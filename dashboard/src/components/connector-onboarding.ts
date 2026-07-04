@@ -12,12 +12,12 @@ import {
   channelIcon,
   connectorAccentStyle,
   sidecarCommands,
-  startSidecar,
   isInProcessConnector,
   CONNECTOR_DISPLAY_NAMES,
   KNOWN_CONNECTOR_IDS,
   type KnownConnectorId,
-} from './connector-status'
+} from './connector-constants'
+import { startSidecar } from './connector-status'
 import { ConnectorBulkActions } from './connector-overview-strip'
 import { SurfaceCard } from './common/card'
 

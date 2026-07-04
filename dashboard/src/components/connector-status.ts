@@ -21,6 +21,29 @@ import {
   type GateKeeperInfo,
   type GateStatusData,
 } from '../api/gate'
+import {
+  KNOWN_CONNECTOR_IDS,
+  IN_PROCESS_CONNECTOR_ENV,
+  isInProcessConnector,
+  CONNECTOR_DISPLAY_NAMES,
+  sidecarCommands,
+  connectorAccentStyle,
+  channelIcon,
+  type KnownConnectorId,
+  type InProcessConnectorId,
+} from './connector-constants'
+// Back-compat re-export: connector vocabulary now lives in ./connector-constants.
+export {
+  KNOWN_CONNECTOR_IDS,
+  IN_PROCESS_CONNECTOR_IDS,
+  IN_PROCESS_CONNECTOR_ENV,
+  isInProcessConnector,
+  CONNECTOR_DISPLAY_NAMES,
+  sidecarCommands,
+  connectorAccentStyle,
+  channelIcon,
+} from './connector-constants'
+export type { KnownConnectorId, InProcessConnectorId, SidecarCommands } from './connector-constants'
 import { formatTimeAgoEn } from '../lib/format-time'
 import { ErrorState } from './common/feedback-state'
 import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
@@ -75,49 +98,9 @@ function activeConnectorFilter(): string | null {
 // no sidecar process, no lifecycle command panel — see
 // {@link IN_PROCESS_CONNECTOR_IDS}.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
-interface SidecarCommands {
-  start: string
-  tail: string
-  status: string
-  stop: string
-}
-
-// Known connectors that appear in the dashboard (status panels, accent
-// colours, channel icons). Includes both external sidecars and the
-// in-process Discord gateway — the operator still wants to see Discord's
-// status row even though there's no sidecar process to start.
-//
-// Source of truth: the three remaining sidecars under /sidecars/, the
-// in-process gateway under lib/server/server_discord_in_process_gateway.{ml,mli},
-// and config/navigation.ts.
-export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
-export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
-
-// Subset of {@link KNOWN_CONNECTOR_IDS} that run inside the server
-// process. For these, the "사이드카 미시작 / Start / Stop / tail
-// run.sh" lifecycle affordances are suppressed because there is no
-// sidecar process — the operator boots them by setting an env var and
-// restarting the server. RFC-0203 §Phase 3.
-export const IN_PROCESS_CONNECTOR_IDS = ['discord'] as const
-export type InProcessConnectorId = (typeof IN_PROCESS_CONNECTOR_IDS)[number]
-
-export function isInProcessConnector(connectorId: string): boolean {
-  return (IN_PROCESS_CONNECTOR_IDS as readonly string[]).includes(connectorId)
-}
-
-// The env var the operator must set to activate an in-process connector.
-// One per IN_PROCESS_CONNECTOR_IDS entry. Used by the status panel hint
-// shown in place of the "Start sidecar" affordance.
-export const IN_PROCESS_CONNECTOR_ENV: Record<InProcessConnectorId, string> = {
-  discord: 'DISCORD_BOT_TOKEN',
-}
-
-export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
-  discord: 'Discord',
-  imessage: 'iMessage',
-  slack: 'Slack',
-  telegram: 'Telegram',
-}
+// Connector vocabulary (KNOWN_CONNECTOR_IDS, display names, sidecar commands,
+// accent styles, channel icons) lives in ./connector-constants and is imported
+// at the top of this file; re-exported there for back-compat.
 
 const CONNECTOR_STATE_LABELS = ['offline', 'stale', 'connected', 'disconnected'] as const
 export type ConnectorStateLabel = (typeof CONNECTOR_STATE_LABELS)[number]
@@ -128,41 +111,6 @@ function isConnectorStateLabel(value: string | undefined): value is ConnectorSta
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled connector state label: ${String(value)}`)
-}
-
-// Sidecar directories — only for connectors that actually run as
-// external sidecar processes. Discord is intentionally absent
-// (RFC-0203 §Phase 3 deleted sidecars/discord-bot/).
-const SIDECAR_DIRS: Record<string, string> = {
-  imessage: 'sidecars/imessage-bot',
-  slack: 'sidecars/slack-bot',
-  telegram: 'sidecars/telegram-bot',
-}
-
-export function sidecarCommands(connectorId: string): SidecarCommands {
-  const dir = SIDECAR_DIRS[connectorId] ?? `sidecars/${connectorId}-bot`
-  return {
-    start: `cd ${dir} && ./run.sh`,
-    tail: `cd ${dir} && ./run.sh tail`,
-    status: `cd ${dir} && ./run.sh status`,
-    stop: `cd ${dir} && ./run.sh stop`,
-  }
-}
-
-// Brand accent RGB triplets per connector. Used as a subtle 135deg gradient
-// behind the panel header so an operator scanning many connectors can tell
-// them apart without reading the title. Values picked from each platform's
-// official brand palette, biased toward dark-theme legibility.
-const CONNECTOR_ACCENT_RGB: Record<string, string> = {
-  discord: '88,101,242',   // blurple
-  imessage: '48,209,88',   // iOS Messages bubble green
-  slack: '236,178,46',     // brand yellow (most distinctive vs telegram cyan)
-  telegram: '34,158,217',  // brand cyan
-}
-
-export function connectorAccentStyle(connectorId: string): string {
-  const rgb = CONNECTOR_ACCENT_RGB[connectorId] ?? '120,130,150'
-  return `background:linear-gradient(135deg,rgba(${rgb},0.16),rgba(${rgb},0.04))`
 }
 
 interface ConnectorUiState {
@@ -291,21 +239,6 @@ async function refresh() {
 
     return next
   })
-}
-
-const CHANNEL_ICONS: Record<string, string> = {
-  discord: '\u{1F3AE}',
-  imessage: '\u{1F4F1}',
-  telegram: '\u{2708}',
-  slack: '\u{1F4AC}',
-  signal: '\u{1F512}',
-  webchat: '\u{1F310}',
-  api: '\u{26A1}',
-  internal: '\u{2699}',
-}
-
-export function channelIcon(ch: string): string {
-  return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
 
 const timeAgo = formatTimeAgoEn

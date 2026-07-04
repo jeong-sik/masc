@@ -183,7 +183,7 @@ let test_is_allowed_wildcard () =
 let test_is_allowed_no_mapping () =
   with_temp_base_path (fun base_path ->
       Alcotest.(check bool)
-        "no mapping denies access" false
+        "no mapping defaults to all repositories" true
         (Keeper_repo_mapping.is_allowed ~keeper_id:"unknown" ~repository_id:"repo-a" ~base_path))
 
 let test_is_allowed_mapping_parse_error () =
@@ -268,9 +268,8 @@ let test_validate_access_no_mapping () =
       match
         Keeper_repo_mapping.validate_access ~keeper_id:"unknown" ~repository_id:"repo-a" ~base_path
       with
-      | Ok _ -> Alcotest.fail "expected Error"
-      | Error msg ->
-          Alcotest.(check bool) "mentions not allowed" true (contains_substring msg "not allowed"))
+      | Ok () -> ()
+      | Error msg -> Alcotest.fail ("expected Ok for default wildcard scope, got: " ^ msg))
 
 let test_validate_path_access_allowed () =
   with_temp_base_path (fun base_path ->
@@ -928,6 +927,35 @@ let test_validate_path_access_playground_unknown_repo_denied () =
           Alcotest.(check bool)
             "mentions not allowed" true (contains_substring msg "not allowed"))
 
+let test_validate_path_access_playground_unknown_repo_no_mapping_uses_default_scope () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_path =
+        Filename.concat base_path "workspace/yousleepwhen/masc"
+      in
+      ensure_dir masc_path;
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          local_path = masc_path;
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/nick0cave/repos/unknown/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error msg ->
+          Alcotest.fail ("expected default wildcard scope for missing mapping, got: " ^ msg))
+
 let test_apply_mapping_explicit () =
   with_temp_base_path (fun base_path ->
       write_mapping base_path "keeper-1" [ "repo-a"; "repo-c" ];
@@ -956,7 +984,7 @@ let test_apply_mapping_no_mapping () =
       let filtered =
         Keeper_repo_mapping.apply_mapping ~keeper_id:"unknown" ~base_path ~repositories:repos
       in
-      Alcotest.(check int) "no mapping returns none" 0 (List.length filtered))
+      Alcotest.(check int) "no mapping returns all" 2 (List.length filtered))
 
 let test_apply_mapping_parse_error () =
   with_temp_base_path (fun base_path ->
@@ -981,9 +1009,8 @@ let test_allowed_repositories () =
 let test_allowed_repositories_no_mapping () =
   with_temp_base_path (fun base_path ->
       match Keeper_repo_mapping.allowed_repositories ~keeper_id:"unknown" ~base_path with
-      | Ok _ -> Alcotest.fail "expected Error"
-      | Error msg ->
-          Alcotest.(check bool) "mentions no mapping" true (contains_substring msg "No mapping"))
+      | Error msg -> Alcotest.fail ("unexpected error: " ^ msg)
+      | Ok ids -> Alcotest.(check (list string)) "default wildcard" ["*"] ids)
 
 let test_save_mapping_creates_config_dir () =
   with_empty_temp_base_path (fun base_path ->
@@ -1070,8 +1097,10 @@ let () =
             test_validate_path_access_playground_gitdir_parent_symlink_escape_denied;
           Alcotest.test_case "playground large git config is denied" `Quick
             test_validate_path_access_playground_large_git_config_denied;
-          Alcotest.test_case "playground unknown repo denied" `Quick
+          Alcotest.test_case "playground unknown repo denied by explicit mapping" `Quick
             test_validate_path_access_playground_unknown_repo_denied;
+          Alcotest.test_case "playground unknown repo no mapping uses default scope" `Quick
+            test_validate_path_access_playground_unknown_repo_no_mapping_uses_default_scope;
         ] );
       ( "apply_mapping",
         [

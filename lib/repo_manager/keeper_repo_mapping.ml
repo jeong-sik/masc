@@ -267,8 +267,10 @@ let find_mapping ~base_path ~keeper_id =
   | Mapping_load_error msg -> Error msg
 
 let allowed_repositories ~keeper_id ~base_path =
-  let* mapping = find_mapping ~base_path ~keeper_id in
-  Ok mapping.repository_ids
+  match lookup_mapping ~base_path ~keeper_id with
+  | Mapping_found mapping -> Ok mapping.repository_ids
+  | Mapping_missing _ -> Ok ["*"]
+  | Mapping_load_error msg -> Error msg
 
 type repository_scope = Repo_manager_types.repository_scope =
   | All_repositories
@@ -356,9 +358,7 @@ let record_policy_decision ~keeper_id ?repository_id decision =
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match lookup_mapping ~base_path ~keeper_id with
-  | Mapping_missing _ ->
-      record_policy_decision ~keeper_id Policy_decision_missing;
-      false
+  | Mapping_missing _ -> true
   | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
       record_policy_decision ~keeper_id Policy_decision_load_error;
@@ -420,9 +420,7 @@ let save_mapping ~base_path mapping =
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
   match lookup_mapping ~base_path ~keeper_id with
-  | Mapping_missing _ ->
-      record_policy_decision ~keeper_id Policy_decision_missing;
-      []
+  | Mapping_missing _ -> repositories
   | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
       record_policy_decision ~keeper_id Policy_decision_load_error;

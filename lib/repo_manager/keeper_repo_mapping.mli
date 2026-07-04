@@ -46,7 +46,9 @@ val find_mapping :
 val allowed_repositories :
   keeper_id:string -> base_path:string -> (repository_id list, string) result
 (** [allowed_repositories ~keeper_id ~base_path] returns the list of
-    repository IDs that [keeper_id] is allowed to access. *)
+    repository IDs that [keeper_id] is allowed to access. A keeper without an
+    explicit mapping inherits the default wildcard scope [["*"]]; malformed
+    mapping files still fail closed. *)
 
 val log_mapping_load_error_if_new : keeper_id:string -> string -> unit
 (** Log a mapping load error once per keeper so operators notice file
@@ -70,7 +72,9 @@ val record_policy_decision :
 val is_allowed :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> bool
 (** [is_allowed ~keeper_id ~repository_id ~base_path] returns [true] if
-    [keeper_id] may access [repository_id]. *)
+    [keeper_id] may access [repository_id]. Missing mappings use the default
+    wildcard scope so keeper-local clones are usable without a per-keeper
+    mapping entry; malformed mappings remain deny-by-error. *)
 
 val validate_access :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> (unit, string) result
@@ -86,8 +90,8 @@ val apply_mapping :
   keeper_id:string -> base_path:string -> repositories:repository list -> repository list
 (** [apply_mapping ~keeper_id ~base_path ~repositories] filters the given
     repository list to only those accessible by [keeper_id].
-    When no mapping exists for the keeper, or mapping loading fails, no
-    repositories are returned. *)
+    When no mapping exists for the keeper, all repositories are returned.
+    Mapping load failures still return no repositories. *)
 
 type repository_identity_mismatch
 

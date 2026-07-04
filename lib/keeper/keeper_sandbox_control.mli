@@ -49,7 +49,6 @@ val cleanup_stale :
 
 type playground_policy_status =
   | Policy_allowed
-  | Policy_denied_missing_mapping
   | Policy_denied_not_in_mapping
   | Policy_mapping_load_error
   | Policy_repository_identity_mismatch

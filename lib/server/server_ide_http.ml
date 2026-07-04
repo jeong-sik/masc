@@ -75,6 +75,58 @@ let resolve_partition_for_query ~state ~uri =
      | _ -> Ide_paths.Legacy_default)
 ;;
 
+type annotation_scope_error =
+  | File_path_repo_id_mismatch
+  | File_path_canonical_url_mismatch
+
+let annotation_scope_error_message = function
+  | File_path_repo_id_mismatch -> "file_path does not belong to requested repo_id"
+  | File_path_canonical_url_mismatch ->
+    "file_path does not belong to requested canonical_url"
+;;
+
+let nonempty_query_param uri key =
+  match Uri.get_query_param uri key with
+  | Some raw ->
+    let value = String.trim raw in
+    if String.equal value "" then None else Some value
+  | None -> None
+;;
+
+let validate_annotation_post_scope ~state ~uri ~file_path =
+  if Filename.is_relative file_path then Ok ()
+  else (
+    let project_base = base_path_of_state state in
+    match nonempty_query_param uri "canonical_url" with
+    | Some canonical_url ->
+      (match Ide_paths.canonical_url_of_remote canonical_url with
+       | None -> Ok ()
+       | Some requested_slug ->
+         (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
+          | Some (repo, _) ->
+            (match Ide_paths.canonical_url_of_remote repo.url with
+             | Some actual_slug when String.equal actual_slug requested_slug -> Ok ()
+             | Some _ | None -> Error File_path_canonical_url_mismatch)
+          | None -> Error File_path_canonical_url_mismatch))
+    | None ->
+      (match nonempty_query_param uri "repo_id" with
+       | None -> Ok ()
+       | Some requested_repo_id ->
+         (match Repo_store.find ~base_path:project_base requested_repo_id with
+          | Error _ -> Ok ()
+          | Ok _ ->
+            (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
+             | Some (repo, _) when String.equal repo.id requested_repo_id -> Ok ()
+             | Some _ | None -> Error File_path_repo_id_mismatch))))
+;;
+
+let resolve_partition_for_annotation_post ~state ~uri ~file_path =
+  let partition = resolve_partition_for_query ~state ~uri in
+  match validate_annotation_post_scope ~state ~uri ~file_path with
+  | Ok () -> Ok partition
+  | Error err -> Error (annotation_scope_error_message err)
+;;
+
 let orphan_read_reason_label = function
   | Ide_paths.By_url _ -> None
   | Ide_paths.No_canonical_url -> Some "no_canonical_url"
@@ -541,41 +593,50 @@ let add_routes router =
                      let session_id = find_string "session_id" in
                      let operation_id = find_string "operation_id" in
                      let worker_run_id = find_string "worker_run_id" in
-                     let partition = resolve_partition_for_query ~state ~uri in
                      (match
-                        Ide_annotations.create
-                          ~base_dir:base
-                          ~partition
-                          ~keeper_id
-                          ~file_path
-                          ~line_start
-                          ~line_end
-                          ~kind
-                          ~content
-                          ?goal_id
-                          ?task_id
-                          ?board_post_id
-                          ?comment_id
-                          ?pr_id
-                          ?git_ref
-                          ?log_id
-                          ?session_id
-                          ?operation_id
-                          ?worker_run_id
-                          ()
+                        resolve_partition_for_annotation_post ~state ~uri ~file_path
                       with
-                      | Ok annotation ->
-                        Http.Response.json_value
-                          ~status:`Created
-                          ~request
-                          (json_ok (Ide_annotation_types.annotation_to_json annotation))
-                          reqd
                       | Error msg ->
                         Http.Response.json_value
                           ~status:`Bad_request
                           ~request
                           (json_error msg)
-                          reqd)))
+                          reqd
+                      | Ok partition ->
+                        (match
+                           Ide_annotations.create
+                             ~base_dir:base
+                             ~partition
+                             ~keeper_id
+                             ~file_path
+                             ~line_start
+                             ~line_end
+                             ~kind
+                             ~content
+                             ?goal_id
+                             ?task_id
+                             ?board_post_id
+                             ?comment_id
+                             ?pr_id
+                             ?git_ref
+                             ?log_id
+                             ?session_id
+                             ?operation_id
+                             ?worker_run_id
+                             ()
+                         with
+                         | Ok annotation ->
+                           Http.Response.json_value
+                             ~status:`Created
+                             ~request
+                             (json_ok (Ide_annotation_types.annotation_to_json annotation))
+                             reqd
+                         | Error msg ->
+                           Http.Response.json_value
+                             ~status:`Bad_request
+                             ~request
+                             (json_error msg)
+                             reqd))))
              | _ ->
                Http.Response.json_value
                  ~status:`Bad_request
@@ -928,7 +989,7 @@ let add_routes router =
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/cursors/stream" (fun request reqd ->
-    with_public_read
+    Server_auth.with_observer_sse_read_auth
       (fun state _req inner_reqd ->
          let uri = Uri.of_string request.target in
          match parse_pagination_query ~max_limit:200 uri with
@@ -1039,7 +1100,7 @@ let add_routes router =
                  ; ("retrieval_status", `String ide_memory_retrieval_status)
                  ; ("semantic_memory_status", `String ide_memory_semantic_status)
                  ; ("episodic_memory_status", `String ide_memory_episodic_status)
-                 ] );
+                 ] )
            ] in
            let origin = get_origin request in
            let headers =

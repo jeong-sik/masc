@@ -1,4 +1,7 @@
-import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  DashboardRuntimeReasoningStreamingFormat,
+} from '../api/dashboard'
 
 function nonEmptyParts(parts: Array<string | null | undefined>): string[] {
   return parts.filter((value): value is string => Boolean(value))
@@ -91,6 +94,13 @@ function runtimeCatalogRequestFormat(item: DashboardRuntimeProviderSnapshot): st
   const format = item.request_config?.response_format
   if (!format?.kind) return null
   return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeReasoningStreamingFormatSummary(
+  format: DashboardRuntimeReasoningStreamingFormat | null | undefined,
+): string | null {
+  if (!format?.kind) return null
+  return format.field ? `${format.kind}:${format.field}` : format.kind
 }
 
 export function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapshot): string | null {
@@ -254,6 +264,12 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
   ])
+  const input = nonEmptyParts([
+    caps.supports_multimodal_inputs ? 'multimodal' : null,
+    caps.supports_image_input ? 'image' : null,
+    caps.supports_audio_input ? 'audio' : null,
+    caps.supports_video_input ? 'video' : null,
+  ])
   const toolChoice = caps.supports_tool_choice
     ? `tool-choice${nonEmptyParts([
       caps.supports_required_tool_choice ? 'required' : null,
@@ -261,7 +277,9 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
       caps.supports_parallel_tool_calls ? 'parallel' : null,
     ]).map(flag => `+${flag}`).join('')}`
     : null
+  const reasoningStream = runtimeReasoningStreamingFormatSummary(caps.reasoning_streaming_format)
   const parts = nonEmptyParts([
+    caps.source ? `source:${caps.source}` : null,
     context,
     output,
     caps.supports_tools ? 'tools' : null,
@@ -271,6 +289,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     format.length > 0 ? `format:${format.join(',')}` : null,
     sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
     ignoredSampling ? `ignored:${ignoredSampling}` : null,
+    input.length > 0 ? `input:${input.join(',')}` : null,
     caps.modality_priority ? `modality:${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content:${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
@@ -279,9 +298,10 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
       ? `effort:${caps.accepted_reasoning_efforts.join(',')}`
       : null,
+    caps.thinking_control_format ? `wire:${caps.thinking_control_format}` : null,
     caps.preserve_thinking_control_format ? `preserve:${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out:${caps.reasoning_output_format}` : null,
-    caps.reasoning_streaming_format?.kind ? `reasoning-stream:${caps.reasoning_streaming_format.kind}` : null,
+    reasoningStream ? `reasoning-stream:${reasoningStream}` : null,
     caps.reasoning_replay_override ? `replay:${caps.reasoning_replay_override}` : null,
     caps.task ? `task:${caps.task}` : null,
     caps.supports_native_streaming ? 'native-stream' : null,

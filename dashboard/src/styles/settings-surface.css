@@ -1270,6 +1270,12 @@
   background: var(--volt-wash);
 }
 
+.set-fusion-composition {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 /* fusion settings editor rows — classes referenced by fusion-settings-panel.ts
    (set-fusion-editor / set-line) but never defined, which left label+control
    rendered inline. Mirrors .set-row / .set-input tokens. */
@@ -1282,8 +1288,15 @@
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
   padding: 12px 0;
   border-top: 1px solid var(--border-soft);
+}
+
+.set-line-stack {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .set-line:first-child {
@@ -1298,7 +1311,8 @@
 }
 
 .set-line > input[type='text'],
-.set-line > input[type='number'] {
+.set-line > input[type='number'],
+.set-line > select {
   flex: none;
   width: 230px;
   font-family: var(--font-mono);
@@ -1312,9 +1326,60 @@
 }
 
 .set-line > input[type='text']:focus,
-.set-line > input[type='number']:focus {
+.set-line > input[type='number']:focus,
+.set-line > select:focus {
   border-color: var(--volt-dim);
   box-shadow: 0 0 0 2px var(--volt-wash);
+}
+
+.set-fusion-runtime-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.set-fusion-runtime-chips {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.set-fusion-runtime-chip {
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.set-fusion-runtime-chip button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font-size: var(--fs-13);
+  justify-content: center;
+  padding: 0 2px;
+}
+
+.set-fusion-runtime-chip button:hover {
+  color: var(--status-fail);
+}
+
+.set-fusion-runtime-add {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .set-line > input[type='checkbox'] {

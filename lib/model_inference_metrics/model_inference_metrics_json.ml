@@ -101,6 +101,10 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
                   ; "turn_lane", Json_util.string_opt_to_json r.re_turn_lane
                   ; "input_tokens", Json_util.int_opt_to_json r.re_input_tokens
                   ; "output_tokens", Json_util.int_opt_to_json r.re_output_tokens
+                  ; ( "cache_read_tokens"
+                    , Json_util.int_opt_to_json r.re_cache_read_tokens )
+                  ; ( "cache_creation_tokens"
+                    , Json_util.int_opt_to_json r.re_cache_creation_tokens )
                   ; "latency_ms", Json_util.float_opt_to_json r.re_latency_ms
                   ; "prompt_tok_per_sec", Json_util.float_opt_to_json r.re_prompt_tok_per_sec
                   ; "peak_memory_gb", Json_util.float_opt_to_json r.re_peak_memory_gb

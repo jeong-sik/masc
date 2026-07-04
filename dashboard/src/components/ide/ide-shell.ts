@@ -33,10 +33,12 @@ import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
 import {
+  connectKeeperCursorStream,
   cursorOverlaySignal,
   getKeeperColor,
   type KeeperCursor,
   type KeeperCursorOverlay,
+  type KeeperCursorStreamState,
 } from './keeper-cursor-overlay'
 import { lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
 import { navigate, route } from '../../router'
@@ -55,6 +57,7 @@ import {
   parseActive,
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
+import { viewFromRoute } from './ide-view-route'
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
@@ -156,17 +159,6 @@ interface IdeStatusbarInput {
   readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
   readonly dashboardConnected?: boolean
   readonly lspStatus?: LspStatusSnapshot
-}
-
-function viewFromRoute(raw: string | null | undefined): ViewTab {
-  const normalized = raw
-    ?.trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, '-')
-  if (normalized === 'split' || normalized === 'split-diff' || normalized === 'merge') return 'split-diff'
-  if (normalized === 'unified') return 'unified'
-  if (normalized === 'blame') return 'blame'
-  return 'source'
 }
 
 function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
@@ -608,6 +600,42 @@ function cursorAgeLabel(lastUpdate: number): string {
   return `${Math.round(minutes / 60)}h ago`
 }
 
+function cursorStreamStatusTone(status: KeeperCursorStreamState['status']): 'ghost' | 'info' | 'ok' | 'warn' {
+  switch (status) {
+    case 'connecting':
+      return 'info'
+    case 'live':
+      return 'ok'
+    case 'degraded':
+      return 'warn'
+    case 'closed':
+      return 'ghost'
+  }
+}
+
+function cursorStreamStatusLabel(stream: KeeperCursorStreamState): string {
+  switch (stream.status) {
+    case 'connecting':
+      return 'stream connecting'
+    case 'live':
+      return 'stream live'
+    case 'degraded':
+      return stream.failedCount > 0
+        ? `stream degraded ${stream.failedCount} failed`
+        : 'stream degraded'
+    case 'closed':
+      return 'stream closed'
+  }
+}
+
+function cursorStreamStatusTitle(stream: KeeperCursorStreamState): string {
+  const parts = [cursorStreamStatusLabel(stream)]
+  if (stream.lastOpenMs !== undefined) parts.push(`last open ${new Date(stream.lastOpenMs).toISOString()}`)
+  if (stream.lastErrorMs !== undefined) parts.push(`last error ${new Date(stream.lastErrorMs).toISOString()}`)
+  if (stream.error) parts.push(stream.error)
+  return parts.join(' · ')
+}
+
 function sortedCursors(overlay: KeeperCursorOverlay): ReadonlyArray<KeeperCursor> {
   return [...overlay.cursors.values()].sort((left, right) => {
     if (right.last_update !== left.last_update) return right.last_update - left.last_update
@@ -659,6 +687,16 @@ function IdeCursorRailPanel() {
         <span>KEEPER CURSORS</span>
         <span>${cursors.length} active</span>
       </div>
+      ${overlay.stream ? html`
+        <div
+          class=${`ide-cursor-stream-status chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
+          data-testid="ide-cursor-stream-status"
+          data-state=${overlay.stream.status}
+          role="status"
+          aria-live="polite"
+          title=${cursorStreamStatusTitle(overlay.stream)}
+        >${cursorStreamStatusLabel(overlay.stream)}</div>
+      ` : null}
       ${overlay.active_file ? html`
         <div class="ide-cursor-rail-active-file" title=${overlay.active_file}>
           active file · ${shortCursorPath(overlay.active_file)}
@@ -853,6 +891,25 @@ export function IdeShell() {
     const unsubscribe = ideContextFocus.subscribe(setContextFocus)
     return () => unsubscribe()
   }, [])
+
+  useEffect(() => {
+    const repoId = activeRepositoryId?.trim()
+    if (!repoId) {
+      cursorOverlaySignal.value = {
+        ...cursorOverlaySignal.value,
+        stream: { status: 'closed', failedCount: 0 },
+      }
+      return
+    }
+    return connectKeeperCursorStream('', (overlay) => {
+      cursorOverlaySignal.value = { ...overlay, stream: cursorOverlaySignal.value.stream }
+    }, {
+      repoId,
+      onStatus: stream => {
+        cursorOverlaySignal.value = { ...cursorOverlaySignal.value, stream }
+      },
+    })
+  }, [activeRepositoryId])
 
   const routeFileFocus = routeFocusFile(route.value.params)
   const routeLineFocus = routeFocusLine(route.value.params)
@@ -1207,6 +1264,7 @@ export function IdeShell() {
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
+                      repoId=${activeRepositoryId}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}

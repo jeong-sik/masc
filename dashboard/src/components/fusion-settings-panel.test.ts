@@ -23,6 +23,14 @@ judge = "j"
 min_answered = 1
 `
 
+const SAMPLE_WITH_RUNTIME_OPTIONS = `${SAMPLE}
+[new.x]
+is-default = false
+
+[meta.judge]
+is-default = false
+`
+
 const cfg = (over: { ok?: boolean; source_text?: string; reloaded?: boolean }) => ({
   ok: over.ok ?? true,
   path: null,
@@ -79,6 +87,28 @@ describe('FusionSettingsPanel', () => {
     await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     const posted = saveMock.mock.calls[0]?.[0] as string
     expect(posted.split('[fusion.presets.trio]')[1]).toContain('min_answered = 2')
+    expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('edits the active flat preset panel runtimes and judge runtime', async () => {
+    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_RUNTIME_OPTIONS }))
+    saveMock.mockImplementation(async (sourceText: string) => cfg({ ok: true, reloaded: true, source_text: sourceText }))
+    await mount()
+
+    const add = q('[data-testid="fusion-panel-runtime-add"]') as HTMLSelectElement
+    add.value = 'new.x'
+    await fireEvent.change(add)
+
+    const judge = q('[data-testid="fusion-judge-runtime"]') as HTMLSelectElement
+    judge.value = 'meta.judge'
+    await fireEvent.change(judge)
+
+    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    const posted = saveMock.mock.calls[0]?.[0] as string
+    const trio = posted.split('[fusion.presets.trio]')[1] ?? ''
+    expect(trio).toContain('panel = ["a", "b", "c", "new.x"]')
+    expect(trio).toContain('judge = "meta.judge"')
     expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
   })
 
@@ -227,7 +257,29 @@ min_answered = 2
 
     expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
     expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
+    expect(q('[data-testid="fusion-preset-composition-editor"]')).not.toBeNull()
     expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
+  })
+
+  it('does not synthesize an empty panel array on unchanged no-panel preset saves', async () => {
+    const noPanel = `[fusion]
+enabled = true
+default_preset = "trio"
+max_concurrent_panels = 2
+
+[fusion.presets.trio]
+min_answered = 2
+`
+    fetchMock.mockResolvedValue(cfg({ source_text: noPanel }))
+    saveMock.mockImplementation(async (sourceText: string) => cfg({ ok: true, reloaded: true, source_text: sourceText }))
+    await mount()
+
+    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    const posted = saveMock.mock.calls[0]?.[0] as string
+    const trio = posted.split('[fusion.presets.trio]')[1] ?? ''
+    expect(trio).toContain('min_answered = 2')
+    expect(trio).not.toContain('panel = []')
   })
 
   it('shows a fail-visible note (not a partial panel) for grouped presets', async () => {
@@ -249,6 +301,7 @@ panel = ["careful1"]
     expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
     // Grouped note shown; the flat lane card is NOT rendered.
     expect(q('[data-testid="fusion-preset-grouped"]')?.textContent).toContain('2개 그룹')
+    expect(q('[data-testid="fusion-preset-composition-editor"]')).toBeNull()
     expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
     expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
     // Must never leak the first group's model as the preset panel (the P1 bug).
@@ -279,5 +332,6 @@ model = "coverage_model"
     expect(q('[data-testid="fusion-preset-judge"]')?.textContent).toBe('meta_model')
     // The judge lane honestly notes the first-pass judges rather than implying one.
     expect(q('[data-testid="fusion-preset-judge-lane-h"]')?.textContent).toContain('1차 심판 2')
+    expect(q('[data-testid="fusion-preset-composition-editor"]')?.textContent).toContain('Judge-of-judges runtime')
   })
 })

@@ -132,6 +132,17 @@ function dashboardFetchMockWithFailure(
   }
 }
 
+function dashboardFetchMockWithResponse(
+  pattern: RegExp,
+  response: Response,
+): (input: RequestInfo | URL) => Promise<Response> {
+  return (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    if (pattern.test(url)) return Promise.resolve(response)
+    return dashboardFetchMock(input)
+  }
+}
+
 describe('IdeShell', () => {
   let container: HTMLDivElement
 
@@ -519,6 +530,33 @@ describe('IdeShell', () => {
     expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
   })
 
+  it('surfaces malformed annotation responses in the IDE statusbar', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(dashboardFetchMockWithResponse(
+        /\/api\/v1\/ide\/annotations/,
+        jsonResponse({ ok: true, data: [null] }),
+      )),
+    )
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-workspace-fetch"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('IDE fetch degraded annotations')
+    expect(chip.getAttribute('title')).toContain(
+      'fetchIdeAnnotations returned malformed row at index 0',
+    )
+  })
+
   it('surfaces overlay-only LSP languages in the IDE statusbar', async () => {
     lspStatusSnapshot.value = {
       langs: [
@@ -891,12 +929,22 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
   })
 
-  it('switches the IDE right rail tabs and renders cursor stream focus', () => {
+  it('switches the IDE right rail tabs and renders cursor stream focus', async () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
       postId: null,
     }
+    class MockEventSource {
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(_url: string) {}
+
+      close = vi.fn()
+    }
+    vi.stubGlobal('EventSource', MockEventSource)
     cursorOverlaySignal.value = {
       cursors: new Map([[
         'sangsu',
@@ -918,6 +966,16 @@ describe('IdeShell', () => {
     }
 
     render(h(IdeShell, {}), container)
+    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('connecting'))
+    cursorOverlaySignal.value = {
+      ...cursorOverlaySignal.value,
+      stream: {
+        status: 'degraded',
+        failedCount: 2,
+        lastErrorMs: Date.UTC(2026, 6, 4, 1, 2, 3),
+        error: 'SSE transport error',
+      },
+    }
 
     fireEvent.click(buttonByText(container, 'Activity'))
     expect(buttonByText(container, 'Activity').getAttribute('aria-selected')).toBe('true')
@@ -936,6 +994,10 @@ describe('IdeShell', () => {
     expect(cursorRail?.textContent).toContain('str_replace')
     expect(cursorRail?.textContent).toContain('round.ml:94-96')
     expect(cursorRail?.textContent).toContain('L94')
+    expect(container.querySelector('[data-testid="ide-cursor-stream-status"]')?.textContent)
+      .toBe('stream degraded 2 failed')
+    expect(container.querySelector('[data-testid="ide-cursor-stream-status"]')?.getAttribute('data-state'))
+      .toBe('degraded')
 
     fireEvent.click(buttonByText(container, 'Focus'))
     expect(ideContextFocus.value).toMatchObject({

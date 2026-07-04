@@ -90,7 +90,8 @@ let observer_sse_query_token_from_request request =
   match request.Httpun.Request.meth with
   | `GET
     when (observer_stream_requested && String.equal path "/mcp")
-         || String.equal path "/events/presence" ->
+         || String.equal path "/events/presence"
+         || String.equal path "/api/v1/ide/cursors/stream" ->
       trim_opt (query_param request "token")
   | _ -> None
 
@@ -207,7 +208,7 @@ let verify_mcp_observer_stream_auth ~base_path request =
     | None ->
         Error
           "Authentication required. Use 'Authorization: Bearer <token>' header \
-           or 'token' query param for the observer/presence SSE stream."
+           or 'token' query param for the observer/presence/cursor SSE stream."
     | Some token -> (
         let* agent_name =
           resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
@@ -934,6 +935,27 @@ let rec with_public_read handler request reqd =
     match !server_state with
     | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state -> handler state request reqd
+
+and with_observer_sse_read_auth handler request reqd =
+  let strict = http_auth_strict_enabled () in
+  let path = Http_server_eio.Request.path request in
+  if strict && not (is_public_read_path path) then
+    match !server_state with
+    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
+    | Some state ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      (match verify_mcp_observer_stream_auth ~base_path request with
+       | Ok _ ->
+         (match check_agent_rate_limit request reqd with
+          | Ok () -> handler state request reqd
+          | Error () -> ())
+       | Error msg ->
+         Http_server_eio.Response.json
+           ~status:`Unauthorized
+           (Yojson.Safe.to_string (`Assoc [ "error", `String msg ]))
+           reqd)
+  else
+    with_public_read handler request reqd
 
 and with_read_auth handler request reqd =
   match !server_state with

@@ -5,6 +5,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { dashboardBearerToken } from '../../api/core'
 import { createSseTransport } from '../../transports/sse-transport'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -30,6 +31,22 @@ export interface KeeperCursorOverlay {
     risk_level: 'low' | 'medium' | 'high'
   }>
   active_file: string | null
+  stream?: KeeperCursorStreamState
+}
+
+export type KeeperCursorStreamStatus = 'connecting' | 'live' | 'degraded' | 'closed'
+
+export interface KeeperCursorStreamState {
+  readonly status: KeeperCursorStreamStatus
+  readonly failedCount: number
+  readonly lastOpenMs?: number
+  readonly lastErrorMs?: number
+  readonly error?: string
+}
+
+export interface KeeperCursorStreamOptions {
+  readonly repoId?: string | null
+  readonly onStatus?: (state: KeeperCursorStreamState) => void
 }
 
 // ── Signals ──────────────────────────────────────────────────────
@@ -406,23 +423,67 @@ export function normalizeKeeperCursorSnapshot(snapshot: unknown): KeeperCursorOv
 export function connectKeeperCursorStream(
   baseUrl: string,
   onUpdate: (overlay: KeeperCursorOverlay) => void,
+  options: KeeperCursorStreamOptions = {},
 ): () => void {
-  const transport = createSseTransport(`${baseUrl}/api/v1/ide/cursors/stream`)
+  let failedCount = 0
+  options.onStatus?.({ status: 'connecting', failedCount })
+  if (typeof EventSource === 'undefined') {
+    failedCount = 1
+    options.onStatus?.({
+      status: 'degraded',
+      failedCount,
+      lastErrorMs: Date.now(),
+      error: 'EventSource unavailable',
+    })
+    return () => {
+      options.onStatus?.({ status: 'closed', failedCount })
+    }
+  }
+
+  const transport = createSseTransport(buildKeeperCursorStreamUrl(baseUrl, options.repoId))
   const unsubscribe = transport.subscribe((event) => {
+    if (event.type === 'open') {
+      failedCount = 0
+      options.onStatus?.({ status: 'live', failedCount, lastOpenMs: Date.now() })
+      return
+    }
     if (event.type === 'message') {
       onUpdate(normalizeKeeperCursorSnapshot(event.data))
       return
     }
     if (event.type === 'error') {
+      failedCount += 1
+      options.onStatus?.({
+        status: 'degraded',
+        failedCount,
+        lastErrorMs: Date.now(),
+        error: event.error.message,
+      })
       console.error('Keeper cursor stream error:', event.error)
+      return
+    }
+    if (event.type === 'close') {
+      options.onStatus?.({ status: 'closed', failedCount })
     }
   })
   transport.connect()
 
   return () => {
-    unsubscribe()
     transport.disconnect()
+    unsubscribe()
   }
+}
+
+export function buildKeeperCursorStreamUrl(baseUrl: string, repoId?: string | null): string {
+  const base = baseUrl.trim().replace(/\/+$/, '')
+  const endpoint = `${base}/api/v1/ide/cursors/stream`
+  const params = new URLSearchParams()
+  const trimmedRepoId = repoId?.trim()
+  const token = dashboardBearerToken()
+  if (trimmedRepoId) params.set('repo_id', trimmedRepoId)
+  if (token) params.set('token', token)
+  const query = params.toString()
+  return query ? `${endpoint}?${query}` : endpoint
 }
 
 // ── Helper to update cursor from tool call ───────────────────────

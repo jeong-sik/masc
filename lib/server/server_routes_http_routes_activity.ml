@@ -13,6 +13,10 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
+let activity_result_json ~ok ~message =
+  `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
+;;
+
 let include_moderation_projection ~base_path request =
   match auth_token_from_request request with
   | None -> false
@@ -555,8 +559,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -569,14 +572,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -591,8 +590,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -610,14 +608,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -632,8 +626,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -646,14 +639,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -670,8 +659,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -684,14 +672,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->

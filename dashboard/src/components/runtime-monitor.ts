@@ -11,6 +11,7 @@ import {
   type DashboardRuntimeProviderProbe,
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
+  type DashboardRuntimeReasoningStreamingFormat,
 } from '../api/dashboard'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
@@ -454,6 +455,13 @@ function runtimeEffectiveReasoningText(provider: DashboardRuntimeProviderSnapsho
   ])
 }
 
+function runtimeReasoningStreamingFormatText(
+  format: DashboardRuntimeReasoningStreamingFormat | null | undefined,
+): string | null {
+  if (!format?.kind) return null
+  return format.field ? `${format.kind}:${format.field}` : format.kind
+}
+
 function runtimeEffectiveInputText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const caps = provider.effective_capabilities
   if (!caps) return null
@@ -762,6 +770,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
   ].filter((value): value is string => Boolean(value))
   const ignoredSampling = caps.ignored_sampling_parameters.join(',')
   const modalities = [
+    caps.supports_multimodal_inputs ? 'multimodal' : null,
     caps.supports_image_input ? 'image' : null,
     caps.supports_audio_input ? 'audio' : null,
     caps.supports_video_input ? 'video' : null,
@@ -783,7 +792,9 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
+  const reasoningStream = runtimeReasoningStreamingFormatText(caps.reasoning_streaming_format)
   const parts = [
+    caps.source ? `source ${caps.source}` : null,
     context,
     output,
     caps.supports_tools ? 'tools' : null,
@@ -802,9 +813,10 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
       ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
       : null,
+    caps.thinking_control_format ? `wire ${caps.thinking_control_format}` : null,
     caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
-    caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
+    reasoningStream ? `reasoning-stream ${reasoningStream}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
     caps.supports_native_streaming ? 'native-stream' : null,
@@ -1031,6 +1043,17 @@ function fmtRecentEntryCost(
   return formatted !== MISSING_DATA_DASH ? formatted : recentEntryMissingLabel(entry)
 }
 
+function fmtRecentEntryCache(
+  entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
+): string {
+  if (entry.cache_read_tokens == null && entry.cache_creation_tokens == null) {
+    return recentEntryMissingLabel(entry)
+  }
+  const read = fmtRecentEntryNumber(entry, entry.cache_read_tokens)
+  const creation = fmtRecentEntryNumber(entry, entry.cache_creation_tokens)
+  return `${read}/${creation}`
+}
+
 function recentEntryDetail(
   entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
 ): string | null {
@@ -1068,6 +1091,7 @@ const recentEntryColumns: TableColumn<RecentEntry>[] = [
   },
   { key: 'input_tokens', header: 'in tok', render: (re) => fmtRecentEntryNumber(re, re.input_tokens) },
   { key: 'output_tokens', header: 'out tok', render: (re) => fmtRecentEntryNumber(re, re.output_tokens) },
+  { key: 'cache_tokens', header: 'cache r/w', render: fmtRecentEntryCache },
   {
     key: 'latency_ms',
     header: 'latency',

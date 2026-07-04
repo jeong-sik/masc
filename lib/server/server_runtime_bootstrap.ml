@@ -153,24 +153,64 @@ let resolve_oas_capability_manifest_path ?(env = Sys.getenv_opt) ~config_root ()
      | Some path -> Some { path; source = Config_root_file capability_manifest_filename }
      | None -> None)
 
+let install_runtime_model_catalog_override ~clear_catalog ~load_catalog ~set_catalog path =
+  clear_catalog ();
+  match load_catalog path with
+  | Some catalog ->
+    set_catalog catalog;
+    true
+  | None -> false
+
+let install_runtime_capability_manifest_override
+      ~clear_manifest
+      ~load_manifest
+      ~set_manifest
+      path
+  =
+  clear_manifest ();
+  match load_manifest path with
+  | Some manifest ->
+    set_manifest manifest;
+    true
+  | None -> false
+
 let configure_oas_capability_manifest_env
       ?(env = Sys.getenv_opt)
       ~config_root
       ?(putenv = Unix.putenv)
+      ?(clear_manifest = Llm_provider.Capability_manifest.clear_global)
+      ?(load_manifest = Llm_provider.Capability_manifest.load_runtime_file)
+      ?(set_manifest = Llm_provider.Capability_manifest.set_global)
       ()
   =
   match resolve_oas_capability_manifest_path ~env ~config_root () with
   | Some { source = Capability_manifest_env_var; path } as resolution ->
+    let installed =
+      install_runtime_capability_manifest_override
+        ~clear_manifest
+        ~load_manifest
+        ~set_manifest
+        path
+    in
     Log.Misc.info
-      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s already configured"
-      path;
+      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s already configured%s"
+      path
+      (if installed then " and loaded" else "");
     resolution
   | Some { source; path } as resolution ->
     putenv oas_capability_manifest_env_var_name path;
+    let installed =
+      install_runtime_capability_manifest_override
+        ~clear_manifest
+        ~load_manifest
+        ~set_manifest
+        path
+    in
     Log.Misc.info
-      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s resolved from %s"
+      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s resolved from %s%s"
       path
-      (capability_manifest_env_source_to_string source);
+      (capability_manifest_env_source_to_string source)
+      (if installed then " and loaded" else "");
     resolution
   | None ->
     Log.Misc.info
@@ -185,18 +225,39 @@ let configure_oas_model_catalog_env
       ?(putenv = Unix.putenv)
       ?(preload_agent_sdk_catalog = Llm_provider.Model_catalog.preload_global)
       ?(agent_sdk_catalog = Llm_provider.Model_catalog.global)
+      ?(clear_catalog = Llm_provider.Model_catalog.clear_global)
+      ?(load_catalog = Llm_provider.Model_catalog.load_runtime_file)
+      ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
   match resolve_oas_model_catalog_path ~env ?cwd ?argv0 () with
   | Some { source = Env_var Oas_model_catalog; path } as resolution ->
-    Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s already configured" path;
+    let installed =
+      install_runtime_model_catalog_override
+        ~clear_catalog
+        ~load_catalog
+        ~set_catalog
+        path
+    in
+    Log.Misc.info
+      "model_catalog: OAS_MODEL_CATALOG=%s already configured%s"
+      path
+      (if installed then " and loaded" else "");
     resolution
   | Some { source; path } as resolution ->
     putenv (model_catalog_env_var_name Oas_model_catalog) path;
+    let installed =
+      install_runtime_model_catalog_override
+        ~clear_catalog
+        ~load_catalog
+        ~set_catalog
+        path
+    in
     Log.Misc.info
-      "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s"
+      "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s%s"
       path
-      (model_catalog_env_source_to_string source);
+      (model_catalog_env_source_to_string source)
+      (if installed then " and loaded" else "");
     resolution
   | None ->
     preload_agent_sdk_catalog ();

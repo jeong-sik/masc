@@ -56,5 +56,9 @@ function activityTraceSurface(event: RunActivityEvent): string {
   if (event.context?.task_id) return 'Task'
   if (event.context?.git_ref) return 'Git'
   if (event.context?.log_id) return 'Log'
+  if (event.context?.comment_id) return 'Comment'
+  if (event.context?.session_id || event.context?.operation_id || event.context?.worker_run_id) {
+    return 'Runtime'
+  }
   return event.kind?.trim() || 'Activity'
 }

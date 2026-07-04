@@ -223,6 +223,7 @@ describe('RuntimeMonitor', () => {
           note: null,
           discovery: {
             healthy: true,
+            discovered_model: 'Qwen/Qwen3-32B',
             ctx_size: 200000,
             total_slots: 4,
             busy_slots: 1,
@@ -354,6 +355,8 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('task transcription · native-stream')
     expect(container.textContent).toContain('seed+images')
     expect(container.textContent).toContain('code-exec')
+    expect(container.textContent).toContain('discovered · Qwen/Qwen3-32B')
+    expect(container.textContent).toContain('idle · 3')
   })
 
   it('renders parameter facts as structured request declared and effective rows', async () => {

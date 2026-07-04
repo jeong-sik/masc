@@ -8,6 +8,7 @@ import {
   workspaceFetchIssueFromError,
   workspaceTreeIdentity,
 } from './ide-data-workspace-store'
+import { isDiffEditorView, viewFromRoute } from './ide-view-route'
 import type { Repository } from '../../api/repositories'
 
 function repo(
@@ -239,6 +240,17 @@ describe('workspace fetch diagnostics', () => {
       [repositoryIssue, oldTreeIssue, oldFileIssue, currentDiffIssue],
       { filePath: 'README.md', repoId: 'current-repo' },
     )).toEqual([repositoryIssue, currentDiffIssue])
+  })
+})
+
+describe('ide route view helpers', () => {
+  it('normalizes legacy diff aliases through one shared helper', () => {
+    expect(viewFromRoute('split')).toBe('split-diff')
+    expect(viewFromRoute('split_diff')).toBe('split-diff')
+    expect(viewFromRoute('merge')).toBe('split-diff')
+    expect(isDiffEditorView(viewFromRoute('merge'))).toBe(true)
+    expect(isDiffEditorView(viewFromRoute('unified'))).toBe(true)
+    expect(isDiffEditorView(viewFromRoute('blame'))).toBe(false)
   })
 })
 

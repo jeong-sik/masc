@@ -57,6 +57,7 @@ import {
   parseActive,
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
+import { viewFromRoute } from './ide-view-route'
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
@@ -158,17 +159,6 @@ interface IdeStatusbarInput {
   readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
   readonly dashboardConnected?: boolean
   readonly lspStatus?: LspStatusSnapshot
-}
-
-function viewFromRoute(raw: string | null | undefined): ViewTab {
-  const normalized = raw
-    ?.trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, '-')
-  if (normalized === 'split' || normalized === 'split-diff' || normalized === 'merge') return 'split-diff'
-  if (normalized === 'unified') return 'unified'
-  if (normalized === 'blame') return 'blame'
-  return 'source'
 }
 
 function focusFromRoute(raw: string | null | undefined): IdeFocus | null {

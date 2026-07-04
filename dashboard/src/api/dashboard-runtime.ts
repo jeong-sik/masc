@@ -626,7 +626,7 @@ function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderD
   if (!isRecord(raw)) return null
   return {
     healthy: asBoolean(raw.healthy),
-    discovered_model: null,
+    discovered_model: asNullableString(raw.discovered_model),
     ctx_size: asNumber(raw.ctx_size) ?? null,
     total_slots: asNumber(raw.total_slots) ?? null,
     busy_slots: asNumber(raw.busy_slots) ?? null,

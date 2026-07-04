@@ -13,6 +13,12 @@ import {
 import { errorToString, MISSING_DATA_DASH } from '../lib/format-string'
 import { formatNumber } from '../lib/format-number'
 import { formatRelativeAgeMs } from '../lib/format-time'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+} from '../lib/runtime-provider-summary'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
@@ -237,6 +243,16 @@ function endpointRows(probe: DashboardRuntimeProbeResponse | null): Array<{ labe
   ].filter(row => Boolean(row.value))
 }
 
+function defaultRuntimeSpecRows(provider: DashboardRuntimeProviderSnapshot | null): Array<{ label: string; value: string }> {
+  if (!provider) return []
+  return [
+    { label: 'effective', value: runtimeCatalogEffectiveCapabilities(provider) },
+    { label: 'declared', value: runtimeCatalogDeclaredSpec(provider) },
+    { label: 'request', value: runtimeCatalogRequestConfig(provider) },
+    { label: 'policy', value: runtimeCatalogParameterPolicy(provider) },
+  ].filter((row): row is { label: string; value: string } => Boolean(row.value))
+}
+
 export function RuntimeHealthSnapshot() {
   const resource = useManagedAsyncResource<RuntimeHealthSnapshotData>()
 
@@ -271,6 +287,7 @@ export function RuntimeHealthSnapshot() {
     ? providers?.providers.find(provider => runtimeKey(provider) === defaultRuntime) ?? null
     : null
   const endpoints = endpointRows(probe)
+  const defaultSpecRows = defaultRuntimeSpecRows(defaultProvider)
 
   return html`
     <${SectionCard}
@@ -400,6 +417,25 @@ export function RuntimeHealthSnapshot() {
               warnings: ${governance.warnings.join(', ')}
             </div>
           ` : null}
+        </div>
+      ` : null}
+
+      ${defaultSpecRows.length > 0 ? html`
+        <div class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-xs" data-testid="runtime-health-default-spec">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">default runtime spec</span>
+            <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">${defaultRuntime ?? MISSING_DATA_DASH}</span>
+          </div>
+          <div class="mt-2 grid gap-1.5">
+            ${defaultSpecRows.map(row => html`
+              <div class="grid gap-1 md:grid-cols-[6.5rem_minmax(0,1fr)]" data-runtime-health-default-spec-row=${row.label}>
+                <span class="font-mono text-3xs uppercase text-[var(--color-fg-muted)]">${row.label}</span>
+                <span class="min-w-0 truncate font-mono text-2xs text-[var(--color-fg-secondary)]" title=${row.value}>
+                  ${row.value}
+                </span>
+              </div>
+            `)}
+          </div>
         </div>
       ` : null}
 

@@ -212,6 +212,38 @@ export interface PendingConfirmation {
 //   serialized at `:814`. Frontend was untyped `string`.
 export type KeeperApprovalRiskLevel = 'low' | 'medium' | 'high' | 'critical'
 
+/** One operator option proposed by the HITL context-summary worker.
+ *  Mirrors `keeper_approval_queue_rules_types.ml:suggested_option`. */
+export interface HitlSuggestedOption {
+  label: string
+  rationale: string
+  estimated_risk_delta: KeeperApprovalRiskLevel | null
+}
+
+/** LLM-generated operator briefing attached to a pending approval by the HITL
+ *  context-summary worker (`hitl_summary_worker.ml`). Mirrors
+ *  `keeper_approval_queue_rules_types.ml:hitl_context_summary`. */
+export interface HitlContextSummary {
+  summary_version: number
+  generated_at_iso: string | null
+  model_run_id: string | null
+  context_summary: string
+  key_questions: string[]
+  suggested_options: HitlSuggestedOption[]
+  risk_rationale: string | null
+  uncertainty: number | null
+}
+
+/** Discriminated union mirroring the backend `summary_status` variant
+ *  (`keeper_approval_queue_rules_types.ml:summary_status`). `available` carries
+ *  the briefing the operator reads before deciding; `pending`/`failed` are
+ *  in-flight/error states worth surfacing rather than hiding. */
+export type HitlSummaryStatus =
+  | { status: 'not_requested' }
+  | { status: 'pending' }
+  | { status: 'available'; summary: HitlContextSummary }
+  | { status: 'failed'; reason: string; retryable: boolean }
+
 export interface KeeperApprovalQueueItem {
   id: string
   keeper_name: string
@@ -243,6 +275,9 @@ export interface KeeperApprovalQueueItem {
   } | null
   input?: unknown
   input_preview?: string | null
+  /** HITL operator briefing state. `null` when the backend payload omits it or
+   *  the wire shape violates the contract — never coerced into a fake state. */
+  summary_status?: HitlSummaryStatus | null
 }
 
 export interface KeeperResolvedApprovalItem {

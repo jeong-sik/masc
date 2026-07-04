@@ -323,6 +323,7 @@ function runtimeEffectiveCapabilitySummary(
     caps.supports_min_p ? 'min_p' : null,
     caps.supports_seed ? 'seed' : null,
   ].filter((value): value is string => Boolean(value))
+  const ignoredSampling = caps.ignored_sampling_parameters.join(',')
   const formats = [
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
@@ -342,6 +343,7 @@ function runtimeEffectiveCapabilitySummary(
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    ignoredSampling ? `ignored ${ignoredSampling}` : null,
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,

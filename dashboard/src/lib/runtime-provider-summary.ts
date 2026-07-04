@@ -247,6 +247,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.supports_min_p ? 'min_p' : null,
     caps.supports_seed ? 'seed' : null,
   ])
+  const ignoredSampling = caps.ignored_sampling_parameters.join(',')
   const context = typeof caps.max_context_tokens === 'number' ? `ctx:${caps.max_context_tokens}` : null
   const output = typeof caps.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null
   const format = nonEmptyParts([
@@ -269,6 +270,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     format.length > 0 ? `format:${format.join(',')}` : null,
     sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+    ignoredSampling ? `ignored:${ignoredSampling}` : null,
     caps.modality_priority ? `modality:${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content:${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,

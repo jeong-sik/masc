@@ -1733,6 +1733,10 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "supports_min_p", `Bool caps.supports_min_p
       ; "supports_seed", `Bool caps.supports_seed
       ; "supports_seed_with_images", `Bool caps.supports_seed_with_images
+      ; ( "ignored_sampling_parameters"
+        , caps.ignored_sampling_parameters
+          |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
+          |> Json_util.json_string_list )
       ; "supports_computer_use", `Bool caps.supports_computer_use
       ; "supports_code_execution", `Bool caps.supports_code_execution
       ; "emits_usage_tokens", `Bool caps.emits_usage_tokens

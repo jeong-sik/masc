@@ -167,6 +167,7 @@ describe('RuntimeMonitor', () => {
             supports_min_p: true,
             supports_seed: true,
             supports_seed_with_images: true,
+            ignored_sampling_parameters: ['temperature', 'top_p'],
             supports_computer_use: true,
             supports_code_execution: true,
             emits_usage_tokens: true,
@@ -391,6 +392,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('runtime-mcp-tools')
     expect(container.textContent).toContain('reasoning · extended · budget · effort low,medium,high')
     expect(container.textContent).toContain('reasoning-stream delta-reasoning-field')
+    expect(container.textContent).toContain('ignored temperature,top_p')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
     expect(container.textContent).toContain('preserve chat-template-kwargs-preserve-thinking')
@@ -477,5 +479,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('transcription')
     expect(container.textContent).toContain('effective · controls')
     expect(container.textContent).toContain('native-stream,system-prompt,cache')
+    expect(container.textContent).toContain('effective · ignored sampling')
+    expect(container.textContent).toContain('temperature,top_p')
   })
 })

@@ -1095,6 +1095,7 @@ supports_prompt_caching = true
 supports_top_k = true
 supports_min_p = true
 supports_seed = true
+ignored_sampling_parameters = ["temperature", "top_p"]
 
 [[models]]
 id_prefix = "openai_compat/reasoning-small-out"
@@ -1248,6 +1249,13 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       "top_k"
       true
       (caps |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check (list string))
+      "ignored sampling parameters"
+      [ "temperature"; "top_p" ]
+      (caps
+       |> J.member "ignored_sampling_parameters"
+       |> J.to_list
+       |> List.map J.to_string);
     Alcotest.(check string)
       "effective modality priority"
       "visual-first"

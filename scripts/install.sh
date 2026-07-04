@@ -213,18 +213,19 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   CONFIG_FILE="$CONFIG_DIR/tool_policy.toml"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
+  MODEL_CATALOG_FILE="$CONFIG_DIR/oas-models.toml"
 
-  if [ -e "$CONFIG_FILE" ] && [ -e "$RUNTIME_FILE" ] && [ "$FORCE" -eq 0 ]; then
+  if [ -e "$CONFIG_FILE" ] && [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_FILE" ] && [ "$FORCE" -eq 0 ]; then
     log "config already present at $CONFIG_DIR, skipping seed"
   elif [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would seed configs to $CONFIG_DIR from release"
+    log "[dry-run] would seed configs and model catalog to $CONFIG_DIR from release"
   else
-    log "seeding configs to $CONFIG_DIR"
+    log "seeding configs and model catalog to $CONFIG_DIR"
     mkdir -p "$CONFIG_DIR"
 
-    seed_config() {
-      local name="$1" dest="$2"
-      local raw="https://raw.githubusercontent.com/$REPO/$VERSION/config/$name"
+    seed_raw() {
+      local raw_path="$1" name="$2" dest="$3"
+      local raw="https://raw.githubusercontent.com/$REPO/$VERSION/$raw_path"
       local tmp="$dest.partial"
       curl -fsSL --max-time 60 --retry 3 -o "$tmp" "$raw" \
         || die "config seed failed (raw fetch from $raw)"
@@ -232,17 +233,23 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
       mv "$tmp" "$dest"
     }
 
-    seed_config_if_missing() {
-      local name="$1" dest="$2"
+    seed_raw_if_missing() {
+      local raw_path="$1" name="$2" dest="$3"
       if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then
         log "config already present: $dest, skipping seed"
       else
-        seed_config "$name" "$dest"
+        seed_raw "$raw_path" "$name" "$dest"
       fi
+    }
+
+    seed_config_if_missing() {
+      local name="$1" dest="$2"
+      seed_raw_if_missing "config/$name" "$name" "$dest"
     }
 
     seed_config_if_missing "tool_policy.toml" "$CONFIG_FILE"
     seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"
+    seed_raw_if_missing "oas-models.toml" "oas-models.toml" "$MODEL_CATALOG_FILE"
   fi
 fi
 

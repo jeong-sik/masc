@@ -112,6 +112,63 @@ let test_fresh_critical_entry_phase_is_awaiting_operator () =
        | None -> Alcotest.fail "Critical approval did not resume after resolve")
 ;;
 
+(* A keeper skipping cycles on [Approval_pending] is not blocked in-process, so
+   resolving must fire the wake hook that enqueues a [Hitl_resolved] stimulus.
+   Without it the keeper only resumes on an unrelated stimulus / no-progress
+   recovery / the 30-minute janitor (the reported "HITL 됐는데 핑을 못 받음"). *)
+let test_resolve_fires_keeper_wake_hook () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_path = temp_dir () in
+  let woke = ref None in
+  AQ.set_approval_resolution_wake_hook (fun ~base_path:_ ~keeper_name ~approval_id ~decision ->
+    woke := Some (keeper_name, approval_id, decision));
+  Fun.protect
+    ~finally:(fun () ->
+      (* Reset to the default no-op so the recording closure does not leak into
+         later tests that share this module-level hook. *)
+      AQ.set_approval_resolution_wake_hook
+        (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ());
+      cleanup_dir base_path)
+    (fun () ->
+       Eio.Switch.run
+       @@ fun sw ->
+       let keeper_name = "resolve-wake-test" in
+       let result = ref None in
+       Eio.Fiber.fork ~sw (fun () ->
+         let decision =
+           AQ.submit_and_await
+             ~keeper_name
+             ~tool_name:"keeper_continue_after_reconcile"
+             ~input:(`Assoc [ "kind", `String "critical_gate" ])
+             ~risk_level:AQ.Critical
+             ~base_path
+             ()
+         in
+         result := Some decision);
+       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+       let id =
+         match pending_id_for_keeper ~keeper_name with
+         | Some id -> id
+         | None -> Alcotest.fail "Critical approval was not queued"
+       in
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       (* resolve_entry fires the hook synchronously before returning. *)
+       (match !woke with
+        | Some (kn, aid, decision) ->
+          Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
+          Alcotest.(check string) "wake carries the resolved approval id" id aid;
+          Alcotest.(check bool)
+            "wake carries the typed decision label"
+            true
+            (decision = Keeper_event_queue.Hitl_approved)
+        | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
+       yield_until (fun () -> Option.is_some !result))
+;;
+
 let test_critical_entry_phase_becomes_escalated_after_timer () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -360,6 +417,12 @@ let () =
             "Critical entry becomes Escalated after escalation timer"
             `Quick
             test_critical_entry_phase_becomes_escalated_after_timer
+        ] )
+    ; ( "wake"
+      , [ Alcotest.test_case
+            "resolve fires the keeper wake hook"
+            `Quick
+            test_resolve_fires_keeper_wake_hook
         ] )
     ; ( "summary"
       , [ Alcotest.test_case

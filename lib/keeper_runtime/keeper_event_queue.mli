@@ -64,6 +64,12 @@ type stimulus_payload =
           content on the turn path and there is no payload duplication.
           Edge-triggered: dequeued once, re-armed only by a new ambient
           message. Dormant until [handle_ambient] enqueues it (P3). *)
+  | Hitl_resolved of hitl_resolution
+      (** A HITL approval this keeper enqueued — and skipped cycles on via
+          [has_pending_for_keeper -> Skip Approval_pending] — was resolved.
+          Wakes the keeper so it re-evaluates immediately instead of stalling
+          until an unrelated stimulus, no-progress recovery, or the 30-minute
+          approval janitor. Mirrors [Fusion_completed]/[Bg_completed]. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -103,6 +109,21 @@ and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
 
+and hitl_resolution_decision =
+  | Hitl_approved
+  | Hitl_rejected
+  | Hitl_edited
+
+and hitl_resolution = {
+  approval_id : string;
+  decision : hitl_resolution_decision;
+}
+(** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
+    pending-approval queue entry; [decision] is the resolved label
+    ("approve" | "reject" | ...), carried for observability. The keeper
+    re-evaluates from its own state once the approval leaves the queue, so the
+    decision is not itself control flow. *)
+
 and connector_attention = { event_id : string }
 (** RFC-connector-ambient-attention-wake payload for [Connector_attention]:
     [event_id] is the pointer into [Keeper_external_attention] for the ambient
@@ -116,6 +137,14 @@ val fusion_completion_post_id : fusion_completion -> post_id
 val bg_job_completion_post_id : bg_job_completion -> post_id
 (** RFC-0290 dedup/correlation id for [Bg_completed]. Uses [bg_board_post_id]
     when the producer set it, otherwise falls back to ["bg-run:<run_id>"]. *)
+
+val hitl_resolution_post_id : hitl_resolution -> post_id
+(** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
+    De-dups repeat resolve wakes for the same approval within the dedup
+    window. *)
+
+val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
+(** Stable wire/log label for a HITL resolution wake decision. *)
 
 val bg_job_kind_to_string : bg_job_kind -> string
 (** RFC-0290: stable label for a background job kind, for logs and correlation

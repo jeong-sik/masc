@@ -11,6 +11,7 @@ type stimulus_kind =
   | Bg_completed  (* RFC-0290: generic background job completion wake *)
   | Connector_attention
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
+  | Hitl_resolved  (* HITL approval resolution wake — unblocks Skip Approval_pending *)
 
 type reaction_kind =
   | Turn_started
@@ -30,6 +31,7 @@ let stimulus_kind_to_string = function
   | Fusion_completed -> "fusion_completed"
   | Bg_completed -> "bg_completed"
   | Connector_attention -> "connector_attention"
+  | Hitl_resolved -> "hitl_resolved"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -43,6 +45,7 @@ let stimulus_kind_of_string = function
   | "fusion_completed" -> Some Fusion_completed
   | "bg_completed" -> Some Bg_completed
   | "connector_attention" -> Some Connector_attention
+  | "hitl_resolved" -> Some Hitl_resolved
   | _ -> None
 ;;
 
@@ -88,6 +91,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
   | Keeper_event_queue.Bg_completed _ -> Bg_completed
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
+  | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -164,6 +168,11 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
   | Keeper_event_queue.Connector_attention ca ->
     Printf.sprintf "connector_attention event_id=%s" ca.event_id
+  | Keeper_event_queue.Hitl_resolved r ->
+    Printf.sprintf
+      "hitl_resolved approval=%s decision=%s"
+      r.approval_id
+      (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -177,7 +186,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.No_progress_recovery
     | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Bg_completed _
-    | Keeper_event_queue.Connector_attention _ -> None
+    | Keeper_event_queue.Connector_attention _
+    | Keeper_event_queue.Hitl_resolved _ -> None
   in
   `Assoc
     (base_fields
@@ -660,7 +670,7 @@ let summarize_rows ~keeper_name ~limit rows =
           강제한다 (catch-all 금지). *)
        | Some
            ( Board_signal | Bootstrap | No_progress_recovery | Fusion_completed
-           | Bg_completed | Connector_attention )
+           | Bg_completed | Connector_attention | Hitl_resolved )
          -> ())
   in
   let note_payload_parse_error row =
@@ -754,7 +764,7 @@ let summarize_rows ~keeper_name ~limit rows =
         | Some No_progress_recovery -> true
         | Some
             ( Board_signal | Bootstrap | Fusion_completed | Bg_completed
-            | Connector_attention )
+            | Connector_attention | Hitl_resolved )
         | None ->
           false)
       pending_stimulus_ids

@@ -145,7 +145,8 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Fusion_completed _
       | Keeper_event_queue.Bg_completed _
       | Keeper_event_queue.Bootstrap
-      | Keeper_event_queue.No_progress_recovery ->
+      | Keeper_event_queue.No_progress_recovery
+      | Keeper_event_queue.Hitl_resolved _ ->
         None)
     stimuli
 ;;

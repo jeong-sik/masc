@@ -320,6 +320,7 @@ function runtimeEffectiveCapabilitySummary(
   ].filter((value): value is string => Boolean(value))
   const parts = [
     typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
+    caps.supports_tools ? 'tools' : null,
     caps.supports_tool_choice ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}` : null,
     caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
@@ -338,6 +339,7 @@ function runtimeEffectiveCapabilitySummary(
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
+    caps.supports_native_streaming ? 'native-stream' : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
     caps.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`

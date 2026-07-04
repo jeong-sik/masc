@@ -396,6 +396,7 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     : null
   const parts = [
     output,
+    caps.supports_tools ? 'tools' : null,
     toolChoice,
     item.effective_capabilities?.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     item.effective_capabilities?.supports_runtime_tool_events ? 'runtime-tool-events' : null,
@@ -429,6 +430,7 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     item.effective_capabilities?.task
       ? `task:${item.effective_capabilities.task}`
       : null,
+    item.effective_capabilities?.supports_native_streaming ? 'native-stream' : null,
     item.effective_capabilities?.supports_system_prompt ? 'system-prompt' : null,
     item.effective_capabilities?.supports_prompt_caching
       ? `prompt-cache${typeof item.effective_capabilities.prompt_cache_alignment === 'number'

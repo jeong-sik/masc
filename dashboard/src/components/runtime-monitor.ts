@@ -383,6 +383,7 @@ function runtimeEffectiveControlText(provider: DashboardRuntimeProviderSnapshot)
   const caps = provider.effective_capabilities
   if (!caps) return null
   return textList([
+    flagText(caps.supports_native_streaming, 'native-stream'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
     flagText(caps.supports_caching, 'cache'),
     caps.supports_prompt_caching
@@ -683,6 +684,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
   ].filter((value): value is string => Boolean(value))
   const parts = [
     output,
+    caps.supports_tools ? 'tools' : null,
     tools,
     caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
@@ -702,6 +704,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
+    caps.supports_native_streaming ? 'native-stream' : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
     caps.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`

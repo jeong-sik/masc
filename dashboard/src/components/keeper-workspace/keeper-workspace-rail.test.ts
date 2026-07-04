@@ -251,6 +251,7 @@ describe('KeeperWorkspaceRail', () => {
           effective_capabilities: {
             source: 'oas-provider-config-model',
             max_output_tokens: 65536,
+            supports_tools: true,
             supports_tool_choice: true,
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
@@ -269,6 +270,7 @@ describe('KeeperWorkspaceRail', () => {
               field: 'reasoning_content',
             },
             reasoning_replay_override: 'preserve-always',
+            supports_native_streaming: true,
             supports_system_prompt: true,
             supports_caching: true,
             supports_prompt_caching: true,
@@ -394,13 +396,14 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain(
       'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
+    expect(container.textContent).toContain('out 65536 · tools · tool_choice+parallel')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
     expect(container.textContent).toContain('extended thinking')
     expect(container.textContent).toContain('reasoning budget')
     expect(container.textContent).toContain('effort low,medium,high')
     expect(container.textContent).toContain('preserve always-preserved')
-    expect(container.textContent).toContain('task transcription')
+    expect(container.textContent).toContain('task transcription · native-stream')
     // the "no source" stub is replaced once the catalog reports capabilities
     expect(container.textContent).not.toContain('조정 정보 미수신')
   })

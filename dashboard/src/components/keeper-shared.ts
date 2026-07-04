@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
@@ -523,6 +523,7 @@ export function KeeperConversationPanel({
   // the signal graph (keeper-chat-store), so re-renders must be forced.
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion(v => v + 1)
+  const isDrainingRef = useRef(false)
 
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
@@ -644,6 +645,13 @@ export function KeeperConversationPanel({
     return () => clearInterval(id)
   }, [sending, keeperName])
 
+  // Reactively drain the queued inputs when the keeper finishes sending
+  useEffect(() => {
+    if (!sending && keeperName) {
+      void drainQueue()
+    }
+  }, [sending, keeperName])
+
   const streamStartedAt = keeperStreamStartedAt.value[keeperName] ?? null
   // Before the first SSE event arrives, measure the stall from stream
   // start instead so a never-responding stream is also flagged.
@@ -657,38 +665,44 @@ export function KeeperConversationPanel({
   }
 
   const drainQueue = async () => {
-    for (;;) {
-      const queued = dequeueInput(keeperName)
-      if (!queued) return
-      bumpQueue()
-
-      const content = queued.content.trim()
-      const attachments = queued.attachments && queued.attachments.length > 0 ? queued.attachments : undefined
-      if (!content && !attachments) {
-        markInputSent(keeperName)
+    if (isDrainingRef.current) return
+    isDrainingRef.current = true
+    try {
+      for (;;) {
+        const queued = dequeueInput(keeperName)
+        if (!queued) return
         bumpQueue()
-        continue
-      }
 
-      try {
-        await sendKeeperThreadMessage(keeperName, content, {
-          attachments,
-          clientActionId: queued.clientActionId,
-        })
-        markInputSent(keeperName)
-        bumpQueue()
-      } catch (err) {
-        if (isAbortError(err)) {
+        const content = queued.content.trim()
+        const attachments = queued.attachments && queued.attachments.length > 0 ? queued.attachments : undefined
+        if (!content && !attachments) {
           markInputSent(keeperName)
           bumpQueue()
+          continue
+        }
+
+        try {
+          await sendKeeperThreadMessage(keeperName, content, {
+            attachments,
+            clientActionId: queued.clientActionId,
+          })
+          markInputSent(keeperName)
+          bumpQueue()
+        } catch (err) {
+          if (isAbortError(err)) {
+            markInputSent(keeperName)
+            bumpQueue()
+            return
+          }
+          requeueInputFront(keeperName, queued)
+          bumpQueue()
+          const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
+          showToast(message, 'error')
           return
         }
-        requeueInputFront(keeperName, queued)
-        bumpQueue()
-        const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
-        showToast(message, 'error')
-        return
       }
+    } finally {
+      isDrainingRef.current = false
     }
   }
 

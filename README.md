@@ -323,6 +323,14 @@ Route examples: `dashboard#monitoring?section=agents`, `dashboard#monitoring?sec
 
 (Some diagnostic views such as `monitoring?section=journey` are provided by a route-only mapping in `dashboard/src/components/status.ts` rather than a rail surface — reachable by route but not by rail label.)
 
+### Design preview
+
+A v2 Keeper Agent surface mockup (roster rail, per-turn detail, runtime panel). This is a design mockup, not a snapshot of the current build.
+
+[![MASC v2 Keeper Agent 대시보드 시안](docs/design/assets/2026-07-04-masc-v2-keeper-agent.png)](docs/design/2026-07-04-masc-v2-keeper-agent-design.md)
+
+See [docs/design/2026-07-04-masc-v2-keeper-agent-design.md](docs/design/2026-07-04-masc-v2-keeper-agent-design.md) for the layout breakdown.
+
 ---
 
 ## Documentation

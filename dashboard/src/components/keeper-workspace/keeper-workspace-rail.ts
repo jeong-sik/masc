@@ -129,6 +129,22 @@ function formatCtxK(n: number | null | undefined): string | null {
   return `${Math.round(n / 1000)}k ctx`
 }
 
+function runtimeParameterPolicySummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const policy = entry.parameter_policy
+  if (!policy) return null
+  const ignored = policy.ignored_sampling_params.join(',')
+  const alwaysIgnored = policy.always_ignored_sampling_params.join(',')
+  const parts = [
+    policy.reasoning_toggle_wire ? policy.reasoning_toggle_wire : null,
+    policy.reasoning_replay_policy ? policy.reasoning_replay_policy : null,
+    ignored ? `ignore ${ignored}` : null,
+    alwaysIgnored ? `always ${alwaysIgnored}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   useEffect(() => {
     loadRuntimeCatalog()
@@ -150,6 +166,7 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   const effortMode = entry?.thinking_control_format ?? null
   const effortControlled = effortMode !== null && effortMode !== 'none'
   const effortAdjustable = effortMode === 'reasoning-effort' || Boolean(entry?.supports_reasoning_budget)
+  const parameterPolicy = entry ? runtimeParameterPolicySummary(entry) : null
 
   return html`
     <div class="ctx-sec">
@@ -189,6 +206,14 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
               ? html`<span class="rtc-eff-na" data-effort-mode=${effortMode}>${effortMode} · ${effortAdjustable ? '조정 가능' : '고정'}</span>`
               : html`<span class="rtc-eff-na" data-effort-mode="none">effort 제어 없음</span>`}
         </div>
+        ${parameterPolicy
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">params</span>
+                <span class="rtc-eff-na" title=${parameterPolicy}>${parameterPolicy}</span>
+              </div>
+            `
+          : null}
       </div>
     </div>
   `

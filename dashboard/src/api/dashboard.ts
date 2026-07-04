@@ -123,6 +123,7 @@ export { fetchDashboardBriefing, fetchDashboardMission, fetchDashboardMissionSes
 
 export type {
   DashboardRuntimeProviderSnapshot,
+  DashboardRuntimeParameterPolicy,
   DashboardRuntimeAssignment,
   DashboardRuntimeAssignmentGovernance,
   DashboardRuntimeProvidersResponse,

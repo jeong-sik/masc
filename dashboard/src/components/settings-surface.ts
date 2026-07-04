@@ -214,6 +214,20 @@ function RuntimeCatalogCapability({ label, value }: { label: string; value: bool
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
 }
 
+function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnapshot): string | null {
+  const policy = item.parameter_policy
+  if (!policy) return null
+  const ignored = policy.ignored_sampling_params.join(',')
+  const alwaysIgnored = policy.always_ignored_sampling_params.join(',')
+  const parts = [
+    policy.reasoning_toggle_wire ? `wire:${policy.reasoning_toggle_wire}` : null,
+    policy.reasoning_replay_policy ? `replay:${policy.reasoning_replay_policy}` : null,
+    ignored ? `ignore:${ignored}` : null,
+    alwaysIgnored ? `always:${alwaysIgnored}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
   if (!defaults) return []
   return defaults.runtimes.map((entry: RuntimeEntry) => ({
@@ -249,6 +263,7 @@ function RuntimeCatalogCard({
   const transport = item.endpoint_url ?? item.transport ?? item.kind ?? 'transport 미수집'
   const status = item.available === false ? 'unavailable' : item.status ?? 'configured'
   const isDefault = runtimeId === (defaultRuntimeId ?? '')
+  const parameterPolicy = runtimeCatalogParameterPolicy(item)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -274,6 +289,9 @@ function RuntimeCatalogCard({
         <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
         <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
         <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
+        ${parameterPolicy
+          ? html`<span class="rt-cap tcf mono" title=${parameterPolicy}>${parameterPolicy}</span>`
+          : null}
       </div>
       <div class="set-rt-row">
         <span class="sub-k">transport</span>

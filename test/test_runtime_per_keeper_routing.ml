@@ -1004,6 +1004,41 @@ let test_thinking_support_false_forces_off () =
       seed.Runtime_inference.thinking_enabled)
 ;;
 
+let test_runtime_inventory_surfaces_parameter_policy () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let policy = thinkdefault |> J.member "parameter_policy" in
+    Alcotest.(check string)
+      "reasoning toggle wire"
+      "chat_template_kwargs"
+      (policy |> J.member "reasoning_toggle_wire" |> J.to_string);
+    Alcotest.(check string)
+      "reasoning replay policy"
+      "no_replay"
+      (policy |> J.member "reasoning_replay_policy" |> J.to_string);
+    Alcotest.(check bool)
+      "no tool replay requirement"
+      false
+      (policy |> J.member "requires_reasoning_replay_on_tool_call" |> J.to_bool);
+    Alcotest.(check int)
+      "ignored sampling params empty"
+      0
+      (policy |> J.member "ignored_sampling_params" |> J.to_list |> List.length);
+    Alcotest.(check int)
+      "always ignored sampling params empty"
+      0
+      (policy |> J.member "always_ignored_sampling_params" |> J.to_list |> List.length))
+;;
+
 let test_thinking_unknown_runtime_defers () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"bogus.binding" in
@@ -1447,6 +1482,10 @@ let () =
             "thinking-support=false forces thinking off (Some false)"
             `Quick
             test_thinking_support_false_forces_off
+        ; Alcotest.test_case
+            "runtime inventory surfaces OAS parameter policy"
+            `Quick
+            test_runtime_inventory_surfaces_parameter_policy
         ; Alcotest.test_case
             "unknown runtime id defers (None)"
             `Quick

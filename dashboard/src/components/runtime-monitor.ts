@@ -156,6 +156,22 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   return provider.discovery?.healthy === false ? 'degraded' : 'unknown'
 }
 
+function runtimeParameterPolicyText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const policy = provider.parameter_policy
+  if (!policy) return null
+  const parts = [
+    policy.reasoning_toggle_wire ? `wire ${policy.reasoning_toggle_wire}` : null,
+    policy.reasoning_replay_policy ? `replay ${policy.reasoning_replay_policy}` : null,
+    policy.ignored_sampling_params.length > 0
+      ? `ignored ${policy.ignored_sampling_params.join(',')}`
+      : null,
+    policy.always_ignored_sampling_params.length > 0
+      ? `always ignored ${policy.always_ignored_sampling_params.join(',')}`
+      : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function providerProbeKey(probe: DashboardRuntimeProviderProbe): string | null {
   return probe.runtime_id ?? null
 }
@@ -531,6 +547,7 @@ export function RuntimeMonitor() {
           ${(providers?.providers ?? []).length > 0
             ? providers?.providers.map(provider => {
                 const liveProbe = providerProbes.get(providerRuntimeKey(provider)) ?? null
+                const parameterPolicy = runtimeParameterPolicyText(provider)
                 return html`
                 <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
@@ -556,6 +573,11 @@ export function RuntimeMonitor() {
                   ${liveProbe?.probe_url || provider.endpoint_url
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${liveProbe?.probe_url ?? provider.endpoint_url ?? ''}>
                         probe · ${liveProbe?.probe_url ?? provider.endpoint_url}
+                      </div>`
+                    : null}
+                  ${parameterPolicy
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${parameterPolicy}>
+                        params · ${parameterPolicy}
                       </div>`
                     : null}
                   ${liveProbe?.error

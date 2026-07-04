@@ -2423,6 +2423,13 @@ describe('fetchRuntimeProviders', () => {
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
             temperature: 0.65,
+            parameter_policy: {
+              reasoning_toggle_wire: 'chat_template_kwargs',
+              reasoning_replay_policy: 'preserve_always',
+              requires_reasoning_replay_on_tool_call: false,
+              ignored_sampling_params: ['temperature', 'top_p'],
+              always_ignored_sampling_params: ['temperature'],
+            },
             source: 'runtime.toml',
             discovery: {
               healthy: true,
@@ -2473,6 +2480,10 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[0]?.parameter_policy?.reasoning_toggle_wire).toBe('chat_template_kwargs')
+    expect(result.providers[0]?.parameter_policy?.reasoning_replay_policy).toBe('preserve_always')
+    expect(result.providers[0]?.parameter_policy?.ignored_sampling_params).toEqual(['temperature', 'top_p'])
+    expect(result.providers[0]?.parameter_policy?.always_ignored_sampling_params).toEqual(['temperature'])
     expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
     expect(result.assignment_governance?.status).toBe('degraded')

@@ -16,6 +16,14 @@ interface DashboardRuntimeProviderDiscovery {
   idle_slots?: number | null
 }
 
+export interface DashboardRuntimeParameterPolicy {
+  reasoning_toggle_wire?: string | null
+  reasoning_replay_policy?: string | null
+  requires_reasoning_replay_on_tool_call?: boolean
+  ignored_sampling_params: string[]
+  always_ignored_sampling_params: string[]
+}
+
 export interface DashboardRuntimeProviderSnapshot {
   provider: string
   runtime_id?: string | null
@@ -43,6 +51,7 @@ export interface DashboardRuntimeProviderSnapshot {
   supports_image_input?: boolean
   supports_reasoning_budget?: boolean
   thinking_control_format?: string | null
+  parameter_policy?: DashboardRuntimeParameterPolicy | null
   model_count?: number | null
   models: string[]
   source?: string | null
@@ -193,6 +202,17 @@ export interface DashboardRuntimeModelMetricsResponse {
   models: DashboardRuntimeModelMetric[]
 }
 
+function decodeRuntimeParameterPolicy(raw: unknown): DashboardRuntimeParameterPolicy | null {
+  if (!isRecord(raw)) return null
+  return {
+    reasoning_toggle_wire: asNullableString(raw.reasoning_toggle_wire),
+    reasoning_replay_policy: asNullableString(raw.reasoning_replay_policy),
+    requires_reasoning_replay_on_tool_call: asBoolean(raw.requires_reasoning_replay_on_tool_call),
+    ignored_sampling_params: asStringArray(raw.ignored_sampling_params),
+    always_ignored_sampling_params: asStringArray(raw.always_ignored_sampling_params),
+  }
+}
+
 function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderDiscovery | null {
   if (!isRecord(raw)) return null
   return {
@@ -234,6 +254,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     supports_image_input: asBoolean(raw.supports_image_input),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     thinking_control_format: asNullableString(raw.thinking_control_format),
+    parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),
     source: asNullableString(raw.source),

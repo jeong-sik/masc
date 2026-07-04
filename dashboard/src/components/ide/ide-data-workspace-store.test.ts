@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clearWorkspaceFetchIssue,
+  replaceWorkspaceFetchIssue,
   sameWorkspaceTreeIdentity,
   selectPreferredIdeRepositoryId,
+  workspaceFetchIssueFromError,
   workspaceTreeIdentity,
 } from './ide-data-workspace-store'
 import type { Repository } from '../../api/repositories'
@@ -153,6 +156,63 @@ describe('selectPreferredIdeRepositoryId', () => {
     // After self-healing excludes llama-cpp:
     const excluded = new Set(['llama-cpp'])
     expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-a')
+  })
+})
+
+describe('workspace fetch diagnostics', () => {
+  it('materializes failed fetches without stringly fallback coercion', () => {
+    const issue = workspaceFetchIssueFromError('diff', new Error('network down'), {
+      filePath: 'lib/runtime.ml',
+      keeper: 'sangsu',
+      repoId: 'masc',
+      nowMs: 42,
+    })
+
+    expect(issue).toEqual({
+      kind: 'diff',
+      message: 'network down',
+      file_path: 'lib/runtime.ml',
+      keeper: 'sangsu',
+      repo_id: 'masc',
+      observed_at_ms: 42,
+    })
+  })
+
+  it('keeps one issue per fetch scope and clears only that scope', () => {
+    const treeIssue = workspaceFetchIssueFromError('tree', new Error('tree failed'), {
+      repoId: 'masc',
+      nowMs: 1,
+    })!
+    const diffIssue = workspaceFetchIssueFromError('diff', new Error('diff failed'), {
+      filePath: 'lib/runtime.ml',
+      repoId: 'masc',
+      nowMs: 2,
+    })!
+    const newerDiffIssue = workspaceFetchIssueFromError('diff', new Error('diff still failed'), {
+      filePath: 'lib/runtime.ml',
+      repoId: 'masc',
+      nowMs: 3,
+    })!
+
+    const issues = replaceWorkspaceFetchIssue(
+      replaceWorkspaceFetchIssue(
+        replaceWorkspaceFetchIssue([], treeIssue),
+        diffIssue,
+      ),
+      newerDiffIssue,
+    )
+
+    expect(issues).toHaveLength(2)
+    expect(issues.map(issue => issue.message)).toEqual(['tree failed', 'diff still failed'])
+    expect(clearWorkspaceFetchIssue(issues, 'diff', {
+      filePath: 'lib/runtime.ml',
+      repoId: 'masc',
+    })).toEqual([treeIssue])
+  })
+
+  it('does not record navigation aborts as degraded workspace fetches', () => {
+    const abort = new DOMException('Aborted', 'AbortError')
+    expect(workspaceFetchIssueFromError('file', abort)).toBeNull()
   })
 })
 

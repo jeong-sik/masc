@@ -917,6 +917,7 @@ describe('SettingsSurface', () => {
             supports_extended_thinking: true,
             supports_reasoning_budget: true,
             accepted_reasoning_efforts: ['low', 'medium', 'high'],
+            thinking_control_format: 'reasoning-effort',
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -1078,6 +1079,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('extended-thinking')
       expect(cards[0]?.textContent).toContain('reasoning-budget')
       expect(cards[0]?.textContent).toContain('effort:low,medium,high')
+      expect(cards[0]?.textContent).toContain('wire:reasoning-effort')
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
       expect(cards[0]?.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
       expect(cards[0]?.textContent).toContain('task:transcription · native-stream')

@@ -301,6 +301,39 @@ let test_post_cursors_persists_valid_focus_mode () =
     | [] -> fail "expected persisted cursor")
 ;;
 
+let test_post_cursors_honors_canonical_url_scope () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let scoped_path =
+      "/api/v1/ide/cursors?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
+    in
+    let body = {|{"file_path":"lib/a.ml","line":9,"focus_mode":"editing"}|} in
+    let post_request =
+      http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
+    in
+    let post_response = dispatch router post_request in
+    check_status "POST cursor with canonical_url scope returns 201" 201 post_response;
+    let unscoped_request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors" () in
+    let unscoped_response = dispatch router unscoped_request in
+    check_status "GET unscoped cursors succeeds" 200 unscoped_response;
+    let unscoped_json = unscoped_response |> response_body |> Yojson.Safe.from_string in
+    let unscoped_data = Json.member "data" unscoped_json in
+    check
+      int
+      "scoped cursor is not written to legacy_default"
+      0
+      (List.length (json_list_member "unscoped cursor snapshot" "cursors" unscoped_data));
+    let scoped_request = http_request ~meth:`GET ~path:scoped_path () in
+    let scoped_response = dispatch router scoped_request in
+    check_status "GET scoped cursors succeeds" 200 scoped_response;
+    let scoped_json = scoped_response |> response_body |> Yojson.Safe.from_string in
+    let scoped_data = Json.member "data" scoped_json in
+    match json_list_member "scoped cursor snapshot" "cursors" scoped_data with
+    | cursor :: _ ->
+      check string "scoped cursor file" "lib/a.ml" (json_string_member "cursor" "file_path" cursor)
+    | [] -> fail "expected scoped cursor")
+;;
+
 let test_post_annotations_requires_auth () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let body = {|{"file_path":"lib/a.ml","line_start":1,"line_end":2,"content":"note"}|} in
@@ -530,6 +563,8 @@ let () =
             test_post_cursors_rejects_negative_column
         ; test_case "POST cursor persists valid focus_mode" `Quick
             test_post_cursors_persists_valid_focus_mode
+        ; test_case "POST cursor honors canonical_url scope" `Quick
+            test_post_cursors_honors_canonical_url_scope
         ; test_case "POST annotation requires auth" `Quick
             test_post_annotations_requires_auth
         ; test_case "DELETE annotation requires auth" `Quick

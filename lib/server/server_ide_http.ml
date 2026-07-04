@@ -791,6 +791,8 @@ let add_routes router =
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
          let base = base_path_of_state state in
+         let uri = Uri.of_string request.target in
+         let partition = resolve_partition_for_query ~state ~uri in
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_json_body body_str with
            | Error msg ->
@@ -853,6 +855,7 @@ let add_routes router =
                            ~file_path
                            ~line
                            ?column
+                           ~partition
                            ?focus_mode
                            ~source
                            ()

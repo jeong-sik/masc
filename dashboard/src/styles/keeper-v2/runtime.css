@@ -143,6 +143,11 @@
 /* settings launcher card + per-keeper runtime capability card */
 .rtc-card { border: 1px solid var(--border-main); border-radius: var(--radius-sm); background: var(--bg-card); padding: 10px 12px; }
 .rtc-id { font-size: 11.5px; color: var(--volt-strong); word-break: break-all; }
+/* Pending runtime assignment: the config editor saved a runtime the running
+   keeper has not adopted yet (assigned ≠ live). Amber to read as "pending",
+   not an error. */
+.rtc-drift { font-size: var(--fs-10); color: var(--status-warn); margin-top: 4px; word-break: break-all; }
+.rtc-drift .mono { font-family: var(--font-mono); }
 .rtc-na { font-size: var(--fs-11); color: var(--text-dim); margin-top: 5px; }
 .rtc-model { font-size: 10.5px; color: var(--text-dim); margin-top: 4px; }
 .rtc-flags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }

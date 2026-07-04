@@ -320,7 +320,19 @@ let test_handled_lsp_method_catalog_is_classified () =
     None
     (Option.map
        (fun (_ : Lsp.method_class) -> true)
-       (Lsp.classify_handled_lsp_method "workspace/executeCommand"))
+       (Lsp.classify_handled_lsp_method "workspace/executeCommand"));
+  check
+    (option bool)
+    "unknown document sync notification stays absent"
+    None
+    (Option.map
+       (fun (_ : Lsp.method_class) -> true)
+       (Lsp.classify_handled_lsp_method "textDocument/didSomethingElse"));
+  (match Lsp.classify_forwarded_method "textDocument/didSomethingElse" with
+   | Lsp.Unknown_forwarded_method method_ ->
+     check string "unknown document sync method preserved" "textDocument/didSomethingElse" method_
+   | Lsp.Forward_read_only | Lsp.Reject_write_adjacent ->
+     Alcotest.fail "unknown document sync method must not enter forwarding allowlists")
 ;;
 
 let test_unknown_language_is_typed () =

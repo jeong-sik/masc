@@ -131,62 +131,6 @@ let get_recent_commits ~repository ~branch ~limit =
   | Ok lines -> Ok lines
   | Error msg -> Error msg
 
-let porcelain_conflict x y =
-  match (x, y) with
-  | 'D', 'D'
-  | 'A', 'U'
-  | 'U', 'D'
-  | 'U', 'A'
-  | 'D', 'U'
-  | 'A', 'A'
-  | 'U', 'U' -> true
-  | _ -> false
-
-let count_porcelain_line summary line =
-  if String.length line < 2 then
-    Stdlib.Error "git status --porcelain=v1 returned a malformed status row"
-  else
-    let x = String.get line 0 in
-    let y = String.get line 1 in
-    let is_untracked = Char.equal x '?' && Char.equal y '?' in
-    let is_ignored = Char.equal x '!' && Char.equal y '!' in
-    if is_ignored then Stdlib.Ok summary
-    else
-      let conflicted = porcelain_conflict x y in
-      let staged =
-        (not conflicted) && (not is_untracked) && not (Char.equal x ' ')
-      in
-      let unstaged =
-        (not conflicted) && (not is_untracked) && not (Char.equal y ' ')
-      in
-      Stdlib.Ok
-        {
-          changed_files = summary.changed_files + 1;
-          staged_files = summary.staged_files + if staged then 1 else 0;
-          unstaged_files = summary.unstaged_files + if unstaged then 1 else 0;
-          untracked_files =
-            summary.untracked_files + if is_untracked then 1 else 0;
-          conflicted_files =
-            summary.conflicted_files + if conflicted then 1 else 0;
-        }
-
-let summarize_porcelain_lines lines =
-  let ( let* ) = Result.bind in
-  let empty =
-    {
-      changed_files = 0;
-      staged_files = 0;
-      unstaged_files = 0;
-      untracked_files = 0;
-      conflicted_files = 0;
-    }
-  in
-  List.fold_left
-    (fun acc line ->
-      let* summary = acc in
-      count_porcelain_line summary line)
-    (Stdlib.Ok empty) lines
-
 let status_summary ~repository =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
@@ -194,4 +138,18 @@ let status_summary ~repository =
       ["--no-optional-locks"; "status"; "--porcelain=v1"; "--untracked-files=normal"]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
-  | Stdlib.Ok lines -> summarize_porcelain_lines lines
+  | Stdlib.Ok lines -> (
+      match
+        Masc_exec.Output_parse.summarize_git_status_porcelain
+          (String.concat "\n" lines)
+      with
+      | Error msg -> Error msg
+      | Ok summary ->
+          Ok
+            {
+              changed_files = summary.changed_files;
+              staged_files = summary.staged_files;
+              unstaged_files = summary.unstaged_files;
+              untracked_files = summary.untracked_files;
+              conflicted_files = summary.conflicted_files;
+            })

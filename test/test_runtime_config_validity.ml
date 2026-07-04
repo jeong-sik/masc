@@ -1388,7 +1388,7 @@ let test_server_degraded_init_disables_uncatalogued_runtimes () =
      [ollama.missing]\n\
      \n\
      [runtime]\n\
-     default = \"ollama.missing\"\n\
+     default = \"ollama.good\"\n\
      librarian = \"ollama.missing\"\n\
      media_failover = [\"ollama.missing\", \"ollama.good\"]\n\
      \n\
@@ -1413,7 +1413,7 @@ let test_server_degraded_init_disables_uncatalogued_runtimes () =
        | Ok Runtime.Initialized -> fail "expected degraded startup outcome"
        | Ok (Runtime.Initialized_degraded degradation) ->
          check string "configured default"
-           "ollama.missing"
+           "ollama.good"
            degradation.configured_default_runtime_id;
          check string "effective default"
            "ollama.good"
@@ -1449,6 +1449,56 @@ let test_server_degraded_init_disables_uncatalogued_runtimes () =
            (String_util.contains_substring rendered "\"status\":\"degraded\"");
          check bool "json names disabled runtime" true
            (String_util.contains_substring rendered "ollama.missing"))
+
+let test_server_degraded_init_rejects_uncatalogued_default () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-oas-catalog\"\n\
+     max-context = 1024\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.missing\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_degraded_report ~config_path:path with
+       | Ok Runtime.Initialized -> fail "expected missing default catalog row"
+       | Ok (Runtime.Initialized_degraded _) ->
+         fail "missing configured default must not pick another effective default"
+       | Error (Runtime.Missing_catalog_models report) ->
+         failf
+           "expected default-specific config error, got missing catalog report: %s"
+           (Runtime.strict_init_error_to_string
+              (Runtime.Missing_catalog_models report))
+       | Error (Runtime.Runtime_config_error msg) ->
+         check bool "error names runtime default" true
+           (String_util.contains_substring msg "[runtime].default");
+         check bool "error names missing default runtime" true
+           (String_util.contains_substring msg "ollama.missing");
+         check bool "error rejects alternate default routing" true
+           (String_util.contains_substring msg "different default runtime"))
 
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -1832,6 +1882,9 @@ let () =
           test_case
             "server degraded init disables uncatalogued runtimes"
             `Quick test_server_degraded_init_disables_uncatalogued_runtimes;
+          test_case
+            "server degraded init rejects uncatalogued default"
+            `Quick test_server_degraded_init_rejects_uncatalogued_default;
           test_case
             "runtime assignment rejects commented disabled binding"
             `Quick test_runtime_assignment_rejects_commented_disabled_binding;

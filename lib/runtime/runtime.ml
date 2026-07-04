@@ -565,10 +565,16 @@ let degrade_loaded_for_missing_catalog
          "%s: all configured runtime models are absent from the OAS capability \
           catalog; cannot degrade without dispatching through provider_default"
          report.config_path)
-  | effective_default :: _ ->
-    let effective_default =
-      if is_missing configured_default.id then effective_default else configured_default
-    in
+  | _ when is_missing configured_default.id ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime].default = %S is absent from the OAS capability catalog; \
+          cannot degrade without silently routing unassigned keepers to a \
+          different default runtime"
+         report.config_path
+         configured_default.id)
+  | _ ->
+    let effective_default = configured_default in
     let disabled_runtime_ids =
       report.missing_models
       |> List.map (fun (missing : missing_catalog_model) -> missing.runtime_id)

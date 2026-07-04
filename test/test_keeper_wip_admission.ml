@@ -1,6 +1,7 @@
 open Alcotest
 
 module Admission = Masc.Keeper_wip_admission
+module Env_config_core = Masc.Env_config_core
 module Task_runtime = Masc.Keeper_tool_task_runtime
 module U = Yojson.Safe.Util
 
@@ -527,6 +528,18 @@ let test_default_caps_unparseable_keeps_default () =
   check (option int) "per_category keeps default on garbage" (Some 4)
     c.Admission.max_per_category
 
+let raises_config_error f =
+  try
+    ignore (f ());
+    false
+  with Env_config_core.Config_error _ -> true
+
+let test_default_caps_parse_warn_escalates_malformed_env () =
+  with_env "MASC_PARSE_WARN" "1" @@ fun () ->
+  with_env "MASC_KEEPER_WIP_MAX_PER_CATEGORY" "banana" @@ fun () ->
+  check bool "strict malformed cap raises Config_error" true
+    (raises_config_error Admission.default_caps)
+
 let () =
   run "Keeper_wip_admission"
     [ ( "caps"
@@ -577,5 +590,7 @@ let () =
             test_default_caps_disable_via_zero_and_negative
         ; test_case "unparseable value keeps the default" `Quick
             test_default_caps_unparseable_keeps_default
+        ; test_case "MASC_PARSE_WARN escalates malformed cap env" `Quick
+            test_default_caps_parse_warn_escalates_malformed_env
         ] )
     ]

@@ -31,7 +31,7 @@ let with_env key value f =
       f ())
 ;;
 
-let progress_row ?(priority = 50) ~trace_id ~text : string =
+let progress_row ?(priority = 50) ~trace_id ~text () : string =
   `Assoc
     [ ("schema_version", `Int Policy.keeper_memory_schema_version)
     ; ("kind", `String "progress")
@@ -136,7 +136,7 @@ let test_schema_mismatch_surfaces_typed_error () =
   let content =
     String.concat
       "\n"
-      [ progress_row ~trace_id:"t1" ~text:"valid row"
+      [ progress_row ~trace_id:"t1" ~text:"valid row" ()
       ; (`Assoc [ ("schema_version", `Int 1); ("kind", `String "progress") ]
          |> Yojson.Safe.to_string)
       ]
@@ -160,7 +160,7 @@ let test_malformed_json_is_not_schema_mismatch () =
   let content =
     String.concat
       "\n"
-      [ progress_row ~trace_id:"t1" ~text:"valid row"; {|{"schema_version":|} ]
+      [ progress_row ~trace_id:"t1" ~text:"valid row" (); {|{"schema_version":|} ]
     ^ "\n"
   in
   write_file path content;
@@ -184,8 +184,8 @@ let test_memory_search_json_returns_partial_bank_match () =
   let content =
     String.concat
       "\n"
-      [ progress_row ~priority:100 ~trace_id:"partial-1" ~text:relevant_text
-      ; progress_row ~priority:5 ~trace_id:"partial-2" ~text:weaker_text
+      [ progress_row ~priority:100 ~trace_id:"partial-1" ~text:relevant_text ()
+      ; progress_row ~priority:5 ~trace_id:"partial-2" ~text:weaker_text ()
       ]
     ^ "\n"
   in
@@ -237,7 +237,7 @@ let test_write_failure_surfaces_typed_error () =
   let target_notes = Bank.memory_compaction_target_notes () in
   let rows =
     List.init (target_notes + 30) (fun i ->
-      progress_row ~trace_id:("t" ^ string_of_int i) ~text:"duplicate")
+      progress_row ~trace_id:("t" ^ string_of_int i) ~text:"duplicate" ())
   in
   let content = String.concat "\n" rows ^ "\n" in
   write_file path content;

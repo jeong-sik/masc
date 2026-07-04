@@ -390,20 +390,6 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
     :: ("policy_allowed", `Bool allowed)
     :: (default_scope_fields @ repository_id_fields @ reason_fields @ error_fields)
   in
-  let field_allowed_scope ?(default_scope = false) () =
-    match
-      playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
-        ~repo_path
-    with
-    | Error (`Identity_mismatch msg) ->
-      field Policy_repository_identity_mismatch false
-        ~repository_id:repo_name ~error:msg ()
-    | Error (`Store_error msg) ->
-      field Policy_repository_store_error false ~repository_id:repo_name
-        ~error:msg ()
-    | Ok repository_id ->
-      field Policy_allowed true ~repository_id ~default_scope ()
-  in
   let repository_id_in_catalog repository_id =
     match repo_catalog with
     | Error msg -> Error (`Store_error msg)

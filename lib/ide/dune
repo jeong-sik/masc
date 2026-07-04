@@ -25,6 +25,7 @@
   uuidm
   fs_compat
   masc.dated_jsonl
+  masc.attribution
   masc.masc_process
   masc.command_descriptor
   masc.agent_observation

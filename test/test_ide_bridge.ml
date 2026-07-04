@@ -380,6 +380,82 @@ let test_hook_extracts_file_path_from_file_path_key () =
     check string "file_path" "src/main.ml" (Yojson.Safe.Util.to_string fp))
 ;;
 
+let test_hook_and_cursor_share_path_priority () =
+  with_temp_dir (fun base_dir ->
+    let input =
+      `Assoc
+        [ "path", `String "lib/from-path.ml"
+        ; "file_path", `String "lib/from-file-path.ml"
+        ; "line", `Int 9
+        ; "focus_mode", `String "editing"
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
+      ~tool_name:"fs_edit"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-9"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:50.0
+      ~output_text:"edited"
+      ~input;
+    let events = Ide_bridge.list_events ~base_path:base_dir () in
+    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
+    match events, cursors with
+    | event :: _, [ cursor ] ->
+      check
+        string
+        "tool event path priority"
+        "lib/from-path.ml"
+        (json_string "file_path" event);
+      check
+        string
+        "cursor path priority"
+        "lib/from-path.ml"
+        (json_string "file_path" cursor)
+    | _ -> fail "expected one tool event and one cursor")
+;;
+
+let test_hook_and_cursor_share_blank_path_fallback () =
+  with_temp_dir (fun base_dir ->
+    let input =
+      `Assoc
+        [ "path", `String " "
+        ; "file_path", `String "lib/from-file-path.ml"
+        ; "line", `Int 9
+        ; "focus_mode", `String "editing"
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
+      ~tool_name:"fs_edit"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-9"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:50.0
+      ~output_text:"edited"
+      ~input;
+    let events = Ide_bridge.list_events ~base_path:base_dir () in
+    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
+    match events, cursors with
+    | event :: _, [ cursor ] ->
+      check
+        string
+        "tool event blank path fallback"
+        "lib/from-file-path.ml"
+        (json_string "file_path" event);
+      check
+        string
+        "cursor blank path fallback"
+        "lib/from-file-path.ml"
+        (json_string "file_path" cursor)
+    | _ -> fail "expected one tool event and one cursor")
+;;
+
 let test_hook_no_file_path () =
   with_temp_dir (fun base_dir ->
     let input = `Assoc [ "command", `String "ls" ] in
@@ -1054,6 +1130,14 @@ let () =
     ; ( "hook_extract"
       , [ test_case "file_path from path key" `Quick test_hook_extracts_file_path_from_path_key
         ; test_case "file_path from file_path key" `Quick test_hook_extracts_file_path_from_file_path_key
+        ; test_case
+            "tool event and cursor share path priority"
+            `Quick
+            test_hook_and_cursor_share_path_priority
+        ; test_case
+            "tool event and cursor share blank path fallback"
+            `Quick
+            test_hook_and_cursor_share_blank_path_fallback
         ; test_case "no file_path (execute)" `Quick test_hook_no_file_path
         ; test_case "summary truncation" `Quick test_hook_summary_truncation
         ; test_case "typed_outcome mapping" `Quick test_hook_typed_outcome_mapping

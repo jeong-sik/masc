@@ -85,6 +85,17 @@ let test_blank_path_falls_back_to_file_path () =
        ])
 ;;
 
+let test_path_priority_matches_ide_helper () =
+  check
+    string
+    "path wins"
+    "repos/masc/lib/from-path.ml"
+    (observed_path
+       [ "path", `String "repos/masc/lib/from-path.ml"
+       ; "file_path", `String "repos/masc/lib/from-file-path.ml"
+       ])
+;;
+
 let test_missing_path_falls_back_to_base_path () =
   check string "base fallback" "/tmp/masc-base" (observed_path [])
 ;;
@@ -128,6 +139,8 @@ let () =
         ; test_case "absolute path ignores cwd" `Quick test_absolute_path_ignores_cwd
         ; test_case "blank path falls back to file_path" `Quick
             test_blank_path_falls_back_to_file_path
+        ; test_case "path priority matches IDE helper" `Quick
+            test_path_priority_matches_ide_helper
         ; test_case "missing path falls back to base_path" `Quick
             test_missing_path_falls_back_to_base_path
         ] )

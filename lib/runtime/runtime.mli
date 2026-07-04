@@ -150,9 +150,11 @@ val init_default_strict_report :
 val init_default_degraded_report :
   config_path:string -> (init_default_outcome, strict_init_error) result
 (** Server bootstrap entry point. Applies the strict OAS catalog gate, but when
-    only the catalog-membership gate fails it can remove uncatalogued runtimes
-    from the active runtime set and continue in an operator-visible degraded
-    mode. Routing/parse errors and all-missing runtime sets remain fatal. *)
+    only non-default catalog-membership routes fail it can remove uncatalogued
+    runtimes from the active runtime set and continue in an operator-visible
+    degraded mode. Routing/parse errors, all-missing runtime sets, and an
+    uncatalogued [\[runtime\].default] remain fatal because server boot must not
+    invent a replacement default runtime. *)
 
 module For_testing : sig
   type snapshot

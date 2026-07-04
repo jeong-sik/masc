@@ -387,7 +387,10 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('params')
     expect(container.textContent).toContain('chat_template_kwargs · preserve_always')
     expect(container.textContent).toContain('request')
-    expect(container.textContent).toContain('openai_compat · path /chat/completions · out 65536 · ctx 131072')
+    expect(container.textContent).toContain(
+      'openai_compat · source oas-provider-config · path /chat/completions · out 65536 · ctx 131072',
+    )
+    expect(container.textContent).toContain('system prompt')
     expect(container.textContent).toContain('tool required')
     expect(container.textContent).toContain('declared')
     expect(container.textContent).toContain('chat-completions · openai-compatible-http')

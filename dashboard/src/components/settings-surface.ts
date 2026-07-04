@@ -400,7 +400,13 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     item.effective_capabilities?.modality_priority
       ? `modality:${item.effective_capabilities.modality_priority}`
       : null,
+    item.effective_capabilities?.assistant_tool_content_format
+      ? `tool-content:${item.effective_capabilities.assistant_tool_content_format}`
+      : null,
     item.effective_capabilities?.supports_reasoning ? 'reasoning' : null,
+    item.effective_capabilities?.preserve_thinking_control_format
+      ? `preserve:${item.effective_capabilities.preserve_thinking_control_format}`
+      : null,
     item.effective_capabilities?.reasoning_output_format
       ? `reasoning-out:${item.effective_capabilities.reasoning_output_format}`
       : null,
@@ -409,6 +415,9 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
       : null,
     item.effective_capabilities?.reasoning_replay_override
       ? `replay:${item.effective_capabilities.reasoning_replay_override}`
+      : null,
+    item.effective_capabilities?.task
+      ? `task:${item.effective_capabilities.task}`
       : null,
     item.effective_capabilities?.supports_system_prompt ? 'system-prompt' : null,
     item.effective_capabilities?.supports_prompt_caching

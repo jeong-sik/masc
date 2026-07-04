@@ -255,9 +255,11 @@ describe('KeeperWorkspaceRail', () => {
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
+            assistant_tool_content_format: 'null',
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
+            preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
               kind: 'delta-reasoning-field',
@@ -275,6 +277,7 @@ describe('KeeperWorkspaceRail', () => {
             supports_code_execution: true,
             emits_usage_tokens: true,
             modality_priority: 'visual-first',
+            task: 'transcription',
             supported_models: ['minimax-m3'],
           },
           declared_spec: {
@@ -385,6 +388,9 @@ describe('KeeperWorkspaceRail', () => {
       'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
     expect(container.textContent).toContain('modality visual-first')
+    expect(container.textContent).toContain('tool-content null')
+    expect(container.textContent).toContain('preserve always-preserved')
+    expect(container.textContent).toContain('task transcription')
     // the "no source" stub is replaced once the catalog reports capabilities
     expect(container.textContent).not.toContain('조정 정보 미수신')
   })

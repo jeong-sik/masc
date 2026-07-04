@@ -83,11 +83,64 @@ type caps = {
   max_per_category : int option;
 }
 
-let default_caps =
-  { max_global = Some 16
-  ; max_per_repo = Some 12
-  ; max_per_goal = Some 3
-  ; max_per_category = Some 4
+(* Historical hardcoded WIP admission caps. Kept as the fallback so an unset
+   environment and no override reproduce the exact prior behaviour. *)
+let default_max_global = 16
+let default_max_per_repo = 12
+let default_max_per_goal = 3
+let default_max_per_category = 4
+
+(* Accepted-override ceiling for a configured cap. An operator wanting an axis
+   effectively unbounded sets 0 (see [cap_of_rp]); this bound only caps the
+   maximum a positive override may request. *)
+let wip_cap_max = 1024
+
+(* WIP concurrency caps as governance-registered runtime params, using the shared
+   knob convention ([Keeper_config_rp_helpers._rp_int] + [int_of_env_default])
+   instead of a bespoke reader, so they surface in runtime.toml and the dashboard
+   knob table rather than being env-only. The [default] thunk reads
+   MASC_KEEPER_WIP_* at get time (malformed -> default, clamped to [0, wip_cap_max]);
+   a runtime.toml/dashboard override takes precedence. Registered once at module
+   load. These caps never reject a task that resolves to [repo = None] (see
+   [task_repo]); the knobs tune fleet concurrency, they do not gate repo access. *)
+let wip_cap_rp ~key ~env ~default =
+  Keeper_config_rp_helpers._rp_int ~key
+    ~default:(fun () ->
+      Keeper_config_rp_helpers.int_of_env_default env ~default ~min_v:0 ~max_v:wip_cap_max)
+    ~min_v:0 ~max_v:wip_cap_max
+    ~description:
+      (Printf.sprintf
+         "Max concurrent in-progress keeper tasks (%s axis); 0 = unbounded" key)
+    ()
+
+let max_global_rp =
+  wip_cap_rp ~key:"keeper.wip.max_global" ~env:"MASC_KEEPER_WIP_MAX_GLOBAL"
+    ~default:default_max_global
+
+let max_per_repo_rp =
+  wip_cap_rp ~key:"keeper.wip.max_per_repo" ~env:"MASC_KEEPER_WIP_MAX_PER_REPO"
+    ~default:default_max_per_repo
+
+let max_per_goal_rp =
+  wip_cap_rp ~key:"keeper.wip.max_per_goal" ~env:"MASC_KEEPER_WIP_MAX_PER_GOAL"
+    ~default:default_max_per_goal
+
+let max_per_category_rp =
+  wip_cap_rp ~key:"keeper.wip.max_per_category" ~env:"MASC_KEEPER_WIP_MAX_PER_CATEGORY"
+    ~default:default_max_per_category
+
+(* 0 (or a negative override, clamped to 0) disables the axis: [None] = unbounded,
+   deferring to the remaining caps, mirroring the historical [int option] where
+   [None] meant "no cap on this axis". *)
+let cap_of_rp rp =
+  let n = Runtime_params.get rp in
+  if n <= 0 then None else Some n
+
+let default_caps () =
+  { max_global = cap_of_rp max_global_rp
+  ; max_per_repo = cap_of_rp max_per_repo_rp
+  ; max_per_goal = cap_of_rp max_per_goal_rp
+  ; max_per_category = cap_of_rp max_per_category_rp
   }
 
 type active_item = {
@@ -196,7 +249,7 @@ let reject_if_at_cap reason scope_key current = function
 let first_rejection checks =
   List.find_map Fun.id checks
 
-let decide ?(caps = default_caps) active ~scope =
+let decide ?(caps = default_caps ()) active ~scope =
   let global_count = List.length active in
   let repo_count =
     count_matching (fun item -> same_repo item.scope.repo scope.repo) active

@@ -15,12 +15,21 @@ type model_catalog_env_resolution =
   ; source : model_catalog_env_source
   }
 
+and capability_manifest_env_resolution =
+  { path : string
+  ; source : capability_manifest_env_source
+  }
+
 and model_catalog_env_source =
   | Env_var of model_catalog_env_var
   | Parent_file of
       { origin : model_catalog_parent_origin
       ; filename : string
       }
+
+and capability_manifest_env_source =
+  | Capability_manifest_env_var
+  | Config_root_file of string
 
 and model_catalog_env_var =
   | Oas_model_catalog
@@ -43,8 +52,15 @@ let model_catalog_env_source_to_string = function
   | Parent_file { origin; filename } ->
     Printf.sprintf "%s:%s" (model_catalog_parent_origin_label origin) filename
 
+let oas_capability_manifest_env_var_name = "OAS_CAPABILITY_MANIFEST"
+
+let capability_manifest_env_source_to_string = function
+  | Capability_manifest_env_var -> oas_capability_manifest_env_var_name
+  | Config_root_file filename -> Printf.sprintf "config-root:%s" filename
+
 let models_toml_filename = "models.toml"
 let oas_models_toml_filename = "oas-models.toml"
+let capability_manifest_filename = "capability-manifest.json"
 
 let nonempty_env env name =
   match env name with
@@ -122,11 +138,45 @@ let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
            | [] -> "")
        in
        (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
-        | Some _ as found -> found
-        | None ->
-          (match argv0_parent_dir ~cwd:process_cwd argv0 with
-           | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
-           | None -> None)))
+	        | Some _ as found -> found
+	        | None ->
+	          (match argv0_parent_dir ~cwd:process_cwd argv0 with
+	           | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
+	           | None -> None)))
+
+let resolve_oas_capability_manifest_path ?(env = Sys.getenv_opt) ~config_root () =
+  match nonempty_env env oas_capability_manifest_env_var_name with
+  | Some path -> Some { path; source = Capability_manifest_env_var }
+  | None ->
+    let candidate = Filename.concat config_root capability_manifest_filename in
+    (match existing_file candidate with
+     | Some path -> Some { path; source = Config_root_file capability_manifest_filename }
+     | None -> None)
+
+let configure_oas_capability_manifest_env
+      ?(env = Sys.getenv_opt)
+      ~config_root
+      ?(putenv = Unix.putenv)
+      ()
+  =
+  match resolve_oas_capability_manifest_path ~env ~config_root () with
+  | Some { source = Capability_manifest_env_var; path } as resolution ->
+    Log.Misc.info
+      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s already configured"
+      path;
+    resolution
+  | Some { source; path } as resolution ->
+    putenv oas_capability_manifest_env_var_name path;
+    Log.Misc.info
+      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s resolved from %s"
+      path
+      (capability_manifest_env_source_to_string source);
+    resolution
+  | None ->
+    Log.Misc.info
+      "capability_manifest: no config-root capability-manifest.json found; using \
+       agent_sdk ambient capability manifest state";
+    None
 
 let configure_oas_model_catalog_env
       ?(env = Sys.getenv_opt)
@@ -302,6 +352,10 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Unix.putenv Env_config_core.base_path_env_key base_path;
   ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
+  let config_root = (startup_config_resolution ~base_path).config_root.path in
+  let (_ : capability_manifest_env_resolution option) =
+    configure_oas_capability_manifest_env ~config_root ()
+  in
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing

@@ -731,6 +731,34 @@ let test_dashboard_proof_route_registered_in_http_routers () =
   check bool "HTTP/2 dashboard proof route registered" true
     (contains_substring h2 "\"/api/v1/dashboard/proof\"")
 
+let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Client_registry_eio.reset_for_testing
+    (fun () ->
+      Client_registry_eio.reset_for_testing ();
+      let json = Server_dashboard_http.dashboard_ide_snapshot_json ~config in
+      let partition = Ide_paths.Legacy_default in
+      let open Yojson.Safe.Util in
+      check string "partition kind" (Ide_paths.partition_kind partition)
+        (json |> member "partition_kind" |> to_string);
+      check bool "partition is orphan" (Ide_paths.partition_is_orphan partition)
+        (json |> member "partition_orphan" |> to_bool);
+      check int "events count metadata" 0
+        (json |> member "events_count" |> to_int);
+      check int "cursors count metadata" 0
+        (json |> member "cursors_count" |> to_int);
+      check int "annotations count metadata" 0
+        (json |> member "annotations_count" |> to_int);
+      check int "regions count metadata" 0
+        (json |> member "regions_count" |> to_int);
+      check int "active keepers count metadata" 0
+        (json |> member "active_keepers_count" |> to_int);
+      check int "events nested count remains" 0
+        (json |> member "events" |> member "count" |> to_int);
+      check int "presence nested count remains" 0
+        (json |> member "presence" |> member "count" |> to_int))
+
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
@@ -1532,6 +1560,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_verification_index;
           test_case "proof route registered in HTTP routers" `Quick
             test_dashboard_proof_route_registered_in_http_routers;
+          test_case "IDE snapshot exposes legacy partition metadata" `Quick
+            test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata;
           test_case "bootstrap omits eager goal tree" `Quick
             test_dashboard_bootstrap_omits_eager_goal_tree;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick

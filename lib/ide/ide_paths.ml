@@ -19,6 +19,19 @@ type partition =
   | Base_unresolved
   | Legacy_default
 
+let partition_kind = function
+  | By_url _ -> "by_url"
+  | No_canonical_url -> "no_canonical_url"
+  | Unmatched -> "unmatched"
+  | Base_unresolved -> "base_unresolved"
+  | Legacy_default -> "legacy_default"
+;;
+
+let partition_is_orphan = function
+  | By_url _ -> false
+  | No_canonical_url | Unmatched | Base_unresolved | Legacy_default -> true
+;;
+
 let partition_store_dir ~base_dir = function
   | By_url slug -> by_url_path ~base_dir ~canonical_url:slug
   (* Layout invariant: all non-By_url partitions share [_orphan/] so disk layout

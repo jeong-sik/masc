@@ -594,10 +594,12 @@ let pending_board_event_of_stimulus
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
-  | Keeper_event_queue.Connector_attention _ ->
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
-       fires via the Connector_attention_stimulus trigger; content threading
-       from external_attention is P3. *)
+       fires via the trigger itself; [Hitl_resolved] carries no observation to
+       inject — the keeper resumes on its own state once the approval is gone
+       from the queue. *)
     None
 ;;
 

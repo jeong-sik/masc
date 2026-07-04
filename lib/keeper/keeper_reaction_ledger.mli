@@ -17,6 +17,7 @@ type stimulus_kind =
   | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (** RFC-0290: generic background job completion wake *)
   | Connector_attention
+  | Hitl_resolved  (** HITL approval resolution wake — unblocks [Skip Approval_pending] *)
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
 
 type reaction_kind =

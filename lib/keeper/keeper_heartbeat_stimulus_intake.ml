@@ -80,7 +80,12 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Connector_attention_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Bg_completed _ ->
+  | Keeper_event_queue.Bg_completed _
+  | Keeper_event_queue.Hitl_resolved _ ->
+    (* No dedicated turn_reason: like the other async-completion wakes, the
+       stimulus itself forces the keeper to re-run its cycle. Once the resolved
+       approval has left the queue the keeper no longer skips on
+       [Approval_pending] and proceeds on its own state. *)
     None
 ;;
 
@@ -187,6 +192,19 @@ let consume_single_heartbeat_stimulus
       ca.event_id
       meta_after_triage.name;
     pending_events
+  | Keeper_event_queue.Hitl_resolved r ->
+    (* The HITL approval this keeper was skipping on ([Skip Approval_pending])
+       was resolved. The wake is the whole point: the approval has left the
+       queue, so this cycle no longer skips and the keeper resumes on its own
+       state. There is no observation to inject — the decision reached the
+       keeper's suspended tool call (or the reject/expire teardown) through the
+       resolver, not turn input; injecting a pending event would fabricate one. *)
+    Log.Keeper.info
+      "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
+      r.approval_id
+      r.decision
+      meta_after_triage.name;
+    []
 ;;
 
 let consume_board_stimulus_batch ~meta_after_triage batch =

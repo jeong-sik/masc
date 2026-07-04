@@ -309,6 +309,17 @@ val submit_pending :
 
 (** {1 Resolve (operator action)} *)
 
+(** Install the hook that wakes a keeper when one of its pending approvals is
+    resolved or expires. Injected (rather than a direct
+    [Keeper_keepalive_signal] call) to break a dependency cycle: this module
+    sits below [Keeper_keepalive_signal], which depends on
+    [Keeper_world_observation], which depends back here for
+    [has_pending_for_keeper]. The default is a no-op; [Server_bootstrap]
+    installs the [Hitl_resolved]-stimulus wake. *)
+val set_approval_resolution_wake_hook :
+  (base_path:string -> keeper_name:string -> approval_id:string -> decision:string -> unit) ->
+  unit
+
 (** Resolve a pending approval and optionally remember the decision
     as a rule. Returns [Not_found] when [id] is absent or
     [Already_resolved] on concurrent-resolve race. *)

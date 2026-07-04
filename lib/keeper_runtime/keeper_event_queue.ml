@@ -41,6 +41,14 @@ type stimulus_payload =
          recorded as external attention. Carries the [event_id] pointer (not
          content). Dormant — no producer emits it yet (handle_ambient enqueuer
          lands in P3), same staging as [Bg_completed] above. *)
+  | Hitl_resolved of hitl_resolution
+      (* A HITL approval this keeper enqueued — and then skipped cycles on via
+         [has_pending_for_keeper -> Skip Approval_pending] — was resolved. Wakes
+         the keeper so it re-evaluates and proceeds on its next cycle instead of
+         stalling until an unrelated stimulus, no-progress recovery, or the
+         30-minute approval janitor. Mirrors [Fusion_completed]/[Bg_completed]:
+         a HITL decision is an async completion the waiting keeper must be
+         notified of. *)
 
 and fusion_completion = {
   run_id : string;
@@ -63,6 +71,15 @@ and bg_job_kind = Subprocess
       (* RFC-0290: closed sum of background job kinds (v1 = [Subprocess]); a new
          kind forces every match to add an arm rather than defaulting. *)
 
+and hitl_resolution = {
+  approval_id : string;
+  (* the resolved pending-approval id; correlates to the queue entry. *)
+  decision : string;
+  (* resolved decision label ("approve" | "reject" | ...); carried for
+     observability, not for control flow — the keeper re-evaluates from its
+     own state once the approval is gone from the queue. *)
+}
+
 and bg_job_outcome =
   | Bg_ok of string  (* result payload *)
   | Bg_failed of string  (* failure label *)
@@ -79,6 +96,8 @@ let fusion_completion_post_id (fc : fusion_completion) =
 let bg_job_completion_post_id (c : bg_job_completion) =
   if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
   else c.bg_board_post_id
+
+let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let bg_job_kind_to_string = function
   | Subprocess -> "subprocess"
@@ -192,11 +211,12 @@ let payload_kind_label = function
   | Fusion_completed _ -> "fusion_completed"
   | Bg_completed _ -> "bg_completed"
   | Connector_attention _ -> "connector_attention"
+  | Hitl_resolved _ -> "hitl_resolved"
 
 let is_board_signal = function
   | Board_signal _ -> true
   | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
-  | Connector_attention _ ->
+  | Connector_attention _ | Hitl_resolved _ ->
     false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
@@ -329,6 +349,12 @@ let payload_to_yojson = function
       [ "kind", `String "connector_attention"
       ; "event_id", `String ca.event_id
       ]
+  | Hitl_resolved r ->
+    `Assoc
+      [ "kind", `String "hitl_resolved"
+      ; "approval_id", `String r.approval_id
+      ; "decision", `String r.decision
+      ]
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -366,6 +392,10 @@ let payload_of_yojson json =
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
     Ok (Connector_attention { event_id })
+  | "hitl_resolved" ->
+    let* approval_id = string_field ~context "approval_id" fields in
+    let* decision = string_field ~context "decision" fields in
+    Ok (Hitl_resolved { approval_id; decision })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

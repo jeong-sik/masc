@@ -777,6 +777,40 @@ let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
       Hitl_summary_worker.spawn ~sw ~entry ~provider_config:config ~on_summary ~on_failure ()
 ;;
 
+(* Wake the keeper that was waiting on this approval. A keeper that enqueued an
+   approval and is now skipping cycles via [has_pending_for_keeper -> Skip
+   Approval_pending] (keeper_world_observation) has no in-process fiber blocked
+   on the resolver promise, so resolving the promise does not resume it. The
+   composition root registers a hook that enqueues a [Hitl_resolved] wake
+   stimulus — the same async-completion-wake mechanism [Fusion_completed]
+   (RFC-0266) and [Bg_completed] (RFC-0290) use — so the keeper re-evaluates
+   immediately instead of stalling until an unrelated stimulus, no-progress
+   recovery, or the 30-minute approval janitor.
+
+   Injected as a hook rather than a direct call to break a dependency cycle:
+   this module sits below [Keeper_keepalive_signal], which depends on
+   [Keeper_world_observation], which depends back on this module for
+   [has_pending_for_keeper]. The default is a no-op so unit tests and
+   pre-bootstrap contexts stay wake-free; [Server_bootstrap] installs the real
+   [Keeper_keepalive_signal]-backed wake. *)
+let approval_resolution_wake_hook :
+    (base_path:string -> keeper_name:string -> approval_id:string -> decision:string -> unit)
+    ref =
+  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ())
+
+let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
+
+let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision =
+  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn
+      ~keeper_name
+      "hitl resolution wake failed approval=%s: %s"
+      approval_id
+      (Printexc.to_string exn)
+;;
+
 let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
   let decision_str = approval_decision_to_string decision in
   Log.Keeper.info
@@ -823,6 +857,11 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
            (Printexc.to_string exn))
        (fun () -> f decision)
    | None -> ());
+  wake_keeper_on_approval_resolution
+    ~base_path
+    ~keeper_name:entry.keeper_name
+    ~approval_id:entry.id
+    ~decision:decision_str;
   try
     Sse.broadcast
       (`Assoc
@@ -1407,6 +1446,15 @@ let expire_stale ~max_wait_s =
          ?disposition_reason:entry.disposition_reason
          ~decision:(Approval_expired reason)
          ();
+       (* Expiry clears the [Approval_pending] skip just like a resolution, so
+          the keeper needs the same wake or it stays stalled until an unrelated
+          stimulus. The keeper's suspended tool call (if any) receives
+          [Reject reason]. *)
+       wake_keeper_on_approval_resolution
+         ~base_path:entry.audit_base_path
+         ~keeper_name:entry.keeper_name
+         ~approval_id:id
+         ~decision:"reject";
        (match entry.resolver with
         | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
         | None -> ());

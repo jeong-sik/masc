@@ -497,6 +497,27 @@ let start_keeper_loops
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:(Mcp_server.workspace_config state)
       signal);
+  (* Wake a keeper when one of its pending HITL approvals resolves/expires.
+     Registered here (composition root) rather than in Keeper_approval_queue to
+     break the Keeper_approval_queue -> Keeper_keepalive_signal ->
+     Keeper_world_observation -> Keeper_approval_queue dependency cycle. Mirrors
+     the Fusion_completed/Bg_completed async-completion wakes. *)
+  Keeper_approval_queue.set_approval_resolution_wake_hook
+    (fun ~base_path ~keeper_name ~approval_id ~decision ->
+       let resolution = Keeper_event_queue.{ approval_id; decision } in
+       let stimulus : Keeper_event_queue.stimulus =
+         { Keeper_event_queue.post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+         ; urgency = Keeper_event_queue.Immediate
+         ; arrived_at = Time_compat.now ()
+         ; payload = Keeper_event_queue.Hitl_resolved resolution
+         }
+       in
+       Log.Keeper.info
+         "hitl resolution wake: keeper=%s approval=%s decision=%s"
+         keeper_name
+         approval_id
+         decision;
+       Keeper_keepalive_signal.wakeup_keeper ~base_path ~stimulus keeper_name);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
     Sse.broadcast

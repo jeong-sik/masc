@@ -113,6 +113,27 @@ let () =
       | _ -> Alcotest.fail "Bg_completed codec round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("Bg_completed stimulus round-trip failed: " ^ msg));
 
+  (* Hitl_resolved survives the codec round-trip: the wake is persisted for
+     replay when the target keeper is not registered yet, so approval_id and
+     decision must round-trip intact. *)
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = hitl_resolution_post_id { approval_id = "appr-9"; decision = "approve" }
+          ; urgency = Immediate
+          ; arrived_at = 4.0
+          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = "approve" }
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Hitl_resolved { approval_id; decision } ->
+        assert (String.equal approval_id "appr-9");
+        assert (String.equal decision "approve");
+        assert (String.equal s.post_id "hitl-approval:appr-9")
+      | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
+
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }

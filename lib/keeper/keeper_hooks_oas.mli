@@ -113,6 +113,11 @@ val classify_cost_usd_source :
 val record_cost_emit_source : String.t -> unit
 (** Bump the [cost_emit_source_metric] for the given source label. *)
 
+val cache_miss_input_tokens :
+  input_tokens:int ->
+  cache_creation_input_tokens:int -> cache_read_input_tokens:int -> int
+(** Derive uncached input tokens from OAS usage counters, clamped at zero. *)
+
 val cost_event_payload :
   agent_name:string ->
   task_id:string option ->

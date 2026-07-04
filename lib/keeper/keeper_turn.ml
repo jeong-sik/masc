@@ -1328,10 +1328,10 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                   | None -> `Null
                 in
                 let cache_miss_input_tokens =
-                  max 0
-                    (u.input_tokens
-                     - u.cache_creation_input_tokens
-                     - u.cache_read_input_tokens)
+                  Keeper_hooks_oas.cache_miss_input_tokens
+                    ~input_tokens:u.input_tokens
+                    ~cache_creation_input_tokens:u.cache_creation_input_tokens
+                    ~cache_read_input_tokens:u.cache_read_input_tokens
                 in
                 let tool_call_evidence =
                   result.tool_calls

@@ -260,18 +260,33 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
     | Some _ -> Some configured_librarian_max_tokens
     | None -> Some configured_librarian_max_tokens
   in
-  { provider_cfg with
-    max_tokens
-  ; temperature = Some 0.0
-  ; tool_choice = None
-  ; disable_parallel_tool_use = true
-  ; enable_thinking = Some false
-  ; preserve_thinking = Some false
-  ; thinking_budget = None
-  ; clear_thinking = Some true
-  }
-    |> Keeper_structured_output_schema.apply_to_provider_config
-         Keeper_structured_output_schema.librarian_episode_output_schema
+  let tuned_cfg =
+    { provider_cfg with
+      max_tokens
+    ; temperature = Some 0.0
+    ; tool_choice = None
+    ; disable_parallel_tool_use = true
+    ; enable_thinking = Some false
+    ; preserve_thinking = Some false
+    ; thinking_budget = None
+    ; clear_thinking = Some true
+    }
+  in
+  (* Native json_schema when the provider declares it; otherwise fall back to the
+     schema-free tuned config so json_object / free-text providers (GLM, MiMo,
+     ollama cloud) can still serve the librarian. The schema gate is NOT the
+     silent-failure safety net — the parse-retry loop below plus WARN on
+     permanent failure is. Mirrors fusion_judge's prompt-tier fallback. *)
+  let native_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config
+      Keeper_structured_output_schema.librarian_episode_output_schema tuned_cfg
+  in
+  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
+  | Ok () -> native_cfg
+  (* Schema unavailable (GLM, MiMo, ollama cloud): prompt-tier fallback. The
+     parse-retry loop below + WARN on permanent failure is the silent-failure
+     safety net — the schema gate is not. Mirrors fusion_judge's fallback. *)
+  | Error _ -> tuned_cfg
 ;;
 
 let message role text =

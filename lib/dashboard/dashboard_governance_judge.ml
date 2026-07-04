@@ -662,16 +662,15 @@ let prompt_for_facts facts_json =
 
 let apply_governance_judge_output_schema provider_cfg =
   let schema = Keeper_structured_output_schema.governance_judge_output_schema in
-  let provider_cfg =
+  let native_cfg =
     Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
   in
-  match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
-  | Ok () -> Ok provider_cfg
-  | Error detail ->
-      Error
-        (Agent_sdk.Error.Config
-           (Agent_sdk.Error.InvalidConfig
-              { field = "dashboard.governance_judge.output_schema"; detail }))
+  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
+  | Ok () -> Ok native_cfg
+  | Error _ ->
+      (* Schema unavailable (GLM, MiMo, ollama cloud): prompt-tier fallback so the
+         governance judge still runs. Mirrors fusion_judge's fallback. *)
+      Ok provider_cfg
 
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)

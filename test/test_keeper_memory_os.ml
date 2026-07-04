@@ -1567,7 +1567,7 @@ let test_librarian_runtime_appends_episode_bundle () =
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
-let test_librarian_runtime_rejects_invalid_schema_provider_before_call () =
+let test_librarian_runtime_falls_back_when_schema_unavailable () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       with_eio (fun ~sw ~net ~clock ->
@@ -1593,20 +1593,15 @@ let test_librarian_runtime_rejects_invalid_schema_provider_before_call () =
             ~generation:1
             inp
         with
-        | Ok _ -> Alcotest.fail "expected invalid schema provider to fail closed"
-        | Error (Librarian_runtime.Provider_config_rejected msg) ->
+        | Ok _ ->
           Alcotest.(check bool)
-            "fake complete was not called"
-            false
-            !called;
-          Alcotest.(check bool)
-            "rejection cites native structured output"
+            "complete called on the prompt-tier fallback path"
             true
-            (contains "native structured output" msg)
+            !called
         | Error err ->
           Alcotest.fail
             (Printf.sprintf
-               "expected provider config rejection, got %s"
+               "expected prompt-tier fallback to succeed, got %s"
                (Librarian_runtime.extraction_error_to_string err)))))
 ;;
 
@@ -5781,9 +5776,9 @@ let () =
             `Quick
             test_librarian_runtime_appends_episode_bundle
         ; Alcotest.test_case
-            "librarian runtime rejects invalid schema provider before call"
+            "librarian runtime falls back when schema unavailable"
             `Quick
-            test_librarian_runtime_rejects_invalid_schema_provider_before_call
+            test_librarian_runtime_falls_back_when_schema_unavailable
         ; Alcotest.test_case
             "librarian runtime requires clock for provider call"
             `Quick

@@ -1,8 +1,4 @@
-(** RFC-0107 Phase D Connection Pool — interface skeleton.
-
-    Phase D.2a delivers the interface only; implementations raise
-    [Failure "Pool.<fn>: not implemented (Phase D.2b)"] until the piaf
-    binding lands in D.2b.
+(** RFC-0107 Phase D Connection Pool.
 
     Design rationale lives in [docs/rfc/RFC-0107-phase-d-pool-design.md].
     Critical findings absorbed from Phase B Prior Art research
@@ -13,8 +9,8 @@
     - cohttp upstream patch is not viable (issue #85 closed 2014, eio
       not covered). piaf is the only rational transport choice.
     - Eio #244 "exactly-one-owner" principle motivates the no-double-
-      release invariant enforced by the [request] / [with_connection]
-      callback API (no naked acquire / release exposed). *)
+      release invariant enforced by the scoped [request] API (no naked
+      acquire / release exposed). *)
 
 (** Opaque per-process connection pool. Attaches to a long-lived
     [Eio.Switch] (typically server root_sw via [Eio_context]). The pool
@@ -146,18 +142,6 @@ val request_with_idle_timeout :
     - ["idle timeout after %.1fs"]      (body silent past idle_timeout_sec)
     - ["total timeout after %.1fs"]     (total_timeout_sec elapsed)
     - any Piaf error message. *)
-
-val with_connection :
-  t ->
-  url:string ->
-  (unit -> 'a) -> 'a
-(** Scoped low-level handle for streaming bodies (voice_bridge). The
-    callback runs with a connection borrowed from the pool; on return
-    (success or exception) the connection is released back to the
-    pool. Most callers should use [request] instead.
-
-    Phase D.2b will refine the callback signature to expose the
-    transport handle (piaf [Client.t] or equivalent). *)
 
 (* ── Telemetry ─────────────────────────────────────────────────── *)
 

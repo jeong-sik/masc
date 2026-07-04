@@ -514,12 +514,12 @@ let test_default_caps_positive_env_override () =
   check (option int) "max_global overridden" (Some 8) c.Admission.max_global;
   check (option int) "other axes untouched" (Some 3) c.max_per_goal
 
-let test_default_caps_disable_via_none_and_zero () =
-  with_env "MASC_KEEPER_WIP_MAX_PER_REPO" "none" @@ fun () ->
-  with_env "MASC_KEEPER_WIP_MAX_PER_GOAL" "0" @@ fun () ->
+let test_default_caps_disable_via_zero_and_negative () =
+  with_env "MASC_KEEPER_WIP_MAX_PER_REPO" "0" @@ fun () ->
+  with_env "MASC_KEEPER_WIP_MAX_PER_GOAL" "-1" @@ fun () ->
   let c = Admission.default_caps () in
-  check (option int) "per_repo disabled by \"none\"" None c.Admission.max_per_repo;
-  check (option int) "per_goal disabled by 0" None c.max_per_goal
+  check (option int) "per_repo disabled by 0" None c.Admission.max_per_repo;
+  check (option int) "per_goal disabled by negative (clamped to 0)" None c.max_per_goal
 
 let test_default_caps_unparseable_keeps_default () =
   with_env "MASC_KEEPER_WIP_MAX_PER_CATEGORY" "banana" @@ fun () ->
@@ -573,8 +573,8 @@ let () =
             test_default_caps_unset_uses_historical_defaults
         ; test_case "positive env value overrides a cap" `Quick
             test_default_caps_positive_env_override
-        ; test_case "\"none\"/0 disable a cap axis" `Quick
-            test_default_caps_disable_via_none_and_zero
+        ; test_case "0/negative disable a cap axis" `Quick
+            test_default_caps_disable_via_zero_and_negative
         ; test_case "unparseable value keeps the default" `Quick
             test_default_caps_unparseable_keeps_default
         ] )

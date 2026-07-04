@@ -83,46 +83,64 @@ type caps = {
   max_per_category : int option;
 }
 
-(* Historical hardcoded WIP admission caps. Kept as the env fallback so an
-   unset environment reproduces the exact prior behaviour. *)
+(* Historical hardcoded WIP admission caps. Kept as the fallback so an unset
+   environment and no override reproduce the exact prior behaviour. *)
 let default_max_global = 16
 let default_max_per_repo = 12
 let default_max_per_goal = 3
 let default_max_per_category = 4
 
-(* Startup env override for one WIP cap. Unset keeps the historical default; a
-   positive integer sets the cap; "none"/"off"/a non-positive integer disables
-   it ([None] = unbounded on that axis, so the remaining caps still apply); an
-   unparseable value keeps the default. Read lazily per [decide] call (via
-   [default_caps ()]) so a runtime.toml boot override resolves after boot, matching
-   the other MASC_KEEPER_* knobs (e.g. [Keeper_turn_liveness]). These caps never
-   reject a task that resolves to [repo = None] (see [task_repo]); the knobs exist
-   for operators to tune fleet concurrency without a rebuild, not to gate repo
-   access. *)
-let wip_cap_from_env ~(env : string) ~(default : int) : int option =
-  match Env_config_core.raw_value_opt env with
-  | None -> Some default
-  | Some raw ->
-    let raw = String.lowercase_ascii (String.trim raw) in
-    if String.equal raw "none" || String.equal raw "off"
-    then None
-    else (
-      match int_of_string_opt raw with
-      | Some n when n > 0 -> Some n
-      | Some _ -> None
-      | None -> Some default)
+(* Accepted-override ceiling for a configured cap. An operator wanting an axis
+   effectively unbounded sets 0 (see [cap_of_rp]); this bound only caps the
+   maximum a positive override may request. *)
+let wip_cap_max = 1024
+
+(* WIP concurrency caps as governance-registered runtime params, using the shared
+   knob convention ([Keeper_config_rp_helpers._rp_int] + [int_of_env_default])
+   instead of a bespoke reader, so they surface in runtime.toml and the dashboard
+   knob table rather than being env-only. The [default] thunk reads
+   MASC_KEEPER_WIP_* at get time (malformed -> default, clamped to [0, wip_cap_max]);
+   a runtime.toml/dashboard override takes precedence. Registered once at module
+   load. These caps never reject a task that resolves to [repo = None] (see
+   [task_repo]); the knobs tune fleet concurrency, they do not gate repo access. *)
+let wip_cap_rp ~key ~env ~default =
+  Keeper_config_rp_helpers._rp_int ~key
+    ~default:(fun () ->
+      Keeper_config_rp_helpers.int_of_env_default env ~default ~min_v:0 ~max_v:wip_cap_max)
+    ~min_v:0 ~max_v:wip_cap_max
+    ~description:
+      (Printf.sprintf
+         "Max concurrent in-progress keeper tasks (%s axis); 0 = unbounded" key)
+    ()
+
+let max_global_rp =
+  wip_cap_rp ~key:"keeper.wip.max_global" ~env:"MASC_KEEPER_WIP_MAX_GLOBAL"
+    ~default:default_max_global
+
+let max_per_repo_rp =
+  wip_cap_rp ~key:"keeper.wip.max_per_repo" ~env:"MASC_KEEPER_WIP_MAX_PER_REPO"
+    ~default:default_max_per_repo
+
+let max_per_goal_rp =
+  wip_cap_rp ~key:"keeper.wip.max_per_goal" ~env:"MASC_KEEPER_WIP_MAX_PER_GOAL"
+    ~default:default_max_per_goal
+
+let max_per_category_rp =
+  wip_cap_rp ~key:"keeper.wip.max_per_category" ~env:"MASC_KEEPER_WIP_MAX_PER_CATEGORY"
+    ~default:default_max_per_category
+
+(* 0 (or a negative override, clamped to 0) disables the axis: [None] = unbounded,
+   deferring to the remaining caps, mirroring the historical [int option] where
+   [None] meant "no cap on this axis". *)
+let cap_of_rp rp =
+  let n = Runtime_params.get rp in
+  if n <= 0 then None else Some n
 
 let default_caps () =
-  { max_global =
-      wip_cap_from_env ~env:"MASC_KEEPER_WIP_MAX_GLOBAL" ~default:default_max_global
-  ; max_per_repo =
-      wip_cap_from_env ~env:"MASC_KEEPER_WIP_MAX_PER_REPO" ~default:default_max_per_repo
-  ; max_per_goal =
-      wip_cap_from_env ~env:"MASC_KEEPER_WIP_MAX_PER_GOAL" ~default:default_max_per_goal
-  ; max_per_category =
-      wip_cap_from_env
-        ~env:"MASC_KEEPER_WIP_MAX_PER_CATEGORY"
-        ~default:default_max_per_category
+  { max_global = cap_of_rp max_global_rp
+  ; max_per_repo = cap_of_rp max_per_repo_rp
+  ; max_per_goal = cap_of_rp max_per_goal_rp
+  ; max_per_category = cap_of_rp max_per_category_rp
   }
 
 type active_item = {

@@ -267,6 +267,74 @@ let test_write_and_unknown_methods_rejected () =
      Alcotest.fail "unknown method must stay diagnostic, not coerce")
 ;;
 
+let require_handled_method_class method_ expected =
+  match Lsp.classify_handled_lsp_method method_ with
+  | Some actual ->
+    check bool (method_ ^ " class") true (actual = expected)
+  | None -> Alcotest.fail (method_ ^ " missing from handled LSP method catalog")
+;;
+
+let test_handled_lsp_method_catalog_is_classified () =
+  let catalog = Lsp.handled_lsp_methods () in
+  let methods = List.map fst catalog in
+  check
+    int
+    "no duplicate handled method names"
+    (List.length methods)
+    (List.length (List.sort_uniq String.compare methods));
+  check
+    (list string)
+    "canonical handled methods"
+    [ "initialize"
+    ; "initialized"
+    ; "shutdown"
+    ; "exit"
+    ; "masc/lspStatus"
+    ; "textDocument/didOpen"
+    ; "textDocument/didChange"
+    ; "textDocument/didSave"
+    ; "textDocument/didClose"
+    ; "textDocument/hover"
+    ; "textDocument/codeLens"
+    ; "textDocument/inlayHint"
+    ; "textDocument/diagnostic"
+    ; "textDocument/definition"
+    ; "textDocument/references"
+    ; "textDocument/completion"
+    ; "textDocument/codeAction"
+    ; "textDocument/documentSymbol"
+    ; "textDocument/foldingRange"
+    ; "textDocument/documentHighlight"
+    ]
+    methods;
+  require_handled_method_class "initialize" Lsp.Lifecycle;
+  require_handled_method_class "exit" Lsp.Lifecycle;
+  require_handled_method_class "masc/lspStatus" Lsp.Status;
+  require_handled_method_class "textDocument/didChange" Lsp.Mutation;
+  require_handled_method_class "textDocument/didSave" Lsp.Mutation;
+  require_handled_method_class "textDocument/hover" Lsp.Read_only;
+  require_handled_method_class "textDocument/codeAction" Lsp.Read_only;
+  check
+    (option bool)
+    "unknown handled catalog lookup stays absent"
+    None
+    (Option.map
+       (fun (_ : Lsp.method_class) -> true)
+       (Lsp.classify_handled_lsp_method "workspace/executeCommand"));
+  check
+    (option bool)
+    "unknown document sync notification stays absent"
+    None
+    (Option.map
+       (fun (_ : Lsp.method_class) -> true)
+       (Lsp.classify_handled_lsp_method "textDocument/didSomethingElse"));
+  (match Lsp.classify_forwarded_method "textDocument/didSomethingElse" with
+   | Lsp.Unknown_forwarded_method method_ ->
+     check string "unknown document sync method preserved" "textDocument/didSomethingElse" method_
+   | Lsp.Forward_read_only | Lsp.Reject_write_adjacent ->
+     Alcotest.fail "unknown document sync method must not enter forwarding allowlists")
+;;
+
 let test_unknown_language_is_typed () =
   match Lsp.resolve_lang "README.unknown_extension_for_lsp" with
   | Lsp.Unknown_lang -> ()
@@ -341,6 +409,8 @@ let () =
       , [ test_case "read-only methods forward" `Quick test_read_methods_forward
         ; test_case "write/unknown methods are rejected" `Quick
             test_write_and_unknown_methods_rejected
+        ; test_case "handled method catalog is classified" `Quick
+            test_handled_lsp_method_catalog_is_classified
         ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
         ; test_case "overlay code actions carry no write edit" `Quick
             test_code_actions_have_no_workspace_edit

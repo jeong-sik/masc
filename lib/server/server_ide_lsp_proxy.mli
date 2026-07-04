@@ -69,4 +69,21 @@ module For_testing : sig
       method reaching the catch-all forwarder. Default-deny: only listed read
       methods forward, while unknown wire strings remain visible. *)
   val classify_forwarded_method : string -> disposition
+
+  (** Classification for methods handled directly by the proxy command catalog
+      (task-1694). [Mutation] covers document-sync notifications forwarded by
+      the proxy; write-adjacent request methods remain outside this catalog and
+      are denied by {!classify_forwarded_method}. *)
+  type method_class =
+    | Read_only
+    | Mutation
+    | Lifecycle
+    | Status
+
+  (** Canonical handled LSP method catalog as [(wire_method, class)]. *)
+  val handled_lsp_methods : unit -> (string * method_class) list
+
+  (** Classify a handled method by wire name, or [None] when the method is not
+      in the direct proxy catalog. *)
+  val classify_handled_lsp_method : string -> method_class option
 end

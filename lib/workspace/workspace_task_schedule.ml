@@ -204,9 +204,6 @@ let claim_next_r
       ~agent_name
       ?(exclude_task_ids = [])
       ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
-      ?(admission_filter :
-         active_tasks:Masc_domain.task list -> Masc_domain.task -> bool =
-        fun ~active_tasks:_ _ -> true)
       ?(allow_scope_fallback = false)
       ()
   =
@@ -277,15 +274,6 @@ let claim_next_r
                    ; scope_widened = false
                    })));
         let released_task_id, working_tasks = None, backlog.tasks in
-        let active_admission_tasks =
-          List.filter
-            (fun (task : Masc_domain.task) ->
-               match task.task_status with
-               | Claimed _ | InProgress _ -> true
-               | AwaitingVerification { assignee; _ } -> assignee <> agent_name
-               | Todo | Done _ | Cancelled _ -> false)
-            working_tasks
-        in
         (* Starvation prevention: Calculate effective priority
          Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
         let now = Time_compat.now () in
@@ -385,48 +373,31 @@ let claim_next_r
           | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
           | None -> blocked_ids @ exclude_task_ids
         in
-        let admission_decisions = Hashtbl.create 16 in
-        let admission_allowed (task : Masc_domain.task) =
-          match Hashtbl.find_opt admission_decisions task.id with
-          | Some allowed -> allowed
-          | None ->
-            let allowed = admission_filter ~active_tasks:active_admission_tasks task in
-            Hashtbl.replace admission_decisions task.id allowed;
-            allowed
-        in
-        let effective_task_filter (task : Masc_domain.task) =
-          task_filter task && admission_allowed task
-        in
         let task_filter_excluded =
           List.filter
             (fun (t : task) ->
-               (not (List.mem t.id all_excluded))
-               && ((not (task_filter t)) || not (admission_allowed t)))
+               (not (List.mem t.id all_excluded)) && not (task_filter t))
             unclaimed
         in
         let eligible_from candidates =
           List.filter
             (fun (t : task) ->
-               (not (List.mem t.id all_excluded)) && effective_task_filter t)
+               (not (List.mem t.id all_excluded)) && task_filter t)
             candidates
         in
         let scoped_eligible = eligible_from unclaimed in
         (* Goal-scope must not starve a keeper: when [allow_scope_fallback] and no
-           scoped task is admission-eligible, widen to all_tasks. [admission_allowed]
-           and [all_excluded] are still enforced — only [task_filter] (the goal
-           scope) is dropped — so a wip-blocked scoped task stays excluded while an
+           scoped task passes [task_filter], widen to all_tasks. [all_excluded] is
+           still enforced — only [task_filter] (the goal scope) is dropped — so an
            unscoped task can be claimed. Schedule-level companion to the RFC-0067 §1
-           resolve-side fallback; this layer additionally covers the
-           scoped-task-exists-but-admission-blocked case that the resolver cannot
-           see. *)
+           resolve-side fallback. *)
         let eligible, scope_widened =
           match scoped_eligible with
           | _ :: _ -> scoped_eligible, false
           | [] when allow_scope_fallback ->
             let widened =
               List.filter
-                (fun (t : task) ->
-                   (not (List.mem t.id all_excluded)) && admission_allowed t)
+                (fun (t : task) -> not (List.mem t.id all_excluded))
                 unclaimed
             in
             (match widened with

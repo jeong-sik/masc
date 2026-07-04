@@ -25,15 +25,26 @@ module type S = sig
   val connected : unit -> bool
 end
 
+(* Module-level registry: [register] runs during startup while [find]/[all]
+   are also reachable from HTTP handlers and tests. Use Stdlib.Mutex because
+   callers do not always have an Eio context, and keep the critical sections
+   limited to Hashtbl access. *)
 let registry : (string, (module S)) Hashtbl.t = Hashtbl.create 4
+let registry_mu = Stdlib.Mutex.create ()
+
+let with_registry_lock f = Stdlib.Mutex.protect registry_mu f
 
 let register (module C : S) =
-  Hashtbl.replace registry C.connector_id (module C : S)
+  let connector_id = C.connector_id in
+  let connector = (module C : S) in
+  with_registry_lock (fun () -> Hashtbl.replace registry connector_id connector)
 
-let find name = Hashtbl.find_opt registry name
+let find name =
+  with_registry_lock (fun () -> Hashtbl.find_opt registry name)
 
 let all () =
-  Hashtbl.fold (fun _k v acc -> v :: acc) registry []
+  with_registry_lock (fun () ->
+    Hashtbl.fold (fun _k v acc -> v :: acc) registry [])
 
 let connectors_json ?gate_status_json ?(audit_limit = 10) () =
   let connectors = all () in

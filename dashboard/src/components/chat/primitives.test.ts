@@ -1922,6 +1922,42 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
   })
 
+  it('badges turn timeline rows with field-level provenance', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-provenance',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [
+              { kind: 'think', text: 'checking context', oasBlockIndex: 3 },
+              {
+                kind: 'tool',
+                name: 'keeper_board_list',
+                toolCallId: 'tc-prov',
+                status: 'ok',
+                args: '{"limit":1}',
+                oasBlockIndex: 4,
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const badges = [...container.querySelectorAll('[data-chat-trace-provenance]')]
+      .map(node => node.getAttribute('data-chat-trace-provenance'))
+    expect(badges).toContain('OAS #3')
+    expect(badges).toContain('OAS #4')
+    expect(badges).toContain('reply')
+  })
+
   it('renders thinking text as sanitized markdown with newlines preserved', async () => {
     render(
       html`<${ChatTranscript}
@@ -2162,6 +2198,39 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     await flushUi()
     const step = container.querySelector('[data-chat-trace-step="tool"]')
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+  })
+
+  it('marks trace-only tool steps without tool_call_id as unlinked, not pending', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-unlinked-trace-tool',
+            text: 'legacy trace',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'tool', name: 'legacy_tool_without_id' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle?.textContent).toContain('조인 불가 1')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
+    expect(step?.querySelector('.chat-block-tstep-status.unlinked')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('unlinked_trace')
+
+    ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+
+    expect(step?.textContent).toContain('도구 호출 ID 없음')
+    expect(step?.textContent).not.toContain('출력 대기 중')
   })
 
   it('marks an unjoined tool step as missing once the owning turn has settled', () => {

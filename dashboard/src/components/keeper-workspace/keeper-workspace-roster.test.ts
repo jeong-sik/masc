@@ -427,11 +427,17 @@ describe('KeeperWorkspaceRoster', () => {
     expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
   })
 
-  it('falls back to the scope proxy when a keeper has no sandbox_target', () => {
-    keepers.value = [mk({ name: 'nobase', status: 'running', model: 'anthropic/claude-x' })]
+  it('falls back to the runtime scope proxy when a keeper has no sandbox_target', () => {
+    keepers.value = [mk({
+      name: 'nobase',
+      status: 'running',
+      runtime_canonical: 'oas.primary',
+      model: 'anthropic/claude-x',
+    })]
     render(html`<${KeeperWorkspaceRoster} activeName="nobase" />`, host)
     const handle = host.querySelector('.kw-kp-handle') as HTMLElement
-    expect(handle?.textContent).toBe('anthropic/claude-x')
+    expect(handle?.textContent).toBe('oas.primary')
+    expect(handle?.textContent).not.toBe('anthropic/claude-x')
   })
 
   it('matches a search query against the basepath', () => {

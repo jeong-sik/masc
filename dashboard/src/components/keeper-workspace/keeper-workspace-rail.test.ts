@@ -120,7 +120,8 @@ describe('KeeperWorkspaceRail', () => {
     // low-signal in the detail view; the 런타임 section keeps its vitals.
     expect(container.textContent).not.toContain('처리량')
     expect(container.textContent).toContain('런타임')
-    expect(container.textContent).toContain('sonnet-4.6')
+    expect(container.textContent).not.toContain('sonnet-4.6')
+    expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
     expect(container.textContent).toContain('oas·seoul-1')
   })
 

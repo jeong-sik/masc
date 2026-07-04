@@ -90,10 +90,10 @@ describe('statePillTone', () => {
 })
 
 describe('keeperModelLabel', () => {
-  it('prefers active_model_label, then active_model, then model', () => {
-    expect(keeperModelLabel(mk({ active_model_label: 'A', active_model: 'B', model: 'C' }))).toBe('A')
-    expect(keeperModelLabel(mk({ active_model: 'B', model: 'C' }))).toBe('B')
-    expect(keeperModelLabel(mk({ model: 'C' }))).toBe('C')
+  it('does not expose raw keeper model fields', () => {
+    expect(keeperModelLabel(mk({ active_model_label: 'A', active_model: 'B', model: 'C' }))).toBeNull()
+    expect(keeperModelLabel(mk({ active_model: 'B', model: 'C' }))).toBeNull()
+    expect(keeperModelLabel(mk({ model: 'C' }))).toBeNull()
     expect(keeperModelLabel(mk({}))).toBeNull()
   })
 })

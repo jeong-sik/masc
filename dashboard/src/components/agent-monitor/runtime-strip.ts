@@ -40,16 +40,18 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const model = keeperDisplayModel(keeper)
   const runtime = keeperDisplayRuntime(keeper)
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
-  loadRuntimeCatalog()
-  const catalogState = runtimeCatalogState.value
-  const catalog = catalogState.status === 'loaded' ? catalogState.data : []
+  if (runtime) loadRuntimeCatalog()
+  const catalogState = runtime ? runtimeCatalogState.value : null
+  const catalog = catalogState?.status === 'loaded' ? catalogState.data : []
   const runtimeEntry = runtime ? findRuntimeCatalogEntry(catalog, runtime.value) : null
   const runtimeFacts = runtimeEntry ? runtimeCatalogSnapshotFacts(runtimeEntry) : null
-  const runtimeSpecState = runtimeFacts
-    ?? (runtime && catalogState.status === 'error' ? 'catalog unavailable' : null)
-    ?? (runtime && catalogState.status === 'loaded' && runtimeEntry === null ? 'catalog entry missing' : null)
+  const runtimeSpecState = runtime
+    ? runtimeFacts
+      ?? (catalogState?.status === 'error' ? 'catalog unavailable' : null)
+      ?? (catalogState?.status === 'loaded' && runtimeEntry === null ? 'catalog entry missing' : null)
+    : null
   const runtimeSpecTitle = runtimeFacts
-    ?? (catalogState.status === 'error' ? catalogState.message : runtimeSpecState)
+    ?? (catalogState?.status === 'error' ? catalogState.message : runtimeSpecState)
 
   return html`
     <div class="v2-monitoring-detail agent-runtime-strip">

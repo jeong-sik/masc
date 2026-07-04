@@ -127,6 +127,22 @@ describe('AgentRuntimeStrip', () => {
     expect(container.textContent).toContain('claude-4')
   })
 
+  it('does not load runtime catalog when no runtime evidence exists', () => {
+    mockFindKeeper.mockReturnValue({
+      pipeline_stage: null,
+      context_ratio: null,
+      generation: null,
+    })
+    mockKeeperDisplayModel.mockReturnValue(null)
+    mockKeeperDisplayRuntime.mockReturnValue(null)
+    mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
+    const container = document.createElement('div')
+    render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
+    expect(mockLoadRuntimeCatalog).not.toHaveBeenCalled()
+    expect(mockFindRuntimeCatalogEntry).not.toHaveBeenCalled()
+    expect(mockRuntimeCatalogSnapshotFacts).not.toHaveBeenCalled()
+  })
+
   it('renders runtime lane when present', () => {
     mockFindKeeper.mockReturnValue({
       pipeline_stage: null,

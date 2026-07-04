@@ -124,7 +124,7 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).not.toContain('no active keeper task')
   })
 
-  it('shows the current task goal progress and links back to planning', () => {
+  it('shows the current task goal task count and links back to planning', () => {
     keepers.value = [keeperFixture()]
     goals.value = [goalFixture()]
     tasks.value = [
@@ -135,10 +135,10 @@ describe('IdeKeeperWorkPanel', () => {
 
     render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
 
-    expect(container.textContent).toContain('GOAL PROGRESS')
+    expect(container.textContent).toContain('GOAL TASKS')
     expect(container.textContent).toContain('Runtime goal')
     expect(container.textContent).toContain('1/2 tasks')
-    expect(container.textContent).toContain('50%')
+    expect(container.textContent).not.toContain('50%')
     expect(container.textContent).toContain('Goal')
     expect(container.textContent).toContain('Task')
     expect(container.querySelectorAll('.ide-keeper-work-card.v2-ide-card').length).toBeGreaterThanOrEqual(1)

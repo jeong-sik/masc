@@ -1,5 +1,5 @@
 ---
-rfc: "0307"
+rfc: "0308"
 title: "Verification-required done guard — route verifier-bound tasks through submit_for_verification"
 status: Draft
 created: 2026-07-04
@@ -11,7 +11,7 @@ related: ["0222", "0109", "0199", "0221", "0220"]
 implementation_prs: []
 ---
 
-# RFC-0307: Verification-required done guard
+# RFC-0308: Verification-required done guard
 
 Status: Draft · Completion-policy convergence · Close the "no-verifier done" bypass
 Drafted by: Claude (5-agent adversarial audit `wf_369a757f-334`, 2026-07-04), pending owner review.
@@ -60,16 +60,16 @@ For verifier-required tasks, the `claimed/in_progress → done` transition is **
 
 ### §2.2 Type-level invariant (parse, don't validate)
 
-The current topology — `done` and `submit_for_verification` as sibling actions the agent picks between — is itself the root defect. RFC-0307 makes the FSM **task-policy-dependent**: the transition table is computed per task from its verifier-required flag, so a verifier-required task's FSM literally does not contain the `in_progress → done` edge. The illegal transition is unrepresentable.
+The current topology — `done` and `submit_for_verification` as sibling actions the agent picks between — is itself the root defect. RFC-0308 makes the FSM **task-policy-dependent**: the transition table is computed per task from its verifier-required flag, so a verifier-required task's FSM literally does not contain the `in_progress → done` edge. The illegal transition is unrepresentable.
 
 ---
 
 ## §3 Relationship to existing RFCs
 
-- **RFC-0222** (typed acceptance criterion + harness-driven completion, Draft): complementary. RFC-0222 adds a *deterministic* completion path for checkable tasks (acceptance criterion satisfied → auto-done). RFC-0307 adds the *inverse*: verifier-required tasks **cannot** be done directly. Together: checkable → harness auto-done; verifier-required → submit-forced; everything else → current `done`. RFC-0307 does not supersede RFC-0222; the two compose.
+- **RFC-0222** (typed acceptance criterion + harness-driven completion, Draft): complementary. RFC-0222 adds a *deterministic* completion path for checkable tasks (acceptance criterion satisfied → auto-done). RFC-0308 adds the *inverse*: verifier-required tasks **cannot** be done directly. Together: checkable → harness auto-done; verifier-required → submit-forced; everything else → current `done`. RFC-0308 does not supersede RFC-0222; the two compose.
 - **RFC-0109 Phase D** (`tool_task.ml:434-437` "must not depend on verifier agent being alive"): **amended in part**. The liveness guarantee is preserved for non-verifier-required tasks. For verifier-required tasks, the guarantee is intentionally narrowed — those tasks opt into a verifier dependency by carrying a contract/policy. This is a scoped exception, not a wholesale removal.
 - **RFC-0199** (evidence-driven auto-approval): preserved. The deterministic-harness auto-done path (`670-699`) is an explicit exception in the per-task FSM computation; it does not traverse the guard.
-- **RFC-0221** (atomic verification submission) / **RFC-0220** (verification scheduling decouple): unaffected — they operate on the `awaiting_verification` side, which RFC-0307 makes reachable for verifier-required tasks.
+- **RFC-0221** (atomic verification submission) / **RFC-0220** (verification scheduling decouple): unaffected — they operate on the `awaiting_verification` side, which RFC-0308 makes reachable for verifier-required tasks.
 
 ---
 
@@ -105,7 +105,7 @@ The current topology — `done` and `submit_for_verification` as sibling actions
 ## §7 Open questions
 
 1. Should the anti-rationalization gate's `fail_mode` default flip to `closed` for verifier-required tasks (defence in depth), or is routing through `submit` sufficient? (Audit suggests routing is sufficient; fail_mode is a separate concern.)
-2. The `persisted_contract_rejection` gate was flagged as a dead no-op (`tool_task_contract_gate.ml:66-76` always returns `None`) — should RFC-0307 also revive it, or is it intentionally inert pending another RFC?
+2. The `persisted_contract_rejection` gate was flagged as a dead no-op (`tool_task_contract_gate.ml:66-76` always returns `None`) — should RFC-0308 also revive it, or is it intentionally inert pending another RFC?
 3. Cross_verifier lane serving in a single-process keeper: does the same process that owns the task serve the verifier lane (self-verification risk)? The `Submit` arm blocks `same_agent → Self_approval`, but the `done`-path LLM gate does not. This audit did not fully trace the lane serving; follow-up verification needed.
 
 ---

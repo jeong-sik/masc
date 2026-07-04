@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   clearWorkspaceFetchIssue,
   replaceWorkspaceFetchIssue,
+  retainCurrentWorkspaceFetchIssues,
   sameWorkspaceTreeIdentity,
   selectPreferredIdeRepositoryId,
   workspaceFetchIssueFromError,
@@ -213,6 +214,31 @@ describe('workspace fetch diagnostics', () => {
   it('does not record navigation aborts as degraded workspace fetches', () => {
     const abort = new DOMException('Aborted', 'AbortError')
     expect(workspaceFetchIssueFromError('file', abort)).toBeNull()
+  })
+
+  it('drops stale workspace-scoped issues when the active repo changes', () => {
+    const repositoryIssue = workspaceFetchIssueFromError('repositories', new Error('repo list down'), {
+      nowMs: 1,
+    })!
+    const oldTreeIssue = workspaceFetchIssueFromError('tree', new Error('old repo tree down'), {
+      repoId: 'old-repo',
+      nowMs: 2,
+    })!
+    const oldFileIssue = workspaceFetchIssueFromError('file', new Error('old repo same file down'), {
+      filePath: 'README.md',
+      repoId: 'old-repo',
+      nowMs: 3,
+    })!
+    const currentDiffIssue = workspaceFetchIssueFromError('diff', new Error('current diff down'), {
+      filePath: 'README.md',
+      repoId: 'current-repo',
+      nowMs: 4,
+    })!
+
+    expect(retainCurrentWorkspaceFetchIssues(
+      [repositoryIssue, oldTreeIssue, oldFileIssue, currentDiffIssue],
+      { filePath: 'README.md', repoId: 'current-repo' },
+    )).toEqual([repositoryIssue, currentDiffIssue])
   })
 })
 

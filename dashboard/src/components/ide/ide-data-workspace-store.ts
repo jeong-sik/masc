@@ -186,6 +186,20 @@ export function clearWorkspaceFetchIssue(
   return issues.filter(issue => !sameWorkspaceIssueScope(issue, issueToClear))
 }
 
+export function retainCurrentWorkspaceFetchIssues(
+  issues: ReadonlyArray<WorkspaceFetchIssue>,
+  context: WorkspaceFetchIssueContext,
+): ReadonlyArray<WorkspaceFetchIssue> {
+  const currentFilePath = context.filePath ?? null
+  const currentKeeper = context.keeper ?? null
+  const currentRepoId = context.repoId ?? null
+  return issues.filter(issue => {
+    if (issue.kind === 'repositories') return true
+    if (issue.keeper !== currentKeeper || issue.repo_id !== currentRepoId) return false
+    return issue.file_path === null || issue.file_path === currentFilePath
+  })
+}
+
 function isManagedMirrorRepository(repository: Repository): boolean {
   const localPath = repository.local_path.replace(/\\/g, '/')
   return localPath === `.masc/repos/${repository.id}`
@@ -352,9 +366,11 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
-    workspaceIssuesSignal.value = currentWorkspaceIssues().filter(
-      issue => issue.file_path === null || issue.file_path === filePath,
-    )
+    workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
+      filePath,
+      keeper: keeperParam ?? null,
+      repoId,
+    })
 
     // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {

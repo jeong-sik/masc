@@ -70,6 +70,86 @@ export interface DashboardRuntimeRequestConfig {
   connect_timeout_s?: number | null
 }
 
+export interface DashboardRuntimeProviderBehaviorCapabilities {
+  supports_inline_tools?: boolean
+  requires_per_keeper_bridging_for_bound_actor_tools?: boolean
+  identity_runtime_mcp_header_keys: string[]
+  argv_prompt_preflight?: boolean
+  uses_anthropic_caching?: boolean
+  max_turns_per_attempt?: number | null
+  tolerates_bound_actor_fallback?: boolean
+}
+
+export interface DashboardRuntimeDeclaredProviderSpec {
+  id?: string | null
+  display_name?: string | null
+  protocol?: string | null
+  api_format?: string | null
+  transport?: string | null
+  auth_kind?: string | null
+  is_non_interactive?: boolean
+  has_capabilities?: boolean
+  behavior_capabilities?: DashboardRuntimeProviderBehaviorCapabilities | null
+  custom_header_count?: number | null
+  connect_timeout_s?: number | null
+}
+
+export interface DashboardRuntimeDeclaredModelCapabilities {
+  source?: string | null
+  max_output_tokens?: number | null
+  supports_tool_choice?: boolean
+  supports_extended_thinking?: boolean
+  supports_reasoning_budget?: boolean
+  thinking_control_format?: string | null
+  supports_image_input?: boolean
+  supports_audio_input?: boolean
+  supports_video_input?: boolean
+  supports_multimodal_inputs?: boolean
+  supports_response_format_json?: boolean
+  supports_structured_output?: boolean
+  supports_native_streaming?: boolean
+  supports_caching?: boolean
+  supports_prompt_caching?: boolean
+  prompt_cache_alignment?: number | null
+  supports_top_k?: boolean
+  supports_min_p?: boolean
+  supports_seed?: boolean
+  emits_usage_tokens?: boolean
+  supports_computer_use?: boolean
+}
+
+export interface DashboardRuntimeDeclaredModelSpec {
+  id?: string | null
+  api_name?: string | null
+  tools_support?: boolean
+  max_context?: number | null
+  thinking_support?: boolean
+  preserve_thinking?: boolean | null
+  max_thinking_budget?: number | null
+  streaming?: boolean
+  temperature?: number | null
+  capabilities?: DashboardRuntimeDeclaredModelCapabilities | null
+  match_prefixes: string[]
+}
+
+export interface DashboardRuntimeDeclaredBindingSpec {
+  provider_id?: string | null
+  model_id?: string | null
+  is_default?: boolean
+  max_concurrent?: number | null
+  price_input?: number | null
+  price_output?: number | null
+  keep_alive?: string | null
+  num_ctx?: number | null
+}
+
+export interface DashboardRuntimeDeclaredSpec {
+  source?: string | null
+  provider?: DashboardRuntimeDeclaredProviderSpec | null
+  model?: DashboardRuntimeDeclaredModelSpec | null
+  binding?: DashboardRuntimeDeclaredBindingSpec | null
+}
+
 export interface DashboardRuntimeReasoningStreamingFormat {
   kind?: string | null
   field?: string | null
@@ -148,6 +228,7 @@ export interface DashboardRuntimeProviderSnapshot {
   effective_capabilities?: DashboardRuntimeEffectiveCapabilities | null
   parameter_policy?: DashboardRuntimeParameterPolicy | null
   request_config?: DashboardRuntimeRequestConfig | null
+  declared_spec?: DashboardRuntimeDeclaredSpec | null
   model_count?: number | null
   models: string[]
   source?: string | null
@@ -364,6 +445,109 @@ function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig
   }
 }
 
+function decodeRuntimeProviderBehaviorCapabilities(
+  raw: unknown,
+): DashboardRuntimeProviderBehaviorCapabilities | null {
+  if (!isRecord(raw)) return null
+  return {
+    supports_inline_tools: asBoolean(raw.supports_inline_tools),
+    requires_per_keeper_bridging_for_bound_actor_tools:
+      asBoolean(raw.requires_per_keeper_bridging_for_bound_actor_tools),
+    identity_runtime_mcp_header_keys: asStringArray(raw.identity_runtime_mcp_header_keys),
+    argv_prompt_preflight: asBoolean(raw.argv_prompt_preflight),
+    uses_anthropic_caching: asBoolean(raw.uses_anthropic_caching),
+    max_turns_per_attempt: asNumber(raw.max_turns_per_attempt) ?? null,
+    tolerates_bound_actor_fallback: asBoolean(raw.tolerates_bound_actor_fallback),
+  }
+}
+
+function decodeRuntimeDeclaredProviderSpec(raw: unknown): DashboardRuntimeDeclaredProviderSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    id: asNullableString(raw.id),
+    display_name: asNullableString(raw.display_name),
+    protocol: asNullableString(raw.protocol),
+    api_format: asNullableString(raw.api_format),
+    transport: asNullableString(raw.transport),
+    auth_kind: asNullableString(raw.auth_kind),
+    is_non_interactive: asBoolean(raw.is_non_interactive),
+    has_capabilities: asBoolean(raw.has_capabilities),
+    behavior_capabilities: decodeRuntimeProviderBehaviorCapabilities(raw.behavior_capabilities),
+    custom_header_count: asNumber(raw.custom_header_count) ?? null,
+    connect_timeout_s: asNumber(raw.connect_timeout_s) ?? null,
+  }
+}
+
+function decodeRuntimeDeclaredModelCapabilities(
+  raw: unknown,
+): DashboardRuntimeDeclaredModelCapabilities | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    max_output_tokens: asNumber(raw.max_output_tokens) ?? null,
+    supports_tool_choice: asBoolean(raw.supports_tool_choice),
+    supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
+    supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
+    thinking_control_format: asNullableString(raw.thinking_control_format),
+    supports_image_input: asBoolean(raw.supports_image_input),
+    supports_audio_input: asBoolean(raw.supports_audio_input),
+    supports_video_input: asBoolean(raw.supports_video_input),
+    supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
+    supports_response_format_json: asBoolean(raw.supports_response_format_json),
+    supports_structured_output: asBoolean(raw.supports_structured_output),
+    supports_native_streaming: asBoolean(raw.supports_native_streaming),
+    supports_caching: asBoolean(raw.supports_caching),
+    supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
+    prompt_cache_alignment: asNumber(raw.prompt_cache_alignment) ?? null,
+    supports_top_k: asBoolean(raw.supports_top_k),
+    supports_min_p: asBoolean(raw.supports_min_p),
+    supports_seed: asBoolean(raw.supports_seed),
+    emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
+    supports_computer_use: asBoolean(raw.supports_computer_use),
+  }
+}
+
+function decodeRuntimeDeclaredModelSpec(raw: unknown): DashboardRuntimeDeclaredModelSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    id: asNullableString(raw.id),
+    api_name: asNullableString(raw.api_name),
+    tools_support: asBoolean(raw.tools_support),
+    max_context: asNumber(raw.max_context) ?? null,
+    thinking_support: asBoolean(raw.thinking_support),
+    preserve_thinking: asBoolean(raw.preserve_thinking) ?? null,
+    max_thinking_budget: asNumber(raw.max_thinking_budget) ?? null,
+    streaming: asBoolean(raw.streaming),
+    temperature: asNumber(raw.temperature) ?? null,
+    capabilities: decodeRuntimeDeclaredModelCapabilities(raw.capabilities),
+    match_prefixes: asStringArray(raw.match_prefixes),
+  }
+}
+
+function decodeRuntimeDeclaredBindingSpec(raw: unknown): DashboardRuntimeDeclaredBindingSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    provider_id: asNullableString(raw.provider_id),
+    model_id: asNullableString(raw.model_id),
+    is_default: asBoolean(raw.is_default),
+    max_concurrent: asNumber(raw.max_concurrent) ?? null,
+    price_input: asNumber(raw.price_input) ?? null,
+    price_output: asNumber(raw.price_output) ?? null,
+    keep_alive: asNullableString(raw.keep_alive),
+    num_ctx: asNumber(raw.num_ctx) ?? null,
+  }
+}
+
+function decodeRuntimeDeclaredSpec(raw: unknown): DashboardRuntimeDeclaredSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    provider: decodeRuntimeDeclaredProviderSpec(raw.provider),
+    model: decodeRuntimeDeclaredModelSpec(raw.model),
+    binding: decodeRuntimeDeclaredBindingSpec(raw.binding),
+  }
+}
+
 function decodeNullableStringArray(raw: unknown): string[] | null {
   return Array.isArray(raw) ? asStringArray(raw) : null
 }
@@ -468,6 +652,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     effective_capabilities: decodeRuntimeEffectiveCapabilities(raw.effective_capabilities),
     parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
     request_config: decodeRuntimeRequestConfig(raw.request_config),
+    declared_spec: decodeRuntimeDeclaredSpec(raw.declared_spec),
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),
     source: asNullableString(raw.source),

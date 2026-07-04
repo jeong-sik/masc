@@ -192,6 +192,40 @@ function runtimeRequestConfigSummary(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeDeclaredSpecSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const spec = entry.declared_spec
+  if (!spec) return null
+  const caps = spec.model?.capabilities
+  const sampling = [
+    caps?.supports_top_k ? 'top_k' : null,
+    caps?.supports_min_p ? 'min_p' : null,
+    caps?.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const formats = [
+    caps?.supports_response_format_json ? 'json' : null,
+    caps?.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  let thinking: string | null = null
+  if (typeof spec.model?.thinking_support === 'boolean') {
+    thinking = spec.model.thinking_support ? 'think on' : 'think off'
+  }
+  const parts = [
+    spec.provider?.api_format ? spec.provider.api_format : null,
+    typeof spec.model?.max_context === 'number' ? `ctx ${spec.model.max_context}` : null,
+    thinking,
+    caps?.thinking_control_format ? caps.thinking_control_format : null,
+    typeof caps?.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
+    formats.length > 0 ? `format ${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    typeof spec.binding?.max_concurrent === 'number' ? `conc ${spec.binding.max_concurrent}` : null,
+    spec.binding?.keep_alive ? `keep ${spec.binding.keep_alive}` : null,
+    typeof spec.binding?.num_ctx === 'number' ? `num_ctx ${spec.binding.num_ctx}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeEffectiveCapabilitySummary(
   entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
 ): string | null {
@@ -239,6 +273,7 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   const effectiveCapabilities = entry ? runtimeEffectiveCapabilitySummary(entry) : null
   const parameterPolicy = entry ? runtimeParameterPolicySummary(entry) : null
   const requestConfig = entry ? runtimeRequestConfigSummary(entry) : null
+  const declaredSpec = entry ? runtimeDeclaredSpecSummary(entry) : null
 
   return html`
     <div class="ctx-sec">
@@ -291,6 +326,14 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
               <div class="rtc-effort">
                 <span class="rtc-effort-k">request</span>
                 <span class="rtc-eff-na" title=${requestConfig}>${requestConfig}</span>
+              </div>
+            `
+          : null}
+        ${declaredSpec
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">declared</span>
+                <span class="rtc-eff-na" title=${declaredSpec}>${declaredSpec}</span>
               </div>
             `
           : null}

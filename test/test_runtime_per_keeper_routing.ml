@@ -1150,6 +1150,95 @@ let test_runtime_inventory_surfaces_request_config () =
      | _ -> Alcotest.fail "request_config must be an object"))
 ;;
 
+let test_runtime_inventory_surfaces_declared_spec () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let spec = thinkdefault |> J.member "declared_spec" in
+    let provider = spec |> J.member "provider" in
+    let model = spec |> J.member "model" in
+    let binding = spec |> J.member "binding" in
+    Alcotest.(check string)
+      "declared spec source"
+      "runtime.toml"
+      (spec |> J.member "source" |> J.to_string);
+    Alcotest.(check string)
+      "provider id"
+      "ollama_cloud"
+      (provider |> J.member "id" |> J.to_string);
+    Alcotest.(check string)
+      "api format"
+      "chat-completions"
+      (provider |> J.member "api_format" |> J.to_string);
+    Alcotest.(check string)
+      "transport"
+      "http"
+      (provider |> J.member "transport" |> J.to_string);
+    Alcotest.(check bool)
+      "provider capabilities absent"
+      false
+      (provider |> J.member "has_capabilities" |> J.to_bool);
+    (match provider |> J.member "behavior_capabilities" with
+     | `Null -> ()
+     | _ -> Alcotest.fail "absent provider capabilities must remain null");
+    Alcotest.(check int)
+      "custom header count"
+      0
+      (provider |> J.member "custom_header_count" |> J.to_int);
+    Alcotest.(check string)
+      "model id"
+      "thinkdefault"
+      (model |> J.member "id" |> J.to_string);
+    Alcotest.(check string)
+      "model api name"
+      "qwen36-35b-a3b-mtp"
+      (model |> J.member "api_name" |> J.to_string);
+    Alcotest.(check int)
+      "declared max context"
+      128000
+      (model |> J.member "max_context" |> J.to_int);
+    Alcotest.(check bool)
+      "declared thinking support"
+      true
+      (model |> J.member "thinking_support" |> J.to_bool);
+    (match model |> J.member "capabilities" with
+     | `Null -> ()
+     | _ -> Alcotest.fail "absent model capabilities must remain null");
+    Alcotest.(check string)
+      "binding provider id"
+      "ollama_cloud"
+      (binding |> J.member "provider_id" |> J.to_string);
+    Alcotest.(check string)
+      "binding model id"
+      "thinkdefault"
+      (binding |> J.member "model_id" |> J.to_string);
+    Alcotest.(check int)
+      "binding max concurrency"
+      1
+      (binding |> J.member "max_concurrent" |> J.to_int);
+    (match binding |> J.member "keep_alive", binding |> J.member "num_ctx" with
+     | `Null, `Null -> ()
+     | _ -> Alcotest.fail "unset binding keep_alive/num_ctx must remain null");
+    (match provider with
+     | `Assoc fields ->
+       List.iter
+         (fun secret_key ->
+            Alcotest.(check bool)
+              ("declared provider secret omitted: " ^ secret_key)
+              false
+              (List.mem_assoc secret_key fields))
+         [ "credentials"; "headers"; "endpoint_url" ]
+     | _ -> Alcotest.fail "declared_spec provider must be an object"))
+;;
+
 let test_thinking_unknown_runtime_defers () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"bogus.binding" in
@@ -1605,6 +1694,10 @@ let () =
             "runtime inventory surfaces OAS request config"
             `Quick
             test_runtime_inventory_surfaces_request_config
+        ; Alcotest.test_case
+            "runtime inventory surfaces declared spec"
+            `Quick
+            test_runtime_inventory_surfaces_declared_spec
         ; Alcotest.test_case
             "unknown runtime id defers (None)"
             `Quick

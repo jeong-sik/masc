@@ -269,6 +269,39 @@ function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapshot): st
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapshot): string | null {
+  const spec = item.declared_spec
+  if (!spec) return null
+  const caps = spec.model?.capabilities
+  const sampling = [
+    caps?.supports_top_k ? 'top_k' : null,
+    caps?.supports_min_p ? 'min_p' : null,
+    caps?.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const formats = [
+    caps?.supports_response_format_json ? 'json' : null,
+    caps?.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  let thinking: string | null = null
+  if (typeof spec.model?.thinking_support === 'boolean') {
+    thinking = spec.model.thinking_support ? 'think:on' : 'think:off'
+  }
+  const parts = [
+    spec.provider?.api_format ? `api:${spec.provider.api_format}` : null,
+    spec.provider?.protocol ? `protocol:${spec.provider.protocol}` : null,
+    typeof spec.model?.max_context === 'number' ? `ctx:${spec.model.max_context}` : null,
+    thinking,
+    caps?.thinking_control_format ? `wire:${caps.thinking_control_format}` : null,
+    typeof caps?.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null,
+    formats.length > 0 ? `format:${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+    typeof spec.binding?.max_concurrent === 'number' ? `concurrency:${spec.binding.max_concurrent}` : null,
+    spec.binding?.keep_alive ? `keep:${spec.binding.keep_alive}` : null,
+    typeof spec.binding?.num_ctx === 'number' ? `num_ctx:${spec.binding.num_ctx}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnapshot): string | null {
   const caps = item.effective_capabilities
   if (!caps) return null
@@ -332,6 +365,7 @@ function RuntimeCatalogCard({
   const effectiveCapabilities = runtimeCatalogEffectiveCapabilities(item)
   const parameterPolicy = runtimeCatalogParameterPolicy(item)
   const requestConfig = runtimeCatalogRequestConfig(item)
+  const declaredSpec = runtimeCatalogDeclaredSpec(item)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -365,6 +399,9 @@ function RuntimeCatalogCard({
           : null}
         ${requestConfig
           ? html`<span class="rt-cap tcf mono" title=${requestConfig}>${requestConfig}</span>`
+          : null}
+        ${declaredSpec
+          ? html`<span class="rt-cap tcf mono" title=${declaredSpec}>declared:${declaredSpec}</span>`
           : null}
       </div>
       <div class="set-rt-row">

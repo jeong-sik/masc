@@ -221,6 +221,65 @@ function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): s
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const spec = provider.declared_spec
+  if (!spec) return null
+  const declaredCaps = spec.model?.capabilities
+  const declaredSampling = [
+    declaredCaps?.supports_top_k ? 'top_k' : null,
+    declaredCaps?.supports_min_p ? 'min_p' : null,
+    declaredCaps?.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const declaredFormats = [
+    declaredCaps?.supports_response_format_json ? 'json' : null,
+    declaredCaps?.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const declaredInputs = [
+    declaredCaps?.supports_image_input ? 'image' : null,
+    declaredCaps?.supports_audio_input ? 'audio' : null,
+    declaredCaps?.supports_video_input ? 'video' : null,
+  ].filter((value): value is string => Boolean(value))
+  let declaredThinking: string | null = null
+  if (typeof spec.model?.thinking_support === 'boolean') {
+    declaredThinking = spec.model.thinking_support ? 'think on' : 'think off'
+  }
+  const providerParts = [
+    spec.provider?.api_format ? `api ${spec.provider.api_format}` : null,
+    spec.provider?.protocol ? `protocol ${spec.provider.protocol}` : null,
+    spec.provider?.transport ? `transport ${spec.provider.transport}` : null,
+    typeof spec.provider?.custom_header_count === 'number'
+      ? `headers ${spec.provider.custom_header_count}`
+      : null,
+  ].filter((value): value is string => Boolean(value))
+  const modelParts = [
+    spec.model?.api_name ? `model ${spec.model.api_name}` : null,
+    typeof spec.model?.max_context === 'number' ? `ctx ${formatNumber(spec.model.max_context)}` : null,
+    typeof spec.model?.temperature === 'number' ? `temp ${spec.model.temperature}` : null,
+    declaredThinking,
+    typeof spec.model?.max_thinking_budget === 'number'
+      ? `budget ${formatNumber(spec.model.max_thinking_budget)}`
+      : null,
+    declaredCaps?.thinking_control_format ? `wire ${declaredCaps.thinking_control_format}` : null,
+    typeof declaredCaps?.max_output_tokens === 'number'
+      ? `out ${formatNumber(declaredCaps.max_output_tokens)}`
+      : null,
+    declaredFormats.length > 0 ? `format ${declaredFormats.join(',')}` : null,
+    declaredSampling.length > 0 ? `sampling ${declaredSampling.join(',')}` : null,
+    declaredInputs.length > 0 ? `input ${declaredInputs.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const bindingParts = [
+    typeof spec.binding?.max_concurrent === 'number' ? `concurrency ${spec.binding.max_concurrent}` : null,
+    spec.binding?.keep_alive ? `keep ${spec.binding.keep_alive}` : null,
+    typeof spec.binding?.num_ctx === 'number' ? `num_ctx ${formatNumber(spec.binding.num_ctx)}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const parts = [
+    providerParts.length > 0 ? providerParts.join(',') : null,
+    modelParts.length > 0 ? modelParts.join(',') : null,
+    bindingParts.length > 0 ? bindingParts.join(',') : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const caps = provider.effective_capabilities
   if (!caps) return null
@@ -632,6 +691,7 @@ export function RuntimeMonitor() {
                 const effectiveCapabilities = runtimeEffectiveCapabilitiesText(provider)
                 const parameterPolicy = runtimeParameterPolicyText(provider)
                 const requestConfig = runtimeRequestConfigText(provider)
+                const declaredSpec = runtimeDeclaredSpecText(provider)
                 return html`
                 <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
@@ -667,6 +727,11 @@ export function RuntimeMonitor() {
                   ${requestConfig
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${requestConfig}>
                         request · ${requestConfig}
+                      </div>`
+                    : null}
+                  ${declaredSpec
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${declaredSpec}>
+                        declared · ${declaredSpec}
                       </div>`
                     : null}
                   ${effectiveCapabilities

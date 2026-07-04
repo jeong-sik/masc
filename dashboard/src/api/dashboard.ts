@@ -123,6 +123,12 @@ export { fetchDashboardBriefing, fetchDashboardMission, fetchDashboardMissionSes
 
 export type {
   DashboardRuntimeProviderSnapshot,
+  DashboardRuntimeDeclaredBindingSpec,
+  DashboardRuntimeDeclaredModelCapabilities,
+  DashboardRuntimeDeclaredModelSpec,
+  DashboardRuntimeDeclaredProviderSpec,
+  DashboardRuntimeDeclaredSpec,
+  DashboardRuntimeProviderBehaviorCapabilities,
   DashboardRuntimeParameterPolicy,
   DashboardRuntimeRequestConfig,
   DashboardRuntimeResponseFormat,

@@ -1560,6 +1560,110 @@ let runtime_request_config_json (rt : Runtime.t) =
     ]
 ;;
 
+let runtime_api_format_wire : Runtime_schema.api_format -> string = function
+  | Runtime_schema.Messages_api -> "messages"
+  | Runtime_schema.Chat_completions_api -> "chat-completions"
+  | Runtime_schema.Ollama_api -> "ollama"
+;;
+
+let runtime_provider_behavior_capabilities_json
+    (capabilities : Runtime_schema.capabilities option) =
+  match capabilities with
+  | None -> `Null
+  | Some caps ->
+    `Assoc
+      [ "supports_inline_tools", `Bool caps.supports_inline_tools
+      ; ( "requires_per_keeper_bridging_for_bound_actor_tools"
+        , `Bool caps.requires_per_keeper_bridging_for_bound_actor_tools )
+      ; ( "identity_runtime_mcp_header_keys"
+        , Json_util.json_string_list caps.identity_runtime_mcp_header_keys )
+      ; "argv_prompt_preflight", `Bool caps.argv_prompt_preflight
+      ; "uses_anthropic_caching", `Bool caps.uses_anthropic_caching
+      ; "max_turns_per_attempt", Json_util.int_opt_to_json caps.max_turns_per_attempt
+      ; "tolerates_bound_actor_fallback", `Bool caps.tolerates_bound_actor_fallback
+      ]
+;;
+
+let runtime_declared_model_capabilities_json
+    (capabilities : Runtime_schema.model_capabilities option) =
+  match capabilities with
+  | None -> `Null
+  | Some caps ->
+    `Assoc
+      [ "source", `String runtime_inventory_source
+      ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
+      ; "supports_tool_choice", `Bool caps.supports_tool_choice
+      ; "supports_extended_thinking", `Bool caps.supports_extended_thinking
+      ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
+      ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
+      ; "supports_image_input", `Bool caps.supports_image_input
+      ; "supports_audio_input", `Bool caps.supports_audio_input
+      ; "supports_video_input", `Bool caps.supports_video_input
+      ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
+      ; "supports_response_format_json", `Bool caps.supports_response_format_json
+      ; "supports_structured_output", `Bool caps.supports_structured_output
+      ; "supports_native_streaming", `Bool caps.supports_native_streaming
+      ; "supports_caching", `Bool caps.supports_caching
+      ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
+      ; "prompt_cache_alignment", Json_util.int_opt_to_json caps.prompt_cache_alignment
+      ; "supports_top_k", `Bool caps.supports_top_k
+      ; "supports_min_p", `Bool caps.supports_min_p
+      ; "supports_seed", `Bool caps.supports_seed
+      ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+      ; "supports_computer_use", `Bool caps.supports_computer_use
+      ]
+;;
+
+let runtime_declared_spec_json (rt : Runtime.t) =
+  `Assoc
+    [ "source", `String runtime_inventory_source
+    ; ( "provider"
+      , `Assoc
+          [ "id", `String rt.provider.id
+          ; "display_name", `String rt.provider.display_name
+          ; "protocol", `String rt.provider.protocol
+          ; "api_format", `String (runtime_api_format_wire rt.provider.api_format)
+          ; "transport", `String (runtime_transport_string rt.provider.transport)
+          ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
+          ; "is_non_interactive", `Bool rt.provider.is_non_interactive
+          ; "has_capabilities", `Bool (Option.is_some rt.provider.capabilities)
+          ; ( "behavior_capabilities"
+            , runtime_provider_behavior_capabilities_json rt.provider.capabilities )
+          ; ( "custom_header_count"
+            , `Int
+                (rt.provider.headers
+                 |> Option.map List.length
+                 |> Option.value ~default:0) )
+          ; "connect_timeout_s", Json_util.float_opt_to_json rt.provider.connect_timeout_s
+          ] )
+    ; ( "model"
+      , `Assoc
+          [ "id", `String rt.model.id
+          ; "api_name", `String rt.model.api_name
+          ; "tools_support", `Bool rt.model.tools_support
+          ; "max_context", `Int rt.model.max_context
+          ; "thinking_support", `Bool rt.model.thinking_support
+          ; "preserve_thinking", Json_util.bool_opt_to_json rt.model.preserve_thinking
+          ; "max_thinking_budget", Json_util.int_opt_to_json rt.model.max_thinking_budget
+          ; "streaming", `Bool rt.model.streaming
+          ; "temperature", Json_util.float_opt_to_json rt.model.temperature
+          ; "capabilities", runtime_declared_model_capabilities_json rt.model.capabilities
+          ; "match_prefixes", Json_util.json_string_list rt.model.match_prefixes
+          ] )
+    ; ( "binding"
+      , `Assoc
+          [ "provider_id", `String rt.binding.provider_id
+          ; "model_id", `String rt.binding.model_id
+          ; "is_default", `Bool rt.binding.is_default
+          ; "max_concurrent", Json_util.int_opt_to_json rt.binding.max_concurrent
+          ; "price_input", Json_util.float_opt_to_json rt.binding.price_input
+          ; "price_output", Json_util.float_opt_to_json rt.binding.price_output
+          ; "keep_alive", Json_util.string_opt_to_json rt.binding.keep_alive
+          ; "num_ctx", Json_util.int_opt_to_json rt.binding.num_ctx
+          ] )
+    ]
+;;
+
 let effective_capabilities_json (rt : Runtime.t) =
   match Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config with
   | None -> `Null
@@ -1698,6 +1802,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt
+    ; "declared_spec", runtime_declared_spec_json rt
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models
     ; "source", `String runtime_inventory_source

@@ -760,7 +760,10 @@ let ingest_cursor_event
        append_cursor ~base_dir:base_path ~partition json;
        Ok ()
      with exn ->
-       Error (Printf.sprintf "Failed to persist cursor event: %s" (Printexc.to_string exn)))
+       Printf.eprintf
+         "Ide_bridge.ingest_cursor_event error: %s\n%!"
+         (Printexc.to_string exn);
+       Error "Failed to persist cursor event")
 ;;
 ;;
 

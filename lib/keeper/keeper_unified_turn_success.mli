@@ -71,6 +71,12 @@ module For_testing : sig
     -> updated_meta:Keeper_meta_contract.keeper_meta
     -> terminal_outcome:terminal_outcome
     -> Keeper_meta_contract.keeper_meta
+
+  val reset_turn_failures_for_stop_reason
+    :  config:Workspace.config
+    -> updated_meta:Keeper_meta_contract.keeper_meta
+    -> Keeper_agent_run.run_result
+    -> unit
 end
 
 val handle

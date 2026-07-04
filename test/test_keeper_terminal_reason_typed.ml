@@ -842,6 +842,122 @@ let () =
 ;;
 
 let () =
+  with_temp_dir "keeper-success-clears-stale-provider-failure" @@ fun workspace_dir ->
+  let keeper_name = "success-clears-stale-provider-failure" in
+  let config = Masc.Workspace.default_config workspace_dir in
+  let meta : KMC.keeper_meta =
+    meta_fixture_exn
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String keeper_name
+        ; "trace_id", `String "trace-success-clears-stale-provider-failure"
+        ; "goal", `String "Clear stale provider runtime failure after success"
+        ])
+  in
+  let run_result ?(stop_reason = Runtime_agent.Completed) ()
+    : Masc.Keeper_agent_run.run_result
+    =
+    let prompt_metrics =
+      Masc.Keeper_agent_prompt_metrics.build_prompt_metrics
+        ~system_prompt:""
+        ~dynamic_context:""
+        ~user_message:""
+    in
+    let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
+      { actual_input_tokens = None
+      ; display_total_tokens = 0
+      ; estimated_known_tokens = 0
+      ; segments = []
+      }
+    in
+    let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
+      { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
+      ; config_root = ""
+      ; runtime_config_path = None
+      }
+    in
+    { response_text = "completed"
+    ; model_used = "test-model"
+    ; prompt_metrics
+    ; ctx_composition
+    ; runtime_observation = None
+    ; turn_count = 1
+    ; usage = Masc.Inference_utils.zero_usage
+    ; usage_reported = true
+    ; tool_calls = []
+    ; completion_contract_result = R.Contract_satisfied_execution
+    ; operator_disposition = None
+    ; checkpoint = None
+    ; trace_ref = None
+    ; run_validation = None
+    ; stop_reason
+    ; inference_telemetry = None
+    ; tool_surface
+    ; pre_dispatch_compacted = false
+    ; pre_dispatch_compaction_trigger = None
+    ; pre_dispatch_compaction_before_tokens = None
+    ; pre_dispatch_compaction_after_tokens = None
+    }
+  in
+  let stale_provider_failure =
+    Masc.Keeper_registry.Provider_runtime_error
+      { code = "api_error_invalid_request"
+      ; detail = "stale quota from a previous runtime"
+      ; provider_id = Some "kimi_code"
+      ; http_status = None
+      ; runtime_id = Some "kimi_code.kimi-for-coding"
+      ; reason = None
+      }
+  in
+  let registered_entry () =
+    match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+    | Some entry -> entry
+    | None -> failwith ("missing registered keeper " ^ keeper_name)
+  in
+  let latch_stale_provider_failure () =
+    Masc.Keeper_registry.increment_turn_failures
+      ~base_path:config.base_path
+      keeper_name;
+    Masc.Keeper_registry.set_failure_reason
+      ~base_path:config.base_path
+      keeper_name
+      (Some stale_provider_failure)
+  in
+  Masc.Keeper_registry.clear ();
+  Fun.protect
+    ~finally:Masc.Keeper_registry.clear
+    (fun () ->
+       ignore
+         (Masc.Keeper_registry.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       latch_stale_provider_failure ();
+       UTS.reset_turn_failures_for_stop_reason ~config ~updated_meta:meta (run_result ());
+       let entry_after_success = registered_entry () in
+       check
+         "successful terminal turn clears stale provider failure reason"
+         (entry_after_success.last_failure_reason = None);
+       check
+         "successful terminal turn clears turn consecutive failures"
+         (entry_after_success.turn_consecutive_failures = 0);
+       latch_stale_provider_failure ();
+       UTS.reset_turn_failures_for_stop_reason
+         ~config
+         ~updated_meta:meta
+         (run_result
+            ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 8; limit = 8 })
+            ());
+       let entry_after_budget = registered_entry () in
+       check
+         "budget-exhausted terminal turn preserves provider failure reason"
+         (entry_after_budget.last_failure_reason = Some stale_provider_failure);
+       check
+         "budget-exhausted terminal turn preserves turn consecutive failures"
+         (entry_after_budget.turn_consecutive_failures = 1))
+;;
+
+let () =
   match !failures with
   | [] -> print_endline "test_keeper_terminal_reason_typed: OK"
   | xs ->

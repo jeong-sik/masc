@@ -1075,6 +1075,7 @@
   test_http_protocol_detect
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_stale_claim_release
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
@@ -1269,6 +1270,7 @@
   test_http_protocol_detect
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_stale_claim_release
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract

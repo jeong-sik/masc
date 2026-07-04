@@ -285,6 +285,7 @@ describe('KeeperWorkspaceRail', () => {
             supports_min_p: true,
             supports_seed: true,
             supports_seed_with_images: true,
+            ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
             supports_code_execution: true,
             emits_usage_tokens: true,
             modality_priority: 'visual-first',
@@ -406,6 +407,7 @@ describe('KeeperWorkspaceRail', () => {
       'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
     expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
+    expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
     expect(container.textContent).toContain('extended thinking')

@@ -199,6 +199,7 @@ export interface DashboardRuntimeEffectiveCapabilities {
   supports_min_p?: boolean
   supports_seed?: boolean
   supports_seed_with_images?: boolean
+  ignored_sampling_parameters: string[]
   supports_computer_use?: boolean
   supports_code_execution?: boolean
   emits_usage_tokens?: boolean
@@ -637,6 +638,7 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_min_p: asBoolean(raw.supports_min_p),
     supports_seed: asBoolean(raw.supports_seed),
     supports_seed_with_images: asBoolean(raw.supports_seed_with_images),
+    ignored_sampling_parameters: asStringArray(raw.ignored_sampling_parameters),
     supports_computer_use: asBoolean(raw.supports_computer_use),
     supports_code_execution: asBoolean(raw.supports_code_execution),
     emits_usage_tokens: asBoolean(raw.emits_usage_tokens),

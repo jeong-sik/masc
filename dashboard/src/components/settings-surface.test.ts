@@ -933,6 +933,7 @@ describe('SettingsSurface', () => {
             supports_min_p: true,
             supports_seed: true,
             supports_seed_with_images: true,
+            ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
             supports_code_execution: true,
             emits_usage_tokens: true,
             modality_priority: 'visual-first',
@@ -1071,6 +1072,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
       expect(cards[0]?.textContent).toContain('ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
+      expect(cards[0]?.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
       expect(cards[0]?.textContent).toContain('extended-thinking')

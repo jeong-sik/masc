@@ -1078,7 +1078,9 @@ max_output_tokens = 65536
 supports_tools = true
 supports_tool_choice = true
 supports_required_tool_choice = true
+supports_named_tool_choice = true
 supports_parallel_tool_calls = true
+assistant_tool_content_format = "empty_string"
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
@@ -1087,14 +1089,23 @@ thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "preserve_always"
 supports_response_format_json = true
 supports_structured_output = true
 modality_priority = "visual_first"
+task = "transcription"
+supports_audio_input = true
+supports_video_input = true
 supports_native_streaming = true
+supports_system_prompt = true
+supports_caching = true
 supports_prompt_caching = true
 supports_top_k = true
 supports_min_p = true
 supports_seed = true
+ignored_sampling_parameters = ["temperature", "top_p", "presence_penalty", "frequency_penalty"]
+supports_computer_use = true
+supports_code_execution = true
 
 [[models]]
 id_prefix = "openai_compat/reasoning-small-out"
@@ -1233,6 +1244,14 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       "parallel tool calls"
       true
       (caps |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "named tool choice"
+      true
+      (caps |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check string)
+      "assistant tool content format"
+      "empty-string"
+      (caps |> J.member "assistant_tool_content_format" |> J.to_string);
     Alcotest.(check (list string))
       "accepted reasoning efforts"
       [ "low"; "medium"; "high" ]
@@ -1244,10 +1263,49 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       "reasoning streaming field"
       "reasoning_content"
       (caps |> J.member "reasoning_streaming_format" |> J.member "field" |> J.to_string);
+    Alcotest.(check string)
+      "reasoning replay override"
+      "preserve-always"
+      (caps |> J.member "reasoning_replay_override" |> J.to_string);
+    Alcotest.(check string)
+      "task"
+      "transcription"
+      (caps |> J.member "task" |> J.to_string);
+    Alcotest.(check bool)
+      "audio input"
+      true
+      (caps |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "video input"
+      true
+      (caps |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "system prompt"
+      true
+      (caps |> J.member "supports_system_prompt" |> J.to_bool);
+    Alcotest.(check bool)
+      "caching"
+      true
+      (caps |> J.member "supports_caching" |> J.to_bool);
     Alcotest.(check bool)
       "top_k"
       true
       (caps |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check (list string))
+      "ignored sampling parameters"
+      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
+      (caps
+       |> J.member "ignored_sampling_parameters"
+       |> J.to_list
+       |> List.map J.to_string);
+    Alcotest.(check bool)
+      "computer use"
+      true
+      (caps |> J.member "supports_computer_use" |> J.to_bool);
+    Alcotest.(check bool)
+      "code execution"
+      true
+      (caps |> J.member "supports_code_execution" |> J.to_bool);
     Alcotest.(check string)
       "effective modality priority"
       "visual-first"

@@ -519,6 +519,9 @@ function runtimeParameterDetailRows(
         flagText(caps.supports_seed, 'seed'),
       ])
     : null
+  const effectiveIgnoredSampling = caps
+    ? stringArrayText(caps.ignored_sampling_parameters)
+    : null
   const declaredFormat = declaredCaps
     ? textList([
         flagText(declaredCaps.supports_response_format_json, 'json'),
@@ -634,6 +637,7 @@ function runtimeParameterDetailRows(
     detailRow('effective', 'task', caps?.task),
     detailRow('effective', 'controls', runtimeEffectiveControlText(provider)),
     detailRow('effective', 'sampling', effectiveSampling),
+    detailRow('effective', 'ignored sampling', effectiveIgnoredSampling),
     detailRow('effective', 'supported models', stringArrayText(caps?.supported_models)),
   ].filter((row): row is RuntimeParameterDetailRow => row !== null)
 }
@@ -756,6 +760,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.supports_min_p ? 'min_p' : null,
     caps.supports_seed ? 'seed' : null,
   ].filter((value): value is string => Boolean(value))
+  const ignoredSampling = caps.ignored_sampling_parameters.join(',')
   const modalities = [
     caps.supports_image_input ? 'image' : null,
     caps.supports_audio_input ? 'audio' : null,
@@ -787,6 +792,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    ignoredSampling ? `ignored ${ignoredSampling}` : null,
     modalities.length > 0 ? `input ${modalities.join(',')}` : null,
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,

@@ -532,6 +532,56 @@ let runtime_missing_from_report (report : missing_catalog_report) runtime_id =
     report.missing_models
 ;;
 
+let dropped_assignment_label (entry : dropped_runtime_assignment) =
+  Printf.sprintf "[runtime.assignments].%s=%S" entry.keeper_name entry.runtime_id
+;;
+
+let dropped_route_label (entry : dropped_runtime_route) =
+  Printf.sprintf "%s=%S" entry.route_name entry.runtime_id
+;;
+
+let dropped_lane_label (prefix : string) (entry : dropped_runtime_lane) =
+  Printf.sprintf
+    "%s.%s=[%s]"
+    prefix
+    entry.lane_id
+    (String.concat ", " (List.map (Printf.sprintf "%S") entry.runtime_ids))
+;;
+
+let missing_reference_error
+    ~(config_path : string)
+    ~(dropped_assignments : dropped_runtime_assignment list)
+    ~(dropped_routes : dropped_runtime_route list)
+    ~(dropped_media_failover : string list)
+    ~(dropped_lane_candidates : dropped_runtime_lane list)
+    ~(dropped_lanes : dropped_runtime_lane list)
+  =
+  let references =
+    List.concat
+      [ List.map dropped_assignment_label dropped_assignments
+      ; List.map dropped_route_label dropped_routes
+      ; (match dropped_media_failover with
+         | [] -> []
+         | runtime_ids ->
+           [ Printf.sprintf
+               "[runtime].media_failover=[%s]"
+               (String.concat ", " (List.map (Printf.sprintf "%S") runtime_ids))
+           ])
+      ; List.map
+          (dropped_lane_label "[runtime.lanes].candidates")
+          dropped_lane_candidates
+      ; List.map (dropped_lane_label "[runtime.lanes].dropped") dropped_lanes
+      ]
+  in
+  Printf.sprintf
+    "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
+     are referenced by routing config: %s. Add catalog rows to oas-models.toml \
+     or remove those routing references; MASC will not erase explicit runtime \
+     intent into default fallback."
+    config_path
+    (String.concat "; " references)
+;;
+
 let degrade_loaded_for_missing_catalog
     ( (runtimes, configured_default, assignments, librarian_id, structured_judge_id,
        cross_verifier_id, media_failover, lanes) :
@@ -558,6 +608,94 @@ let degrade_loaded_for_missing_catalog
   =
   let is_missing = runtime_missing_from_report report in
   let active_runtimes = List.filter (fun (rt : t) -> not (is_missing rt.id)) runtimes in
+  let disabled_runtime_ids =
+    report.missing_models
+    |> List.map (fun (missing : missing_catalog_model) -> missing.runtime_id)
+    |> List.sort_uniq String.compare
+  in
+  let kept_assignments, dropped_assignments =
+    List.fold_right
+      (fun (keeper_name, runtime_id) (kept, dropped) ->
+         if is_missing runtime_id
+         then kept, { keeper_name; runtime_id } :: dropped
+         else (keeper_name, runtime_id) :: kept, dropped)
+      assignments
+      ([], [])
+  in
+  let default_drop =
+    if is_missing configured_default.id
+    then Some { route_name = "[runtime].default"; runtime_id = configured_default.id }
+    else None
+  in
+  let drop_route route_name = function
+    | None -> None, None
+    | Some runtime_id when is_missing runtime_id -> None, Some { route_name; runtime_id }
+    | Some _ as value -> value, None
+  in
+  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
+  let structured_judge_id, structured_judge_drop =
+    drop_route "[runtime].structured_judge" structured_judge_id
+  in
+  let cross_verifier_id, cross_verifier_drop =
+    drop_route "[runtime].cross_verifier" cross_verifier_id
+  in
+  let dropped_routes =
+    [ default_drop; librarian_drop; structured_judge_drop; cross_verifier_drop ]
+    |> List.filter_map Fun.id
+  in
+  let kept_media_failover, dropped_media_failover =
+    List.fold_right
+      (fun runtime_id (kept, dropped) ->
+         if is_missing runtime_id
+         then kept, runtime_id :: dropped
+         else runtime_id :: kept, dropped)
+      media_failover
+      ([], [])
+  in
+  let kept_lanes, dropped_lane_candidates, dropped_lanes =
+    List.fold_right
+      (fun (lane : Runtime_lane.t) (kept, dropped_candidates, dropped_lanes) ->
+         let kept_candidates, dropped_candidates_for_lane =
+           List.fold_right
+             (fun runtime_id (kept_ids, dropped_ids) ->
+                if is_missing runtime_id
+                then kept_ids, runtime_id :: dropped_ids
+                else runtime_id :: kept_ids, dropped_ids)
+             (Runtime_lane.ordered_candidates lane)
+             ([], [])
+         in
+         let dropped_candidates =
+           match dropped_candidates_for_lane with
+           | [] -> dropped_candidates
+           | runtime_ids ->
+             { lane_id = Runtime_lane.id lane; runtime_ids } :: dropped_candidates
+         in
+         match kept_candidates with
+         | [] ->
+           ( kept
+           , dropped_candidates
+           , { lane_id = Runtime_lane.id lane
+             ; runtime_ids = Runtime_lane.ordered_candidates lane
+             }
+             :: dropped_lanes )
+         | _ ->
+           ( Runtime_lane.make
+               ~id:(Runtime_lane.id lane)
+               ~strategy:(Runtime_lane.strategy lane)
+               kept_candidates
+             :: kept
+           , dropped_candidates
+           , dropped_lanes ))
+      lanes
+      ([], [], [])
+  in
+  let has_routing_references =
+    (not (List.is_empty dropped_assignments))
+    || (not (List.is_empty dropped_routes))
+    || (not (List.is_empty dropped_media_failover))
+    || (not (List.is_empty dropped_lane_candidates))
+    || not (List.is_empty dropped_lanes)
+  in
   match active_runtimes with
   | [] ->
     Error
@@ -565,97 +703,20 @@ let degrade_loaded_for_missing_catalog
          "%s: all configured runtime models are absent from the OAS capability \
           catalog; cannot degrade without dispatching through provider_default"
          report.config_path)
-  | _ when is_missing configured_default.id ->
+  | _ when has_routing_references ->
     Error
-      (Printf.sprintf
-         "%s: [runtime].default = %S is absent from the OAS capability catalog; \
-          cannot degrade without silently routing unassigned keepers to a \
-          different default runtime"
-         report.config_path
-         configured_default.id)
+      (missing_reference_error
+         ~config_path:report.config_path
+         ~dropped_assignments
+         ~dropped_routes
+         ~dropped_media_failover
+         ~dropped_lane_candidates
+         ~dropped_lanes)
   | _ ->
-    let effective_default = configured_default in
-    let disabled_runtime_ids =
-      report.missing_models
-      |> List.map (fun (missing : missing_catalog_model) -> missing.runtime_id)
-      |> List.sort_uniq String.compare
-    in
-    let kept_assignments, dropped_assignments =
-      List.fold_right
-        (fun (keeper_name, runtime_id) (kept, dropped) ->
-           if is_missing runtime_id
-           then kept, { keeper_name; runtime_id } :: dropped
-           else (keeper_name, runtime_id) :: kept, dropped)
-        assignments
-        ([], [])
-    in
-    let drop_route route_name = function
-      | None -> None, None
-      | Some runtime_id when is_missing runtime_id ->
-        None, Some { route_name; runtime_id }
-      | Some _ as value -> value, None
-    in
-    let librarian_id, librarian_drop = drop_route "runtime.librarian" librarian_id in
-    let structured_judge_id, structured_judge_drop =
-      drop_route "runtime.structured_judge" structured_judge_id
-    in
-    let cross_verifier_id, cross_verifier_drop =
-      drop_route "runtime.cross_verifier" cross_verifier_id
-    in
-    let dropped_routes =
-      [ librarian_drop; structured_judge_drop; cross_verifier_drop ]
-      |> List.filter_map Fun.id
-    in
-    let kept_media_failover, dropped_media_failover =
-      List.fold_right
-        (fun runtime_id (kept, dropped) ->
-           if is_missing runtime_id
-           then kept, runtime_id :: dropped
-           else runtime_id :: kept, dropped)
-        media_failover
-        ([], [])
-    in
-    let kept_lanes, dropped_lane_candidates, dropped_lanes =
-      List.fold_right
-        (fun (lane : Runtime_lane.t) (kept, dropped_candidates, dropped_lanes) ->
-           let kept_candidates, dropped_candidates_for_lane =
-             List.fold_right
-               (fun runtime_id (kept_ids, dropped_ids) ->
-                  if is_missing runtime_id
-                  then kept_ids, runtime_id :: dropped_ids
-                  else runtime_id :: kept_ids, dropped_ids)
-               (Runtime_lane.ordered_candidates lane)
-               ([], [])
-           in
-           let dropped_candidates =
-             match dropped_candidates_for_lane with
-             | [] -> dropped_candidates
-             | runtime_ids ->
-               { lane_id = Runtime_lane.id lane; runtime_ids } :: dropped_candidates
-           in
-           match kept_candidates with
-           | [] ->
-             ( kept
-             , dropped_candidates
-             , { lane_id = Runtime_lane.id lane
-               ; runtime_ids = Runtime_lane.ordered_candidates lane
-               }
-               :: dropped_lanes )
-           | _ ->
-             ( Runtime_lane.make
-                 ~id:(Runtime_lane.id lane)
-                 ~strategy:(Runtime_lane.strategy lane)
-                 kept_candidates
-               :: kept
-             , dropped_candidates
-             , dropped_lanes ))
-        lanes
-        ([], [], [])
-    in
     let degradation =
       { report
       ; configured_default_runtime_id = configured_default.id
-      ; effective_default_runtime_id = effective_default.id
+      ; effective_default_runtime_id = configured_default.id
       ; disabled_runtime_ids
       ; dropped_assignments
       ; dropped_routes
@@ -666,7 +727,7 @@ let degrade_loaded_for_missing_catalog
     in
     Ok
       ( ( active_runtimes
-        , effective_default
+        , configured_default
         , kept_assignments
         , librarian_id
         , structured_judge_id

@@ -83,7 +83,8 @@ type startup_degradation =
 (** Operator-visible startup degradation. Missing-catalog runtime bindings are
     removed from the active runtime set so requests never dispatch through OAS
     [provider_default]. The server may continue only when at least one
-    catalog-known runtime remains. *)
+    catalog-known runtime remains and no routing config references a disabled
+    runtime id. *)
 
 type init_default_outcome =
   | Initialized
@@ -150,11 +151,11 @@ val init_default_strict_report :
 val init_default_degraded_report :
   config_path:string -> (init_default_outcome, strict_init_error) result
 (** Server bootstrap entry point. Applies the strict OAS catalog gate, but when
-    only non-default catalog-membership routes fail it can remove uncatalogued
+    only unreferenced catalog-membership rows fail it can remove uncatalogued
     runtimes from the active runtime set and continue in an operator-visible
-    degraded mode. Routing/parse errors, all-missing runtime sets, and an
-    uncatalogued [\[runtime\].default] remain fatal because server boot must not
-    invent a replacement default runtime. *)
+    degraded mode. Routing/parse errors, all-missing runtime sets, and explicit
+    routing references to uncatalogued runtimes remain fatal so configured intent
+    is never erased into default fallback. *)
 
 module For_testing : sig
   type snapshot

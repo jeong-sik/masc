@@ -165,6 +165,17 @@ let test_git_status_summary_counts_conflicts_once () =
       ck_int "untracked_files" 1 summary.untracked_files;
       ck_int "conflicted_files" 1 summary.conflicted_files
 
+let test_git_status_summary_counts_type_changes () =
+  let output = "T  lib/type-staged.ml\n T lib/type-worktree.ml\n" in
+  match Masc_exec.Output_parse.summarize_git_status_porcelain output with
+  | Error msg -> Alcotest.fail msg
+  | Ok summary ->
+      ck_int "changed_files" 2 summary.changed_files;
+      ck_int "staged_files" 1 summary.staged_files;
+      ck_int "unstaged_files" 1 summary.unstaged_files;
+      ck_int "untracked_files" 0 summary.untracked_files;
+      ck_int "conflicted_files" 0 summary.conflicted_files
+
 let test_git_status_summary_rejects_malformed_rows () =
   match Masc_exec.Output_parse.summarize_git_status_porcelain "M\n" with
   | Ok _ -> Alcotest.fail "malformed row should fail loud"
@@ -184,5 +195,6 @@ let () =
   test_cargo_test_failures ();
   test_git_status_unchanged ();
   test_git_status_summary_counts_conflicts_once ();
+  test_git_status_summary_counts_type_changes ();
   test_git_status_summary_rejects_malformed_rows ();
-  print_endline "test_output_parse_p14: 14/14 passed"
+  print_endline "test_output_parse_p14: 15/15 passed"

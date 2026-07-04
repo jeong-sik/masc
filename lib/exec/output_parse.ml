@@ -60,7 +60,7 @@ let git_porcelain_conflict x y =
   | _ -> false
 
 let git_porcelain_status_char = function
-  | ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!' -> true
+  | ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | 'U' | '?' | '!' -> true
   | _ -> false
 
 let update_git_status_summary summary line =

@@ -101,7 +101,7 @@ describe('SettingsRepositoriesSection', () => {
 
     const entry = container.querySelector('[data-testid="settings-repo-mapping-entry"]')
     expect(entry?.textContent).toContain('Keeper 접근')
-    expect(entry?.textContent).toContain('매핑이 없으면 keeper 개인 clone 기본 범위를 사용합니다')
+    expect(entry?.textContent).toContain('매핑이 없으면 등록된 keeper 개인 clone 기본 범위를 사용합니다')
 
     ;(container.querySelector('[data-testid="settings-repo-mapping-open"]') as HTMLButtonElement).click()
     await flush()

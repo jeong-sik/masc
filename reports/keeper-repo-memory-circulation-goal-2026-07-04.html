@@ -200,7 +200,7 @@
         <article class="card">
           <h3>Backend Default Is Aligned</h3>
           <span class="status good">branch patch complete</span>
-          <p>Missing keeper mapping now inherits the default wildcard scope for keeper-local clones, while explicit mappings can restrict access and malformed mapping files still fail closed.</p>
+          <p>Missing keeper mapping now inherits the default wildcard scope for registered keeper-local clones, while explicit mappings can restrict access and malformed mapping files or unregistered repository IDs still fail closed.</p>
           <div class="evidence">
             <code>Keeper_repo_mapping.is_allowed</code> returns true on <code>Mapping_missing</code>.<br>
             <code>Keeper_sandbox_control</code> marks missing mapping as <code>allowed</code> with <code>policy_default_scope</code>.
@@ -245,7 +245,7 @@
             <td><code>repositories.toml</code>, keeper sandbox <code>repos/</code>, git remotes.</td>
             <td>Keeper fact JSONL, librarian output, GC report, consolidation plan.</td>
             <td>IDE repo picker and settings must not invent availability.</td>
-            <td>Make missing mapping mean default all-access for keeper-local clones, with explicit mapping as an optional filter.</td>
+            <td>Make missing mapping mean default access to registered keeper-local clones, with explicit mapping as an optional filter.</td>
           </tr>
           <tr>
             <td><strong>Permission / Safety</strong></td>

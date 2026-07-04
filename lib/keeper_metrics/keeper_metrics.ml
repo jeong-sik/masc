@@ -243,7 +243,8 @@ type t =
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
-  | KeeperRepoMappingDeniedMissing      (* counter: keeper repo mapping decision: missing mapping *)
+  | KeeperRepoMappingDefaultScopeAllowed (* counter: missing mapping default-scope access allowed *)
+  | KeeperRepoMappingDeniedUnregistered (* counter: repository policy denied an unregistered repo id *)
   | KeeperRepoMappingDeniedNotInMapping (* counter: keeper repo mapping decision: repo not in mapping *)
   | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
   | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
@@ -513,7 +514,10 @@ let to_string = function
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
-  | KeeperRepoMappingDeniedMissing -> "masc_keeper_repo_mapping_denied_missing_total"
+  | KeeperRepoMappingDefaultScopeAllowed ->
+    "masc_keeper_repo_mapping_default_scope_allowed_total"
+  | KeeperRepoMappingDeniedUnregistered ->
+    "masc_keeper_repo_mapping_denied_unregistered_total"
   | KeeperRepoMappingDeniedNotInMapping -> "masc_keeper_repo_mapping_denied_not_in_mapping_total"
   | KeeperRepoMappingLoadError -> "masc_keeper_repo_mapping_load_error_total"
   | KeeperRepoMappingRepositoryIdentityMismatch ->
@@ -588,7 +592,8 @@ let all : t list =
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal;
-  KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
+  KeeperRepoMappingDefaultScopeAllowed; KeeperRepoMappingDeniedUnregistered;
+  KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;
   RawTraceSinkDegraded; WireCaptureResponseSuppressed; WireCaptureWriteFailures;
   WireCaptureRecordSkipped

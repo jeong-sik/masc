@@ -302,6 +302,20 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
       (fun (r : repository) -> String_set.mem r.id mapping_id_set)
       repos
 
+let repository_registered ~base_path ~repository_id =
+  match Repo_store.load_all ~base_path with
+  | Error msg ->
+    Log.Misc.warn
+      "[KeeperRepoMapping] repository_registered: repo store load failed for \
+       repository %s — access denied fail-closed (error: %s)"
+      repository_id msg;
+    Error msg
+  | Ok repos ->
+    Ok
+      (List.exists
+         (fun (repo : repository) -> String.equal repo.id repository_id)
+         repos)
+
 let log_mapping_load_error_if_new ~keeper_id msg =
   let rec mark () =
     let current = Atomic.get logged_mapping_errors in
@@ -321,7 +335,8 @@ let log_mapping_load_error_if_new ~keeper_id msg =
 ;;
 
 type policy_decision =
-  | Policy_decision_missing
+  | Policy_decision_default_scope_allowed
+  | Policy_decision_unregistered_repository
   | Policy_decision_not_in_mapping
   | Policy_decision_load_error
   | Policy_decision_repository_identity_mismatch
@@ -330,8 +345,16 @@ type policy_decision =
 let record_policy_decision ~keeper_id ?repository_id decision =
   let metric, extra_labels =
     match decision with
-    | Policy_decision_missing ->
-      (Keeper_metrics.KeeperRepoMappingDeniedMissing, [])
+    | Policy_decision_default_scope_allowed ->
+      ( Keeper_metrics.KeeperRepoMappingDefaultScopeAllowed
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
+    | Policy_decision_unregistered_repository ->
+      ( Keeper_metrics.KeeperRepoMappingDeniedUnregistered
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
     | Policy_decision_not_in_mapping ->
       ( Keeper_metrics.KeeperRepoMappingDeniedNotInMapping
       , match repository_id with
@@ -357,17 +380,30 @@ let record_policy_decision ~keeper_id ?repository_id decision =
 ;;
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
-  match lookup_mapping ~base_path ~keeper_id with
-  | Mapping_missing _ -> true
-  | Mapping_load_error msg ->
+  match repository_registered ~base_path ~repository_id with
+  | Error _ ->
+    record_policy_decision ~keeper_id ~repository_id
+      Policy_decision_repository_store_error;
+    false
+  | Ok false ->
+    record_policy_decision ~keeper_id ~repository_id
+      Policy_decision_unregistered_repository;
+    false
+  | Ok true -> (
+    match lookup_mapping ~base_path ~keeper_id with
+    | Mapping_missing _ ->
+      record_policy_decision ~keeper_id ~repository_id
+        Policy_decision_default_scope_allowed;
+      true
+    | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
       record_policy_decision ~keeper_id Policy_decision_load_error;
       false
-  | Mapping_found mapping ->
+    | Mapping_found mapping ->
       if mapping_allows_repository mapping ~repository_id then true
       else (
         record_policy_decision ~keeper_id ~repository_id Policy_decision_not_in_mapping;
-        false)
+        false))
 
 let validate_access ~keeper_id ~repository_id ~base_path =
   if is_allowed ~keeper_id ~repository_id ~base_path then Ok ()

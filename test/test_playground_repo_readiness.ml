@@ -76,7 +76,8 @@ let repo_mapping_decision_metric_total () =
   List.fold_left
     (fun total metric -> total +. metric_total metric)
     0.0
-    [ Keeper_metrics.KeeperRepoMappingDeniedMissing;
+    [ Keeper_metrics.KeeperRepoMappingDefaultScopeAllowed;
+      Keeper_metrics.KeeperRepoMappingDeniedUnregistered;
       Keeper_metrics.KeeperRepoMappingDeniedNotInMapping;
       Keeper_metrics.KeeperRepoMappingLoadError;
       Keeper_metrics.KeeperRepoMappingRepositoryIdentityMismatch;
@@ -198,6 +199,14 @@ let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc-mcp" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc-mcp"
+        ~name:"masc-mcp"
+        ~url:"https://github.com/jeong-sik/masc-mcp.git"
+        ~local_path:repo_path
+    ];
   create_playground_repo_marker ~config ~meta "masc-mcp";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc-mcp" in
   check bool "policy allows missing mapping default scope" true
@@ -229,6 +238,14 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+    ];
   write_mapping base_path meta.name [ "*" ];
   create_playground_repo_marker ~config ~meta "masc";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
@@ -329,6 +346,14 @@ let test_playground_repos_projection_does_not_record_policy_metrics () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+    ];
   create_playground_repo_marker ~config ~meta "masc";
   let before = repo_mapping_decision_metric_total () in
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in

@@ -289,7 +289,7 @@ export function SettingsRepositoriesSection() {
       <div class="set-row" data-testid="settings-repo-mapping-entry">
         <div class="set-row-l">
           <div class="set-label">Keeper 접근</div>
-          <div class="set-hint">명시 매핑은 선택 접근 필터입니다. 매핑이 없으면 keeper 개인 clone 기본 범위를 사용합니다.</div>
+          <div class="set-hint">명시 매핑은 선택 접근 필터입니다. 매핑이 없으면 등록된 keeper 개인 clone 기본 범위를 사용합니다.</div>
         </div>
         <div class="set-row-c">
           <button

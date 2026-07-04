@@ -15,7 +15,7 @@
 // swapped".
 
 import { html } from 'htm/preact'
-import { KNOWN_CONNECTOR_IDS } from './connector-status'
+import { KNOWN_CONNECTOR_IDS } from './connector-constants'
 import { SkeletonCircle } from './common/skeleton'
 import { SurfaceCard } from './common/card'
 

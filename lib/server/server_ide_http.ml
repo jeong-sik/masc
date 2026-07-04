@@ -193,22 +193,45 @@ let parse_annotation_kind = function
      | None -> Error "Invalid annotation kind")
 ;;
 
-let parse_positive_int_query ?(default = 50) ?(max_value = 200) uri name =
+let parse_int_query uri name =
   match Uri.get_query_param uri name with
-  | Some s ->
-    (match int_of_string_opt s with
-     | Some n when n > 0 -> min n max_value
-     | _ -> default)
-  | None -> default
+  | None -> Ok None
+  | Some raw ->
+    let value = String.trim raw in
+    (match int_of_string_opt value with
+     | Some n -> Ok (Some n)
+     | None -> Error (Printf.sprintf "%s must be an integer" name))
+;;
+
+let parse_positive_int_query ?(default = 50) ?max_value uri name =
+  match parse_int_query uri name with
+  | Error _ as err -> err
+  | Ok None -> Ok default
+  | Ok (Some n) when n > 0 ->
+    let n =
+      match max_value with
+      | Some max_value -> min n max_value
+      | None -> n
+    in
+    Ok n
+  | Ok (Some _) -> Error (Printf.sprintf "%s must be greater than 0" name)
 ;;
 
 let parse_non_negative_int_query ?(default = 0) uri name =
-  match Uri.get_query_param uri name with
-  | Some s ->
-    (match int_of_string_opt s with
-     | Some n when n > 0 -> n
-     | _ -> default)
-  | None -> default
+  match parse_int_query uri name with
+  | Error _ as err -> err
+  | Ok None -> Ok default
+  | Ok (Some n) when n >= 0 -> Ok n
+  | Ok (Some _) -> Error (Printf.sprintf "%s must be greater than or equal to 0" name)
+;;
+
+let parse_pagination_query ?max_limit uri =
+  match parse_positive_int_query ?max_value:max_limit uri "limit" with
+  | Error _ as err -> err
+  | Ok limit ->
+    (match parse_non_negative_int_query uri "offset" with
+     | Error _ as err -> err
+     | Ok offset -> Ok (limit, offset))
 ;;
 
 let event_kind_param uri =
@@ -297,14 +320,12 @@ let build_presence_snapshot state =
     ]
 ;;
 
-let build_cursor_snapshot state uri =
+let build_cursor_snapshot state uri ~limit ~offset =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
   let partition = resolve_partition_for_read ~state ~uri in
   let keeper_id = keeper_id_param uri in
   let file_path = file_path_param uri in
-  let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
-  let offset = parse_non_negative_int_query ~default:0 uri "offset" in
   let cursors =
     Ide_bridge.list_cursors
       ~base_path:base
@@ -674,40 +695,46 @@ let add_routes router =
              (json_error msg)
              reqd
          | Ok kind ->
-           let base = base_path_of_state state in
-           let partition = resolve_partition_for_read ~state ~uri in
-           let keeper_id = keeper_id_param uri in
-           let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
-           let offset = parse_non_negative_int_query ~default:0 uri "offset" in
-           let events =
-             Ide_bridge.list_events
-               ~base_path:base
-               ~partition
-               ?kind
-               ?keeper_id
-               ~limit
-               ~offset
-               ()
-           in
-           let kind_json =
-             match kind with
-             | Some k -> `String (Ide_bridge.event_kind_to_string k)
-             | None -> `String "all"
-           in
-           let result =
-             `Assoc
-               [ "events", `List events
-               ; "count", `Int (List.length events)
-               ; "kind", kind_json
-               ; "limit", `Int limit
-               ; "offset", `Int offset
-               ]
-           in
-           Http.Response.json_value
-             ~compress:true
-             ~request
-             (json_ok result)
-             reqd)
+           (match parse_pagination_query ~max_limit:200 uri with
+            | Error msg ->
+              Http.Response.json_value
+                ~status:`Bad_request
+                ~request
+                (json_error msg)
+                reqd
+            | Ok (limit, offset) ->
+              let base = base_path_of_state state in
+              let partition = resolve_partition_for_read ~state ~uri in
+              let keeper_id = keeper_id_param uri in
+              let events =
+                Ide_bridge.list_events
+                  ~base_path:base
+                  ~partition
+                  ?kind
+                  ?keeper_id
+                  ~limit
+                  ~offset
+                  ()
+              in
+              let kind_json =
+                match kind with
+                | Some k -> `String (Ide_bridge.event_kind_to_string k)
+                | None -> `String "all"
+              in
+              let result =
+                `Assoc
+                  [ "events", `List events
+                  ; "count", `Int (List.length events)
+                  ; "kind", kind_json
+                  ; "limit", `Int limit
+                  ; "offset", `Int offset
+                  ]
+              in
+              Http.Response.json_value
+                ~compress:true
+                ~request
+                (json_ok result)
+                reqd))
       request
       reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
@@ -727,12 +754,20 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         let snapshot = build_cursor_snapshot state uri in
-         Http.Response.json_value
-           ~compress:true
-           ~request
-           (json_ok snapshot)
-           reqd)
+         match parse_pagination_query ~max_limit:200 uri with
+         | Error msg ->
+           Http.Response.json_value
+             ~status:`Bad_request
+             ~request
+             (json_error msg)
+             reqd
+         | Ok (limit, offset) ->
+           let snapshot = build_cursor_snapshot state uri ~limit ~offset in
+           Http.Response.json_value
+             ~compress:true
+             ~request
+             (json_ok snapshot)
+             reqd)
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
@@ -855,50 +890,58 @@ let add_routes router =
     with_public_read
       (fun state _req inner_reqd ->
          let uri = Uri.of_string request.target in
-         let origin = get_origin request in
-         let headers =
-           Httpun.Headers.of_list
-             ([ "content-type", "text/event-stream"
-              ; "cache-control", "no-cache"
-              ; "connection", "keep-alive"
-              ; "x-accel-buffering", "no"
-              ]
-              @ cors_headers origin)
-         in
-         let response = Httpun.Response.create ~headers `OK in
-         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
-         let write_snapshot () =
-           let snapshot_json =
-             Yojson.Safe.to_string (build_cursor_snapshot state uri)
+         match parse_pagination_query ~max_limit:200 uri with
+         | Error msg ->
+           Http.Response.json_value
+             ~status:`Bad_request
+             ~request
+             (json_error msg)
+             inner_reqd
+         | Ok (limit, offset) ->
+           let origin = get_origin request in
+           let headers =
+             Httpun.Headers.of_list
+               ([ "content-type", "text/event-stream"
+                ; "cache-control", "no-cache"
+                ; "connection", "keep-alive"
+                ; "x-accel-buffering", "no"
+                ]
+                @ cors_headers origin)
            in
-           let event = Printf.sprintf "data: %s\n\n" snapshot_json in
-           Httpun.Body.Writer.write_string writer event
-         in
-         write_snapshot ();
-         match state.Mcp_server.sw, state.Mcp_server.clock with
-         | Some sw, Some clock ->
-           Eio.Fiber.fork ~sw (fun () ->
-             let rec loop () =
-               (try
-                  Eio.Time.sleep clock 30.0;
-                  write_snapshot ();
-                  loop ()
-                with
+           let response = Httpun.Response.create ~headers `OK in
+           let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+           let write_snapshot () =
+             let snapshot_json =
+               Yojson.Safe.to_string (build_cursor_snapshot state uri ~limit ~offset)
+             in
+             let event = Printf.sprintf "data: %s\n\n" snapshot_json in
+             Httpun.Body.Writer.write_string writer event
+           in
+           write_snapshot ();
+           (match state.Mcp_server.sw, state.Mcp_server.clock with
+            | Some sw, Some clock ->
+              Eio.Fiber.fork ~sw (fun () ->
+                let rec loop () =
+                  (try
+                     Eio.Time.sleep clock 30.0;
+                     write_snapshot ();
+                     loop ()
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                     Log.Server.debug
+                       "IDE cursor SSE ping loop error: %s"
+                       (Printexc.to_string exn));
+                  Httpun.Body.Writer.close writer
+                in
+                try loop () with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
-                  Log.Server.debug
-                    "IDE cursor SSE ping loop error: %s"
-                    (Printexc.to_string exn));
-               Httpun.Body.Writer.close writer
-             in
-             try loop () with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Server.error
-                 "IDE cursor SSE loop exited: %s"
-                 (Printexc.to_string exn);
-               Httpun.Body.Writer.close writer)
-         | _ -> Httpun.Body.Writer.close writer)
+                  Log.Server.error
+                    "IDE cursor SSE loop exited: %s"
+                    (Printexc.to_string exn);
+                  Httpun.Body.Writer.close writer)
+            | _ -> Httpun.Body.Writer.close writer))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/memory" (fun request reqd ->
@@ -911,57 +954,60 @@ let add_routes router =
            | Some k when k <> "" -> Some k
            | _ -> None
          in
-         let limit =
-           match Uri.get_query_param uri "limit" with
-           | Some s -> (try int_of_string s with _ -> 50)
-           | None -> 50
-         in
-         (* Memory tiers: retrospective, episode, semantic.
-            Currently returns annotation-based memory entries.
-            Future: integrate with Neo4j/pgvector for semantic search. *)
-         let filter : Ide_annotation_types.annotation_filter =
-           { file_path = None; keeper_id; goal_id = None; task_id = None }
-         in
-         let partition = resolve_partition_for_read ~state ~uri in
-         let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
-         let entries =
-           List.map (fun (a : Ide_annotation_types.annotation) ->
-             `Assoc [
-               ("id", `String a.id);
-               ("kind", `String (Ide_annotation_types.annotation_kind_to_string a.kind));
-               ("content", `String a.content);
-               ("file_path", `String a.file_path);
-               ("line_start", `Int a.line_start);
-               ("line_end", `Int a.line_end);
-               ("keeper_id", `String a.keeper_id);
-               ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
-               ("source_kind", `String ide_memory_source_kind);
-               ("retrieval_status", `String ide_memory_retrieval_status);
-               ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
-               ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
-             ])
-           (List.filteri (fun i _ -> i < limit) annotations)
-         in
-         let result = `Assoc [
-           ("entries", `List entries);
-           ("total", `Int (List.length annotations));
-           ("limit", `Int limit);
-           ( "contract"
-           , `Assoc
-               [ ("source_kind", `String ide_memory_source_kind)
-               ; ("retrieval_status", `String ide_memory_retrieval_status)
-               ; ("semantic_memory_status", `String ide_memory_semantic_status)
-               ; ("episodic_memory_status", `String ide_memory_episodic_status)
-               ] );
-         ] in
-         let origin = get_origin request in
-         let headers =
-           Httpun.Headers.of_list
-             (("content-type", "application/json") :: cors_headers origin)
-         in
-         let body = Yojson.Safe.to_string result in
-         let response = Httpun.Response.create ~headers `OK in
-         Httpun.Reqd.respond_with_string inner_reqd response body)
+         match parse_positive_int_query uri "limit" with
+         | Error msg ->
+           Http.Response.json_value
+             ~status:`Bad_request
+             ~request
+             (json_error msg)
+             inner_reqd
+         | Ok limit ->
+           (* Memory tiers: retrospective, episode, semantic.
+              Currently returns annotation-based memory entries.
+              Future: integrate with Neo4j/pgvector for semantic search. *)
+           let filter : Ide_annotation_types.annotation_filter =
+             { file_path = None; keeper_id; goal_id = None; task_id = None }
+           in
+           let partition = resolve_partition_for_read ~state ~uri in
+           let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
+           let entries =
+             List.map (fun (a : Ide_annotation_types.annotation) ->
+               `Assoc [
+                 ("id", `String a.id);
+                 ("kind", `String (Ide_annotation_types.annotation_kind_to_string a.kind));
+                 ("content", `String a.content);
+                 ("file_path", `String a.file_path);
+                 ("line_start", `Int a.line_start);
+                 ("line_end", `Int a.line_end);
+                 ("keeper_id", `String a.keeper_id);
+                 ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
+                 ("source_kind", `String ide_memory_source_kind);
+                 ("retrieval_status", `String ide_memory_retrieval_status);
+                 ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
+                 ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
+               ])
+             (List.filteri (fun i _ -> i < limit) annotations)
+           in
+           let result = `Assoc [
+             ("entries", `List entries);
+             ("total", `Int (List.length annotations));
+             ("limit", `Int limit);
+             ( "contract"
+             , `Assoc
+                 [ ("source_kind", `String ide_memory_source_kind)
+                 ; ("retrieval_status", `String ide_memory_retrieval_status)
+                 ; ("semantic_memory_status", `String ide_memory_semantic_status)
+                 ; ("episodic_memory_status", `String ide_memory_episodic_status)
+                 ] );
+           ] in
+           let origin = get_origin request in
+           let headers =
+             Httpun.Headers.of_list
+               (("content-type", "application/json") :: cors_headers origin)
+           in
+           let body = Yojson.Safe.to_string result in
+           let response = Httpun.Response.create ~headers `OK in
+           Httpun.Reqd.respond_with_string inner_reqd response body)
       request
       reqd)
 ;;

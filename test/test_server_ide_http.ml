@@ -200,6 +200,13 @@ let json_list_member label key json =
   | other -> failf "%s: expected list member %s, got %s" label key (Yojson.Safe.to_string other)
 ;;
 
+let error_message_of_response response =
+  response
+  |> response_body
+  |> Yojson.Safe.from_string
+  |> json_string_member "error response" "error"
+;;
+
 let setup_state base_path =
   save_auth_config base_path;
   let state = Masc.Mcp_server.create_state ~base_path in
@@ -336,6 +343,38 @@ let test_memory_response_declares_annotation_source_contract () =
       (json_string_member "entry" "retrieval_status" entry))
 ;;
 
+let test_get_events_rejects_invalid_limit () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/events?limit=not-an-int" () in
+    let response = dispatch router request in
+    check_status "GET events invalid limit returns 400" 400 response;
+    check string "typed limit error" "limit must be an integer" (error_message_of_response response))
+;;
+
+let test_get_cursors_rejects_negative_offset () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors?offset=-1" () in
+    let response = dispatch router request in
+    check_status "GET cursors invalid offset returns 400" 400 response;
+    check
+      string
+      "typed offset error"
+      "offset must be greater than or equal to 0"
+      (error_message_of_response response))
+;;
+
+let test_get_memory_rejects_non_positive_limit () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/memory?limit=0" () in
+    let response = dispatch router request in
+    check_status "GET memory invalid limit returns 400" 400 response;
+    check
+      string
+      "typed memory limit error"
+      "limit must be greater than 0"
+      (error_message_of_response response))
+;;
+
 let () =
   run
     "server_ide_http"
@@ -361,6 +400,14 @@ let () =
             "GET memory declares annotation source contract"
             `Quick
             test_memory_response_declares_annotation_source_contract
+        ] )
+    ; ( "query_parsing"
+      , [ test_case "GET events rejects invalid limit" `Quick
+            test_get_events_rejects_invalid_limit
+        ; test_case "GET cursors rejects negative offset" `Quick
+            test_get_cursors_rejects_negative_offset
+        ; test_case "GET memory rejects non-positive limit" `Quick
+            test_get_memory_rejects_non_positive_limit
         ] )
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick

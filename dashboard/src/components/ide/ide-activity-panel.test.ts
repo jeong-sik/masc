@@ -338,6 +338,43 @@ describe('IdeActivityPanel', () => {
     expect(url.searchParams.get('limit')).toBe('50')
   })
 
+  it('surfaces IDE bridge event fetch failures without dropping graph activity', async () => {
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return Promise.reject(new Error('ide bridge events unavailable'))
+      }
+      return new Response(JSON.stringify({
+        events: [{
+          seq: 1,
+          ts_ms: 100,
+          ts_iso: '2026-05-05T10:00:00Z',
+          workspace_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'sangsu' },
+          subject: { kind: 'log', id: 'turn-graph' },
+          payload: {
+            file_path: 'lib/runtime.ml',
+            line: 4,
+            log_id: 'turn-graph',
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('turn-graph')
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent)
+        .toBe('bridge degraded 1 failed')
+    })
+    expect(container.querySelector('.ide-activity-refresh-status')?.getAttribute('title'))
+      .toContain('IDE bridge events unavailable')
+  })
+
   it('shows linked context coverage for mixed activity events', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({

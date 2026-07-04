@@ -73,15 +73,28 @@ interface ActivityFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly workspaceId: string
   readonly ok: boolean
+  readonly bridgeOk: boolean
 }
 
-type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline'
+interface ActivityGraphFetchResult {
+  readonly events: ReadonlyArray<RunActivityEvent>
+  readonly workspaceId: string
+  readonly ok: boolean
+}
+
+interface BridgeFetchResult {
+  readonly events: ReadonlyArray<RunActivityEvent>
+  readonly ok: boolean
+}
+
+type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline' | 'degraded'
 
 interface ActivityRefreshState {
   readonly tone: ActivityRefreshTone
   readonly lastOkMs: number | null
   readonly lastAttemptMs: number | null
   readonly failedCount: number
+  readonly bridgeFailedCount: number
 }
 
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
@@ -93,6 +106,7 @@ const INITIAL_REFRESH_STATE: ActivityRefreshState = {
   lastOkMs: null,
   lastAttemptMs: null,
   failedCount: 0,
+  bridgeFailedCount: 0,
 }
 interface ProgressSurfaceSpec {
   readonly key: keyof RunActivityContext
@@ -199,14 +213,15 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
 
 async function fetchActivityEvents(repoId?: string | null): Promise<ActivityFetchResult> {
   const graph = await fetchActivityGraphEvents()
-  const bridgeEvents = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId)
+  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId)
   return {
     ...graph,
-    events: mergeRunActivityEvents(graph.events, bridgeEvents),
+    bridgeOk: bridge.ok,
+    events: mergeRunActivityEvents(graph.events, bridge.events),
   }
 }
 
-async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
+async function fetchActivityGraphEvents(): Promise<ActivityGraphFetchResult> {
   try {
     const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
@@ -224,12 +239,15 @@ async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
   repoId?: string | null,
-): Promise<ReadonlyArray<RunActivityEvent>> {
+): Promise<BridgeFetchResult> {
   try {
     const events = await fetchIdeEvents({ limit: 50, repoId })
-    return events.map((event, index) => mapIdeBridgeEvent(event, workspaceId, index))
+    return {
+      events: events.map((event, index) => mapIdeBridgeEvent(event, workspaceId, index)),
+      ok: true,
+    }
   } catch {
-    return EMPTY_ACTIVITY
+    return { events: EMPTY_ACTIVITY, ok: false }
   }
 }
 
@@ -449,23 +467,25 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok } = await fetchActivityEvents(repoId)
+      const { events, workspaceId, ok, bridgeOk } = await fetchActivityEvents(repoId)
       if (cancelled) return
       if (ok) {
         store.reset(workspaceId)
         store.seed(events)
-        setRefreshState({
-          tone: 'live',
+        setRefreshState(prev => ({
+          tone: bridgeOk ? 'live' : 'degraded',
           lastOkMs: Date.now(),
           lastAttemptMs: attemptMs,
           failedCount: 0,
-        })
+          bridgeFailedCount: bridgeOk ? 0 : prev.bridgeFailedCount + 1,
+        }))
       } else {
         setRefreshState(prev => ({
           tone: prev.lastOkMs === null ? 'offline' : 'stale',
           lastOkMs: prev.lastOkMs,
           lastAttemptMs: attemptMs,
           failedCount: prev.failedCount + 1,
+          bridgeFailedCount: prev.bridgeFailedCount,
         }))
       }
       if (refreshMs !== null) timer = setTimeout(load, refreshMs)
@@ -886,12 +906,17 @@ function activityRouteContext(item: RunActivityEvent): IdeContextRouteContext {
 function activityRefreshLabel(state: ActivityRefreshState, refreshMs: number | null): string {
   if (state.tone === 'loading') return 'syncing'
   if (state.tone === 'live') return refreshMs === null ? 'loaded' : 'live'
+  if (state.tone === 'degraded') {
+    const failures = state.bridgeFailedCount === 1 ? '1 failed' : `${state.bridgeFailedCount} failed`
+    return `bridge degraded ${failures}`
+  }
   const failures = state.failedCount === 1 ? '1 failed' : `${state.failedCount} failed`
   return state.tone === 'offline' ? `offline ${failures}` : `stale ${failures}`
 }
 
 function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | null): string {
   const parts = [`Activity refresh ${activityRefreshLabel(state, refreshMs)}`]
+  if (state.tone === 'degraded') parts.push('IDE bridge events unavailable')
   if (state.lastOkMs !== null) parts.push(`last update ${formatActivityTime(state.lastOkMs)}`)
   if (state.lastAttemptMs !== null) parts.push(`last attempt ${formatActivityTime(state.lastAttemptMs)}`)
   if (refreshMs !== null) parts.push(`poll ${Math.max(1, Math.round(refreshMs / 1000))}s`)

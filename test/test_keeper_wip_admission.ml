@@ -1,7 +1,6 @@
 open Alcotest
 
 module Admission = Masc.Keeper_wip_admission
-module Env_config_core = Masc.Env_config_core
 module Task_runtime = Masc.Keeper_tool_task_runtime
 module U = Yojson.Safe.Util
 

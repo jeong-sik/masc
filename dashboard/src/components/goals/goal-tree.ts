@@ -32,6 +32,7 @@ import type { GoalDossierProps, GoalDossierRelatedItem } from '../memory/goal-do
 import type {
   DashboardGoalDetailResponse,
   DashboardWorkspaceFsmViolation,
+  GoalCompletionSummary,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalFsmProjection,
@@ -764,6 +765,27 @@ function TreeTask({ task }: { task: GoalTreeTask }) {
   `
 }
 
+function goalCompletionPctLabel(summary: GoalCompletionSummary): string {
+  if (summary.metric_evaluation === 'unevaluated') return 'metric unevaluated'
+  if (summary.pct == null) return 'unmeasured'
+  return `${summary.pct}%`
+}
+
+function goalCompletionTruthTitle(
+  summary: GoalCompletionSummary,
+  label: string,
+  gateLabel: string,
+): string {
+  const pct = summary.pct == null ? 'pct=unmeasured' : `pct=${summary.pct}%`
+  const metric = `metric_evaluation=${summary.metric_evaluation}`
+  const source = `source=${summary.pct_source}`
+  const unevaluated =
+    summary.metric_evaluation === 'unevaluated'
+      ? '; pct is task-derived/proxy data, not an evaluated goal metric'
+      : ''
+  return `Completion: ${label}; ${pct}; ${source}; ${metric}; ${gateLabel}${unevaluated}`
+}
+
 function GoalCompletionStrip({
   node,
   compact = false,
@@ -774,14 +796,17 @@ function GoalCompletionStrip({
   const summary = goalCompletionSummaryForNode(node)
   const tone = goalCompletionTone(summary)
   const label = goalCompletionLabel(summary)
-  const pctLabel = summary.pct == null ? 'unmeasured' : `${summary.pct}%`
+  const pctLabel = goalCompletionPctLabel(summary)
   const gateLabel = goalCompletionGateLabel(summary)
+  const title = goalCompletionTruthTitle(summary, label, gateLabel)
 
   if (compact) {
     return html`
       <span
         class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${completionToneClass(tone)}"
-        title=${`Completion: ${label}; ${pctLabel}; ${gateLabel}`}
+        title=${title}
+        data-goal-completion-metric-evaluation=${summary.metric_evaluation}
+        data-goal-completion-pct-source=${summary.pct_source}
       >
         ${label}
       </span>
@@ -802,7 +827,14 @@ function GoalCompletionStrip({
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2 text-xs">
         <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
           <div class="text-3xs uppercase text-text-muted">basis</div>
-          <div class="mt-1 font-semibold text-text-strong">${summary.pct_source}</div>
+          <div
+            class="mt-1 font-semibold text-text-strong"
+            title=${title}
+            data-goal-completion-metric-evaluation=${summary.metric_evaluation}
+            data-goal-completion-pct-source=${summary.pct_source}
+          >
+            ${summary.pct_source}${summary.metric_evaluation === 'unevaluated' ? ' · metric unevaluated' : ''}
+          </div>
         </div>
         <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
           <div class="text-3xs uppercase text-text-muted">task open</div>

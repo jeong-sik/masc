@@ -205,21 +205,20 @@ function GoalProgressCard(
   progress: GoalProgress | null,
   taskId: string | null,
 ) {
-  const pctLabel = progress ? formatProgressPct(progress) : '0%'
+  const taskCountLabel = progress ? formatProgressPct(progress) : 'no linked tasks'
   const pctValue = progress ? Math.round(progress.ratio * 100) : 0
   return html`
-    <div class="ide-keeper-work-goal v2-ide-card" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
+    <div class="ide-keeper-work-goal v2-ide-card" role="status" aria-label=${`Goal ${goal.id} linked task count ${taskCountLabel}`}>
       <div class="ide-keeper-work-card-top">
-        <span>GOAL PROGRESS</span>
+        <span>GOAL TASKS</span>
         <span>${goalPhaseLabel(goal.phase)}</span>
       </div>
       <strong title=${goal.title}>${goal.title}</strong>
-      <div class="ide-keeper-work-goal-bar" aria-hidden="true">
+      <div class="ide-keeper-work-goal-bar" aria-hidden="true" title="Linked task count only; metric attainment is not available on this IDE summary card.">
         <span style=${{ width: `${pctValue}%` }} />
       </div>
       <div class="ide-keeper-work-goal-meta">
-        <span>${progress ? `${progress.done}/${progress.total} tasks` : '0/0 tasks'}</span>
-        <span>${pctLabel}</span>
+        <span>${taskCountLabel}</span>
         ${goal.metric ? html`<span title=${goal.metric}>${goal.metric}</span>` : null}
         ${goal.target_value ? html`<span title=${goal.target_value}>target ${goal.target_value}</span>` : null}
       </div>

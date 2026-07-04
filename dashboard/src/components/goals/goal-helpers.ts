@@ -61,12 +61,10 @@ export function goalById(id: string): Goal | undefined {
   return goals.value.find(g => g.id === id)
 }
 
-// -- Derived progress (Phase F-G1) -------------------------------
-// Phase 2 spec (`design-system/preview/cb-group-d.jsx:GoalHorizonTrack`)
-// expects per-goal `progress` / `total`. Backend `Goal` does not surface
-// these — we derive them from linked tasks. `cancelled` tasks are excluded
-// from the denominator so cancelling a task moves the ratio up rather than
-// counting it as failed work.
+// -- Task completion counts --------------------------------------
+// This is not a goal-attainment metric. It is a count of linked tasks from
+// the planning store, used only where the richer dashboard goal-tree summary
+// is not available yet. Metric/attainment truth belongs to the goal-tree API.
 
 export interface GoalProgress {
   done: number
@@ -109,24 +107,23 @@ export function goalProgressFor(goalId: string): GoalProgress {
 }
 
 export function formatProgressPct(p: GoalProgress): string {
-  if (p.total === 0) return '0%'
-  return `${Math.round(p.ratio * 100)}%`
+  if (p.total === 0) return 'no linked tasks'
+  return `${p.done}/${p.total} tasks`
 }
 
 export function TaskProgressBar({ done, total, size = 'md' }: { done: number; total: number; size?: 'sm' | 'md' }) {
   const ratio = total > 0 ? done / total : 0
   const pct = Math.round(ratio * 100)
-  const barColor =
-    pct >= 80 ? 'var(--color-status-ok)'
-    : pct >= 50 ? 'var(--amber-bright)'
-    : pct >= 20 ? 'var(--color-orange-400)'
-    : 'var(--color-status-err)'
-
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden">
-        <div class="${h} rounded-[var(--r-0)] transition-[width] duration-[var(--t-xslow)]" style="width:${pct}%;background:${barColor}"></div>
+      <div
+        class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden"
+        title="Linked task completion count. This is not a goal-attainment metric."
+        data-task-count-meter
+        data-task-count-meter-pct=${pct}
+      >
+        <div class="${h} rounded-[var(--r-0)] transition-[width] duration-[var(--t-xslow)] bg-[var(--color-accent-fg)]" style="width:${pct}%"></div>
       </div>
       <span class="text-2xs font-semibold tabular-nums text-text-muted w-14 text-right">${done}/${total}</span>
     </div>

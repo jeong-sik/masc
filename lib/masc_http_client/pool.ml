@@ -7,9 +7,8 @@
       ([Host_key -> queue]) is built here.
     - Pool itself is process-lifetime, attached to a long-lived
       [Eio.Switch] (typically server root_sw).
-    - Callback API ([request] / [with_connection]) over naked
-      acquire/release for type-level leak resistance (Eio #244
-      exactly-one-owner principle).
+    - Scoped [request] API over naked acquire/release for leak resistance
+      (Eio #244 exactly-one-owner principle).
     - No silent retry — caller decides. (RFC-0107 §"Workaround
       Rejection Bar" anti-pattern.)
 
@@ -585,14 +584,6 @@ let request_with_idle_timeout t
 	         (Printf.sprintf "total timeout after %.1fs" t_total,
 	          !progress_ref))
   | Some _ -> run ()
-
-let with_connection _t ~url:_ _f =
-  (* Phase D.2c: streaming voice_bridge migration uses this.  For now
-     stub raises so that any accidental caller fails loudly; the
-     non-streaming [request] is the supported surface in D.2b. *)
-  raise (Failure "Pool.with_connection: not yet implemented \
-                  (RFC-0107 Phase D.2c — streaming voice_bridge \
-                  migration)")
 
 (* ── Stats ─────────────────────────────────────────────────────── *)
 

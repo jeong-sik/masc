@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { ConnectorOnboardingGrid, onboardingStartLabel } from './connector-onboarding'
 import { resetSetupGuideExpansionState } from './setup-guide-card'
-import { sidecarCommands } from './connector-status'
+import { sidecarCommands } from './connector-constants'
 import { _testResetBulkInflight } from './connector-overview-strip'
 
 describe('ConnectorOnboardingGrid', () => {

@@ -12,14 +12,24 @@ interface MemoryEntry {
   readonly line_end: number
   readonly keeper_id: string
   readonly created_at_ms: number
+  readonly source_kind?: string
+  readonly retrieval_status?: string
   readonly goal_id: string | null
   readonly task_id: string | null
+}
+
+interface MemoryContract {
+  readonly source_kind?: string
+  readonly retrieval_status?: string
+  readonly semantic_memory_status?: string
+  readonly episodic_memory_status?: string
 }
 
 interface MemoryResponse {
   readonly entries: ReadonlyArray<MemoryEntry>
   readonly total: number
   readonly limit: number
+  readonly contract?: MemoryContract
 }
 
 interface IdeMemoryPanelProps {
@@ -43,6 +53,36 @@ function formatTimestamp(ms: number): string {
   const diffHr = Math.floor(diffMin / 60)
   if (diffHr < 24) return `${diffHr}h ago`
   return date.toLocaleDateString()
+}
+
+function memorySourceLabel(sourceKind?: string): string {
+  switch (sourceKind) {
+    case 'ide_annotation':
+      return 'annotation'
+    case 'semantic_memory':
+      return 'semantic'
+    case 'episodic_memory':
+      return 'episode'
+    case undefined:
+    case '':
+      return 'unknown'
+    default:
+      return sourceKind
+  }
+}
+
+function memoryStatusLabel(status?: string): string {
+  switch (status) {
+    case 'annotation_index_only':
+      return 'annotation index'
+    case 'not_configured':
+      return 'not configured'
+    case undefined:
+    case '':
+      return 'unknown'
+    default:
+      return status
+  }
 }
 
 const LENS_NODE_TYPES: MemoryLensProps['nodeTypes'] = {
@@ -102,6 +142,7 @@ function buildLensGraph(entries: ReadonlyArray<MemoryEntry>): {
 export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
   const [entries, setEntries] = useState<ReadonlyArray<MemoryEntry>>([])
   const [total, setTotal] = useState(0)
+  const [contract, setContract] = useState<MemoryContract | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -117,6 +158,7 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
       const data: MemoryResponse = await res.json()
       setEntries(data.entries)
       setTotal(data.total)
+      setContract(data.contract ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -128,11 +170,21 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
     fetchMemory()
   }, [fetchMemory])
 
+  const sourceKind = contract?.source_kind ?? entries[0]?.source_kind
+  const retrievalStatus = contract?.retrieval_status ?? entries[0]?.retrieval_status
+  const semanticStatus = contract?.semantic_memory_status
+
   return html`
     <div class="ide-memory-panel v2-ide-panel" data-testid="ide-memory-panel">
       <div class="ide-memory-panel__header">
         <span class="ide-memory-panel__title">Memory</span>
         <span>
+          <span class="ide-memory-panel__source" title="Memory source">
+            source:${memorySourceLabel(sourceKind)}
+          </span>
+          <span class="ide-memory-panel__source" title="Semantic memory status">
+            semantic:${memoryStatusLabel(semanticStatus)}
+          </span>
           <button
             class="ide-memory-panel__refresh v2-ide-action"
             onClick=${fetchMemory}
@@ -162,6 +214,9 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
                           class="ide-memory-panel__kind"
                           style=${{ color: KIND_COLORS[entry.kind] ?? 'inherit' }}
                         >${entry.kind}</span>
+                        <span class="ide-memory-panel__source">
+                          ${memorySourceLabel(entry.source_kind ?? sourceKind)}
+                        </span>
                         <span class="ide-memory-panel__time">
                           ${formatTimestamp(entry.created_at_ms)}
                         </span>
@@ -174,6 +229,9 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
                       <div class="ide-memory-panel__meta">
                         <span class="ide-memory-panel__file">
                           ${entry.file_path}:${entry.line_start}
+                        </span>
+                        <span class="ide-memory-panel__tag">
+                          retrieval:${memoryStatusLabel(entry.retrieval_status ?? retrievalStatus)}
                         </span>
                         ${entry.goal_id
                           ? html`<span class="ide-memory-panel__tag">goal:${entry.goal_id}</span>`

@@ -2684,6 +2684,24 @@ button.ide-persistence-focus:focus-visible {
   font-size: var(--fs-9);
 }
 
+.ide-memory-panel__source {
+  display: inline-flex;
+  align-items: center;
+  min-height: 17px;
+  max-width: 12rem;
+  padding: 0 5px;
+  margin-right: var(--sp-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--color-bg-muted) 88%, transparent);
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ide-memory-panel__refresh {
   display: inline-flex;
   align-items: center;

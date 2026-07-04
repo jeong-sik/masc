@@ -70,7 +70,8 @@ let payload
     ?(cache_creation_input_tokens = 0)
     ?(cache_read_input_tokens = 0)
     ~cost_usd
-    ~usage_trust =
+    ~usage_trust
+    () =
   H.cost_event_payload
     ~agent_name:"test_agent"
     ~task_id:None
@@ -86,7 +87,7 @@ let payload
 
 let test_untrusted_tokens_positive_cost_is_accounted () =
   (* 0 tokens (untrusted) but a positive provider cost: the footgun row. *)
-  let p = payload ~cost_usd:0.0123 ~usage_trust:untrusted_zero_tokens in
+  let p = payload ~cost_usd:0.0123 ~usage_trust:untrusted_zero_tokens () in
   check (float 1e-9) "positive cost_usd is accounted, not masked to 0.0" 0.0123
     (float_field p "cost_usd");
   check string "cost_status reflects the reported cost" "reported"
@@ -97,14 +98,14 @@ let test_untrusted_tokens_positive_cost_is_accounted () =
 let test_untrusted_tokens_still_surface_trust () =
   (* Token-trust visibility is preserved: decoupling cost does NOT silence the
      usage_trust signal that operators alert on. *)
-  let p = payload ~cost_usd:0.0123 ~usage_trust:untrusted_zero_tokens in
+  let p = payload ~cost_usd:0.0123 ~usage_trust:untrusted_zero_tokens () in
   check string "usage_trust still surfaces untrusted" "untrusted"
     (string_field p "usage_trust")
 
 (* --- no-op leg: untrusted tokens + zero/absent cost stays 0.0 + untrusted --- *)
 
 let test_untrusted_tokens_zero_cost_stays_zero () =
-  let p = payload ~cost_usd:0.0 ~usage_trust:untrusted_zero_tokens in
+  let p = payload ~cost_usd:0.0 ~usage_trust:untrusted_zero_tokens () in
   check (float 1e-9) "zero cost stays 0.0" 0.0 (float_field p "cost_usd");
   check string "cost_usd_source remains untrusted_usage for zero cost"
     "untrusted_usage" (string_field p "cost_usd_source");
@@ -134,6 +135,7 @@ let test_trusted_tokens_include_cache_delta () =
       ~cache_read_input_tokens:20
       ~cost_usd:0.0042
       ~usage_trust:Trust.Usage_trusted
+      ()
   in
   check int "cache creation tokens are recorded" 10
     (int_field p "cache_creation_tokens");
@@ -151,6 +153,7 @@ let test_untrusted_tokens_mask_cache_delta () =
       ~cache_read_input_tokens:20
       ~cost_usd:0.0
       ~usage_trust:untrusted_zero_tokens
+      ()
   in
   check_null_field p "cache_creation_tokens";
   check_null_field p "cache_read_tokens";

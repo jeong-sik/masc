@@ -734,9 +734,9 @@ let test_dashboard_proof_route_registered_in_http_routers () =
 let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Fun.protect
-    ~finally:Client_registry_eio.reset_for_testing
+    ~finally:Masc.Client_registry_eio.reset_for_testing
     (fun () ->
-      Client_registry_eio.reset_for_testing ();
+      Masc.Client_registry_eio.reset_for_testing ();
       let json = Server_dashboard_http.dashboard_ide_snapshot_json ~config in
       let partition = Ide_paths.Legacy_default in
       let open Yojson.Safe.Util in

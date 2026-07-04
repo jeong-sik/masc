@@ -78,6 +78,20 @@ let create_worker_token base_path agent_name =
     failf "create_token failed for %s: %s" agent_name (Masc_domain.masc_error_to_string e)
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv name old
+      | None -> Unix.putenv name "")
+    (fun () ->
+       (match value with
+        | Some next -> Unix.putenv name next
+        | None -> Unix.putenv name "");
+       f ())
+;;
+
 let http_request ~meth ~path ?(body = "") ?(token = None) () =
   let headers =
     [ "host", "localhost"
@@ -378,6 +392,16 @@ let test_read_cursors_records_unmatched_repo_orphan_metric () =
     check (float 0.0001) "unmatched orphan read increments" (before +. 1.0) after)
 ;;
 
+let test_cursor_stream_accepts_query_token_under_strict_auth () =
+  with_env "MASC_HTTP_BASE_URL" (Some "https://masc.example.test") (fun () ->
+    with_ide_server (fun ~base_path ~state:_ ~router ->
+      let token = create_worker_token base_path "alice" in
+      let path = "/api/v1/ide/cursors/stream?repo_id=masc&token=" ^ Uri.pct_encode token in
+      let request = http_request ~meth:`GET ~path () in
+      let response = dispatch router request in
+      check_status "GET cursor stream with query token succeeds" 200 response))
+;;
+
 let test_memory_response_declares_annotation_source_contract () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     (match
@@ -535,6 +559,10 @@ let () =
             "GET cursors records unmatched repo orphan read metric"
             `Quick
             test_read_cursors_records_unmatched_repo_orphan_metric
+        ; test_case
+            "GET cursor stream accepts query token under strict auth"
+            `Quick
+            test_cursor_stream_accepts_query_token_under_strict_auth
         ; test_case
             "GET memory declares annotation source contract"
             `Quick

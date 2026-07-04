@@ -400,6 +400,25 @@ html[data-skin="v2"] .rt-default-tag {
   border-radius: var(--radius-pill);
 }
 html[data-skin="v2"] .rt-bind-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 3px; } /* runtime.css:86 */
+html[data-skin="v2"] .rt-bind-catalog {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: var(--fs-10);
+  line-height: 1.35;
+  max-width: 100%;
+}
+html[data-skin="v2"] .rt-bind-catalog-row {
+  display: grid;
+  grid-template-columns: minmax(84px, max-content) minmax(0, 1fr);
+  gap: 9px;
+  align-items: baseline;
+}
+html[data-skin="v2"] .rt-bind-catalog-k { color: var(--text-mid); }
+html[data-skin="v2"] .rt-bind-catalog-v { color: var(--text-dim); overflow-wrap: anywhere; }
+html[data-skin="v2"] .rt-bind-catalog-state { color: var(--text-mid); overflow-wrap: anywhere; }
 html[data-skin="v2"] .rt-bind-fields { display: flex; gap: 10px; flex: none; } /* runtime.css:87 */
 html[data-skin="v2"] .rt-mini {
   /* runtime.css:88 */

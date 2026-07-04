@@ -15,21 +15,32 @@ import {
 const runtimeCatalogResource = createAsyncResource<DashboardRuntimeProviderSnapshot[]>()
 export const runtimeCatalogState = runtimeCatalogResource.state
 
+async function fetchRuntimeCatalog(): Promise<DashboardRuntimeProviderSnapshot[]> {
+  const response = await fetchRuntimeProviders()
+  return response.providers
+}
+
 export function loadRuntimeCatalog(): void {
   if (runtimeCatalogState.value.status !== 'idle') return
-  void runtimeCatalogResource.load(async () => {
-    const response = await fetchRuntimeProviders()
-    return response.providers
-  })
+  void runtimeCatalogResource.load(fetchRuntimeCatalog)
 }
 
 export function resetRuntimeCatalog(): void {
   runtimeCatalogResource.reset()
 }
 
-export function reloadRuntimeCatalog(): void {
+export async function reloadRuntimeCatalog(): Promise<void> {
   runtimeCatalogResource.reset()
-  loadRuntimeCatalog()
+  let loadError: unknown = null
+  await runtimeCatalogResource.load(async () => {
+    try {
+      return await fetchRuntimeCatalog()
+    } catch (err) {
+      loadError = err
+      throw err
+    }
+  })
+  if (loadError) throw loadError
 }
 
 export function findRuntimeCatalogEntry(

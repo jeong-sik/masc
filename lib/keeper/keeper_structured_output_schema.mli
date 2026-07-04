@@ -32,6 +32,9 @@ val verification_verdict_output_schema : Yojson.Safe.t
 val anti_rationalization_verdict_output_schema : Yojson.Safe.t
 (** JSON object the task anti-rationalization reviewer provider must return. *)
 
+val hitl_context_summary_schema : Yojson.Safe.t
+(** JSON object the HITL context-summary worker provider must return. *)
+
 val governance_resolved_tool_tokens : string list
 (** Resolved tool names accepted by the dashboard governance judge. The
     provider schema and runtime parser both consume this list. *)
@@ -41,6 +44,11 @@ val apply_to_provider_config
   -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 (** Set both OAS structured-output fields for [schema]. *)
+
+val apply_hitl_summary_schema_to_config
+  :  Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Set both OAS structured-output fields for {!hitl_context_summary_schema}. *)
 
 val validate_provider_config
   :  Yojson.Safe.t

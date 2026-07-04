@@ -391,6 +391,63 @@ let keeper_tool_search_top_k_rp =
 let keeper_tool_search_top_k () : int =
   Runtime_params.get keeper_tool_search_top_k_rp
 
+(* ── HITL context-summary worker policy ─────────────────────── *)
+
+(** Timeout for the HITL summary LLM call. Kept short because the summary
+    is advisory and must not block operator attention. *)
+let hitl_summary_timeout_sec_rp =
+  _rp_float ~key:"keeper.hitl_summary.timeout_sec"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_HITL_SUMMARY_TIMEOUT_SEC"
+                          ~default:30.0 ~min_v:1.0 ~max_v:300.0)
+    ~min_v:1.0 ~max_v:300.0
+    ~description:"HITL context-summary LLM timeout (seconds)" ()
+let hitl_summary_timeout_sec () : float =
+  Runtime_params.get hitl_summary_timeout_sec_rp
+
+(** Max chat messages included in a HITL summary context bundle.
+    Limits context size and cost per summary. *)
+let hitl_summary_chat_message_limit_rp =
+  _rp_int ~key:"keeper.hitl_summary.chat_message_limit"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_HITL_SUMMARY_CHAT_MESSAGE_LIMIT"
+                          ~default:20 ~min_v:0 ~max_v:200)
+    ~min_v:0 ~max_v:200
+    ~description:"HITL context-summary chat message inclusion limit" ()
+let hitl_summary_chat_message_limit () : int =
+  Runtime_params.get hitl_summary_chat_message_limit_rp
+
+(** Max output tokens for the HITL summary LLM call. Caps cost and prevents
+    runaway structured-output generation. *)
+let hitl_summary_max_tokens_rp =
+  _rp_int ~key:"keeper.hitl_summary.max_tokens"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_HITL_SUMMARY_MAX_TOKENS"
+                          ~default:512 ~min_v:64 ~max_v:4096)
+    ~min_v:64 ~max_v:4096
+    ~description:"HITL context-summary max output tokens" ()
+let hitl_summary_max_tokens () : int =
+  Runtime_params.get hitl_summary_max_tokens_rp
+
+(** Temperature for the HITL summary LLM call. Deterministic by default. *)
+let hitl_summary_temperature_rp =
+  _rp_float ~key:"keeper.hitl_summary.temperature"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_HITL_SUMMARY_TEMPERATURE"
+                          ~default:0.0 ~min_v:0.0 ~max_v:2.0)
+    ~min_v:0.0 ~max_v:2.0
+    ~description:"HITL context-summary sampling temperature" ()
+let hitl_summary_temperature () : float =
+  Runtime_params.get hitl_summary_temperature_rp
+
+(** Global concurrency cap for HITL summary LLM calls. Prevents a burst of
+    Medium+ approvals from creating an unbounded number of in-flight LLM
+    requests. *)
+let hitl_summary_concurrency_limit_rp =
+  _rp_int ~key:"keeper.hitl_summary.concurrency_limit"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_HITL_SUMMARY_CONCURRENCY_LIMIT"
+                          ~default:4 ~min_v:1 ~max_v:64)
+    ~min_v:1 ~max_v:64
+    ~description:"HITL context-summary global concurrency cap" ()
+let hitl_summary_concurrency_limit () : int =
+  Runtime_params.get hitl_summary_concurrency_limit_rp
+
 (* max_turns is owned by the OAS SDK default; MASC no longer sets it from
    keeper runtime config.
    Known constraints (retain for future tuning):
@@ -404,6 +461,11 @@ let keeper_tool_search_top_k () : int =
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
+  let (_ : float) = Runtime_params.get hitl_summary_timeout_sec_rp in
+  let (_ : int) = Runtime_params.get hitl_summary_chat_message_limit_rp in
+  let (_ : int) = Runtime_params.get hitl_summary_max_tokens_rp in
+  let (_ : float) = Runtime_params.get hitl_summary_temperature_rp in
+  let (_ : int) = Runtime_params.get hitl_summary_concurrency_limit_rp in
   ()
 
 let keeper_enable_thinking_rp =

@@ -139,6 +139,7 @@ type t =
   | ReplySkillRouteLinesRemoved
   | MemoryLlmSummaryOutcomes
   | MemoryLlmSummaryChainExhausted
+  | HitlSummaryOutcomes
   | UserVisibleReplySource
   | ContinuitySummarySource
   | SummarizerStateScrubs

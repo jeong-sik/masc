@@ -211,6 +211,14 @@ val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int
 val keeper_tool_search_top_k : unit -> int
 
+(** {2 HITL Context-Summary Worker Policy} *)
+
+val hitl_summary_timeout_sec : unit -> float
+val hitl_summary_chat_message_limit : unit -> int
+val hitl_summary_max_tokens : unit -> int
+val hitl_summary_temperature : unit -> float
+val hitl_summary_concurrency_limit : unit -> int
+
 val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool

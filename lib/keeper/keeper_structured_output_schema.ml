@@ -247,6 +247,31 @@ let anti_rationalization_verdict_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+let hitl_context_summary_schema =
+  let suggested_option_fields =
+    [ "label", string_schema
+    ; "rationale", string_schema
+    ; ( "estimated_risk_delta"
+      , nullable_enum_schema Keeper_approval_queue_rules_types.allowed_risk_level_values )
+    ]
+  in
+  let suggested_option_schema =
+    object_schema ~required:(List.map fst suggested_option_fields) suggested_option_fields
+  in
+  let fields =
+    [ "summary_version", integer_schema
+    ; "generated_at", number_schema
+    ; "model_run_id", string_schema
+    ; "context_summary", string_schema
+    ; "key_questions", string_array_schema
+    ; "suggested_options", array_schema suggested_option_schema
+    ; "risk_rationale", nullable_string_schema
+    ; "uncertainty", number_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let fusion_position_schema =
   let fields =
     [ Fusion_judge_parse.wire_field_model, string_schema
@@ -337,6 +362,10 @@ let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config
     response_format = Agent_sdk.Types.JsonSchema schema
   ; output_schema = Some schema
   }
+;;
+
+let apply_hitl_summary_schema_to_config config =
+  apply_to_provider_config hitl_context_summary_schema config
 ;;
 
 let validate_provider_config schema provider_cfg =

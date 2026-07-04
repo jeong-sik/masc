@@ -14,6 +14,31 @@ type risk_level =
   | High
   | Critical
 
+(** Suggested operator option produced by the HITL context-summary worker. *)
+type suggested_option =
+  { label : string
+  ; rationale : string
+  ; estimated_risk_delta : risk_level option
+  }
+
+(** LLM-generated context summary attached to a pending approval. *)
+type hitl_context_summary =
+  { summary_version : int
+  ; generated_at : float
+  ; model_run_id : string
+  ; context_summary : string
+  ; key_questions : string list
+  ; suggested_options : suggested_option list
+  ; risk_rationale : string option
+  ; uncertainty : float
+  }
+
+and summary_status =
+  | Summary_not_requested
+  | Summary_pending
+  | Summary_available of hitl_context_summary
+  | Summary_failed of { reason : string; retryable : bool }
+
 (** Lifecycle phase of a pending approval. *)
 type pending_phase =
   | Awaiting_operator
@@ -56,6 +81,8 @@ type pending_approval =
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; context_summary : hitl_context_summary option
+  ; summary_status : summary_status
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry
@@ -102,6 +129,8 @@ val pending_phase_to_string : pending_phase -> string
 val pending_phase_of_string : string -> pending_phase option
 val approval_decision_to_string : decision -> string
 val approval_audit_decision_to_string : approval_audit_decision -> string
+val hitl_context_summary_to_yojson : hitl_context_summary -> Yojson.Safe.t
+val summary_status_to_yojson : summary_status -> Yojson.Safe.t
 
 (** {1 Rule store (persisted)} *)
 
@@ -213,7 +242,6 @@ val list_recent_resolved_json :
 module For_testing : sig
   val reset_audit_store : unit -> unit
   val first_cmd_token : string -> string option
-  val get_pending_entry : id:string -> pending_approval option
 end
 
 (** {1 Submit & await} *)
@@ -309,6 +337,12 @@ val list_pending_dashboard_json : unit -> Yojson.Safe.t
 (** Detail view of a single pending entry with input + runtime
     contract included. *)
 val get_pending_json : id:string -> Yojson.Safe.t option
+
+(** Read a pending entry by id. Returns [None] if already resolved. *)
+val get_pending_entry : id:string -> pending_approval option
+
+(** Apply a copy-on-write update to a pending entry if it still exists. *)
+val update_pending_entry : id:string -> (pending_approval -> pending_approval) -> unit
 
 val pending_count : unit -> int
 val pending_count_for_keeper : keeper_name:string -> int

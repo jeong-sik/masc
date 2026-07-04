@@ -148,6 +148,7 @@ type t =
   | ReplySkillRouteLinesRemoved
   | MemoryLlmSummaryOutcomes
   | MemoryLlmSummaryChainExhausted
+  | HitlSummaryOutcomes
   | UserVisibleReplySource
   | ContinuitySummarySource
   | SummarizerStateScrubs
@@ -409,6 +410,7 @@ let to_string = function
   | MemoryLlmSummaryOutcomes -> "masc_keeper_memory_llm_summary_outcomes_total"
   | MemoryLlmSummaryChainExhausted ->
     "masc_keeper_memory_llm_summary_chain_exhausted_total"
+  | HitlSummaryOutcomes -> "masc_keeper_hitl_summary_outcomes_total"
   | UserVisibleReplySource -> "masc_keeper_user_visible_reply_source_total"
   | ContinuitySummarySource -> "masc_keeper_continuity_summary_source_total"
   | SummarizerStateScrubs -> "masc_keeper_summarizer_state_scrubs_total"
@@ -566,7 +568,7 @@ let all : t list =
     TomlReconcileDedup; ReconcileDisabled; ToolUsageFlushFailures; TurnTimeoutCommitted;
     TurnErrorAfterTools; RuntimeSyncFailures; LocalDiscoveryFailures; ThinkingPersistFailures;
     CheckpointFailures; DecisionAuditRingOverflows; ReplySkillRouteStrips; ReplySkillRouteLinesRemoved;
-    MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; UserVisibleReplySource; ContinuitySummarySource;
+    MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; HitlSummaryOutcomes; UserVisibleReplySource; ContinuitySummarySource;
     SummarizerStateScrubs; SummarizerStateBlocksRemoved; OasEnvKeyRejections; ContinuityTsRecovered;
     MemoryWriteFailures; MemoryLaneUnitFailures; MemoryConsolidations; MemoryLaneSubmitted; MemoryLaneRanInline; MemoryLaneDropped;
     MemoryLanePending; MemoryLaneInFlight; MemoryLaneProviderSlotBusy; MemoryBankCompactionFailures; MemoryOsMaintenanceKeeperTimeout; WriteMetaCycleFailures; AlertPersistFailures;

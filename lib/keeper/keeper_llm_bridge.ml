@@ -95,7 +95,7 @@ let bridge_details fields envelope =
 let with_hitl_approval_headroom timeout_s =
   Float.max
     timeout_s
-    (Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0)
+    (Keeper_approval_queue_rules.default_noncritical_approval_timeout_s +. 30.0)
 ;;
 
 

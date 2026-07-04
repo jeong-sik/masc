@@ -6,6 +6,29 @@ type risk_level =
   | High
   | Critical
 
+type suggested_option =
+  { label : string
+  ; rationale : string
+  ; estimated_risk_delta : risk_level option
+  }
+
+type hitl_context_summary =
+  { summary_version : int
+  ; generated_at : float
+  ; model_run_id : string
+  ; context_summary : string
+  ; key_questions : string list
+  ; suggested_options : suggested_option list
+  ; risk_rationale : string option
+  ; uncertainty : float
+  }
+
+and summary_status =
+  | Summary_not_requested
+  | Summary_pending
+  | Summary_available of hitl_context_summary
+  | Summary_failed of { reason : string; retryable : bool }
+
 type pending_phase =
   | Awaiting_operator
   | Escalated
@@ -34,6 +57,8 @@ type pending_approval =
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; context_summary : hitl_context_summary option
+  ; summary_status : summary_status
   }
 
 type decision = Agent_sdk.Hooks.approval_decision
@@ -69,6 +94,7 @@ type rule_match =
 type resolution_result = { remembered_rule : approval_rule option }
 
 val risk_level_to_string : risk_level -> string
+val allowed_risk_level_values : string list
 val allowed_risk_level_values_label : string
 val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option
@@ -84,6 +110,9 @@ val string_opt_of_json : Yojson.Safe.t -> string option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t
 val approval_rule_to_yojson : approval_rule -> Yojson.Safe.t
+val suggested_option_to_yojson : suggested_option -> Yojson.Safe.t
+val hitl_context_summary_to_yojson : hitl_context_summary -> Yojson.Safe.t
+val summary_status_to_yojson : summary_status -> Yojson.Safe.t
 
 val approval_rule_of_yojson_with_error :
   Yojson.Safe.t -> (approval_rule, string) Stdlib.result

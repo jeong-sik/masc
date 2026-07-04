@@ -76,12 +76,7 @@ let non_empty_string_member name input =
 ;;
 
 let observation_file_path_from_tool_input ~base_path input =
-  let path =
-    match non_empty_string_member "path" input with
-    | Some p -> Some p
-    | None -> non_empty_string_member "file_path" input
-  in
-  match path with
+  match Tool_input_path.tool_input_file_path input with
   | None -> base_path
   | Some p when Filename.is_relative p && not (sandbox_rooted_relative_path p) ->
     (match non_empty_string_member "cwd" input with

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { addRepository, discoverRepositories, fetchRepositoriesList, removeRepository } from './repositories'
+import { addRepository, discoverRepositories, fetchRepositoriesList, normalizeRepositoryGitStatus, removeRepository } from './repositories'
 
 const mockFetch = vi.fn()
 
@@ -30,6 +30,16 @@ describe('repositories API', () => {
           name: 'masc',
           local_path: '/Users/dancer/me/workspace/yousleepwhen/masc',
           status: 'active',
+          git_status: {
+            state: 'available',
+            source: 'git-status-porcelain-v1',
+            dirty: true,
+            changed_files: 3,
+            staged_files: 1,
+            unstaged_files: 1,
+            untracked_files: 1,
+            conflicted_files: 0,
+          },
         },
       ],
     })
@@ -40,6 +50,25 @@ describe('repositories API', () => {
     expect(repos).toHaveLength(1)
     expect(repos[0]!.id).toBe('masc')
     expect(repos[0]!.default_branch).toBe('main')
+    expect(repos[0]!.git_status).toMatchObject({
+      state: 'available',
+      changed_files: 3,
+      staged_files: 1,
+      unstaged_files: 1,
+      untracked_files: 1,
+    })
+  })
+
+  it('does not silently coerce malformed git_status to a clean tree', () => {
+    expect(normalizeRepositoryGitStatus({
+      state: 'available',
+      dirty: true,
+      changed_files: '3',
+    })).toEqual({
+      state: 'unavailable',
+      source: '',
+      error: 'malformed repository git_status payload',
+    })
   })
 
   it('discoverRepositories registers discovered repositories through the backend', async () => {

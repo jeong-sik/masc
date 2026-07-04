@@ -16,6 +16,16 @@ vi.mock('../../api/repositories', () => ({
     sync_interval: 300,
     created_at: null,
     updated_at: null,
+    git_status: {
+      state: 'available',
+      source: 'git-status-porcelain-v1',
+      dirty: true,
+      changed_files: 2,
+      staged_files: 1,
+      unstaged_files: 0,
+      untracked_files: 1,
+      conflicted_files: 0,
+    },
   }])),
 }))
 
@@ -155,6 +165,18 @@ describe('IdeShell', () => {
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Time')
     expect(container.textContent).toContain('Approve')
+  })
+
+  it('renders repository git status without the dirty-count stub', async () => {
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-repo-origin"]')?.textContent)
+        .toContain('2개 변경')
+    })
+    expect(container.querySelector('[data-stub="repo-dirty-count"]')).toBeNull()
+    expect(container.querySelector('[data-state="dirty"]')?.getAttribute('title'))
+      .toContain('untracked 1')
   })
 
   it('hydrates current file and line focus from IDE route params', async () => {

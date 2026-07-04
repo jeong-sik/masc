@@ -38,6 +38,12 @@ let run_cmd ~cwd argv =
        | _, Unix.WSIGNALED s -> Error (Printf.sprintf "signal %d" s)
        | _, Unix.WSTOPPED s -> Error (Printf.sprintf "stopped %d" s))
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let init_local_repo path =
   Unix.mkdir path 0o755;
   let () =
@@ -168,6 +174,46 @@ let test_get_recent_commits () =
               Alcotest.(check bool) "contains initial" true
                 (List.exists (fun s -> contains_substring s "initial") commits)))
 
+let test_status_summary_counts_porcelain_rows () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      (match run_cmd ~cwd:source ["git"; "checkout"; "-b"; "status-work"] with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail ("git checkout status-work failed: " ^ e));
+      let tracked = Filename.concat source "tracked.txt" in
+      write_file tracked "committed\n";
+      (match run_cmd ~cwd:source ["git"; "add"; "tracked.txt"] with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail ("git add failed: " ^ e));
+      (match run_cmd ~cwd:source ["git"; "commit"; "-m"; "tracked"] with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail ("git commit tracked failed: " ^ e));
+      let repo = sample_repo ~url:source source in
+      (match Repo_git.status_summary ~repository:repo with
+      | Error e -> Alcotest.fail ("clean status failed: " ^ e)
+      | Ok summary ->
+          Alcotest.(check int) "clean changed" 0 summary.changed_files);
+      write_file tracked "modified\n";
+      write_file (Filename.concat source "untracked.txt") "new\n";
+      (match Repo_git.status_summary ~repository:repo with
+      | Error e -> Alcotest.fail ("dirty status failed: " ^ e)
+      | Ok summary ->
+          Alcotest.(check int) "dirty changed" 2 summary.changed_files;
+          Alcotest.(check int) "dirty unstaged" 1 summary.unstaged_files;
+          Alcotest.(check int) "dirty untracked" 1 summary.untracked_files;
+          Alcotest.(check int) "dirty staged" 0 summary.staged_files);
+      (match run_cmd ~cwd:source ["git"; "add"; "tracked.txt"] with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail ("git add modified failed: " ^ e));
+      match Repo_git.status_summary ~repository:repo with
+      | Error e -> Alcotest.fail ("staged status failed: " ^ e)
+      | Ok summary ->
+          Alcotest.(check int) "staged changed" 2 summary.changed_files;
+          Alcotest.(check int) "staged tracked" 1 summary.staged_files;
+          Alcotest.(check int) "staged unstaged" 0 summary.unstaged_files;
+          Alcotest.(check int) "staged untracked" 1 summary.untracked_files)
+
 let () =
   Alcotest.run "Repo_git"
     [
@@ -181,4 +227,9 @@ let () =
       ( "fetch", [ Alcotest.test_case "returns remotes" `Quick test_fetch ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );
+      ( "status_summary",
+        [
+          Alcotest.test_case "counts porcelain rows" `Quick
+            test_status_summary_counts_porcelain_rows;
+        ] );
     ]

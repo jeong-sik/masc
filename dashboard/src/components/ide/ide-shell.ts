@@ -662,12 +662,32 @@ function IdeCursorRailRow({ cursor }: { readonly cursor: KeeperCursor }) {
  * optional GitHub-style web link, and the default branch using the vendored
  * keeper-v2 `.ide-repo` / `.ide-remote` / `.ide-web` / `.br` skin classes.
  *
- * Data honesty:
- *  - origin URL + default branch come from the live `Repository`.
- *  - the web link is only rendered when a usable https URL can be derived.
- *  - the prototype's "변경 N건" dirty count has no live source on
- *    `Repository`, so it is surfaced as a `data-stub` placeholder (no number).
  */
+function repositoryGitStatusView(repository: Repository) {
+  const status = repository.git_status
+  if (!status) {
+    return html`<span data-state="missing" title="repository git_status 필드 미수신">변경 상태 없음</span>`
+  }
+  if (status.state === 'unavailable') {
+    return html`
+      <span data-state="unavailable" title=${status.error || 'git status unavailable'}>
+        변경 확인 실패
+      </span>
+    `
+  }
+  if (!status.dirty) {
+    return html`<span data-state="clean" title="git status --porcelain=v1: 변경 없음">변경 없음</span>`
+  }
+  const title = [
+    `changed ${status.changed_files}`,
+    `staged ${status.staged_files}`,
+    `unstaged ${status.unstaged_files}`,
+    `untracked ${status.untracked_files}`,
+    `conflicted ${status.conflicted_files}`,
+  ].join(' · ')
+  return html`<span data-state="dirty" title=${title}>${status.changed_files}개 변경</span>`
+}
+
 function IdeRepoOrigin({
   repositories,
   activeRepositoryId,
@@ -716,7 +736,7 @@ function IdeRepoOrigin({
         : null}
       ${branch ? html`<span class="br" title="기본 브랜치 (default_branch)">${branch}</span>` : null}
       ${' · '}
-      <span data-stub="repo-dirty-count" title="변경 파일 수 — 라이브 신호 없음">변경 미수신</span>
+      ${repositoryGitStatusView(repository)}
     </span>
   `
 }

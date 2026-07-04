@@ -1,5 +1,14 @@
 open Repo_manager_types
 
+type status_summary = {
+  changed_files : int;
+  staged_files : int;
+  unstaged_files : int;
+  untracked_files : int;
+  conflicted_files : int;
+}
+(** Summary parsed from Git's porcelain-v1 status contract. *)
+
 val clone : repository:repository -> (unit, string) result
 (** [clone ~repository] clones [repository.url] into [repository.local_path]. *)
 
@@ -32,3 +41,8 @@ val get_recent_commits :
   repository:repository -> branch:string -> limit:int -> (string list, string) result
 (** [get_recent_commits ~repository ~branch ~limit] returns the most recent
     [limit] commits on [branch] as ["HASH subject"] lines. *)
+
+val status_summary : repository:repository -> (status_summary, string) result
+(** [status_summary ~repository] returns a read-only dirty-tree summary using
+    [git status --porcelain=v1]. It returns [Error _] instead of inventing a
+    clean result when Git cannot inspect the repository. *)

@@ -217,6 +217,60 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('runtime assignment governance')
   })
 
+  it('surfaces startup catalog degradation on the first screen', async () => {
+    apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
+      ...providerPayload(),
+      startup_degradation: {
+        schema: 'masc.runtime_startup_degradation.v1',
+        status: 'degraded',
+        degraded: true,
+        operator_action_required: true,
+        terminal_reason: 'missing_oas_catalog_models',
+        message: 'runtime catalog degraded boot',
+        config_path: '/tmp/masc-test/runtime.toml',
+        configured_default_runtime_id: 'glm-coding.glm-5-turbo',
+        effective_default_runtime_id: 'glm-coding.glm-5-turbo',
+        missing_catalog_model_count: 2,
+        missing_catalog_models: [
+          {
+            runtime_id: 'mimo.mimo-v2.5-pro',
+            provider_id: 'mimo',
+            provider_label: 'openai_compat',
+            model_id: 'mimo-v2.5-pro',
+          },
+          {
+            runtime_id: 'mimo.mimo-v2.5',
+            provider_id: 'mimo',
+            provider_label: 'openai_compat',
+            model_id: 'mimo-v2.5',
+          },
+        ],
+        disabled_runtime_ids: ['mimo.mimo-v2.5-pro', 'mimo.mimo-v2.5'],
+        dropped_assignments: [],
+        dropped_routes: [],
+        dropped_media_failover: [],
+        dropped_lane_candidates: [],
+        dropped_lanes: [],
+        next_action: 'Add the listed provider/model rows to oas-models.toml.',
+      },
+    })
+    const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
+
+    render(h(RuntimeHealthSnapshot, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime startup degraded') ?? false,
+      'startup degradation warning',
+    )
+
+    expect(container.textContent).toContain('startup')
+    expect(container.textContent).toContain('2 catalog gaps')
+    expect(container.textContent).toContain('missing_oas_catalog_models')
+    expect(container.textContent).toContain('effective default: glm-coding.glm-5-turbo')
+    expect(container.textContent).toContain('disabled runtimes: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
+    expect(container.textContent).toContain('missing catalog: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
+    expect(container.textContent).toContain('next: Add the listed provider/model rows to oas-models.toml.')
+  })
+
   it('uses force=1 when the operator clicks Live probe', async () => {
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
 

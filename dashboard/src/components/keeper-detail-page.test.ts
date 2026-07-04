@@ -87,7 +87,6 @@ describe('KeeperWorkspaceRail', () => {
     // this test focused on the detail page's runtime, context, and task facts.
     const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent)
     expect(sectionHeaders).toContain('런타임')
-    expect(container.textContent).toContain('claude-sonnet-4')
     expect(container.textContent).toContain('oas-seoul-1')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('T-1')

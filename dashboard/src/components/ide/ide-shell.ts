@@ -8,7 +8,7 @@ import {
   type IdeContextFocus,
   type IdeContextFocusRouteLink,
 } from './ide-state'
-import { createIdeDataWorkspaceStore } from './ide-data-workspace-store'
+import { getIdeDataWorkspaceStore } from './ide-workspace-singleton'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -722,9 +722,12 @@ function IdeRepoOrigin({
 }
 
 export function IdeShell() {
-  const workspaceStore = useMemo(() => createIdeDataWorkspaceStore(), [])
+  // App-lifetime singleton: the store survives IdeShell unmount (tab change),
+  // so tree expansion / repo selection / diff / file content persist across
+  // navigation instead of being disposed and refetched. Do NOT dispose on
+  // unmount — the store is intentionally shared across all IdeShell mounts.
+  const workspaceStore = useMemo(() => getIdeDataWorkspaceStore(), [])
 
-  useEffect(() => () => workspaceStore.dispose(), [workspaceStore])
   const annotations = useSubscribedSnapshot(
     workspaceStore.annotations,
     workspaceStore.subscribeAnnotations,

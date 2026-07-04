@@ -308,11 +308,14 @@ export function IdeExplorer({
             store.isExpanded(node.path),
             node.path === activeFile,
             () => {
+              // store.toggle -> expand -> loadChildren fetches this directory's
+              // children on first open (no-op if already present/in flight).
               if (node.hasChildren) store.toggle(node.path)
               else activeIdeFile.value = node.path
             },
             contextFocus?.file_path === node.path ? contextFocus : null,
             keepersByFile.get(node.path),
+            store.isChildrenLoading(node.path),
           ))}
         </ul>
       </div>
@@ -369,9 +372,14 @@ function TreeRow(
   onClick: () => void,
   contextFocus: IdeContextFocus | null,
   activeKeepers?: ReadonlyArray<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>,
+  loadingChildren = false,
 ) {
   const indent = node.depth * 12
-  const chevron = node.hasChildren ? (expanded ? '▾' : '▸') : ''
+  // While a directory's children are being fetched (lazy expand), show a
+  // pending glyph in the chevron slot so the expand reads as in-progress.
+  const chevron = node.hasChildren
+    ? (loadingChildren ? '◌' : (expanded ? '▾' : '▸'))
+    : ''
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()

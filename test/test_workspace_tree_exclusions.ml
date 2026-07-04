@@ -58,6 +58,21 @@ let path_of_node = function
 
 let paths nodes = List.map path_of_node nodes
 
+let field_of_node key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let bool_field node key =
+  match field_of_node key node with Some (`Bool b) -> b | _ -> false
+
+let int_field node key =
+  match field_of_node key node with Some (`Int n) -> n | _ -> -1
+
+let string_field node key =
+  match field_of_node key node with Some (`String s) -> s | _ -> ""
+
+let find_node nodes p = List.find_opt (fun n -> path_of_node n = p) nodes
+
 let test_masc_ide_excluded () =
   with_temp_dir (fun base ->
     mkdir_p (Filename.concat base ".masc-ide/by-url/some_slug");
@@ -88,6 +103,43 @@ let test_other_internal_dirs_still_excluded () =
     check bool "lib must appear in tree" true (List.exists (fun p -> p = "lib") ps))
 ;;
 
+(* --- Lazy children (RFC-0014 amendment) --- *)
+
+let test_boundary_directory_is_expandable () =
+  with_temp_dir (fun base ->
+    touch (Filename.concat base "a/b/c.ml");
+    (* Scan two levels: root [a] recurses to [a/b], which sits at the boundary
+       (depth 1 = max_depth) so its own children are not scanned. With lazy
+       children [a/b] must still report hasChildren=true so the client renders a
+       chevron and fetches its entries from /api/v1/workspace/children on
+       expand. Before the change it was is_dir && depth < max_depth = false. *)
+    let nodes = W.scan_dir ~base ~depth:0 ~max_depth:1 ~max_nodes:200 [] base in
+    match find_node nodes "a/b" with
+    | None -> Alcotest.fail "boundary directory a/b missing from scan"
+    | Some node ->
+      check bool "boundary directory a/b is expandable" true (bool_field node "hasChildren"))
+;;
+
+let test_one_level_children_scan () =
+  with_temp_dir (fun base ->
+    touch (Filename.concat base "a/b/c.ml");
+    touch (Filename.concat base "a/x.ml");
+    (* Emulate /api/v1/workspace/children: scan exactly one level of [a] with
+       ~depth = ~max_depth = 1 rooted at base/a while ~base stays the whole
+       tree. Returns a's immediate entries only (a/b, a/x.ml) — never the
+       grandchild a/b/c.ml — and anchors each node's path/parent/depth to the
+       whole tree so the client merges them into its flat node array. *)
+    let sub = Filename.concat base "a" in
+    let nodes = W.scan_dir ~base ~depth:1 ~max_depth:1 ~max_nodes:200 [] sub in
+    let ps = List.sort String.compare (paths nodes) in
+    check (list string) "returns exactly a's immediate children" [ "a/b"; "a/x.ml" ] ps;
+    match find_node nodes "a/b" with
+    | None -> Alcotest.fail "a/b missing from children scan"
+    | Some node ->
+      check string "child parent anchored to whole tree" "a" (string_field node "parent");
+      check int "child depth anchored to whole tree" 1 (int_field node "depth"))
+;;
+
 let () =
   run
     "workspace_tree_exclusions"
@@ -97,6 +149,16 @@ let () =
             "other internal dirs still excluded"
             `Quick
             test_other_internal_dirs_still_excluded
+        ] )
+    ; ( "RFC-0014 lazy children"
+      , [ test_case
+            "boundary directory reports hasChildren"
+            `Quick
+            test_boundary_directory_is_expandable
+        ; test_case
+            "children scan returns exactly one level"
+            `Quick
+            test_one_level_children_scan
         ] )
     ]
 ;;

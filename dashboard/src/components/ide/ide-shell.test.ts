@@ -35,6 +35,7 @@ import {
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { activeIdeFile, ideContextFocus } from './ide-state'
+import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
@@ -118,6 +119,10 @@ describe('IdeShell', () => {
 
   afterEach(() => {
     render(null, container)
+    // IdeShell now shares an app-lifetime workspace-store singleton; dispose it
+    // between tests (after unmount) so each test starts from a fresh store
+    // instead of inheriting the previous test's tree/repo/diff state.
+    resetIdeDataWorkspaceStoreForTest()
     vi.unstubAllGlobals()
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }

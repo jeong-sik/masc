@@ -9,6 +9,7 @@ import {
 } from '../../api/repositories'
 import {
   fetchWorkspaceFile,
+  fetchWorkspaceChildren,
   fetchGitBlame,
   fetchGitDiff,
   fetchWorkspaceTree,
@@ -33,6 +34,7 @@ import {
   fetchIdeAnnotations,
   type IdeAnnotation,
 } from '../../api/ide'
+import { registerIdeWorkspaceRefresh } from '../../sse-store'
 
 export interface IdeDataWorkspaceStore {
   readonly documentStore: CodeDocumentStore
@@ -114,7 +116,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     content: '',
   })
   const ownershipStore = createKeeperLineOwnershipStore(activeIdeFile.value)
-  const fileTreeStore = createFileTreeStore()
 
   const diffRowsSignal = signal<ReadonlyArray<UnifiedDiffRow>>([])
   const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
@@ -122,6 +123,19 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
   const activeRepositoryIdSignal = signal<string | null>(null)
   const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
+
+  // Lazy tree: expanding a directory fetches its immediate children on demand.
+  // The loader reads the current keeper/repo at call time (not capture time),
+  // so it stays correct across repo/keeper switches. Diff badges are omitted on
+  // lazily-loaded nodes (server does not compute them per-subtree); they refresh
+  // on the next full tree load.
+  const fileTreeStore = createFileTreeStore({
+    loadChildren: (path: string) =>
+      fetchWorkspaceChildren(path, {
+        keeper: activeKeeperName.value || undefined,
+        repoId: activeRepositoryIdSignal.value,
+      }),
+  })
 
   /** Track repo IDs that returned unreachable workspace sources, to avoid re-selecting them. */
   const unreachableRepoIds = new Set<string>()
@@ -151,8 +165,15 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       repositoriesSignal.value = []
     })
 
-  // React to file / keeper changes
-  const disposeEffect = effect(() => {
+  // Fetch the workspace snapshot for the current file/keeper/repo/task.
+  //
+  // Called two ways: reactively via the effect() below (on navigation-signal
+  // changes) and imperatively via the live SSE refresh (when a keeper edits
+  // files — see registerIdeWorkspaceRefresh). Both share `abortController`, so
+  // the latest call always wins and a live refresh cannot race a navigation
+  // refresh to stale data. The fetches are idempotent (server is SSOT), so a
+  // coalesced live+nav refresh is safe.
+  const runWorkspaceFetches = (): void => {
     const filePath = activeIdeFile.value
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
@@ -244,7 +265,20 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       if (signal.aborted) return
       annotationsSignal.value = annotations
     }).catch(() => {})
+  }
+
+  // Re-run fetches on navigation-signal changes. Reading the signals
+  // synchronously inside runWorkspaceFetches registers them as effect
+  // dependencies (activeIdeFile, activeKeeperName, activeRepositoryId,
+  // selectedTask), so the effect re-fires exactly when they change.
+  const disposeEffect = effect(() => {
+    runWorkspaceFetches()
   })
+
+  // Live updates: refresh the workspace snapshot when a keeper edits files or
+  // completes a turn. The sse-store dispatch is debounced and scoped to the
+  // code surface, so this does not fetch while the user is on another tab.
+  const unregisterLiveRefresh = registerIdeWorkspaceRefresh(runWorkspaceFetches)
 
   return {
     documentStore,
@@ -279,6 +313,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       annotationsSignal.subscribe(listener),
     dispose: () => {
       abortController.abort()
+      unregisterLiveRefresh()
       disposeEffect()
       ownershipStore.dispose()
     },

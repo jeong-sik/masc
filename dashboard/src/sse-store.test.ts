@@ -439,6 +439,60 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshFusionRuns).not.toHaveBeenCalled()
   })
 
+  it('routes keeper_tool_call to the IDE workspace refresh while on the code surface', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'code', params: {}, postId: null }
+    const ideRefresh = vi.fn()
+    const unregister = sseStore.registerIdeWorkspaceRefresh(ideRefresh)
+
+    sseStore.routeServerPushEvent({ type: 'keeper_tool_call' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(ideRefresh).toHaveBeenCalledTimes(1)
+    unregister()
+  })
+
+  it('normalizes the masc/ prefix when routing keeper edits to the IDE refresh', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'code', params: {}, postId: null }
+    const ideRefresh = vi.fn()
+    sseStore.registerIdeWorkspaceRefresh(ideRefresh)
+
+    sseStore.routeServerPushEvent({ type: 'masc/keeper_tool_call' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(ideRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refresh the IDE workspace off the code surface (route-scoped)', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'overview', params: {}, postId: null }
+    const ideRefresh = vi.fn()
+    sseStore.registerIdeWorkspaceRefresh(ideRefresh)
+
+    sseStore.routeServerPushEvent({ type: 'keeper_tool_call' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(ideRefresh).not.toHaveBeenCalled()
+  })
+
+  it('stops IDE workspace refreshes once the subscriber unregisters', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'code', params: {}, postId: null }
+    const ideRefresh = vi.fn()
+    const unregister = sseStore.registerIdeWorkspaceRefresh(ideRefresh)
+    unregister()
+
+    sseStore.routeServerPushEvent({ type: 'keeper_tool_call' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(ideRefresh).not.toHaveBeenCalled()
+  })
+
   it('routes keeper_chat_appended pushes to the live chat refresh hook', async () => {
     const { sseStore } = await loadSseStore()
 

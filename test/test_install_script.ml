@@ -71,6 +71,14 @@ let test_config_seed_skips_each_existing_file_without_force () =
     "runtime uses per-file seed"
     script
     {|seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"|};
+  assert_contains
+    "model catalog has config-root destination"
+    script
+    {|MODEL_CATALOG_FILE="$CONFIG_DIR/oas-models.toml"|};
+  assert_contains
+    "model catalog uses root release seed"
+    script
+    {|seed_raw_if_missing "oas-models.toml" "oas-models.toml" "$MODEL_CATALOG_FILE"|};
   assert_not_contains
     "no all-or-nothing seed calls"
     script
@@ -90,6 +98,18 @@ let test_release_requires_advertised_binary_assets () =
     "required release asset missing: $asset"
 ;;
 
+let test_release_checksums_include_model_catalog_seed () =
+  let workflow = release_workflow () in
+  assert_contains
+    "release checksum includes runtime config seeds"
+    workflow
+    "(cd ../config && sha256sum tool_policy.toml runtime.toml) >> SHA256SUMS";
+  assert_contains
+    "release checksum includes model catalog seed"
+    workflow
+    "(cd .. && sha256sum oas-models.toml) >> SHA256SUMS"
+;;
+
 let () =
   run
     "install_script"
@@ -102,6 +122,10 @@ let () =
             "advertised binary assets are release-required"
             `Quick
             test_release_requires_advertised_binary_assets
+        ; test_case
+            "release checksums include model catalog seed"
+            `Quick
+            test_release_checksums_include_model_catalog_seed
         ] )
     ]
 ;;

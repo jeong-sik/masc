@@ -1,7 +1,5 @@
 import { get, post, fetchWithTimeout, type GetOptions } from './core'
 import {
-  parseIdeAnnotations,
-  parseIdeCodeRegions,
   type IdeAnnotation,
   type IdeCodeRegion,
   type AnnotationKind,
@@ -104,7 +102,6 @@ export interface CreateAnnotationInput {
   readonly file_path: string
   readonly line_start: number
   readonly line_end: number
-  readonly keeper_id: string
   readonly kind: AnnotationKind
   readonly content: string
   readonly goal_id?: string
@@ -137,6 +134,181 @@ function appendWorkspaceParams(
   if (opts.repoId) params.set('repo_id', opts.repoId)
 }
 
+function ideEnvelopeData(raw: unknown, operation: string): unknown {
+  if (!isRecord(raw)) throw new Error(`${operation} returned a malformed response envelope`)
+  if (raw.ok !== true) {
+    const message = typeof raw.error === 'string' && raw.error.trim() !== ''
+      ? raw.error.trim()
+      : `${operation} failed`
+    throw new Error(message)
+  }
+  return raw.data
+}
+
+function ideEnvelopeRecord(raw: unknown, operation: string): Record<string, unknown> {
+  const data = ideEnvelopeData(raw, operation)
+  if (!isRecord(data)) throw new Error(`${operation} returned malformed data`)
+  return data
+}
+
+function parseStrictRows<T>(
+  operation: string,
+  data: unknown,
+  parse: (value: unknown) => T | null,
+): ReadonlyArray<T> {
+  if (!Array.isArray(data)) throw new Error(`${operation} returned malformed data`)
+  const parsed = data.map(parse)
+  const invalidIndex = parsed.findIndex(item => item === null)
+  if (invalidIndex >= 0) {
+    throw new Error(`${operation} returned malformed row at index ${invalidIndex}`)
+  }
+  return parsed as ReadonlyArray<T>
+}
+
+function parseStrictRow<T>(
+  operation: string,
+  data: unknown,
+  parse: (value: unknown) => T | null,
+): T {
+  const parsed = parse(data)
+  if (parsed === null) throw new Error(`${operation} returned malformed row`)
+  return parsed
+}
+
+function nullableStringField(record: Record<string, unknown>, key: string): string | null | undefined {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  return typeof value === 'string' ? value : undefined
+}
+
+function integerField(record: Record<string, unknown>, key: string): number | null {
+  const value = numberField(record, key)
+  return value !== null && Number.isInteger(value) ? value : null
+}
+
+function positiveIntegerField(record: Record<string, unknown>, key: string): number | null {
+  const value = integerField(record, key)
+  return value !== null && value > 0 ? value : null
+}
+
+function annotationKindField(record: Record<string, unknown>): AnnotationKind | null {
+  const kind = stringField(record, 'kind')
+  return kind === 'Comment'
+    || kind === 'Decision'
+    || kind === 'Question'
+    || kind === 'Bookmark'
+    ? kind
+    : null
+}
+
+function parseStrictIdeAnnotation(raw: unknown): IdeAnnotation | null {
+  if (!isRecord(raw)) return null
+  const id = stringField(raw, 'id')
+  const filePath = stringField(raw, 'file_path')
+  const lineStart = positiveIntegerField(raw, 'line_start')
+  const lineEnd = positiveIntegerField(raw, 'line_end')
+  const keeperId = stringField(raw, 'keeper_id')
+  const kind = annotationKindField(raw)
+  const content = typeof raw.content === 'string' ? raw.content : null
+  const goalId = nullableStringField(raw, 'goal_id')
+  const taskId = nullableStringField(raw, 'task_id')
+  const boardPostId = nullableStringField(raw, 'board_post_id')
+  const commentId = nullableStringField(raw, 'comment_id')
+  const prId = nullableStringField(raw, 'pr_id')
+  const gitRef = nullableStringField(raw, 'git_ref')
+  const logId = nullableStringField(raw, 'log_id')
+  const sessionId = nullableStringField(raw, 'session_id')
+  const operationId = nullableStringField(raw, 'operation_id')
+  const workerRunId = nullableStringField(raw, 'worker_run_id')
+  const createdAtMs = numberField(raw, 'created_at_ms')
+  const updatedAtMs = numberField(raw, 'updated_at_ms')
+  if (
+    !id
+    || !filePath
+    || lineStart === null
+    || lineEnd === null
+    || lineEnd < lineStart
+    || !keeperId
+    || kind === null
+    || content === null
+    || goalId === undefined
+    || taskId === undefined
+    || boardPostId === undefined
+    || commentId === undefined
+    || prId === undefined
+    || gitRef === undefined
+    || logId === undefined
+    || sessionId === undefined
+    || operationId === undefined
+    || workerRunId === undefined
+    || createdAtMs === null
+    || updatedAtMs === null
+  ) {
+    return null
+  }
+  return {
+    id,
+    file_path: filePath,
+    line_start: lineStart,
+    line_end: lineEnd,
+    keeper_id: keeperId,
+    kind,
+    content,
+    goal_id: goalId,
+    task_id: taskId,
+    board_post_id: boardPostId,
+    comment_id: commentId,
+    pr_id: prId,
+    git_ref: gitRef,
+    log_id: logId,
+    session_id: sessionId,
+    operation_id: operationId,
+    worker_run_id: workerRunId,
+    created_at_ms: createdAtMs,
+    updated_at_ms: updatedAtMs,
+  }
+}
+
+function parseStrictIdeCodeRegion(raw: unknown): IdeCodeRegion | null {
+  if (!isRecord(raw)) return null
+  const source = isRecord(raw.source) ? raw.source : null
+  if (source === null) return null
+  const filePath = stringField(raw, 'file_path')
+  const lineStart = positiveIntegerField(raw, 'line_start')
+  const lineEnd = positiveIntegerField(raw, 'line_end')
+  const keeperId = stringField(raw, 'keeper_id')
+  const sourceType = stringField(source, 'type')
+  const sourceToolName = nullableStringField(source, 'tool_name')
+  const sourceTurn = sourceType === 'tool_call' ? integerField(source, 'turn') : null
+  const sourceNote = sourceType === 'manual' ? nullableStringField(source, 'note') : null
+  const timestampMs = numberField(raw, 'timestamp_ms')
+  if (
+    !filePath
+    || lineStart === null
+    || lineEnd === null
+    || lineEnd < lineStart
+    || !keeperId
+    || (sourceType !== 'tool_call' && sourceType !== 'manual')
+    || sourceToolName === undefined
+    || sourceNote === undefined
+    || (sourceType === 'tool_call' && sourceTurn === null)
+    || timestampMs === null
+  ) {
+    return null
+  }
+  return {
+    file_path: filePath,
+    line_start: lineStart,
+    line_end: lineEnd,
+    keeper_id: keeperId,
+    source_type: sourceType,
+    source_tool_name: sourceToolName,
+    source_turn: sourceTurn,
+    source_note: sourceNote,
+    timestamp_ms: timestampMs,
+  }
+}
+
 export async function fetchIdeAnnotations(
   filter: IdeAnnotationFilter = {},
   opts: IdeApiOptions = {},
@@ -146,8 +318,7 @@ export async function fetchIdeAnnotations(
   appendWorkspaceParams(params, opts)
   const query = params.size > 0 ? `?${params.toString()}` : ''
   const raw = await get<unknown>(`/api/v1/ide/annotations${query}`, opts)
-  if (!isRecord(raw) || raw.ok !== true) return []
-  return parseIdeAnnotations(raw.data)
+  return parseStrictRows('fetchIdeAnnotations', ideEnvelopeData(raw, 'fetchIdeAnnotations'), parseStrictIdeAnnotation)
 }
 
 export async function createIdeAnnotation(
@@ -158,19 +329,17 @@ export async function createIdeAnnotation(
   appendWorkspaceParams(params, opts)
   const query = params.size > 0 ? `?${params.toString()}` : ''
   const raw = await post<unknown>(`/api/v1/ide/annotations${query}`, input)
-  if (!isRecord(raw) || raw.ok !== true) return null
-  return parseIdeAnnotations([raw.data])[0] ?? null
+  return parseStrictRow('createIdeAnnotation', ideEnvelopeData(raw, 'createIdeAnnotation'), parseStrictIdeAnnotation)
 }
 
 export async function deleteIdeAnnotation(
   id: string,
-  keeperId: string,
   opts: IdeApiOptions = {},
 ): Promise<boolean> {
   const params = new URLSearchParams()
-  params.set('keeper_id', keeperId)
   appendWorkspaceParams(params, opts)
-  const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}?${params.toString()}`
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}${query}`
   try {
     const res = await fetchWithTimeout(path, { method: 'DELETE' }, 15_000)
     return res.ok
@@ -187,8 +356,7 @@ export async function fetchIdeRegions(
   params.set('file_path', filePath)
   appendWorkspaceParams(params, opts)
   const raw = await get<unknown>(`/api/v1/ide/regions?${params.toString()}`, opts)
-  if (!isRecord(raw) || raw.ok !== true) return []
-  return parseIdeCodeRegions(raw.data)
+  return parseStrictRows('fetchIdeRegions', ideEnvelopeData(raw, 'fetchIdeRegions'), parseStrictIdeCodeRegion)
 }
 
 export async function fetchIdePresence(
@@ -212,8 +380,15 @@ export async function fetchIdeCursors(
   if (opts.offset !== undefined) params.set('offset', String(opts.offset))
   const query = params.size > 0 ? `?${params.toString()}` : ''
   const raw = await get<unknown>(`/api/v1/ide/cursors${query}`, opts)
-  if (!isRecord(raw) || raw.ok !== true) return null
-  return parseIdeCursorSnapshot(raw.data)
+  const data = ideEnvelopeRecord(raw, 'fetchIdeCursors')
+  const snapshot = parseIdeCursorSnapshot(data)
+  if (snapshot === null) throw new Error('fetchIdeCursors returned malformed data')
+  const cursorRows = data.cursors
+  if (!Array.isArray(cursorRows)) throw new Error('fetchIdeCursors returned malformed cursors')
+  if (snapshot.cursors.length !== cursorRows.length) {
+    throw new Error('fetchIdeCursors returned malformed cursor rows')
+  }
+  return snapshot
 }
 
 export async function fetchIdeEvents(
@@ -227,9 +402,15 @@ export async function fetchIdeEvents(
   if (opts.offset !== undefined) params.set('offset', String(opts.offset))
   const query = params.size > 0 ? `?${params.toString()}` : ''
   const raw = await get<unknown>(`/api/v1/ide/events${query}`, opts)
-  if (!isRecord(raw) || raw.ok !== true || !isRecord(raw.data)) return []
-  const events = raw.data.events
-  return Array.isArray(events) ? events.map(parseIdeBridgeEvent).filter(isIdeBridgeEvent) : []
+  const data = ideEnvelopeRecord(raw, 'fetchIdeEvents')
+  const events = data.events
+  if (!Array.isArray(events)) throw new Error('fetchIdeEvents returned malformed events')
+  const parsed = events.map(parseIdeBridgeEvent)
+  const invalidIndex = parsed.findIndex(event => event === null)
+  if (invalidIndex >= 0) {
+    throw new Error(`fetchIdeEvents returned malformed event at index ${invalidIndex}`)
+  }
+  return parsed.filter(isIdeBridgeEvent)
 }
 
 function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {

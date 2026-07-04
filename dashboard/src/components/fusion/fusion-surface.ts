@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
 import { navigate, replaceRoute, route } from '../../router'
+import { ConnectionStatus } from '../dashboard-shell'
 import {
   fusionBoardLoading,
   fusionBoardPosts,
@@ -1117,12 +1118,15 @@ export function FusionSurface() {
             <span>보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다.</span>
           </div>
         </div>
-        <button
-          type="button"
-          class=${`fus-link inline fus-refresh ${ringFocusClasses()}`}
-          onClick=${() => { void refreshFusionBoard(); void refreshFusionRuns() }}
-          disabled=${fusionBoardLoading.value || fusionRunsLoading.value}
-        >${fusionBoardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
+        <div class="flex items-center gap-3">
+          <${ConnectionStatus} />
+          <button
+            type="button"
+            class=${`fus-link inline fus-refresh ${ringFocusClasses()}`}
+            onClick=${() => { void refreshFusionBoard(); void refreshFusionRuns() }}
+            disabled=${fusionBoardLoading.value || fusionRunsLoading.value}
+          >${fusionBoardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
+        </div>
       </header>
 
       <${FusionRunsPanel} />

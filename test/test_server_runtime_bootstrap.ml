@@ -248,7 +248,7 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
         ~argv0:(Filename.concat dir "main_eio.exe")
         ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
         ~preload_agent_sdk_catalog:(fun () -> incr preload_calls)
-        ~agent_sdk_catalog:(fun () -> Some [])
+        ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
         ()
     in
     Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);

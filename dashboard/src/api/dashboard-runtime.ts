@@ -230,6 +230,8 @@ export interface DashboardRuntimeProviderSnapshot {
   capabilities_declared?: boolean
   supports_multimodal_inputs?: boolean
   supports_image_input?: boolean
+  supports_audio_input?: boolean
+  supports_video_input?: boolean
   supports_reasoning_budget?: boolean
   thinking_control_format?: string | null
   effective_capabilities?: DashboardRuntimeEffectiveCapabilities | null
@@ -626,7 +628,7 @@ function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderD
   if (!isRecord(raw)) return null
   return {
     healthy: asBoolean(raw.healthy),
-    discovered_model: null,
+    discovered_model: asNullableString(raw.discovered_model),
     ctx_size: asNumber(raw.ctx_size) ?? null,
     total_slots: asNumber(raw.total_slots) ?? null,
     busy_slots: asNumber(raw.busy_slots) ?? null,
@@ -661,6 +663,8 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     capabilities_declared: asBoolean(raw.capabilities_declared),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_image_input: asBoolean(raw.supports_image_input),
+    supports_audio_input: asBoolean(raw.supports_audio_input),
+    supports_video_input: asBoolean(raw.supports_video_input),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     thinking_control_format: asNullableString(raw.thinking_control_format),
     effective_capabilities: decodeRuntimeEffectiveCapabilities(raw.effective_capabilities),

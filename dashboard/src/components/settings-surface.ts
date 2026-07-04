@@ -214,6 +214,34 @@ function RuntimeCatalogCapability({ label, value }: { label: string; value: bool
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
 }
 
+function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapshot): string | null {
+  const modelCount = typeof item.model_count === 'number'
+    ? item.model_count
+    : item.models.length > 0
+      ? item.models.length
+      : null
+  const note = item.note?.trim()
+  const parts = [
+    item.source ? `source:${item.source}` : null,
+    typeof modelCount === 'number' ? `models:${modelCount}` : null,
+    typeof item.temperature === 'number' ? `model-temp:${item.temperature}` : null,
+    typeof item.capabilities_declared === 'boolean'
+      ? `caps:${item.capabilities_declared ? 'declared' : 'missing'}`
+      : null,
+    typeof item.supports_multimodal_inputs === 'boolean'
+      ? `multimodal:${item.supports_multimodal_inputs ? 'on' : 'off'}`
+      : null,
+    typeof item.supports_image_input === 'boolean' ? `image:${item.supports_image_input ? 'on' : 'off'}` : null,
+    typeof item.supports_audio_input === 'boolean' ? `audio:${item.supports_audio_input ? 'on' : 'off'}` : null,
+    typeof item.supports_video_input === 'boolean' ? `video:${item.supports_video_input ? 'on' : 'off'}` : null,
+    typeof item.supports_reasoning_budget === 'boolean'
+      ? `reasoning-budget:${item.supports_reasoning_budget ? 'on' : 'off'}`
+      : null,
+    note ? `note:${note}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnapshot): string | null {
   const policy = item.parameter_policy
   if (!policy) return null
@@ -503,6 +531,7 @@ function RuntimeCatalogCard({
   const parameterPolicy = runtimeCatalogParameterPolicy(item)
   const requestConfig = runtimeCatalogRequestConfig(item)
   const declaredSpec = runtimeCatalogDeclaredSpec(item)
+  const snapshotFacts = runtimeCatalogSnapshotFacts(item)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -528,6 +557,9 @@ function RuntimeCatalogCard({
         <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
         <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
         <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
+        ${snapshotFacts
+          ? html`<span class="rt-cap tcf mono" title=${snapshotFacts}>snapshot:${snapshotFacts}</span>`
+          : null}
         ${effectiveCapabilities
           ? html`<span class="rt-cap tcf mono" title=${effectiveCapabilities}>${effectiveCapabilities}</span>`
           : null}
@@ -992,6 +1024,19 @@ export function SettingsSurface() {
   function openSection(id: SectionId) {
     setSec(id)
     navigate('settings', id === DEFAULT_SETTINGS_SECTION ? {} : { section: id })
+  }
+
+  function handleExportHtmlSnapshot() {
+    const htmlContent = document.documentElement.outerHTML
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `MASC_Dashboard_snapshot.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   // Server config projection — used by Paths, MCP and Notifications.
@@ -1683,6 +1728,23 @@ export function SettingsSurface() {
                   <span class="set-truth-source">no writer</span>
                 </div>
               <//>
+
+              <div class="set-rt-launch" style=${{ marginTop: '16px', border: '1px solid var(--color-border-default)', padding: '16px', borderRadius: '8px', background: 'var(--color-bg-elevated)' }}>
+                <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style=${{ fontWeight: 'bold', fontSize: '14px', color: 'var(--color-fg-primary)' }}>HTML 스냅샷 내보내기</div>
+                    <div class="set-hint" style=${{ marginTop: '4px' }}>현재 렌더링된 DOM을 HTML로 저장합니다. 외부 asset, API 데이터, 실행 상태는 파일에 내장되지 않습니다.</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="cn-act act"
+                    style=${{ background: 'var(--color-brand)', color: 'var(--volt-ink)', fontWeight: '600' }}
+                    onClick=${handleExportHtmlSnapshot}
+                  >
+                    다운로드 ⤓
+                  </button>
+                </div>
+              </div>
             `}
           </div>
         </div>

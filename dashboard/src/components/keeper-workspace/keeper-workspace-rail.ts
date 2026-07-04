@@ -401,7 +401,12 @@ function RuntimeSection({
   // (reasoning-effort mode or a reasoning-budget knob). Both come from the
   // /api/v1/providers projection — no per-keeper mutation here (deferred).
   const multimodal = capabilitiesDeclared
-    ? Boolean(entry?.supports_multimodal_inputs || entry?.supports_image_input)
+    ? Boolean(
+        entry?.supports_multimodal_inputs
+        || entry?.supports_image_input
+        || entry?.supports_audio_input
+        || entry?.supports_video_input,
+      )
     : null
   const effortMode = entry?.thinking_control_format ?? null
   const effortControlled = effortMode !== null && effortMode !== 'none'

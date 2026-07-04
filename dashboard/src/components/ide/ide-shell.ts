@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { ConnectionStatus } from '../dashboard-shell'
 import { useSignalValue, useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
 import {
   activeIdeFile,
@@ -1033,10 +1034,7 @@ export function IdeShell() {
             `)}
           </div>
           <${IdePresenceStrip} />
-          <span
-            class="ide-plane-connection"
-            data-state=${statusbar.connectionTone}
-          >● ${statusbar.connectionLabel}</span>
+          <${ConnectionStatus} />
         </header>
         <${IdeToolbar}
           activeView=${activeView}

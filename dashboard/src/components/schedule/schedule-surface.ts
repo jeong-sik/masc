@@ -7,6 +7,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { ConnectionStatus } from '../dashboard-shell'
 import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { StatusChip } from '../common/status-chip'
@@ -61,7 +62,7 @@ export function ScheduleSurface() {
   return html`
     <main class="ov ov-2col sch-surf" data-screen-label="예약" data-testid="schedule-surface">
       <div class="ov-scroll">
-        <header class="ov-head">
+        <header class="ov-head" style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <span class="ov-eyebrow">Schedule</span>
             <h1>예약 · 자동화 큐</h1>
@@ -73,6 +74,7 @@ export function ScheduleSurface() {
               <span>schedule runner projection을 읽어 표시하며, 이 화면에서 keeper turn을 자동 구동하지 않습니다.</span>
             </div>
           </div>
+          <${ConnectionStatus} />
         </header>
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}

@@ -383,6 +383,9 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('tool required')
     expect(container.textContent).toContain('declared')
     expect(container.textContent).toContain('chat-completions · openai-compatible-http')
+    expect(container.textContent).toContain('headers 1')
+    expect(container.textContent).toContain('temp 0.65')
+    expect(container.textContent).toContain('budget 32768')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge')
     expect(container.textContent).toContain(
       'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',

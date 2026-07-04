@@ -497,28 +497,25 @@ let track_write_region
     | _ -> `Assoc fields
   in
   let tool_call_json = `Assoc [ "name", `String tool_name; "arguments", arguments ] in
-  match
-    Agent_observation.emit_write_region_event
-      { base_path = base_dir; partition; keeper_id = keeper_name; turn; tool_call_json }
+  let warn_and_surface message =
+    Log.Keeper.warn
+      "IDE region tracking failed for keeper=%s path=%s: %s"
+      keeper_name
+      file_path
+      message;
+    Some message
+  in
+  try
+    match
+      Agent_observation.emit_write_region_event
+        { base_path = base_dir; partition; keeper_id = keeper_name; turn; tool_call_json }
+    with
+    | Ok () -> None
+    | Error err ->
+      Agent_observation.write_region_error_to_string err |> warn_and_surface
   with
-  | Ok () -> None
-  | Error err ->
-    let message = Agent_observation.write_region_error_to_string err in
-    Log.Keeper.warn
-      "IDE region tracking failed for keeper=%s path=%s: %s"
-      keeper_name
-      file_path
-      message;
-    Some message
-  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exception exn ->
-    let message = Printexc.to_string exn in
-    Log.Keeper.warn
-      "IDE region tracking failed for keeper=%s path=%s: %s"
-      keeper_name
-      file_path
-      message;
-    Some message
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Printexc.to_string exn |> warn_and_surface
 ;;
 
 let ide_observation_failure_fields = function

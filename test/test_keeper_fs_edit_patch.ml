@@ -11,7 +11,6 @@ module Keeper_registry = Masc.Keeper_registry
 module Keeper_tool_alias = Masc.Keeper_tool_alias
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
-module Agent_observation = Masc.Agent_observation
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 

@@ -455,6 +455,7 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_operator_action";
       "masc_operator_confirm";
       "masc_operator_judgment_write";
+      "masc_keeper_repair";
       "masc_surface_audit";
       "masc_operation_start";
       "masc_dispatch_tick";
@@ -645,22 +646,6 @@ let test_masc_keeper_msg_schema () =
           Alcotest.(check bool) "omits required_tool_names" false
             (List.mem_assoc "required_tool_names" props)
       | None -> Alcotest.fail "masc_keeper_msg missing properties"
-
-let test_masc_keeper_repair_schema () =
-  match find_registered_tool "masc_keeper_repair" with
-  | None -> Alcotest.fail "masc_keeper_repair not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has task_spec" true
-            (List.mem_assoc "task_spec" props);
-          Alcotest.(check bool) "has source_text" true
-            (List.mem_assoc "source_text" props);
-          Alcotest.(check bool) "has target_mode" true
-            (List.mem_assoc "target_mode" props);
-          Alcotest.(check bool) "has validator_profile" true
-            (List.mem_assoc "validator_profile" props)
-      | None -> Alcotest.fail "masc_keeper_repair missing properties"
 
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
@@ -874,8 +859,6 @@ let () =
         test_keeper_sandbox_args_allowed_for_dashboard_patch;
       Alcotest.test_case "keeper-msg" `Quick
         test_masc_keeper_msg_schema;
-      Alcotest.test_case "keeper-repair" `Quick
-        test_masc_keeper_repair_schema;
     ];
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick

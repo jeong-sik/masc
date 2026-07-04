@@ -78,6 +78,10 @@ type lsp_method =
   | Shutdown
   | Exit
   | Masc_lsp_status
+  | Did_open
+  | Did_change
+  | Did_save
+  | Did_close
   | Hover
   | CodeLens
   | InlayHint
@@ -90,44 +94,86 @@ type lsp_method =
   | Folding_range
   | Document_highlight
 
-let lsp_method_of_string = function
-  | "initialize" -> Some Initialize
-  | "initialized" -> Some Initialized
-  | "shutdown" -> Some Shutdown
-  | "exit" -> Some Exit
-  | "masc/lspStatus" -> Some Masc_lsp_status
-  | "textDocument/hover" -> Some Hover
-  | "textDocument/codeLens" -> Some CodeLens
-  | "textDocument/inlayHint" -> Some InlayHint
-  | "textDocument/diagnostic" -> Some Diagnostic
-  | "textDocument/definition" -> Some Definition
-  | "textDocument/references" -> Some References
-  | "textDocument/completion" -> Some Completion
-  | "textDocument/codeAction" -> Some CodeAction
-  | "textDocument/documentSymbol" -> Some Document_symbol
-  | "textDocument/foldingRange" -> Some Folding_range
-  | "textDocument/documentHighlight" -> Some Document_highlight
-  | _ -> None
-;;
+module Lsp_method_catalog = struct
+  type classification =
+    | Read_only
+    | Mutation
+    | Lifecycle
+    | Status
 
-let lsp_method_to_string = function
-  | Initialize -> "initialize"
-  | Initialized -> "initialized"
-  | Shutdown -> "shutdown"
-  | Exit -> "exit"
-  | Masc_lsp_status -> "masc/lspStatus"
-  | Hover -> "textDocument/hover"
-  | CodeLens -> "textDocument/codeLens"
-  | InlayHint -> "textDocument/inlayHint"
-  | Diagnostic -> "textDocument/diagnostic"
-  | Definition -> "textDocument/definition"
-  | References -> "textDocument/references"
-  | Completion -> "textDocument/completion"
-  | CodeAction -> "textDocument/codeAction"
-  | Document_symbol -> "textDocument/documentSymbol"
-  | Folding_range -> "textDocument/foldingRange"
-  | Document_highlight -> "textDocument/documentHighlight"
-;;
+  type entry =
+    { method_ : lsp_method
+    ; wire_method : string
+    ; classification : classification
+    }
+
+  let entry method_ =
+    let wire_method, classification =
+      match method_ with
+      | Initialize -> "initialize", Lifecycle
+      | Initialized -> "initialized", Lifecycle
+      | Shutdown -> "shutdown", Lifecycle
+      | Exit -> "exit", Lifecycle
+      | Masc_lsp_status -> "masc/lspStatus", Status
+      | Did_open -> "textDocument/didOpen", Mutation
+      | Did_change -> "textDocument/didChange", Mutation
+      | Did_save -> "textDocument/didSave", Mutation
+      | Did_close -> "textDocument/didClose", Mutation
+      | Hover -> "textDocument/hover", Read_only
+      | CodeLens -> "textDocument/codeLens", Read_only
+      | InlayHint -> "textDocument/inlayHint", Read_only
+      | Diagnostic -> "textDocument/diagnostic", Read_only
+      | Definition -> "textDocument/definition", Read_only
+      | References -> "textDocument/references", Read_only
+      | Completion -> "textDocument/completion", Read_only
+      | CodeAction -> "textDocument/codeAction", Read_only
+      | Document_symbol -> "textDocument/documentSymbol", Read_only
+      | Folding_range -> "textDocument/foldingRange", Read_only
+      | Document_highlight -> "textDocument/documentHighlight", Read_only
+    in
+    { method_; wire_method; classification }
+  ;;
+
+  let handled_methods =
+    [ Initialize
+    ; Initialized
+    ; Shutdown
+    ; Exit
+    ; Masc_lsp_status
+    ; Did_open
+    ; Did_change
+    ; Did_save
+    ; Did_close
+    ; Hover
+    ; CodeLens
+    ; InlayHint
+    ; Diagnostic
+    ; Definition
+    ; References
+    ; Completion
+    ; CodeAction
+    ; Document_symbol
+    ; Folding_range
+    ; Document_highlight
+    ]
+  ;;
+
+  let entries = List.map entry handled_methods
+
+  let of_string method_ =
+    List.find_map
+      (fun entry ->
+         if String.equal entry.wire_method method_ then Some entry.method_ else None)
+      entries
+  ;;
+
+  let to_string method_ = (entry method_).wire_method
+  let classification method_ = (entry method_).classification
+end
+
+let lsp_method_of_string = Lsp_method_catalog.of_string
+let lsp_method_to_string = Lsp_method_catalog.to_string
+let lsp_method_classification = Lsp_method_catalog.classification
 
 type conn_state =
   { sw : Eio.Switch.t
@@ -1393,6 +1439,24 @@ module For_testing = struct
     | Unknown_forwarded_method of string
 
   let classify_forwarded_method = classify_forwarded_method
+
+  (* task-1694: canonical handled LSP command catalog. *)
+  type method_class = Lsp_method_catalog.classification =
+    | Read_only
+    | Mutation
+    | Lifecycle
+    | Status
+
+  let handled_lsp_methods () =
+    List.map
+      (fun (entry : Lsp_method_catalog.entry) ->
+         entry.wire_method, entry.classification)
+      Lsp_method_catalog.entries
+  ;;
+
+  let classify_handled_lsp_method method_ =
+    Option.map lsp_method_classification (lsp_method_of_string method_)
+  ;;
 
   type lang = resolved_lang =
     | Known_lang of string

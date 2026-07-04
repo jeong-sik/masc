@@ -125,11 +125,15 @@ let make_config_root root =
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
-let model_catalog_resolution_source_label resolution =
+let model_catalog_resolution_source_label
+    (resolution : Server_runtime_bootstrap.model_catalog_env_resolution)
+  =
   Server_runtime_bootstrap.model_catalog_env_source_to_string
     resolution.Server_runtime_bootstrap.source
 
-let capability_manifest_resolution_source_label resolution =
+let capability_manifest_resolution_source_label
+    (resolution : Server_runtime_bootstrap.capability_manifest_env_resolution)
+  =
   Server_runtime_bootstrap.capability_manifest_env_source_to_string
     resolution.Server_runtime_bootstrap.source
 

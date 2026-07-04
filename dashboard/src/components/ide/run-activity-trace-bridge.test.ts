@@ -79,6 +79,54 @@ describe('bridgeRunActivityEventsToTrace', () => {
     expect(keeperTraceState.value.events[0]?.count).toBe(1)
   })
 
+  it('labels typed comment and runtime activity surfaces without kind fallback', () => {
+    const emitted = bridgeRunActivityEventsToTrace([
+      activity({
+        id: 'evt-comment',
+        kind: 'note',
+        context: {
+          file_path: 'lib/comment.ml',
+          line: 11,
+          comment_id: 'comment-11',
+        },
+      }),
+      activity({
+        id: 'evt-runtime',
+        kind: 'note',
+        context: {
+          file_path: 'lib/runtime.ml',
+          line: 12,
+          session_id: 'session-12',
+          operation_id: 'operation-12',
+          worker_run_id: 'worker-12',
+        },
+      }),
+    ], new Set())
+
+    expect([...emitted]).toEqual([
+      'activity:run-default:evt-comment',
+      'activity:run-default:evt-runtime',
+    ])
+    expect(keeperTraceState.value.events).toMatchObject([
+      {
+        id: 'activity:run-default:evt-comment',
+        filePath: 'lib/comment.ml',
+        line: 11,
+        surface: 'Comment',
+        commentId: 'comment-11',
+      },
+      {
+        id: 'activity:run-default:evt-runtime',
+        filePath: 'lib/runtime.ml',
+        line: 12,
+        surface: 'Runtime',
+        sessionId: 'session-12',
+        operationId: 'operation-12',
+        workerRunId: 'worker-12',
+      },
+    ])
+  })
+
   it('skips unscoped lines and unsafe file paths without poisoning later enrichment', () => {
     const unscoped = activity({
       id: 'evt-1',

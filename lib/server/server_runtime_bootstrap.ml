@@ -144,7 +144,9 @@ let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
 	           | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
 	           | None -> None)))
 
-let resolve_oas_capability_manifest_path ?(env = Sys.getenv_opt) ~config_root () =
+let resolve_oas_capability_manifest_path ?(env = Sys.getenv_opt) ~config_root ()
+  : capability_manifest_env_resolution option
+  =
   match nonempty_env env oas_capability_manifest_env_var_name with
   | Some path -> Some { path; source = Capability_manifest_env_var }
   | None ->

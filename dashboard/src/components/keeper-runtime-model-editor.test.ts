@@ -188,6 +188,78 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
       seed: 7,
       connect_timeout_s: 30,
     },
+    declared_spec: {
+      source: 'runtime.toml',
+      provider: {
+        id: runtimeId.split('.')[0],
+        display_name: providerName,
+        protocol: 'openai-compatible-http',
+        api_format: 'chat-completions',
+        transport: 'http',
+        auth_kind: 'env:RUNTIME_API_KEY',
+        is_non_interactive: true,
+        has_capabilities: true,
+        behavior_capabilities: {
+          supports_inline_tools: true,
+          requires_per_keeper_bridging_for_bound_actor_tools: true,
+          identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+          argv_prompt_preflight: false,
+          uses_anthropic_caching: false,
+          max_turns_per_attempt: null,
+          tolerates_bound_actor_fallback: false,
+        },
+        custom_header_count: 1,
+        connect_timeout_s: 30,
+      },
+      model: {
+        id: runtimeId.split('.')[1],
+        api_name: modelName,
+        tools_support: true,
+        max_context: 128000,
+        thinking_support: true,
+        preserve_thinking: true,
+        max_thinking_budget: 4096,
+        streaming: true,
+        temperature: 0.2,
+        capabilities: {
+          source: 'runtime.toml',
+          supports_tool_choice: true,
+          supports_required_tool_choice: true,
+          supports_named_tool_choice: true,
+          supports_parallel_tool_calls: true,
+          supports_extended_thinking: true,
+          supports_reasoning_budget: true,
+          thinking_control_format: 'chat-template-kwargs',
+          supports_response_format_json: true,
+          supports_structured_output: true,
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+          supports_native_streaming: true,
+          supports_system_prompt: true,
+          supports_caching: true,
+          supports_prompt_caching: true,
+          prompt_cache_alignment: 1024,
+          supports_top_k: true,
+          supports_min_p: true,
+          supports_seed: true,
+          supports_seed_with_images: true,
+          supports_code_execution: true,
+        },
+        match_prefixes: [`${modelName}-`],
+      },
+      binding: {
+        provider_id: runtimeId.split('.')[0],
+        model_id: runtimeId.split('.')[1],
+        is_default: true,
+        max_concurrent: 4,
+        price_input: 0.1,
+        price_output: 0.2,
+        keep_alive: '30m',
+        num_ctx: 131072,
+      },
+    },
     models: [modelName],
     endpoint_url: 'https://runtime.example/v1',
   }
@@ -262,6 +334,11 @@ describe('KeeperRuntimeModelEditor', () => {
     expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
     expect(container.textContent).toContain('format:json,schema')
     expect(container.textContent).toContain('prompt-cache@1024')
+    expect(container.textContent).toContain('declared')
+    expect(container.textContent).toContain('api:chat-completions')
+    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
+    expect(container.textContent).toContain('match:claude-')
+    expect(container.textContent).toContain('concurrency:4')
     expect(container.textContent).toContain('wire:responses.reasoning')
     expect(container.textContent).toContain('tool-call-replay:required')
     expect(container.textContent).toContain('responses-api')
@@ -314,6 +391,8 @@ describe('KeeperRuntimeModelEditor', () => {
     expect(container.textContent).toContain('runtime.toml')
     expect(container.textContent).toContain('[runtime.assignments]')
     expect(container.textContent).toContain('caps:declared')
+    expect(container.textContent).toContain('api:chat-completions')
+    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
     expect(container.textContent).toContain('responses-api')
   })
 

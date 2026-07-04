@@ -32,6 +32,7 @@ import {
   runtimeCatalogState,
 } from '../lib/runtime-catalog-resource'
 import {
+  runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
   runtimeCatalogParameterPolicy,
   runtimeCatalogRequestConfig,
@@ -133,6 +134,7 @@ function RuntimeCatalogSummary({
   const endpoint = entry.endpoint_url ?? entry.transport ?? MISSING_DATA_DASH
   const snapshotFacts = runtimeCatalogSnapshotFacts(entry)
   const effectiveCapabilities = runtimeCatalogEffectiveCapabilities(entry)
+  const declaredSpec = runtimeCatalogDeclaredSpec(entry)
   const parameterPolicy = runtimeCatalogParameterPolicy(entry)
   const requestConfig = runtimeCatalogRequestConfig(entry)
   return html`
@@ -158,11 +160,12 @@ function RuntimeCatalogSummary({
         <${RuntimeCapabilityPill} label="multimodal" value=${entry.supports_multimodal_inputs} />
         <${RuntimeCapabilityPill} label="reasoning-budget" value=${entry.supports_reasoning_budget} />
       </div>
-      ${snapshotFacts || effectiveCapabilities || parameterPolicy || requestConfig
+      ${snapshotFacts || effectiveCapabilities || declaredSpec || parameterPolicy || requestConfig
         ? html`
             <div class="mt-2 grid gap-1.5">
               ${snapshotFacts ? html`<${RuntimeCatalogDetailRow} label="snapshot" value=${snapshotFacts} />` : null}
               ${effectiveCapabilities ? html`<${RuntimeCatalogDetailRow} label="effective" value=${effectiveCapabilities} />` : null}
+              ${declaredSpec ? html`<${RuntimeCatalogDetailRow} label="declared" value=${declaredSpec} />` : null}
               ${parameterPolicy ? html`<${RuntimeCatalogDetailRow} label="policy" value=${parameterPolicy} />` : null}
               ${requestConfig ? html`<${RuntimeCatalogDetailRow} label="request" value=${requestConfig} />` : null}
             </div>

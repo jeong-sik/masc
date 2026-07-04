@@ -612,9 +612,7 @@ let field_value fixture ~tool_name field_name schema =
              "tool_search_files";
            ] ->
       `String (ensure_code_file fixture)
-  | "working_dir"
-    when tool_name = "masc_keeper_repair" ->
-      `String fixture.worktree_dir
+  | "working_dir" -> `String fixture.worktree_dir
   | "cwd" -> `String fixture.worktree_dir
   | "command" -> `String "git status"
   | "content" when tool_name = "tool_write_file" -> `String "after\n"
@@ -662,13 +660,8 @@ let field_value fixture ~tool_name field_name schema =
       List.mem tool_name
         [
           "masc_keeper_up";
-          "masc_keeper_repair";
         ] ->
       `String "bad keeper!"
-  | "task_spec" when tool_name = "masc_keeper_repair" ->
-      `String "Write only OCaml code for inc : int -> int."
-  | "source_text" when tool_name = "masc_keeper_repair" ->
-      `String "let inc n = n + 1\n"
   | "name" when tool_name = "masc_keeper_msg" ->
       `String "bad keeper!"
   | "name" -> `String "tool-matrix"
@@ -761,8 +754,6 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
       match name with
       | "masc_start" -> [ "path"; "task_title" ]
       | "masc_heartbeat_start" -> [ "interval" ]
-      | "masc_keeper_repair" ->
-          [ "source_text"; "max_attempts"; "working_dir" ]
       | "masc_keeper_msg" ->
           [ "timeout_sec" ]
       | "masc_board_post" ->

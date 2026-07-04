@@ -386,39 +386,6 @@ let keeper_schemas : tool_schema list = [
     ];
   };
 
-  {
-    name = "masc_keeper_repair";
-    description = "Run a keeper-facing detachable repair loop for OCaml code and return the terminal state.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("task_spec", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Exact OCaml task specification or signature requirement.");
-        ]);
-        ("source_text", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional initial OCaml code to validate and repair.");
-        ]);
-        ("target_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "snippet"; `String "repo"]);
-        ]);
-        ("working_dir", `Assoc [ ("type", `String "string") ]);
-        ("target_file", `Assoc [ ("type", `String "string") ]);
-        ("plugin_id", `Assoc [ ("type", `String "string") ]);
-        ("validator_profile", `Assoc [ ("type", `String "string") ]);
-        ("model_label", `Assoc [ ("type", `String "string") ]);
-        ("max_attempts", `Assoc [ ("type", `String "integer") ]);
-      ]);
-      ("required", `List [`String "name"; `String "task_spec"]);
-    ];
-  };
-
   (* masc_keeper_reconcile removed with manual_reconcile blocker system. *)
 
   {

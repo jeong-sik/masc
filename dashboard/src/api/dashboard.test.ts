@@ -2423,6 +2423,167 @@ describe('fetchRuntimeProviders', () => {
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
             temperature: 0.65,
+            parameter_policy: {
+              reasoning_toggle_wire: 'chat_template_kwargs',
+              reasoning_replay_policy: 'preserve_always',
+              requires_reasoning_replay_on_tool_call: false,
+              ignored_sampling_params: ['temperature', 'top_p'],
+              always_ignored_sampling_params: ['temperature'],
+            },
+            request_config: {
+              source: 'oas-provider-config',
+              provider_kind: 'openai_compat',
+              request_path: '/chat/completions',
+              request_path_targets_responses_api: false,
+              max_tokens: 65536,
+              max_context: 131072,
+              temperature: null,
+              top_p: null,
+              top_k: null,
+              min_p: null,
+              has_system_prompt: false,
+              enable_thinking: true,
+              preserve_thinking: null,
+              thinking_budget: 32768,
+              clear_thinking: false,
+              resolved_reasoning_effort: 'high',
+              glm_clear_thinking: false,
+              glm_replay_reasoning: true,
+              tool_stream: true,
+              tool_choice: {
+                kind: 'required',
+              },
+              disable_parallel_tool_use: false,
+              response_format: {
+                kind: 'json_schema',
+                has_schema: true,
+              },
+              has_output_schema: true,
+              cache_system_prompt: true,
+              supports_tool_choice_override: true,
+              supports_structured_output_override: null,
+              has_model_capabilities_override: true,
+              keep_alive: '30m',
+              internal_model_rotation_count: null,
+              num_ctx: 131072,
+              seed: 42,
+              has_previous_response_id: false,
+              connect_timeout_s: 120,
+            },
+            effective_capabilities: {
+              source: 'oas-provider-config-model',
+              max_context_tokens: 131072,
+              max_output_tokens: 65536,
+              supports_tools: true,
+              supports_tool_choice: true,
+              supports_required_tool_choice: true,
+              supports_named_tool_choice: false,
+              supports_parallel_tool_calls: true,
+              supports_runtime_mcp_tools: false,
+              supports_runtime_tool_events: false,
+              assistant_tool_content_format: 'null',
+              supports_reasoning: true,
+              supports_extended_thinking: true,
+              supports_reasoning_budget: true,
+              accepted_reasoning_efforts: ['low', 'medium', 'high'],
+              thinking_control_format: 'chat-template-kwargs',
+              preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
+              reasoning_output_format: 'split-reasoning-fields',
+              reasoning_streaming_format: {
+                kind: 'delta-reasoning-field',
+                field: 'reasoning_content',
+              },
+              reasoning_replay_override: 'preserve-always',
+              supports_response_format_json: true,
+              supports_structured_output: true,
+              supports_multimodal_inputs: true,
+              supports_image_input: true,
+              supports_audio_input: false,
+              supports_video_input: false,
+              task: null,
+              supports_native_streaming: true,
+              supports_system_prompt: true,
+              supports_caching: true,
+              supports_prompt_caching: true,
+              prompt_cache_alignment: 1024,
+              supports_top_k: true,
+              supports_min_p: true,
+              supports_seed: true,
+              supports_seed_with_images: false,
+              supports_computer_use: false,
+              supports_code_execution: false,
+              emits_usage_tokens: true,
+              supported_models: null,
+            },
+            declared_spec: {
+              source: 'runtime.toml',
+              provider: {
+                id: 'runpod_mtp',
+                display_name: 'RunPod',
+                protocol: 'openai-compatible-http',
+                api_format: 'chat-completions',
+                transport: 'http',
+                auth_kind: 'env:RUNPOD_API_KEY',
+                is_non_interactive: false,
+                has_capabilities: true,
+                behavior_capabilities: {
+                  supports_inline_tools: true,
+                  requires_per_keeper_bridging_for_bound_actor_tools: false,
+                  identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+                  argv_prompt_preflight: false,
+                  uses_anthropic_caching: false,
+                  max_turns_per_attempt: 3,
+                  tolerates_bound_actor_fallback: true,
+                },
+                custom_header_count: 2,
+                connect_timeout_s: 120,
+              },
+              model: {
+                id: 'qwen',
+                api_name: 'Qwen/Qwen3-32B',
+                tools_support: true,
+                max_context: 128000,
+                thinking_support: true,
+                preserve_thinking: true,
+                max_thinking_budget: 32768,
+                streaming: true,
+                temperature: 0.65,
+                capabilities: {
+                  source: 'runtime.toml',
+                  max_output_tokens: 65536,
+                  supports_tool_choice: true,
+                  supports_extended_thinking: true,
+                  supports_reasoning_budget: true,
+                  thinking_control_format: 'chat-template-kwargs',
+                  supports_image_input: true,
+                  supports_audio_input: false,
+                  supports_video_input: false,
+                  supports_multimodal_inputs: true,
+                  supports_response_format_json: true,
+                  supports_structured_output: true,
+                  supports_native_streaming: true,
+                  supports_caching: true,
+                  supports_prompt_caching: true,
+                  prompt_cache_alignment: 1024,
+                  supports_top_k: true,
+                  supports_min_p: true,
+                  supports_seed: true,
+                  emits_usage_tokens: true,
+                  supports_computer_use: false,
+                },
+                match_prefixes: ['Qwen/'],
+              },
+              binding: {
+                provider_id: 'runpod_mtp',
+                model_id: 'qwen',
+                is_default: true,
+                max_concurrent: 4,
+                price_input: 0.1,
+                price_output: 0.2,
+                keep_alive: '30m',
+                num_ctx: 131072,
+              },
+            },
             source: 'runtime.toml',
             discovery: {
               healthy: true,
@@ -2473,6 +2634,31 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[0]?.parameter_policy?.reasoning_toggle_wire).toBe('chat_template_kwargs')
+    expect(result.providers[0]?.parameter_policy?.reasoning_replay_policy).toBe('preserve_always')
+    expect(result.providers[0]?.parameter_policy?.ignored_sampling_params).toEqual(['temperature', 'top_p'])
+    expect(result.providers[0]?.parameter_policy?.always_ignored_sampling_params).toEqual(['temperature'])
+    expect(result.providers[0]?.request_config?.provider_kind).toBe('openai_compat')
+    expect(result.providers[0]?.request_config?.request_path).toBe('/chat/completions')
+    expect(result.providers[0]?.request_config?.max_tokens).toBe(65536)
+    expect(result.providers[0]?.request_config?.thinking_budget).toBe(32768)
+    expect(result.providers[0]?.request_config?.resolved_reasoning_effort).toBe('high')
+    expect(result.providers[0]?.request_config?.tool_choice?.kind).toBe('required')
+    expect(result.providers[0]?.request_config?.response_format?.kind).toBe('json_schema')
+    expect(result.providers[0]?.request_config?.num_ctx).toBe(131072)
+    expect(result.providers[0]?.effective_capabilities?.max_output_tokens).toBe(65536)
+    expect(result.providers[0]?.effective_capabilities?.supports_parallel_tool_calls).toBe(true)
+    expect(result.providers[0]?.effective_capabilities?.accepted_reasoning_efforts).toEqual(['low', 'medium', 'high'])
+    expect(result.providers[0]?.effective_capabilities?.reasoning_streaming_format?.field).toBe('reasoning_content')
+    expect(result.providers[0]?.effective_capabilities?.supports_top_k).toBe(true)
+    expect(result.providers[0]?.declared_spec?.source).toBe('runtime.toml')
+    expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')
+    expect(
+      result.providers[0]?.declared_spec?.provider?.behavior_capabilities
+        ?.identity_runtime_mcp_header_keys,
+    ).toEqual(['x-masc-keeper'])
+    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_structured_output).toBe(true)
+    expect(result.providers[0]?.declared_spec?.binding?.max_concurrent).toBe(4)
     expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
     expect(result.assignment_governance?.status).toBe('degraded')

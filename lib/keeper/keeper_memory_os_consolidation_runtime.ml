@@ -23,12 +23,17 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
 let user_message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 ;;
 
+type 'a timeout_result =
+  | Completed of 'a
+  | Timed_out
+  | Clock_unavailable
+
 let with_timeout ?clock ~timeout_sec f =
   match clock with
-  | None -> Some (f ())
+  | None -> Clock_unavailable
   | Some clock ->
-    (try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
-     | Eio.Time.Timeout -> None)
+    (try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+     | Eio.Time.Timeout -> Timed_out)
 ;;
 
 (* Below this many facts there is nothing to consolidate; skip the LLM call. *)
@@ -160,9 +165,15 @@ let consolidate_keeper
            with_timeout ?clock ~timeout_sec (fun () ->
              complete ~sw ~net ?clock ~config ~messages ())
          with
-         | None -> Transport_failed "consolidation provider timed out"
-         | Some (Error _) -> Transport_failed "consolidation provider transport error"
-         | Some (Ok response) ->
+         | Timed_out -> Transport_failed "consolidation provider timed out"
+         | Clock_unavailable ->
+           Transport_failed
+             (Printf.sprintf
+                "consolidation provider clock unavailable; refusing provider call \
+                 without enforcing timeout_sec=%.1f"
+                timeout_sec)
+         | Completed (Error _) -> Transport_failed "consolidation provider transport error"
+         | Completed (Ok response) ->
            if String.trim (Agent_sdk_response.text_of_response response) = ""
            then Empty_response
            else

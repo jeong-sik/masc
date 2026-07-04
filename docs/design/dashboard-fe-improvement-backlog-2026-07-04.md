@@ -21,7 +21,7 @@ Bank the low-risk, compiler-checkable, behavior-preserving wins first (typed-uni
 |---|-------|------|------|--------|---------------------|--------|
 | 1 | Shared typed delivery classifier (`lib/keeper-delivery.ts`) | ssot | low | S | yes | **DONE** (this branch) |
 | 2 | Total parsers for 4 store-normalizer unions | ssot | low | M | yes | **DONE** (this branch) |
-| 3 | Connector constants/helpers extraction (`connector-constants.ts`) | ssot | low | M | yes | Wave 1 |
+| 3 | Connector vocabulary extraction (`connector-constants.ts`) | ssot | low | M | yes | **DONE** (this branch — SSOT only; cycle NOT broken, see note) |
 | 4 | Transcript off-screen cost (`content-visibility` first, windowing = RFC) | perf | med | M | no | Wave 2 (measure-gated) |
 | 5 | Decompose `chat/primitives.ts` along concern boundaries | refactor | med | L | yes | Wave 3 (after 1) |
 | 6 | `fsm-hub` prop→state derivation (store-prev-during-render) | refactor | med | S | no (naive fix regresses) | Wave 3 |
@@ -35,7 +35,7 @@ Bank the low-risk, compiler-checkable, behavior-preserving wins first (typed-uni
 **Wave 1 — low-risk SSOT + safe extractions (behavior-preserving, `tsc`+vitest green, no user-visible change):**
 - Slice 1 (delivery classifier) — **done**
 - Slice 2 (store-normalizer total parsers) — needs a completeness check (`type _Covered = Exclude<T, typeof VALUES[number]> extends never ? true : never`); preserve each callsite's exact normalization (taskStatus trims+lowercases; executionTone lowercases only; signalTruth/evidenceSource case-sensitive). Severity SSOT is `types/dashboard-execution.ts` `DashboardExecutionTone`, not `core.ts`. Helper is `assertExhaustive`.
-- Slice 3 (connector constants) — SSOT-only; the bundle-shrink claim is deferred to Wave-2 measurement. Moving constants alone does **not** break the `connector-status ↔ connector-overview-strip` cycle (strip still imports `startSidecar`/`stopSidecar`; quick-bind imports `bindConnector`) — add a separate `connector-actions.ts` to cut the cycle, or drop the cycle claim.
+- Slice 3 (connector vocabulary) — **DONE, SSOT-only.** Extracted the pure vocabulary (KNOWN_CONNECTOR_IDS, display names, sidecar commands, accent style, channel icon) to `connector-constants.ts` (a leaf — imports nothing from connector-status, so no new cycle); connector-status re-exports for back-compat; skeleton/onboarding repointed. **Cycle NOT broken and NOT claimed:** the sidecar actions (start/stop/bind) close over connector-status's signal-backed UI state (`patchConnectorUiState`/`refresh`), so they cannot move to a `connector-actions.ts` without dragging that state — verified by reading the action bodies. Breaking the cycle needs the UI-state store extraction (Slice 8/RFC). State-label helpers (`connectorStateLabel`/`connectorCardBorderClass`) also stayed (share the file-local exhaustiveness helper). Bundle-shrink claim deferred to Wave-2 `BUNDLE_REPORT=1` measurement. Gates: tsc 0, eslint 0, vitest (4 connector suites +42, panel 37) green.
 
 **Wave 2 — performance, measurement-gated:**
 - Slice 4: measure first (`performance-monitor` LoAF + a memo render counter) on a synthetic 500+ entry streaming transcript; ship the cheap `content-visibility:auto` row wrapper (mirrors `virtual-list.ts:242-259`) *before* any windowing; gate on real transcript-length distribution.

@@ -136,6 +136,10 @@ let metric_process_timeout = Otel_metric_store_core.declare_counter "masc_proces
 let metric_build_identity_probe_failures = Otel_metric_store_core.declare_counter "masc_build_identity_probe_failures_total"
 let metric_distributed_lock_acquire_failed = Otel_metric_store_core.declare_counter "masc_distributed_lock_acquire_failed_total"
 
+let metric_ide_orphan_reads =
+  Otel_metric_store_core.declare_counter "masc_ide_orphan_reads_total"
+;;
+
 (* #10130: boot-time sweep of [save_file_atomic] orphan temp
    files.  Labels: [size_class = empty | with_data].  The
    [with_data] rate is the interesting operator signal — each

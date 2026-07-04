@@ -71,12 +71,12 @@ release 시 close 하지 않음).
 
 ## 3. Pool design (transport-agnostic interface)
 
-핵심 결정: **opaque `Pool.t`** + **`with_connection`** callback API.
-`acquire`/`release` 같은 명시적 lifetime API 대신 scoped callback.
-근거: callsite 가 acquire 후 잊으면 leak. callback 은 type 차원에서
-release 보장.
+핵심 결정: **opaque `Pool.t`** + scoped `request` API.
+`acquire`/`release` 같은 명시적 lifetime API 는 노출하지 않는다.
+근거: callsite 가 acquire 후 잊으면 leak. `request` 는 pool 내부에서
+borrow/release 를 닫아 caller 가 release 를 잊을 수 없게 한다.
 
-### 3.1 interface skeleton
+### 3.1 interface shape
 
 ```ocaml
 (* lib/masc_http_client/pool.mli — Phase D design draft *)
@@ -148,17 +148,9 @@ val request :
       that connection and surfaces the error (no silent retry — caller
       decides). *)
 
-val with_connection :
-  t ->
-  url:string ->
-  ((* low-level handle — transport-specific. Phase D step 2 (post-B):
-      either piaf [Piaf.Client.t] or our own [Cohttp_eio.Client.t] +
-      socket-tracking wrapper. Exposed only for streaming callsites
-      (voice_bridge). Most callers should use [request]. *)
-   unit -> 'a) -> 'a
-(** Scoped low-level handle. Released to pool on return. Streaming
-    callers (response body iteration spanning multiple Eio.Fiber.yield)
-    use this; one-shot callers use [request]. *)
+(* No low-level streaming borrow API is exposed until the concrete handle
+   type is specified. A public callback with [unit -> 'a] cannot support
+   streaming and must not ship as a stub. *)
 
 (* ── Telemetry ──────────────────────────────────────────────────────── *)
 
@@ -241,7 +233,7 @@ Phase D step 2 가 그 결정 위에 구현.
 
 | 항목 | 결정 또는 open |
 |---|---|
-| acquire/release vs callback | **callback** (`with_connection`, `request`) — leak resistant |
+| acquire/release vs scoped API | **scoped `request` only** — leak resistant; streaming borrow API requires a concrete handle type before exposure |
 | Pool lifetime | **server root_sw** — pool 자체는 process-lifetime |
 | connection error 시 retry | **caller 결정** (pool 은 connection drop 만 함) — silent retry 는 N-of-M anti-pattern 위험 |
 | per-host TLS context cache | piaf 가 이미 함 (Phase B 확인) — cohttp 직접 구현 시 우리가 더해야 함 |

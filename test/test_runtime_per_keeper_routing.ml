@@ -918,14 +918,26 @@ let runtime_thinking_model_catalog =
 id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
 base = "openai_chat"
 max_context_tokens = 131072
+max_output_tokens = 65536
 supports_tools = true
 supports_tool_choice = true
+supports_required_tool_choice = true
+supports_parallel_tool_calls = true
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
+accepted_reasoning_efforts = ["low", "medium", "high"]
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+supports_response_format_json = true
+supports_structured_output = true
 supports_native_streaming = true
+supports_prompt_caching = true
+supports_top_k = true
+supports_min_p = true
+supports_seed = true
 
 [[models]]
 id_prefix = "openai_compat/reasoning-small-out"
@@ -1002,6 +1014,229 @@ let test_thinking_support_false_forces_off () =
       "non-thinking model emits Some false (capability gate forces thinking off)"
       (Some false)
       seed.Runtime_inference.thinking_enabled)
+;;
+
+let test_runtime_inventory_surfaces_parameter_policy () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let policy = thinkdefault |> J.member "parameter_policy" in
+    Alcotest.(check string)
+      "reasoning toggle wire"
+      "chat_template_kwargs"
+      (policy |> J.member "reasoning_toggle_wire" |> J.to_string);
+    Alcotest.(check string)
+      "reasoning replay policy"
+      "no_replay"
+      (policy |> J.member "reasoning_replay_policy" |> J.to_string);
+    Alcotest.(check bool)
+      "no tool replay requirement"
+      false
+      (policy |> J.member "requires_reasoning_replay_on_tool_call" |> J.to_bool);
+    Alcotest.(check int)
+      "ignored sampling params empty"
+      0
+      (policy |> J.member "ignored_sampling_params" |> J.to_list |> List.length);
+    Alcotest.(check int)
+      "always ignored sampling params empty"
+      0
+      (policy |> J.member "always_ignored_sampling_params" |> J.to_list |> List.length))
+;;
+
+let test_runtime_inventory_surfaces_effective_capabilities () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let caps = thinkdefault |> J.member "effective_capabilities" in
+    Alcotest.(check string)
+      "effective capability source"
+      "oas-provider-config-model"
+      (caps |> J.member "source" |> J.to_string);
+    Alcotest.(check int)
+      "effective max output"
+      65536
+      (caps |> J.member "max_output_tokens" |> J.to_int);
+    Alcotest.(check bool)
+      "parallel tool calls"
+      true
+      (caps |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check (list string))
+      "accepted reasoning efforts"
+      [ "low"; "medium"; "high" ]
+      (caps
+       |> J.member "accepted_reasoning_efforts"
+       |> J.to_list
+       |> List.map J.to_string);
+    Alcotest.(check string)
+      "reasoning streaming field"
+      "reasoning_content"
+      (caps |> J.member "reasoning_streaming_format" |> J.member "field" |> J.to_string);
+    Alcotest.(check bool)
+      "top_k"
+      true
+      (caps |> J.member "supports_top_k" |> J.to_bool))
+;;
+
+let test_runtime_inventory_surfaces_request_config () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let request = thinkdefault |> J.member "request_config" in
+    Alcotest.(check string)
+      "request config source"
+      "oas-provider-config"
+      (request |> J.member "source" |> J.to_string);
+    Alcotest.(check string)
+      "provider kind"
+      "openai_compat"
+      (request |> J.member "provider_kind" |> J.to_string);
+    Alcotest.(check string)
+      "request path"
+      "/chat/completions"
+      (request |> J.member "request_path" |> J.to_string);
+    Alcotest.(check bool)
+      "not responses api"
+      false
+      (request |> J.member "request_path_targets_responses_api" |> J.to_bool);
+    Alcotest.(check int)
+      "request max context"
+      128000
+      (request |> J.member "max_context" |> J.to_int);
+    Alcotest.(check string)
+      "response format kind"
+      "off"
+      (request |> J.member "response_format" |> J.member "kind" |> J.to_string);
+    Alcotest.(check bool)
+      "no output schema body exposed"
+      false
+      (request |> J.member "has_output_schema" |> J.to_bool);
+    Alcotest.(check bool)
+      "no model capabilities override on provider_config"
+      false
+      (request |> J.member "has_model_capabilities_override" |> J.to_bool);
+    (match request with
+     | `Assoc fields ->
+       List.iter
+         (fun secret_key ->
+            Alcotest.(check bool)
+              ("secret key omitted: " ^ secret_key)
+              false
+              (List.mem_assoc secret_key fields))
+         [ "api_key"; "headers"; "system_prompt"; "output_schema"; "previous_response_id" ]
+     | _ -> Alcotest.fail "request_config must be an object"))
+;;
+
+let test_runtime_inventory_surfaces_declared_spec () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let spec = thinkdefault |> J.member "declared_spec" in
+    let provider = spec |> J.member "provider" in
+    let model = spec |> J.member "model" in
+    let binding = spec |> J.member "binding" in
+    Alcotest.(check string)
+      "declared spec source"
+      "runtime.toml"
+      (spec |> J.member "source" |> J.to_string);
+    Alcotest.(check string)
+      "provider id"
+      "ollama_cloud"
+      (provider |> J.member "id" |> J.to_string);
+    Alcotest.(check string)
+      "api format"
+      "chat-completions"
+      (provider |> J.member "api_format" |> J.to_string);
+    Alcotest.(check string)
+      "transport"
+      "http"
+      (provider |> J.member "transport" |> J.to_string);
+    Alcotest.(check bool)
+      "provider capabilities absent"
+      false
+      (provider |> J.member "has_capabilities" |> J.to_bool);
+    (match provider |> J.member "behavior_capabilities" with
+     | `Null -> ()
+     | _ -> Alcotest.fail "absent provider capabilities must remain null");
+    Alcotest.(check int)
+      "custom header count"
+      0
+      (provider |> J.member "custom_header_count" |> J.to_int);
+    Alcotest.(check string)
+      "model id"
+      "thinkdefault"
+      (model |> J.member "id" |> J.to_string);
+    Alcotest.(check string)
+      "model api name"
+      "qwen36-35b-a3b-mtp"
+      (model |> J.member "api_name" |> J.to_string);
+    Alcotest.(check int)
+      "declared max context"
+      128000
+      (model |> J.member "max_context" |> J.to_int);
+    Alcotest.(check bool)
+      "declared thinking support"
+      true
+      (model |> J.member "thinking_support" |> J.to_bool);
+    (match model |> J.member "capabilities" with
+     | `Null -> ()
+     | _ -> Alcotest.fail "absent model capabilities must remain null");
+    Alcotest.(check string)
+      "binding provider id"
+      "ollama_cloud"
+      (binding |> J.member "provider_id" |> J.to_string);
+    Alcotest.(check string)
+      "binding model id"
+      "thinkdefault"
+      (binding |> J.member "model_id" |> J.to_string);
+    Alcotest.(check int)
+      "binding max concurrency"
+      1
+      (binding |> J.member "max_concurrent" |> J.to_int);
+    (match binding |> J.member "keep_alive", binding |> J.member "num_ctx" with
+     | `Null, `Null -> ()
+     | _ -> Alcotest.fail "unset binding keep_alive/num_ctx must remain null");
+    (match provider with
+     | `Assoc fields ->
+       List.iter
+         (fun secret_key ->
+            Alcotest.(check bool)
+              ("declared provider secret omitted: " ^ secret_key)
+              false
+              (List.mem_assoc secret_key fields))
+         [ "credentials"; "headers"; "endpoint_url" ]
+     | _ -> Alcotest.fail "declared_spec provider must be an object"))
 ;;
 
 let test_thinking_unknown_runtime_defers () =
@@ -1447,6 +1682,22 @@ let () =
             "thinking-support=false forces thinking off (Some false)"
             `Quick
             test_thinking_support_false_forces_off
+        ; Alcotest.test_case
+            "runtime inventory surfaces OAS parameter policy"
+            `Quick
+            test_runtime_inventory_surfaces_parameter_policy
+        ; Alcotest.test_case
+            "runtime inventory surfaces OAS effective capabilities"
+            `Quick
+            test_runtime_inventory_surfaces_effective_capabilities
+        ; Alcotest.test_case
+            "runtime inventory surfaces OAS request config"
+            `Quick
+            test_runtime_inventory_surfaces_request_config
+        ; Alcotest.test_case
+            "runtime inventory surfaces declared spec"
+            `Quick
+            test_runtime_inventory_surfaces_declared_spec
         ; Alcotest.test_case
             "unknown runtime id defers (None)"
             `Quick

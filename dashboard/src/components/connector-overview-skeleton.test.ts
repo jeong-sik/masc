@@ -7,7 +7,7 @@ import {
   overviewSkeletonGridClasses,
   overviewSkeletonTileCount,
 } from './connector-overview-skeleton'
-import { KNOWN_CONNECTOR_IDS } from './connector-status'
+import { KNOWN_CONNECTOR_IDS } from './connector-constants'
 
 describe('overview skeleton (pure helpers)', () => {
   it('tile count matches KNOWN_CONNECTOR_IDS (no drift if a 5th bridge is added)', () => {

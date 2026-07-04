@@ -327,7 +327,10 @@ describe('RuntimeMonitor', () => {
     )
 
     expect(container.textContent).toContain('params · wire chat_template_kwargs')
-    expect(container.textContent).toContain('request · kind openai_compat')
+    expect(container.textContent).toContain(
+      'request · kind openai_compat · source oas-provider-config · path /chat/completions',
+    )
+    expect(container.textContent).toContain('system prompt')
     expect(container.textContent).toContain('preserve off')
     expect(container.textContent).toContain('glm replay')
     expect(container.textContent).toContain('tool stream on')

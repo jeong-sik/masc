@@ -23,7 +23,11 @@ let parse_lsp_jsonrpc_request jsonrpc_request_json =
     | `Assoc fields ->
       (match List.assoc_opt "method" fields with
        | Some (`String method_) ->
-         let params = Option.value ~default:`Null (List.assoc_opt "params" fields) in
+         let params =
+           match List.assoc_opt "params" fields with
+           | Some value -> value
+           | None -> `Null
+         in
          Ok (method_, params)
        | Some _ -> Error "JSON-RPC request method field must be a string"
        | None -> Error "JSON-RPC request missing method field")

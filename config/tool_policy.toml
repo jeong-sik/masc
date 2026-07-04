@@ -1,7 +1,7 @@
-# ⚠️ LEGACY / RETIRED CONFIGURATION
+# LEGACY / RETIRED CONFIGURATION
 # This file (tool_policy.toml) is kept only as a config-root marker.
 # Its contents are NOT read at boot or runtime because tool access is now
-# fully registry/descriptor-driven. See README.md and TOML-RELOAD-MATRIX.md.
+# fully registry/descriptor-driven. See README.md and docs/TOML-RELOAD-MATRIX.md.
 #
 # Tool Policy Configuration (LEGACY)
 # Defines named tool groups for keeper tool_access lists.

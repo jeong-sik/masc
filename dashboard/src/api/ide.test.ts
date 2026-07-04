@@ -67,22 +67,24 @@ describe('ide API', () => {
     expect(url).toContain('repo_id=masc')
   })
 
-  it('createIdeAnnotation appends workspace params to mutation URL', async () => {
+  it('createIdeAnnotation relies on token identity and appends workspace params', async () => {
     stubFetch({ ok: true, data: annotation })
 
     await createIdeAnnotation({
       file_path: 'lib/a.ml',
       line_start: 1,
       line_end: 1,
-      keeper_id: 'sangsu',
       kind: 'Comment',
       content: 'Review this line',
     }, { keeper: 'sangsu', repoId: 'masc' })
 
     const url = String(mockFetch.mock.calls[0]![0])
+    const init = mockFetch.mock.calls[0]![1] as RequestInit
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>
     expect(url).toContain('/api/v1/ide/annotations?')
     expect(url).toContain('keeper=sangsu')
     expect(url).toContain('repo_id=masc')
+    expect(body).not.toHaveProperty('keeper_id')
   })
 
   it('fetchIdeRegions appends repo_id param', async () => {
@@ -96,15 +98,15 @@ describe('ide API', () => {
     expect(url).toContain('repo_id=masc')
   })
 
-  it('deleteIdeAnnotation appends repo_id param', async () => {
+  it('deleteIdeAnnotation relies on token identity and appends repo_id param', async () => {
     stubFetch({}, true)
 
-    await deleteIdeAnnotation('ann-1', 'sangsu', { repoId: 'masc' })
+    await deleteIdeAnnotation('ann-1', { repoId: 'masc' })
 
     const url = String(mockFetch.mock.calls[0]![0])
     expect(url).toContain('/api/v1/ide/annotations/ann-1?')
-    expect(url).toContain('keeper_id=sangsu')
     expect(url).toContain('repo_id=masc')
+    expect(url).not.toContain('keeper_id=')
   })
 
   it('fetchIdeEvents appends event filters and parses bridge events', async () => {

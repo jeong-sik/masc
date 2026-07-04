@@ -104,7 +104,6 @@ export interface CreateAnnotationInput {
   readonly file_path: string
   readonly line_start: number
   readonly line_end: number
-  readonly keeper_id: string
   readonly kind: AnnotationKind
   readonly content: string
   readonly goal_id?: string
@@ -164,13 +163,12 @@ export async function createIdeAnnotation(
 
 export async function deleteIdeAnnotation(
   id: string,
-  keeperId: string,
   opts: IdeApiOptions = {},
 ): Promise<boolean> {
   const params = new URLSearchParams()
-  params.set('keeper_id', keeperId)
   appendWorkspaceParams(params, opts)
-  const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}?${params.toString()}`
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}${query}`
   try {
     const res = await fetchWithTimeout(path, { method: 'DELETE' }, 15_000)
     return res.ok

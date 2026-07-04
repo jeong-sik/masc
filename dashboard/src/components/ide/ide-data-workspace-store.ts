@@ -57,9 +57,48 @@ export interface IdeDataWorkspaceStore {
   readonly dispose: () => void
 }
 
+export interface WorkspaceTreeIdentity {
+  readonly source: WorkspaceSource
+  readonly basePath: string | null
+}
+
 function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>): string | null {
   const firstFile = nodes.find(node => !node.hasChildren)
   return firstFile?.path ?? null
+}
+
+export function workspaceTreeIdentity(
+  source: WorkspaceSource,
+  basePath: string | null,
+): WorkspaceTreeIdentity {
+  return { source, basePath }
+}
+
+export function sameWorkspaceTreeIdentity(
+  left: WorkspaceTreeIdentity | null,
+  right: WorkspaceTreeIdentity,
+): boolean {
+  if (left === null) return false
+  if (left.basePath !== right.basePath) return false
+  const leftSource = left.source
+  const rightSource = right.source
+  if (leftSource.kind !== rightSource.kind) return false
+  switch (leftSource.kind) {
+    case 'project':
+      return true
+    case 'repository':
+      return rightSource.kind === 'repository' && leftSource.repoId === rightSource.repoId
+    case 'repository_missing':
+      return rightSource.kind === 'repository_missing' && leftSource.repoId === rightSource.repoId
+    case 'repository_unknown':
+      return rightSource.kind === 'repository_unknown' && leftSource.repoId === rightSource.repoId
+    case 'playground':
+      return rightSource.kind === 'playground' && leftSource.keeper === rightSource.keeper
+    case 'playground_missing':
+      return rightSource.kind === 'playground_missing' && leftSource.keeper === rightSource.keeper
+    case 'keeper_unknown':
+      return rightSource.kind === 'keeper_unknown' && leftSource.keeper === rightSource.keeper
+  }
 }
 
 function isManagedMirrorRepository(repository: Repository): boolean {
@@ -141,12 +180,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const unreachableRepoIds = new Set<string>()
 
   let abortController = new AbortController()
-  // Identity (repo + workspace source kind) the file tree was last seeded for.
+  // Identity of the workspace source the file tree was last seeded for.
   // A matching identity means the next fetch is a live refresh of the same
   // workspace, so the tree is reconciled (expansion + lazily-loaded children
-  // preserved) rather than re-seeded (which would collapse it on every keeper
-  // edit). `undefined` until the first successful fetch forces an initial seed.
-  let lastTreeIdentity: string | undefined = undefined
+  // preserved) rather than re-seeded. Include the source payload and basePath
+  // so keeper/repo/fallback switches cannot retain stale lazy children.
+  let lastTreeIdentity: WorkspaceTreeIdentity | null = null
 
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
@@ -198,15 +237,15 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {
       if (signal.aborted) return
-      // Same repo + source ⇒ live refresh: keep the operator's expansion and
-      // any lazily-loaded children. A change ⇒ workspace switch: reset.
-      const treeIdentity = `${repoId ?? ''}::${source.kind}`
-      if (treeIdentity === lastTreeIdentity) {
+      // Same source + base path ⇒ live refresh: keep the operator's expansion
+      // and any lazily-loaded children. A change ⇒ workspace switch: reset.
+      const treeIdentity = workspaceTreeIdentity(source, basePath)
+      if (sameWorkspaceTreeIdentity(lastTreeIdentity, treeIdentity)) {
         fileTreeStore.reconcile(nodes)
       } else {
         fileTreeStore.seed(nodes)
-        lastTreeIdentity = treeIdentity
       }
+      lastTreeIdentity = treeIdentity
       workspaceSourceSignal.value = source
       workspaceBasePathSignal.value = basePath
 

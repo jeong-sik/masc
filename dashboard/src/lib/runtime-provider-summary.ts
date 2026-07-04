@@ -279,6 +279,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     : null
   const reasoningStream = runtimeReasoningStreamingFormatSummary(caps.reasoning_streaming_format)
   const parts = nonEmptyParts([
+    caps.source ? `source:${caps.source}` : null,
     context,
     output,
     caps.supports_tools ? 'tools' : null,

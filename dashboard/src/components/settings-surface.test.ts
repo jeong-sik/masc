@@ -1076,7 +1076,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('system-prompt')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
-      expect(cards[0]?.textContent).toContain('ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
+      expect(cards[0]?.textContent).toContain('source:oas-provider-config-model · ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
       expect(cards[0]?.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
       expect(cards[0]?.textContent).toContain('input:multimodal,image,audio')
       expect(cards[0]?.textContent).toContain('modality:visual-first')

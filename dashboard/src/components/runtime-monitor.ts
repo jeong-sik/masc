@@ -794,6 +794,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
   ].filter((value): value is string => Boolean(value))
   const reasoningStream = runtimeReasoningStreamingFormatText(caps.reasoning_streaming_format)
   const parts = [
+    caps.source ? `source ${caps.source}` : null,
     context,
     output,
     caps.supports_tools ? 'tools' : null,

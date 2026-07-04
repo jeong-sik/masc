@@ -545,13 +545,12 @@ describe('SettingsSurface', () => {
       await waitFor(() => {
         expect(container.textContent).toContain('HTML 스냅샷 내보내기')
       })
-      expect(container.textContent).toContain('현재 렌더링된 DOM을 HTML로 저장합니다')
-      expect(container.textContent).toContain('실행 상태는 파일에 내장되지 않습니다')
+      expect(container.textContent).toContain('현재 렌더링된 DOM을 HTML 파일로 저장하여 다운로드합니다')
       expect(container.textContent).not.toContain('Standalone HTML')
       expect(container.textContent).not.toContain('모든 리소스')
 
       const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-        .find(candidate => candidate.textContent?.includes('다운로드'))
+        .find(candidate => candidate.textContent?.includes('내보내기'))
       expect(button).toBeTruthy()
 
       await fireEvent.click(button as HTMLButtonElement)

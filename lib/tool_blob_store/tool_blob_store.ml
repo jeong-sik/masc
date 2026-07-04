@@ -2,7 +2,7 @@ module SS = Set_util.StringSet
 
 type t = { root : string } [@@unboxed]
 
-let preview_max = 2000
+let preview_max = 200
 
 let make_preview bytes =
   let len = min (String.length bytes) preview_max in

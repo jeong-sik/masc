@@ -584,7 +584,7 @@ let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
 
 let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
   let base_path = config.base_path in
-  let partition = Ide_paths.Orphan in
+  let partition = Ide_paths.Legacy_default in
   let limit = 10 in
   let events =
     Ide_bridge.list_events

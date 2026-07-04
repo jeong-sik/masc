@@ -39,7 +39,21 @@ type turn_event =
 
 type codebase_partition =
   | By_url of string
-  | Orphan
+      (** canonical URL 정상 resolved: host_path slug. *)
+  | No_canonical_url
+      (** [canonical_url_of_remote] returned None: blank [repo.url] or malformed
+          remote. v2 §7 "(1) 빈 repo/remote 없음". *)
+  | Unmatched
+      (** Caller passed [repo_id] but the repository store could not resolve it.
+          v2 §7 "(2) repo_id unmatched". *)
+  | Base_unresolved
+      (** [file_path] under no registered repo (unregistered worktree, outside
+          playground). v2 §7 "(4) base 경로 소실" — write-path [unregistered_repo]
+          is the live instance. *)
+  | Legacy_default
+      (** No [canonical_url]/[repo_id] supplied, or record has no [partition]
+          field (tool/turn/pr_event). Structural ceiling, NOT a soft fallback.
+          v2 §7 "(3) default 미갱신". *)
 
 val canonical_url_of_remote : string -> string option
 (** [canonical_url_of_remote remote] normalises a git remote string into a

@@ -73,7 +73,7 @@ let test_ingest_tool_event () =
       ~file_path:(Some "lib/test.ml")
       ~timestamp_ms:1717400000000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -98,7 +98,7 @@ let test_ingest_turn_event () =
       ~stop_reason:(Some "end_turn")
       ~duration_ms:(Some 5000)
       ~timestamp_ms:1717400000000L;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "turn_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -135,7 +135,7 @@ let test_ingest_multiple_events () =
       ~file_path:None
       ~timestamp_ms:2000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -319,7 +319,7 @@ let test_hook_extracts_file_path_from_path_key () =
       ~duration_ms:100.0
       ~output_text:"wrote 10 lines"
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let line = input_line ic in
@@ -342,7 +342,7 @@ let test_hook_extracts_file_path_from_file_path_key () =
       ~duration_ms:50.0
       ~output_text:"edited"
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let line = input_line ic in
@@ -365,7 +365,7 @@ let test_hook_no_file_path () =
       ~duration_ms:10.0
       ~output_text:"file1.ml\nfile2.ml"
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let line = input_line ic in
@@ -389,7 +389,7 @@ let test_hook_summary_truncation () =
       ~duration_ms:10.0
       ~output_text:long_output
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let line = input_line ic in
@@ -412,7 +412,7 @@ let test_hook_typed_outcome_mapping () =
       ~duration_ms:10.0
       ~output_text:"command failed"
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let line = input_line ic in
@@ -436,7 +436,7 @@ let test_pr_event_ingest () =
       ~comment_count:0
       ~review_status:None
       ~timestamp_ms:1717400000000L;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -460,7 +460,7 @@ let test_pr_event_from_hook_uses_structured_descriptor_output () =
       ~turn_id:"t1"
       ~output_text:output
       ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -484,7 +484,7 @@ let test_pr_event_from_hook_uses_descriptor_confirmed_cli_url () =
       ~turn_id:"t1"
       ~output_text:output
       ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -511,7 +511,7 @@ let test_pr_event_from_hook_ignores_non_execute () =
       ~turn_id:"t1"
       ~output_text:output
       ~tool_name:"fs_write";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created" false (Sys.file_exists path))
 ;;
@@ -525,7 +525,7 @@ let test_pr_event_from_hook_ignores_no_url () =
       ~turn_id:"t1"
       ~output_text:output
       ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created" false (Sys.file_exists path))
 ;;
@@ -539,7 +539,7 @@ let test_pr_event_from_hook_ignores_raw_url () =
       ~turn_id:"t1"
       ~output_text:output
       ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created for raw url" false (Sys.file_exists path))
 ;;
@@ -555,7 +555,7 @@ let test_descriptor_gated_on_success () =
       ~output_text:failed_output
       ~tool_name:"execute"
       ~success:false;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created on failure" false (Sys.file_exists path))
 ;;
@@ -571,7 +571,7 @@ let test_legacy_hook_uses_explicit_success_flag () =
       ~turn_id:"t1"
       ~output_text:failed_output
       ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created on failed wrapper result" false (Sys.file_exists path))
 ;;
@@ -587,7 +587,7 @@ let test_descriptor_ingested_on_success () =
       ~output_text:success_output
       ~tool_name:"execute"
       ~success:true;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file created on success" true (Sys.file_exists path);
     let ic = open_in path in
@@ -622,7 +622,7 @@ let test_concurrent_ingest () =
       Eio.Switch.run (fun sw ->
         List.iter (fun f -> Eio.Fiber.fork ~sw f) fibers));
     (* Verify all events were written *)
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -782,7 +782,7 @@ let test_list_events_reads_across_segments () =
       ~file_path:None
       ~timestamp_ms:5000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan in
+    let dir = Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "tool_events.jsonl" in
     let oc = open_out (path ^ ".1") in
     output_string oc

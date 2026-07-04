@@ -319,7 +319,7 @@ let test_create_orphan_separates_from_by_url () =
     let _ =
       create_in_partition
         ~base_dir
-        ~partition:Ide_paths.Orphan
+        ~partition:Ide_paths.Legacy_default
         ~kind:Types.Comment
         ~content:"orphan record"
         ()
@@ -340,7 +340,7 @@ let test_create_orphan_separates_from_by_url () =
         ()
     in
     let orphan =
-      Store.list ~base_dir ~partition:Ide_paths.Orphan ~filter:(make_filter ()) ()
+      Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) ()
     in
     check int "by-url count" 1 (List.length by_url);
     check int "orphan count" 1 (List.length orphan);
@@ -368,7 +368,7 @@ let test_legacy_default_is_unchanged () =
     in
     let legacy_path =
       Filename.concat
-        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan)
+        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default)
         "annotations.jsonl"
     in
     check bool "orphan file exists" true (Sys.file_exists legacy_path);
@@ -392,7 +392,7 @@ let test_delete_partition_scoped () =
     let in_legacy =
       Store.delete
         ~base_dir
-        ~partition:Ide_paths.Orphan
+        ~partition:Ide_paths.Legacy_default
         ~id:by_url.id
         ~keeper_id:"sangsu"
         ()
@@ -895,7 +895,7 @@ let test_compact_drops_tombstoned () =
     Store.compact ~base_dir ();
     let path =
       Filename.concat
-        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan)
+        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default)
         "annotations.jsonl"
     in
     let compact_end_markers =

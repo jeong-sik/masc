@@ -342,6 +342,81 @@ describe('createFileTreeStore lazy children loading', () => {
   })
 })
 
+describe('createFileTreeStore live refresh (reconcile)', () => {
+  const ROOT_ONLY: ReadonlyArray<FileTreeNode> = [
+    dir('lib', 0, ''),
+    dir('dashboard', 0, ''),
+    file('README.md', 0, ''),
+  ]
+
+  it('preserves expansion and lazily-loaded children across a same-workspace refresh', async () => {
+    const loadChildren = vi.fn(async (path: string): Promise<FileTreeNode[]> =>
+      path === 'lib' ? [dir('lib/server', 1, 'lib'), file('lib/main.ml', 1, 'lib')] : [],
+    )
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+    s.expand('lib')
+    await flushMicrotasks()
+    // Precondition: lib is expanded and its lazily-loaded children are visible.
+    expect(s.isExpanded('lib')).toBe(true)
+    expect(s.visibleNodes().map(n => n.path)).toContain('lib/server')
+
+    // A keeper edit triggers a live refresh: the bounded rescan returns the
+    // same root-only tree (no 'lib' children). reconcile must keep the tree
+    // the operator has open, unlike seed which would collapse it.
+    s.reconcile(ROOT_ONLY)
+
+    expect(s.isExpanded('lib')).toBe(true)
+    expect(s.isChildrenLoaded('lib')).toBe(true)
+    const visible = s.visibleNodes().map(n => n.path)
+    expect(visible).toContain('lib/server')
+    expect(visible).toContain('lib/main.ml')
+  })
+
+  it('applies fresh diffs on refresh while keeping the tree open', () => {
+    const s = createFileTreeStore()
+    s.seed(SAMPLE)
+    s.expand('runtime/runtime')
+    expect(s.diffSummary().additions).toBe(14 + 3 + 8)
+
+    // router.ts gained more additions in the fresh scan.
+    const fresh = SAMPLE.map(n =>
+      n.path === 'runtime/runtime/router.ts' ? { ...n, diff: '+40' } : n,
+    )
+    s.reconcile(fresh)
+
+    expect(s.isExpanded('runtime/runtime')).toBe(true)
+    expect(s.diffSummary().additions).toBe(40 + 3 + 8)
+  })
+
+  it('drops stale children when a workspace switch (seed) lands mid-fetch', async () => {
+    // Gate the first fetch so a seed can interleave before it resolves.
+    let releaseFirst: (nodes: FileTreeNode[]) => void = () => {}
+    const first = new Promise<FileTreeNode[]>(resolve => {
+      releaseFirst = resolve
+    })
+    const loadChildren = vi.fn(() => first)
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+
+    const pending = s.loadChildren('lib') // captures generation, awaits `first`
+    // Workspace switch before the fetch resolves.
+    s.seed([dir('src', 0, ''), file('README.md', 0, '')])
+    // The stale fetch now resolves with the previous workspace's children.
+    releaseFirst([dir('lib/server', 1, 'lib'), file('lib/main.ml', 1, 'lib')])
+    await pending
+    await flushMicrotasks()
+
+    // The generation guard must have dropped the stale merge: no 'lib' node
+    // leaked into the new workspace, and 'lib' is not marked loaded.
+    const paths = s.visibleNodes().map(n => n.path)
+    expect(paths).not.toContain('lib/server')
+    expect(paths).not.toContain('lib/main.ml')
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+    expect(s.isChildrenLoading('lib')).toBe(false)
+  })
+})
+
 async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()

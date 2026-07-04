@@ -60,7 +60,15 @@ export interface CreateFileTreeStoreOptions {
 }
 
 export interface FileTreeStore {
+  /** Switch to a new workspace: replace nodes and reset expansion/load state.
+   *  Bumps the load generation so children fetches from the previous workspace
+   *  can no longer merge. */
   readonly seed: (nodes: ReadonlyArray<FileTreeNode>) => void
+  /** Live refresh of the SAME workspace: apply the freshly scanned tree while
+   *  preserving the user's expansion and any lazily-loaded deeper children.
+   *  Use this (not [seed]) when the repo/keeper identity is unchanged, so a
+   *  keeper file edit does not collapse the tree the operator has open. */
+  readonly reconcile: (nodes: ReadonlyArray<FileTreeNode>) => void
   readonly visibleNodes: () => ReadonlyArray<FileTreeNode>
   readonly diffSummary: () => FileTreeDiffSummary
   readonly subscribe: (listener: () => void) => () => void
@@ -134,22 +142,32 @@ export function createFileTreeStore(
   // Directories with an in-flight children fetch (drives a spinner and guards
   // against duplicate concurrent fetches).
   const loading = signal<ReadonlySet<string>>(new Set())
+  // Monotonic load generation. Bumped by [seed] (a workspace switch); captured
+  // by [loadChildren] before its await so a children fetch that resolves after
+  // a switch cannot merge into the new workspace. [reconcile] does not bump it
+  // — a same-workspace refresh leaves in-flight fetches valid.
+  let generation = 0
+
+  // The set of directories whose children are present in [nodes] (some node
+  // names the directory as its parent). Distinguishes an eagerly-fetched
+  // subtree (expand shows already-present children) from a lazy boundary
+  // directory (expand must fetch). The root sentinel ('') is always loaded.
+  const loadedDirsOf = (nodes: ReadonlyArray<FileTreeNode>): Set<string> => {
+    const dirs = new Set<string>([''])
+    for (const n of nodes) {
+      const parent = normalizedParent(n.parent)
+      if (parent !== null) dirs.add(parent)
+    }
+    return dirs
+  }
 
   // Default-expand depth-0 directories so the initial render is not a
   // wall of root entries with no children visible.
   const seed = (nodes: ReadonlyArray<FileTreeNode>): void => {
+    generation += 1
     allNodes.value = nodes
-    // A directory has its children present iff some seeded node names it as
-    // parent. This distinguishes an eagerly-fetched subtree (expand shows the
-    // already-present children) from a lazy boundary directory (expand must
-    // fetch). Recomputed from scratch on every seed so a repo/keeper switch
-    // does not leak stale load state.
-    const initiallyLoaded = new Set<string>([''])
+    const initiallyLoaded = loadedDirsOf(nodes)
     const initiallyExpanded = new Set<string>()
-    for (const n of nodes) {
-      const parent = normalizedParent(n.parent)
-      if (parent !== null) initiallyLoaded.add(parent)
-    }
     // Auto-expand a depth-0 directory only when its children are already
     // present (loaded). A root-only source (e.g. the `project` workspace)
     // returns depth-0 directories with hasChildren=true but no children in the
@@ -163,6 +181,32 @@ export function createFileTreeStore(
     loaded.value = initiallyLoaded
     loading.value = new Set()
     expanded.value = initiallyExpanded
+  }
+
+  const reconcile = (nodes: ReadonlyArray<FileTreeNode>): void => {
+    // Fresh bounded scan of the same workspace. Fresh nodes win on path
+    // collision (they carry updated diffs); nodes only in the current set are
+    // lazily-loaded descendants the bounded rescan does not reach, so keep
+    // them. Expansion and load markers are intersected with the surviving
+    // paths so the tree the operator has open is not collapsed by a keeper's
+    // file edit.
+    const freshByPath = new Set(nodes.map(n => n.path))
+    const preservedLazy = allNodes.value.filter(n => !freshByPath.has(n.path))
+    const merged = [...nodes, ...preservedLazy]
+    const present = new Set(merged.map(n => n.path))
+
+    const nextLoaded = loadedDirsOf(merged)
+    // Preserve directories already marked loaded that still exist — notably an
+    // empty directory whose loadChildren resolved to [] (it has no child node
+    // to re-derive "loaded" from), so a refresh does not force a re-fetch.
+    for (const p of loaded.value) {
+      if (p === '' || present.has(p)) nextLoaded.add(p)
+    }
+
+    allNodes.value = merged
+    loaded.value = nextLoaded
+    loading.value = new Set([...loading.value].filter(p => present.has(p)))
+    expanded.value = new Set([...expanded.value].filter(p => present.has(p)))
   }
 
   const mergeChildren = (
@@ -187,21 +231,31 @@ export function createFileTreeStore(
     if (!fetchChildren) return
     if (loaded.value.has(path) || loading.value.has(path)) return
 
+    // Capture the generation before the await. A [seed] (workspace switch) that
+    // lands while this fetch is in flight bumps the generation and resets
+    // state; merging now would leak the previous workspace's children into the
+    // new one and mark a wrong-workspace directory as loaded.
+    const gen = generation
     const nextLoading = new Set(loading.value)
     nextLoading.add(path)
     loading.value = nextLoading
 
     try {
       const children = await fetchChildren(path)
+      if (gen !== generation) return
       mergeChildren(path, children)
     } catch {
       // Leave `path` out of `loaded` so a later expand retries. Swallow like
       // the sibling workspace fetches (network errors surface as an empty /
       // unchanged subtree, not a thrown render).
     } finally {
-      const done = new Set(loading.value)
-      done.delete(path)
-      loading.value = done
+      // Only clear the marker if no switch intervened; a [seed] already reset
+      // the loading set, and rewriting it here would fire a spurious update.
+      if (gen === generation) {
+        const done = new Set(loading.value)
+        done.delete(path)
+        loading.value = done
+      }
     }
   }
 
@@ -305,6 +359,7 @@ export function createFileTreeStore(
 
   return {
     seed,
+    reconcile,
     visibleNodes,
     diffSummary,
     subscribe,

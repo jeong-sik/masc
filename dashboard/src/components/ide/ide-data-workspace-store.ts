@@ -141,6 +141,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const unreachableRepoIds = new Set<string>()
 
   let abortController = new AbortController()
+  // Identity (repo + workspace source kind) the file tree was last seeded for.
+  // A matching identity means the next fetch is a live refresh of the same
+  // workspace, so the tree is reconciled (expansion + lazily-loaded children
+  // preserved) rather than re-seeded (which would collapse it on every keeper
+  // edit). `undefined` until the first successful fetch forces an initial seed.
+  let lastTreeIdentity: string | undefined = undefined
 
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
@@ -192,7 +198,15 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {
       if (signal.aborted) return
-      fileTreeStore.seed(nodes)
+      // Same repo + source ⇒ live refresh: keep the operator's expansion and
+      // any lazily-loaded children. A change ⇒ workspace switch: reset.
+      const treeIdentity = `${repoId ?? ''}::${source.kind}`
+      if (treeIdentity === lastTreeIdentity) {
+        fileTreeStore.reconcile(nodes)
+      } else {
+        fileTreeStore.seed(nodes)
+        lastTreeIdentity = treeIdentity
+      }
       workspaceSourceSignal.value = source
       workspaceBasePathSignal.value = basePath
 

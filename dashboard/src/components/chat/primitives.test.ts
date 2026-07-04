@@ -27,6 +27,20 @@ vi.mock('../../api/board', () => ({
   fetchBoardPost: vi.fn(),
 }))
 
+export let mockTranscribeCallback: ((text: string) => void) | null = null
+vi.mock('./voice-input', () => ({
+  voiceInputSupported: () => true,
+  useVoiceInput: ({ onTranscribed }: any) => {
+    mockTranscribeCallback = onTranscribed
+    return {
+      state: 'idle',
+      supported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+    }
+  },
+}))
+
 const flushUi = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
 
 function makeFileList(files: File[]): FileList {
@@ -1639,6 +1653,61 @@ describe('ChatComposer multimodal', () => {
     renderComposer()
     const sendBtn = container.querySelector('.send') as HTMLButtonElement
     expect(sendBtn.disabled).toBe(true)
+  })
+
+  it('handles voice draft transcription, rendering, removal, and serialization on send', async () => {
+    const onSend = vi.fn()
+    renderComposer({ onSend })
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    expect(sendBtn.disabled).toBe(true)
+
+    // Simulate Scribe v2 completing transcription
+    if (mockTranscribeCallback) {
+      mockTranscribeCallback('스케줄러 결과 확인 바람')
+    }
+    await new Promise((r) => setTimeout(r, 10))
+
+    // 1. Voice draft should be rendered
+    const voiceDraftEl = container.querySelector('[data-testid="composer-voice-draft"]')
+    expect(voiceDraftEl).not.toBeNull()
+    expect(voiceDraftEl?.textContent).toContain('스케줄러 결과 확인 바람')
+
+    // 2. Send button should be enabled because we have content
+    expect(sendBtn.disabled).toBe(false)
+
+    // 3. Click send button and verify serialization
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledOnce()
+    const payload = onSend.mock.calls[0]?.[0]
+    expect(payload.text).toContain('스케줄러 결과 확인 바람')
+    expect(payload.blocks).toHaveLength(2) // Voice block + text block
+    expect(payload.blocks[0]).toMatchObject({
+      t: 'voice',
+      transcript: '스케줄러 결과 확인 바람',
+    })
+
+    // 4. Voice draft should be cleared after send
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).toBeNull()
+  })
+
+  it('allows removing voice draft before send', async () => {
+    renderComposer()
+
+    if (mockTranscribeCallback) {
+      mockTranscribeCallback('임시 받아쓰기')
+    }
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).not.toBeNull()
+
+    const removeBtn = container.querySelector('[data-testid="composer-voice-draft"] .cdraft-x') as HTMLButtonElement
+    removeBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).toBeNull()
   })
 })
 

@@ -3253,6 +3253,13 @@ export function AttachDraftChip({
   `
 }
 
+export interface ComposerVoiceDraft {
+  secs: number
+  size: string
+  wave: number[]
+  transcript: string
+}
+
 export function ChatComposer({
   draft: draftProp,
   placeholder,
@@ -3310,6 +3317,8 @@ export function ChatComposer({
   const [drag, setDrag] = useState(false)
   const [slashIdx, setSlashIdx] = useState(0)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
+  const [voiceDraft, setVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
+  const lastVoiceDurationRef = useRef(0)
   const isControlled = typeof draftProp === 'string'
   const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
   const slashMenuKeeperLabel = keeperLabel?.trim() || CHAT_COMPOSER_DEFAULT_KEEPER_LABEL
@@ -3360,15 +3369,29 @@ export function ChatComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // RFC-0236 P1: speak to compose. Transcribed text appends to the draft at a
-  // newline; an empty draft is replaced outright. Send stays manual (no
-  // auto-send) so the operator can correct a transcription before it lands.
+  // RFC-0236 P1: speak to compose. Voice transcription is saved as a visual draft
+  // card (VoiceDraft) matching the mockup and board composers.
   const voice = useVoiceInput({
     onTranscribed: (text) => {
-      setDraft(draft.trim() === '' ? text : `${draft}\n${text}`)
+      if (text) {
+        const secs = Math.max(1, lastVoiceDurationRef.current)
+        const size = formatAttachmentSize(secs * 32000)
+        setVoiceDraft({
+          secs,
+          size,
+          wave: [0.35, 0.72, 0.48, 0.9, 0.42, 0.66, 0.58, 0.8, 0.5, 0.7, 0.38, 0.62],
+          transcript: text,
+        })
+      }
     },
     onError: (message) => showToast(message, 'error'),
   })
+
+  useEffect(() => {
+    if (voice.state === 'recording') {
+      lastVoiceDurationRef.current = 0
+    }
+  }, [voice.state])
 
   useEffect(() => {
     if (voice.state !== 'recording') {
@@ -3376,7 +3399,11 @@ export function ChatComposer({
       return
     }
     const startedAt = Date.now()
-    const tick = () => setVoiceElapsed(Math.round((Date.now() - startedAt) / 1000))
+    const tick = () => {
+      const duration = Math.round((Date.now() - startedAt) / 1000)
+      setVoiceElapsed(duration)
+      lastVoiceDurationRef.current = duration
+    }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
@@ -3407,7 +3434,7 @@ export function ChatComposer({
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '전송'
   const isStreamWarning = streaming && elapsed > 60
-  const hasContent = draft.trim() !== '' || attachments.length > 0
+  const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
   const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
@@ -3482,7 +3509,22 @@ export function ChatComposer({
         size: att.size,
       })
     }
-    const text = draft.trim()
+    let text = draft.trim()
+    if (voiceDraft) {
+      const voiceText = `[Voice memo ${formatVoiceClock(voiceDraft.secs)} (${voiceDraft.size})]\n${voiceDraft.transcript}`
+      text = text ? `${voiceText}\n\n${text}` : voiceText
+
+      blocks.push({
+        t: 'voice',
+        secs: voiceDraft.secs,
+        size: voiceDraft.size,
+        wave: voiceDraft.wave,
+        via: 'ElevenLabs Scribe v2',
+        transcript: voiceDraft.transcript,
+        src: '',
+      } as ChatBlock)
+    }
+
     if (text) {
       blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
       userBlocks.push({ type: 'text', text })
@@ -3496,6 +3538,7 @@ export function ChatComposer({
     setDraft('')
     setSlashIdx(0)
     setAttachments([])
+    setVoiceDraft(null)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -3583,7 +3626,7 @@ export function ChatComposer({
                 <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
               </div>
             `}
-        ${attachments.length > 0
+        ${attachments.length > 0 || voiceDraft
           ? html`
               <div class="composer-tray">
                 ${attachments.map((att) => html`
@@ -3593,6 +3636,31 @@ export function ChatComposer({
                     onRemove=${() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
                   />
                 `)}
+                ${voiceDraft
+                  ? html`
+                      <div class="cdraft voice" data-testid="composer-voice-draft">
+                        <span class="cdraft-glyph mic">◌</span>
+                        <div class="cdraft-wave" aria-hidden="true">
+                          ${voiceDraft.wave.map((height, index) => html`<span class="vbar" key=${index} style=${{ height: `${Math.round(4 + height * 18)}px` }} />`)}
+                        </div>
+                        <span class="cdraft-dur mono">${formatVoiceClock(voiceDraft.secs)}</span>
+                        <div class="cdraft-tx">
+                          <span class="cdraft-tx-k">받아쓰기</span>
+                          <span class="cdraft-tx-v">${voiceDraft.transcript}</span>
+                        </div>
+                        <button
+                          type="button"
+                          class="cdraft-x"
+                          title="음성 제거"
+                          aria-label="Remove voice draft"
+                          onClick=${() => { setVoiceDraft(null) }}
+                          disabled=${disabled}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    `
+                  : null}
               </div>
             `
           : null}

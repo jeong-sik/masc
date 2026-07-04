@@ -175,11 +175,15 @@ let resolve_oas_capability_manifest_path ?(env = Sys.getenv_opt) ~config_root ()
   : capability_manifest_env_resolution option
   =
   match nonempty_env env oas_capability_manifest_env_var_name with
-  | Some path -> Some { path; source = Capability_manifest_env_var }
+  | Some path ->
+    Some ({ path; source = Capability_manifest_env_var } : capability_manifest_env_resolution)
   | None ->
     let candidate = Filename.concat config_root capability_manifest_filename in
     (match existing_file candidate with
-     | Some path -> Some { path; source = Config_root_file capability_manifest_filename }
+     | Some path ->
+       Some
+         ({ path; source = Config_root_file capability_manifest_filename }
+          : capability_manifest_env_resolution)
      | None -> None)
 
 let install_runtime_model_catalog_override ~clear_catalog ~load_catalog ~set_catalog path =

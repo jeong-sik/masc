@@ -502,7 +502,7 @@ describe('IdeShell', () => {
     )
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      params: { section: 'ide-shell', view: 'unified', file: 'lib/runtime.ml' },
       postId: null,
     }
 

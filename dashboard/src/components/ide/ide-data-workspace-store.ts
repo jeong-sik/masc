@@ -1,6 +1,7 @@
 import { signal, effect } from '@preact/signals'
 import { activeIdeFile } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
+import { route } from '../../router'
 import { selectedTask } from '../goals/task-detail-selection'
 import {
   discoverRepositories,
@@ -472,42 +473,51 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       })
     })
 
-    // Load blame → ownership
-    fetchGitBlame(filePath, opts).then(blocks => {
-      if (signal.aborted) return
-      clearIssue('blame', { filePath, keeper: keeperParam ?? null, repoId })
-      for (const block of blocks) {
-        ownershipStore.ingest({
-          file_path: block.file_path,
-          line_start: block.line_start,
-          line_end: block.line_end,
-          keeper_id: block.keeper_id,
-          timestamp_ms: block.timestamp_ms,
-          kind: block.kind as KeeperEditKind,
-        })
-      }
-    }).catch(error => {
-      recordIssue('blame', error, {
-        filePath,
-        keeper: keeperParam ?? null,
-        repoId,
-        fallbackMessage: 'git blame fetch failed',
-      })
-    })
+    // Load blame & diff conditionally on view tab to prevent over-fetching
+    const currentView = route.value.params.view?.trim().toLowerCase() || 'source'
+    const isBlameView = currentView === 'blame'
+    const isDiffView = currentView === 'split-diff' || currentView === 'split' || currentView === 'unified' || currentView === 'diff'
 
-    // Load diff
-    fetchGitDiff(filePath, { ...opts, baseRef: 'HEAD' }).then(rows => {
-      if (signal.aborted) return
-      clearIssue('diff', { filePath, keeper: keeperParam ?? null, repoId })
-      diffRowsSignal.value = rows
-    }).catch(error => {
-      recordIssue('diff', error, {
-        filePath,
-        keeper: keeperParam ?? null,
-        repoId,
-        fallbackMessage: 'git diff fetch failed',
+    if (isBlameView) {
+      fetchGitBlame(filePath, opts).then(blocks => {
+        if (signal.aborted) return
+        clearIssue('blame', { filePath, keeper: keeperParam ?? null, repoId })
+        for (const block of blocks) {
+          ownershipStore.ingest({
+            file_path: block.file_path,
+            line_start: block.line_start,
+            line_end: block.line_end,
+            keeper_id: block.keeper_id,
+            timestamp_ms: block.timestamp_ms,
+            kind: block.kind as KeeperEditKind,
+          })
+        }
+      }).catch(error => {
+        recordIssue('blame', error, {
+          filePath,
+          keeper: keeperParam ?? null,
+          repoId,
+          fallbackMessage: 'git blame fetch failed',
+        })
       })
-    })
+    }
+
+    if (isDiffView) {
+      fetchGitDiff(filePath, { ...opts, baseRef: 'HEAD' }).then(rows => {
+        if (signal.aborted) return
+        clearIssue('diff', { filePath, keeper: keeperParam ?? null, repoId })
+        diffRowsSignal.value = rows
+      }).catch(error => {
+        recordIssue('diff', error, {
+          filePath,
+          keeper: keeperParam ?? null,
+          repoId,
+          fallbackMessage: 'git diff fetch failed',
+        })
+      })
+    } else {
+      diffRowsSignal.value = []
+    }
 
     // Load annotations
     fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, opts).then(annotations => {

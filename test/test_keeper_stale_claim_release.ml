@@ -35,12 +35,12 @@ let cleanup_dir dir =
   | _ -> ()
 
 let add_goal_task config ~goal_id ~title =
-  let result =
-    Masc.Workspace.add_task config ~goal_id ~title ~priority:3
+  match
+    Masc.Workspace.add_task_with_result config ~goal_id ~title ~priority:3
       ~description:"stale release fixture"
-  in
-  if not (Astring.String.is_prefix ~affix:"Added task" result)
-  then fail ("add_task failed: " ^ result)
+  with
+  | Ok created -> created.Masc.Workspace.task_id
+  | Error err -> fail (Masc.Workspace.add_task_error_to_string err)
 
 let claim_task_exn config ~agent_name ~task_id =
   match Masc.Workspace.claim_task_r config ~agent_name ~task_id () with
@@ -96,20 +96,25 @@ let test_keeper_task_claim_releases_stale_owners () =
          | Ok payload -> payload
          | Error msg -> fail msg
        in
-       for i = 1 to 4 do
-         add_goal_task config ~goal_id:goal.id
-           ~title:(Printf.sprintf "fix: stale release fixture %d" i)
-       done;
-       let stale_agents =
-         [ "keeper-a-agent"; "keeper-b-agent"; "keeper-c-agent" ]
+       let task_ids =
+         List.init 4 (fun i ->
+           add_goal_task config ~goal_id:goal.id
+             ~title:(Printf.sprintf "fix: stale release fixture %d" (i + 1)))
        in
-       List.iteri
-         (fun i agent_name ->
-            let task_id = Printf.sprintf "task-%03d" (i + 1) in
+       let first_stale_task_id, second_stale_task_id, stale_claims =
+         match task_ids with
+         | first :: second :: third :: _ ->
+           ( first
+           , second
+           , [ "keeper-a-agent", first; "keeper-b-agent", second; "keeper-c-agent", third ] )
+         | _ -> fail "expected four created task ids"
+       in
+       List.iter
+         (fun (agent_name, task_id) ->
             claim_task_exn config ~agent_name ~task_id;
             mark_agent_stale_for_release config ~agent_name;
             age_claimed_task_for_release config ~task_id)
-         stale_agents;
+         stale_claims;
        let payload =
          Task_runtime.handle_keeper_task_tool ~config
            ~meta:(meta_with_active_goal goal.id)
@@ -120,20 +125,20 @@ let test_keeper_task_claim_releases_stale_owners () =
          (json |> U.member "claimed_task" <> `Null);
        check int "stale release count" 3
          (json |> U.member "stale_claim_releases" |> U.to_list |> List.length);
-       check string "new claimant took released task" "task-001"
+       check string "new claimant took released task" first_stale_task_id
          (json |> U.member "claimed_task" |> U.member "task_id" |> U.to_string);
        let backlog = Masc.Workspace.read_backlog config in
        match
          List.find_opt
-           (fun (task : Masc_domain.task) -> String.equal task.id "task-002")
+           (fun (task : Masc_domain.task) -> String.equal task.id second_stale_task_id)
            backlog.tasks
        with
        | Some { task_status = Masc_domain.Todo; _ } -> ()
        | Some task ->
          fail
-           (Printf.sprintf "expected task-002 to be released, got %s"
+           (Printf.sprintf "expected %s to be released, got %s" second_stale_task_id
               (Masc_domain.task_status_to_string task.task_status))
-       | None -> fail "task-002 missing from backlog")
+       | None -> fail (second_stale_task_id ^ " missing from backlog"))
 
 let () =
   run "Keeper_stale_claim_release"

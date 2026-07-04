@@ -467,14 +467,17 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
-  let expect_bare_native_kimi_wire_semantics model_id =
+  let expect_bare_kimi_k27_wire_semantics model_id =
     (match Llm_provider.Model_catalog.lookup catalog model_id with
      | None -> failf "expected repo OAS catalog row for %s" model_id
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
          entry.base_label;
-       check (option string) (model_id ^ " no catalog thinking override") None
+       check (option string) (model_id ^ " no request thinking knob") (Some "none")
          entry.thinking_control_format;
+       check (option string) (model_id ^ " always preserved thinking")
+         (Some "always_preserved")
+         entry.preserve_thinking_control_format;
        check (option string) (model_id ^ " no catalog replay override") None
          entry.reasoning_replay);
     match Llm_provider.Capabilities.for_model_id model_id with
@@ -492,8 +495,8 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
   in
   expect_request_side_preserve "runpod_mtp/qwen36-35b-a3b-mtp";
   expect_request_side_preserve "qwen36-35b-a3b-mtp";
-  expect_preserve_always_replay "ollama_cloud/kimi-k2.6";
-  expect_bare_native_kimi_wire_semantics "kimi-k2.6"
+  expect_preserve_always_replay "ollama_cloud/kimi-k2.7-code";
+  expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
 let test_repo_runtime_bindings_resolve_through_oas_catalog () =
   with_repo_oas_model_catalog @@ fun _catalog ->
@@ -733,23 +736,23 @@ let test_repo_runtime_toml_loads () =
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "ollama_cloud.kimi-k2-6")
+            String.equal runtime.id "ollama_cloud.kimi-k2-7-code")
          runtimes
      with
-     | None -> fail "expected Kimi K2.6 Ollama Cloud runtime in seed"
+     | None -> fail "expected Kimi K2.7 Code Ollama Cloud runtime in seed"
      | Some runtime ->
-       check string "Kimi K2.6 api name" "kimi-k2.6" runtime.model.api_name;
-       check int "Kimi K2.6 context" 262144 runtime.model.max_context;
+       check string "Kimi K2.7 Code api name" "kimi-k2.7-code" runtime.model.api_name;
+       check int "Kimi K2.7 Code context" 262144 runtime.model.max_context;
        (match runtime.model.capabilities with
         | Some caps ->
-          check bool "Kimi K2.6 image input" true caps.supports_image_input;
-          check bool "Kimi K2.6 multimodal input" true
+          check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
+          check bool "Kimi K2.7 Code multimodal input" true
             caps.supports_multimodal_inputs;
-          check bool "Kimi K2.6 reasoning effort" true
+          check bool "Kimi K2.7 Code reasoning effort" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
                Runtime_schema.Reasoning_effort)
-        | None -> fail "expected Kimi K2.6 capabilities"))
+        | None -> fail "expected Kimi K2.7 Code capabilities"))
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =

@@ -34,7 +34,7 @@ display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"
 endpoint = "https://ollama.com/v1"
 # OAS connect + initial-response-headers wall-clock budget (oas#2163).
-# Ollama Cloud serving reasoning models (kimi-k2.6, minimax-m3) can hold the
+# Ollama Cloud serving reasoning models (kimi-k2.7-code, minimax-m3) can hold the
 # first response header past the 60s OpenAI_compat default (cold-start /
 # admission queueing / long reasoning prefill), surfacing in the Fusion panel
 # as `phase=http_operation: HTTP operation exceeded wall-clock timeout` — which
@@ -242,17 +242,19 @@ supports-multimodal-inputs = true
 
 [ollama_cloud_native.minimax-m3-native-structured]
 
-# Kimi K2.6 (Ollama Cloud) — vision-capable Cloud runtime. The model name is
-# kept separate from Kimi's direct API route; OAS owns provider/model wire
+# Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
+# is kept separate from Kimi's direct API route; OAS owns provider/model wire
 # details and MASC declares only runtime-local concrete model capabilities.
-[models.kimi-k2-6]
-api-name = "kimi-k2.6"
+# Official Kimi docs checked 2026-07-04: kimi-k2.7-code is the latest
+# code-focused thinking model; keep the short Kimi seed on the current model.
+[models.kimi-k2-7-code]
+api-name = "kimi-k2.7-code"
 max-context = 262144
 tools-support = true
 thinking-support = true
 streaming = true
 
-[models.kimi-k2-6.capabilities]
+[models.kimi-k2-7-code.capabilities]
 max-output-tokens = 32768
 supports-tool-choice = false
 supports-extended-thinking = true
@@ -266,7 +268,7 @@ supports-structured-output = false
 supports-image-input = true
 supports-multimodal-inputs = true
 
-[ollama_cloud.kimi-k2-6]
+[ollama_cloud.kimi-k2-7-code]
 
 # Ollama Cloud canonical model seeds
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.

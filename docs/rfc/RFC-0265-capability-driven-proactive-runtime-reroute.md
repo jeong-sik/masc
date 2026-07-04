@@ -70,7 +70,7 @@ The turn died with no answer.
 
 The mismatch is **structural and known before the request is built** — it is not
 a transient error. The inventory *did* contain capable models at that moment
-(`kimi-k2-6` and `minimax-m3` both report `vision` in `/api/show`), but nothing
+(`kimi-k2.7-code` and `minimax-m3` both report `vision` in `/api/show`), but nothing
 routed the image turn to them.
 
 ## 2. Why this is not RFC-0207 Part B
@@ -185,18 +185,18 @@ New optional key in `runtime.toml`:
 # Unset → derive capable runtimes from declared [models.*.capabilities] in
 # declaration order. Each id must resolve to a configured runtime (load error
 # otherwise).
-media_failover = ["ollama_cloud.kimi-k2-6", "ollama_cloud.minimax-m3"]
+media_failover = ["ollama_cloud.kimi-k2-7-code", "ollama_cloud.minimax-m3"]
 ```
 
 ### 4.1 Prerequisite — declare media capabilities accurately (config, not code)
 
 The reroute can only pick a runtime whose `model.capabilities` *declares* the
-modality. Today the vision-capable cloud models are under-declared:
+modality. The vision-capable cloud models must not be under-declared:
 
 - `[models.minimax-m3.capabilities]` declares JSON/structured-output only —
   **no `supports-image-input`** (yet `/api/show` reports `vision`).
-- `[models.kimi-k2-6]` has **no `.capabilities` block** (yet `/api/show` reports
-  `vision`).
+- `[models.kimi-k2-7-code.capabilities]` must retain `supports-image-input` and
+  `supports-multimodal-inputs`.
 
 Until those declarations match `/api/show`, no candidate qualifies and the floor
 (loud reject) fires. This is the same capability-declaration discipline that

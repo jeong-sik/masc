@@ -1172,7 +1172,7 @@ export function IdeShell() {
                   >
                     <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                     <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                    <${IdeMemoryPanel} keeperName=${terminalKeeper} />
+                    <${IdeMemoryPanel} keeperName=${terminalKeeper} repoId=${activeRepositoryId} />
                   </div>
                   <div
                     class="ide-plane-primary-rail"

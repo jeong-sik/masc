@@ -1,4 +1,7 @@
-import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  DashboardRuntimeReasoningStreamingFormat,
+} from '../api/dashboard'
 
 function nonEmptyParts(parts: Array<string | null | undefined>): string[] {
   return parts.filter((value): value is string => Boolean(value))
@@ -91,6 +94,13 @@ function runtimeCatalogRequestFormat(item: DashboardRuntimeProviderSnapshot): st
   const format = item.request_config?.response_format
   if (!format?.kind) return null
   return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeReasoningStreamingFormatSummary(
+  format: DashboardRuntimeReasoningStreamingFormat | null | undefined,
+): string | null {
+  if (!format?.kind) return null
+  return format.field ? `${format.kind}:${format.field}` : format.kind
 }
 
 export function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapshot): string | null {
@@ -261,6 +271,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
       caps.supports_parallel_tool_calls ? 'parallel' : null,
     ]).map(flag => `+${flag}`).join('')}`
     : null
+  const reasoningStream = runtimeReasoningStreamingFormatSummary(caps.reasoning_streaming_format)
   const parts = nonEmptyParts([
     context,
     output,
@@ -281,7 +292,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
       : null,
     caps.preserve_thinking_control_format ? `preserve:${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out:${caps.reasoning_output_format}` : null,
-    caps.reasoning_streaming_format?.kind ? `reasoning-stream:${caps.reasoning_streaming_format.kind}` : null,
+    reasoningStream ? `reasoning-stream:${reasoningStream}` : null,
     caps.reasoning_replay_override ? `replay:${caps.reasoning_replay_override}` : null,
     caps.task ? `task:${caps.task}` : null,
     caps.supports_native_streaming ? 'native-stream' : null,

@@ -11,6 +11,7 @@ import {
   type DashboardRuntimeProviderProbe,
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
+  type DashboardRuntimeReasoningStreamingFormat,
 } from '../api/dashboard'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
@@ -454,6 +455,13 @@ function runtimeEffectiveReasoningText(provider: DashboardRuntimeProviderSnapsho
   ])
 }
 
+function runtimeReasoningStreamingFormatText(
+  format: DashboardRuntimeReasoningStreamingFormat | null | undefined,
+): string | null {
+  if (!format?.kind) return null
+  return format.field ? `${format.kind}:${format.field}` : format.kind
+}
+
 function runtimeEffectiveInputText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const caps = provider.effective_capabilities
   if (!caps) return null
@@ -783,6 +791,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
+  const reasoningStream = runtimeReasoningStreamingFormatText(caps.reasoning_streaming_format)
   const parts = [
     context,
     output,
@@ -804,7 +813,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
       : null,
     caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
-    caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
+    reasoningStream ? `reasoning-stream ${reasoningStream}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
     caps.supports_native_streaming ? 'native-stream' : null,

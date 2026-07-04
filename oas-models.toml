@@ -208,6 +208,110 @@ output_per_million = 2.2
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.18333333333333332
 
+# Xiaomi MiMo V2.5 capability specs.
+# Token Plan and the regular API expose the same vendor model capabilities for
+# these rows, but they are different products operationally: Token Plan is a
+# coding-tool subscription with regional gateways and tp-* keys; the regular API
+# is pay-per-token billing on api.xiaomimimo.com. The /anthropic Token Plan
+# gateway is a different wire protocol and is not represented by these
+# openai_chat rows.
+[[models]]
+id_prefix = "mimo-v2.5-pro"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "mimo-v2.5"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_response_format_json = true
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+supports_video_input = true
+supports_native_streaming = true
+
+# WORKAROUND: the pinned OAS capability label path can still classify the
+# Xiaomi token-plan endpoint as raw openai_compat when the SDK does not yet
+# contain a MiMo base-url recognizer. Bare rows above are the canonical model
+# declarations; these provider-qualified rows only satisfy the strict runtime
+# gate until the OAS recognizer is pinned here.
+[[models]]
+id_prefix = "openai_compat/mimo-v2.5-pro"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "openai_compat/mimo-v2.5"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_response_format_json = true
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+supports_video_input = true
+supports_native_streaming = true
+
 # Gemma Models
 [[models]]
 id_prefix = "hf.co/unsloth/gemma-4"

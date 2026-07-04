@@ -2807,6 +2807,8 @@ describe('fetchRuntimeModelMetrics', () => {
               turn_lane: 'text_only',
               input_tokens: null,
               output_tokens: null,
+              cache_read_tokens: null,
+              cache_creation_tokens: null,
               latency_ms: null,
               cost_usd: null,
               tools_count: 0,
@@ -2862,6 +2864,8 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.recent_entries?.[0]?.stop_reason).toBe('turn_budget_exhausted(3/3)')
     expect(metric.recent_entries?.[0]?.turn_lane).toBe('text_only')
     expect(metric.recent_entries?.[0]?.input_tokens).toBeNull()
+    expect(metric.recent_entries?.[0]?.cache_read_tokens).toBeNull()
+    expect(metric.recent_entries?.[0]?.cache_creation_tokens).toBeNull()
     expect(metric.recent_entries?.[0]?.latency_ms).toBeNull()
     expect(metric.recent_entries?.[0]?.usage_reported).toBe(false)
     expect(metric.recent_entries?.[0]?.telemetry_reported).toBe(false)

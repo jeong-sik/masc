@@ -482,4 +482,138 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('effective · ignored sampling')
     expect(container.textContent).toContain('temperature,top_p,presence_penalty,frequency_penalty')
   })
+
+  it('shows per-turn cache read/write tokens in recent model entries', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce({
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 1,
+      total_error_entries: 0,
+      latency_buckets: [],
+      models: [
+        {
+          model_id: 'runtime_lane_cache',
+          provider: null,
+          entry_count: 1,
+          success_count: 1,
+          error_count: 0,
+          avg_tok_per_sec: 20,
+          p50_tok_per_sec: 20,
+          p95_tok_per_sec: 20,
+          avg_latency_ms: 500,
+          p95_latency_ms: 500,
+          total_input_tokens: 256,
+          total_output_tokens: 64,
+          total_cache_read_tokens: 128,
+          total_cache_creation_tokens: 16,
+          total_cost_usd: 0.01,
+          avg_tool_calls_per_turn: 0,
+          total_tool_calls: 0,
+          top_tools: [],
+          recent_entries: [
+            {
+              ts_unix: 1780714051,
+              outcome: 'success',
+              stop_reason: 'stop',
+              turn_lane: 'text_only',
+              input_tokens: 256,
+              output_tokens: 64,
+              cache_read_tokens: 128,
+              cache_creation_tokens: 16,
+              latency_ms: 500,
+              cost_usd: 0.01,
+              tools_count: 0,
+              usage_reported: true,
+              telemetry_reported: true,
+            },
+          ],
+          buckets: [],
+        },
+      ],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime_lane_cache') ?? false,
+      'runtime model metric card',
+    )
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find((el) => el.textContent?.includes('recent 1 turns'))
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await waitFor(
+      () => container.textContent?.includes('cache r/w') ?? false,
+      'recent entry cache column',
+    )
+    expect(container.textContent).toContain('128/16')
+  })
+
+  it('shows one missing-data reason when recent cache tokens are absent', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce({
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 1,
+      total_error_entries: 0,
+      latency_buckets: [],
+      models: [
+        {
+          model_id: 'runtime_lane_missing_cache',
+          provider: null,
+          entry_count: 1,
+          success_count: 1,
+          error_count: 0,
+          total_input_tokens: null,
+          total_output_tokens: null,
+          total_cache_read_tokens: null,
+          total_cache_creation_tokens: null,
+          total_cost_usd: null,
+          avg_tool_calls_per_turn: 0,
+          total_tool_calls: 0,
+          coverage_status: 'none',
+          primary_coverage_reason: 'missing_usage_and_inference',
+          top_tools: [],
+          recent_entries: [
+            {
+              ts_unix: 1780714051,
+              outcome: 'success',
+              stop_reason: 'stop',
+              turn_lane: 'text_only',
+              input_tokens: null,
+              output_tokens: null,
+              cache_read_tokens: null,
+              cache_creation_tokens: null,
+              latency_ms: null,
+              cost_usd: null,
+              tools_count: 0,
+              usage_reported: false,
+              telemetry_reported: true,
+              coverage_reason: 'missing_usage_and_inference',
+              coverage_stage: 'oas',
+            },
+          ],
+          buckets: [],
+        },
+      ],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime_lane_missing_cache') ?? false,
+      'runtime model metric card',
+    )
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find((el) => el.textContent?.includes('recent 1 turns'))
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await waitFor(
+      () => container.textContent?.includes('cache r/w') ?? false,
+      'recent entry cache column',
+    )
+    expect(container.textContent).toContain('no-usage')
+    expect(container.textContent).not.toContain('no-usage/no-usage')
+  })
 })

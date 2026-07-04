@@ -15,6 +15,8 @@ type recent_entry = {
   re_turn_lane : string option;
   re_input_tokens : int option;
   re_output_tokens : int option;
+  re_cache_read_tokens : int option;
+  re_cache_creation_tokens : int option;
   re_latency_ms : float option;
   re_prompt_tok_per_sec : float option;
   re_peak_memory_gb : float option;

@@ -12,6 +12,15 @@ type secret_root_info =
   ; source : string
   }
 
+type loaded_secret_root =
+  { info : secret_root_info
+  ; configured : bool
+  ; env_entries : (string * string) list
+  ; file_entries : (string * string) list
+  }
+
+let base_secret_scope = "base"
+
 let trim_env_opt key =
   match Sys.getenv_opt key with
   | Some value ->
@@ -20,8 +29,7 @@ let trim_env_opt key =
   | None -> None
 ;;
 
-let secret_root_info ~base_path ~keeper_name =
-  let keeper_dir = Workspace_utils.safe_filename keeper_name in
+let secret_root_info_of_dir ~base_path ~keeper_dir =
   match trim_env_opt "MASC_SECRET_DIR" with
   | Some root -> { root = Filename.concat root keeper_dir; source = "MASC_SECRET_DIR" }
   | None ->
@@ -33,8 +41,26 @@ let secret_root_info ~base_path ~keeper_name =
     }
 ;;
 
+let keeper_secret_dir keeper_name = Workspace_utils.safe_filename keeper_name
+
+let secret_root_info ~base_path ~keeper_name =
+  secret_root_info_of_dir ~base_path ~keeper_dir:(keeper_secret_dir keeper_name)
+;;
+
 let secret_root ~base_path ~keeper_name =
   (secret_root_info ~base_path ~keeper_name).root
+;;
+
+let base_secret_root_info ~base_path =
+  secret_root_info_of_dir ~base_path ~keeper_dir:base_secret_scope
+;;
+
+let secret_roots ~base_path ~keeper_name =
+  let keeper_dir = keeper_secret_dir keeper_name in
+  let keeper_root = secret_root_info_of_dir ~base_path ~keeper_dir in
+  if String.equal keeper_dir base_secret_scope
+  then [ keeper_root ]
+  else [ base_secret_root_info ~base_path; keeper_root ]
 ;;
 
 let path_exists path =
@@ -280,6 +306,60 @@ let collect_file_entries files_root =
     | Ok entries -> Ok (List.rev entries)
 ;;
 
+let load_secret_root info =
+  let root = info.root in
+  if not (path_exists root)
+  then Ok { info; configured = false; env_entries = []; file_entries = [] }
+  else if not (is_directory root)
+  then Error (Printf.sprintf "keeper secret root is not a directory: %s" root)
+  else
+    match reject_symlink ~kind:File_source root with
+    | Error _ as err -> err
+    | Ok _ ->
+      let env_root = Filename.concat root "env" in
+      let files_root = Filename.concat root "files" in
+      (match load_env_entries env_root with
+       | Error _ as err -> err
+       | Ok env_entries ->
+         (match collect_file_entries files_root with
+          | Error _ as err -> err
+          | Ok file_entries ->
+            Ok { info; configured = true; env_entries; file_entries }))
+;;
+
+let load_secret_roots ~base_path ~keeper_name =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | info :: rest ->
+      (match load_secret_root info with
+       | Error _ as err -> err
+       | Ok loaded -> loop (loaded :: acc) rest)
+  in
+  loop [] (secret_roots ~base_path ~keeper_name)
+;;
+
+let overlay_by_key key_of base overlay =
+  let overlay_keys = List.map key_of overlay in
+  base |> List.filter (fun item -> not (List.mem (key_of item) overlay_keys)) |> fun base ->
+  base @ overlay
+;;
+
+let merge_env_entries roots =
+  List.fold_left
+    (fun acc loaded -> overlay_by_key fst acc loaded.env_entries)
+    []
+    roots
+;;
+
+let merge_file_entries roots =
+  List.fold_left
+    (fun acc loaded -> overlay_by_key snd acc loaded.file_entries)
+    []
+    roots
+;;
+
+let any_configured roots = List.exists (fun loaded -> loaded.configured) roots
+
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 ;;
@@ -288,9 +368,28 @@ let file_mount_json (host_path, container_path) =
   `Assoc [ "host_path", `String host_path; "container_path", `String container_path ]
 ;;
 
+let secret_root_json loaded =
+  let status =
+    if not loaded.configured
+    then "absent"
+    else if loaded.env_entries = [] && loaded.file_entries = []
+    then "empty"
+    else "ready"
+  in
+  `Assoc
+    [ "root", `String loaded.info.root
+    ; "source", `String loaded.info.source
+    ; "status", `String status
+    ; "configured", `Bool loaded.configured
+    ; "env_count", `Int (List.length loaded.env_entries)
+    ; "file_count", `Int (List.length loaded.file_entries)
+    ]
+;;
+
 let status_json
       ~root
       ~source
+      ~effective_roots
       ~status
       ~configured
       ~env_names
@@ -303,6 +402,7 @@ let status_json
     ; "configured", `Bool configured
     ; "root", `String root
     ; "source", `String source
+    ; "effective_roots", `List (List.map secret_root_json effective_roots)
     ; "env_count", `Int (List.length env_names)
     ; "file_count", `Int (List.length file_entries)
     ; "env_names", json_string_list env_names
@@ -315,84 +415,50 @@ let status_json
 
 let dashboard_status_json ~base_path ~keeper_name =
   let { root; source } = secret_root_info ~base_path ~keeper_name in
-  if not (path_exists root)
-  then
+  match load_secret_roots ~base_path ~keeper_name with
+  | Error err ->
     status_json
       ~root
       ~source
-      ~status:"absent"
-      ~configured:false
-      ~env_names:[]
-      ~file_entries:[]
-      ~error:None
-      ~next_action:("create " ^ root ^ "/env and/or " ^ root ^ "/files")
-  else if not (is_directory root)
-  then
-    status_json
-      ~root
-      ~source
+      ~effective_roots:[]
       ~status:"error"
       ~configured:true
       ~env_names:[]
       ~file_entries:[]
-      ~error:(Some ("keeper secret root is not a directory: " ^ root))
-      ~next_action:"replace the secret root with a directory"
-  else (
-    match reject_symlink ~kind:File_source root with
-    | Error err ->
-      status_json
-        ~root
-        ~source
-        ~status:"error"
-        ~configured:true
-        ~env_names:[]
-        ~file_entries:[]
-        ~error:(Some err)
-        ~next_action:"replace the secret root symlink with a real directory"
-    | Ok _ ->
-      let env_root = Filename.concat root "env" in
-      let files_root = Filename.concat root "files" in
-      (match load_env_entries env_root with
-       | Error err ->
-         status_json
-           ~root
-           ~source
-           ~status:"error"
-           ~configured:true
-           ~env_names:[]
-           ~file_entries:[]
-           ~error:(Some err)
-           ~next_action:"fix keeper secret env entries"
-       | Ok env_entries ->
-         (match collect_file_entries files_root with
-          | Error err ->
-            status_json
-              ~root
-              ~source
-              ~status:"error"
-              ~configured:true
-              ~env_names:(List.map fst env_entries)
-              ~file_entries:[]
-              ~error:(Some err)
-              ~next_action:"fix keeper secret file entries"
-          | Ok file_entries ->
-            let status =
-              if env_entries = [] && file_entries = [] then "empty" else "ready"
-            in
-            let next_action =
-              if String.equal status "ready"
-              then "none"
-              else "add entries under env/ and/or files/"
-            in
-            status_json
-              ~root
-              ~source
-              ~status
-              ~configured:true
-              ~env_names:(List.map fst env_entries)
-              ~file_entries
-              ~error:None
-              ~next_action)))
+      ~error:(Some err)
+      ~next_action:"fix keeper secret roots"
+  | Ok roots ->
+    let env_entries = merge_env_entries roots in
+    let file_entries = merge_file_entries roots in
+    let status =
+      if not (any_configured roots)
+      then "absent"
+      else if env_entries = [] && file_entries = []
+      then "empty"
+      else "ready"
+    in
+    let next_action =
+      match status with
+      | "ready" -> "none"
+      | "absent" ->
+        "create "
+        ^ root
+        ^ "/env and/or "
+        ^ root
+        ^ "/files, or configure "
+        ^ (base_secret_root_info ~base_path).root
+      | _ -> "add entries under env/ and/or files/"
+    in
+    status_json
+      ~root
+      ~source
+      ~effective_roots:roots
+      ~status
+      ~configured:(any_configured roots)
+      ~env_names:(List.map fst env_entries)
+      ~file_entries
+      ~error:None
+      ~next_action
 ;;
 
 let rec ensure_dir path =
@@ -471,66 +537,153 @@ let cleanup_files paths =
     paths
 ;;
 
+let github_token_env_names = [ "GH_TOKEN"; "GITHUB_TOKEN" ]
+
+let has_github_token entries =
+  List.exists
+    (fun key ->
+       List.exists
+         (fun (name, value) -> String.equal name key && not (String.equal value ""))
+         entries)
+    github_token_env_names
+;;
+
+let git_config_global_env_name = "GIT_CONFIG_GLOBAL"
+
+let git_config_helper_content =
+  "[credential \"https://github.com\"]\n\thelper = \"!gh auth git-credential\"\n"
+;;
+
+let local_git_config_global_path ~base_path ~keeper_name =
+  let playground =
+    Filename.concat base_path (Playground_paths.bundle_root keeper_name)
+  in
+  Filename.concat playground ".gitconfig"
+;;
+
+let ensure_local_git_config_global ~path =
+  try
+    ensure_dir (Filename.dirname path);
+    match Fs_compat.save_file_atomic path git_config_helper_content with
+    | Ok () -> Ok ()
+    | Error err -> Error err
+  with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Error
+      (Printf.sprintf
+         "%s%s%s"
+         (Unix.error_message err)
+         (if String.equal fn "" then "" else ": " ^ fn)
+         (if String.equal arg "" then "" else " " ^ arg))
+;;
+
 let local_env_for_keeper ?host_env ~base_path ~keeper_name () =
-  let root = secret_root ~base_path ~keeper_name in
-  if not (path_exists root)
-  then
-    let env_entries = local_env_entries_with_defaults [] in
-    Ok (Some (overlay_env_entries (local_base_host_env ?host_env ()) env_entries))
-  else if not (is_directory root)
-  then Error (Printf.sprintf "keeper secret root is not a directory: %s" root)
-  else (
-    match reject_symlink ~kind:File_source root with
-    | Error _ as err -> err
-    | Ok _ ->
-      let env_root = Filename.concat root "env" in
-      let files_root = Filename.concat root "files" in
-      (match load_env_entries env_root with
-       | Error _ as err -> err
-       | Ok env_entries ->
-	         (match collect_file_entries files_root with
-	          | Error _ as err -> err
-	          | Ok _file_entries ->
-	            let env_entries = local_env_entries_with_defaults env_entries in
-	            let base = local_base_host_env ?host_env () in
-	            Ok (Some (overlay_env_entries base env_entries)))))
+  match load_secret_roots ~base_path ~keeper_name with
+  | Error _ as err -> err
+  | Ok roots ->
+    let env_entries = merge_env_entries roots in
+    let git_config_path = local_git_config_global_path ~base_path ~keeper_name in
+    let needs_managed_git_config =
+      has_github_token env_entries
+      && not (env_entries_have git_config_global_env_name env_entries)
+    in
+    if needs_managed_git_config
+    then (
+      match ensure_local_git_config_global ~path:git_config_path with
+      | Error _ as err -> err
+      | Ok () ->
+        let env_entries =
+          (git_config_global_env_name, git_config_path) :: env_entries
+        in
+        let env_entries = local_env_entries_with_defaults env_entries in
+        let base = local_base_host_env ?host_env () in
+        Ok (Some (overlay_env_entries base env_entries)))
+    else
+      let env_entries = local_env_entries_with_defaults env_entries in
+      let base = local_base_host_env ?host_env () in
+      Ok (Some (overlay_env_entries base env_entries))
+;;
+
+let docker_git_config_global_path =
+  Filename.concat
+    (Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:"")
+    "gitconfig"
+;;
+
+let docker_git_config_host_path ~base_path ~keeper_name =
+  let dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "tmp")
+      "gitconfig"
+  in
+  Filename.concat dir (Workspace_utils.safe_filename keeper_name ^ ".gitconfig")
+;;
+
+let ensure_docker_git_config_global ~base_path ~keeper_name =
+  let path = docker_git_config_host_path ~base_path ~keeper_name in
+  try
+    ensure_dir (Filename.dirname path);
+    match Fs_compat.save_file_atomic path git_config_helper_content with
+    | Ok () -> Ok path
+    | Error err -> Error err
+  with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Error
+      (Printf.sprintf
+         "%s%s%s"
+         (Unix.error_message err)
+         (if String.equal fn "" then "" else ": " ^ fn)
+         (if String.equal arg "" then "" else " " ^ arg))
 ;;
 
 let docker_args_for_keeper ~base_path ~keeper_name ~container_name =
-  let root = secret_root ~base_path ~keeper_name in
-  if not (path_exists root)
-  then Ok { docker_args = []; cleanup = (fun () -> ()) }
-  else if not (is_directory root)
-  then Error (Printf.sprintf "keeper secret root is not a directory: %s" root)
-  else (
-    match reject_symlink ~kind:File_source root with
-    | Error _ as err -> err
-    | Ok _ ->
-      let env_root = Filename.concat root "env" in
-      let files_root = Filename.concat root "files" in
-      (match load_env_entries env_root with
-       | Error _ as err -> err
-       | Ok env_entries ->
-         (match collect_file_entries files_root with
-          | Error _ as err -> err
-          | Ok file_entries ->
-            (match write_env_file ~base_path ~container_name env_entries with
-             | Error _ as err -> err
-             | Ok env_file ->
-               let env_args =
-                 match env_file with
-                 | None -> []
-                 | Some path -> [ "--env-file"; path ]
-               in
-               let file_args =
-                 file_entries
-                 |> List.concat_map (fun (host, container) ->
-                   [ "-v"; host ^ ":" ^ container ^ ":ro" ])
-               in
-               let cleanup =
-                 match env_file with
-                 | None -> fun () -> ()
-                 | Some path -> fun () -> cleanup_files [ path ]
-               in
-               Ok { docker_args = env_args @ file_args; cleanup }))))
+  match load_secret_roots ~base_path ~keeper_name with
+  | Error _ as err -> err
+  | Ok roots ->
+    let env_entries = merge_env_entries roots in
+    let file_entries = merge_file_entries roots in
+    let git_config =
+      if env_entries_have git_config_global_env_name env_entries
+         || not (has_github_token env_entries)
+      then Ok None
+      else
+        match ensure_docker_git_config_global ~base_path ~keeper_name with
+        | Error _ as err -> err
+        | Ok path -> Ok (Some path)
+    in
+    (match git_config with
+     | Error _ as err -> err
+     | Ok git_config ->
+       let env_entries =
+         match git_config with
+         | None -> env_entries
+         | Some _ -> (git_config_global_env_name, docker_git_config_global_path) :: env_entries
+       in
+       (match write_env_file ~base_path ~container_name env_entries with
+        | Error _ as err -> err
+        | Ok env_file ->
+          let env_args =
+            match env_file with
+            | None -> []
+            | Some path -> [ "--env-file"; path ]
+          in
+          let git_config_mount =
+            match git_config with
+            | None -> []
+            | Some path -> [ path, docker_git_config_global_path ]
+          in
+          let file_args =
+            file_entries @ git_config_mount
+            |> List.concat_map (fun (host, container) ->
+              [ "-v"; host ^ ":" ^ container ^ ":ro" ])
+          in
+          let cleanup_paths =
+            (match env_file with
+             | None -> []
+             | Some path -> [ path ])
+          in
+          let cleanup = fun () -> cleanup_files cleanup_paths in
+          Ok { docker_args = env_args @ file_args; cleanup }))
 ;;

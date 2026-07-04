@@ -119,6 +119,8 @@ let secret_root_default ~base ~keeper_name =
     (Workspace_utils.safe_filename keeper_name)
 ;;
 
+let base_secret_root_default ~base = secret_root_default ~base ~keeper_name:"base"
+
 let test_missing_secret_dir_is_noop () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -166,10 +168,13 @@ let test_env_and_files_project_to_docker_args () =
     (match env_file_arg projection.docker_args with
      | None -> Alcotest.fail "missing --env-file"
      | Some env_file ->
-       Alcotest.(check string)
+       let env = read_file env_file in
+       Alcotest.(check bool)
          "env file content"
-         "GH_TOKEN=ghs_projected_secret\n"
-         (read_file env_file);
+         true
+         (contains_substring env "GH_TOKEN=ghs_projected_secret\n");
+       Alcotest.(check bool) "git config env added" true
+         (contains_substring env "GIT_CONFIG_GLOBAL=");
        projection.cleanup ();
        Alcotest.(check bool) "env file cleaned up" false (Sys.file_exists env_file))
 ;;
@@ -198,9 +203,90 @@ let test_secret_dir_override_uses_keeper_subdir () =
          (match env_file_arg projection.docker_args with
           | None -> Alcotest.fail "missing --env-file"
           | Some env_file ->
-            Alcotest.(check string) "override env content" "GH_TOKEN=override\n"
-              (read_file env_file);
+            Alcotest.(check bool) "override env content" true
+              (contains_substring (read_file env_file) "GH_TOKEN=override\n");
             projection.cleanup ()))
+;;
+
+let test_base_secret_env_and_files_project_to_keeper_docker_args () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = base_secret_root_default ~base in
+  let token_path = Filename.concat (Filename.concat root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  write_file token_path "base-token\n";
+  write_file ssh_path "BASE PRIVATE KEY";
+  match
+    Keeper_secret_projection.docker_args_for_keeper
+      ~base_path:base
+      ~keeper_name:"idealist"
+      ~container_name:"container"
+  with
+  | Error err -> Alcotest.fail err
+  | Ok projection ->
+    (match env_file_arg projection.docker_args with
+     | None -> Alcotest.fail "missing --env-file"
+     | Some env_file ->
+       let env = read_file env_file in
+       Alcotest.(check bool) "base gh token projected" true
+         (contains_substring env "GH_TOKEN=base-token\n");
+       Alcotest.(check bool) "git config env projected" true
+         (contains_substring env "GIT_CONFIG_GLOBAL="));
+    let args = String.concat " " projection.docker_args in
+    Alcotest.(check bool) "base ssh file mounted" true
+      (contains_substring args (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+    Alcotest.(check bool) "generated gitconfig mounted" true
+      (contains_substring args ":/tmp/masc-runtime/.masc/gitconfig:ro");
+    projection.cleanup ()
+;;
+
+let test_keeper_secret_overrides_base_secret_entries () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let base_root = base_secret_root_default ~base in
+  let keeper_root = secret_root_default ~base ~keeper_name:"idealist" in
+  let base_ssh =
+    Filename.concat
+      (Filename.concat base_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  let keeper_ssh =
+    Filename.concat
+      (Filename.concat keeper_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  write_file (Filename.concat (Filename.concat base_root "env") "GH_TOKEN") "base-token";
+  write_file (Filename.concat (Filename.concat keeper_root "env") "GH_TOKEN") "keeper-token";
+  write_file base_ssh "BASE PRIVATE KEY";
+  write_file keeper_ssh "KEEPER PRIVATE KEY";
+  match
+    Keeper_secret_projection.docker_args_for_keeper
+      ~base_path:base
+      ~keeper_name:"idealist"
+      ~container_name:"container"
+  with
+  | Error err -> Alcotest.fail err
+  | Ok projection ->
+    (match env_file_arg projection.docker_args with
+     | None -> Alcotest.fail "missing --env-file"
+     | Some env_file ->
+       let env = read_file env_file in
+       Alcotest.(check bool) "keeper token wins" true
+         (contains_substring env "GH_TOKEN=keeper-token\n");
+       Alcotest.(check bool) "base token omitted" false
+         (contains_substring env "GH_TOKEN=base-token\n"));
+    let args = String.concat " " projection.docker_args in
+    Alcotest.(check bool) "keeper ssh mount wins" true
+      (contains_substring args (keeper_ssh ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+    Alcotest.(check bool) "base ssh mount omitted" false
+      (contains_substring args (base_ssh ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+    projection.cleanup ()
 ;;
 
 let test_local_env_missing_secret_dir_is_scrubbed () =
@@ -317,6 +403,38 @@ let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
       "safe PATH preserved"
       (Some "/usr/bin")
       (env_value "PATH" env)
+;;
+
+let test_local_env_inherits_base_secret_and_sets_git_config_global () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = base_secret_root_default ~base in
+  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") "base-token\n";
+  let host_env = [| "PATH=/usr/bin"; "HOME=/Users/operator" |] in
+  match
+    Keeper_secret_projection.local_env_for_keeper
+      ~host_env
+      ~base_path:base
+      ~keeper_name:"idealist"
+      ()
+  with
+  | Error err -> Alcotest.fail err
+  | Ok None -> Alcotest.fail "expected local env projection"
+  | Ok (Some env) ->
+    Alcotest.(check (option string))
+      "base token projected"
+      (Some "base-token")
+      (env_value "GH_TOKEN" env);
+    (match env_value "GIT_CONFIG_GLOBAL" env with
+     | None -> Alcotest.fail "missing GIT_CONFIG_GLOBAL"
+     | Some git_config ->
+       Alcotest.(check bool) "git config under keeper playground" true
+         (contains_substring git_config ".masc/playground/idealist/.gitconfig");
+       Alcotest.(check bool) "git config file exists" true
+         (Sys.file_exists git_config);
+       Alcotest.(check bool) "git helper configured" true
+         (contains_substring (read_file git_config) "gh auth git-credential"))
 ;;
 
 let test_invalid_env_name_rejects () =
@@ -473,10 +591,16 @@ let () =
             test_env_and_files_project_to_docker_args
         ; Alcotest.test_case "MASC_SECRET_DIR uses keeper subdir" `Quick
             test_secret_dir_override_uses_keeper_subdir
+        ; Alcotest.test_case "base secret projects to keeper docker args" `Quick
+            test_base_secret_env_and_files_project_to_keeper_docker_args
+        ; Alcotest.test_case "keeper secret overrides base secret entries" `Quick
+            test_keeper_secret_overrides_base_secret_entries
         ; Alcotest.test_case "local env missing secret dir is scrubbed" `Quick
             test_local_env_missing_secret_dir_is_scrubbed
         ; Alcotest.test_case "local env uses keeper env without ambient creds" `Quick
             test_local_env_uses_keeper_secret_env_without_ambient_credentials
+        ; Alcotest.test_case "local env inherits base secret and sets git config" `Quick
+            test_local_env_inherits_base_secret_and_sets_git_config_global
         ; Alcotest.test_case "invalid env name rejects" `Quick
             test_invalid_env_name_rejects
         ; Alcotest.test_case "symlink file rejects" `Quick test_symlink_file_rejects

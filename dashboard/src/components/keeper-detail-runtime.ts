@@ -20,6 +20,7 @@ import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { toolCategory } from './tool-call-shared'
 import { formatIndependentCounters, formatRatioPair } from './counter-format'
 import type { Keeper } from '../types'
+import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type {
   KeeperCompositeSnapshot,
   KeeperSecretProjection,
@@ -51,6 +52,18 @@ import {
   peekKeeperConfigLoadStatus,
   peekLoadedKeeperConfig,
 } from './keeper-config-panel'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../lib/runtime-catalog-resource'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+  runtimeCatalogSnapshotFacts,
+} from '../lib/runtime-provider-summary'
 
 const DEFAULT_ALLOWLIST_PREVIEW_LIMIT = 12
 
@@ -1123,6 +1136,112 @@ function RuntimeLensLaneRow({ lane }: { lane: KeeperRuntimeLensLane }) {
   `
 }
 
+function runtimeLensCatalogId(trace: KeeperRuntimeTraceResponse): string | null {
+  const drift = trace.runtime_lens.axes.config_drift
+  const live = drift.live_runtime_id?.trim()
+  if (live) return live
+  const defaultRuntime = drift.default_runtime_id?.trim()
+  return defaultRuntime || null
+}
+
+function RuntimeLensCatalogDetailRow({ label, value }: { label: string; value: string }) {
+  return html`
+    <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] px-3 py-2">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
+      <div class="break-words font-mono text-3xs leading-relaxed text-[var(--color-fg-secondary)]" title=${value}>${value}</div>
+    </div>
+  `
+}
+
+function RuntimeLensCatalogSummary({
+  runtimeId,
+  entry,
+  status,
+  errorMessage,
+}: {
+  runtimeId: string | null
+  entry: DashboardRuntimeProviderSnapshot | null
+  status: 'idle' | 'loading' | 'loaded' | 'error'
+  errorMessage?: string
+}) {
+  if (!runtimeId) {
+    return html`
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
+        data-testid="runtime-lens-catalog-spec"
+      >
+        runtime catalog: no runtime id observed in config drift axis
+      </div>
+    `
+  }
+
+  if (status === 'idle' || status === 'loading') {
+    return html`
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
+        data-testid="runtime-lens-catalog-spec"
+      >
+        runtime catalog loading: ${runtimeId}
+      </div>
+    `
+  }
+
+  if (status === 'error') {
+    return html`
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--color-status-bad)]/40 bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-status-bad)]"
+        data-testid="runtime-lens-catalog-spec"
+      >
+        runtime catalog error for ${runtimeId}: ${errorMessage ?? 'unknown error'}
+      </div>
+    `
+  }
+
+  if (!entry) {
+    return html`
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-status-warn)]"
+        data-testid="runtime-lens-catalog-spec"
+      >
+        runtime catalog missing exact entry: ${runtimeId}
+      </div>
+    `
+  }
+
+  const provider = entry.provider_display_name ?? entry.provider_id ?? entry.provider
+  const model = entry.model_api_name ?? entry.model_id ?? 'model unknown'
+  const snapshotFacts = runtimeCatalogSnapshotFacts(entry)
+  const effectiveCapabilities = runtimeCatalogEffectiveCapabilities(entry)
+  const declaredSpec = runtimeCatalogDeclaredSpec(entry)
+  const parameterPolicy = runtimeCatalogParameterPolicy(entry)
+  const requestConfig = runtimeCatalogRequestConfig(entry)
+
+  return html`
+    <div
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      data-testid="runtime-lens-catalog-spec"
+    >
+      <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div class="text-xs font-semibold text-[var(--color-fg-primary)]">runtime catalog spec</div>
+          <div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]" title=${runtimeId}>${runtimeId}</div>
+        </div>
+        <div class="min-w-0 text-right">
+          <div class="truncate text-xs font-medium text-[var(--color-fg-secondary)]" title=${provider}>${provider}</div>
+          <div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]" title=${model}>${model}</div>
+        </div>
+      </div>
+      <div class="grid gap-1.5">
+        ${snapshotFacts ? html`<${RuntimeLensCatalogDetailRow} label="snapshot" value=${snapshotFacts} />` : null}
+        ${effectiveCapabilities ? html`<${RuntimeLensCatalogDetailRow} label="effective" value=${effectiveCapabilities} />` : null}
+        ${declaredSpec ? html`<${RuntimeLensCatalogDetailRow} label="declared" value=${declaredSpec} />` : null}
+        ${parameterPolicy ? html`<${RuntimeLensCatalogDetailRow} label="policy" value=${parameterPolicy} />` : null}
+        ${requestConfig ? html`<${RuntimeLensCatalogDetailRow} label="request" value=${requestConfig} />` : null}
+      </div>
+    </div>
+  `
+}
+
 export function RuntimeLensSection({
   trace,
 }: {
@@ -1146,6 +1265,12 @@ export function RuntimeLensSection({
   const artifacts = trace.linked_artifacts
   const clockEdges = lens.clock_edges
   const clockGroups = lens.clock_groups
+  const runtimeId = runtimeLensCatalogId(trace)
+  if (runtimeId) loadRuntimeCatalog()
+  const catalogState = runtimeCatalogState.value
+  const runtimeCatalogEntry = catalogState.status === 'loaded'
+    ? findRuntimeCatalogEntry(catalogState.data, runtimeId ?? '')
+    : null
   const swimlanes = [
     lens.swimlanes.keeper,
     lens.swimlanes.masc_policy_runtime,
@@ -1204,6 +1329,13 @@ export function RuntimeLensSection({
         <${SignalRow} label="memory evidence" value=${runtimeTraceMemoryEvidence(trace)} />
         <${SignalRow} label="stale reason" value=${compactToken(trace.stale_reason, 'none')} />
       </div>
+
+      <${RuntimeLensCatalogSummary}
+        runtimeId=${runtimeId}
+        entry=${runtimeCatalogEntry}
+        status=${catalogState.status}
+        errorMessage=${catalogState.status === 'error' ? catalogState.message : undefined}
+      />
 
       <div class="flex flex-wrap gap-1.5 min-w-0" data-testid="runtime-lens-gaps">
         ${lens.gaps.length > 0

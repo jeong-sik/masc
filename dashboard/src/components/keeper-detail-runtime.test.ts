@@ -1,10 +1,24 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
+const runtimeCatalogRefs = vi.hoisted(() => ({
+  fetchRuntimeProviders: vi.fn(),
+}))
+
+vi.mock('../api/dashboard', async () => {
+  const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
+  return {
+    ...actual,
+    fetchRuntimeProviders: runtimeCatalogRefs.fetchRuntimeProviders,
+  }
+})
+
+import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
+import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 import {
   AllowlistPreview,
   BudgetSourceBadge,
@@ -23,9 +37,92 @@ import {
   resolveKeeperToolPolicy,
 } from './keeper-detail-source'
 
+beforeEach(() => {
+  resetRuntimeCatalog()
+  runtimeCatalogRefs.fetchRuntimeProviders.mockReset()
+  runtimeCatalogRefs.fetchRuntimeProviders.mockResolvedValue({ providers: [] })
+})
+
 afterEach(() => {
   cleanup()
+  resetRuntimeCatalog()
 })
+
+function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnapshot {
+  const [providerId, modelId] = runtimeId.split('.', 2)
+  return {
+    provider: runtimeId,
+    runtime_id: runtimeId,
+    provider_id: providerId,
+    provider_display_name: 'Runtime Provider',
+    model_id: modelId,
+    model_api_name: 'model-api',
+    capabilities_declared: true,
+    supports_multimodal_inputs: true,
+    supports_image_input: true,
+    supports_audio_input: true,
+    source: 'runtime.toml',
+    models: ['model-api'],
+    effective_capabilities: {
+      source: 'oas-provider-config-model',
+      accepted_reasoning_efforts: null,
+      thinking_control_format: 'responses.reasoning',
+      supports_multimodal_inputs: true,
+      supports_image_input: true,
+      supports_audio_input: true,
+      supports_video_input: false,
+      ignored_sampling_parameters: ['temperature'],
+      supported_models: ['model-api'],
+    },
+    parameter_policy: {
+      reasoning_toggle_wire: 'responses.reasoning',
+      reasoning_replay_policy: 'preserve',
+      requires_reasoning_replay_on_tool_call: true,
+      ignored_sampling_params: ['top_k'],
+      always_ignored_sampling_params: ['min_p'],
+    },
+    request_config: {
+      source: 'runtime.toml',
+      provider_kind: 'cloud',
+      request_path_targets_responses_api: true,
+    },
+    declared_spec: {
+      source: 'runtime.toml',
+      provider: {
+        id: providerId,
+        display_name: 'Runtime Provider',
+        protocol: 'openai-compatible-http',
+        api_format: 'responses',
+        transport: 'http',
+        auth_kind: 'env:RUNTIME_API_KEY',
+        is_non_interactive: true,
+        behavior_capabilities: {
+          identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+        },
+      },
+      model: {
+        id: modelId,
+        api_name: 'model-api',
+        match_prefixes: ['model-'],
+        capabilities: {
+          source: 'runtime.toml',
+          thinking_control_format: 'responses.reasoning',
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+        },
+      },
+      binding: {
+        provider_id: providerId,
+        model_id: modelId,
+        is_default: false,
+        max_concurrent: 4,
+        keep_alive: '10m',
+      },
+    },
+  }
+}
 
 describe('resolveKeeperToolPolicy', () => {
   it('uses keeper config as the authoritative policy source', () => {
@@ -706,6 +803,8 @@ describe('RuntimeLensSection', () => {
     render(h(RuntimeLensSection, { trace: runtimeTraceFixture() }))
 
     expect(screen.getByTestId('runtime-lens')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-lens-catalog-spec')).toHaveTextContent('no runtime id observed')
+    expect(runtimeCatalogRefs.fetchRuntimeProviders).not.toHaveBeenCalled()
     expect(screen.getByText('keeper / agent turn')).toBeInTheDocument()
     expect(screen.getByText('7 / 3')).toBeInTheDocument()
     expect(screen.getByText('trace id')).toBeInTheDocument()
@@ -741,6 +840,40 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
+  })
+
+  it('renders catalog-backed runtime spec for the observed live runtime id', async () => {
+    const trace = runtimeTraceFixture()
+    trace.runtime_lens.axes.config_drift = {
+      ...trace.runtime_lens.axes.config_drift,
+      present: true,
+      status: 'override',
+      has_live_override: true,
+      runtime_override: true,
+      override_fields: ['runtime_id'],
+      default_runtime_id: 'provider.default',
+      live_runtime_id: 'provider.model',
+    }
+    runtimeCatalogRefs.fetchRuntimeProviders.mockResolvedValueOnce({
+      providers: [runtimeProviderFixture('provider.model')],
+    })
+
+    render(h(RuntimeLensSection, { trace }))
+
+    await waitFor(() => expect(screen.getByTestId('runtime-lens-catalog-spec')).toHaveTextContent('runtime catalog spec'))
+    const catalog = screen.getByTestId('runtime-lens-catalog-spec')
+    expect(catalog).toHaveTextContent('runtime catalog spec')
+    expect(catalog).toHaveTextContent('provider.model')
+    expect(catalog).toHaveTextContent('Runtime Provider')
+    expect(catalog).toHaveTextContent('model-api')
+    expect(catalog).toHaveTextContent('source:oas-provider-config-model')
+    expect(catalog).toHaveTextContent('input:multimodal,image,audio')
+    expect(catalog).toHaveTextContent('wire:responses.reasoning')
+    expect(catalog).toHaveTextContent('tool-call-replay:required')
+    expect(catalog).toHaveTextContent('responses-api')
+    expect(catalog).toHaveTextContent('declared')
+    expect(catalog).toHaveTextContent('api:responses')
+    expect(catalog).toHaveTextContent('concurrency:4')
   })
 
   it('renders an empty state while runtime trace is unavailable', () => {

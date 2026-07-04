@@ -14,7 +14,12 @@
 import { html } from 'htm/preact'
 import { Fragment } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import type { KeeperApprovalQueueItem, KeeperResolvedApprovalItem } from '../../types'
+import type {
+  KeeperApprovalQueueItem,
+  KeeperResolvedApprovalItem,
+  HitlContextSummary,
+  HitlSummaryStatus,
+} from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatDateTimeKo } from '../../lib/format-time'
@@ -157,6 +162,69 @@ function openKeeperWorkspace(name: string): void {
   navigate('monitoring', { section: 'agents', view: 'keepers', keeper: name })
 }
 
+// Render the HITL context-summary worker's operator briefing. `available`
+// carries the LLM-generated summary the operator reads before deciding;
+// `pending`/`failed` are surfaced (not hidden) so a stuck or errored summary is
+// visible rather than silently absent. `not_requested`/`null` render nothing.
+function renderAvailableSummary(summary: HitlContextSummary) {
+  return html`
+    <div class="ap-summary sev-summary" data-testid="approval-summary" data-summary-state="available">
+      <div class="ap-summary-head">
+        <span class="ap-summary-label">🧭 컨텍스트 요약</span>
+        ${typeof summary.uncertainty === 'number'
+          ? html`<span class="ap-summary-uncertainty" title="요약 불확실도">불확실도 ${Math.round(summary.uncertainty * 100)}%</span>`
+          : null}
+      </div>
+      <p class="ap-summary-text">${summary.context_summary}</p>
+      ${summary.key_questions.length
+        ? html`<ul class="ap-summary-questions">
+            ${summary.key_questions.map(q => html`<li>${q}</li>`)}
+          </ul>`
+        : null}
+      ${summary.suggested_options.length
+        ? html`<ul class="ap-summary-options">
+            ${summary.suggested_options.map(
+              opt => html`<li class="ap-summary-option">
+                <span class="ap-summary-option-label">${opt.label}</span>
+                <span class="ap-summary-option-rationale">${opt.rationale}</span>
+                ${opt.estimated_risk_delta
+                  ? html`<span class="ap-summary-option-risk">${keeperApprovalRiskLabel(opt.estimated_risk_delta)}</span>`
+                  : null}
+              </li>`,
+            )}
+          </ul>`
+        : null}
+      ${summary.risk_rationale?.trim()
+        ? html`<p class="ap-summary-rationale">${summary.risk_rationale.trim()}</p>`
+        : null}
+    </div>
+  `
+}
+
+function approvalSummaryBlock(status: HitlSummaryStatus | null | undefined) {
+  if (!status) return null
+  switch (status.status) {
+    case 'not_requested':
+      return null
+    case 'pending':
+      return html`<div class="ap-summary ap-summary-pending" data-testid="approval-summary" data-summary-state="pending">
+        <span class="ap-summary-label">🧭 컨텍스트 요약 생성 중…</span>
+      </div>`
+    case 'failed':
+      return html`<div class="ap-summary ap-summary-failed" data-testid="approval-summary" data-summary-state="failed">
+        <span class="ap-summary-label">컨텍스트 요약 실패${status.retryable ? ' · 재시도 예정' : ''}</span>
+        ${status.reason ? html`<span class="ap-summary-reason">${status.reason}</span>` : null}
+      </div>`
+    case 'available':
+      return renderAvailableSummary(status.summary)
+    default: {
+      // Exhaustive over HitlSummaryStatus — a new backend variant fails typecheck here.
+      const _never: never = status
+      return _never
+    }
+  }
+}
+
 function ApprovalCard({
   item,
   selected,
@@ -198,6 +266,7 @@ function ApprovalCard({
         </div>
         <h3 class="ap-title">${title}</h3>
         ${detailReason ? html`<p class="ap-detail">${detailReason}</p>` : null}
+        ${approvalSummaryBlock(item.summary_status)}
         <div class="ap-req">
           <${AgentAvatar} name=${item.keeper_name} size="sm" />
           <div class="ap-req-body">

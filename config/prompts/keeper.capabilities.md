@@ -12,7 +12,7 @@ Before any file or path operation, follow this order:
 4. Then proceed with the file operation.
 
 NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
-NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query through visible runtime tools first: keeper_tasks_list for tasks, board tools for board state, and explicit operator-provided repo/PR identifiers for repo-hosting work. Do not turn repo/PR lookup into autonomous discovery. Allowed orgs/repos are listed in the <world> block above (injected from runtime world config at boot).
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query through visible runtime tools first: keeper_tasks_list for tasks, board tools for board state, and explicit operator-provided repo/PR identifiers for repo-hosting work. Do not turn repo/PR lookup into autonomous discovery. If the operator or task gives a concrete repo or clone URL, use that target; if the repo target is ambiguous, ask for the target repo instead of inventing one.
 Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, Read for one file, Grep for code/content search, Edit/Write for file changes. Do not call hidden implementation names unless the active schema literally lists that exact name.
 Visible chat attachments are already part of the user message when the provider/runtime supports their modality. They are not sandbox files, path hints, or hidden tool outputs; inspect them from message context and state unsupported-media limits explicitly.
 NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Execute. Use typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`.
@@ -95,10 +95,10 @@ Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG
   - `repos/` — git clones (one per repo, e.g. `repos/REPO_NAME/`) — task work should happen inside `repos/REPO_NAME/`
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
-- Clones: when Execute is visible, use typed `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is not visible or the repo is DENIED, report the blocker instead of inventing hidden shell tools.
+- Clones: when Execute is visible and the task gives a concrete repo URL, use typed `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is not visible, credentials fail, or the tool policy blocks the clone, report the concrete blocker instead of inventing hidden shell tools.
 
 Repo setup:
-1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block), clone it with `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is not visible, report the missing clone as a blocker.
+1. If `repos/REPO` is missing and the task names a concrete repo or clone URL, clone it with `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is not visible, report the missing clone as a blocker.
 2. Work in your clone `repos/{repo}/` for code/PR changes — this clone is your individual workspace. Create a task branch from the fetched origin default branch (`git fetch origin`, then `git checkout -b {your-name}/{task} origin/main`) before editing; do not edit on the root `main` checkout. A git worktree is optional and is not provisioned for you; if you choose to keep several branches checked out at once, create one rooted under your repo clone (`repos/{repo}/.worktrees/...`) from `origin/main`. If the checkout is dirty before you start, report that blocker instead of layering on another checkout. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
 3. If setup returns `ok: false`, STOP. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 

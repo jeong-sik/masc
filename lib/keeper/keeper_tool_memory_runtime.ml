@@ -177,12 +177,15 @@ let search_memory_bank
     else List.filter (fun m -> String_util.equals_ci m.kind kind_filter) parsed
   in
   (* Text match: query against text field (non-deterministic data).
-     Token-AND, not whole-query substring — "소주 갑오징어" must match a
-     note containing both words in any order (issue #20908). *)
+     Partial-token match (count > 0), not strict token-AND — a natural-language
+     query like "notable event lesson learned" previously matched 0 notes even
+     when 2 of 4 tokens overlapped a stored note. The matched-token ratio is a
+     ranking signal only; priority, recency, horizon, source, and synthetic
+     penalties still participate in the final score. *)
   let matched =
     if query = ""
     then filtered
-    else List.filter (fun m -> String_util.contains_all_tokens_ci m.text query) filtered
+    else List.filter (fun m -> String_util.count_matched_tokens_ci m.text query > 0) filtered
   in
   (* Scoring: priority * recency_weight.
      recency_weight normalizes age relative to the oldest note in the result set.
@@ -215,8 +218,15 @@ let search_memory_bank
       let synthetic_penalty =
         if Keeper_synthetic_marker.contains_marker m.text then -0.1 else 0.0
       in
+      let token_match_weight =
+        if query = "" then 1.0
+        else String_util.matched_token_ratio_ci m.text query
+      in
       let score =
-        (float_of_int m.priority /. 100.0 *. recency_weight *. horizon_weight)
+        (float_of_int m.priority /. 100.0
+           *. recency_weight
+           *. horizon_weight
+           *. token_match_weight)
         +. synthetic_penalty
         +. source_bonus
       in

@@ -1,6 +1,7 @@
 type t =
   | Ok_summary
   | Timed_out
+  | Clock_unavailable
   | Http_error
   | Empty_response
   | Invalid_structured_response
@@ -8,6 +9,7 @@ type t =
 let to_label = function
   | Ok_summary -> "ok_summary"
   | Timed_out -> "timed_out"
+  | Clock_unavailable -> "clock_unavailable"
   | Http_error -> "http_error"
   | Empty_response -> "empty_response"
   | Invalid_structured_response -> "invalid_structured_response"

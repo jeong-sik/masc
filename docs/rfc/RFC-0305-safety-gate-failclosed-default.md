@@ -55,7 +55,7 @@ Deviations found (fail-open where a safety decision cannot complete):
 | # | Site | Gate | Fail-open mechanism | Active? |
 |---|------|------|---------------------|---------|
 | A | `lib/config/env_config_governance.ml:180,188` + `lib/task/anti_rationalization.ml:1032` | excuse detection | `fail_mode` default `open` → `Approve` | **yes** |
-| B | `lib/keeper_runtime/keeper_fd_pressure.ml:552` | fleet turn admission | `system_fds = None -> Admit` (siblings :535/:561 block) | yes |
+| ~~B~~ | ~~`lib/keeper_runtime/keeper_fd_pressure.ml:552`~~ | ~~fleet turn admission~~ | **WITHDRAWN — false positive**, see §1.2 | — |
 | C | `lib/eval_gate.ml:262,348` | destructive-command scan | malformed JSON args → `""` → no match → `Pass` | yes |
 | D | `lib/eval_gate.ml:203` | destructive evasion detect | regex evaluator error → `false` → passes | yes |
 | E | `lib/worker_oas.ml:262`, `lib/keeper/keeper_guards.ml:157` | command extraction | payload under unexpected field → `""` → not screened | yes |
@@ -72,8 +72,9 @@ Counter-examples — sites that already fail closed, establishing the norm:
   `Reject`, **explicitly overriding OAS's fail-open default** (#7883). This is a
   direct in-tree precedent for the principle.
 - `lib/keeper_runtime/keeper_disk_pressure.ml:268` — unmeasurable disk → `Block`.
-- `lib/keeper_runtime/keeper_fd_pressure.ml:535,561` — unknown fd probe →
-  `probe_unknown_block`. (This makes site B, in the same module, the outlier.)
+- `lib/keeper_runtime/keeper_fd_pressure.ml:535,561` — unknown *process-level*
+  fd probe (`open_fds` / `soft_limit`) → `probe_unknown_block`. (The *host-level*
+  `system_fds` branch admits on purpose — see §1.2.)
 - `lib/governance_pipeline.ml:54-68,545-564` — unknown `governance_level` → require
   confirm; no matching approval rule → block via HITL.
 - `lib/keeper/keeper_approval_queue.ml:97` + rules types — HITL approval
@@ -84,6 +85,35 @@ Counter-examples — sites that already fail closed, establishing the norm:
   deliberately avoids `_ -> Full` to prevent silently elevating a future
   restricted profile to full tool access.
 - `lib/tool_input_validation.ml:29` — tool with no registered schema → rejected.
+
+### 1.2 Correction: site B is a false positive (withdrawn)
+
+The initial survey flagged `keeper_fd_pressure.ml:552` (`system_fds = None -> Admit`)
+as fail-open because its two sibling branches block on an unknown probe. On
+closer reading the module docstring documents this branch as intentional:
+
+> "It checks both the process `nofile` budget and, when available, the host
+> kernel's global file-table budget… **System probe failures remain
+> telemetry-only: a sandbox or restricted host must not block keeper launches
+> after the direct process nofile budget has passed.**"
+
+The two probes are not peers. `open_fds` / `soft_limit` are the **process-level
+primary gate** — if they cannot be measured, the process's own fd safety is
+unverifiable, so block. `system_fds` is a **host-wide, best-effort secondary
+signal** (ENFILE can fire while the process fd count is still low). A
+sandbox/CI/restricted host frequently cannot read `sysctl kern.num_files` or
+`/proc/sys/fs/file-nr`; blocking there would stall **every** keeper on that host
+class even though the process budget already vouched for safety. Admitting is
+the correct availability-preserving choice, and it is downstream of the process
+gate, not a bypass of it.
+
+This is exactly the §2.1 trade-off applied correctly by the original author:
+fail-closed on the primary measurement, degrade-to-admit on the secondary one
+whose failure does not indicate danger. The lesson for the remaining sites:
+**read the gate's own contract/docstring before classifying an asymmetry as a
+bug** — an admit branch may be a documented availability decision, not an
+oversight. (A prototype fix + mutation test "passed", but only because the test
+encoded the wrong expectation; the merged behavior is correct.)
 
 ## 2. Principle
 
@@ -133,8 +163,9 @@ opt-out where a fleet-stall risk is real:
   `MASC_ANTI_RATIONALIZATION_FAIL_MODE=open` explicitly. The `Closed` branch
   (`lib/task/anti_rationalization.ml:1046`, `Reject "verifier unavailable (fail-closed)"`)
   and the gate-2 advisory already exist; only the default changes.
-- **B (fd-pressure admission)**: `system_fds = None -> probe_unknown_block`,
-  matching the two sibling branches in the same function.
+- ~~**B (fd-pressure admission)**~~: **withdrawn** — the `system_fds = None ->
+  Admit` branch is an intentional, documented availability decision, not a
+  fail-open (see §1.2). No change.
 - **C/D/E (destructive-command path)**: a shared `Reject` (or `Trajectory` fail)
   when command extraction or args-JSON parsing fails, instead of scanning an
   empty string. One helper closes all three (they share `lib/eval_gate` +
@@ -174,7 +205,6 @@ terminal event.
 |---|---|---|---|
 | Hard-forbidden OAS callback | `auto_approval_hard_forbidden` true | Immediate `Reject`; never queued | `lib/governance_pipeline.ml:323`, `:409` |
 | Excuse detection (A) | evaluator unavailable, no gate-2 advisory | `Reject` | `lib/task/anti_rationalization.ml:1046` |
-| FD-pressure admission (B) | `system_fds = None` | `probe_unknown_block` | `lib/keeper_runtime/keeper_fd_pressure.ml:552` |
 | Destructive-command scan (C/D/E) | malformed JSON args / regex error / unexpected payload field | `Reject` | `lib/eval_gate.ml:203,262,348`; `lib/worker_oas.ml:262`; `lib/keeper/keeper_guards.ml:157` |
 | Risk classify unknown (F) | unknown tool/verb | require confirm | `lib/governance_pipeline_risk.ml:129,337` |
 | Tool schema unknown type (G) | unknown JSON-Schema `type` | `Error` | `lib/sdk_tool_contract.ml:245` |
@@ -210,12 +240,10 @@ blast radius, smallest first:
 
 1. **I, G, C/D/E** — pure fail-closed on malformed/unknown input. No fleet-stall
    risk (malformed input is not a normal path). Each gets a unit test:
-   malformed → reject.
-2. **B** — one-line, aligns with in-module siblings; test: `system_fds = None`
-   → admission blocked.
-3. **F, H** — risk/capability defaults; wider behavioral surface, needs a sweep
+   malformed → reject. (**I landed: #23092**.)
+2. **F, H** — risk/capability defaults; wider behavioral surface, needs a sweep
    of currently-unclassified tools so nothing legitimate is newly blocked.
-4. **A** — the default flip. Highest fleet-stall exposure, so it lands last and
+3. **A** — the default flip. Highest fleet-stall exposure, so it lands last and
    with the opt-out documented in `runtime.toml` and an operator runbook note.
    Verify the gate-2 advisory + `Closed` branch cover the common excuse cases so
    a routine outage degrades rather than hard-stalls.

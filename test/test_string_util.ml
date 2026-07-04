@@ -290,6 +290,30 @@ let test_contains_all_tokens_ci_ascii_ci_and_empty () =
   check bool "whitespace-only query yields false" false
     (SU.contains_all_tokens_ci "abc" "  \t")
 
+let test_count_matched_tokens_ci_partial () =
+  check int "partial natural-language query counts overlap" 2
+    (SU.count_matched_tokens_ci
+       "task-1562 triple_write release lesson"
+       "notable event lesson learned triple_write");
+  check int "ASCII tokens are case-insensitive" 2
+    (SU.count_matched_tokens_ci "Keeper Board POST" "board keeper");
+  check int "absent tokens do not count" 1
+    (SU.count_matched_tokens_ci memory_note "소주 맥주");
+  check int "empty query has zero matches" 0
+    (SU.count_matched_tokens_ci "abc" "")
+
+let test_matched_token_ratio_ci_partial () =
+  check (float 0.0001) "partial natural-language query ratio" 0.4
+    (SU.matched_token_ratio_ci
+       "task-1562 triple_write release lesson"
+       "notable event lesson learned triple_write");
+  check (float 0.0001) "full match ratio" 1.0
+    (SU.matched_token_ratio_ci memory_note "소주 갑오징어");
+  check (float 0.0001) "no match ratio" 0.0
+    (SU.matched_token_ratio_ci memory_note "맥주");
+  check (float 0.0001) "empty query ratio" 0.0
+    (SU.matched_token_ratio_ci "abc" "")
+
 let test_starts_with_ci_basic () =
   check bool "exact case" true
     (SU.starts_with_ci ~prefix:"Bearer " "Bearer abc123");
@@ -395,7 +419,11 @@ let () =
           test_case "order-independent token AND" `Quick
             test_contains_all_tokens_ci_order_independent;
           test_case "ASCII ci and empty query" `Quick
-            test_contains_all_tokens_ci_ascii_ci_and_empty ] );
+            test_contains_all_tokens_ci_ascii_ci_and_empty;
+          test_case "partial token count" `Quick
+            test_count_matched_tokens_ci_partial;
+          test_case "partial token ratio" `Quick
+            test_matched_token_ratio_ci_partial ] );
       ( "starts_with_ci",
         [ test_case "basic" `Quick test_starts_with_ci_basic;
           test_case "boundaries" `Quick test_starts_with_ci_boundaries ] );

@@ -37,17 +37,23 @@ let test_of_int_opt () =
   assert (D.of_int_opt 0 = None);
   assert (D.of_int_opt (-1) = None)
 
-(* ─── authorize_transition (stub) ─────────────────────────────── *)
+(* ─── authorize_transition ────────────────────────────────────── *)
 
-let test_authorize_transition_stub_always_ok () =
-  let res =
+let test_authorize_transition_allows_same_or_degradation () =
+  assert (
+    D.authorize_transition ~from:(D.Any_level D.L1) ~to_:(D.Any_level D.L1)
+    = Ok ());
+  assert (
     D.authorize_transition ~from:(D.Any_level D.L1) ~to_:(D.Any_level D.L4)
-  in
-  assert (res = Ok ());
-  let res2 =
-    D.authorize_transition ~from:(D.Any_level D.L4) ~to_:(D.Any_level D.L1)
-  in
-  assert (res2 = Ok ())
+    = Ok ());
+  assert (
+    D.authorize_transition ~from:(D.Any_level D.L2) ~to_:(D.Any_level D.L3)
+    = Ok ())
+
+let test_authorize_transition_rejects_restoration_without_policy () =
+  match D.authorize_transition ~from:(D.Any_level D.L4) ~to_:(D.Any_level D.L1) with
+  | Error _ -> ()
+  | Ok () -> assert false
 
 (* ─── apply_level_to_strategy ─────────────────────────────────── *)
 
@@ -153,7 +159,8 @@ let () =
   test_level_to_string ();
   test_to_int ();
   test_of_int_opt ();
-  test_authorize_transition_stub_always_ok ();
+  test_authorize_transition_allows_same_or_degradation ();
+  test_authorize_transition_rejects_restoration_without_policy ();
   test_l1_returns_canonical_for_transient ();
   test_l1_returns_canonical_for_permanent_handoff ();
   test_l2_downgrades_retry_to_fallback ();

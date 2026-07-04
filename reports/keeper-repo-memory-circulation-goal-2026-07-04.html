@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Repository / Memory Circulation Goal Matrix</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f0f4f6;
+      --ink: #17212b;
+      --muted: #5a6878;
+      --line: #cfdae3;
+      --accent: #18615f;
+      --accent-soft: #d9eeeb;
+      --warn: #8a5b0a;
+      --warn-soft: #fff1cc;
+      --bad: #9f2f3f;
+      --bad-soft: #ffe1e6;
+      --good: #1b6b3a;
+      --good-soft: #dff4e6;
+      --code: #243447;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      padding: 28px 32px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px 24px 56px;
+    }
+    h1, h2, h3 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 24px; line-height: 1.25; }
+    h2 { font-size: 17px; margin-bottom: 12px; }
+    h3 { font-size: 14px; margin-bottom: 8px; }
+    p { margin: 6px 0; color: var(--muted); }
+    code {
+      color: var(--code);
+      background: #eef2f5;
+      border: 1px solid #dbe3ea;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      border-radius: 4px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfd;
+      min-height: 128px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+    .status.good { color: var(--good); background: var(--good-soft); border-color: #bde3ca; }
+    .status.warn { color: var(--warn); background: var(--warn-soft); border-color: #efd68e; }
+    .status.bad { color: var(--bad); background: var(--bad-soft); border-color: #f2b9c2; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      padding: 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #e7edf1;
+      font-size: 12px;
+      color: #34495d;
+    }
+    tr:last-child td { border-bottom: 0; }
+    td:last-child, th:last-child { border-right: 0; }
+    ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+    li { margin: 4px 0; }
+    .evidence {
+      margin-top: 8px;
+      padding: 8px;
+      background: #f7fafc;
+      border: 1px dashed var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .next {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+    }
+    @media (max-width: 900px) {
+      header { padding: 22px 18px 16px; }
+      main { padding: 18px 14px 42px; }
+      .grid { grid-template-columns: 1fr; }
+      table { table-layout: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Keeper Repository / Memory Circulation Goal Matrix</h1>
+    <p>목표: Keeper 개인 clone 기반 저장소 흐름, 설정 표면, 프롬프트 진실성, Memory OS 청소/현실성 검사를 서로 직교하게 추적하고 첫 PR 범위를 고정한다.</p>
+    <div class="meta">
+      <span class="pill">확인일: 2026-07-04</span>
+      <span class="pill">Repo: <code>masc</code></span>
+      <span class="pill">Branch: <code>codex-repo-memory-circulation-20260704</code></span>
+      <span class="pill">Boundary: MASC owns this, OAS unaware</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="section">
+      <h2>Current Truth Snapshot</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Repository Management Exists</h3>
+          <span class="status good">implemented, partially surfaced</span>
+          <p>Backend has repository registry and keeper mapping APIs. Workspace also has a repository management page.</p>
+          <div class="evidence">
+            <code>lib/server/server_routes_http_routes_repositories.ml</code><br>
+            <code>lib/server/server_routes_http_routes_keeper_repos.ml</code><br>
+            <code>dashboard/src/components/repository-management.ts</code>
+          </div>
+        </article>
+        <article class="card">
+          <h3>Settings Surface Is Linked</h3>
+          <span class="status good">branch patch complete</span>
+          <p>Settings keeps repository registration local and now links directly to the Workspace repository mapping SSOT, so the keeper access surface is discoverable without duplicating state.</p>
+          <div class="evidence">
+            <code>dashboard/src/components/settings-repositories.ts</code> routes to <code>#workspace?section=repositories&amp;view=mappings</code>.
+          </div>
+        </article>
+        <article class="card">
+          <h3>Prompt Truth Is Aligned</h3>
+          <span class="status good">branch patch complete</span>
+          <p>Prompts correctly say each keeper works under <code>repos/REPO_NAME</code>. This branch removes the static <code>ALLOWED</code>/<code>DENIED</code> clone wording so concrete operator-provided repos do not trigger an artificial authorization question.</p>
+          <div class="evidence">
+            <code>config/prompts/keeper.capabilities.md</code><br>
+            <code>config/prompts/keeper.world.md</code>
+          </div>
+        </article>
+        <article class="card">
+          <h3>Backend Default Is Aligned</h3>
+          <span class="status good">branch patch complete</span>
+          <p>Missing keeper mapping now inherits the default wildcard scope for registered keeper-local clones, while explicit mappings can restrict access and malformed mapping files or unregistered repository IDs still fail closed.</p>
+          <div class="evidence">
+            <code>Keeper_repo_mapping.is_allowed</code> returns true on <code>Mapping_missing</code>.<br>
+            <code>Keeper_sandbox_control</code> marks missing mapping as <code>allowed</code> with <code>policy_default_scope</code>.
+          </div>
+        </article>
+        <article class="card">
+          <h3>Memory Cleaning Exists</h3>
+          <span class="status good">structural cleaner present</span>
+          <p>Memory OS has deterministic TTL/dedup GC, dry-run reporting, and a maintenance loop. LLM consolidation can merge/drop facts when enabled.</p>
+          <div class="evidence">
+            <code>lib/keeper/keeper_memory_os_gc.ml</code><br>
+            <code>lib/keeper/keeper_memory_os_consolidation_runtime.ml</code><br>
+            <code>bin/main_eio.ml memory-os-gc-dry-run</code>
+          </div>
+        </article>
+        <article class="card">
+          <h3>Reality Drift Cleaner Is Not Productized</h3>
+          <span class="status warn">next design target</span>
+          <p>Current GC removes expired/duplicate facts; consolidation can drop by LLM plan. A cycle that re-checks external state, marks stale facts, and writes correction evidence is still a separate product axis.</p>
+          <div class="evidence">
+            <code>Keeper_memory_os_policy</code> keeps judgment out of numeric GC; reality checks need an LLM/evidence boundary.
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Orthogonal Matrix</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Axis</th>
+            <th>Repository Flow</th>
+            <th>Memory Flow</th>
+            <th>IDE / Dashboard Impact</th>
+            <th>First PR Move</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Truth Source</strong></td>
+            <td><code>repositories.toml</code>, keeper sandbox <code>repos/</code>, git remotes.</td>
+            <td>Keeper fact JSONL, librarian output, GC report, consolidation plan.</td>
+            <td>IDE repo picker and settings must not invent availability.</td>
+            <td>Make missing mapping mean default access to registered keeper-local clones, with explicit mapping as an optional filter.</td>
+          </tr>
+          <tr>
+            <td><strong>Permission / Safety</strong></td>
+            <td>Sandbox containment, destructive command gates, repo identity mismatch checks.</td>
+            <td>Fact-store lock, strict parse before rewrite, LLM judgment boundary for forgetting.</td>
+            <td>Operator must see when a repo is unavailable versus denied versus unregistered.</td>
+            <td>Keep identity mismatch and corrupt store fail-closed; remove misleading missing-mapping denial.</td>
+          </tr>
+          <tr>
+            <td><strong>Accumulation</strong></td>
+            <td>Per-keeper clones, branches, worktrees, auto-sync state.</td>
+            <td>Turn outputs, tool results, librarian facts, recall injections.</td>
+            <td>IDE needs source selection plus context freshness.</td>
+            <td>Expose settings entry point for both registered repos and keeper access mapping.</td>
+          </tr>
+          <tr>
+            <td><strong>Cleaner Cycle</strong></td>
+            <td>Repo sync, stale worktree cleanup, branch status inspection.</td>
+            <td>GC, consolidation, future reality-verification updater.</td>
+            <td>Cleaner state should be visible before IDE trusts context.</td>
+            <td>Document current cleaner vs missing drift verifier so follow-up PR is bounded.</td>
+          </tr>
+          <tr>
+            <td><strong>Prompt Injection / Falsehood</strong></td>
+            <td>Prompt must match sandbox path and clone policy exactly.</td>
+            <td>Prompt must not claim stale memory is current reality.</td>
+            <td>Prompt assembly panel should flag stale repo path examples and hidden tool names.</td>
+            <td>Static capability prompt now routes concrete repo/URL targets to clone-or-report-tool-blocker behavior.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section next">
+      <h2>First PR Scope</h2>
+      <ul>
+        <li>Aligned backend default: missing keeper repo mapping becomes implicit <code>*</code>, while malformed mapping, explicit empty mapping, repo-store load errors, and identity mismatches remain explicit failures.</li>
+        <li>Aligned dashboard: Settings repositories section links the keeper access mapping instead of hiding it in Workspace only.</li>
+        <li>Aligned prompt: keeper clone setup no longer asks whether a concrete operator-provided repo is in an undefined static allowlist.</li>
+        <li>Keep Memory OS implementation unchanged in this first PR; the report defines the next follow-up as a reality-drift verifier/cleaner, not a TTL/score heuristic.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Follow-Up Goal Seeds</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Goal</th>
+            <th>Definition Of Done</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>RMC-1</td>
+            <td>Repository access truth</td>
+            <td>No keeper asks for undefined repo authorization when an operator-provided repo/URL can be cloned into its sandbox. Tests cover missing mapping, explicit deny-all, wildcard, and identity mismatch.</td>
+          </tr>
+          <tr>
+            <td>RMC-2</td>
+            <td>Settings discoverability</td>
+            <td>Settings repositories page shows both repo registration and keeper access mapping, with tests that prevent hiding one surface again.</td>
+          </tr>
+          <tr>
+            <td>RMC-3</td>
+            <td>Memory reality checker</td>
+            <td>A typed maintenance cycle selects candidate external-state facts, gathers current evidence through existing tools, asks an LLM/verifier to judge drift, and writes correction facts with provenance. No numeric heuristic decides truth.</td>
+          </tr>
+          <tr>
+            <td>RMC-4</td>
+            <td>IDE context trust</td>
+            <td>IDE panels can distinguish registered repo, keeper-local clone, missing clone, stale memory, GC candidate, and verified-current fact states.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

@@ -166,6 +166,11 @@ val metric_distributed_lock_acquire_failed : string
 (** #9645: distributed lock acquire retry-budget exhaustions.
     Labels: [key, attempts]. *)
 
+(** IDE read routes that resolved to the shared orphan partition instead of
+    [by-url/<canonical-repo>]. Labels: [reason] =
+    [no_canonical_url | unmatched | base_unresolved | legacy_default]. *)
+val metric_ide_orphan_reads : string
+
 (** #10130: boot-time sweep of save_file_atomic orphan temp files.
     Labels: [size_class = empty | with_data]. *)
 val metric_fs_atomic_orphans_cleaned : string

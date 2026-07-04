@@ -59,6 +59,7 @@ describe('SettingsRepositoriesSection', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     _resetSettingsRepositoriesForTests()
+    window.history.replaceState(null, '', '/')
     container = document.createElement('div')
     document.body.appendChild(container)
   })
@@ -93,6 +94,19 @@ describe('SettingsRepositoriesSection', () => {
     const second = rows[1]!
     expect(second.querySelector('.set-repo-sync')?.classList.contains('on')).toBe(false)
     expect(second.querySelector('.set-repo-sync')?.textContent).toBe('수동')
+  })
+
+  it('exposes keeper access mapping from settings', async () => {
+    await mount()
+
+    const entry = container.querySelector('[data-testid="settings-repo-mapping-entry"]')
+    expect(entry?.textContent).toContain('Keeper 접근')
+    expect(entry?.textContent).toContain('매핑이 없으면 등록된 keeper 개인 clone 기본 범위를 사용합니다')
+
+    ;(container.querySelector('[data-testid="settings-repo-mapping-open"]') as HTMLButtonElement).click()
+    await flush()
+
+    expect(window.location.hash).toBe('#workspace?section=repositories&view=mappings')
   })
 
   it('renders the empty state without inventing rows', async () => {

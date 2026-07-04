@@ -55,13 +55,14 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.14+ so MASC consumes parse-time base preset
-  ;; validation (oas#2433), the classifier-free provider path (oas#2446),
-  ;; per-model catalog rows on Custom_registered (oas#2447), non-blocking
-  ;; Eio.Mutex wire capture with bounded growth (oas#2449/#2448), redaction
-  ;; hardening for large media payloads (oas#2444), and the non-local
-  ;; default fallback provider (oas#2442).
-  (agent_sdk (>= 0.208.14))
+  ;; Pinned to OAS v0.208.17 (oas#2463). Beyond the earlier baseline it adds
+  ;; the exact Uri.host ollama classifier (oas#2458), wire-capture I/O on a
+  ;; background fiber (oas#2456) with Eio.Mutex protection (oas#2460),
+  ;; output_schema wire serialization pinned for ollama+anthropic (oas#2459),
+  ;; kimi sampling/k2 thinking-dialect alignment (oas#2461/#2465), and removal
+  ;; of a stream-idle assert-false control path (oas#2462). Exact pin sha lives
+  ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
+  (agent_sdk (>= 0.208.17))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

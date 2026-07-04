@@ -33,6 +33,7 @@ import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
 import {
+  connectKeeperCursorStream,
   cursorOverlaySignal,
   getKeeperColor,
   type KeeperCursor,
@@ -44,6 +45,7 @@ import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
 import { connected } from '../../sse'
 import { dashboardBearerToken } from '../../api/core'
+import { DEFAULT_MASC_ORIGIN } from '../../config/constants'
 import { devTokenBootstrapStatus } from '../../api/dev-token'
 import { dashboardWsOnlyEnabled } from '../../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashboard-ws-state'
@@ -322,6 +324,10 @@ function dashboardRuntimeConnected(): boolean {
     return dashboardWsConnected.value || dashboardWsSseFallbackActive.value
   }
   return connected.value
+}
+
+function dashboardOrigin(): string {
+  return typeof window === 'undefined' ? DEFAULT_MASC_ORIGIN : window.location.origin
 }
 
 /**
@@ -961,6 +967,17 @@ export function IdeShell() {
     dashboardConnected: dashboardRuntimeConnected(),
     lspStatus,
   })
+
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return
+    return connectKeeperCursorStream(
+      dashboardOrigin(),
+      overlay => {
+        cursorOverlaySignal.value = overlay
+      },
+      { repoId: activeRepositoryId },
+    )
+  }, [activeRepositoryId])
 
   useEffect(() => {
     const next = viewFromRoute(route.value.params.view)

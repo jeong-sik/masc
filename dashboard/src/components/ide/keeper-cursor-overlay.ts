@@ -403,11 +403,25 @@ export function normalizeKeeperCursorSnapshot(snapshot: unknown): KeeperCursorOv
   }
 }
 
+export interface KeeperCursorStreamOptions {
+  readonly repoId?: string | null
+}
+
+export function keeperCursorStreamUrl(
+  baseUrl: string,
+  opts: KeeperCursorStreamOptions = {},
+): string {
+  const url = new URL('/api/v1/ide/cursors/stream', baseUrl)
+  if (opts.repoId) url.searchParams.set('repo_id', opts.repoId)
+  return url.toString()
+}
+
 export function connectKeeperCursorStream(
   baseUrl: string,
   onUpdate: (overlay: KeeperCursorOverlay) => void,
+  opts: KeeperCursorStreamOptions = {},
 ): () => void {
-  const transport = createSseTransport(`${baseUrl}/api/v1/ide/cursors/stream`)
+  const transport = createSseTransport(keeperCursorStreamUrl(baseUrl, opts))
   const unsubscribe = transport.subscribe((event) => {
     if (event.type === 'message') {
       onUpdate(normalizeKeeperCursorSnapshot(event.data))

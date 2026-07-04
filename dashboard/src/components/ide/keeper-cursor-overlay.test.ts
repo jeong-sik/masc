@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   connectKeeperCursorStream,
   getKeeperColor,
+  keeperCursorStreamUrl,
   normalizeKeeperCursorSnapshot,
 } from './keeper-cursor-overlay'
 
@@ -102,6 +103,11 @@ describe('getKeeperColor', () => {
     expect(instances[0]?.url).toBe('http://localhost:8935/api/v1/ide/cursors/stream')
     cleanup()
     expect(instances[0]?.close).toHaveBeenCalled()
+  })
+
+  it('builds repository-scoped cursor stream URLs', () => {
+    expect(keeperCursorStreamUrl('http://localhost:8935', { repoId: 'masc' }))
+      .toBe('http://localhost:8935/api/v1/ide/cursors/stream?repo_id=masc')
   })
 
   it('cancels cursor stream reconnect timers during cleanup', () => {

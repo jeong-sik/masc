@@ -49,6 +49,21 @@ import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
 
+class MockEventSource {
+  static instances: MockEventSource[] = []
+
+  readonly url: string
+  onopen: ((event: Event) => void) | null = null
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  close = vi.fn()
+
+  constructor(url: string) {
+    this.url = url
+    MockEventSource.instances.push(this)
+  }
+}
+
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
     .find(candidate => candidate.textContent === text)
@@ -137,6 +152,8 @@ describe('IdeShell', () => {
 
   beforeEach(() => {
     container = document.createElement('div')
+    MockEventSource.instances = []
+    vi.stubGlobal('EventSource', MockEventSource)
     clearLocalStorage()
     vi.stubGlobal('fetch', vi.fn(dashboardFetchMock))
   })
@@ -944,6 +961,25 @@ describe('IdeShell', () => {
       surface: 'Keeper',
       label: 'str_replace',
       keeper_id: 'sangsu',
+    })
+  })
+
+  it('subscribes to the cursor stream with active repository scope', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => {
+      const scoped = MockEventSource.instances.some(instance => {
+        const url = new URL(instance.url)
+        return url.pathname === '/api/v1/ide/cursors/stream'
+          && url.searchParams.get('repo_id') === 'masc'
+      })
+      expect(scoped).toBe(true)
     })
   })
 

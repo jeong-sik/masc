@@ -4,12 +4,20 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { Save, Trash2 } from 'lucide-preact'
 import { formatPct1 } from '../lib/format-number'
 import {
   compactToken,
   deriveKeeperRuntimeProjection,
   type KeeperRuntimeProjectionRuntimeInput,
 } from '../lib/keeper-runtime-projection'
+import {
+  deleteKeeperSecretEnv,
+  setKeeperSecretEnv,
+  type KeeperSecretEnvMutation,
+  type KeeperSecretEnvSetMutation,
+  type KeeperSecretScope,
+} from '../api/dashboard-keeper-secrets'
 import { ActionButton } from './common/button'
 import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
@@ -364,12 +372,95 @@ function secretRootCounts(root: KeeperSecretProjection['effective_roots'][number
   return `${root.env_count} env · ${root.file_count} files`
 }
 
+type KeeperSecretPendingAction = 'set' | 'delete'
+
+interface KeeperSecretProjectionPanelProps {
+  projection: KeeperSecretProjection | null | undefined
+  keeperName?: string
+  onProjectionChange?: (projection: KeeperSecretProjection) => void
+  setSecretEnv?: typeof setKeeperSecretEnv
+  deleteSecretEnv?: typeof deleteKeeperSecretEnv
+}
+
+function secretMutationErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return 'secret mutation failed'
+}
+
 export function KeeperSecretProjectionPanel({
   projection,
-}: {
-  projection: KeeperSecretProjection | null | undefined
-}) {
-  if (!projection) {
+  keeperName,
+  onProjectionChange,
+  setSecretEnv = setKeeperSecretEnv,
+  deleteSecretEnv = deleteKeeperSecretEnv,
+}: KeeperSecretProjectionPanelProps) {
+  const [localProjection, setLocalProjection] = useState<KeeperSecretProjection | null>(projection ?? null)
+  const [scope, setScope] = useState<KeeperSecretScope>('keeper')
+  const [envName, setEnvName] = useState('GH_TOKEN')
+  const [secretValue, setSecretValue] = useState('')
+  const [pending, setPending] = useState<KeeperSecretPendingAction | null>(null)
+  const [mutationMessage, setMutationMessage] = useState<string | null>(null)
+  const [mutationError, setMutationError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLocalProjection(projection ?? null)
+  }, [projection])
+
+  const visibleProjection = localProjection ?? projection
+  const trimmedEnvName = envName.trim()
+  const canMutate = Boolean(keeperName) && pending === null && trimmedEnvName.length > 0
+
+  function adoptProjection(next: KeeperSecretProjection) {
+    setLocalProjection(next)
+    onProjectionChange?.(next)
+  }
+
+  async function handleSetEnv(event: Event) {
+    event.preventDefault()
+    if (!keeperName || trimmedEnvName.length === 0 || pending !== null) return
+    setPending('set')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretEnvSetMutation = {
+      scope,
+      name: trimmedEnvName,
+      value: secretValue,
+    }
+    try {
+      const next = await setSecretEnv(keeperName, mutation)
+      adoptProjection(next)
+      setSecretValue('')
+      setMutationMessage(`${trimmedEnvName} saved to ${scope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function handleDeleteEnv() {
+    if (!keeperName || trimmedEnvName.length === 0 || pending !== null) return
+    setPending('delete')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretEnvMutation = {
+      scope,
+      name: trimmedEnvName,
+    }
+    try {
+      const next = await deleteSecretEnv(keeperName, mutation)
+      adoptProjection(next)
+      setSecretValue('')
+      setMutationMessage(`${trimmedEnvName} deleted from ${scope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  if (!visibleProjection) {
     return html`
       <div
         class="v2-monitoring-detail rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
@@ -386,11 +477,12 @@ export function KeeperSecretProjectionPanel({
     `
   }
 
-  const tone = secretProjectionTone(projection.status)
-  const filePaths = projection.file_mounts.map(mount => mount.container_path)
-  const envSummary = truncateSecretProjectionList(projection.env_names, 5)
+  const projectionView = visibleProjection
+  const tone = secretProjectionTone(projectionView.status)
+  const filePaths = projectionView.file_mounts.map(mount => mount.container_path)
+  const envSummary = truncateSecretProjectionList(projectionView.env_names, 5)
   const fileSummary = truncateSecretProjectionList(filePaths, 4)
-  const effectiveRoots = projection.effective_roots ?? []
+  const effectiveRoots = projectionView.effective_roots ?? []
   const rootRows = effectiveRoots.map((root, index) => ({
     ...root,
     label: secretRootScopeLabel(index, effectiveRoots.length),
@@ -398,16 +490,16 @@ export function KeeperSecretProjectionPanel({
   const scopeSummary = rootRows.length > 0 ? rootRows.map(row => row.label).join(' -> ') : 'keeper'
   const rootSummary = rootRows.length > 0
     ? truncateSecretProjectionList(rootRows.map(row => `${row.label}: ${row.status} · ${secretRootCounts(row)}`), 3)
-    : projection.root
+    : projectionView.root
   const rootTitle = rootRows.length > 0
     ? rootRows.map(row => `${row.label}: ${row.root}`).join('\n')
-    : projection.root
+    : projectionView.root
   const summary =
-    projection.status === 'ready'
-      ? `${projection.env_count} env · ${projection.file_count} files`
-      : projection.status === 'error'
-        ? projection.error ?? 'projection error'
-        : projection.next_action
+    projectionView.status === 'ready'
+      ? `${projectionView.env_count} env · ${projectionView.file_count} files`
+      : projectionView.status === 'error'
+        ? projectionView.error ?? 'projection error'
+        : projectionView.next_action
 
   return html`
     <div
@@ -418,20 +510,20 @@ export function KeeperSecretProjectionPanel({
         <div class="min-w-0">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Secret projection</div>
           <div class="mt-1 flex flex-wrap items-center gap-2">
-            <${StatusChip} tone=${tone} uppercase=${false}>${secretProjectionLabel(projection.status)}<//>
+            <${StatusChip} tone=${tone} uppercase=${false}>${secretProjectionLabel(projectionView.status)}<//>
             <span class="text-sm font-medium text-[var(--color-fg-primary)]">${summary}</span>
           </div>
         </div>
-        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${projection.source}</span>
+        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${projectionView.source}</span>
       </div>
 
       <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
         <${SignalRow} label="scope order" value=${scopeSummary} />
         <${SignalRow} label="effective roots" value=${rootSummary} title=${rootTitle} />
-        <${SignalRow} label="keeper root" value=${projection.root} />
+        <${SignalRow} label="keeper root" value=${projectionView.root} />
         <${SignalRow} label="env names" value=${envSummary} />
         <${SignalRow} label="file mounts" value=${fileSummary} />
-        <${SignalRow} label="validation" value=${projection.values_validated ? 'values validated · values redacted' : 'structure only'} />
+        <${SignalRow} label="validation" value=${projectionView.values_validated ? 'values validated · values redacted' : 'structure only'} />
       </div>
 
       ${rootRows.length > 1
@@ -448,10 +540,95 @@ export function KeeperSecretProjectionPanel({
           `
         : null}
 
-      ${projection.error
+      <form
+        class="mt-3 grid grid-cols-1 gap-2 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] p-3 lg:grid-cols-[140px_minmax(140px,0.7fr)_minmax(180px,1fr)_auto]"
+        data-testid="keeper-secret-projection-form"
+        onSubmit=${handleSetEnv}
+      >
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          scope
+          <select
+            class="w-full rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm font-medium normal-case tracking-normal text-[var(--input-fg)]"
+            value=${scope}
+            disabled=${pending !== null || !keeperName}
+            data-testid="keeper-secret-scope"
+            onChange=${(event: Event) => setScope((event.currentTarget as HTMLSelectElement).value as KeeperSecretScope)}
+          >
+            <option value="keeper">keeper</option>
+            <option value="shared">shared</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          env
+          <${TextInput}
+            value=${envName}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret env name"
+            autoComplete="off"
+            testId="keeper-secret-env-name"
+            onInput=${(event: Event) => setEnvName((event.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          value
+          <${TextInput}
+            type="password"
+            value=${secretValue}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret env value"
+            autoComplete="new-password"
+            testId="keeper-secret-value"
+            onInput=${(event: Event) => setSecretValue((event.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
+        <div class="flex flex-wrap items-end gap-2">
+          <${ActionButton}
+            type="submit"
+            size="sm"
+            disabled=${!canMutate}
+            ariaBusy=${pending === 'set'}
+            testId="keeper-secret-save"
+            class="inline-flex items-center gap-1.5"
+          >
+            <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'set' ? 'Saving' : 'Save'}</span>
+          <//>
+          <${ActionButton}
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled=${!canMutate}
+            ariaBusy=${pending === 'delete'}
+            testId="keeper-secret-delete"
+            class="inline-flex items-center gap-1.5"
+            onClick=${handleDeleteEnv}
+          >
+            <${Trash2} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'delete' ? 'Deleting' : 'Delete'}</span>
+          <//>
+        </div>
+      </form>
+
+      ${mutationMessage
+        ? html`
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--ok-light)]">
+              ${mutationMessage}
+            </div>
+          `
+        : null}
+
+      ${mutationError
         ? html`
             <div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
-              ${projection.error}
+              ${mutationError}
+            </div>
+          `
+        : null}
+
+      ${projectionView.error
+        ? html`
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
+              ${projectionView.error}
             </div>
           `
         : null}

@@ -329,6 +329,10 @@ export class CompositeSchemaDriftError extends SchemaDriftError {
   }
 }
 
+export function parseKeeperSecretProjection(data: unknown): KeeperSecretProjection {
+  return parseOrThrow(CompositeSchemaDriftError, KeeperSecretProjectionSchema, data)
+}
+
 export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnapshot {
   return parseOrThrow(CompositeSchemaDriftError, KeeperCompositeSnapshotSchema, data)
 }

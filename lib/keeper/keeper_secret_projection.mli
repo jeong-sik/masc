@@ -8,6 +8,10 @@ type secret_root_info =
   ; source : string
   }
 
+type secret_scope =
+  | Shared_secret
+  | Keeper_secret
+
 val secret_root_info : base_path:string -> keeper_name:string -> secret_root_info
 
 val secret_root : base_path:string -> keeper_name:string -> string
@@ -38,6 +42,28 @@ val local_env_for_keeper :
 
 val docker_args_for_keeper :
   base_path:string -> keeper_name:string -> container_name:string -> (t, string) result
+
+val secret_scope_of_string : string -> secret_scope option
+
+val set_env_entry :
+  base_path:string ->
+  keeper_name:string ->
+  scope:secret_scope ->
+  name:string ->
+  value:string ->
+  (unit, string) result
+(** Persist one projected env secret under [secrets/base/env] or
+    [secrets/<keeper>/env]. The value is validated with the same single-line
+    rules used by local and docker projection. *)
+
+val delete_env_entry :
+  base_path:string ->
+  keeper_name:string ->
+  scope:secret_scope ->
+  name:string ->
+  (unit, string) result
+(** Remove one projected env secret. Missing files are treated as a no-op;
+    symlinks and non-regular entries are rejected. *)
 
 val dashboard_status_json :
   base_path:string -> keeper_name:string -> Yojson.Safe.t

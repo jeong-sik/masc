@@ -610,6 +610,107 @@ let test_dashboard_status_reports_projection_error () =
     (contains_substring (Yojson.Safe.to_string json) "invalid keeper secret env name")
 ;;
 
+let test_set_and_delete_env_entry_updates_projection () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let base_root = base_secret_root_default ~base in
+  let keeper_root = secret_root_default ~base ~keeper_name:"minjae" in
+  let shared_path = Filename.concat (Filename.concat base_root "env") "GH_TOKEN" in
+  let keeper_path = Filename.concat (Filename.concat keeper_root "env") "GH_TOKEN" in
+  (match
+     Keeper_secret_projection.set_env_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Shared_secret
+       ~name:"GH_TOKEN"
+       ~value:"ghs_shared_from_ui\n"
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  (match
+     Keeper_secret_projection.set_env_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~name:"GH_TOKEN"
+       ~value:"ghs_keeper_from_ui"
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  Alcotest.(check string) "shared value normalized" "ghs_shared_from_ui"
+    (read_file shared_path);
+  Alcotest.(check string) "keeper value" "ghs_keeper_from_ui"
+    (read_file keeper_path);
+  let json =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:base
+      ~keeper_name:"minjae"
+  in
+  Alcotest.(check string) "status" "ready" (json_string "status" json);
+  Alcotest.(check int) "effective env count" 1 (json_int "env_count" json);
+  Alcotest.(check bool) "shared value redacted" false
+    (contains_substring (Yojson.Safe.to_string json) "ghs_shared_from_ui");
+  Alcotest.(check bool) "keeper value redacted" false
+    (contains_substring (Yojson.Safe.to_string json) "ghs_keeper_from_ui");
+  (match
+     Keeper_secret_projection.delete_env_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~name:"GH_TOKEN"
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  Alcotest.(check bool) "keeper file deleted" false (Sys.file_exists keeper_path);
+  let inherited_json =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:base
+      ~keeper_name:"minjae"
+  in
+  Alcotest.(check int) "inherits shared env" 1 (json_int "env_count" inherited_json);
+  (match
+     Keeper_secret_projection.delete_env_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Shared_secret
+       ~name:"GH_TOKEN"
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  Alcotest.(check bool) "shared file deleted" false (Sys.file_exists shared_path)
+;;
+
+let test_set_env_entry_rejects_invalid_inputs () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  (match
+     Keeper_secret_projection.set_env_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~name:"BAD-NAME"
+       ~value:"secret"
+   with
+   | Ok () -> Alcotest.fail "expected invalid env name rejection"
+   | Error msg ->
+     Alcotest.(check bool) "mentions env name" true
+       (contains_substring msg "invalid keeper secret env name"));
+  (match
+     Keeper_secret_projection.set_env_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~name:"GH_TOKEN"
+       ~value:"line1\nline2"
+   with
+   | Ok () -> Alcotest.fail "expected multiline value rejection"
+   | Error msg ->
+     Alcotest.(check bool) "mentions single-line" true
+       (contains_substring msg "single-line"))
+;;
+
 let test_env_value_leading_hash_rejects () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -659,6 +760,10 @@ let () =
             test_dashboard_status_redacts_values
         ; Alcotest.test_case "dashboard status reports projection error" `Quick
             test_dashboard_status_reports_projection_error
+        ; Alcotest.test_case "set/delete env entry updates projection" `Quick
+            test_set_and_delete_env_entry_updates_projection
+        ; Alcotest.test_case "set env entry rejects invalid inputs" `Quick
+            test_set_env_entry_rejects_invalid_inputs
         ; Alcotest.test_case "env value leading hash rejects" `Quick
             test_env_value_leading_hash_rejects
         ] )

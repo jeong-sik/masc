@@ -193,7 +193,7 @@ export function KeeperDetailBody({
           ${'' /* ── 런타임 model 편집 (RFC-0207 persona runtime_id) — surfaced here so it is one expand away, not buried under 설정 → Keeper 설정 → 소스 ── */}
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
-          <${KeeperSecretProjectionPanel} projection=${compositeSnapshot?.secret_projection} />
+          <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>
             <${KeeperLiveTruthPanel}

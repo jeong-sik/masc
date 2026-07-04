@@ -1,6 +1,6 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
@@ -931,12 +931,80 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('ready')).toBeInTheDocument()
     expect(screen.getByText('1 env · 1 files')).toBeInTheDocument()
     expect(screen.getByText('shared -> keeper')).toBeInTheDocument()
-    expect(screen.getByText('shared')).toBeInTheDocument()
-    expect(screen.getByText('keeper')).toBeInTheDocument()
+    expect(screen.getAllByText('shared').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('keeper').length).toBeGreaterThan(0)
     expect(screen.getByText('/Users/dancer/me/.masc/secrets/base')).toBeInTheDocument()
     expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()
+  })
+
+  it('sets secret env values without rendering the submitted value', async () => {
+    const nextProjection = {
+      status: 'ready',
+      configured: true,
+      root: '/Users/dancer/me/.masc/secrets/sangsu',
+      source: 'workspace_masc_secrets',
+      effective_roots: [
+        {
+          root: '/Users/dancer/me/.masc/secrets/base',
+          source: 'workspace_masc_secrets',
+          status: 'absent',
+          configured: false,
+          env_count: 0,
+          file_count: 0,
+        },
+        {
+          root: '/Users/dancer/me/.masc/secrets/sangsu',
+          source: 'workspace_masc_secrets',
+          status: 'ready',
+          configured: true,
+          env_count: 1,
+          file_count: 0,
+        },
+      ],
+      env_count: 1,
+      file_count: 0,
+      env_names: ['ANTHROPIC_API_KEY'],
+      file_mounts: [],
+      values_validated: true,
+      error: null,
+      next_action: 'none',
+    }
+    const setSecretEnv = vi.fn().mockResolvedValue(nextProjection)
+
+    render(h(KeeperSecretProjectionPanel, {
+      keeperName: 'sangsu',
+      projection: {
+        ...nextProjection,
+        status: 'empty',
+        env_count: 0,
+        env_names: [],
+        next_action: 'add entries under env/ and/or files/',
+      },
+      setSecretEnv,
+    }))
+
+    fireEvent.input(screen.getByTestId('keeper-secret-env-name'), {
+      target: { value: 'ANTHROPIC_API_KEY' },
+    })
+    fireEvent.input(screen.getByTestId('keeper-secret-value'), {
+      target: { value: 'ghs_new_secret' },
+    })
+    fireEvent.submit(screen.getByTestId('keeper-secret-projection-form'))
+
+    await waitFor(() => {
+      expect(setSecretEnv).toHaveBeenCalledWith('sangsu', {
+        scope: 'keeper',
+        name: 'ANTHROPIC_API_KEY',
+        value: 'ghs_new_secret',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('ghs_new_secret')).toBeNull()
+    })
+    expect(screen.getByText('ANTHROPIC_API_KEY saved to keeper')).toBeInTheDocument()
+    expect(screen.queryByText('ghs_new_secret')).toBeNull()
   })
 })
 

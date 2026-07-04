@@ -12,6 +12,10 @@ type secret_root_info =
   ; source : string
   }
 
+type secret_scope =
+  | Shared_secret
+  | Keeper_secret
+
 type loaded_secret_root =
   { info : secret_root_info
   ; configured : bool
@@ -61,6 +65,18 @@ let secret_roots ~base_path ~keeper_name =
   if String.equal keeper_dir base_secret_scope
   then [ keeper_root ]
   else [ base_secret_root_info ~base_path; keeper_root ]
+;;
+
+let secret_root_info_for_scope ~base_path ~keeper_name = function
+  | Shared_secret -> base_secret_root_info ~base_path
+  | Keeper_secret -> secret_root_info ~base_path ~keeper_name
+;;
+
+let secret_scope_of_string value =
+  match String.lowercase_ascii (String.trim value) with
+  | "shared" | "base" -> Some Shared_secret
+  | "keeper" -> Some Keeper_secret
+  | _ -> None
 ;;
 
 let path_exists path =
@@ -146,21 +162,25 @@ let contains_char value c =
   String.contains value c
 ;;
 
+let validate_env_value ~path value =
+  if contains_char value '\n' || contains_char value '\r'
+  then Error (Printf.sprintf "keeper secret env value must be single-line: %s" path)
+  else if contains_char value '\000'
+  then Error (Printf.sprintf "keeper secret env value must not contain NUL: %s" path)
+  else if String.length value > 0 && Char.equal value.[0] '#'
+  then
+    Error
+      (Printf.sprintf
+         "keeper secret env value must not start with '#', which docker --env-file \
+          treats as a comment: %s"
+         path)
+  else Ok value
+;;
+
 let read_env_entry path =
   try
     let value = read_file path |> strip_one_final_newline in
-    if contains_char value '\n' || contains_char value '\r'
-    then Error (Printf.sprintf "keeper secret env value must be single-line: %s" path)
-    else if contains_char value '\000'
-    then Error (Printf.sprintf "keeper secret env value must not contain NUL: %s" path)
-    else if String.length value > 0 && Char.equal value.[0] '#'
-    then
-      Error
-        (Printf.sprintf
-           "keeper secret env value must not start with '#', which docker --env-file \
-            treats as a comment: %s"
-           path)
-    else Ok value
+    validate_env_value ~path value
   with
   | Sys_error msg -> Error msg
 ;;
@@ -469,6 +489,118 @@ let rec ensure_dir path =
     if parent <> path then ensure_dir parent;
     try Unix.mkdir path 0o700 with
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+let unix_error_message err fn arg =
+  Printf.sprintf
+    "%s%s%s"
+    (Unix.error_message err)
+    (if String.equal fn "" then "" else ": " ^ fn)
+    (if String.equal arg "" then "" else " " ^ arg)
+;;
+
+let ensure_secret_directory ~label path =
+  try
+    ensure_dir path;
+    if not (is_directory path)
+    then Error (Printf.sprintf "keeper secret %s path is not a directory: %s" label path)
+    else (
+      match lstat path with
+      | Error _ as err -> err
+      | Ok st ->
+        (match st.Unix.st_kind with
+         | Unix.S_LNK ->
+           Error
+             (Printf.sprintf
+                "keeper secret %s path must not be a symlink: %s"
+                label
+                path)
+         | _ -> Ok ()))
+  with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
+;;
+
+let validate_env_entry_target path =
+  try
+    let st = Unix.lstat path in
+    match st.Unix.st_kind with
+    | Unix.S_REG -> Ok ()
+    | Unix.S_LNK ->
+      Error
+        (Printf.sprintf "keeper secret env entry must not be a symlink: %s" path)
+    | _ ->
+      Error
+        (Printf.sprintf
+           "keeper secret env entry must be a regular file: %s"
+           path)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
+;;
+
+let set_env_entry ~base_path ~keeper_name ~scope ~name ~value =
+  let name = String.trim name in
+  if not (valid_env_name name)
+  then Error (Printf.sprintf "invalid keeper secret env name: %s" name)
+  else
+    let value = strip_one_final_newline value in
+    match validate_env_value ~path:name value with
+    | Error _ as err -> err
+    | Ok value ->
+      let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+      let env_root = Filename.concat info.root "env" in
+      (match ensure_secret_directory ~label:"root" info.root with
+       | Error _ as err -> err
+       | Ok () ->
+         (match ensure_secret_directory ~label:"env" env_root with
+          | Error _ as err -> err
+          | Ok () ->
+            let path = Filename.concat env_root name in
+            (match validate_env_entry_target path with
+             | Error _ as err -> err
+             | Ok () ->
+               (match Fs_compat.save_file_atomic path value with
+                | Error _ as err -> err
+                | Ok () ->
+                  (try
+                     Unix.chmod path 0o600;
+                     Ok ()
+                   with
+                   | Unix.Unix_error (err, fn, arg) ->
+                     Error (unix_error_message err fn arg))))))
+;;
+
+let delete_env_entry ~base_path ~keeper_name ~scope ~name =
+  let name = String.trim name in
+  if not (valid_env_name name)
+  then Error (Printf.sprintf "invalid keeper secret env name: %s" name)
+  else
+    let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+    if not (path_exists info.root)
+    then Ok ()
+    else
+      match ensure_secret_directory ~label:"root" info.root with
+      | Error _ as err -> err
+      | Ok () ->
+        let env_root = Filename.concat info.root "env" in
+        if not (path_exists env_root)
+        then Ok ()
+        else (
+          match ensure_secret_directory ~label:"env" env_root with
+          | Error _ as err -> err
+          | Ok () ->
+            let path = Filename.concat env_root name in
+            (match validate_env_entry_target path with
+             | Error _ as err -> err
+             | Ok () ->
+               (try
+                  if path_exists path then Sys.remove path;
+                  Ok ()
+                with
+                | Sys_error msg -> Error msg
+                | Unix.Unix_error (err, fn, arg) ->
+                  Error (unix_error_message err fn arg))))
 ;;
 
 let private_tmp_dir ~base_path =

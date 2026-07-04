@@ -15,6 +15,27 @@ val try_parse :
     feeds [output] through it.  Returns [None] when no parser matches
     or when the output does not conform to the expected format. *)
 
+type git_status_porcelain_summary = {
+  changed_files : int;
+  staged_files : int;
+  unstaged_files : int;
+  untracked_files : int;
+  conflicted_files : int;
+  staged_paths : string list;
+  unstaged_paths : string list;
+  untracked_paths : string list;
+  conflicted_paths : string list;
+}
+(** Typed summary of Git porcelain-v1 status rows. A file with both index and
+    worktree changes increments [changed_files] once and may appear in both
+    [staged_paths] and [unstaged_paths]. *)
+
+val summarize_git_status_porcelain :
+  string -> (git_status_porcelain_summary, string) result
+(** Parse [git status --porcelain=v1] output. Empty output is a clean tree.
+    Malformed or unknown status rows return [Error _] so production callers can
+    fail loud, while {!try_parse} still declines with [None]. *)
+
 val utf8_truncate : string -> int -> string
 (** [utf8_truncate s max_bytes] truncates [s] at a UTF-8 character
     boundary.  Exported for consumers that need safe truncation

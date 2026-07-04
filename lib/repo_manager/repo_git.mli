@@ -1,10 +1,23 @@
 open Repo_manager_types
 
+type status_summary = {
+  changed_files : int;
+  staged_files : int;
+  unstaged_files : int;
+  untracked_files : int;
+  conflicted_files : int;
+}
+(** Summary parsed from Git's porcelain-v1 status contract. *)
+
 val clone : repository:repository -> (unit, string) result
 (** [clone ~repository] clones [repository.url] into [repository.local_path]. *)
 
 val run_git :
-  cwd:string -> ?env:(string * string) list -> string list -> (string list, string) result
+  cwd:string ->
+  ?env:(string * string) list ->
+  ?timeout_sec:float ->
+  string list ->
+  (string list, string) result
 (** [run_git ~cwd args] runs [git -C cwd args] through the repo-manager Git
     execution wrapper and returns non-empty stdout lines. Callers must pass
     argv tokens, never shell text. *)
@@ -32,3 +45,9 @@ val get_recent_commits :
   repository:repository -> branch:string -> limit:int -> (string list, string) result
 (** [get_recent_commits ~repository ~branch ~limit] returns the most recent
     [limit] commits on [branch] as ["HASH subject"] lines. *)
+
+val status_summary : repository:repository -> (status_summary, string) result
+(** [status_summary ~repository] returns a read-only dirty-tree summary using
+    [git --no-optional-locks status --porcelain=v1] with
+    [GIT_OPTIONAL_LOCKS=0]. It returns [Error _] instead of inventing a clean
+    result when Git cannot inspect the repository. *)

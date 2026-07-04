@@ -41,7 +41,31 @@ let status_json = function
   | Cloning -> ("cloning", None)
   | Error msg -> ("error", Some msg)
 
-let repository_json (repo : Repo_manager_types.repository) =
+let git_status_json ~base_path (repo : Repo_manager_types.repository) =
+  let abs_local_path = Repo_store.local_path ~base_path repo in
+  let repo_for_git = { repo with local_path = abs_local_path } in
+  match Repo_git.status_summary ~repository:repo_for_git with
+  | Ok summary ->
+      `Assoc
+        [
+          ("state", `String "available");
+          ("source", `String "git-status-porcelain-v1");
+          ("dirty", `Bool (summary.changed_files > 0));
+          ("changed_files", `Int summary.changed_files);
+          ("staged_files", `Int summary.staged_files);
+          ("unstaged_files", `Int summary.unstaged_files);
+          ("untracked_files", `Int summary.untracked_files);
+          ("conflicted_files", `Int summary.conflicted_files);
+        ]
+  | Error msg ->
+      `Assoc
+        [
+          ("state", `String "unavailable");
+          ("source", `String "git-status-porcelain-v1");
+          ("error", `String msg);
+        ]
+
+let repository_json ~base_path (repo : Repo_manager_types.repository) =
   let status, error = status_json repo.status in
   let fields =
     [
@@ -57,6 +81,7 @@ let repository_json (repo : Repo_manager_types.repository) =
       ("sync_interval", `Int repo.sync_interval);
       ("created_at", timestamp_json repo.created_at);
       ("updated_at", timestamp_json repo.updated_at);
+      ("git_status", git_status_json ~base_path repo);
     ]
   in
   let fields =
@@ -215,7 +240,7 @@ let handle_list_repositories state req reqd =
       let json =
         `Assoc
           [
-            ("repositories", `List (List.map repository_json repos));
+            ("repositories", `List (List.map (repository_json ~base_path) repos));
             ("total", `Int (List.length repos));
           ]
       in
@@ -226,7 +251,7 @@ let handle_get_repository state id req reqd =
   match Repo_store.find ~base_path id with
   | Error msg -> json_response ~status:`Not_found req reqd (json_error msg)
   | Ok repo ->
-      Http.Response.json_value ~request:req (repository_json repo) reqd
+      Http.Response.json_value ~request:req (repository_json ~base_path repo) reqd
 
 let handle_list_branches state id req reqd =
   let base_path = base_path_of_state state in
@@ -273,7 +298,7 @@ let handle_add_repository state _agent_name req reqd =
           | Error msg ->
               json_response ~status:`Bad_request req reqd (json_error msg)
           | Ok added_repo ->
-              let json = repository_json added_repo in
+              let json = repository_json ~base_path added_repo in
               Http.Response.json_value ~request:req json reqd))
 
 let handle_remove_repository state _agent_name req reqd =
@@ -324,7 +349,7 @@ let handle_update_repository state _agent_name req reqd =
                             (json_error msg)
                       | Ok persisted ->
                           Http.Response.json_value ~request:req
-                            (repository_json persisted) reqd))))
+                            (repository_json ~base_path persisted) reqd))))
       | _ ->
           json_response ~status:`Not_found req reqd
             (json_error "unknown repository endpoint"))
@@ -374,7 +399,7 @@ let handle_discover_repositories state _agent_name req reqd =
       let json =
         `Assoc
           [
-            ("repositories", `List (List.map repository_json repos));
+            ("repositories", `List (List.map (repository_json ~base_path) repos));
             ("total", `Int (List.length repos));
             ("discovered", `Bool true);
             ("registered", `Bool true);

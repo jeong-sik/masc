@@ -23,43 +23,161 @@ let cargo_failed_re = Re.Pcre.re {|(\d+) failed|} |> Re.compile
 
 (* --- git status --porcelain --- *)
 
-let parse_git_status_porcelain output =
+type git_status_porcelain_summary = {
+  changed_files : int;
+  staged_files : int;
+  unstaged_files : int;
+  untracked_files : int;
+  conflicted_files : int;
+  staged_paths : string list;
+  unstaged_paths : string list;
+  untracked_paths : string list;
+  conflicted_paths : string list;
+}
+
+let empty_git_status_porcelain_summary =
+  {
+    changed_files = 0;
+    staged_files = 0;
+    unstaged_files = 0;
+    untracked_files = 0;
+    conflicted_files = 0;
+    staged_paths = [];
+    unstaged_paths = [];
+    untracked_paths = [];
+    conflicted_paths = [];
+  }
+
+let git_porcelain_conflict x y =
+  match (x, y) with
+  | 'D', 'D'
+  | 'A', 'U'
+  | 'U', 'D'
+  | 'U', 'A'
+  | 'D', 'U'
+  | 'A', 'A'
+  | 'U', 'U' -> true
+  | _ -> false
+
+let git_porcelain_status_char = function
+  | ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | 'U' | '?' | '!' -> true
+  | _ -> false
+
+let update_git_status_summary summary line =
+  if String.length line < 3 then
+    Error "git status --porcelain=v1 returned a malformed status row"
+  else
+    let x = String.get line 0 in
+    let y = String.get line 1 in
+    if
+      (not (git_porcelain_status_char x)) || not (git_porcelain_status_char y)
+    then
+      Error
+        (Printf.sprintf
+           "git status --porcelain=v1 returned unknown status row %S" line)
+    else
+      let path = String.trim (String.sub line 2 (String.length line - 2)) in
+      if path = "" then
+        Error "git status --porcelain=v1 returned a status row without a path"
+      else
+        let is_untracked = Char.equal x '?' && Char.equal y '?' in
+        let is_ignored = Char.equal x '!' && Char.equal y '!' in
+        if is_ignored then Ok summary
+        else
+          let conflicted = git_porcelain_conflict x y in
+          if
+            ((Char.equal x '?' || Char.equal y '?') && not is_untracked)
+            || ((Char.equal x '!' || Char.equal y '!') && not is_ignored)
+            || ((Char.equal x 'U' || Char.equal y 'U') && not conflicted)
+          then
+            Error
+              (Printf.sprintf
+                 "git status --porcelain=v1 returned unknown status row %S" line)
+          else
+            let staged =
+              (not conflicted) && (not is_untracked) && not (Char.equal x ' ')
+            in
+            let unstaged =
+              (not conflicted) && (not is_untracked) && not (Char.equal y ' ')
+            in
+            Ok
+              {
+                changed_files = summary.changed_files + 1;
+                staged_files =
+                  summary.staged_files + if staged then 1 else 0;
+                unstaged_files =
+                  summary.unstaged_files + if unstaged then 1 else 0;
+                untracked_files =
+                  summary.untracked_files + if is_untracked then 1 else 0;
+                conflicted_files =
+                  summary.conflicted_files + if conflicted then 1 else 0;
+                staged_paths =
+                  if staged then path :: summary.staged_paths
+                  else summary.staged_paths;
+                unstaged_paths =
+                  if unstaged then path :: summary.unstaged_paths
+                  else summary.unstaged_paths;
+                untracked_paths =
+                  if is_untracked then path :: summary.untracked_paths
+                  else summary.untracked_paths;
+                conflicted_paths =
+                  if conflicted then path :: summary.conflicted_paths
+                  else summary.conflicted_paths;
+              }
+
+let finalize_git_status_summary summary =
+  {
+    summary with
+    staged_paths = List.rev summary.staged_paths;
+    unstaged_paths = List.rev summary.unstaged_paths;
+    untracked_paths = List.rev summary.untracked_paths;
+    conflicted_paths = List.rev summary.conflicted_paths;
+  }
+
+let summarize_git_status_porcelain output =
   let lines =
     String.split_on_char '\n' output
     |> List.filter (fun line -> String.trim line <> "")
   in
-  if lines = [] then None
-  else
-    let staged = ref [] and unstaged = ref [] and untracked = ref [] in
-    List.iter
-      (fun line ->
-        if String.length line < 2 then ()
-        else
-          let xy = String.sub line 0 2 in
-          let path = String.trim (String.sub line 2 (String.length line - 2)) in
-          (* XY format: X=index, Y=worktree *)
-          match xy.[0], xy.[1] with
-          | '?', '?' -> untracked := path :: !untracked
-          | ' ', ('M' | 'D' | 'A') -> unstaged := path :: !unstaged
-          | ('M' | 'A' | 'D' | 'R' | 'C'), _ ->
-              staged := path :: !staged;
-              if xy.[1] <> ' ' then unstaged := path :: !unstaged
-          | ' ', _ -> () (* clean in index, clean in worktree *)
-          | _ -> unstaged := path :: !unstaged)
-      lines;
-    let n_staged = List.length !staged in
-    let n_unstaged = List.length !unstaged in
-    let n_untracked = List.length !untracked in
-    if n_staged + n_unstaged + n_untracked = 0 then None
-    else
-      Some
-        (`Assoc
-           [
-             ("staged", `List (List.map (fun p -> `String p) (List.rev !staged)));
-             ("unstaged", `List (List.map (fun p -> `String p) (List.rev !unstaged)));
-             ( "untracked",
-               `List (List.map (fun p -> `String p) (List.rev !untracked)) );
-           ])
+  let ( let* ) = Result.bind in
+  let* summary =
+    List.fold_left
+      (fun acc line ->
+        let* summary = acc in
+        update_git_status_summary summary line)
+      (Ok empty_git_status_porcelain_summary) lines
+  in
+  Ok (finalize_git_status_summary summary)
+
+let git_status_paths_json paths =
+  `List (List.map (fun p -> `String p) paths)
+
+let parse_git_status_porcelain output =
+  match summarize_git_status_porcelain output with
+  | Error _ -> None
+  | Ok
+      {
+        staged_files;
+        unstaged_files;
+        untracked_files;
+        conflicted_files;
+        staged_paths;
+        unstaged_paths;
+        untracked_paths;
+        conflicted_paths;
+        _;
+      } ->
+      if staged_files + unstaged_files + untracked_files + conflicted_files = 0
+      then None
+      else
+        Some
+          (`Assoc
+             [
+               ("staged", git_status_paths_json staged_paths);
+               ("unstaged", git_status_paths_json unstaged_paths);
+               ("untracked", git_status_paths_json untracked_paths);
+               ("conflicted", git_status_paths_json conflicted_paths);
+             ])
 
 (* --- git log --oneline --- *)
 

@@ -29,18 +29,30 @@ let non_interactive_git_env =
     ("GCM_INTERACTIVE", "Never");
   ]
 
+let read_only_git_env = ("GIT_OPTIONAL_LOCKS", "0") :: non_interactive_git_env
+
+let status_summary_timeout_sec = 5.0
+
 let split_lines text =
   if text = "" then []
   else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
 
-let run_git ~cwd ?(env = []) args : (string list, string) result =
+type status_summary = {
+  changed_files : int;
+  staged_files : int;
+  unstaged_files : int;
+  untracked_files : int;
+  conflicted_files : int;
+}
+
+let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   let argv = "git" :: "-C" :: cwd :: args in
   let envp = merge_env env in
   let raw_source = String.concat " " (List.map Filename.quote argv) in
   let status, stdout, stderr =
     Masc_exec.Exec_gate.run_argv_with_status_split
       ~actor:(Masc_exec.Agent_id.of_string "repo-manager/git") ~raw_source ~summary:"repo manager git"
- ~env:envp argv
+      ~env:envp ?timeout_sec argv
   in
   match status with
   | Unix.WEXITED 0 -> Ok (split_lines stdout)
@@ -118,3 +130,26 @@ let get_recent_commits ~repository ~branch ~limit =
   with
   | Ok lines -> Ok lines
   | Error msg -> Error msg
+
+let status_summary ~repository =
+  match
+    run_git ~cwd:repository.local_path ~env:read_only_git_env
+      ~timeout_sec:status_summary_timeout_sec
+      ["--no-optional-locks"; "status"; "--porcelain=v1"; "--untracked-files=normal"]
+  with
+  | Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok lines -> (
+      match
+        Masc_exec.Output_parse.summarize_git_status_porcelain
+          (String.concat "\n" lines)
+      with
+      | Error msg -> Error msg
+      | Ok summary ->
+          Ok
+            {
+              changed_files = summary.changed_files;
+              staged_files = summary.staged_files;
+              unstaged_files = summary.unstaged_files;
+              untracked_files = summary.untracked_files;
+              conflicted_files = summary.conflicted_files;
+            })

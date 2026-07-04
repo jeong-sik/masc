@@ -918,14 +918,26 @@ let runtime_thinking_model_catalog =
 id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
 base = "openai_chat"
 max_context_tokens = 131072
+max_output_tokens = 65536
 supports_tools = true
 supports_tool_choice = true
+supports_required_tool_choice = true
+supports_parallel_tool_calls = true
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
+accepted_reasoning_efforts = ["low", "medium", "high"]
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+supports_response_format_json = true
+supports_structured_output = true
 supports_native_streaming = true
+supports_prompt_caching = true
+supports_top_k = true
+supports_min_p = true
+supports_seed = true
 
 [[models]]
 id_prefix = "openai_compat/reasoning-small-out"
@@ -1037,6 +1049,48 @@ let test_runtime_inventory_surfaces_parameter_policy () =
       "always ignored sampling params empty"
       0
       (policy |> J.member "always_ignored_sampling_params" |> J.to_list |> List.length))
+;;
+
+let test_runtime_inventory_surfaces_effective_capabilities () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let caps = thinkdefault |> J.member "effective_capabilities" in
+    Alcotest.(check string)
+      "effective capability source"
+      "oas-provider-config-model"
+      (caps |> J.member "source" |> J.to_string);
+    Alcotest.(check int)
+      "effective max output"
+      65536
+      (caps |> J.member "max_output_tokens" |> J.to_int);
+    Alcotest.(check bool)
+      "parallel tool calls"
+      true
+      (caps |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check (list string))
+      "accepted reasoning efforts"
+      [ "low"; "medium"; "high" ]
+      (caps
+       |> J.member "accepted_reasoning_efforts"
+       |> J.to_list
+       |> List.map J.to_string);
+    Alcotest.(check string)
+      "reasoning streaming field"
+      "reasoning_content"
+      (caps |> J.member "reasoning_streaming_format" |> J.member "field" |> J.to_string);
+    Alcotest.(check bool)
+      "top_k"
+      true
+      (caps |> J.member "supports_top_k" |> J.to_bool))
 ;;
 
 let test_thinking_unknown_runtime_defers () =
@@ -1486,6 +1540,10 @@ let () =
             "runtime inventory surfaces OAS parameter policy"
             `Quick
             test_runtime_inventory_surfaces_parameter_policy
+        ; Alcotest.test_case
+            "runtime inventory surfaces OAS effective capabilities"
+            `Quick
+            test_runtime_inventory_surfaces_effective_capabilities
         ; Alcotest.test_case
             "unknown runtime id defers (None)"
             `Quick

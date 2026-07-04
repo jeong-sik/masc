@@ -228,6 +228,31 @@ function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnapshot): 
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = item.effective_capabilities
+  if (!caps) return null
+  const sampling = [
+    caps.supports_top_k ? 'top_k' : null,
+    caps.supports_min_p ? 'min_p' : null,
+    caps.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const output = typeof caps.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null
+  const format = [
+    caps.supports_response_format_json ? 'json' : null,
+    caps.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = caps.supports_tool_choice
+    ? `tool-choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    : null
+  const parts = [
+    output,
+    toolChoice,
+    format.length > 0 ? `format:${format.join(',')}` : null,
+    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
   if (!defaults) return []
   return defaults.runtimes.map((entry: RuntimeEntry) => ({
@@ -263,6 +288,7 @@ function RuntimeCatalogCard({
   const transport = item.endpoint_url ?? item.transport ?? item.kind ?? 'transport 미수집'
   const status = item.available === false ? 'unavailable' : item.status ?? 'configured'
   const isDefault = runtimeId === (defaultRuntimeId ?? '')
+  const effectiveCapabilities = runtimeCatalogEffectiveCapabilities(item)
   const parameterPolicy = runtimeCatalogParameterPolicy(item)
 
   return html`
@@ -289,6 +315,9 @@ function RuntimeCatalogCard({
         <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
         <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
         <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
+        ${effectiveCapabilities
+          ? html`<span class="rt-cap tcf mono" title=${effectiveCapabilities}>${effectiveCapabilities}</span>`
+          : null}
         ${parameterPolicy
           ? html`<span class="rt-cap tcf mono" title=${parameterPolicy}>${parameterPolicy}</span>`
           : null}

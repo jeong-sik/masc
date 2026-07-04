@@ -1447,6 +1447,120 @@ let thinking_control_format_wire : Runtime_schema.thinking_control_format -> str
   | Runtime_schema.Enable_thinking -> "enable-thinking"
 ;;
 
+let preserve_thinking_control_format_wire
+  : Llm_provider.Capabilities.preserve_thinking_control_format -> string
+  = function
+  | No_preserve_thinking_control -> "none"
+  | Thinking_object_keep_all -> "thinking-object-keep-all"
+  | Chat_template_kwargs_preserve_thinking -> "chat-template-kwargs-preserve-thinking"
+  | Top_level_preserve_thinking -> "top-level-preserve-thinking"
+  | Always_preserved_thinking -> "always-preserved-thinking"
+;;
+
+let assistant_tool_content_format_wire
+  : Llm_provider.Capabilities.assistant_tool_content_format -> string
+  = function
+  | Assistant_tool_content_null -> "null"
+  | Assistant_tool_content_empty_string -> "empty-string"
+;;
+
+let reasoning_output_format_wire : Llm_provider.Capabilities.reasoning_output_format -> string =
+  function
+  | No_reasoning_output_format -> "none"
+  | Split_reasoning_fields -> "split-reasoning-fields"
+;;
+
+let reasoning_streaming_format_json
+  : Llm_provider.Capabilities.reasoning_streaming_format -> Yojson.Safe.t
+  = function
+  | Default_reasoning_streaming -> `Assoc [ "kind", `String "default" ]
+  | No_reasoning_streaming -> `Assoc [ "kind", `String "none" ]
+  | Delta_reasoning_field field ->
+    `Assoc [ "kind", `String "delta-reasoning-field"; "field", `String field ]
+  | Template_reasoning_streaming -> `Assoc [ "kind", `String "template" ]
+;;
+
+let reasoning_replay_override_wire
+  : Llm_provider.Capabilities.reasoning_replay_override -> string
+  = function
+  | Default_reasoning_replay -> "default"
+  | Force_no_replay -> "force-no-replay"
+  | Force_drop_without_tool_preserve_with_tool -> "drop-without-tool-preserve-with-tool"
+  | Force_preserve_always -> "preserve-always"
+;;
+
+let task_json : Llm_provider.Capabilities.task option -> Yojson.Safe.t = function
+  | None -> `Null
+  | Some Transcription -> `String "transcription"
+  | Some Speech -> `String "speech"
+  | Some Image_generation -> `String "image-generation"
+  | Some Video_generation -> `String "video-generation"
+;;
+
+let effective_capabilities_json (rt : Runtime.t) =
+  match Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config with
+  | None -> `Null
+  | Some caps ->
+    let accepted_reasoning_efforts =
+      match caps.accepted_reasoning_efforts with
+      | None -> `Null
+      | Some efforts ->
+        efforts
+        |> List.map Llm_provider.Reasoning_effort.to_string
+        |> Json_util.json_string_list
+    in
+    let supported_models =
+      match caps.supported_models with
+      | None -> `Null
+      | Some models -> Json_util.json_string_list models
+    in
+    `Assoc
+      [ "source", `String "oas-provider-config-model"
+      ; "max_context_tokens", Json_util.int_opt_to_json caps.max_context_tokens
+      ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
+      ; "supports_tools", `Bool caps.supports_tools
+      ; "supports_tool_choice", `Bool caps.supports_tool_choice
+      ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
+      ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
+      ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
+      ; "supports_runtime_mcp_tools", `Bool caps.supports_runtime_mcp_tools
+      ; "supports_runtime_tool_events", `Bool caps.supports_runtime_tool_events
+      ; ( "assistant_tool_content_format"
+        , `String (assistant_tool_content_format_wire caps.assistant_tool_content_format) )
+      ; "supports_reasoning", `Bool caps.supports_reasoning
+      ; "supports_extended_thinking", `Bool caps.supports_extended_thinking
+      ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
+      ; "accepted_reasoning_efforts", accepted_reasoning_efforts
+      ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
+      ; ( "preserve_thinking_control_format"
+        , `String (preserve_thinking_control_format_wire caps.preserve_thinking_control_format)
+        )
+      ; "reasoning_output_format", `String (reasoning_output_format_wire caps.reasoning_output_format)
+      ; "reasoning_streaming_format", reasoning_streaming_format_json caps.reasoning_streaming_format
+      ; "reasoning_replay_override", `String (reasoning_replay_override_wire caps.reasoning_replay_override)
+      ; "supports_response_format_json", `Bool caps.supports_response_format_json
+      ; "supports_structured_output", `Bool caps.supports_structured_output
+      ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
+      ; "supports_image_input", `Bool caps.supports_image_input
+      ; "supports_audio_input", `Bool caps.supports_audio_input
+      ; "supports_video_input", `Bool caps.supports_video_input
+      ; "task", task_json caps.task
+      ; "supports_native_streaming", `Bool caps.supports_native_streaming
+      ; "supports_system_prompt", `Bool caps.supports_system_prompt
+      ; "supports_caching", `Bool caps.supports_caching
+      ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
+      ; "prompt_cache_alignment", Json_util.int_opt_to_json caps.prompt_cache_alignment
+      ; "supports_top_k", `Bool caps.supports_top_k
+      ; "supports_min_p", `Bool caps.supports_min_p
+      ; "supports_seed", `Bool caps.supports_seed
+      ; "supports_seed_with_images", `Bool caps.supports_seed_with_images
+      ; "supports_computer_use", `Bool caps.supports_computer_use
+      ; "supports_code_execution", `Bool caps.supports_code_execution
+      ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+      ; "supported_models", supported_models
+      ]
+;;
+
 let runtime_parameter_policy_json (rt : Runtime.t) =
   let module RD = Llm_provider.Reasoning_dialect in
   let dialect = RD.for_provider_config rt.provider_config in
@@ -1518,6 +1632,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "supports_image_input", `Bool caps.supports_image_input
     ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
+    ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models

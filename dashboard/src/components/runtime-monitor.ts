@@ -172,6 +172,39 @@ function runtimeParameterPolicyText(provider: DashboardRuntimeProviderSnapshot):
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.effective_capabilities
+  if (!caps) return null
+  const sampling = [
+    caps.supports_top_k ? 'top_k' : null,
+    caps.supports_min_p ? 'min_p' : null,
+    caps.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const modalities = [
+    caps.supports_image_input ? 'image' : null,
+    caps.supports_audio_input ? 'audio' : null,
+    caps.supports_video_input ? 'video' : null,
+  ].filter((value): value is string => Boolean(value))
+  const output = typeof caps.max_output_tokens === 'number'
+    ? `out ${formatNumber(caps.max_output_tokens)}`
+    : null
+  const tools = caps.supports_tool_choice
+    ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    : null
+  const formats = [
+    caps.supports_response_format_json ? 'json' : null,
+    caps.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const parts = [
+    output,
+    tools,
+    formats.length > 0 ? `format ${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    modalities.length > 0 ? `input ${modalities.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function providerProbeKey(probe: DashboardRuntimeProviderProbe): string | null {
   return probe.runtime_id ?? null
 }
@@ -547,6 +580,7 @@ export function RuntimeMonitor() {
           ${(providers?.providers ?? []).length > 0
             ? providers?.providers.map(provider => {
                 const liveProbe = providerProbes.get(providerRuntimeKey(provider)) ?? null
+                const effectiveCapabilities = runtimeEffectiveCapabilitiesText(provider)
                 const parameterPolicy = runtimeParameterPolicyText(provider)
                 return html`
                 <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
@@ -578,6 +612,11 @@ export function RuntimeMonitor() {
                   ${parameterPolicy
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${parameterPolicy}>
                         params · ${parameterPolicy}
+                      </div>`
+                    : null}
+                  ${effectiveCapabilities
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${effectiveCapabilities}>
+                        caps · ${effectiveCapabilities}
                       </div>`
                     : null}
                   ${liveProbe?.error

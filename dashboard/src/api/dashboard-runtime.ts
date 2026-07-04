@@ -24,6 +24,54 @@ export interface DashboardRuntimeParameterPolicy {
   always_ignored_sampling_params: string[]
 }
 
+export interface DashboardRuntimeReasoningStreamingFormat {
+  kind?: string | null
+  field?: string | null
+}
+
+export interface DashboardRuntimeEffectiveCapabilities {
+  source?: string | null
+  max_context_tokens?: number | null
+  max_output_tokens?: number | null
+  supports_tools?: boolean
+  supports_tool_choice?: boolean
+  supports_required_tool_choice?: boolean
+  supports_named_tool_choice?: boolean
+  supports_parallel_tool_calls?: boolean
+  supports_runtime_mcp_tools?: boolean
+  supports_runtime_tool_events?: boolean
+  assistant_tool_content_format?: string | null
+  supports_reasoning?: boolean
+  supports_extended_thinking?: boolean
+  supports_reasoning_budget?: boolean
+  accepted_reasoning_efforts: string[] | null
+  thinking_control_format?: string | null
+  preserve_thinking_control_format?: string | null
+  reasoning_output_format?: string | null
+  reasoning_streaming_format?: DashboardRuntimeReasoningStreamingFormat | null
+  reasoning_replay_override?: string | null
+  supports_response_format_json?: boolean
+  supports_structured_output?: boolean
+  supports_multimodal_inputs?: boolean
+  supports_image_input?: boolean
+  supports_audio_input?: boolean
+  supports_video_input?: boolean
+  task?: string | null
+  supports_native_streaming?: boolean
+  supports_system_prompt?: boolean
+  supports_caching?: boolean
+  supports_prompt_caching?: boolean
+  prompt_cache_alignment?: number | null
+  supports_top_k?: boolean
+  supports_min_p?: boolean
+  supports_seed?: boolean
+  supports_seed_with_images?: boolean
+  supports_computer_use?: boolean
+  supports_code_execution?: boolean
+  emits_usage_tokens?: boolean
+  supported_models: string[] | null
+}
+
 export interface DashboardRuntimeProviderSnapshot {
   provider: string
   runtime_id?: string | null
@@ -51,6 +99,7 @@ export interface DashboardRuntimeProviderSnapshot {
   supports_image_input?: boolean
   supports_reasoning_budget?: boolean
   thinking_control_format?: string | null
+  effective_capabilities?: DashboardRuntimeEffectiveCapabilities | null
   parameter_policy?: DashboardRuntimeParameterPolicy | null
   model_count?: number | null
   models: string[]
@@ -213,6 +262,66 @@ function decodeRuntimeParameterPolicy(raw: unknown): DashboardRuntimeParameterPo
   }
 }
 
+function decodeNullableStringArray(raw: unknown): string[] | null {
+  return Array.isArray(raw) ? asStringArray(raw) : null
+}
+
+function decodeRuntimeReasoningStreamingFormat(
+  raw: unknown,
+): DashboardRuntimeReasoningStreamingFormat | null {
+  if (!isRecord(raw)) return null
+  return {
+    kind: asNullableString(raw.kind),
+    field: asNullableString(raw.field),
+  }
+}
+
+function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffectiveCapabilities | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    max_context_tokens: asNumber(raw.max_context_tokens) ?? null,
+    max_output_tokens: asNumber(raw.max_output_tokens) ?? null,
+    supports_tools: asBoolean(raw.supports_tools),
+    supports_tool_choice: asBoolean(raw.supports_tool_choice),
+    supports_required_tool_choice: asBoolean(raw.supports_required_tool_choice),
+    supports_named_tool_choice: asBoolean(raw.supports_named_tool_choice),
+    supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
+    supports_runtime_mcp_tools: asBoolean(raw.supports_runtime_mcp_tools),
+    supports_runtime_tool_events: asBoolean(raw.supports_runtime_tool_events),
+    assistant_tool_content_format: asNullableString(raw.assistant_tool_content_format),
+    supports_reasoning: asBoolean(raw.supports_reasoning),
+    supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
+    supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
+    accepted_reasoning_efforts: decodeNullableStringArray(raw.accepted_reasoning_efforts),
+    thinking_control_format: asNullableString(raw.thinking_control_format),
+    preserve_thinking_control_format: asNullableString(raw.preserve_thinking_control_format),
+    reasoning_output_format: asNullableString(raw.reasoning_output_format),
+    reasoning_streaming_format: decodeRuntimeReasoningStreamingFormat(raw.reasoning_streaming_format),
+    reasoning_replay_override: asNullableString(raw.reasoning_replay_override),
+    supports_response_format_json: asBoolean(raw.supports_response_format_json),
+    supports_structured_output: asBoolean(raw.supports_structured_output),
+    supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
+    supports_image_input: asBoolean(raw.supports_image_input),
+    supports_audio_input: asBoolean(raw.supports_audio_input),
+    supports_video_input: asBoolean(raw.supports_video_input),
+    task: asNullableString(raw.task),
+    supports_native_streaming: asBoolean(raw.supports_native_streaming),
+    supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_caching: asBoolean(raw.supports_caching),
+    supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
+    prompt_cache_alignment: asNumber(raw.prompt_cache_alignment) ?? null,
+    supports_top_k: asBoolean(raw.supports_top_k),
+    supports_min_p: asBoolean(raw.supports_min_p),
+    supports_seed: asBoolean(raw.supports_seed),
+    supports_seed_with_images: asBoolean(raw.supports_seed_with_images),
+    supports_computer_use: asBoolean(raw.supports_computer_use),
+    supports_code_execution: asBoolean(raw.supports_code_execution),
+    emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
+    supported_models: decodeNullableStringArray(raw.supported_models),
+  }
+}
+
 function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderDiscovery | null {
   if (!isRecord(raw)) return null
   return {
@@ -254,6 +363,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     supports_image_input: asBoolean(raw.supports_image_input),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     thinking_control_format: asNullableString(raw.thinking_control_format),
+    effective_capabilities: decodeRuntimeEffectiveCapabilities(raw.effective_capabilities),
     parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),

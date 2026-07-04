@@ -145,6 +145,29 @@ function runtimeParameterPolicySummary(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeEffectiveCapabilitySummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const caps = entry.effective_capabilities
+  if (!caps) return null
+  const sampling = [
+    caps.supports_top_k ? 'top_k' : null,
+    caps.supports_min_p ? 'min_p' : null,
+    caps.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const formats = [
+    caps.supports_response_format_json ? 'json' : null,
+    caps.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const parts = [
+    typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
+    caps.supports_tool_choice ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}` : null,
+    formats.length > 0 ? `format ${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   useEffect(() => {
     loadRuntimeCatalog()
@@ -166,6 +189,7 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   const effortMode = entry?.thinking_control_format ?? null
   const effortControlled = effortMode !== null && effortMode !== 'none'
   const effortAdjustable = effortMode === 'reasoning-effort' || Boolean(entry?.supports_reasoning_budget)
+  const effectiveCapabilities = entry ? runtimeEffectiveCapabilitySummary(entry) : null
   const parameterPolicy = entry ? runtimeParameterPolicySummary(entry) : null
 
   return html`
@@ -211,6 +235,14 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
               <div class="rtc-effort">
                 <span class="rtc-effort-k">params</span>
                 <span class="rtc-eff-na" title=${parameterPolicy}>${parameterPolicy}</span>
+              </div>
+            `
+          : null}
+        ${effectiveCapabilities
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">caps</span>
+                <span class="rtc-eff-na" title=${effectiveCapabilities}>${effectiveCapabilities}</span>
               </div>
             `
           : null}

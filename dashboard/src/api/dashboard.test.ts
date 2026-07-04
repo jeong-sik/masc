@@ -2430,6 +2430,51 @@ describe('fetchRuntimeProviders', () => {
               ignored_sampling_params: ['temperature', 'top_p'],
               always_ignored_sampling_params: ['temperature'],
             },
+            effective_capabilities: {
+              source: 'oas-provider-config-model',
+              max_context_tokens: 131072,
+              max_output_tokens: 65536,
+              supports_tools: true,
+              supports_tool_choice: true,
+              supports_required_tool_choice: true,
+              supports_named_tool_choice: false,
+              supports_parallel_tool_calls: true,
+              supports_runtime_mcp_tools: false,
+              supports_runtime_tool_events: false,
+              assistant_tool_content_format: 'null',
+              supports_reasoning: true,
+              supports_extended_thinking: true,
+              supports_reasoning_budget: true,
+              accepted_reasoning_efforts: ['low', 'medium', 'high'],
+              thinking_control_format: 'chat-template-kwargs',
+              preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
+              reasoning_output_format: 'split-reasoning-fields',
+              reasoning_streaming_format: {
+                kind: 'delta-reasoning-field',
+                field: 'reasoning_content',
+              },
+              reasoning_replay_override: 'preserve-always',
+              supports_response_format_json: true,
+              supports_structured_output: true,
+              supports_multimodal_inputs: true,
+              supports_image_input: true,
+              supports_audio_input: false,
+              supports_video_input: false,
+              task: null,
+              supports_native_streaming: true,
+              supports_system_prompt: true,
+              supports_caching: true,
+              supports_prompt_caching: true,
+              prompt_cache_alignment: 1024,
+              supports_top_k: true,
+              supports_min_p: true,
+              supports_seed: true,
+              supports_seed_with_images: false,
+              supports_computer_use: false,
+              supports_code_execution: false,
+              emits_usage_tokens: true,
+              supported_models: null,
+            },
             source: 'runtime.toml',
             discovery: {
               healthy: true,
@@ -2484,6 +2529,11 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.parameter_policy?.reasoning_replay_policy).toBe('preserve_always')
     expect(result.providers[0]?.parameter_policy?.ignored_sampling_params).toEqual(['temperature', 'top_p'])
     expect(result.providers[0]?.parameter_policy?.always_ignored_sampling_params).toEqual(['temperature'])
+    expect(result.providers[0]?.effective_capabilities?.max_output_tokens).toBe(65536)
+    expect(result.providers[0]?.effective_capabilities?.supports_parallel_tool_calls).toBe(true)
+    expect(result.providers[0]?.effective_capabilities?.accepted_reasoning_efforts).toEqual(['low', 'medium', 'high'])
+    expect(result.providers[0]?.effective_capabilities?.reasoning_streaming_format?.field).toBe('reasoning_content')
+    expect(result.providers[0]?.effective_capabilities?.supports_top_k).toBe(true)
     expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
     expect(result.assignment_governance?.status).toBe('degraded')

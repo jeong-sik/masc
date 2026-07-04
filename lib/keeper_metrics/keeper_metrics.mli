@@ -233,7 +233,8 @@ type t =
   | KeeperToolCallRetryLoop
   | AttemptWatchdogFired
   | ShellIrEffectTotal
-  | KeeperRepoMappingDeniedMissing
+  | KeeperRepoMappingDefaultScopeAllowed
+  | KeeperRepoMappingDeniedUnregistered
   | KeeperRepoMappingDeniedNotInMapping
   | KeeperRepoMappingLoadError
   | KeeperRepoMappingRepositoryIdentityMismatch

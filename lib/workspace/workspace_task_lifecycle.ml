@@ -6,6 +6,7 @@ type invalid =
   | Self_approval
   | Self_rejection
   | Verification_disabled
+  | Verification_required_use_submit
   | Invalid_transition
 
 type decision =

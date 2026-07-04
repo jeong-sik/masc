@@ -178,6 +178,27 @@ let contains_all_tokens_ci haystack query =
   | [] -> false
   | tokens -> List.for_all (contains_substring_ci haystack) tokens
 
+(* Token-match count / ratio: how many whitespace-separated tokens of [query]
+   appear in [haystack] as case-insensitive substrings. Used by keeper memory
+   search to score partial matches (keeper-memory-search token-AND was too
+   strict for natural-language queries: "notable event lesson learned" matched
+   0 notes even when 2 of 4 tokens overlapped a stored note's text). *)
+let count_matched_tokens_ci haystack query =
+  match query_tokens query with
+  | [] -> 0
+  | tokens ->
+    List.fold_left
+      (fun acc token -> if contains_substring_ci haystack token then acc + 1 else acc)
+      0
+      tokens
+
+let matched_token_ratio_ci haystack query =
+  match query_tokens query with
+  | [] -> 0.0
+  | tokens ->
+    float_of_int (count_matched_tokens_ci haystack query) /. float_of_int (List.length tokens)
+
+
 (* ASCII case-insensitive equality.  No allocation; equivalent to
    [String.lowercase_ascii a = String.lowercase_ascii b] but
    short-circuits on length and on first mismatching byte. *)

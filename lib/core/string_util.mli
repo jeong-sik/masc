@@ -46,6 +46,16 @@ val contains_all_tokens_ci : string -> string -> bool
     yields [false], matching [contains_substring_ci]'s empty-needle
     behavior. *)
 
+val count_matched_tokens_ci : string -> string -> int
+(** [count_matched_tokens_ci haystack query] — how many tokens of [query]
+    appear in [haystack] as case-insensitive substrings. 0 for an empty
+    query. Used for partial-match scoring (token-AND was too strict for
+    natural-language queries). *)
+
+val matched_token_ratio_ci : string -> string -> float
+(** [matched_token_ratio_ci haystack query] — [count_matched_tokens_ci]
+    divided by the total token count, in [0.0, 1.0]. 0.0 for an empty query. *)
+
 val starts_with_ci : prefix:string -> string -> bool
 (** [starts_with_ci ~prefix s] is the ASCII case-insensitive variant of
     [String.starts_with]. Performs no allocation; lowercases each byte

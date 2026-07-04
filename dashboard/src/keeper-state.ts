@@ -1,6 +1,7 @@
 import { signal } from '@preact/signals'
 import { formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
+import { isInFlightDelivery } from './lib/keeper-delivery'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
 import type {
@@ -1127,10 +1128,6 @@ function sameConversationEntry(
   if (left.id === right.id) return true
   if (left.role === 'tool' || right.role === 'tool') return false
   return left.role === right.role && left.text === right.text
-}
-
-function isInFlightDelivery(delivery: KeeperConversationDelivery): boolean {
-  return delivery === 'sending' || delivery === 'streaming' || delivery === 'queued'
 }
 
 // Entries with no parseable timestamp (live placeholders, still-streaming

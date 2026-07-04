@@ -3,5 +3,6 @@
 ; main masc library — runs in seconds.
 
 (tests
- (names test_fusion test_fusion_harness test_fusion_run_registry)
- (libraries alcotest otoml masc.fusion_core))
+ (names test_fusion test_fusion_harness test_fusion_run_registry
+   test_fusion_config_json)
+ (libraries alcotest otoml yojson masc.fusion_core))

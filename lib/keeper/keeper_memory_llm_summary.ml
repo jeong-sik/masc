@@ -164,12 +164,17 @@ let summary_text_of_response response =
   | Error _ -> None
 ;;
 
+type 'a timeout_result =
+  | Completed of 'a
+  | Timed_out
+  | Clock_unavailable
+
 let with_timeout ?clock ~timeout_sec f =
   match clock with
-  | None -> Some (f ())
+  | None -> Clock_unavailable
   | Some clock ->
-      try Some (Eio.Time.with_timeout_exn clock timeout_sec f)
-      with Eio.Time.Timeout -> None
+    (try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+     | Eio.Time.Timeout -> Timed_out)
 
 let record_summary_outcome
     ~(runtime_id : string)
@@ -182,12 +187,6 @@ let record_summary_outcome
       ; ("runtime_id", runtime_id)
       ]
     ()
-
-module For_testing = struct
-  let summary_text_of_response = summary_text_of_response
-  let summary_text_result_of_response = summary_text_result_of_response
-  let record_summary_outcome = record_summary_outcome
-end
 
 let summarize_with_provider
     ?(complete : complete_fn = default_complete)
@@ -207,12 +206,18 @@ let summarize_with_provider
       with_timeout ?clock ~timeout_sec (fun () ->
         complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
     with
-    | None ->
+    | Timed_out ->
         Log.Keeper.warn
           "memory LLM summary timed out trace_id=%s runtime=%s timeout_sec=%.1f"
           trace_id runtime_id timeout_sec;
         None, Keeper_memory_llm_summary_outcome.Timed_out
-    | Some (Ok response) ->
+    | Clock_unavailable ->
+        Log.Keeper.warn
+          "memory LLM summary clock unavailable trace_id=%s runtime=%s \
+           timeout_sec=%.1f — refusing provider call without enforcing timeout"
+          trace_id runtime_id timeout_sec;
+        None, Keeper_memory_llm_summary_outcome.Clock_unavailable
+    | Completed (Ok response) ->
         (match summary_text_result_of_response response with
          | Ok summary ->
              Some summary, Keeper_memory_llm_summary_outcome.Ok_summary
@@ -227,7 +232,7 @@ let summarize_with_provider
                 runtime=%s detail=%s"
                trace_id runtime_id detail;
              None, Keeper_memory_llm_summary_outcome.Invalid_structured_response)
-    | Some (Error err) ->
+    | Completed (Error err) ->
         Log.Keeper.warn
           "memory LLM summary failed trace_id=%s runtime=%s: %s"
           trace_id runtime_id (Provider_http_error.to_message err);
@@ -235,6 +240,13 @@ let summarize_with_provider
   in
   record_summary_outcome ~runtime_id ~outcome;
   result
+
+module For_testing = struct
+  let summary_text_of_response = summary_text_of_response
+  let summary_text_result_of_response = summary_text_result_of_response
+  let record_summary_outcome = record_summary_outcome
+  let summarize_with_provider = summarize_with_provider
+end
 
 let summarize_with_providers
     ?complete

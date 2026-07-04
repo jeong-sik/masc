@@ -263,6 +263,7 @@ let test_cursor_from_hook_uses_real_file_and_line () =
         ; "line_start", `Int 12
         ; "line_end", `Int 14
         ; "column", `Int 3
+        ; "focus_mode", `String "editing"
         ]
     in
     Ide_bridge.ingest_tool_event_from_hook
@@ -303,6 +304,25 @@ let test_cursor_from_hook_skips_missing_line () =
       ~output_text:"annotated"
       ~input;
     check int "no cursor without line" 0
+      (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
+;;
+
+let test_cursor_from_hook_skips_missing_focus_mode () =
+  with_temp_dir (fun base_dir ->
+    let input =
+      `Assoc [ "file_path", `String "lib/test.ml"; "line_start", `Int 12 ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"keeper_ide_annotate"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-7"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:10.0
+      ~output_text:"annotated"
+      ~input;
+    check int "no cursor without explicit focus mode" 0
       (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
 ;;
 
@@ -502,9 +522,11 @@ let test_pr_event_from_hook_uses_descriptor_confirmed_cli_url () =
       pull_request_url)
 ;;
 
-let test_pr_event_from_hook_ignores_non_execute () =
+let test_pr_event_from_hook_uses_descriptor_for_any_tool_name () =
   with_temp_dir (fun base_dir ->
-    let output = "https://github.com/owner/repo/pull/456" in
+    let output =
+      {|{"ok":true,"output":"{\"number\":456,\"url\":\"https://github.com/owner/repo/pull/456\"}","command_descriptor":{"kind":"gh_pr_create","title":"feat descriptor","base":"main","draft":false}}|}
+    in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
       ~keeper_id:"k1"
@@ -513,7 +535,13 @@ let test_pr_event_from_hook_ignores_non_execute () =
       ~tool_name:"fs_write";
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
     let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file not created" false (Sys.file_exists path))
+    check bool "file exists" true (Sys.file_exists path);
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    check int "pr_number" 456
+      (Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int))
 ;;
 
 let test_pr_event_from_hook_ignores_no_url () =
@@ -902,6 +930,10 @@ let () =
     ; ( "cursor"
       , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line
         ; test_case "from hook skips missing line" `Quick test_cursor_from_hook_skips_missing_line
+        ; test_case
+            "from hook skips missing focus mode"
+            `Quick
+            test_cursor_from_hook_skips_missing_focus_mode
         ] )
     ; ( "hook_extract"
       , [ test_case "file_path from path key" `Quick test_hook_extracts_file_path_from_path_key
@@ -914,7 +946,10 @@ let () =
       , [ test_case "pr event ingest" `Quick test_pr_event_ingest
         ; test_case "from hook uses structured descriptor output" `Quick test_pr_event_from_hook_uses_structured_descriptor_output
         ; test_case "from hook uses descriptor-confirmed CLI URL" `Quick test_pr_event_from_hook_uses_descriptor_confirmed_cli_url
-        ; test_case "from hook ignores non-execute" `Quick test_pr_event_from_hook_ignores_non_execute
+        ; test_case
+            "from hook uses descriptor for any tool name"
+            `Quick
+            test_pr_event_from_hook_uses_descriptor_for_any_tool_name
         ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
         ; test_case "from hook ignores raw url" `Quick test_pr_event_from_hook_ignores_raw_url
         ; test_case "descriptor gated on success" `Quick test_descriptor_gated_on_success

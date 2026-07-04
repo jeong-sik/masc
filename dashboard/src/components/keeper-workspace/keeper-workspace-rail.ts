@@ -129,6 +129,126 @@ function formatCtxK(n: number | null | undefined): string | null {
   return `${Math.round(n / 1000)}k ctx`
 }
 
+function runtimeParameterPolicySummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const policy = entry.parameter_policy
+  if (!policy) return null
+  const ignored = policy.ignored_sampling_params.join(',')
+  const alwaysIgnored = policy.always_ignored_sampling_params.join(',')
+  const parts = [
+    policy.reasoning_toggle_wire ? policy.reasoning_toggle_wire : null,
+    policy.reasoning_replay_policy ? policy.reasoning_replay_policy : null,
+    ignored ? `ignore ${ignored}` : null,
+    alwaysIgnored ? `always ${alwaysIgnored}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeRequestToolChoiceSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const choice = entry.request_config?.tool_choice
+  if (!choice?.kind) return null
+  return choice.name ? `${choice.kind}:${choice.name}` : choice.kind
+}
+
+function runtimeRequestFormatSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const format = entry.request_config?.response_format
+  if (!format?.kind) return null
+  return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeRequestConfigSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const request = entry.request_config
+  if (!request) return null
+  const sampling = [
+    typeof request.temperature === 'number' ? `temp ${request.temperature}` : null,
+    typeof request.top_p === 'number' ? `top_p ${request.top_p}` : null,
+    typeof request.top_k === 'number' ? `top_k ${request.top_k}` : null,
+    typeof request.min_p === 'number' ? `min_p ${request.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = runtimeRequestToolChoiceSummary(entry)
+  const format = runtimeRequestFormatSummary(entry)
+  const parts = [
+    request.provider_kind ? request.provider_kind : null,
+    request.request_path_targets_responses_api ? 'responses-api' : null,
+    typeof request.max_tokens === 'number' ? `out ${request.max_tokens}` : null,
+    typeof request.max_context === 'number' ? `ctx ${request.max_context}` : null,
+    sampling.length > 0 ? sampling.join(',') : null,
+    typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
+    request.resolved_reasoning_effort ? `effort ${request.resolved_reasoning_effort}` : null,
+    toolChoice ? `tool ${toolChoice}` : null,
+    request.disable_parallel_tool_use ? 'parallel off' : null,
+    format ? `format ${format}` : null,
+    typeof request.seed === 'number' ? `seed ${request.seed}` : null,
+    typeof request.num_ctx === 'number' ? `num_ctx ${request.num_ctx}` : null,
+    request.keep_alive ? `keep ${request.keep_alive}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeDeclaredSpecSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const spec = entry.declared_spec
+  if (!spec) return null
+  const caps = spec.model?.capabilities
+  const sampling = [
+    caps?.supports_top_k ? 'top_k' : null,
+    caps?.supports_min_p ? 'min_p' : null,
+    caps?.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const formats = [
+    caps?.supports_response_format_json ? 'json' : null,
+    caps?.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  let thinking: string | null = null
+  if (typeof spec.model?.thinking_support === 'boolean') {
+    thinking = spec.model.thinking_support ? 'think on' : 'think off'
+  }
+  const parts = [
+    spec.provider?.api_format ? spec.provider.api_format : null,
+    typeof spec.model?.max_context === 'number' ? `ctx ${spec.model.max_context}` : null,
+    thinking,
+    caps?.thinking_control_format ? caps.thinking_control_format : null,
+    typeof caps?.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
+    formats.length > 0 ? `format ${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    typeof spec.binding?.max_concurrent === 'number' ? `conc ${spec.binding.max_concurrent}` : null,
+    spec.binding?.keep_alive ? `keep ${spec.binding.keep_alive}` : null,
+    typeof spec.binding?.num_ctx === 'number' ? `num_ctx ${spec.binding.num_ctx}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeEffectiveCapabilitySummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const caps = entry.effective_capabilities
+  if (!caps) return null
+  const sampling = [
+    caps.supports_top_k ? 'top_k' : null,
+    caps.supports_min_p ? 'min_p' : null,
+    caps.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const formats = [
+    caps.supports_response_format_json ? 'json' : null,
+    caps.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const parts = [
+    typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
+    caps.supports_tool_choice ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}` : null,
+    formats.length > 0 ? `format ${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   useEffect(() => {
     loadRuntimeCatalog()
@@ -150,6 +270,10 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   const effortMode = entry?.thinking_control_format ?? null
   const effortControlled = effortMode !== null && effortMode !== 'none'
   const effortAdjustable = effortMode === 'reasoning-effort' || Boolean(entry?.supports_reasoning_budget)
+  const effectiveCapabilities = entry ? runtimeEffectiveCapabilitySummary(entry) : null
+  const parameterPolicy = entry ? runtimeParameterPolicySummary(entry) : null
+  const requestConfig = entry ? runtimeRequestConfigSummary(entry) : null
+  const declaredSpec = entry ? runtimeDeclaredSpecSummary(entry) : null
 
   return html`
     <div class="ctx-sec">
@@ -189,6 +313,38 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
               ? html`<span class="rtc-eff-na" data-effort-mode=${effortMode}>${effortMode} · ${effortAdjustable ? '조정 가능' : '고정'}</span>`
               : html`<span class="rtc-eff-na" data-effort-mode="none">effort 제어 없음</span>`}
         </div>
+        ${parameterPolicy
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">params</span>
+                <span class="rtc-eff-na" title=${parameterPolicy}>${parameterPolicy}</span>
+              </div>
+            `
+          : null}
+        ${requestConfig
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">request</span>
+                <span class="rtc-eff-na" title=${requestConfig}>${requestConfig}</span>
+              </div>
+            `
+          : null}
+        ${declaredSpec
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">declared</span>
+                <span class="rtc-eff-na" title=${declaredSpec}>${declaredSpec}</span>
+              </div>
+            `
+          : null}
+        ${effectiveCapabilities
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">caps</span>
+                <span class="rtc-eff-na" title=${effectiveCapabilities}>${effectiveCapabilities}</span>
+              </div>
+            `
+          : null}
       </div>
     </div>
   `

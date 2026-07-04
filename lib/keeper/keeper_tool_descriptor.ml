@@ -1718,7 +1718,7 @@ let internal_descriptors : t list =
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster (1 entry today) ──── *)
-  (* Other masc_keeper_ tools (status, msg, clear, compact, repair,
+  (* Other masc_keeper_ tools (status, msg, clear, compact,
      sandbox lifecycle) use the keeper Eio context and are gated on
      Phase 5 Eio plumbing scope. *)
     masc_keeper_descriptor "list" "masc_keeper_list"
@@ -1744,8 +1744,6 @@ let internal_descriptors : t list =
       "Audit configured keepers vs personas." ~readonly:true
   ; masc_keeper_descriptor "status" "masc_keeper_status"
       "Detailed single-keeper status (defaults to self when name is empty)." ~readonly:true
-  ; masc_keeper_descriptor "repair" "masc_keeper_repair"
-      "Validate keeper repair inputs (execution path currently unsupported)." ~readonly:false
   ; masc_keeper_descriptor "adversarial_review" "masc_keeper_adversarial_review"
       "Run fresh-context structural adversarial review on a diff or changed file." ~readonly:true
   ; masc_keeper_descriptor "down" "masc_keeper_down"

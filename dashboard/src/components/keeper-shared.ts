@@ -622,6 +622,7 @@ export function KeeperConversationPanel({
         <span class="flex-1">${error}</span>
         <button
           type="button"
+          aria-label="에러 메시지 닫기"
           class="shrink-0 text-[var(--bad-light)] opacity-70 hover:opacity-100 transition-opacity ml-1 cursor-pointer font-bold select-none"
           title="에러 메시지 닫기"
           onClick=${() => setRecordValue(keeperActionErrors, keeperName, null)}

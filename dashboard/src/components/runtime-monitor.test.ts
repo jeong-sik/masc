@@ -393,6 +393,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('reasoning · extended · budget · effort low,medium,high')
     expect(container.textContent).toContain('reasoning-stream delta-reasoning-field:reasoning_content')
     expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
+    expect(container.textContent).toContain('input multimodal,image,audio')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
     expect(container.textContent).toContain('wire chat-template-kwargs · preserve chat-template-kwargs-preserve-thinking')

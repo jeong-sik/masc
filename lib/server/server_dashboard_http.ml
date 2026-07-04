@@ -628,24 +628,36 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _exn -> []
   in
+  let events_count = List.length events in
+  let cursors_count = List.length cursors in
+  let annotations_count = List.length annotations in
+  let regions_count = List.length regions in
+  let active_keepers_count = List.length active_keepers in
   `Assoc
-    [ "events", `Assoc
-        [ "count", `Int (List.length events)
+    [ "partition_kind", `String "legacy_default"
+    ; "partition_orphan", `Bool true
+    ; "events_count", `Int events_count
+    ; "cursors_count", `Int cursors_count
+    ; "annotations_count", `Int annotations_count
+    ; "regions_count", `Int regions_count
+    ; "active_keepers_count", `Int active_keepers_count
+    ; "events", `Assoc
+        [ "count", `Int events_count
         ; "recent", `List events
         ]
     ; "cursors", `Assoc
-        [ "count", `Int (List.length cursors)
+        [ "count", `Int cursors_count
         ; "recent", `List cursors
         ]
     ; "annotations", `Assoc
-        [ "count", `Int (List.length annotations)
+        [ "count", `Int annotations_count
         ]
     ; "regions", `Assoc
-        [ "count", `Int (List.length regions)
+        [ "count", `Int regions_count
         ]
     ; "presence", `Assoc
         [ "active_keepers", `List active_keepers
-        ; "count", `Int (List.length active_keepers)
+        ; "count", `Int active_keepers_count
         ]
     ; "freshness", `Assoc
         [ "snapshot_at", `String (Masc_domain.now_iso ())

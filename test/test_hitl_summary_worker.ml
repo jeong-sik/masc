@@ -10,6 +10,7 @@ open Alcotest
 
 module Q = Keeper_approval_queue_rules_types
 module H = Masc.Hitl_summary_worker
+module Schema = Masc.Keeper_structured_output_schema
 module Workspace = Masc.Workspace
 module Goal_store = Goal_store
 module Keeper_chat_store = Masc.Keeper_chat_store
@@ -153,6 +154,65 @@ let test_parse_summary_failure () =
   match H.For_testing.summary_of_response ~generated_at:1234567890.0 response with
   | Ok _ -> fail "expected summary_of_response to return Error"
   | Error reason -> check bool "error reason non-empty" true (String.length reason > 0)
+;;
+
+let test_parse_summary_rejects_unknown_risk_delta () =
+  let malformed =
+    `Assoc
+      [ "context_summary", `String "A tool request is pending."
+      ; "key_questions", `List [ `String "Is this safe?" ]
+      ; ( "suggested_options"
+        , `List
+            [ `Assoc
+                [ "label", `String "approve"
+                ; "rationale", `String "looks safe"
+                ; "estimated_risk_delta", `String "not-a-risk"
+                ]
+            ] )
+      ; "risk_rationale", `Null
+      ; "uncertainty", `Float 0.25
+      ]
+  in
+  let response : Agent_sdk.Types.api_response =
+    { id = "run-test"
+    ; model = "test-model"
+    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; content = [ Agent_sdk.Types.Text (Yojson.Safe.to_string malformed) ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  match H.For_testing.summary_of_response ~generated_at:1234567890.0 response with
+  | Ok _ -> fail "expected unknown risk delta to fail parsing"
+  | Error reason ->
+    check bool "error names estimated_risk_delta" true
+      (Astring.String.is_infix ~affix:"estimated_risk_delta" reason)
+;;
+
+let test_hitl_summary_schema_excludes_server_owned_fields () =
+  let schema = Schema.hitl_context_summary_schema in
+  let open Yojson.Safe.Util in
+  let required =
+    schema
+    |> member "required"
+    |> convert_each to_string
+    |> List.sort String.compare
+  in
+  check (list string) "required model-owned fields"
+    [ "context_summary"
+    ; "key_questions"
+    ; "risk_rationale"
+    ; "suggested_options"
+    ; "uncertainty"
+    ]
+    required;
+  let properties = schema |> member "properties" in
+  check yojson_t "summary_version is server-owned" `Null
+    (member "summary_version" properties);
+  check yojson_t "generated_at is server-owned" `Null
+    (member "generated_at" properties);
+  check yojson_t "model_run_id is server-owned" `Null
+    (member "model_run_id" properties)
 ;;
 
 (* ── spawn / bundle tests ───────────────────────── *)
@@ -299,6 +359,10 @@ let () =
     ; ( "parse_summary"
       , [ test_case "success" `Quick test_parse_summary_success
         ; test_case "failure" `Quick test_parse_summary_failure
+        ; test_case "unknown risk delta fails" `Quick
+            test_parse_summary_rejects_unknown_risk_delta
+        ; test_case "schema excludes server-owned fields" `Quick
+            test_hitl_summary_schema_excludes_server_owned_fields
         ] )
     ; ( "worker"
       , [ test_case "spawn with no provider config calls on_failure" `Quick

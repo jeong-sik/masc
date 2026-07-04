@@ -259,10 +259,7 @@ let hitl_context_summary_schema =
     object_schema ~required:(List.map fst suggested_option_fields) suggested_option_fields
   in
   let fields =
-    [ "summary_version", integer_schema
-    ; "generated_at", number_schema
-    ; "model_run_id", string_schema
-    ; "context_summary", string_schema
+    [ "context_summary", string_schema
     ; "key_questions", string_array_schema
     ; "suggested_options", array_schema suggested_option_schema
     ; "risk_rationale", nullable_string_schema

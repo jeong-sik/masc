@@ -302,16 +302,16 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
       (fun (r : repository) -> String_set.mem r.id mapping_id_set)
       repos
 
-let repository_registered ~base_path ~repository_id =
+let repository_registered ~base_path ~repository_id : (bool, string) result =
   match Repo_store.load_all ~base_path with
-  | Error msg ->
+  | Stdlib.Error msg ->
     Log.Misc.warn
       "[KeeperRepoMapping] repository_registered: repo store load failed for \
        repository %s — access denied fail-closed (error: %s)"
       repository_id msg;
-    Error msg
-  | Ok repos ->
-    Ok
+    Stdlib.Error msg
+  | Stdlib.Ok repos ->
+    Stdlib.Ok
       (List.exists
          (fun (repo : repository) -> String.equal repo.id repository_id)
          repos)
@@ -381,15 +381,15 @@ let record_policy_decision ~keeper_id ?repository_id decision =
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match repository_registered ~base_path ~repository_id with
-  | Error _ ->
+  | Stdlib.Error _ ->
     record_policy_decision ~keeper_id ~repository_id
       Policy_decision_repository_store_error;
     false
-  | Ok false ->
+  | Stdlib.Ok false ->
     record_policy_decision ~keeper_id ~repository_id
       Policy_decision_unregistered_repository;
     false
-  | Ok true -> (
+  | Stdlib.Ok true -> (
     match lookup_mapping ~base_path ~keeper_id with
     | Mapping_missing _ ->
       record_policy_decision ~keeper_id ~repository_id

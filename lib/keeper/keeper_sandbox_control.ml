@@ -404,6 +404,16 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
     | Ok repository_id ->
       field Policy_allowed true ~repository_id ~default_scope ()
   in
+  let repository_id_in_catalog repository_id =
+    match repo_catalog with
+    | Error msg -> Error (`Store_error msg)
+    | Ok repos ->
+      Ok
+        (List.exists
+           (fun (repo : Repo_manager_types.repository) ->
+             String.equal repo.id repository_id)
+           repos)
+  in
   let field_default_scope () =
     match
       playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
@@ -416,13 +426,11 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       field Policy_repository_store_error false ~repository_id:repo_name
         ~error:msg ()
     | Ok repository_id ->
-      if
-        List.exists
-          (fun (repo : Repo_manager_types.repository) ->
-            String.equal repo.id repository_id)
-          repo_catalog
-      then field Policy_allowed true ~repository_id ~default_scope:true ()
-      else field Policy_denied_not_in_mapping false ~repository_id ()
+      (match repository_id_in_catalog repository_id with
+       | Error (`Store_error msg) ->
+         field Policy_repository_store_error false ~repository_id ~error:msg ()
+       | Ok true -> field Policy_allowed true ~repository_id ~default_scope:true ()
+       | Ok false -> field Policy_denied_not_in_mapping false ~repository_id ())
   in
   match policy with
   | Keeper_repo_mapping.Mapping_load_error msg ->
@@ -441,17 +449,14 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
          field Policy_repository_store_error false ~repository_id:repo_name
            ~error:msg ()
        | Ok repository_id ->
-         if
-           not
-             (List.exists
-                (fun (repo : Repo_manager_types.repository) ->
-                  String.equal repo.id repository_id)
-                repo_catalog)
-         then field Policy_denied_not_in_mapping false ~repository_id ()
-         else if
-           Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id
-         then field Policy_allowed true ~repository_id ()
-         else field Policy_denied_not_in_mapping false ~repository_id ())
+         (match repository_id_in_catalog repository_id with
+          | Error (`Store_error msg) ->
+            field Policy_repository_store_error false ~repository_id ~error:msg ()
+          | Ok false -> field Policy_denied_not_in_mapping false ~repository_id ()
+          | Ok true ->
+            if Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id
+            then field Policy_allowed true ~repository_id ()
+            else field Policy_denied_not_in_mapping false ~repository_id ()))
 
 let with_playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
       ~repo_name ~repo_path = function

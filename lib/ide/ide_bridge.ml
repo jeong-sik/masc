@@ -190,21 +190,23 @@ let tail_read_lines ~path ~budget =
 
 let append_event ~base_dir ~partition ~(event : ide_event) =
   let dir = Ide_paths.partition_store_dir ~base_dir partition in
-  Fs_compat.mkdir_p dir;
   let file_name = event_file_name (event_kind_of_event event) in
   let path = Filename.concat dir file_name in
   let json = ide_event_to_json event in
-  append_rotating
-    ~path
-    ~max_segment_bytes:default_max_segment_bytes
-    ~max_retained_segments:default_max_retained_segments
-    json
+  Ide_ingest_queue.submit (fun () ->
+    Fs_compat.mkdir_p dir;
+    append_rotating
+      ~path
+      ~max_segment_bytes:default_max_segment_bytes
+      ~max_retained_segments:default_max_retained_segments
+      json)
 
 let append_cursor ~base_dir ~partition json =
   let dir = Ide_paths.partition_store_dir ~base_dir partition in
-  Fs_compat.mkdir_p dir;
   let path = Filename.concat dir cursor_file_name in
-  Fs_compat.append_jsonl path json
+  Ide_ingest_queue.submit (fun () ->
+    Fs_compat.mkdir_p dir;
+    Fs_compat.append_jsonl path json)
 
 let string_field key = function
   | `Assoc fields ->

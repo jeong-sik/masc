@@ -968,6 +968,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
       expect(cards[0]?.textContent).toContain('task:transcription')
       expect(cards[0]?.textContent).toContain('declared:api:chat-completions')
+      expect(cards[0]?.textContent).toContain('transport:http')
       expect(cards[0]?.textContent).toContain('headers:1')
       expect(cards[0]?.textContent).toContain('temp:0.65')
       expect(cards[0]?.textContent).toContain('budget:8192')

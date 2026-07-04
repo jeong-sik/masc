@@ -134,31 +134,31 @@ module Lsp_method_catalog = struct
     { method_; wire_method; classification }
   ;;
 
-  let handled_methods =
-    [ Initialize
-    ; Initialized
-    ; Shutdown
-    ; Exit
-    ; Masc_lsp_status
-    ; Did_open
-    ; Did_change
-    ; Did_save
-    ; Did_close
-    ; Hover
-    ; CodeLens
-    ; InlayHint
-    ; Diagnostic
-    ; Definition
-    ; References
-    ; Completion
-    ; CodeAction
-    ; Document_symbol
-    ; Folding_range
-    ; Document_highlight
+  let entries =
+    [ entry Initialize
+    ; entry Initialized
+    ; entry Shutdown
+    ; entry Exit
+    ; entry Masc_lsp_status
+    ; entry Did_open
+    ; entry Did_change
+    ; entry Did_save
+    ; entry Did_close
+    ; entry Hover
+    ; entry CodeLens
+    ; entry InlayHint
+    ; entry Diagnostic
+    ; entry Definition
+    ; entry References
+    ; entry Completion
+    ; entry CodeAction
+    ; entry Document_symbol
+    ; entry Folding_range
+    ; entry Document_highlight
     ]
   ;;
 
-  let entries = List.map entry handled_methods
+  let handled_methods = List.map (fun (e : entry) -> e.method_) entries
 
   let of_string method_ =
     List.find_map

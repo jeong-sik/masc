@@ -5,7 +5,10 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { kSlot, kSigil } from '../keeper-badge'
-import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
+import {
+  keeperDisplayRuntime,
+  keeperDisplayStatus,
+} from '../../lib/keeper-runtime-display'
 import { isKeeperOffline, isKeeperPaused } from '../../lib/keeper-predicates'
 import {
   PHASE_LABEL_KO,
@@ -164,5 +167,5 @@ export function keeperModelLabel(keeper: Keeper): string | null {
 
 /** Current runtime label for the header/rail. */
 export function keeperRuntimeLabel(keeper: Keeper): string | null {
-  return keeper.runtime_canonical ?? keeper.selected_runtime_canonical ?? null
+  return keeperDisplayRuntime(keeper)?.value ?? null
 }

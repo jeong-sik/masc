@@ -6,7 +6,17 @@ import { html } from 'htm/preact'
 import { PipelineStageBadge } from '../keeper-pipeline-stage'
 import { findKeeper } from '../../lib/keeper-utils'
 import { formatDuration } from '../../lib/format-time'
-import { keeperActivityDisplay, keeperDisplayModel } from '../../lib/keeper-runtime-display'
+import {
+  keeperActivityDisplay,
+  keeperDisplayModel,
+  keeperDisplayRuntime,
+} from '../../lib/keeper-runtime-display'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../../lib/runtime-catalog-resource'
+import { runtimeCatalogSnapshotFacts } from '../../lib/runtime-provider-summary'
 
 function ctxBarClass(ratio: number | null | undefined): string {
   if (ratio == null) return ''
@@ -28,7 +38,18 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper.generation
   const model = keeperDisplayModel(keeper)
+  const runtime = keeperDisplayRuntime(keeper)
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  loadRuntimeCatalog()
+  const catalogState = runtimeCatalogState.value
+  const catalog = catalogState.status === 'loaded' ? catalogState.data : []
+  const runtimeEntry = runtime ? findRuntimeCatalogEntry(catalog, runtime.value) : null
+  const runtimeFacts = runtimeEntry ? runtimeCatalogSnapshotFacts(runtimeEntry) : null
+  const runtimeSpecState = runtimeFacts
+    ?? (runtime && catalogState.status === 'error' ? 'catalog unavailable' : null)
+    ?? (runtime && catalogState.status === 'loaded' && runtimeEntry === null ? 'catalog entry missing' : null)
+  const runtimeSpecTitle = runtimeFacts
+    ?? (catalogState.status === 'error' ? catalogState.message : runtimeSpecState)
 
   return html`
     <div class="v2-monitoring-detail agent-runtime-strip">
@@ -53,6 +74,20 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
         <div class="flex items-center gap-1.5 text-sm">
           <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">GEN</span>
           <span class="text-sm text-[var(--color-fg-primary)] tabular-nums">${generation}</span>
+        </div>
+      ` : null}
+
+      ${runtime ? html`
+        <div class="flex items-center gap-1.5 text-sm min-w-0">
+          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">${runtime.label}</span>
+          <span class="text-sm text-[var(--color-fg-primary)] font-mono truncate max-w-50" title=${runtime.value}>${runtime.value}</span>
+        </div>
+      ` : null}
+
+      ${runtimeSpecState ? html`
+        <div class="flex items-center gap-1.5 text-sm min-w-0">
+          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">SPEC</span>
+          <span class="text-3xs text-[var(--color-fg-secondary)] font-mono truncate max-w-80" title=${runtimeSpecTitle}>${runtimeSpecState}</span>
         </div>
       ` : null}
 

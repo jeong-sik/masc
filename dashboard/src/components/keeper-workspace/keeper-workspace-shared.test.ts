@@ -99,9 +99,11 @@ describe('keeperModelLabel', () => {
 })
 
 describe('keeperRuntimeLabel', () => {
-  it('prefers runtime_canonical then selected_runtime_canonical', () => {
-    expect(keeperRuntimeLabel(mk({ runtime_canonical: 'oas·seoul-1' }))).toBe('oas·seoul-1')
+  it('uses the shared runtime display priority', () => {
+    expect(keeperRuntimeLabel(mk({ runtime_canonical: ' oas.seoul-1 ' }))).toBe('oas.seoul-1')
     expect(keeperRuntimeLabel(mk({ selected_runtime_canonical: 'local·docker' }))).toBe('local·docker')
+    expect(keeperRuntimeLabel(mk({ runtime_id: 'keeper_unified' }))).toBe('keeper_unified')
+    expect(keeperRuntimeLabel(mk({ runtime_ref: { group: 'tier', item: 'resilient_breaker' } }))).toBe('tier.resilient_breaker')
     expect(keeperRuntimeLabel(mk({}))).toBeNull()
   })
 })

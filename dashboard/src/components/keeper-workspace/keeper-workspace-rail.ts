@@ -328,6 +328,11 @@ function runtimeEffectiveCapabilitySummary(
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
+    caps.supports_extended_thinking ? 'extended thinking' : null,
+    caps.supports_reasoning_budget ? 'reasoning budget' : null,
+    caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
+      ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
+      : null,
     caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,

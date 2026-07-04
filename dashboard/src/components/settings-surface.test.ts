@@ -835,7 +835,9 @@ describe('SettingsSurface', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
-            accepted_reasoning_efforts: null,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -965,6 +967,9 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('tool:required')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
+      expect(cards[0]?.textContent).toContain('extended-thinking')
+      expect(cards[0]?.textContent).toContain('reasoning-budget')
+      expect(cards[0]?.textContent).toContain('effort:low,medium,high')
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
       expect(cards[0]?.textContent).toContain('task:transcription')
       expect(cards[0]?.textContent).toContain('declared:api:chat-completions')

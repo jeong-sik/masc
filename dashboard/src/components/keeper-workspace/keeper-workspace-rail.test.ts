@@ -259,6 +259,9 @@ describe('KeeperWorkspaceRail', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -393,6 +396,9 @@ describe('KeeperWorkspaceRail', () => {
     )
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
+    expect(container.textContent).toContain('extended thinking')
+    expect(container.textContent).toContain('reasoning budget')
+    expect(container.textContent).toContain('effort low,medium,high')
     expect(container.textContent).toContain('preserve always-preserved')
     expect(container.textContent).toContain('task transcription')
     // the "no source" stub is replaced once the catalog reports capabilities

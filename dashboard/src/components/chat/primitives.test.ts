@@ -1261,17 +1261,12 @@ describe('Keeper v2 chat blocks', () => {
     expect(voice?.textContent).toContain('whisper')
   })
 
-  it('toggles the voice memo play button label', async () => {
+  it('does not render a synthetic voice play button without a safe audio source', () => {
     renderBlocks([{ t: 'voice', secs: 2, wave: [0.2, 0.5] }])
 
-    const play = container.querySelector('[data-chat-block="voice"] button') as HTMLButtonElement
-    expect(play?.textContent?.trim()).toBe('▶')
-    play.click()
-    await flushUi()
-    expect(play?.textContent?.trim()).toBe('❙❙')
-    play.click()
-    await flushUi()
-    expect(play?.textContent?.trim()).toBe('▶')
+    expect(container.querySelector('[data-chat-block="voice"] button')).toBeNull()
+    expect(container.querySelector('[data-chat-block="voice"] audio')).toBeNull()
+    expect(container.querySelectorAll('.chat-block-vbar').length).toBe(2)
   })
 
   it('renders an image block', () => {
@@ -1662,7 +1657,7 @@ describe('ChatComposer multimodal', () => {
     const sendBtn = container.querySelector('.send') as HTMLButtonElement
     expect(sendBtn.disabled).toBe(true)
 
-    // Simulate Scribe v2 completing transcription
+    // Simulate the capture/transcribe boundary completing transcription.
     if (mockTranscribeCallback) {
       mockTranscribeCallback('스케줄러 결과 확인 바람')
     }
@@ -1676,18 +1671,16 @@ describe('ChatComposer multimodal', () => {
     // 2. Send button should be enabled because we have content
     expect(sendBtn.disabled).toBe(false)
 
-    // 3. Click send button and verify serialization
+    // 3. Click send button and verify text-only STT serialization.
     sendBtn.click()
     await new Promise((r) => setTimeout(r, 10))
 
     expect(onSend).toHaveBeenCalledOnce()
     const payload = onSend.mock.calls[0]?.[0]
     expect(payload.text).toContain('스케줄러 결과 확인 바람')
-    expect(payload.blocks).toHaveLength(2) // Voice block + text block
-    expect(payload.blocks[0]).toMatchObject({
-      t: 'voice',
-      transcript: '스케줄러 결과 확인 바람',
-    })
+    expect(payload.blocks).toHaveLength(1)
+    expect(payload.blocks[0]).toMatchObject({ t: 'p' })
+    expect(payload.blocks.some((block: ChatBlock) => block.t === 'voice')).toBe(false)
 
     // 4. Voice draft should be cleared after send
     expect(container.querySelector('[data-testid="composer-voice-draft"]')).toBeNull()

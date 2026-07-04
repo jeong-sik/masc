@@ -1073,66 +1073,46 @@ function isSafeMediaUrl(url: string, dataPrefixes: string[]): boolean {
 }
 
 function ChatVoiceBlock(b: ChatVoiceBlock) {
-  const secs = b.secs ?? 14
-  const [playing, setPlaying] = useState(false)
-  const [prog, setProg] = useState(0)
+  const secs = b.secs
   const safeSrc = b.src && isSafeMediaUrl(b.src, ['data:audio/']) ? b.src : null
-
-  useEffect(() => {
-    if (!playing) return
-    const start = performance.now() - prog * secs * 1000
-    let raf = 0
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - start) / (secs * 1000))
-      setProg(p)
-      if (p >= 1) {
-        setPlaying(false)
-        return
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [playing])
-
-  const toggle = () => {
-    if (prog >= 1) setProg(0)
-    setPlaying((p) => !p)
-  }
-
   const bars = b.wave ?? []
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`
-  const shown = playing || prog > 0 ? prog * secs : secs
 
   return html`
     <div class="chat-block-voice" data-chat-block="voice">
-      <div class="chat-block-voice-row">
-        ${safeSrc
-          ? html`
-              <audio
-                controls
-                preload="none"
-                src=${safeSrc}
-                class="h-8 max-w-[16rem]"
-                aria-label=${b.transcript || '음성 메시지'}
-              />
-            `
-          : html`
-              <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
-                ${playing ? '❙❙' : '▶'}
-              </button>
-            `}
-        <div class="chat-block-voice-wave">
-          ${bars.map((h, i) => html`
-            <span
-              key=${i}
-              class="chat-block-vbar ${(i + 0.5) / bars.length <= prog ? 'on' : ''}"
-              style=${{ height: `${Math.round(5 + h * 21)}px` }}
-            />
-          `)}
-        </div>
-        <span class="chat-block-voice-dur">${fmt(shown)}</span>
-      </div>
+      ${safeSrc || bars.length > 0 || typeof secs === 'number'
+        ? html`
+            <div class="chat-block-voice-row">
+              ${safeSrc
+                ? html`
+                    <audio
+                      controls
+                      preload="none"
+                      src=${safeSrc}
+                      class="h-8 max-w-[16rem]"
+                      aria-label=${b.transcript || '음성 메시지'}
+                    />
+                  `
+                : null}
+              ${bars.length > 0
+                ? html`
+                    <div class="chat-block-voice-wave">
+                      ${bars.map((h, i) => html`
+                        <span
+                          key=${i}
+                          class="chat-block-vbar"
+                          style=${{ height: `${Math.round(5 + h * 21)}px` }}
+                        />
+                      `)}
+                    </div>
+                  `
+                : null}
+              ${typeof secs === 'number'
+                ? html`<span class="chat-block-voice-dur">${fmt(secs)}</span>`
+                : null}
+            </div>
+          `
+        : null}
       ${b.via || b.size
         ? html`
             <div class="chat-block-voice-meta">
@@ -3254,9 +3234,6 @@ export function AttachDraftChip({
 }
 
 export interface ComposerVoiceDraft {
-  secs: number
-  size: string
-  wave: number[]
   transcript: string
 }
 
@@ -3318,7 +3295,6 @@ export function ChatComposer({
   const [slashIdx, setSlashIdx] = useState(0)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
   const [voiceDraft, setVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
-  const lastVoiceDurationRef = useRef(0)
   const isControlled = typeof draftProp === 'string'
   const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
   const slashMenuKeeperLabel = keeperLabel?.trim() || CHAT_COMPOSER_DEFAULT_KEEPER_LABEL
@@ -3374,24 +3350,13 @@ export function ChatComposer({
   const voice = useVoiceInput({
     onTranscribed: (text) => {
       if (text) {
-        const secs = Math.max(1, lastVoiceDurationRef.current)
-        const size = formatAttachmentSize(secs * 32000)
         setVoiceDraft({
-          secs,
-          size,
-          wave: [0.35, 0.72, 0.48, 0.9, 0.42, 0.66, 0.58, 0.8, 0.5, 0.7, 0.38, 0.62],
           transcript: text,
         })
       }
     },
     onError: (message) => showToast(message, 'error'),
   })
-
-  useEffect(() => {
-    if (voice.state === 'recording') {
-      lastVoiceDurationRef.current = 0
-    }
-  }, [voice.state])
 
   useEffect(() => {
     if (voice.state !== 'recording') {
@@ -3402,7 +3367,6 @@ export function ChatComposer({
     const tick = () => {
       const duration = Math.round((Date.now() - startedAt) / 1000)
       setVoiceElapsed(duration)
-      lastVoiceDurationRef.current = duration
     }
     tick()
     const id = setInterval(tick, 1000)
@@ -3511,18 +3475,8 @@ export function ChatComposer({
     }
     let text = draft.trim()
     if (voiceDraft) {
-      const voiceText = `[Voice memo ${formatVoiceClock(voiceDraft.secs)} (${voiceDraft.size})]\n${voiceDraft.transcript}`
+      const voiceText = voiceDraft.transcript
       text = text ? `${voiceText}\n\n${text}` : voiceText
-
-      blocks.push({
-        t: 'voice',
-        secs: voiceDraft.secs,
-        size: voiceDraft.size,
-        wave: voiceDraft.wave,
-        via: 'ElevenLabs Scribe v2',
-        transcript: voiceDraft.transcript,
-        src: '',
-      } as ChatBlock)
     }
 
     if (text) {
@@ -3640,10 +3594,6 @@ export function ChatComposer({
                   ? html`
                       <div class="cdraft voice" data-testid="composer-voice-draft">
                         <span class="cdraft-glyph mic">◌</span>
-                        <div class="cdraft-wave" aria-hidden="true">
-                          ${voiceDraft.wave.map((height, index) => html`<span class="vbar" key=${index} style=${{ height: `${Math.round(4 + height * 18)}px` }} />`)}
-                        </div>
-                        <span class="cdraft-dur mono">${formatVoiceClock(voiceDraft.secs)}</span>
                         <div class="cdraft-tx">
                           <span class="cdraft-tx-k">받아쓰기</span>
                           <span class="cdraft-tx-v">${voiceDraft.transcript}</span>

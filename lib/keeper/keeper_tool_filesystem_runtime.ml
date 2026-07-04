@@ -376,21 +376,23 @@ let raise_fs_edit_error ?fields message =
 ;;
 
 (* RFC-0128 §4.5 — resolve an absolute or base-relative file_path to
-   a partition + repo-relative path. Three outcomes:
+   a partition + repo-relative path. Four outcomes:
 
    1. [Repo_store.find_repo_by_path_prefix] hits AND the repo's [url]
       normalises via [Agent_observation.canonical_url_of_remote] → [By_url slug]
       bucket + the repo-relative [rel_path].
    2. [Repo_store.find_repo_by_path_prefix] hits but the URL is blank or
-      unparseable → [Orphan] + original path. Counter labelled
+      unparseable → [No_canonical_url] + original path. Counter labelled
       [reason=blank_url] or [reason=url_unparseable].
-   3. No registered repo contains this path → [Orphan] + original path.
+   3. A sandbox playground [repo_id] is not present in the repository store →
+      [Unmatched] + original path. Counter labelled
+      [reason=sandbox_unregistered_repo].
+   4. No registered repo contains this path → [Base_unresolved] + original path.
       Counter labelled [reason=unregistered_repo].
 
    The keeper write path is fire-and-forget; this resolver also never
-   raises — failures during [load_all] degrade to [Orphan] silently
-   with the [reason=unregistered_repo] label so the operator can see
-   how often it happens. *)
+   raises — unresolved paths degrade to typed non-[By_url] partitions with
+   metric labels so the operator can see how often each reason appears. *)
 let resolve_partition_for_write ~base_dir ~kind ~file_path =
   let abs =
     if Filename.is_relative file_path

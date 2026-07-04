@@ -636,7 +636,7 @@ let add_routes router =
                              ~status:`Bad_request
                              ~request
                              (json_error msg)
-                             reqd)))
+                             reqd))))
              | _ ->
                Http.Response.json_value
                  ~status:`Bad_request

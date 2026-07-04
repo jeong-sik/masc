@@ -344,6 +344,7 @@ let recover_lost_disk_records ~base_path =
                     if request_has_live_worker request_id
                     then recovered
                     else (
+                      (* See mark_lost_after_recovery: persisted status change is enough. *)
                       ignore (mark_lost_after_recovery entry : entry);
                       recovered + 1)
                   | Found _ | Absent | Unreadable _ -> recovered))

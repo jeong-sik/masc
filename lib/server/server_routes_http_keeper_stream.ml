@@ -184,7 +184,9 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
   let chat_waiting = Keeper_turn_admission.chat_waiting ~base_path ~keeper_name in
   match in_flight, chat_waiting with
   | None, false -> None
-  | _ -> Some (in_flight, chat_waiting)
+  | None, true -> Some (None, true)
+  | Some info, false -> Some (Some info, false)
+  | Some info, true -> Some (Some info, true)
 
 let dashboard_deferred_ack_text ~keeper_name =
   Printf.sprintf
@@ -981,6 +983,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
     Eio.Promise.create ()
   in
   let signal_stream_projection_done () =
+    (* fire-and-forget: completion is idempotent and may race disconnect cleanup. *)
     ignore (Eio.Promise.try_resolve stream_projection_done_resolver () : bool)
   in
   let push_worker_event event =
@@ -1737,6 +1740,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
              Eio.Promise.create ()
            in
            let signal_adapter_finished () =
+             (* fire-and-forget: the adapter-finished signal is idempotent. *)
              ignore (Eio.Promise.try_resolve adapter_finished_resolver () : bool)
            in
            Eio.Fiber.fork ~sw:stream_sw (fun () ->

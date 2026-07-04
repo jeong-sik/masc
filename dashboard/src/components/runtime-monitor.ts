@@ -322,17 +322,50 @@ function runtimeProviderAuthText(
   return provider.auth_kind ?? MISSING_DATA_DASH
 }
 
+function runtimeSnapshotPromptCache(provider: DashboardRuntimeProviderSnapshot): string | null {
+  if (provider.supports_prompt_caching !== true) return null
+  return `prompt-cache${typeof provider.prompt_cache_alignment === 'number' ? `@${provider.prompt_cache_alignment}` : ''}`
+}
+
 function runtimeSnapshotFactsText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const modelCount = runtimeSnapshotModelCount(provider)
   const note = provider.note?.trim()
+  const formats = [
+    provider.supports_response_format_json ? 'json' : null,
+    provider.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const sampling = [
+    provider.supports_top_k ? 'top_k' : null,
+    provider.supports_min_p ? 'min_p' : null,
+    provider.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const controls = [
+    provider.supports_tool_choice ? 'tool-choice' : null,
+    provider.supports_required_tool_choice ? 'required' : null,
+    provider.supports_named_tool_choice ? 'named' : null,
+    provider.supports_parallel_tool_calls ? 'parallel' : null,
+    provider.supports_extended_thinking ? 'extended-thinking' : null,
+    provider.supports_native_streaming ? 'native-stream' : null,
+    provider.supports_system_prompt ? 'system-prompt' : null,
+    provider.supports_caching ? 'cache' : null,
+    runtimeSnapshotPromptCache(provider),
+    provider.supports_seed_with_images ? 'seed+images' : null,
+    provider.emits_usage_tokens ? 'usage' : null,
+    provider.supports_computer_use ? 'computer-use' : null,
+    provider.supports_code_execution ? 'code-exec' : null,
+  ].filter((value): value is string => Boolean(value))
   return textList([
     provider.source ? `source ${provider.source}` : null,
     provider.protocol ? `protocol ${provider.protocol}` : null,
     typeof modelCount === 'number' ? `models ${formatNumber(modelCount)}` : null,
+    typeof provider.max_context === 'number' ? `ctx ${formatNumber(provider.max_context)}` : null,
+    typeof provider.max_output_tokens === 'number' ? `out ${formatNumber(provider.max_output_tokens)}` : null,
     typeof provider.temperature === 'number' ? `model-temp ${provider.temperature}` : null,
     typeof provider.capabilities_declared === 'boolean'
       ? `caps ${provider.capabilities_declared ? 'declared' : 'missing'}`
       : null,
+    formats.length > 0 ? `format ${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     boolStateText(provider.tools_support, 'tools'),
     boolStateText(provider.thinking_support, 'thinking'),
     boolStateText(provider.streaming, 'streaming'),
@@ -342,6 +375,7 @@ function runtimeSnapshotFactsText(provider: DashboardRuntimeProviderSnapshot): s
     boolStateText(provider.supports_video_input, 'video'),
     boolStateText(provider.supports_reasoning_budget, 'reasoning-budget'),
     provider.thinking_control_format ? `thinking-control ${provider.thinking_control_format}` : null,
+    controls.length > 0 ? `controls ${controls.join(',')}` : null,
     note ? `note ${note}` : null,
   ])
 }

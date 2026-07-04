@@ -397,7 +397,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('budget 32768')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge')
     expect(container.textContent).toContain(
-      'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
     expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
     expect(container.textContent).toContain('modality visual-first')

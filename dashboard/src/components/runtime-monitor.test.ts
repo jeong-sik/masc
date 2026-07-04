@@ -337,7 +337,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('auth env:RUNPOD_API_KEY')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('price-in 0.1')
     expect(container.textContent).toContain('effective · ctx 131,072 · out 65,536')

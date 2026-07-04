@@ -263,6 +263,55 @@ let test_missing_current_task_reconciled_before_transition_hint () =
             check bool "reconciled hint asks for claim/list" true
               (string_contains description "No task currently assigned")))
 
+let test_tool_bundle_does_not_emit_full_universe_assignment () =
+  ignore (init_registry ());
+  Tool_assignment_telemetry.reset_for_testing ();
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_assignment_bundle_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
+    (fun () ->
+      let config = Workspace.default_config dir in
+      let meta = make_meta ~name:"test-assignment-bundle" () in
+      let ctx_snapshot =
+        Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+          ~max_tokens:4000
+      in
+      let bundle =
+        Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot ()
+      in
+      Fun.protect
+        ~finally:bundle.cleanup
+        (fun () ->
+          check
+            (option string)
+            "bundle assembly must not claim an LLM-visible assignment"
+            None
+            (Tool_assignment_telemetry.find_latest_assignment_id
+               ~agent_id:meta.agent_name)))
+
+let test_tool_assignment_telemetry_is_before_turn_scoped () =
+  check bool "bundle source does not emit assignment" true
+    (file_not_contains_pattern
+       "lib/keeper/keeper_tools_oas_bundle.ml"
+       "Tool_assignment_telemetry.emit_assigned");
+  check bool "legacy bundle reason removed" true
+    (file_not_contains_pattern
+       "lib/keeper/keeper_tools_oas_bundle.ml"
+       "keeper tool bundle assembly");
+  check bool "before-turn hook records computed schema filter" true
+    (file_contains_pattern
+       "lib/keeper/keeper_run_tools_hooks.ml"
+       "record_tool_assignment ~turn ~tool_list:schema_filter ~lane");
+  check bool "setup owns assignment telemetry emission" true
+    (file_contains_pattern
+       "lib/keeper/keeper_run_tools_setup.ml"
+       "Tool_assignment_telemetry.emit_assigned")
+
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
 let test_atomic_write_not_empty () =
@@ -387,6 +436,10 @@ let () =
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "missing current task reconciles before transition hint" `Quick
             test_missing_current_task_reconciled_before_transition_hint;
+          test_case "bundle assembly does not emit assignment" `Quick
+            test_tool_bundle_does_not_emit_full_universe_assignment;
+          test_case "assignment telemetry is before-turn scoped" `Quick
+            test_tool_assignment_telemetry_is_before_turn_scoped;
         ] );
       ( "atomic_agent_json",
         [

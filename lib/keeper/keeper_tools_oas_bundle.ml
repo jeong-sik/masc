@@ -62,36 +62,6 @@ let make_tool_bundle
     |> List.map Keeper_tool_descriptor.internal_names
     |> List.concat
   in
-  let alias_public_names_in_surface =
-    model_visible_descriptors
-    |> List.concat_map (fun descriptor ->
-      if
-        List.exists
-          (fun internal_name -> List.mem internal_name universe_names)
-          (Keeper_tool_descriptor.internal_names descriptor)
-      then Keeper_tool_descriptor.public_names_of_descriptor descriptor
-      else [])
-  in
-  let assembled_surface_names =
-    List.filter (fun n -> not (List.mem n aliased_internal_names)) universe_names
-    @ alias_public_names_in_surface
-  in
-  (* Record tool assignment telemetry for causal tracing.
-     assignment_id links Assigned -> Called -> Completed events.
-     [tool_list] matches the actual LLM-visible surface (internal names
-     minus aliased counterparts, plus public alias names), so downstream
-     Assigned/Called/Completed pairing has no missing entries. *)
-  let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
-    let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
-    Tool_assignment_telemetry.emit_assigned
-      ~agent_id:meta.agent_name
-      ~profile:"keeper"
-      ~tool_list:assembled_surface_names
-      ~allow_set:(Keeper_tool_policy.StringSet.elements lookup.allow_set)
-      ~deny_set:(Keeper_tool_policy.StringSet.elements lookup.deny_set)
-      ~reason:"keeper tool bundle assembly"
-      ()
-  in
   let failure_counts = create_failure_counts () in
   (* Pass A: internal tools that have no public alias.  Aliased internals
      are registered only via Pass B under their public name so the LLM

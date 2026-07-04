@@ -173,6 +173,69 @@ let modalities_for_request payload =
   | [] -> [ "text" ]
   | labels -> labels
 
+type dashboard_deferred_chat =
+  { in_flight : Keeper_turn_admission.in_flight_info option
+  ; chat_waiting : bool
+  ; queue_length : int
+  }
+
+let dashboard_busy_queue_state ~base_path ~keeper_name =
+  let in_flight = Keeper_turn_admission.in_flight ~base_path ~keeper_name in
+  let chat_waiting = Keeper_turn_admission.chat_waiting ~base_path ~keeper_name in
+  match in_flight, chat_waiting with
+  | None, false -> None
+  | _ -> Some (in_flight, chat_waiting)
+
+let dashboard_deferred_ack_text ~keeper_name =
+  Printf.sprintf
+    "%s is busy; your message is queued and will be answered after the current \
+     turn finishes."
+    keeper_name
+
+let dashboard_deferred_chat_to_json ~keeper_name
+    ({ in_flight; chat_waiting; queue_length } : dashboard_deferred_chat) =
+  let in_flight_fields =
+    match in_flight with
+    | None -> []
+    | Some { Keeper_turn_admission.lane; started_at } ->
+        [ ( "in_flight_lane"
+          , `String (Keeper_turn_admission.lane_to_string lane) )
+        ; ( "in_flight_started_at"
+          , `Float started_at )
+        ]
+  in
+  `Assoc
+    ([ ("keeper_name", `String keeper_name)
+     ; ("status", `String "queued")
+     ; ("queue", `String "keeper_chat_queue")
+     ; ("queue_length", `Int queue_length)
+     ; ("chat_waiting", `Bool chat_waiting)
+     ]
+     @ in_flight_fields)
+
+let enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting =
+  Keeper_chat_queue.enqueue ~keeper_name:payload.name
+    { Keeper_chat_queue.content = payload.message
+    ; user_blocks = payload.user_blocks
+    ; attachments = payload.attachments
+    ; timestamp = Eio.Time.now clock
+    ; source = Keeper_chat_queue.Dashboard
+    };
+  { in_flight
+  ; chat_waiting
+  ; queue_length = Keeper_chat_queue.length ~keeper_name:payload.name
+  }
+
+let dashboard_deferred_chat_of_rejection ~clock payload
+    ({ Keeper_turn_admission.waiting; in_flight } : Keeper_turn_admission.rejection) =
+  enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting:(waiting > 0)
+
+let defer_dashboard_payload_if_busy ~base_path ~clock payload =
+  match dashboard_busy_queue_state ~base_path ~keeper_name:payload.name with
+  | None -> `Not_busy
+  | Some (in_flight, chat_waiting) ->
+      `Queued (enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting)
+
 let keeper_chat_request_prefixes =
   [
     "/api/v1/gate/message/requests/";
@@ -658,6 +721,95 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
     ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 
+let execute_keeper_stream_tool_streaming_if_free ~sw ~clock ?auth_token:_ ?on_event state
+    ~agent_name ~arguments ~on_text_delta =
+  let start_time = Eio.Time.now clock in
+  let outcome =
+    try
+      let keeper_ctx : _ Keeper_tool_surface.context =
+        {
+          config = (Mcp_server.workspace_config state);
+          agent_name;
+          sw;
+          clock;
+          proc_mgr = state.Mcp_server.proc_mgr;
+          net = state.Mcp_server.net;
+        }
+      in
+      match
+        Keeper_turn.handle_keeper_msg_if_free ~on_text_delta ?on_event keeper_ctx
+          arguments
+      with
+      | `Busy rejection -> `Busy rejection
+      | `Ran result ->
+          let success = Tool_result.is_success result in
+          let body = Tool_result.message result in
+          let failure_class =
+            match Tool_result.failure_class result with
+            | Some cls -> cls
+            | None -> Tool_result.Runtime_failure
+          in
+          `Ran (success, body, failure_class)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Workspace.Not_initialized ->
+        `Ran
+          ( false
+          , Masc_domain.masc_error_to_string
+              (Masc_domain.System Masc_domain.System_error.NotInitialized)
+          , Tool_result.Runtime_failure )
+    | exn ->
+        let err = Printexc.to_string exn in
+        Log.Mcp.error "tools/call crashed (stream if-free): %s" err;
+        `Ran (false, Printf.sprintf "Internal error: %s" err, Tool_result.Runtime_failure)
+  in
+  match outcome with
+  | `Busy rejection -> `Busy rejection
+  | `Ran (success, body, failure_class) ->
+      let end_time = Eio.Time.now clock in
+      let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
+      let error_detail =
+        if success then None
+        else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
+      in
+      Audit_log.log_tool_call (Mcp_server.workspace_config state)
+        ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success
+        ~error_msg:error_detail ();
+      if not success then
+        Log.Keeper.emit Log.Error
+          ~details:
+            (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
+               ~agent_name ~duration_ms ~streaming:true ~error_body:body
+               ~failure_class)
+          "keeper tool call failed: masc_keeper_msg";
+      let telemetry_enabled = Env_config_core.telemetry_enabled () in
+      if telemetry_enabled then (
+        match state.Mcp_server.fs with
+        | Some fs ->
+            (try
+               let telemetry_error_kind =
+                 if success then None
+                 else Some (Telemetry_eio.error_kind_of_string "tool_failure")
+               in
+               let telemetry_failure_class =
+                 if success then None else Some failure_class
+               in
+               Telemetry_eio.track_tool_called ~fs
+                 (Mcp_server.workspace_config state)
+                 ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
+                 ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
+                 ?failure_class:telemetry_failure_class
+                 ?error_kind:telemetry_error_kind ?error_message:error_detail ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Misc.error "telemetry tracking failed: %s"
+                 (Printexc.to_string exn))
+        | None -> ());
+      Tool_registry.record_call_if_known ~source:Agent_internal
+        ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
+      `Ran (success, body)
+
 (** Send a Run_error AG-UI event with the given message. *)
 let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
   ignore
@@ -777,6 +929,7 @@ let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
 type keeper_stream_worker_event =
   | Stream_event of Agent_sdk.Types.sse_event
   | Stream_client_disconnected
+  | Stream_dashboard_queued of dashboard_deferred_chat
   | Stream_terminal of
       { ok : bool
       ; status : string
@@ -824,9 +977,15 @@ let process_single_turn ~connector_user_line_recorded_upstream
   let worker_events = Eio.Stream.create worker_events_buffer_size in
   let terminal_pushed = Atomic.make false in
   let client_disconnected = Atomic.make false in
+  let stream_projection_done, stream_projection_done_resolver =
+    Eio.Promise.create ()
+  in
+  let signal_stream_projection_done () =
+    ignore (Eio.Promise.try_resolve stream_projection_done_resolver () : bool)
+  in
   let push_worker_event event =
     match event with
-    | Stream_terminal _ ->
+    | Stream_dashboard_queued _ | Stream_terminal _ ->
         if Atomic.compare_and_set terminal_pushed false true then
           (try Eio.Stream.add worker_events event
            with
@@ -940,6 +1099,9 @@ let process_single_turn ~connector_user_line_recorded_upstream
       ()
   in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
+  let dashboard_direct_stream =
+    (not connector_user_line_recorded_upstream) && not (has_external_speaker payload)
+  in
   let request_id =
     Keeper_msg_async.submit ?timeout_sec ~clock ~sw
       ~base_path
@@ -948,27 +1110,53 @@ let process_single_turn ~connector_user_line_recorded_upstream
         let start_time = Time_compat.now () in
         let dispatch_result =
           try
-            Ok
-              (execute_keeper_stream_tool_streaming ~sw ~clock
-                 ?auth_token
-                 state ~agent_name ~arguments:args ~on_event ~on_text_delta:(fun _ -> ()))
+            if dashboard_direct_stream then
+              match
+                execute_keeper_stream_tool_streaming_if_free ~sw ~clock
+                  ?auth_token
+                  state ~agent_name ~arguments:args ~on_event
+                  ~on_text_delta:(fun _ -> ())
+              with
+              | `Ran result -> Ok (`Ran result)
+              | `Busy rejection ->
+                  let queued =
+                    dashboard_deferred_chat_of_rejection ~clock payload rejection
+                  in
+                  push_worker_event (Stream_dashboard_queued queued);
+                  Ok (`Queued queued)
+            else
+              Ok
+                (`Ran
+                   (execute_keeper_stream_tool_streaming ~sw ~clock
+                      ?auth_token
+                      state ~agent_name ~arguments:args ~on_event
+                      ~on_text_delta:(fun _ -> ())))
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
               Log.Keeper.warn
                 "keeper_stream: streaming dispatch raised: %s"
                 (Printexc.to_string exn);
-              (try
-                 Ok
-                   (execute_keeper_stream_tool ~sw ~clock
-                      ?auth_token
-                      state ~agent_name ~arguments:args)
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn2 -> Error (Printexc.to_string exn2))
+              if dashboard_direct_stream then Error (Printexc.to_string exn)
+              else
+                (try
+                   Ok
+                     (`Ran
+                        (execute_keeper_stream_tool ~sw ~clock
+                           ?auth_token
+                           state ~agent_name ~arguments:args))
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn2 -> Error (Printexc.to_string exn2))
         in
         match dispatch_result with
-        | Ok (true, body) ->
+        | Ok (`Queued queued) ->
+            Tool_result.ok
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              (Yojson.Safe.to_string
+                 (dashboard_deferred_chat_to_json ~keeper_name:payload.name queued))
+        | Ok (`Ran (true, body)) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
             let streamed_text =
               Keeper_stream_text_accum.streamed_text worker_text_accum
@@ -1070,7 +1258,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
                  push_worker_event
                    (Stream_terminal { ok = true; status = "done"; body });
                  Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body)
-        | Ok (false, err) ->
+        | Ok (`Ran (false, err)) ->
             persist_failure_reply err;
             push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
@@ -1084,14 +1272,24 @@ let process_single_turn ~connector_user_line_recorded_upstream
    | None -> ()
    | Some (disconnect_sw, disconnects) ->
        Eio.Fiber.fork ~sw:disconnect_sw (fun () ->
-         let _ = Eio.Stream.take disconnects in
-         if not (Atomic.get terminal_pushed) then begin
-           Atomic.set client_disconnected true;
-           Log.Keeper.info
-             "keeper_stream: client disconnected keeper=%s request_id=%s; request continues for polling"
-             payload.name request_id;
-           push_worker_event Stream_client_disconnected
-         end));
+         match
+           Eio.Fiber.first
+             (fun () ->
+               Eio.Stream.take disconnects;
+               `Client_disconnected)
+             (fun () ->
+               Eio.Promise.await stream_projection_done;
+               `Projection_done)
+         with
+         | `Projection_done -> ()
+         | `Client_disconnected ->
+             if not (Atomic.get terminal_pushed) then begin
+               Atomic.set client_disconnected true;
+               Log.Keeper.info
+                 "keeper_stream: client disconnected keeper=%s request_id=%s; request continues for polling"
+                 payload.name request_id;
+               push_worker_event Stream_client_disconnected
+             end));
   Log.Keeper.info
     "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
     payload.name request_id
@@ -1148,6 +1346,17 @@ let process_single_turn ~connector_user_line_recorded_upstream
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
+    | Stream_dashboard_queued queued ->
+        let message = dashboard_deferred_ack_text ~keeper_name:payload.name in
+        publish_terminal ~status:"queued" ~ok:true ~message ();
+        Keeper_chat_events.publish events (Text_delta message);
+        Keeper_chat_events.publish events
+          (Custom
+             { name = "KEEPER_CHAT_QUEUED";
+               value = dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
+             });
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Run_finished { run_id })
     | Stream_terminal { ok = false; status = "cancelled"; body = message } ->
         let message = redact_text message in
         publish_terminal ~status:"cancelled" ~ok:false ~message ();
@@ -1156,6 +1365,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
     | Stream_terminal { ok = false; status; body = err } ->
         let err = redact_text err in
         publish_terminal ~status ~ok:false ~message:err ();
+        Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err })
     | Stream_terminal { ok = true; body; _ } -> (
         try
@@ -1214,11 +1424,29 @@ let process_single_turn ~connector_user_line_recorded_upstream
         | exn ->
             let message = redact_text (Printexc.to_string exn) in
             publish_terminal ~status:"error" ~ok:false ~message ();
+            Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events
               (Event_error { message }))
   in
-  consume_worker_events empty_keeper_stream_bridge_state
+  match consume_worker_events empty_keeper_stream_bridge_state with
+  | () -> signal_stream_projection_done ()
+  | exception exn ->
+      signal_stream_projection_done ();
+      raise exn
 
+let keeper_chat_stream_headers origin =
+  Httpun.Headers.of_list
+    ([
+       ("content-type", "text/event-stream");
+       ("cache-control", "no-cache");
+       (* This route is a per-turn SSE response. Httpun does not add a
+          Content-Length for streaming bodies, so the terminal delimiter is the
+          writer close; advertising keep-alive makes clients wait for a
+          response end that cannot be framed. *)
+       ("connection", "close");
+       ("x-accel-buffering", "no");
+     ]
+    @ cors_headers origin)
 
 let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let redaction =
@@ -1229,16 +1457,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let redact_text = Keeper_secret_redaction.redact_text redaction in
   let redact_json = Keeper_secret_redaction.redact_json redaction in
   let origin = get_origin request in
-  let headers =
-    Httpun.Headers.of_list
-      ([
-         ("content-type", "text/event-stream");
-         ("cache-control", "no-cache");
-         ("connection", "keep-alive");
-         ("x-accel-buffering", "no");
-       ]
-      @ cors_headers origin)
-  in
+  let headers = keeper_chat_stream_headers origin in
   let response = Httpun.Response.create ~headers `OK in
   let writer = Httpun.Reqd.respond_with_streaming reqd response in
   let mutex = Eio.Mutex.create () in
@@ -1265,7 +1484,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
 
-  let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed =
+  let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed ~on_finished =
     let current_thread_id = ref Ag_ui.default_thread_id in
     let current_run_id = ref None in
     let current_message_id = ref None in
@@ -1482,7 +1701,11 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                    make_event ~thread_id:!current_thread_id ~run_id:(Some run_id)
                      Run_finished))
     in
-    loop ()
+    match loop () with
+    | () -> on_finished ()
+    | exception exn ->
+        on_finished ();
+        raise exn
   in
 
 
@@ -1510,18 +1733,75 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
            let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
            let events = Keeper_chat_events.create () in
+           let adapter_finished, adapter_finished_resolver =
+             Eio.Promise.create ()
+           in
+           let signal_adapter_finished () =
+             ignore (Eio.Promise.try_resolve adapter_finished_resolver () : bool)
+           in
            Eio.Fiber.fork ~sw:stream_sw (fun () ->
              sse_adapter_loop ~events ~writer ~mutex ~closed
-               ~on_closed:notify_disconnect);
-           (* Dashboard stream route: no gate inbound boundary recorded this
-              user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
-           process_single_turn ~connector_user_line_recorded_upstream:false
-             ~state ~clock ~sw
-             ~auth_token:(auth_token_from_request request)
-             ~thread_id ~closed
-             ~client_disconnects:(Some (stream_sw, client_disconnects))
-             ~payload ~run_id ~message_id ~agent_name ~events;
-           (* Queue drain is now handled by Keeper_chat_consumer
+               ~on_closed:notify_disconnect ~on_finished:signal_adapter_finished);
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           let wait_for_adapter_finished () =
+             Eio.Promise.await adapter_finished
+           in
+           let run_now () =
+             (* Dashboard stream route: no gate inbound boundary recorded this
+                user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
+             process_single_turn ~connector_user_line_recorded_upstream:false
+               ~state ~clock ~sw
+               ~auth_token:(auth_token_from_request request)
+               ~thread_id ~closed
+               ~client_disconnects:(Some (stream_sw, client_disconnects))
+               ~payload ~run_id ~message_id ~agent_name ~events;
+             wait_for_adapter_finished ()
+           in
+           if has_external_speaker payload then run_now ()
+           else
+             match
+               try defer_dashboard_payload_if_busy ~base_path ~clock payload
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn -> `Queue_error (Printexc.to_string exn)
+             with
+             | `Not_busy -> run_now ()
+             | `Queued queued ->
+                 Log.Keeper.info
+                   "keeper_stream: deferred busy dashboard message keeper=%s queue_length=%d"
+                   payload.name queued.queue_length;
+                 Keeper_chat_events.publish events
+                   (Run_started { run_id; thread_id });
+                 Keeper_chat_events.publish events
+                   (Text_message_start
+                      { message_id; role = Keeper_chat_events.Assistant });
+                 Keeper_chat_events.publish events
+                   (Text_delta
+                      (dashboard_deferred_ack_text ~keeper_name:payload.name));
+                 Keeper_chat_events.publish events
+                   (Custom
+                      { name = "KEEPER_CHAT_QUEUED";
+                        value =
+                          dashboard_deferred_chat_to_json
+                            ~keeper_name:payload.name queued
+                 });
+                 Keeper_chat_events.publish events Text_message_end;
+                 Keeper_chat_events.publish events (Run_finished { run_id });
+                 wait_for_adapter_finished ()
+             | `Queue_error message ->
+                 Log.Keeper.error
+                   "keeper_stream: failed to defer busy dashboard message keeper=%s: %s"
+                   payload.name message;
+                 Keeper_chat_events.publish events
+                   (Run_started { run_id; thread_id });
+                 Keeper_chat_events.publish events
+                   (Event_error
+                      { message =
+                          "keeper chat queue persistence failed: " ^ message
+                      });
+                 Keeper_chat_events.publish events (Run_finished { run_id });
+                 wait_for_adapter_finished ();
+           (* Queue drain is handled by Keeper_chat_consumer
               (started in server_bootstrap_loops). *)
            ))
 
@@ -1537,6 +1817,11 @@ module For_testing = struct
   let turn_instructions_for_request = turn_instructions_for_request
   let args_of_request = args_of_request
   let modalities_for_request = modalities_for_request
+  let defer_dashboard_payload_if_busy ~base_path ~clock payload =
+    match defer_dashboard_payload_if_busy ~base_path ~clock payload with
+    | `Not_busy -> `Not_busy
+    | `Queued queued -> `Queued queued.queue_length
+
   let extract_visible_reply = extract_visible_reply
   let direct_reply_terminal_error = direct_reply_terminal_error
   let visible_reply_with_stream_fallback = visible_reply_with_stream_fallback
@@ -1549,4 +1834,5 @@ module For_testing = struct
   let empty_stream_bridge_state = empty_keeper_stream_bridge_state
   let translate_oas_stream_event = translate_oas_stream_event
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
+  let keeper_chat_stream_headers = keeper_chat_stream_headers
 end

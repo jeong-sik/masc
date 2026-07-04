@@ -319,6 +319,46 @@ let mark_lost_after_recovery (entry : entry) =
   lost
 ;;
 
+let request_has_live_worker request_id =
+  Eio.Mutex.use_ro mu (fun () -> Hashtbl.mem pending request_id)
+;;
+
+let recover_lost_disk_records ~base_path =
+  let dir = request_dir ~base_path in
+  try
+    if (not (Sys.file_exists dir)) || not (Sys.is_directory dir)
+    then 0
+    else
+      Sys.readdir dir
+      |> Array.fold_left
+           (fun recovered name ->
+              match request_id_of_record_filename name with
+              | None -> recovered
+              | Some request_id ->
+                let path = Filename.concat dir name in
+                if Sys.is_directory path
+                then recovered
+                else (
+                  match load_record ~base_path ~request_id with
+                  | Found ({ status = Queued | Running; _ } as entry) ->
+                    if request_has_live_worker request_id
+                    then recovered
+                    else (
+                      ignore (mark_lost_after_recovery entry : entry);
+                      recovered + 1)
+                  | Found _ | Absent | Unreadable _ -> recovered))
+           0
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.warn
+      "keeper_msg_async: recovery scan failed base_path=%s dir=%s error=%s"
+      base_path
+      dir
+      (Printexc.to_string exn);
+    0
+;;
+
 let generate_request_id ~keeper_name =
   let n = Atomic.fetch_and_add counter 1 in
   let safe_keeper_name =
@@ -595,6 +635,7 @@ module For_testing = struct
   let record_path = record_path
   let load_record = load_record
   let gc_stale_disk = gc_stale_disk
+  let recover_lost_disk_records = recover_lost_disk_records
   let active_switch_count () =
     Eio.Mutex.use_ro mu (fun () -> Hashtbl.length active_switches)
   ;;

@@ -78,6 +78,51 @@ let create_worker_token base_path agent_name =
     failf "create_token failed for %s: %s" agent_name (Masc_domain.masc_error_to_string e)
 ;;
 
+let repository_fixture ~id ~url ~local_path : Repo_manager_types.repository =
+  { id
+  ; name = id
+  ; url
+  ; local_path
+  ; aliases = []
+  ; default_branch = "main"
+  ; keepers = []
+  ; status = Repo_manager_types.Active
+  ; auto_sync = false
+  ; sync_interval = 0
+  ; created_at = Int64.zero
+  ; updated_at = Int64.zero
+  }
+;;
+
+let seed_annotation_scope_repos base_path =
+  let masc_path = Filename.concat base_path "workspace/masc" in
+  let oas_path = Filename.concat base_path "workspace/oas" in
+  let repos =
+    [ repository_fixture
+        ~id:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:masc_path
+    ; repository_fixture
+        ~id:"oas"
+        ~url:"https://github.com/jeong-sik/oas.git"
+        ~local_path:oas_path
+    ]
+  in
+  match Repo_store.save_all ~base_path repos with
+  | Ok () -> masc_path, oas_path
+  | Error msg -> failf "save repositories failed: %s" msg
+;;
+
+let annotation_body ~file_path =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "file_path", `String file_path
+       ; "line_start", `Int 1
+       ; "line_end", `Int 2
+       ; "content", `String "note"
+       ])
+;;
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Fun.protect
@@ -221,6 +266,14 @@ let error_message_of_response response =
   |> json_string_member "error response" "error"
 ;;
 
+let annotation_count router path =
+  let request = http_request ~meth:`GET ~path () in
+  let response = dispatch router request in
+  check_status "GET annotations succeeds" 200 response;
+  let json = response |> response_body |> Yojson.Safe.from_string in
+  List.length (json_list_member "annotations response" "data" json)
+;;
+
 let setup_state base_path =
   save_auth_config base_path;
   let state = Masc.Mcp_server.create_state ~base_path in
@@ -346,6 +399,91 @@ let test_post_cursors_honors_canonical_url_scope () =
     | cursor :: _ ->
       check string "scoped cursor file" "lib/a.ml" (json_string_member "cursor" "file_path" cursor)
     | [] -> fail "expected scoped cursor")
+;;
+
+let test_post_annotations_accepts_matching_repo_scope () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let masc_path, _oas_path = seed_annotation_scope_repos base_path in
+    let token = create_worker_token base_path "alice" in
+    let file_path = Filename.concat masc_path "lib/a.ml" in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations?repo_id=masc"
+        ~body:(annotation_body ~file_path)
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "POST annotation with matching repo_id returns 201" 201 response;
+    check
+      int
+      "matching annotation is visible in requested partition"
+      1
+      (annotation_count router "/api/v1/ide/annotations?repo_id=masc");
+    check
+      int
+      "matching annotation is not written to other partition"
+      0
+      (annotation_count router "/api/v1/ide/annotations?repo_id=oas"))
+;;
+
+let test_post_annotations_rejects_repo_scope_mismatch () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let _masc_path, oas_path = seed_annotation_scope_repos base_path in
+    let token = create_worker_token base_path "alice" in
+    let file_path = Filename.concat oas_path "lib/a.ml" in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations?repo_id=masc"
+        ~body:(annotation_body ~file_path)
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "POST annotation with mismatched repo_id returns 400" 400 response;
+    check
+      string
+      "repo scope mismatch error"
+      "file_path does not belong to requested repo_id"
+      (error_message_of_response response);
+    check
+      int
+      "mismatched annotation is not written to requested partition"
+      0
+      (annotation_count router "/api/v1/ide/annotations?repo_id=masc");
+    check
+      int
+      "mismatched annotation is not written to actual partition"
+      0
+      (annotation_count router "/api/v1/ide/annotations?repo_id=oas"))
+;;
+
+let test_post_annotations_rejects_canonical_scope_mismatch () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let _masc_path, oas_path = seed_annotation_scope_repos base_path in
+    let token = create_worker_token base_path "alice" in
+    let file_path = Filename.concat oas_path "lib/a.ml" in
+    let scoped_path =
+      "/api/v1/ide/annotations?canonical_url="
+      ^ Uri.pct_encode "https://github.com/jeong-sik/masc.git"
+    in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:scoped_path
+        ~body:(annotation_body ~file_path)
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "POST annotation with mismatched canonical_url returns 400" 400 response;
+    check
+      string
+      "canonical scope mismatch error"
+      "file_path does not belong to requested canonical_url"
+      (error_message_of_response response))
 ;;
 
 let test_post_annotations_requires_auth () =
@@ -593,6 +731,12 @@ let () =
             test_post_cursors_persists_valid_focus_mode
         ; test_case "POST cursor honors canonical_url scope" `Quick
             test_post_cursors_honors_canonical_url_scope
+        ; test_case "POST annotation accepts matching repo scope" `Quick
+            test_post_annotations_accepts_matching_repo_scope
+        ; test_case "POST annotation rejects repo scope mismatch" `Quick
+            test_post_annotations_rejects_repo_scope_mismatch
+        ; test_case "POST annotation rejects canonical scope mismatch" `Quick
+            test_post_annotations_rejects_canonical_scope_mismatch
         ; test_case "POST annotation requires auth" `Quick
             test_post_annotations_requires_auth
         ; test_case "DELETE annotation requires auth" `Quick

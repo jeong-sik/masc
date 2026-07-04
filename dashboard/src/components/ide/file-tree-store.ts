@@ -264,22 +264,28 @@ export function createFileTreeStore(
     const open = expanded.value
     if (nodes.length === 0) return []
 
-    const byPath = new Map<string, FileTreeNode>()
-    for (const n of nodes) byPath.set(n.path, n)
-
-    const visible: FileTreeNode[] = []
+    const childrenByParent = new Map<string | null, FileTreeNode[]>()
     for (const n of nodes) {
-      let cur: string | null = normalizedParent(n.parent)
-      let chainOpen = true
-      while (cur !== null) {
-        if (!open.has(cur)) {
-          chainOpen = false
-          break
-        }
-        const parent = byPath.get(cur)
-        cur = parent ? normalizedParent(parent.parent) : null
+      const parent = normalizedParent(n.parent)
+      const children = childrenByParent.get(parent)
+      if (children) {
+        children.push(n)
+      } else {
+        childrenByParent.set(parent, [n])
       }
-      if (chainOpen) visible.push(n)
+    }
+    const visible: FileTreeNode[] = []
+
+    const visit = (node: FileTreeNode): void => {
+      visible.push(node)
+      if (!open.has(node.path)) return
+      for (const child of childrenByParent.get(node.path) ?? []) {
+        visit(child)
+      }
+    }
+
+    for (const root of childrenByParent.get(null) ?? []) {
+      visit(root)
     }
     return visible
   })

@@ -269,8 +269,13 @@ describe('createFileTreeStore lazy children loading', () => {
     expect(loadChildren).toHaveBeenCalledWith('lib')
     expect(s.isChildrenLoaded('lib')).toBe(true)
     // Children are merged and now visible under the expanded 'lib'.
-    expect(s.visibleNodes().map(n => n.path)).toContain('lib/server')
-    expect(s.visibleNodes().map(n => n.path)).toContain('lib/main.ml')
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/server',
+      'lib/main.ml',
+      'dashboard',
+      'README.md',
+    ])
   })
 
   it('does not re-fetch a directory whose children were already loaded', async () => {
@@ -368,9 +373,13 @@ describe('createFileTreeStore live refresh (reconcile)', () => {
 
     expect(s.isExpanded('lib')).toBe(true)
     expect(s.isChildrenLoaded('lib')).toBe(true)
-    const visible = s.visibleNodes().map(n => n.path)
-    expect(visible).toContain('lib/server')
-    expect(visible).toContain('lib/main.ml')
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/server',
+      'lib/main.ml',
+      'dashboard',
+      'README.md',
+    ])
   })
 
   it('applies fresh diffs on refresh while keeping the tree open', () => {

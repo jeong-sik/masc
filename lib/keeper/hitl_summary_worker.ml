@@ -291,15 +291,19 @@ let parse_suggested_option json =
       (match risk_level_of_string s with
        | Some lvl -> Some lvl
        | None ->
-         Log.Keeper.warn
-           "HITL summary parsed unknown estimated_risk_delta=%s; treating as null"
-           s;
-         None)
+         raise
+           (Failure
+              (Printf.sprintf
+                 "estimated_risk_delta %S is not %s"
+                 s
+                 allowed_risk_level_values_label)))
     | other ->
-      Log.Keeper.warn
-        "HITL summary estimated_risk_delta has unexpected JSON type: %s; treating as null"
-        (Yojson.Safe.to_string other);
-      None
+      raise
+        (Failure
+           (Printf.sprintf
+              "estimated_risk_delta must be null or %s, got %s"
+              allowed_risk_level_values_label
+              (Yojson.Safe.to_string other)))
   in
   { label; rationale; estimated_risk_delta }
 ;;

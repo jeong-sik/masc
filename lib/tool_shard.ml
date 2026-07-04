@@ -130,7 +130,7 @@ let shard_taskboard : shard =
   ; read_only_tools = [ "keeper_tasks_list"; "keeper_tasks_audit" ]
   ; removable = true
   ; description =
-      "Task board management: list, audit, force-release, force-done, broadcast"
+      "Task board management: list, audit, claim, create, complete, broadcast"
   }
 ;;
 

@@ -1,0 +1,6 @@
+; Isolated alcotest for the comment-preserving TOML line editor (RFC-0306 §3.2).
+; Links only masc.toml_line_editor — runs in milliseconds.
+
+(test
+ (name test_toml_line_editor)
+ (libraries alcotest masc.toml_line_editor))

@@ -831,19 +831,10 @@ let contains_newline s =
     s
 ;;
 
-let toml_escape_string s =
-  let buf = Buffer.create (String.length s) in
-  String.iter
-    (function
-      | '"' -> Buffer.add_string buf "\\\""
-      | '\\' -> Buffer.add_string buf "\\\\"
-      | '\n' -> Buffer.add_string buf "\\n"
-      | '\r' -> Buffer.add_string buf "\\r"
-      | '\t' -> Buffer.add_string buf "\\t"
-      | c -> Buffer.add_char buf c)
-    s;
-  Buffer.contents buf
-;;
+(* Comment-preserving TOML line editing lives in [Toml_line_editor] (RFC-0306
+   §3.2). These aliases keep the runtime.toml routing/assignment editor's call
+   sites unchanged while removing the duplicated implementations. *)
+let toml_escape_string = Toml_line_editor.escape_string
 
 let assignment_line ~keeper_name ~runtime_id =
   Printf.sprintf
@@ -853,54 +844,15 @@ let assignment_line ~keeper_name ~runtime_id =
 ;;
 
 let runtime_scalar_line ~key ~runtime_id =
-  Printf.sprintf "%s = \"%s\"" key (toml_escape_string runtime_id)
+  Toml_line_editor.scalar_line ~key ~value:runtime_id
 ;;
 
-let runtime_string_array_line ~key ~values =
-  let rendered =
-    values
-    |> List.map (fun value -> Printf.sprintf "\"%s\"" (toml_escape_string value))
-    |> String.concat ", "
-  in
-  Printf.sprintf "%s = [%s]" key rendered
-;;
+let runtime_string_array_line = Toml_line_editor.string_array_line
 
-let split_lines content =
-  if String.equal content "" then [], false
-  else (
-    let len = String.length content in
-    let trailing_newline = Char.equal content.[len - 1] '\n' in
-    let parts = String.split_on_char '\n' content in
-    let lines =
-      if trailing_newline
-      then (
-        match List.rev parts with
-        | "" :: rest -> List.rev rest
-        | _ -> parts)
-      else parts
-    in
-    lines, trailing_newline)
-;;
-
-let join_lines lines ~trailing_newline =
-  match lines with
-  | [] -> if trailing_newline then "\n" else ""
-  | _ ->
-    let body = String.concat "\n" lines in
-    if trailing_newline then body ^ "\n" else body
-;;
-
-let strip_toml_comment line =
-  match String.index_opt line '#' with
-  | None -> line
-  | Some index -> String.sub line 0 index
-;;
-
-let is_toml_table_header line =
-  let s = line |> strip_toml_comment |> String.trim in
-  let len = String.length s in
-  len >= 2 && Char.equal s.[0] '[' && Char.equal s.[len - 1] ']'
-;;
+let split_lines = Toml_line_editor.split_lines
+let join_lines = Toml_line_editor.join_lines
+let strip_toml_comment = Toml_line_editor.strip_comment
+let is_toml_table_header = Toml_line_editor.is_table_header
 
 let is_runtime_assignments_header line =
   String.equal (line |> strip_toml_comment |> String.trim) "[runtime.assignments]"
@@ -910,79 +862,9 @@ let is_runtime_header line =
   String.equal (line |> strip_toml_comment |> String.trim) "[runtime]"
 ;;
 
-let rec split_at n xs =
-  if n <= 0 then [], xs
-  else
-    match xs with
-    | [] -> [], []
-    | x :: rest ->
-      let before, after = split_at (n - 1) rest in
-      x :: before, after
-;;
-
-let find_index pred xs =
-  let rec loop index = function
-    | [] -> None
-    | x :: rest -> if pred x then Some index else loop (index + 1) rest
-  in
-  loop 0 xs
-;;
-
-let parse_quoted_key raw =
-  let len = String.length raw in
-  if len < 2 || not (Char.equal raw.[0] '"') then None
-  else
-    let buf = Buffer.create len in
-    let rec loop index =
-      if index >= len then None
-      else
-        match raw.[index] with
-        | '"' -> Some (Buffer.contents buf)
-        | '\\' when index + 1 < len ->
-          let escaped =
-            match raw.[index + 1] with
-            | '"' -> '"'
-            | '\\' -> '\\'
-            | 'n' -> '\n'
-            | 'r' -> '\r'
-            | 't' -> '\t'
-            | c -> c
-          in
-          Buffer.add_char buf escaped;
-          loop (index + 2)
-        | c ->
-          Buffer.add_char buf c;
-          loop (index + 1)
-    in
-    loop 1
-;;
-
-let parse_literal_key raw =
-  let len = String.length raw in
-  if len < 2 || not (Char.equal raw.[0] '\'') then None
-  else
-    match String.index_from_opt raw 1 '\'' with
-    | None -> None
-    | Some end_index -> Some (String.sub raw 1 (end_index - 1))
-;;
-
-let assignment_key_of_line line =
-  let trimmed = String.trim line in
-  if String.equal trimmed "" || Char.equal trimmed.[0] '#'
-  then None
-  else
-    match String.index_opt trimmed '=' with
-    | None -> None
-    | Some eq_index ->
-      let key_part = String.sub trimmed 0 eq_index |> String.trim in
-      if String.equal key_part ""
-      then None
-      else if Char.equal key_part.[0] '"'
-      then parse_quoted_key key_part
-      else if Char.equal key_part.[0] '\''
-      then parse_literal_key key_part
-      else Some key_part
-;;
+let split_at = Toml_line_editor.split_at
+let find_index = Toml_line_editor.find_index
+let assignment_key_of_line = Toml_line_editor.key_of_line
 
 let replace_or_append_assignment section_lines ~keeper_name ~runtime_id =
   let line = assignment_line ~keeper_name ~runtime_id in

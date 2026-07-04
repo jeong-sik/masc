@@ -408,6 +408,12 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
       ? `tool-content:${item.effective_capabilities.assistant_tool_content_format}`
       : null,
     item.effective_capabilities?.supports_reasoning ? 'reasoning' : null,
+    item.effective_capabilities?.supports_extended_thinking ? 'extended-thinking' : null,
+    item.effective_capabilities?.supports_reasoning_budget ? 'reasoning-budget' : null,
+    item.effective_capabilities?.accepted_reasoning_efforts
+      && item.effective_capabilities.accepted_reasoning_efforts.length > 0
+      ? `effort:${item.effective_capabilities.accepted_reasoning_efforts.join(',')}`
+      : null,
     item.effective_capabilities?.preserve_thinking_control_format
       ? `preserve:${item.effective_capabilities.preserve_thinking_control_format}`
       : null,

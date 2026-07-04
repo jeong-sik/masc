@@ -1100,7 +1100,7 @@ let add_routes router =
                  ; ("retrieval_status", `String ide_memory_retrieval_status)
                  ; ("semantic_memory_status", `String ide_memory_semantic_status)
                  ; ("episodic_memory_status", `String ide_memory_episodic_status)
-                 ] );
+                 ] )
            ] in
            let origin = get_origin request in
            let headers =

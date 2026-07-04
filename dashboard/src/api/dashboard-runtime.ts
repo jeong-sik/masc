@@ -375,6 +375,8 @@ export interface DashboardRuntimeModelMetric {
     turn_lane?: string | null
     input_tokens: number | null
     output_tokens: number | null
+    cache_read_tokens: number | null
+    cache_creation_tokens: number | null
     latency_ms: number | null
     prompt_tok_per_sec?: number | null
     peak_memory_gb?: number | null
@@ -839,6 +841,8 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
             turn_lane: asNullableString(r.turn_lane),
             input_tokens: asNumber(r.input_tokens) ?? null,
             output_tokens: asNumber(r.output_tokens) ?? null,
+            cache_read_tokens: asNumber(r.cache_read_tokens) ?? null,
+            cache_creation_tokens: asNumber(r.cache_creation_tokens) ?? null,
             latency_ms: asNumber(r.latency_ms) ?? null,
             prompt_tok_per_sec: asNumber(r.prompt_tok_per_sec) ?? null,
             peak_memory_gb: asNumber(r.peak_memory_gb) ?? null,

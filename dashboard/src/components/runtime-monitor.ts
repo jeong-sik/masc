@@ -1025,6 +1025,17 @@ function fmtRecentEntryCost(
   return formatted !== MISSING_DATA_DASH ? formatted : recentEntryMissingLabel(entry)
 }
 
+function fmtRecentEntryCache(
+  entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
+): string {
+  if (entry.cache_read_tokens == null && entry.cache_creation_tokens == null) {
+    return recentEntryMissingLabel(entry)
+  }
+  const read = fmtRecentEntryNumber(entry, entry.cache_read_tokens)
+  const creation = fmtRecentEntryNumber(entry, entry.cache_creation_tokens)
+  return `${read}/${creation}`
+}
+
 function recentEntryDetail(
   entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
 ): string | null {
@@ -1062,6 +1073,7 @@ const recentEntryColumns: TableColumn<RecentEntry>[] = [
   },
   { key: 'input_tokens', header: 'in tok', render: (re) => fmtRecentEntryNumber(re, re.input_tokens) },
   { key: 'output_tokens', header: 'out tok', render: (re) => fmtRecentEntryNumber(re, re.output_tokens) },
+  { key: 'cache_tokens', header: 'cache r/w', render: fmtRecentEntryCache },
   {
     key: 'latency_ms',
     header: 'latency',

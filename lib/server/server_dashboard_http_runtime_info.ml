@@ -1497,6 +1497,11 @@ let task_json : Llm_provider.Capabilities.task option -> Yojson.Safe.t = functio
   | Some Video_generation -> `String "video-generation"
 ;;
 
+let modality_priority_wire : Llm_provider.Modality.priority -> string = function
+  | Preserve_input_order -> "preserve-input-order"
+  | Visual_first -> "visual-first"
+;;
+
 let tool_choice_json : Llm_provider.Types.tool_choice option -> Yojson.Safe.t = function
   | None -> `Null
   | Some Llm_provider.Types.Auto -> `Assoc [ "kind", `String "auto" ]
@@ -1711,6 +1716,7 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "supports_image_input", `Bool caps.supports_image_input
       ; "supports_audio_input", `Bool caps.supports_audio_input
       ; "supports_video_input", `Bool caps.supports_video_input
+      ; "modality_priority", `String (modality_priority_wire caps.modality_priority)
       ; "task", task_json caps.task
       ; "supports_native_streaming", `Bool caps.supports_native_streaming
       ; "supports_system_prompt", `Bool caps.supports_system_prompt

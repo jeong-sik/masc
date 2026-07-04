@@ -182,6 +182,7 @@ export interface DashboardRuntimeEffectiveCapabilities {
   supports_image_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
+  modality_priority?: string | null
   task?: string | null
   supports_native_streaming?: boolean
   supports_system_prompt?: boolean
@@ -591,6 +592,7 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_image_input: asBoolean(raw.supports_image_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
+    modality_priority: asNullableString(raw.modality_priority),
     task: asNullableString(raw.task),
     supports_native_streaming: asBoolean(raw.supports_native_streaming),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),

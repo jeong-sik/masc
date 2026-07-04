@@ -933,6 +933,7 @@ reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta:reasoning_content"
 supports_response_format_json = true
 supports_structured_output = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 supports_prompt_caching = true
 supports_top_k = true
@@ -1090,7 +1091,11 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
     Alcotest.(check bool)
       "top_k"
       true
-      (caps |> J.member "supports_top_k" |> J.to_bool))
+      (caps |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check string)
+      "effective modality priority"
+      "visual-first"
+      (caps |> J.member "modality_priority" |> J.to_string))
 ;;
 
 let test_runtime_inventory_surfaces_request_config () =

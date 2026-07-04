@@ -824,6 +824,36 @@ describe('SettingsSurface', () => {
             has_previous_response_id: true,
             connect_timeout_s: 120,
           },
+          effective_capabilities: {
+            source: 'oas-provider-config-model',
+            max_output_tokens: 4096,
+            supports_tool_choice: true,
+            supports_parallel_tool_calls: true,
+            supports_runtime_mcp_tools: true,
+            supports_runtime_tool_events: true,
+            supports_response_format_json: true,
+            supports_structured_output: true,
+            supports_reasoning: true,
+            accepted_reasoning_efforts: null,
+            reasoning_output_format: 'split-reasoning-fields',
+            reasoning_streaming_format: {
+              kind: 'delta-reasoning-field',
+              field: 'reasoning_content',
+            },
+            reasoning_replay_override: 'preserve-always',
+            supports_system_prompt: true,
+            supports_caching: true,
+            supports_prompt_caching: true,
+            prompt_cache_alignment: 1024,
+            supports_top_k: true,
+            supports_min_p: true,
+            supports_seed: true,
+            supports_seed_with_images: true,
+            supports_code_execution: true,
+            emits_usage_tokens: true,
+            modality_priority: 'visual-first',
+            supported_models: ['m1'],
+          },
           declared_spec: {
             source: 'runtime.toml',
             provider: {
@@ -924,6 +954,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
+      expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('declared:api:chat-completions')
       expect(cards[0]?.textContent).toContain('behavior:inline-tools,keeper-bridge')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')

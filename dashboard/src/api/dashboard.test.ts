@@ -2500,6 +2500,7 @@ describe('fetchRuntimeProviders', () => {
               supports_image_input: true,
               supports_audio_input: false,
               supports_video_input: false,
+              modality_priority: 'visual-first',
               task: null,
               supports_native_streaming: true,
               supports_system_prompt: true,
@@ -2650,6 +2651,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.effective_capabilities?.supports_parallel_tool_calls).toBe(true)
     expect(result.providers[0]?.effective_capabilities?.accepted_reasoning_efforts).toEqual(['low', 'medium', 'high'])
     expect(result.providers[0]?.effective_capabilities?.reasoning_streaming_format?.field).toBe('reasoning_content')
+    expect(result.providers[0]?.effective_capabilities?.modality_priority).toBe('visual-first')
     expect(result.providers[0]?.effective_capabilities?.supports_top_k).toBe(true)
     expect(result.providers[0]?.declared_spec?.source).toBe('runtime.toml')
     expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')

@@ -183,10 +183,12 @@ function runtimeRequestConfigSummary(
       : null
   const parts = [
     request.provider_kind ? request.provider_kind : null,
+    request.source ? `source ${request.source}` : null,
     requestPath,
     typeof request.max_tokens === 'number' ? `out ${request.max_tokens}` : null,
     typeof request.max_context === 'number' ? `ctx ${request.max_context}` : null,
     sampling.length > 0 ? sampling.join(',') : null,
+    request.has_system_prompt ? 'system prompt' : null,
     typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
     typeof request.preserve_thinking === 'boolean' ? `preserve ${request.preserve_thinking ? 'on' : 'off'}` : null,
     typeof request.clear_thinking === 'boolean' ? `clear ${request.clear_thinking ? 'on' : 'off'}` : null,

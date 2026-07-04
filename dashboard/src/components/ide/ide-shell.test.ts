@@ -132,6 +132,17 @@ function dashboardFetchMockWithFailure(
   }
 }
 
+function dashboardFetchMockWithResponse(
+  pattern: RegExp,
+  response: Response,
+): (input: RequestInfo | URL) => Promise<Response> {
+  return (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    if (pattern.test(url)) return Promise.resolve(response)
+    return dashboardFetchMock(input)
+  }
+}
+
 describe('IdeShell', () => {
   let container: HTMLDivElement
 
@@ -517,6 +528,33 @@ describe('IdeShell', () => {
     })
     expect(chip.textContent).toBe('IDE fetch degraded diff')
     expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
+  })
+
+  it('surfaces malformed annotation responses in the IDE statusbar', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(dashboardFetchMockWithResponse(
+        /\/api\/v1\/ide\/annotations/,
+        jsonResponse({ ok: true, data: [null] }),
+      )),
+    )
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-workspace-fetch"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('IDE fetch degraded annotations')
+    expect(chip.getAttribute('title')).toContain(
+      'fetchIdeAnnotations returned malformed row at index 0',
+    )
   })
 
   it('surfaces overlay-only LSP languages in the IDE statusbar', async () => {

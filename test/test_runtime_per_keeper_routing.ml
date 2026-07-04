@@ -180,8 +180,16 @@ tools-support = true
 streaming = true
 
 [models.gpt.capabilities]
+supports-tool-choice = true
+supports-required-tool-choice = true
+supports-named-tool-choice = true
+supports-parallel-tool-calls = true
 supports-response-format-json = true
 supports-structured-output = true
+supports-system-prompt = true
+supports-seed = true
+supports-seed-with-images = true
+supports-code-execution = true
 
 [runpod_mtp.qwen]
 is-default = true
@@ -221,8 +229,16 @@ tools-support = true
 streaming = true
 
 [models.gpt.capabilities]
+supports-tool-choice = true
+supports-required-tool-choice = true
+supports-named-tool-choice = true
+supports-parallel-tool-calls = true
 supports-response-format-json = true
 supports-structured-output = true
+supports-system-prompt = true
+supports-seed = true
+supports-seed-with-images = true
+supports-code-execution = true
 
 [runpod_mtp.qwen]
 is-default = true
@@ -427,6 +443,57 @@ let test_runtime_inventory_surfaces_assignment_governance () =
       (match gpt |> J.member "temperature" with
        | `Null -> true
        | _ -> false))
+;;
+
+let test_runtime_inventory_surfaces_declared_model_capabilities () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let gpt =
+      List.find
+        (fun provider ->
+           String.equal
+             "openai.gpt"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let caps =
+      gpt
+      |> J.member "declared_spec"
+      |> J.member "model"
+      |> J.member "capabilities"
+    in
+    (match caps with
+     | `Assoc _ -> ()
+     | _ -> Alcotest.fail "declared model capabilities must be an object");
+    Alcotest.(check string)
+      "declared capability source"
+      "runtime.toml"
+      (caps |> J.member "source" |> J.to_string);
+    Alcotest.(check bool)
+      "declared required tool choice"
+      true
+      (caps |> J.member "supports_required_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared named tool choice"
+      true
+      (caps |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared parallel tool calls"
+      true
+      (caps |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared system prompt"
+      true
+      (caps |> J.member "supports_system_prompt" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared seed with images"
+      true
+      (caps |> J.member "supports_seed_with_images" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared code execution"
+      true
+      (caps |> J.member "supports_code_execution" |> J.to_bool))
 ;;
 
 let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
@@ -1283,15 +1350,14 @@ let fallback_sentinel () = 8192
 
 let test_resolve_max_tokens_reasoning_defers_to_caps_not_fallback () =
   with_runtime_thinking (fun () ->
-    (* qwen36-35b-a3b-mtp declares no explicit [max_output_tokens], so its
-       capability inherits the provider base ceiling (16384). The reasoning path
-       defers to that OAS-owned ceiling — NOT the flat keeper fallback (8192).
-       Raising this runtime to the 32768 operational bound is a catalog change
-       (declare a higher max_output_tokens), per the OAS-owns-the-value split. *)
+    (* qwen36-35b-a3b-mtp declares [max_output_tokens = 65536] in the OAS
+       fixture catalog. The reasoning path defers to that OAS-owned ceiling,
+       bounded by the 32768 operational cap — NOT the flat keeper fallback
+       (8192). *)
     Alcotest.(check int)
-      "reasoning runtime defers to its OAS capability ceiling (16384 base), \
-       above the 8192 keeper fallback"
-      16384
+      "reasoning runtime defers to its OAS capability ceiling, clamped by the \
+       operational bound above the 8192 keeper fallback"
+      32768
       (Runtime_inference.resolve_max_tokens
          ~runtime_id:"ollama_cloud.thinkdefault"
          ~fallback:fallback_sentinel))
@@ -1364,8 +1430,8 @@ let test_max_output_tokens_accessor_projects_catalog () =
       (Some 200000)
       (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.bigout");
     Alcotest.(check (option int))
-      "catalog row without max_output_tokens inherits the provider base ceiling"
-      (Some 16384)
+      "catalog row projects its declared max_output_tokens"
+      (Some 65536)
       (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.thinkdefault");
     Alcotest.(check (option int))
       "reasoning runtime whose model is absent from the catalog projects None"
@@ -1703,6 +1769,10 @@ let () =
             "runtime inventory surfaces declared spec"
             `Quick
             test_runtime_inventory_surfaces_declared_spec
+        ; Alcotest.test_case
+            "runtime inventory surfaces declared model capabilities"
+            `Quick
+            test_runtime_inventory_surfaces_declared_model_capabilities
         ; Alcotest.test_case
             "unknown runtime id defers (None)"
             `Quick

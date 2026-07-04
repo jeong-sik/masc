@@ -440,6 +440,9 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     (fun thinking_control_format ->
       { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
       ; supports_tool_choice = b "supports-tool-choice"
+      ; supports_required_tool_choice = b "supports-required-tool-choice"
+      ; supports_named_tool_choice = b "supports-named-tool-choice"
+      ; supports_parallel_tool_calls = b "supports-parallel-tool-calls"
       ; supports_extended_thinking = b "supports-extended-thinking"
       ; supports_reasoning_budget = b "supports-reasoning-budget"
       ; thinking_control_format
@@ -450,14 +453,17 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       ; supports_response_format_json = b "supports-response-format-json"
       ; supports_structured_output = b "supports-structured-output"
       ; supports_native_streaming = b "supports-native-streaming"
+      ; supports_system_prompt = b "supports-system-prompt"
       ; supports_caching = b "supports-caching"
       ; supports_prompt_caching = b "supports-prompt-caching"
       ; prompt_cache_alignment = positive_int_opt_field "prompt-cache-alignment"
       ; supports_top_k = b "supports-top-k"
       ; supports_min_p = b "supports-min-p"
       ; supports_seed = b "supports-seed"
+      ; supports_seed_with_images = b "supports-seed-with-images"
       ; emits_usage_tokens = b_default_true "emits-usage-tokens"
       ; supports_computer_use = b "supports-computer-use"
+      ; supports_code_execution = b "supports-code-execution"
       })
     thinking_control_format_result
 ;;

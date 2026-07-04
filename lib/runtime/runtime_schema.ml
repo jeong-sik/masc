@@ -96,6 +96,9 @@ type thinking_control_format =
 type model_capabilities =
   { max_output_tokens : int option
   ; supports_tool_choice : bool
+  ; supports_required_tool_choice : bool
+  ; supports_named_tool_choice : bool
+  ; supports_parallel_tool_calls : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool
   ; thinking_control_format : thinking_control_format
@@ -106,20 +109,26 @@ type model_capabilities =
   ; supports_response_format_json : bool
   ; supports_structured_output : bool
   ; supports_native_streaming : bool
+  ; supports_system_prompt : bool
   ; supports_caching : bool
   ; supports_prompt_caching : bool
   ; prompt_cache_alignment : int option
   ; supports_top_k : bool
   ; supports_min_p : bool
   ; supports_seed : bool
+  ; supports_seed_with_images : bool
   ; emits_usage_tokens : bool
   ; supports_computer_use : bool
+  ; supports_code_execution : bool
   }
 [@@deriving show, eq]
 
 let model_capabilities_default =
   { max_output_tokens = None
   ; supports_tool_choice = false
+  ; supports_required_tool_choice = false
+  ; supports_named_tool_choice = false
+  ; supports_parallel_tool_calls = false
   ; supports_extended_thinking = false
   ; supports_reasoning_budget = false
   ; thinking_control_format = No_thinking_control
@@ -130,15 +139,18 @@ let model_capabilities_default =
   ; supports_response_format_json = false
   ; supports_structured_output = false
   ; supports_native_streaming = false
+  ; supports_system_prompt = false
   ; supports_caching = false
   ; supports_prompt_caching = false
   ; prompt_cache_alignment = None
   ; supports_top_k = false
   ; supports_min_p = false
   ; supports_seed = false
+  ; supports_seed_with_images = false
   ; (* stricter default: most providers report usage; CLI wrappers opt out *)
     emits_usage_tokens = true
   ; supports_computer_use = false
+  ; supports_code_execution = false
   }
 ;;
 

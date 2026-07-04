@@ -79,6 +79,9 @@ type thinking_control_format =
 type model_capabilities =
   { max_output_tokens : int option
   ; supports_tool_choice : bool
+  ; supports_required_tool_choice : bool
+  ; supports_named_tool_choice : bool
+  ; supports_parallel_tool_calls : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool
   ; thinking_control_format : thinking_control_format
@@ -89,14 +92,17 @@ type model_capabilities =
   ; supports_response_format_json : bool
   ; supports_structured_output : bool
   ; supports_native_streaming : bool
+  ; supports_system_prompt : bool
   ; supports_caching : bool
   ; supports_prompt_caching : bool
   ; prompt_cache_alignment : int option
   ; supports_top_k : bool
   ; supports_min_p : bool
   ; supports_seed : bool
+  ; supports_seed_with_images : bool
   ; emits_usage_tokens : bool
   ; supports_computer_use : bool
+  ; supports_code_execution : bool
   }
 [@@deriving show, eq]
 

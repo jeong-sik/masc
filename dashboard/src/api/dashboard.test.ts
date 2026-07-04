@@ -2553,6 +2553,9 @@ describe('fetchRuntimeProviders', () => {
                   source: 'runtime.toml',
                   max_output_tokens: 65536,
                   supports_tool_choice: true,
+                  supports_required_tool_choice: true,
+                  supports_named_tool_choice: true,
+                  supports_parallel_tool_calls: true,
                   supports_extended_thinking: true,
                   supports_reasoning_budget: true,
                   thinking_control_format: 'chat-template-kwargs',
@@ -2563,14 +2566,17 @@ describe('fetchRuntimeProviders', () => {
                   supports_response_format_json: true,
                   supports_structured_output: true,
                   supports_native_streaming: true,
+                  supports_system_prompt: true,
                   supports_caching: true,
                   supports_prompt_caching: true,
                   prompt_cache_alignment: 1024,
                   supports_top_k: true,
                   supports_min_p: true,
                   supports_seed: true,
+                  supports_seed_with_images: true,
                   emits_usage_tokens: true,
                   supports_computer_use: false,
+                  supports_code_execution: true,
                 },
                 match_prefixes: ['Qwen/'],
               },
@@ -2660,6 +2666,10 @@ describe('fetchRuntimeProviders', () => {
         ?.identity_runtime_mcp_header_keys,
     ).toEqual(['x-masc-keeper'])
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_structured_output).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_parallel_tool_calls).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_system_prompt).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_seed_with_images).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_code_execution).toBe(true)
     expect(result.providers[0]?.declared_spec?.binding?.max_concurrent).toBe(4)
     expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)

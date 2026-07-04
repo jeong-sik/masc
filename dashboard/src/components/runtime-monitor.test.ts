@@ -180,6 +180,9 @@ describe('RuntimeMonitor', () => {
                 source: 'runtime.toml',
                 max_output_tokens: 65536,
                 supports_tool_choice: true,
+                supports_required_tool_choice: true,
+                supports_named_tool_choice: true,
+                supports_parallel_tool_calls: true,
                 supports_extended_thinking: true,
                 supports_reasoning_budget: true,
                 thinking_control_format: 'chat-template-kwargs',
@@ -190,14 +193,17 @@ describe('RuntimeMonitor', () => {
                 supports_response_format_json: true,
                 supports_structured_output: true,
                 supports_native_streaming: true,
+                supports_system_prompt: true,
                 supports_caching: true,
                 supports_prompt_caching: true,
                 prompt_cache_alignment: 1024,
                 supports_top_k: true,
                 supports_min_p: true,
                 supports_seed: true,
+                supports_seed_with_images: true,
                 emits_usage_tokens: true,
                 supports_computer_use: true,
+                supports_code_execution: true,
               },
               match_prefixes: ['Qwen/'],
             },
@@ -330,7 +336,9 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('declared · api chat-completions')
     expect(container.textContent).toContain('auth env:RUNPOD_API_KEY')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge,argv-preflight,anthropic-cache')
-    expect(container.textContent).toContain('controls tool-choice,native-stream,cache,prompt-cache@1024,usage,computer-use')
+    expect(container.textContent).toContain(
+      'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+    )
     expect(container.textContent).toContain('price-in 0.1')
     expect(container.textContent).toContain('effective · out 65,536')
     expect(container.textContent).toContain('runtime-mcp-tools')

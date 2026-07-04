@@ -337,4 +337,39 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('seed+images')
     expect(container.textContent).toContain('code-exec')
   })
+
+  it('renders parameter facts as structured request declared and effective rows', async () => {
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime parameter detail rows',
+    )
+
+    expect(container.querySelector('[aria-label="runtime parameter detail"]')).not.toBeNull()
+    expect(container.textContent).toContain('policy · replay on tool call')
+    expect(container.textContent).toContain('required')
+    expect(container.textContent).toContain('request · source')
+    expect(container.textContent).toContain('oas-provider-config')
+    expect(container.textContent).toContain('request · system prompt')
+    expect(container.textContent).toContain('declared provider · capabilities block')
+    expect(container.textContent).toContain('declared model · capability source')
+    expect(container.textContent).toContain('binding · provider.model')
+    expect(container.textContent).toContain('runpod_mtp,qwen')
+    expect(container.textContent).toContain('effective · source')
+    expect(container.textContent).toContain('oas-provider-config-model')
+    expect(container.textContent).toContain('effective · max context')
+    expect(container.textContent).toContain('131,072')
+    expect(container.textContent).toContain('effective · tools')
+    expect(container.textContent).toContain('tools,tool-choice,required,named,parallel,runtime-mcp,runtime-events')
+    expect(container.textContent).toContain('effective · reasoning')
+    expect(container.textContent).toContain('reasoning,extended,budget,effort low,medium,high')
+    expect(container.textContent).toContain('effective · thinking wire')
+    expect(container.textContent).toContain('chat-template-kwargs')
+    expect(container.textContent).toContain('effective · preserve wire')
+    expect(container.textContent).toContain('chat-template-kwargs-preserve-thinking')
+    expect(container.textContent).toContain('effective · tool content')
+    expect(container.textContent).toContain('null')
+  })
 })

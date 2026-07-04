@@ -79,6 +79,12 @@ interface RuntimeData {
   probeError: string | null
 }
 
+interface RuntimeParameterDetailRow {
+  axis: string
+  label: string
+  value: string
+}
+
 const COVERAGE_PRIORITY: Record<string, number> = {
   error_only: 0,
   none: 1,
@@ -185,6 +191,55 @@ function runtimeRequestFormatText(provider: DashboardRuntimeProviderSnapshot): s
   return format.has_schema ? `${format.kind}+schema` : format.kind
 }
 
+function boolText(value: boolean | null | undefined): string | null {
+  if (typeof value !== 'boolean') return null
+  return value ? 'yes' : 'no'
+}
+
+function onOffText(value: boolean | null | undefined): string | null {
+  if (typeof value !== 'boolean') return null
+  return value ? 'on' : 'off'
+}
+
+function flagText(
+  value: boolean | null | undefined,
+  enabled: string,
+  disabled?: string,
+): string | null {
+  if (typeof value !== 'boolean') return null
+  return value ? enabled : (disabled ?? `${enabled} off`)
+}
+
+function numberText(value: number | null | undefined): string | null {
+  return typeof value === 'number' ? formatNumber(value) : null
+}
+
+function textList(values: readonly (string | null | undefined)[]): string | null {
+  const present = values.filter((value): value is string => Boolean(value))
+  return present.length > 0 ? present.join(',') : null
+}
+
+function stringArrayText(values: readonly string[] | null | undefined): string | null {
+  return values && values.length > 0 ? values.join(',') : null
+}
+
+function detailRow(
+  axis: string,
+  label: string,
+  value: string | null | undefined,
+): RuntimeParameterDetailRow | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return { axis, label, value: trimmed }
+}
+
+function runtimeRequestPathText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const request = provider.request_config
+  if (!request) return null
+  if (request.request_path_targets_responses_api) return 'responses-api'
+  return request.request_path ?? null
+}
+
 function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const request = provider.request_config
   if (!request) return null
@@ -238,6 +293,253 @@ function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): s
     typeof request.connect_timeout_s === 'number' ? `connect ${request.connect_timeout_s}s` : null,
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeProviderBehaviorText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const behavior = provider.declared_spec?.provider?.behavior_capabilities
+  if (!behavior) return null
+  return textList([
+    flagText(behavior.supports_inline_tools, 'inline-tools'),
+    flagText(behavior.requires_per_keeper_bridging_for_bound_actor_tools, 'keeper-bridge'),
+    flagText(behavior.argv_prompt_preflight, 'argv-preflight'),
+    flagText(behavior.uses_anthropic_caching, 'anthropic-cache'),
+    typeof behavior.max_turns_per_attempt === 'number' ? `max-turns ${behavior.max_turns_per_attempt}` : null,
+    flagText(behavior.tolerates_bound_actor_fallback, 'bound-fallback'),
+  ])
+}
+
+function runtimeDeclaredModelControlText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.declared_spec?.model?.capabilities
+  if (!caps) return null
+  return textList([
+    flagText(caps.supports_tool_choice, 'tool-choice'),
+    flagText(caps.supports_native_streaming, 'native-stream'),
+    flagText(caps.supports_caching, 'cache'),
+    caps.supports_prompt_caching
+      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
+      : flagText(caps.supports_prompt_caching, 'prompt-cache'),
+    flagText(caps.emits_usage_tokens, 'usage'),
+    flagText(caps.supports_computer_use, 'computer-use'),
+  ])
+}
+
+function runtimeDeclaredInputText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.declared_spec?.model?.capabilities
+  if (!caps) return null
+  return textList([
+    flagText(caps.supports_multimodal_inputs, 'multimodal'),
+    flagText(caps.supports_image_input, 'image'),
+    flagText(caps.supports_audio_input, 'audio'),
+    flagText(caps.supports_video_input, 'video'),
+  ])
+}
+
+function runtimeEffectiveToolText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.effective_capabilities
+  if (!caps) return null
+  return textList([
+    flagText(caps.supports_tools, 'tools'),
+    flagText(caps.supports_tool_choice, 'tool-choice'),
+    flagText(caps.supports_required_tool_choice, 'required'),
+    flagText(caps.supports_named_tool_choice, 'named'),
+    flagText(caps.supports_parallel_tool_calls, 'parallel'),
+    flagText(caps.supports_runtime_mcp_tools, 'runtime-mcp'),
+    flagText(caps.supports_runtime_tool_events, 'runtime-events'),
+  ])
+}
+
+function runtimeEffectiveReasoningText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.effective_capabilities
+  if (!caps) return null
+  return textList([
+    flagText(caps.supports_reasoning, 'reasoning'),
+    flagText(caps.supports_extended_thinking, 'extended'),
+    flagText(caps.supports_reasoning_budget, 'budget'),
+    caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
+      ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
+      : null,
+  ])
+}
+
+function runtimeEffectiveInputText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.effective_capabilities
+  if (!caps) return null
+  return textList([
+    flagText(caps.supports_multimodal_inputs, 'multimodal'),
+    flagText(caps.supports_image_input, 'image'),
+    flagText(caps.supports_audio_input, 'audio'),
+    flagText(caps.supports_video_input, 'video'),
+  ])
+}
+
+function runtimeEffectiveControlText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.effective_capabilities
+  if (!caps) return null
+  return textList([
+    flagText(caps.supports_system_prompt, 'system-prompt'),
+    flagText(caps.supports_caching, 'cache'),
+    caps.supports_prompt_caching
+      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
+      : flagText(caps.supports_prompt_caching, 'prompt-cache'),
+    flagText(caps.supports_seed_with_images, 'seed+images'),
+    flagText(caps.supports_computer_use, 'computer-use'),
+    flagText(caps.supports_code_execution, 'code-exec'),
+    flagText(caps.emits_usage_tokens, 'usage'),
+  ])
+}
+
+function runtimeParameterDetailRows(
+  provider: DashboardRuntimeProviderSnapshot,
+): readonly RuntimeParameterDetailRow[] {
+  const policy = provider.parameter_policy
+  const request = provider.request_config
+  const spec = provider.declared_spec
+  const declaredModel = spec?.model
+  const declaredCaps = declaredModel?.capabilities
+  const binding = spec?.binding
+  const caps = provider.effective_capabilities
+  let replayOnToolCall: string | null = null
+  if (policy) {
+    replayOnToolCall = policy.requires_reasoning_replay_on_tool_call ? 'required' : 'not required'
+  }
+  const requestSampling = request
+    ? textList([
+        typeof request.temperature === 'number' ? `temp ${request.temperature}` : null,
+        typeof request.top_p === 'number' ? `top_p ${request.top_p}` : null,
+        typeof request.top_k === 'number' ? `top_k ${request.top_k}` : null,
+        typeof request.min_p === 'number' ? `min_p ${request.min_p}` : null,
+      ])
+    : null
+  const declaredSampling = declaredCaps
+    ? textList([
+        flagText(declaredCaps.supports_top_k, 'top_k'),
+        flagText(declaredCaps.supports_min_p, 'min_p'),
+        flagText(declaredCaps.supports_seed, 'seed'),
+      ])
+    : null
+  const effectiveSampling = caps
+    ? textList([
+        flagText(caps.supports_top_k, 'top_k'),
+        flagText(caps.supports_min_p, 'min_p'),
+        flagText(caps.supports_seed, 'seed'),
+      ])
+    : null
+  const declaredFormat = declaredCaps
+    ? textList([
+        flagText(declaredCaps.supports_response_format_json, 'json'),
+        flagText(declaredCaps.supports_structured_output, 'schema'),
+      ])
+    : null
+  const effectiveFormat = caps
+    ? textList([
+        flagText(caps.supports_response_format_json, 'json'),
+        flagText(caps.supports_structured_output, 'schema'),
+      ])
+    : null
+  return [
+    detailRow('policy', 'reasoning wire', policy?.reasoning_toggle_wire),
+    detailRow('policy', 'replay policy', policy?.reasoning_replay_policy),
+    detailRow('policy', 'replay on tool call', replayOnToolCall),
+    detailRow('policy', 'ignored sampling', stringArrayText(policy?.ignored_sampling_params)),
+    detailRow('policy', 'always ignored', stringArrayText(policy?.always_ignored_sampling_params)),
+    detailRow('request', 'source', request?.source),
+    detailRow('request', 'provider kind', request?.provider_kind),
+    detailRow('request', 'endpoint', runtimeRequestPathText(provider)),
+    detailRow('request', 'system prompt', boolText(request?.has_system_prompt)),
+    detailRow('request', 'max context', numberText(request?.max_context)),
+    detailRow('request', 'max output', numberText(request?.max_tokens)),
+    detailRow('request', 'sampling', requestSampling),
+    detailRow('request', 'thinking', onOffText(request?.enable_thinking)),
+    detailRow('request', 'preserve thinking', onOffText(request?.preserve_thinking)),
+    detailRow('request', 'clear thinking', onOffText(request?.clear_thinking)),
+    detailRow('request', 'thinking budget', numberText(request?.thinking_budget)),
+    detailRow('request', 'reasoning effort', request?.resolved_reasoning_effort),
+    detailRow('request', 'glm clear', boolText(request?.glm_clear_thinking)),
+    detailRow('request', 'glm replay', boolText(request?.glm_replay_reasoning)),
+    detailRow('request', 'tool stream', onOffText(request?.tool_stream)),
+    detailRow('request', 'tool choice', runtimeRequestToolChoiceText(provider)),
+    detailRow('request', 'parallel tool use', request?.disable_parallel_tool_use ? 'disabled' : null),
+    detailRow('request', 'response format', runtimeRequestFormatText(provider)),
+    detailRow('request', 'output schema', boolText(request?.has_output_schema)),
+    detailRow('request', 'cache system prompt', boolText(request?.cache_system_prompt)),
+    detailRow('request', 'tool choice override', onOffText(request?.supports_tool_choice_override)),
+    detailRow('request', 'schema override', onOffText(request?.supports_structured_output_override)),
+    detailRow('request', 'capability override', boolText(request?.has_model_capabilities_override)),
+    detailRow('request', 'seed', numberText(request?.seed)),
+    detailRow('request', 'rotation count', numberText(request?.internal_model_rotation_count)),
+    detailRow('request', 'num_ctx', numberText(request?.num_ctx)),
+    detailRow('request', 'keep alive', request?.keep_alive),
+    detailRow('request', 'previous response', boolText(request?.has_previous_response_id)),
+    detailRow('request', 'connect timeout', numberText(request?.connect_timeout_s)),
+    detailRow('declared provider', 'source', spec?.source),
+    detailRow('declared provider', 'provider', spec?.provider?.id),
+    detailRow('declared provider', 'display name', spec?.provider?.display_name),
+    detailRow('declared provider', 'protocol', spec?.provider?.protocol),
+    detailRow('declared provider', 'api format', spec?.provider?.api_format),
+    detailRow('declared provider', 'transport', spec?.provider?.transport),
+    detailRow('declared provider', 'auth kind', spec?.provider?.auth_kind),
+    detailRow('declared provider', 'non-interactive', boolText(spec?.provider?.is_non_interactive)),
+    detailRow('declared provider', 'capabilities block', boolText(spec?.provider?.has_capabilities)),
+    detailRow('declared provider', 'behavior', runtimeProviderBehaviorText(provider)),
+    detailRow(
+      'declared provider',
+      'mcp headers',
+      stringArrayText(spec?.provider?.behavior_capabilities?.identity_runtime_mcp_header_keys),
+    ),
+    detailRow('declared provider', 'custom headers', numberText(spec?.provider?.custom_header_count)),
+    detailRow('declared provider', 'connect timeout', numberText(spec?.provider?.connect_timeout_s)),
+    detailRow('declared model', 'model id', declaredModel?.id),
+    detailRow('declared model', 'api name', declaredModel?.api_name),
+    detailRow('declared model', 'context', numberText(declaredModel?.max_context)),
+    detailRow('declared model', 'tools', onOffText(declaredModel?.tools_support)),
+    detailRow('declared model', 'streaming', onOffText(declaredModel?.streaming)),
+    detailRow('declared model', 'thinking', onOffText(declaredModel?.thinking_support)),
+    detailRow('declared model', 'preserve thinking', onOffText(declaredModel?.preserve_thinking)),
+    detailRow('declared model', 'thinking budget', numberText(declaredModel?.max_thinking_budget)),
+    detailRow('declared model', 'temperature', numberText(declaredModel?.temperature)),
+    detailRow('declared model', 'capability source', declaredCaps?.source),
+    detailRow('declared model', 'max output', numberText(declaredCaps?.max_output_tokens)),
+    detailRow('declared model', 'thinking wire', declaredCaps?.thinking_control_format),
+    detailRow('declared model', 'format', declaredFormat),
+    detailRow('declared model', 'sampling', declaredSampling),
+    detailRow('declared model', 'inputs', runtimeDeclaredInputText(provider)),
+    detailRow('declared model', 'controls', runtimeDeclaredModelControlText(provider)),
+    detailRow('declared model', 'match prefixes', stringArrayText(declaredModel?.match_prefixes)),
+    detailRow('binding', 'provider.model', textList([binding?.provider_id, binding?.model_id])),
+    detailRow('binding', 'default', boolText(binding?.is_default)),
+    detailRow('binding', 'concurrency', numberText(binding?.max_concurrent)),
+    detailRow(
+      'binding',
+      'price',
+      textList([
+        typeof binding?.price_input === 'number' ? `in ${binding.price_input}` : null,
+        typeof binding?.price_output === 'number' ? `out ${binding.price_output}` : null,
+      ]),
+    ),
+    detailRow('binding', 'keep alive', binding?.keep_alive),
+    detailRow('binding', 'num_ctx', numberText(binding?.num_ctx)),
+    detailRow('effective', 'source', caps?.source),
+    detailRow('effective', 'max context', numberText(caps?.max_context_tokens)),
+    detailRow('effective', 'max output', numberText(caps?.max_output_tokens)),
+    detailRow('effective', 'tools', runtimeEffectiveToolText(provider)),
+    detailRow('effective', 'tool content', caps?.assistant_tool_content_format),
+    detailRow('effective', 'reasoning', runtimeEffectiveReasoningText(provider)),
+    detailRow('effective', 'thinking wire', caps?.thinking_control_format),
+    detailRow('effective', 'preserve wire', caps?.preserve_thinking_control_format),
+    detailRow('effective', 'reasoning output', caps?.reasoning_output_format),
+    detailRow(
+      'effective',
+      'reasoning stream',
+      textList([caps?.reasoning_streaming_format?.kind, caps?.reasoning_streaming_format?.field]),
+    ),
+    detailRow('effective', 'reasoning replay', caps?.reasoning_replay_override),
+    detailRow('effective', 'format', effectiveFormat),
+    detailRow('effective', 'inputs', runtimeEffectiveInputText(provider)),
+    detailRow('effective', 'task', caps?.task),
+    detailRow('effective', 'controls', runtimeEffectiveControlText(provider)),
+    detailRow('effective', 'sampling', effectiveSampling),
+    detailRow('effective', 'supported models', stringArrayText(caps?.supported_models)),
+  ].filter((row): row is RuntimeParameterDetailRow => row !== null)
 }
 
 function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): string | null {
@@ -770,6 +1072,7 @@ export function RuntimeMonitor() {
                 const parameterPolicy = runtimeParameterPolicyText(provider)
                 const requestConfig = runtimeRequestConfigText(provider)
                 const declaredSpec = runtimeDeclaredSpecText(provider)
+                const parameterDetails = runtimeParameterDetailRows(provider)
                 return html`
                 <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
@@ -815,6 +1118,21 @@ export function RuntimeMonitor() {
                   ${effectiveCapabilities
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${effectiveCapabilities}>
                         effective · ${effectiveCapabilities}
+                      </div>`
+                    : null}
+                  ${parameterDetails.length > 0
+                    ? html`<div
+                        class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-1 pt-2 border-t border-[var(--color-border-default)]/50 text-2xs"
+                        aria-label="runtime parameter detail"
+                      >
+                        ${parameterDetails.map(row => html`
+                          <div class="min-w-0 flex gap-1">
+                            <span class="shrink-0 text-[var(--color-fg-muted)]">${row.axis} · ${row.label}</span>
+                            <span class="min-w-0 break-words text-[var(--color-fg-secondary)]" title=${row.value}>
+                              ${row.value}
+                            </span>
+                          </div>
+                        `)}
                       </div>`
                     : null}
                   ${liveProbe?.error

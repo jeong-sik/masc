@@ -20,7 +20,7 @@ Bank the low-risk, compiler-checkable, behavior-preserving wins first (typed-uni
 | # | Slice | Axis | Risk | Effort | Behavior-preserving | Status |
 |---|-------|------|------|--------|---------------------|--------|
 | 1 | Shared typed delivery classifier (`lib/keeper-delivery.ts`) | ssot | low | S | yes | **DONE** (this branch) |
-| 2 | Total parsers for 4 store-normalizer unions | ssot | low | M | yes | Wave 1 — next |
+| 2 | Total parsers for 4 store-normalizer unions | ssot | low | M | yes | **DONE** (this branch) |
 | 3 | Connector constants/helpers extraction (`connector-constants.ts`) | ssot | low | M | yes | Wave 1 |
 | 4 | Transcript off-screen cost (`content-visibility` first, windowing = RFC) | perf | med | M | no | Wave 2 (measure-gated) |
 | 5 | Decompose `chat/primitives.ts` along concern boundaries | refactor | med | L | yes | Wave 3 (after 1) |

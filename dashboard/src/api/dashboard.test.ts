@@ -2645,6 +2645,41 @@ describe('fetchRuntimeProviders', () => {
             { keeper: 'routingtest', runtime_id: 'openai.gpt', matches_default: false },
           ],
         },
+        startup_degradation: {
+          schema: 'masc.runtime_startup_degradation.v1',
+          status: 'degraded',
+          degraded: true,
+          operator_action_required: true,
+          terminal_reason: 'missing_oas_catalog_models',
+          message: 'runtime catalog degraded boot',
+          config_path: '/tmp/masc-test/runtime.toml',
+          configured_default_runtime_id: 'mimo.mimo-v2.5-pro',
+          effective_default_runtime_id: 'runpod_mtp.qwen',
+          missing_catalog_model_count: 1,
+          missing_catalog_models: [
+            {
+              runtime_id: 'mimo.mimo-v2.5-pro',
+              provider_id: 'mimo',
+              provider_label: 'openai_compat',
+              model_id: 'mimo-v2.5-pro',
+            },
+          ],
+          disabled_runtime_ids: ['mimo.mimo-v2.5-pro'],
+          dropped_assignments: [
+            { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
+          ],
+          dropped_routes: [
+            { route_name: 'librarian', runtime_id: 'mimo.mimo-v2.5-pro' },
+          ],
+          dropped_media_failover: ['mimo.mimo-v2.5-pro'],
+          dropped_lane_candidates: [
+            { lane_id: 'coding', runtime_ids: ['mimo.mimo-v2.5-pro'] },
+          ],
+          dropped_lanes: [
+            { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
+          ],
+          next_action: 'Add the listed provider/model rows to oas-models.toml.',
+        },
         config_path: '/tmp/masc-test/runtime.toml',
       }), {
         status: 200,
@@ -2721,6 +2756,14 @@ describe('fetchRuntimeProviders', () => {
     expect(result.assignment_governance?.assignment_count).toBe(2)
     expect(result.assignment_governance?.assigned_runtimes).toEqual(['openai.gpt'])
     expect(result.assignment_governance?.assignments[0]?.keeper).toBe('budgettest')
+    expect(result.startup_degradation?.status).toBe('degraded')
+    expect(result.startup_degradation?.terminal_reason).toBe('missing_oas_catalog_models')
+    expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
+    expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
+    expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
+    expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('librarian')
+    expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 })
 

@@ -289,6 +289,49 @@ export interface DashboardRuntimeAssignmentGovernance {
   assignments: DashboardRuntimeAssignment[]
 }
 
+export interface DashboardRuntimeStartupMissingCatalogModel {
+  runtime_id: string
+  provider_id?: string | null
+  provider_label?: string | null
+  model_id?: string | null
+}
+
+export interface DashboardRuntimeStartupDroppedAssignment {
+  keeper_name: string
+  runtime_id: string
+}
+
+export interface DashboardRuntimeStartupDroppedRoute {
+  route_name: string
+  runtime_id: string
+}
+
+export interface DashboardRuntimeStartupDroppedLane {
+  lane_id: string
+  runtime_ids: string[]
+}
+
+export interface DashboardRuntimeStartupDegradation {
+  schema?: string | null
+  status?: string | null
+  degraded: boolean
+  operator_action_required: boolean
+  terminal_reason?: string | null
+  message?: string | null
+  config_path?: string | null
+  configured_default_runtime_id?: string | null
+  effective_default_runtime_id?: string | null
+  missing_catalog_model_count: number
+  missing_catalog_models: DashboardRuntimeStartupMissingCatalogModel[]
+  disabled_runtime_ids: string[]
+  dropped_assignments: DashboardRuntimeStartupDroppedAssignment[]
+  dropped_routes: DashboardRuntimeStartupDroppedRoute[]
+  dropped_media_failover: string[]
+  dropped_lane_candidates: DashboardRuntimeStartupDroppedLane[]
+  dropped_lanes: DashboardRuntimeStartupDroppedLane[]
+  next_action?: string | null
+}
+
 export interface DashboardRuntimeProvidersResponse {
   updated_at?: string
   summary?: {
@@ -301,6 +344,7 @@ export interface DashboardRuntimeProvidersResponse {
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
   assignment_governance?: DashboardRuntimeAssignmentGovernance | null
+  startup_degradation?: DashboardRuntimeStartupDegradation | null
   // Resolved filesystem path of the runtime.toml the server actually loaded
   // (Runtime.config_path); answers "which config is live" in the monitor.
   config_path?: string | null
@@ -754,6 +798,84 @@ function decodeRuntimeAssignmentGovernance(raw: unknown): DashboardRuntimeAssign
   }
 }
 
+function decodeRuntimeStartupMissingCatalogModel(raw: unknown): DashboardRuntimeStartupMissingCatalogModel | null {
+  if (!isRecord(raw)) return null
+  const runtimeId = asString(raw.runtime_id)
+  if (!runtimeId) return null
+  return {
+    runtime_id: runtimeId,
+    provider_id: asNullableString(raw.provider_id),
+    provider_label: asNullableString(raw.provider_label),
+    model_id: asNullableString(raw.model_id),
+  }
+}
+
+function decodeRuntimeStartupDroppedAssignment(raw: unknown): DashboardRuntimeStartupDroppedAssignment | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  const runtimeId = asString(raw.runtime_id)
+  if (!keeperName || !runtimeId) return null
+  return {
+    keeper_name: keeperName,
+    runtime_id: runtimeId,
+  }
+}
+
+function decodeRuntimeStartupDroppedRoute(raw: unknown): DashboardRuntimeStartupDroppedRoute | null {
+  if (!isRecord(raw)) return null
+  const routeName = asString(raw.route_name)
+  const runtimeId = asString(raw.runtime_id)
+  if (!routeName || !runtimeId) return null
+  return {
+    route_name: routeName,
+    runtime_id: runtimeId,
+  }
+}
+
+function decodeRuntimeStartupDroppedLane(raw: unknown): DashboardRuntimeStartupDroppedLane | null {
+  if (!isRecord(raw)) return null
+  const laneId = asString(raw.lane_id)
+  if (!laneId) return null
+  return {
+    lane_id: laneId,
+    runtime_ids: asStringArray(raw.runtime_ids),
+  }
+}
+
+function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupDegradation | null {
+  if (!isRecord(raw)) return null
+  return {
+    schema: asNullableString(raw.schema),
+    status: asNullableString(raw.status),
+    degraded: asBoolean(raw.degraded) ?? false,
+    operator_action_required: asBoolean(raw.operator_action_required) ?? false,
+    terminal_reason: asNullableString(raw.terminal_reason),
+    message: asNullableString(raw.message),
+    config_path: asNullableString(raw.config_path),
+    configured_default_runtime_id: asNullableString(raw.configured_default_runtime_id),
+    effective_default_runtime_id: asNullableString(raw.effective_default_runtime_id),
+    missing_catalog_model_count: asNumber(raw.missing_catalog_model_count) ?? 0,
+    missing_catalog_models: asRecordArray(raw.missing_catalog_models)
+      .map(decodeRuntimeStartupMissingCatalogModel)
+      .filter((item): item is DashboardRuntimeStartupMissingCatalogModel => item !== null),
+    disabled_runtime_ids: asStringArray(raw.disabled_runtime_ids),
+    dropped_assignments: asRecordArray(raw.dropped_assignments)
+      .map(decodeRuntimeStartupDroppedAssignment)
+      .filter((item): item is DashboardRuntimeStartupDroppedAssignment => item !== null),
+    dropped_routes: asRecordArray(raw.dropped_routes)
+      .map(decodeRuntimeStartupDroppedRoute)
+      .filter((item): item is DashboardRuntimeStartupDroppedRoute => item !== null),
+    dropped_media_failover: asStringArray(raw.dropped_media_failover),
+    dropped_lane_candidates: asRecordArray(raw.dropped_lane_candidates)
+      .map(decodeRuntimeStartupDroppedLane)
+      .filter((item): item is DashboardRuntimeStartupDroppedLane => item !== null),
+    dropped_lanes: asRecordArray(raw.dropped_lanes)
+      .map(decodeRuntimeStartupDroppedLane)
+      .filter((item): item is DashboardRuntimeStartupDroppedLane => item !== null),
+    next_action: asNullableString(raw.next_action),
+  }
+}
+
 function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProvidersResponse | null {
   if (!isRecord(raw)) return null
   const summary = isRecord(raw.summary) ? raw.summary : null
@@ -773,6 +895,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
       .map(decodeRuntimeProviderSnapshot)
       .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
     assignment_governance: decodeRuntimeAssignmentGovernance(raw.assignment_governance),
+    startup_degradation: decodeRuntimeStartupDegradation(raw.startup_degradation),
     config_path: asNullableString(raw.config_path),
   }
 }

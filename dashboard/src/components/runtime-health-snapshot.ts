@@ -8,6 +8,7 @@ import {
   type DashboardRuntimeProviderProbe,
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
+  type DashboardRuntimeStartupDegradation,
 } from '../api/dashboard'
 import { errorToString, MISSING_DATA_DASH } from '../lib/format-string'
 import { formatNumber } from '../lib/format-number'
@@ -95,12 +96,18 @@ function governanceNeedsAttention(governance: DashboardRuntimeAssignmentGovernan
   return governance?.degraded === true || governance?.operator_action_required === true
 }
 
+function startupNeedsAttention(startup: DashboardRuntimeStartupDegradation | null | undefined): boolean {
+  return startup?.degraded === true || startup?.operator_action_required === true
+}
+
 function snapshotStatus(
   counts: ReturnType<typeof countProviderStatus>,
   probeError: string | null,
   governance: DashboardRuntimeAssignmentGovernance | null | undefined,
+  startup: DashboardRuntimeStartupDegradation | null | undefined,
 ): 'ok' | 'warn' | 'crit' {
   if (probeError || counts.failed > 0 || counts.missingAuth > 0) return 'crit'
+  if (startupNeedsAttention(startup)) return 'warn'
   if (governanceNeedsAttention(governance)) return 'warn'
   if (counts.skipped > 0 || counts.reachable === 0) return 'warn'
   return 'ok'
@@ -110,10 +117,40 @@ function snapshotTone(status: 'ok' | 'warn' | 'crit'): 'ok' | 'warn' | 'bad' {
   return status === 'crit' ? 'bad' : status
 }
 
-function snapshotStatusText(status: 'ok' | 'warn' | 'crit', governanceAttention: boolean): string {
+function snapshotStatusText(
+  status: 'ok' | 'warn' | 'crit',
+  startupAttention: boolean,
+  governanceAttention: boolean,
+): string {
   if (status === 'crit') return 'needs attention'
+  if (startupAttention) return 'runtime startup degraded'
   if (governanceAttention) return 'runtime assignment review'
   return status === 'ok' ? 'runtime reachable' : 'probe incomplete'
+}
+
+function startupDegradationValue(startup: DashboardRuntimeStartupDegradation | null | undefined): string {
+  if (!startup) return MISSING_DATA_DASH
+  if (startupNeedsAttention(startup)) return 'degraded'
+  return startup.status ?? 'ok'
+}
+
+function startupDegradationDetail(startup: DashboardRuntimeStartupDegradation | null | undefined): string {
+  if (!startup) return 'startup state'
+  if (startup.missing_catalog_model_count > 0) {
+    return `${formatNumber(startup.missing_catalog_model_count)} catalog gaps`
+  }
+  return startup.terminal_reason ?? startup.status ?? 'ok'
+}
+
+function startupDegradationAlertDetail(startup: DashboardRuntimeStartupDegradation): string | null {
+  const missing = startup.missing_catalog_models
+    .slice(0, 3)
+    .map(model => model.runtime_id)
+  if (missing.length > 0) return `missing catalog: ${missing.join(', ')}`
+  if (startup.disabled_runtime_ids.length > 0) {
+    return `disabled runtimes: ${startup.disabled_runtime_ids.slice(0, 3).join(', ')}`
+  }
+  return startup.message ?? startup.next_action ?? null
 }
 
 function shortUrl(value: string | null | undefined): string {
@@ -220,9 +257,12 @@ export function RuntimeHealthSnapshot() {
   const probe = data?.probe ?? null
   const probeError = data?.probeError ?? null
   const governance = providers?.assignment_governance ?? null
+  const startup = providers?.startup_degradation ?? null
   const counts = countProviderStatus(providers, probe)
-  const status = snapshotStatus(counts, probeError, governance)
+  const status = snapshotStatus(counts, probeError, governance, startup)
   const governanceAttention = governanceNeedsAttention(governance)
+  const startupAttention = startupNeedsAttention(startup)
+  const startupAlertDetail = startupAttention && startup ? startupDegradationAlertDetail(startup) : null
   const problem = firstProblem(providers, probe)
   const providerProbes = providerProbeMap(probe)
   const defaultRuntime = configuredDefaultRuntime(providers) ?? probeDefaultRuntime(probe)
@@ -255,7 +295,7 @@ export function RuntimeHealthSnapshot() {
       ` : null}
       ${state.error ? html`<${ErrorState} message=${state.error} />` : null}
 
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-5" data-testid="runtime-health-snapshot">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="runtime-health-snapshot">
         <${StatTile}
           label="live probe"
           value=${counts.failed > 0 ? `${counts.failed} failing` : `${counts.reachable} reachable`}
@@ -287,6 +327,15 @@ export function RuntimeHealthSnapshot() {
           delta=${{ direction: probeError ? 'down' : 'flat', text: runtimeProbeFreshnessLabel(probe) }}
         />
         <${StatTile}
+          label="startup"
+          value=${startupDegradationValue(startup)}
+          status=${startupAttention ? 'warn' : startup ? 'ok' : 'warn'}
+          delta=${{
+            direction: startupAttention ? 'down' : 'flat',
+            text: startupDegradationDetail(startup),
+          }}
+        />
+        <${StatTile}
           label="assignments"
           value=${assignmentGovernanceValue(governance)}
           status=${governanceAttention ? 'warn' : governance ? 'ok' : 'warn'}
@@ -309,6 +358,32 @@ export function RuntimeHealthSnapshot() {
           <span class="mx-1">·</span>
           <span>${problem.message}</span>
           ${problem.detail ? html`<div class="mt-1 truncate text-2xs" title=${problem.detail}>${problem.detail}</div>` : null}
+        </div>
+      ` : null}
+
+      ${startupAttention && startup ? html`
+        <div class="mt-3 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 px-3 py-2 text-xs text-[var(--status-warn)]" role="alert">
+          runtime startup degraded · ${startup.terminal_reason ?? startup.status ?? 'catalog gate'}
+          ${startup.effective_default_runtime_id ? html`
+            <div class="mt-1 truncate text-2xs" title=${startup.effective_default_runtime_id}>
+              effective default: ${startup.effective_default_runtime_id}
+            </div>
+          ` : null}
+          ${startup.disabled_runtime_ids.length ? html`
+            <div class="mt-1 truncate text-2xs" title=${startup.disabled_runtime_ids.join(', ')}>
+              disabled runtimes: ${startup.disabled_runtime_ids.join(', ')}
+            </div>
+          ` : null}
+          ${startupAlertDetail ? html`
+            <div class="mt-1 truncate text-2xs" title=${startupAlertDetail}>
+              ${startupAlertDetail}
+            </div>
+          ` : null}
+          ${startup.next_action ? html`
+            <div class="mt-1 truncate text-2xs" title=${startup.next_action}>
+              next: ${startup.next_action}
+            </div>
+          ` : null}
         </div>
       ` : null}
 
@@ -343,7 +418,7 @@ export function RuntimeHealthSnapshot() {
 
       <div class="mt-3 flex flex-wrap items-center gap-2 text-2xs">
         <${StatusChip} tone=${snapshotTone(status)} uppercase=${false}>
-          ${snapshotStatusText(status, governanceAttention)}
+          ${snapshotStatusText(status, startupAttention, governanceAttention)}
         <//>
         <${RouteLink}
           tab="monitoring"

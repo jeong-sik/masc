@@ -18,16 +18,11 @@ let build_prompt (input : review_input) : (string, string) result =
 
 let apply_report_verdict_output_schema provider_cfg =
   let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
-  let provider_cfg =
-    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
-  in
-  match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
-  | Ok () -> Ok provider_cfg
-  | Error detail ->
-    Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig
-            { field = "verification.adversarial_review.output_schema"; detail }))
+  Ok
+    (Keeper_structured_output_schema.apply_schema_or_prompt_tier
+       ~log_label:"adversarial review output contract"
+       schema
+       provider_cfg)
 
 let parse_grounded_verdict_from_response_text text =
   match Yojson.Safe.from_string (String.trim text) with

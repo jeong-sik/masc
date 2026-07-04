@@ -50,6 +50,16 @@ val apply_hitl_summary_schema_to_config
   -> Llm_provider.Provider_config.t
 (** Set both OAS structured-output fields for {!hitl_context_summary_schema}. *)
 
+val apply_schema_or_prompt_tier
+  :  log_label:string
+  -> Yojson.Safe.t
+  -> Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Set [schema] only when the provider accepts native structured output.
+    Otherwise return the original provider config and log the prompt-tier
+    downgrade with the validation detail. Use only for keeper operation paths
+    whose parser remains fail-loud after the provider response. *)
+
 val validate_provider_config
   :  Yojson.Safe.t
   -> Llm_provider.Provider_config.t

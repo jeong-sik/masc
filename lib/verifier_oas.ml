@@ -62,16 +62,11 @@ If you cannot call the tool, return only the same JSON object with fields
 
 let apply_report_verdict_output_schema provider_cfg =
   let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
-  let native_cfg =
-    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
-  in
-  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-  | Ok () -> Ok native_cfg
-  | Error _ ->
-    (* Schema unavailable (GLM, MiMo, ollama cloud): prompt-tier fallback so the
-       verifier still runs; the caller parses the response as free-text/JSON.
-       Mirrors fusion_judge's fallback. *)
-    Ok provider_cfg
+  Ok
+    (Keeper_structured_output_schema.apply_schema_or_prompt_tier
+       ~log_label:"verifier output contract"
+       schema
+       provider_cfg)
 ;;
 
 let parse_verdict_from_response_text text =

@@ -368,6 +368,18 @@ let apply_hitl_summary_schema_to_config config =
   apply_to_provider_config hitl_context_summary_schema config
 ;;
 
+let apply_schema_or_prompt_tier ~log_label schema provider_cfg =
+  let native_cfg = apply_to_provider_config schema provider_cfg in
+  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
+  | Ok () -> native_cfg
+  | Error detail ->
+    Log.Keeper.info
+      "%s: prompt tier (native schema unavailable: %s)"
+      log_label
+      detail;
+    provider_cfg
+;;
+
 let validate_provider_config schema provider_cfg =
   provider_cfg
   |> apply_to_provider_config schema

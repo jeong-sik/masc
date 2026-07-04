@@ -276,17 +276,11 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
      schema-free tuned config so json_object / free-text providers (GLM, MiMo,
      ollama cloud) can still serve the librarian. The schema gate is NOT the
      silent-failure safety net — the parse-retry loop below plus WARN on
-     permanent failure is. Mirrors fusion_judge's prompt-tier fallback. *)
-  let native_cfg =
-    Keeper_structured_output_schema.apply_to_provider_config
-      Keeper_structured_output_schema.librarian_episode_output_schema tuned_cfg
-  in
-  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-  | Ok () -> native_cfg
-  (* Schema unavailable (GLM, MiMo, ollama cloud): prompt-tier fallback. The
-     parse-retry loop below + WARN on permanent failure is the silent-failure
-     safety net — the schema gate is not. Mirrors fusion_judge's fallback. *)
-  | Error _ -> tuned_cfg
+     permanent failure is. *)
+  Keeper_structured_output_schema.apply_schema_or_prompt_tier
+    ~log_label:"keeper librarian output contract"
+    Keeper_structured_output_schema.librarian_episode_output_schema
+    tuned_cfg
 ;;
 
 let message role text =

@@ -1458,22 +1458,16 @@ export function SettingsSurface() {
                 </div>
               <//>
 
-              <div class="set-rt-launch" style=${{ marginTop: '16px', border: '1px solid var(--color-border-default)', padding: '16px', borderRadius: '8px', background: 'var(--color-bg-elevated)' }}>
-                <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style=${{ fontWeight: 'bold', fontSize: '14px', color: 'var(--color-fg-primary)' }}>HTML 스냅샷 내보내기</div>
-                    <div class="set-hint" style=${{ marginTop: '4px' }}>현재 렌더링된 DOM을 HTML로 저장합니다. 외부 asset, API 데이터, 실행 상태는 파일에 내장되지 않습니다.</div>
-                  </div>
-                  <button
-                    type="button"
-                    class="cn-act act"
-                    style=${{ background: 'var(--color-brand)', color: 'var(--volt-ink)', fontWeight: '600' }}
-                    onClick=${handleExportHtmlSnapshot}
-                  >
-                    다운로드 ⤓
-                  </button>
-                </div>
-              </div>
+              <${SetRow} label="HTML 스냅샷 내보내기" hint="현재 렌더링된 DOM을 HTML 파일로 저장하여 다운로드합니다.">
+                <button
+                  type="button"
+                  class="cn-act act"
+                  style=${{ background: 'var(--color-brand)', color: 'var(--volt-ink)', fontWeight: '600' }}
+                  onClick=${handleExportHtmlSnapshot}
+                >
+                  내보내기 ⤓
+                </button>
+              <//>
             `}
           </div>
         </div>

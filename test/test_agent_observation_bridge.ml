@@ -38,7 +38,12 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
       ; typed_outcome = "progress"
       ; duration_ms = 12.0
       ; output_text = "annotated"
-      ; input = `Assoc [ "file_path", `String "lib/test.ml"; "line_start", `Int 42 ]
+      ; input =
+          `Assoc
+            [ "file_path", `String "lib/test.ml"
+            ; "line_start", `Int 42
+            ; "focus_mode", `String "editing"
+            ]
       };
     (match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool ~limit:1 () with
      | [ event ] ->

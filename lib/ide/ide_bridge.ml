@@ -589,18 +589,6 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
     | _ -> None
   with _ -> None
 
-let string_contains s needle =
-  let s_len = String.length s in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if needle_len = 0 then true
-    else if i + needle_len > s_len then false
-    else if String.sub s i needle_len = needle then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
-
 let cursor_file_path_of_input input =
   let non_empty = function
     | Some s ->
@@ -619,21 +607,10 @@ let cursor_line_of_input input =
   | None -> int_field "line_start" input
 ;;
 
-let focus_mode_of_tool_input ~tool_name input =
+let focus_mode_of_tool_input input =
   match string_field "focus_mode" input with
-  | Some mode when valid_focus_mode mode -> mode
-  | _ ->
-    let lowered = String.lowercase_ascii tool_name in
-    if string_contains lowered "review"
-    then "reviewing"
-    else if string_contains lowered "read" || string_contains lowered "search"
-    then "reading"
-    else if string_contains lowered "write"
-            || string_contains lowered "edit"
-            || string_contains lowered "patch"
-            || string_contains lowered "annotate"
-    then "editing"
-    else "planning"
+  | Some mode when valid_focus_mode mode -> Some mode
+  | Some _ | None -> None
 ;;
 
 let turn_number_of_id turn_id =
@@ -694,8 +671,8 @@ let ingest_cursor_event_from_hook
     ~timestamp_ms
     ~(input : Yojson.Safe.t)
   =
-  match cursor_file_path_of_input input, cursor_line_of_input input with
-  | Some file_path, Some line when line >= 1 ->
+  match cursor_file_path_of_input input, cursor_line_of_input input, focus_mode_of_tool_input input with
+  | Some file_path, Some line, Some focus_mode when line >= 1 ->
     let column =
       match int_field "column" input with
       | Some n when n >= 0 -> n
@@ -713,7 +690,7 @@ let ingest_cursor_event_from_hook
         ~line
         ~column
         ?selection_end
-        ~focus_mode:(focus_mode_of_tool_input ~tool_name input)
+        ~focus_mode
         ~last_update:timestamp_ms
         ~tool_name
         ?turn:(turn_number_of_id turn_id)
@@ -739,26 +716,34 @@ let ingest_cursor_event
     ()
   =
   let column = Option.value column ~default:0 in
-  let focus_mode = Option.value focus_mode ~default:"edit" in
-  let timestamp_ms = now_ms () in
-  let json =
-    cursor_event_json
-      ~keeper_id
-      ~file_path
-      ~line
-      ~column
-      ?selection_end
-      ~focus_mode
-      ~last_update:timestamp_ms
-      ~tool_name:source
-      ~turn_id:""
-      ()
+  let focus_mode =
+    match focus_mode with
+    | None -> Some "editing"
+    | Some mode when valid_focus_mode mode -> Some mode
+    | Some _ -> None
   in
-  (try append_cursor ~base_dir:base_path ~partition:default_partition json
-   with exn ->
-     Printf.eprintf
-       "Ide_bridge.ingest_cursor_event error: %s\n%!"
-       (Printexc.to_string exn))
+  match focus_mode with
+  | None -> ()
+  | Some focus_mode ->
+    let timestamp_ms = now_ms () in
+    let json =
+      cursor_event_json
+        ~keeper_id
+        ~file_path
+        ~line
+        ~column
+        ?selection_end
+        ~focus_mode
+        ~last_update:timestamp_ms
+        ~tool_name:source
+        ~turn_id:""
+        ()
+    in
+    (try append_cursor ~base_dir:base_path ~partition:default_partition json
+     with exn ->
+       Printf.eprintf
+         "Ide_bridge.ingest_cursor_event error: %s\n%!"
+         (Printexc.to_string exn))
 ;;
 ;;
 
@@ -887,7 +872,7 @@ let ingest_pr_event_from_descriptor
     ~keeper_id
     ~turn_id
     ~output_text
-    ~tool_name
+    ~tool_name:_
     ~success
   =
   (* Gate: only ingest PR events from successful tool executions.
@@ -895,7 +880,7 @@ let ingest_pr_event_from_descriptor
      command_descriptor in their output, which would otherwise produce
      phantom PR #0 events. *)
   if not success then ()
-  else if String.equal (String.lowercase_ascii tool_name) "execute" then
+  else
     match extract_descriptor_from_output output_text with
     | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
       let pr_number, pull_request_url = match parse_pull_request_result_from_output output_text with
@@ -965,7 +950,7 @@ let ingest_pr_event_from_descriptor
     | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
     | None -> ()
 
-(** Ingest PR creation/update events from Execute tool output.
+(** Ingest PR creation/update events from descriptor-backed tool output.
     This legacy hook entrypoint intentionally delegates to descriptor-backed
     ingestion only; raw stdout URL scanning is not a reliable PR signal. *)
 let ingest_pr_event_from_hook

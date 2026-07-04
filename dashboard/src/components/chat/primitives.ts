@@ -18,6 +18,7 @@ const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
+import { isFailedDelivery } from '../../lib/keeper-delivery'
 import { memo } from 'preact/compat'
 import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
@@ -226,7 +227,7 @@ function liveMessageLabel(entry: KeeperConversationEntry): string | null {
 }
 
 function bubbleTone(entry: KeeperConversationEntry): string {
-  if (entry.delivery === 'error' || entry.delivery === 'timeout' || entry.delivery === 'interrupted') return 'error'
+  if (isFailedDelivery(entry.delivery)) return 'error'
   if (entry.role === 'user') return 'user'
   if (entry.role === 'assistant') return 'assistant'
   if (entry.role === 'tool') return 'tool'
@@ -1985,8 +1986,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
   const isFailureMessage =
-    (entry.delivery === 'error' || entry.delivery === 'timeout' || entry.delivery === 'interrupted')
-    && !!entry.error?.trim()
+    isFailedDelivery(entry.delivery) && !!entry.error?.trim()
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
   const hasCardBlock = (entry.blocks ?? []).some((b) => CARD_BLOCK_TYPES.has(b.t))

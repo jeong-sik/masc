@@ -1742,6 +1742,11 @@ let effective_capabilities_json (rt : Runtime.t) =
 
 let runtime_parameter_policy_json (rt : Runtime.t) =
   let module RD = Llm_provider.Reasoning_dialect in
+  let sampling_parameter_json_list values =
+    values
+    |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
+    |> Json_util.json_string_list
+  in
   let dialect = RD.for_provider_config rt.provider_config in
   let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
   let ignored_sampling_params =
@@ -1758,9 +1763,9 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
     [ "reasoning_toggle_wire", `String (RD.toggle_wire_to_string dialect.toggle_wire)
     ; "reasoning_replay_policy", `String (RD.replay_policy_to_string dialect.replay_policy)
     ; "requires_reasoning_replay_on_tool_call", `Bool (RD.requires_reasoning_replay_on_tool_call dialect)
-    ; "ignored_sampling_params", Json_util.json_string_list ignored_sampling_params
+    ; "ignored_sampling_params", sampling_parameter_json_list ignored_sampling_params
     ; ( "always_ignored_sampling_params"
-      , Json_util.json_string_list always_ignored_sampling_params )
+      , sampling_parameter_json_list always_ignored_sampling_params )
     ]
 ;;
 

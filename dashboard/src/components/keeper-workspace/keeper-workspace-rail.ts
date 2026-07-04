@@ -145,6 +145,53 @@ function runtimeParameterPolicySummary(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeRequestToolChoiceSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const choice = entry.request_config?.tool_choice
+  if (!choice?.kind) return null
+  return choice.name ? `${choice.kind}:${choice.name}` : choice.kind
+}
+
+function runtimeRequestFormatSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const format = entry.request_config?.response_format
+  if (!format?.kind) return null
+  return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeRequestConfigSummary(
+  entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
+): string | null {
+  const request = entry.request_config
+  if (!request) return null
+  const sampling = [
+    typeof request.temperature === 'number' ? `temp ${request.temperature}` : null,
+    typeof request.top_p === 'number' ? `top_p ${request.top_p}` : null,
+    typeof request.top_k === 'number' ? `top_k ${request.top_k}` : null,
+    typeof request.min_p === 'number' ? `min_p ${request.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = runtimeRequestToolChoiceSummary(entry)
+  const format = runtimeRequestFormatSummary(entry)
+  const parts = [
+    request.provider_kind ? request.provider_kind : null,
+    request.request_path_targets_responses_api ? 'responses-api' : null,
+    typeof request.max_tokens === 'number' ? `out ${request.max_tokens}` : null,
+    typeof request.max_context === 'number' ? `ctx ${request.max_context}` : null,
+    sampling.length > 0 ? sampling.join(',') : null,
+    typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
+    request.resolved_reasoning_effort ? `effort ${request.resolved_reasoning_effort}` : null,
+    toolChoice ? `tool ${toolChoice}` : null,
+    request.disable_parallel_tool_use ? 'parallel off' : null,
+    format ? `format ${format}` : null,
+    typeof request.seed === 'number' ? `seed ${request.seed}` : null,
+    typeof request.num_ctx === 'number' ? `num_ctx ${request.num_ctx}` : null,
+    request.keep_alive ? `keep ${request.keep_alive}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeEffectiveCapabilitySummary(
   entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
 ): string | null {
@@ -191,6 +238,7 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   const effortAdjustable = effortMode === 'reasoning-effort' || Boolean(entry?.supports_reasoning_budget)
   const effectiveCapabilities = entry ? runtimeEffectiveCapabilitySummary(entry) : null
   const parameterPolicy = entry ? runtimeParameterPolicySummary(entry) : null
+  const requestConfig = entry ? runtimeRequestConfigSummary(entry) : null
 
   return html`
     <div class="ctx-sec">
@@ -235,6 +283,14 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
               <div class="rtc-effort">
                 <span class="rtc-effort-k">params</span>
                 <span class="rtc-eff-na" title=${parameterPolicy}>${parameterPolicy}</span>
+              </div>
+            `
+          : null}
+        ${requestConfig
+          ? html`
+              <div class="rtc-effort">
+                <span class="rtc-effort-k">request</span>
+                <span class="rtc-eff-na" title=${requestConfig}>${requestConfig}</span>
               </div>
             `
           : null}

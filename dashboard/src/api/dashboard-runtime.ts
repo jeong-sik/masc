@@ -24,6 +24,52 @@ export interface DashboardRuntimeParameterPolicy {
   always_ignored_sampling_params: string[]
 }
 
+export interface DashboardRuntimeToolChoice {
+  kind?: string | null
+  name?: string | null
+}
+
+export interface DashboardRuntimeResponseFormat {
+  kind?: string | null
+  has_schema?: boolean
+}
+
+export interface DashboardRuntimeRequestConfig {
+  source?: string | null
+  provider_kind?: string | null
+  request_path?: string | null
+  request_path_targets_responses_api?: boolean
+  max_tokens?: number | null
+  max_context?: number | null
+  temperature?: number | null
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  has_system_prompt?: boolean
+  enable_thinking?: boolean | null
+  preserve_thinking?: boolean | null
+  thinking_budget?: number | null
+  clear_thinking?: boolean | null
+  resolved_reasoning_effort?: string | null
+  glm_clear_thinking?: boolean
+  glm_replay_reasoning?: boolean
+  tool_stream?: boolean
+  tool_choice?: DashboardRuntimeToolChoice | null
+  disable_parallel_tool_use?: boolean
+  response_format?: DashboardRuntimeResponseFormat | null
+  has_output_schema?: boolean
+  cache_system_prompt?: boolean
+  supports_tool_choice_override?: boolean | null
+  supports_structured_output_override?: boolean | null
+  has_model_capabilities_override?: boolean
+  keep_alive?: string | null
+  internal_model_rotation_count?: number | null
+  num_ctx?: number | null
+  seed?: number | null
+  has_previous_response_id?: boolean
+  connect_timeout_s?: number | null
+}
+
 export interface DashboardRuntimeReasoningStreamingFormat {
   kind?: string | null
   field?: string | null
@@ -101,6 +147,7 @@ export interface DashboardRuntimeProviderSnapshot {
   thinking_control_format?: string | null
   effective_capabilities?: DashboardRuntimeEffectiveCapabilities | null
   parameter_policy?: DashboardRuntimeParameterPolicy | null
+  request_config?: DashboardRuntimeRequestConfig | null
   model_count?: number | null
   models: string[]
   source?: string | null
@@ -262,6 +309,61 @@ function decodeRuntimeParameterPolicy(raw: unknown): DashboardRuntimeParameterPo
   }
 }
 
+function decodeRuntimeToolChoice(raw: unknown): DashboardRuntimeToolChoice | null {
+  if (!isRecord(raw)) return null
+  return {
+    kind: asNullableString(raw.kind),
+    name: asNullableString(raw.name),
+  }
+}
+
+function decodeRuntimeResponseFormat(raw: unknown): DashboardRuntimeResponseFormat | null {
+  if (!isRecord(raw)) return null
+  return {
+    kind: asNullableString(raw.kind),
+    has_schema: asBoolean(raw.has_schema),
+  }
+}
+
+function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    provider_kind: asNullableString(raw.provider_kind),
+    request_path: asNullableString(raw.request_path),
+    request_path_targets_responses_api: asBoolean(raw.request_path_targets_responses_api),
+    max_tokens: asNumber(raw.max_tokens) ?? null,
+    max_context: asNumber(raw.max_context) ?? null,
+    temperature: asNumber(raw.temperature) ?? null,
+    top_p: asNumber(raw.top_p) ?? null,
+    top_k: asNumber(raw.top_k) ?? null,
+    min_p: asNumber(raw.min_p) ?? null,
+    has_system_prompt: asBoolean(raw.has_system_prompt),
+    enable_thinking: asBoolean(raw.enable_thinking) ?? null,
+    preserve_thinking: asBoolean(raw.preserve_thinking) ?? null,
+    thinking_budget: asNumber(raw.thinking_budget) ?? null,
+    clear_thinking: asBoolean(raw.clear_thinking) ?? null,
+    resolved_reasoning_effort: asNullableString(raw.resolved_reasoning_effort),
+    glm_clear_thinking: asBoolean(raw.glm_clear_thinking),
+    glm_replay_reasoning: asBoolean(raw.glm_replay_reasoning),
+    tool_stream: asBoolean(raw.tool_stream),
+    tool_choice: decodeRuntimeToolChoice(raw.tool_choice),
+    disable_parallel_tool_use: asBoolean(raw.disable_parallel_tool_use),
+    response_format: decodeRuntimeResponseFormat(raw.response_format),
+    has_output_schema: asBoolean(raw.has_output_schema),
+    cache_system_prompt: asBoolean(raw.cache_system_prompt),
+    supports_tool_choice_override: asBoolean(raw.supports_tool_choice_override) ?? null,
+    supports_structured_output_override: asBoolean(raw.supports_structured_output_override) ?? null,
+    has_model_capabilities_override: asBoolean(raw.has_model_capabilities_override),
+    keep_alive: asNullableString(raw.keep_alive),
+    internal_model_rotation_count: asNumber(raw.internal_model_rotation_count) ?? null,
+    num_ctx: asNumber(raw.num_ctx) ?? null,
+    seed: asNumber(raw.seed) ?? null,
+    has_previous_response_id: asBoolean(raw.has_previous_response_id),
+    connect_timeout_s: asNumber(raw.connect_timeout_s) ?? null,
+  }
+}
+
 function decodeNullableStringArray(raw: unknown): string[] | null {
   return Array.isArray(raw) ? asStringArray(raw) : null
 }
@@ -365,6 +467,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     thinking_control_format: asNullableString(raw.thinking_control_format),
     effective_capabilities: decodeRuntimeEffectiveCapabilities(raw.effective_capabilities),
     parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
+    request_config: decodeRuntimeRequestConfig(raw.request_config),
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),
     source: asNullableString(raw.source),

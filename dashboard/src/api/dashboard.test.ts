@@ -2430,6 +2430,46 @@ describe('fetchRuntimeProviders', () => {
               ignored_sampling_params: ['temperature', 'top_p'],
               always_ignored_sampling_params: ['temperature'],
             },
+            request_config: {
+              source: 'oas-provider-config',
+              provider_kind: 'openai_compat',
+              request_path: '/chat/completions',
+              request_path_targets_responses_api: false,
+              max_tokens: 65536,
+              max_context: 131072,
+              temperature: null,
+              top_p: null,
+              top_k: null,
+              min_p: null,
+              has_system_prompt: false,
+              enable_thinking: true,
+              preserve_thinking: null,
+              thinking_budget: 32768,
+              clear_thinking: false,
+              resolved_reasoning_effort: 'high',
+              glm_clear_thinking: false,
+              glm_replay_reasoning: true,
+              tool_stream: true,
+              tool_choice: {
+                kind: 'required',
+              },
+              disable_parallel_tool_use: false,
+              response_format: {
+                kind: 'json_schema',
+                has_schema: true,
+              },
+              has_output_schema: true,
+              cache_system_prompt: true,
+              supports_tool_choice_override: true,
+              supports_structured_output_override: null,
+              has_model_capabilities_override: true,
+              keep_alive: '30m',
+              internal_model_rotation_count: null,
+              num_ctx: 131072,
+              seed: 42,
+              has_previous_response_id: false,
+              connect_timeout_s: 120,
+            },
             effective_capabilities: {
               source: 'oas-provider-config-model',
               max_context_tokens: 131072,
@@ -2529,6 +2569,14 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.parameter_policy?.reasoning_replay_policy).toBe('preserve_always')
     expect(result.providers[0]?.parameter_policy?.ignored_sampling_params).toEqual(['temperature', 'top_p'])
     expect(result.providers[0]?.parameter_policy?.always_ignored_sampling_params).toEqual(['temperature'])
+    expect(result.providers[0]?.request_config?.provider_kind).toBe('openai_compat')
+    expect(result.providers[0]?.request_config?.request_path).toBe('/chat/completions')
+    expect(result.providers[0]?.request_config?.max_tokens).toBe(65536)
+    expect(result.providers[0]?.request_config?.thinking_budget).toBe(32768)
+    expect(result.providers[0]?.request_config?.resolved_reasoning_effort).toBe('high')
+    expect(result.providers[0]?.request_config?.tool_choice?.kind).toBe('required')
+    expect(result.providers[0]?.request_config?.response_format?.kind).toBe('json_schema')
+    expect(result.providers[0]?.request_config?.num_ctx).toBe(131072)
     expect(result.providers[0]?.effective_capabilities?.max_output_tokens).toBe(65536)
     expect(result.providers[0]?.effective_capabilities?.supports_parallel_tool_calls).toBe(true)
     expect(result.providers[0]?.effective_capabilities?.accepted_reasoning_efforts).toEqual(['low', 'medium', 'high'])

@@ -1093,6 +1093,63 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       (caps |> J.member "supports_top_k" |> J.to_bool))
 ;;
 
+let test_runtime_inventory_surfaces_request_config () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let request = thinkdefault |> J.member "request_config" in
+    Alcotest.(check string)
+      "request config source"
+      "oas-provider-config"
+      (request |> J.member "source" |> J.to_string);
+    Alcotest.(check string)
+      "provider kind"
+      "openai_compat"
+      (request |> J.member "provider_kind" |> J.to_string);
+    Alcotest.(check string)
+      "request path"
+      "/chat/completions"
+      (request |> J.member "request_path" |> J.to_string);
+    Alcotest.(check bool)
+      "not responses api"
+      false
+      (request |> J.member "request_path_targets_responses_api" |> J.to_bool);
+    Alcotest.(check int)
+      "request max context"
+      128000
+      (request |> J.member "max_context" |> J.to_int);
+    Alcotest.(check string)
+      "response format kind"
+      "off"
+      (request |> J.member "response_format" |> J.member "kind" |> J.to_string);
+    Alcotest.(check bool)
+      "no output schema body exposed"
+      false
+      (request |> J.member "has_output_schema" |> J.to_bool);
+    Alcotest.(check bool)
+      "no model capabilities override on provider_config"
+      false
+      (request |> J.member "has_model_capabilities_override" |> J.to_bool);
+    (match request with
+     | `Assoc fields ->
+       List.iter
+         (fun secret_key ->
+            Alcotest.(check bool)
+              ("secret key omitted: " ^ secret_key)
+              false
+              (List.mem_assoc secret_key fields))
+         [ "api_key"; "headers"; "system_prompt"; "output_schema"; "previous_response_id" ]
+     | _ -> Alcotest.fail "request_config must be an object"))
+;;
+
 let test_thinking_unknown_runtime_defers () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"bogus.binding" in
@@ -1544,6 +1601,10 @@ let () =
             "runtime inventory surfaces OAS effective capabilities"
             `Quick
             test_runtime_inventory_surfaces_effective_capabilities
+        ; Alcotest.test_case
+            "runtime inventory surfaces OAS request config"
+            `Quick
+            test_runtime_inventory_surfaces_request_config
         ; Alcotest.test_case
             "unknown runtime id defers (None)"
             `Quick

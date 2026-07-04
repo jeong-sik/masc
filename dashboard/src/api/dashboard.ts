@@ -124,6 +124,9 @@ export { fetchDashboardBriefing, fetchDashboardMission, fetchDashboardMissionSes
 export type {
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeParameterPolicy,
+  DashboardRuntimeRequestConfig,
+  DashboardRuntimeResponseFormat,
+  DashboardRuntimeToolChoice,
   DashboardRuntimeEffectiveCapabilities,
   DashboardRuntimeReasoningStreamingFormat,
   DashboardRuntimeAssignment,

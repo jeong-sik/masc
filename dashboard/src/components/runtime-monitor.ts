@@ -172,6 +172,55 @@ function runtimeParameterPolicyText(provider: DashboardRuntimeProviderSnapshot):
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeRequestToolChoiceText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const choice = provider.request_config?.tool_choice
+  if (!choice?.kind) return null
+  return choice.name ? `${choice.kind}:${choice.name}` : choice.kind
+}
+
+function runtimeRequestFormatText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const format = provider.request_config?.response_format
+  if (!format?.kind) return null
+  return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const request = provider.request_config
+  if (!request) return null
+  const sampling = [
+    typeof request.temperature === 'number' ? `temp ${request.temperature}` : null,
+    typeof request.top_p === 'number' ? `top_p ${request.top_p}` : null,
+    typeof request.top_k === 'number' ? `top_k ${request.top_k}` : null,
+    typeof request.min_p === 'number' ? `min_p ${request.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = runtimeRequestToolChoiceText(provider)
+  const format = runtimeRequestFormatText(provider)
+  let requestPath: string | null = null
+  if (request.request_path_targets_responses_api) {
+    requestPath = 'responses-api'
+  } else if (request.request_path) {
+    requestPath = `path ${request.request_path}`
+  }
+  const parts = [
+    request.provider_kind ? `kind ${request.provider_kind}` : null,
+    requestPath,
+    typeof request.max_tokens === 'number' ? `out ${formatNumber(request.max_tokens)}` : null,
+    typeof request.max_context === 'number' ? `ctx ${formatNumber(request.max_context)}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
+    typeof request.thinking_budget === 'number' ? `budget ${formatNumber(request.thinking_budget)}` : null,
+    request.resolved_reasoning_effort ? `effort ${request.resolved_reasoning_effort}` : null,
+    toolChoice ? `tool ${toolChoice}` : null,
+    request.disable_parallel_tool_use ? 'parallel off' : null,
+    format ? `format ${format}` : null,
+    typeof request.seed === 'number' ? `seed ${request.seed}` : null,
+    typeof request.num_ctx === 'number' ? `num_ctx ${formatNumber(request.num_ctx)}` : null,
+    request.keep_alive ? `keep ${request.keep_alive}` : null,
+    typeof request.connect_timeout_s === 'number' ? `connect ${request.connect_timeout_s}s` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const caps = provider.effective_capabilities
   if (!caps) return null
@@ -578,10 +627,11 @@ export function RuntimeMonitor() {
           : null}
         <div class="flex flex-col gap-3">
           ${(providers?.providers ?? []).length > 0
-            ? providers?.providers.map(provider => {
+              ? providers?.providers.map(provider => {
                 const liveProbe = providerProbes.get(providerRuntimeKey(provider)) ?? null
                 const effectiveCapabilities = runtimeEffectiveCapabilitiesText(provider)
                 const parameterPolicy = runtimeParameterPolicyText(provider)
+                const requestConfig = runtimeRequestConfigText(provider)
                 return html`
                 <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
@@ -612,6 +662,11 @@ export function RuntimeMonitor() {
                   ${parameterPolicy
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${parameterPolicy}>
                         params · ${parameterPolicy}
+                      </div>`
+                    : null}
+                  ${requestConfig
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${requestConfig}>
+                        request · ${requestConfig}
                       </div>`
                     : null}
                   ${effectiveCapabilities

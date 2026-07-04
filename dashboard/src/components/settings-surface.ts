@@ -228,6 +228,47 @@ function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnapshot): 
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeCatalogRequestToolChoice(item: DashboardRuntimeProviderSnapshot): string | null {
+  const choice = item.request_config?.tool_choice
+  if (!choice?.kind) return null
+  return choice.name ? `${choice.kind}:${choice.name}` : choice.kind
+}
+
+function runtimeCatalogRequestFormat(item: DashboardRuntimeProviderSnapshot): string | null {
+  const format = item.request_config?.response_format
+  if (!format?.kind) return null
+  return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapshot): string | null {
+  const request = item.request_config
+  if (!request) return null
+  const sampling = [
+    typeof request.temperature === 'number' ? `temp:${request.temperature}` : null,
+    typeof request.top_p === 'number' ? `top_p:${request.top_p}` : null,
+    typeof request.top_k === 'number' ? `top_k:${request.top_k}` : null,
+    typeof request.min_p === 'number' ? `min_p:${request.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = runtimeCatalogRequestToolChoice(item)
+  const format = runtimeCatalogRequestFormat(item)
+  const parts = [
+    request.provider_kind ? `kind:${request.provider_kind}` : null,
+    request.request_path_targets_responses_api ? 'responses-api' : null,
+    typeof request.max_tokens === 'number' ? `out:${request.max_tokens}` : null,
+    typeof request.max_context === 'number' ? `ctx:${request.max_context}` : null,
+    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+    typeof request.enable_thinking === 'boolean' ? `think:${request.enable_thinking ? 'on' : 'off'}` : null,
+    request.resolved_reasoning_effort ? `effort:${request.resolved_reasoning_effort}` : null,
+    toolChoice ? `tool:${toolChoice}` : null,
+    request.disable_parallel_tool_use ? 'parallel:off' : null,
+    format ? `format:${format}` : null,
+    typeof request.seed === 'number' ? `seed:${request.seed}` : null,
+    typeof request.num_ctx === 'number' ? `num_ctx:${request.num_ctx}` : null,
+    request.keep_alive ? `keep:${request.keep_alive}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnapshot): string | null {
   const caps = item.effective_capabilities
   if (!caps) return null
@@ -290,6 +331,7 @@ function RuntimeCatalogCard({
   const isDefault = runtimeId === (defaultRuntimeId ?? '')
   const effectiveCapabilities = runtimeCatalogEffectiveCapabilities(item)
   const parameterPolicy = runtimeCatalogParameterPolicy(item)
+  const requestConfig = runtimeCatalogRequestConfig(item)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -320,6 +362,9 @@ function RuntimeCatalogCard({
           : null}
         ${parameterPolicy
           ? html`<span class="rt-cap tcf mono" title=${parameterPolicy}>${parameterPolicy}</span>`
+          : null}
+        ${requestConfig
+          ? html`<span class="rt-cap tcf mono" title=${requestConfig}>${requestConfig}</span>`
           : null}
       </div>
       <div class="set-rt-row">

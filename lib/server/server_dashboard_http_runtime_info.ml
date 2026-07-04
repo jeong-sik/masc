@@ -1497,6 +1497,69 @@ let task_json : Llm_provider.Capabilities.task option -> Yojson.Safe.t = functio
   | Some Video_generation -> `String "video-generation"
 ;;
 
+let tool_choice_json : Llm_provider.Types.tool_choice option -> Yojson.Safe.t = function
+  | None -> `Null
+  | Some Llm_provider.Types.Auto -> `Assoc [ "kind", `String "auto" ]
+  | Some Llm_provider.Types.Any -> `Assoc [ "kind", `String "required" ]
+  | Some Llm_provider.Types.None_ -> `Assoc [ "kind", `String "none" ]
+  | Some (Llm_provider.Types.Tool name) ->
+    `Assoc [ "kind", `String "tool"; "name", `String name ]
+;;
+
+let response_format_json : Llm_provider.Types.response_format -> Yojson.Safe.t = function
+  | Llm_provider.Types.Off -> `Assoc [ "kind", `String "off"; "has_schema", `Bool false ]
+  | Llm_provider.Types.JsonMode ->
+    `Assoc [ "kind", `String "json_mode"; "has_schema", `Bool false ]
+  | Llm_provider.Types.JsonSchema _ ->
+    `Assoc [ "kind", `String "json_schema"; "has_schema", `Bool true ]
+;;
+
+let runtime_request_config_json (rt : Runtime.t) =
+  let cfg = rt.provider_config in
+  `Assoc
+    [ "source", `String "oas-provider-config"
+    ; "provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
+    ; "request_path", `String cfg.request_path
+    ; ( "request_path_targets_responses_api"
+      , `Bool (Llm_provider.Provider_config.request_path_targets_responses_api cfg.request_path)
+      )
+    ; "max_tokens", Json_util.int_opt_to_json cfg.max_tokens
+    ; "max_context", Json_util.int_opt_to_json cfg.max_context
+    ; "temperature", Json_util.float_opt_to_json cfg.temperature
+    ; "top_p", Json_util.float_opt_to_json cfg.top_p
+    ; "top_k", Json_util.int_opt_to_json cfg.top_k
+    ; "min_p", Json_util.float_opt_to_json cfg.min_p
+    ; "has_system_prompt", `Bool (Option.is_some cfg.system_prompt)
+    ; "enable_thinking", Json_util.bool_opt_to_json cfg.enable_thinking
+    ; "preserve_thinking", Json_util.bool_opt_to_json cfg.preserve_thinking
+    ; "thinking_budget", Json_util.int_opt_to_json cfg.thinking_budget
+    ; "clear_thinking", Json_util.bool_opt_to_json cfg.clear_thinking
+    ; ( "resolved_reasoning_effort"
+      , Json_util.string_opt_to_json
+          (Llm_provider.Provider_config.reasoning_effort_request_value
+             ~enable_thinking:cfg.enable_thinking
+             ~thinking_budget:cfg.thinking_budget) )
+    ; "glm_clear_thinking", `Bool (Llm_provider.Provider_config.glm_clear_thinking cfg)
+    ; "glm_replay_reasoning", `Bool (Llm_provider.Provider_config.glm_should_replay_reasoning cfg)
+    ; "tool_stream", `Bool cfg.tool_stream
+    ; "tool_choice", tool_choice_json cfg.tool_choice
+    ; "disable_parallel_tool_use", `Bool cfg.disable_parallel_tool_use
+    ; "response_format", response_format_json cfg.response_format
+    ; "has_output_schema", `Bool (Option.is_some cfg.output_schema)
+    ; "cache_system_prompt", `Bool cfg.cache_system_prompt
+    ; "supports_tool_choice_override", Json_util.bool_opt_to_json cfg.supports_tool_choice_override
+    ; ( "supports_structured_output_override"
+      , Json_util.bool_opt_to_json cfg.supports_structured_output_override )
+    ; "has_model_capabilities_override", `Bool (Option.is_some cfg.model_capabilities_override)
+    ; "keep_alive", Json_util.string_opt_to_json cfg.keep_alive
+    ; "internal_model_rotation_count", Json_util.int_opt_to_json cfg.internal_model_rotation_count
+    ; "num_ctx", Json_util.int_opt_to_json cfg.num_ctx
+    ; "seed", Json_util.int_opt_to_json cfg.seed
+    ; "has_previous_response_id", `Bool (Option.is_some cfg.previous_response_id)
+    ; "connect_timeout_s", Json_util.float_opt_to_json cfg.connect_timeout_s
+    ]
+;;
+
 let effective_capabilities_json (rt : Runtime.t) =
   match Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config with
   | None -> `Null
@@ -1634,6 +1697,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
+    ; "request_config", runtime_request_config_json rt
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models
     ; "source", `String runtime_inventory_source

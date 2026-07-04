@@ -274,15 +274,18 @@ function runtimeDeclaredSpecSummary(
     spec.provider?.protocol ? spec.provider.protocol : null,
     spec.provider?.auth_kind ? `auth ${spec.provider.auth_kind}` : null,
     spec.provider?.is_non_interactive ? 'non-interactive' : null,
+    typeof spec.provider?.custom_header_count === 'number' ? `headers ${spec.provider.custom_header_count}` : null,
     typeof spec.provider?.connect_timeout_s === 'number' ? `connect ${spec.provider.connect_timeout_s}s` : null,
     behaviorParts.length > 0 ? `behavior ${behaviorParts.join(',')}` : null,
     typeof spec.model?.max_context === 'number' ? `ctx ${spec.model.max_context}` : null,
+    typeof spec.model?.temperature === 'number' ? `temp ${spec.model.temperature}` : null,
     typeof spec.model?.tools_support === 'boolean' ? `tools ${spec.model.tools_support ? 'on' : 'off'}` : null,
     typeof spec.model?.streaming === 'boolean' ? `stream ${spec.model.streaming ? 'on' : 'off'}` : null,
     typeof spec.model?.preserve_thinking === 'boolean'
       ? `preserve ${spec.model.preserve_thinking ? 'on' : 'off'}`
       : null,
     thinking,
+    typeof spec.model?.max_thinking_budget === 'number' ? `budget ${spec.model.max_thinking_budget}` : null,
     caps?.thinking_control_format ? caps.thinking_control_format : null,
     typeof caps?.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
@@ -322,10 +325,13 @@ function runtimeEffectiveCapabilitySummary(
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
+    caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
+    caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
+    caps.task ? `task ${caps.task}` : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
     caps.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`

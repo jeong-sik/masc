@@ -831,10 +831,12 @@ describe('SettingsSurface', () => {
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
+            assistant_tool_content_format: 'empty-string',
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
             accepted_reasoning_efforts: null,
+            preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
               kind: 'delta-reasoning-field',
@@ -852,6 +854,7 @@ describe('SettingsSurface', () => {
             supports_code_execution: true,
             emits_usage_tokens: true,
             modality_priority: 'visual-first',
+            task: 'transcription',
             supported_models: ['m1'],
           },
           declared_spec: {
@@ -961,7 +964,13 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
+      expect(cards[0]?.textContent).toContain('tool-content:empty-string')
+      expect(cards[0]?.textContent).toContain('preserve:always-preserved')
+      expect(cards[0]?.textContent).toContain('task:transcription')
       expect(cards[0]?.textContent).toContain('declared:api:chat-completions')
+      expect(cards[0]?.textContent).toContain('headers:1')
+      expect(cards[0]?.textContent).toContain('temp:0.65')
+      expect(cards[0]?.textContent).toContain('budget:8192')
       expect(cards[0]?.textContent).toContain(
         'controls:tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
       )

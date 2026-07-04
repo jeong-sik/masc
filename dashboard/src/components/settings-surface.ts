@@ -348,15 +348,18 @@ function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapshot): str
     spec.provider?.protocol ? `protocol:${spec.provider.protocol}` : null,
     spec.provider?.auth_kind ? `auth:${spec.provider.auth_kind}` : null,
     spec.provider?.is_non_interactive ? 'non-interactive' : null,
+    typeof spec.provider?.custom_header_count === 'number' ? `headers:${spec.provider.custom_header_count}` : null,
     typeof spec.provider?.connect_timeout_s === 'number' ? `connect:${spec.provider.connect_timeout_s}s` : null,
     behaviorParts.length > 0 ? `behavior:${behaviorParts.join(',')}` : null,
     typeof spec.model?.max_context === 'number' ? `ctx:${spec.model.max_context}` : null,
+    typeof spec.model?.temperature === 'number' ? `temp:${spec.model.temperature}` : null,
     typeof spec.model?.tools_support === 'boolean' ? `tools:${spec.model.tools_support ? 'on' : 'off'}` : null,
     typeof spec.model?.streaming === 'boolean' ? `stream:${spec.model.streaming ? 'on' : 'off'}` : null,
     typeof spec.model?.preserve_thinking === 'boolean'
       ? `preserve:${spec.model.preserve_thinking ? 'on' : 'off'}`
       : null,
     thinking,
+    typeof spec.model?.max_thinking_budget === 'number' ? `budget:${spec.model.max_thinking_budget}` : null,
     caps?.thinking_control_format ? `wire:${caps.thinking_control_format}` : null,
     typeof caps?.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null,
     formats.length > 0 ? `format:${formats.join(',')}` : null,
@@ -400,7 +403,13 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     item.effective_capabilities?.modality_priority
       ? `modality:${item.effective_capabilities.modality_priority}`
       : null,
+    item.effective_capabilities?.assistant_tool_content_format
+      ? `tool-content:${item.effective_capabilities.assistant_tool_content_format}`
+      : null,
     item.effective_capabilities?.supports_reasoning ? 'reasoning' : null,
+    item.effective_capabilities?.preserve_thinking_control_format
+      ? `preserve:${item.effective_capabilities.preserve_thinking_control_format}`
+      : null,
     item.effective_capabilities?.reasoning_output_format
       ? `reasoning-out:${item.effective_capabilities.reasoning_output_format}`
       : null,
@@ -409,6 +418,9 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
       : null,
     item.effective_capabilities?.reasoning_replay_override
       ? `replay:${item.effective_capabilities.reasoning_replay_override}`
+      : null,
+    item.effective_capabilities?.task
+      ? `task:${item.effective_capabilities.task}`
       : null,
     item.effective_capabilities?.supports_system_prompt ? 'system-prompt' : null,
     item.effective_capabilities?.supports_prompt_caching

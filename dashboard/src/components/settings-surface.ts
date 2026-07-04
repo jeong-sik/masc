@@ -328,6 +328,8 @@ function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapshot): str
     caps?.supports_required_tool_choice ? 'required' : null,
     caps?.supports_named_tool_choice ? 'named' : null,
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
+    caps?.supports_extended_thinking ? 'extended-thinking' : null,
+    caps?.supports_reasoning_budget ? 'reasoning-budget' : null,
     caps?.supports_native_streaming ? 'native-stream' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_caching ? 'cache' : null,

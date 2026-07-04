@@ -30,6 +30,7 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
     install_fresh_ide_sink ();
     Agent_observation.emit_tool_event
       { base_path = base_dir
+      ; partition = Agent_observation.Legacy_default
       ; tool_name = "keeper_ide_annotate"
       ; keeper_id = "keeper-alpha"
       ; turn_id = "turn-9"
@@ -56,6 +57,7 @@ let test_turn_observation_reaches_ide_storage () =
     install_fresh_ide_sink ();
     Agent_observation.emit_turn_event
       { base_path = base_dir
+      ; partition = Agent_observation.Legacy_default
       ; turn_id = "turn-10"
       ; keeper_id = "keeper-beta"
       ; phase = "completed"
@@ -77,6 +79,7 @@ let test_pr_observation_reaches_ide_storage () =
     install_fresh_ide_sink ();
     Agent_observation.emit_pr_event
       { base_path = base_dir
+      ; partition = Agent_observation.Legacy_default
       ; keeper_id = "keeper-gamma"
       ; turn_id = "turn-11"
       ; output_text =
@@ -135,6 +138,7 @@ let test_annotation_request_reaches_ide_storage () =
     let result =
       Agent_observation.emit_annotation_request
         { base_path = base_dir
+        ; partition = Agent_observation.Legacy_default
         ; keeper_id = "keeper-epsilon"
         ; file_path = "lib/annotated.ml"
         ; line_start = 7

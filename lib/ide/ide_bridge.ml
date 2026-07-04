@@ -1038,6 +1038,7 @@ let install_agent_observation_sinks () =
         event.tool_call_json);
   Agent_observation.register_annotation_sink
     (fun ({ base_path
+           ; partition
            ; keeper_id
            ; file_path
            ; line_start
@@ -1059,6 +1060,7 @@ let install_agent_observation_sinks () =
       match
         Ide_annotations.create
           ~base_dir:base_path
+          ~partition
           ~keeper_id
           ~file_path
           ~line_start

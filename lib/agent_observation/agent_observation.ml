@@ -221,13 +221,22 @@ type annotation_result =
 type tool_event_sink = tool_event -> unit
 type pr_event_sink = pr_event -> unit
 type turn_event_sink = turn_event -> unit
-type write_region_sink = write_region_event -> unit
+type write_region_error =
+  | Write_region_sink_not_installed
+  | Write_region_sink_failed of string
+
+let write_region_error_to_string = function
+  | Write_region_sink_not_installed -> "write_region sink is not installed"
+  | Write_region_sink_failed msg -> msg
+;;
+
+type write_region_sink = write_region_event -> (unit, write_region_error) result
 type annotation_sink = annotation_request -> (annotation_result, string) result
 
 let noop_tool_event_sink (_ : tool_event) = ()
 let noop_pr_event_sink (_ : pr_event) = ()
 let noop_turn_event_sink (_ : turn_event) = ()
-let noop_write_region_sink (_ : write_region_event) = ()
+let noop_write_region_sink (_ : write_region_event) = Error Write_region_sink_not_installed
 let noop_annotation_sink (_ : annotation_request) = Error "annotation sink is not installed"
 
 let tool_event_sink = Atomic.make noop_tool_event_sink

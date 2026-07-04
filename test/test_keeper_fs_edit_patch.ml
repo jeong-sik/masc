@@ -11,6 +11,7 @@ module Keeper_registry = Masc.Keeper_registry
 module Keeper_tool_alias = Masc.Keeper_tool_alias
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
+module Agent_observation = Masc.Agent_observation
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
@@ -94,6 +95,13 @@ let parse_error raw =
 
 let parse_int raw field =
   parse raw |> Json.member field |> Json.to_int_option
+
+let parse_write_region_observation_error raw =
+  parse raw
+  |> Json.member "ide_observation"
+  |> Json.member "write_region"
+  |> Json.member "error"
+  |> Json.to_string_option
 
 let public_fs_edit_call ~public ~config ~(meta : Keeper_meta_contract.keeper_meta) args =
   let args = Keeper_tool_alias.translate_input ~public args in
@@ -356,6 +364,30 @@ let test_public_write_file_maps_top_relative_single_repo_path () =
   Alcotest.(check string) "file written through single repo rewrite"
     "let generated = true\n" (Fs_compat.load_file path)
 
+let test_write_file_surfaces_missing_ide_observation_sink () =
+  setup @@ fun ~config ~meta ~playground ->
+  Agent_observation.reset_for_testing ();
+  let path = Filename.concat playground "observed.ml" in
+  let raw =
+    Keeper_tool_filesystem_runtime.handle_file_write
+      ~turn_sandbox_factory:None
+      ~config
+      ~keeper_name:meta.name
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "overwrite"
+          ; "content", `String "let observed = true\n"
+          ])
+  in
+  Alcotest.(check bool) "ok" true (parse_ok raw);
+  Alcotest.(check string) "file written despite observation failure"
+    "let observed = true\n" (Fs_compat.load_file path);
+  Alcotest.(check (option string))
+    "write-region observation failure is surfaced"
+    (Some "write_region sink is not installed")
+    (parse_write_region_observation_error raw)
+
 let () =
   Alcotest.run "Keeper_fs_edit_patch"
     [
@@ -387,5 +419,7 @@ let () =
             test_public_edit_file_maps_top_relative_single_repo_path;
           Alcotest.test_case "public Write maps top-relative single repo path" `Quick
             test_public_write_file_maps_top_relative_single_repo_path;
+          Alcotest.test_case "write_file surfaces missing IDE observation sink" `Quick
+            test_write_file_surfaces_missing_ide_observation_sink;
         ] );
     ]

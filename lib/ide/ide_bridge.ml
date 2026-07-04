@@ -1046,12 +1046,18 @@ let install_agent_observation_sinks () =
           ~timestamp_ms:event.timestamp_ms));
   Agent_observation.register_write_region_sink
     (fun (event : Agent_observation.write_region_event) ->
-      Ide_region_tracker.ingest_tool_call
-        ~base_dir:event.base_path
-        ~partition:event.partition
-        ~keeper_id:event.keeper_id
-        ~turn:event.turn
-        event.tool_call_json);
+      try
+        Ide_region_tracker.ingest_tool_call
+          ~base_dir:event.base_path
+          ~partition:event.partition
+          ~keeper_id:event.keeper_id
+          ~turn:event.turn
+          event.tool_call_json;
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Error (Agent_observation.Write_region_sink_failed (Printexc.to_string exn)));
   Agent_observation.register_annotation_sink
     (fun ({ base_path
            ; partition

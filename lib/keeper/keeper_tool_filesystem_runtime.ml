@@ -497,21 +497,39 @@ let track_write_region
     | _ -> `Assoc fields
   in
   let tool_call_json = `Assoc [ "name", `String tool_name; "arguments", arguments ] in
-  try
+  match
     Agent_observation.emit_write_region_event
-      { base_path = base_dir
-      ; partition
-      ; keeper_id = keeper_name
-      ; turn
-      ; tool_call_json
-      }
+      { base_path = base_dir; partition; keeper_id = keeper_name; turn; tool_call_json }
   with
-  | exn ->
+  | Ok () -> None
+  | Error err ->
+    let message = Agent_observation.write_region_error_to_string err in
     Log.Keeper.warn
       "IDE region tracking failed for keeper=%s path=%s: %s"
       keeper_name
       file_path
-      (Printexc.to_string exn)
+      message;
+    Some message
+  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception exn ->
+    let message = Printexc.to_string exn in
+    Log.Keeper.warn
+      "IDE region tracking failed for keeper=%s path=%s: %s"
+      keeper_name
+      file_path
+      message;
+    Some message
+;;
+
+let ide_observation_failure_fields = function
+  | None -> []
+  | Some error ->
+    [ ( "ide_observation"
+      , `Assoc
+          [ ( "write_region"
+            , `Assoc [ "ok", `Bool false; "error", `String error ] )
+          ] )
+    ]
 ;;
 
 let validate_write_target ~config ~meta ~target =
@@ -632,15 +650,17 @@ let handle_file_write
                       occurrences
                       (String.length updated);
                     (* IDE: record code region after successful patch write *)
-                    track_write_region
-                      ~config
-                      ~keeper_name:meta.name
-                      ~file_path:target
-                      ~content:updated
-                      ~mode_raw:"patch"
-                      ~old_string
-                      ~new_string
-                      ();
+                    let ide_observation_error =
+                      track_write_region
+                        ~config
+                        ~keeper_name:meta.name
+                        ~file_path:target
+                        ~content:updated
+                        ~mode_raw:"patch"
+                        ~old_string
+                        ~new_string
+                        ()
+                    in
                     Ok
                       (Yojson.Safe.to_string
                          (`Assoc
@@ -651,6 +671,7 @@ let handle_file_write
                               ; "occurrences", `Int occurrences
                               ; "bytes_written", `Int (String.length updated)
                               ]
+                              @ ide_observation_failure_fields ide_observation_error
                               @ via_field)))
                 with
                 | Fs_edit_error json -> Ok json
@@ -725,15 +746,17 @@ let handle_file_write
                  mode_label
                  (String.length content);
                (* IDE: record code region after successful overwrite/append write *)
-               track_write_region
-                 ~config
-                 ~keeper_name:meta.name
-                 ~file_path:target
-                 ~content
-                 ~mode_raw:(fs_write_mode_to_string mode)
-                 ~old_string:""
-                 ~new_string:""
-                 ();
+               let ide_observation_error =
+                 track_write_region
+                   ~config
+                   ~keeper_name:meta.name
+                   ~file_path:target
+                   ~content
+                   ~mode_raw:(fs_write_mode_to_string mode)
+                   ~old_string:""
+                   ~new_string:""
+                   ()
+               in
                Ok
                  (Yojson.Safe.to_string
                     (`Assoc
@@ -742,6 +765,7 @@ let handle_file_write
                          ; "mode", `String mode_label
                          ; "bytes_written", `Int (String.length content)
                          ]
+                         @ ide_observation_failure_fields ide_observation_error
                          @ via_field)))
              with
              | Fs_edit_error json -> Ok json

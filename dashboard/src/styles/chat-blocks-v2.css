@@ -94,12 +94,14 @@
 .chat-block-trace-label {
   font-weight: var(--fw-semi);
   color: var(--chat-tool-fg, var(--color-fg-secondary));
+  white-space: nowrap;
 }
 
 .chat-block-trace-count,
 .chat-block-trace-meta {
   color: var(--color-fg-muted);
   font-size: var(--fs-2xs);
+  white-space: nowrap;
 }
 
 .chat-block-trace-meta {

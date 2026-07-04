@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
+import { ConnectionStatus } from './dashboard-shell'
 import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
 import { DEFAULT_MASC_ORIGIN } from '../config/constants'
@@ -1609,7 +1610,8 @@ function ConnectorsSurfaceHeader({
           <span>Discord는 서버 내장 gateway, iMessage/Slack/Telegram은 sidecar 관측 기반입니다.</span>
         </div>
       </div>
-      <div class="cn-surf-actions" style=${{ display: 'flex', gap: 8 }}>
+      <div class="cn-surf-actions" style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <${ConnectionStatus} />
         <button
           type="button"
           class="cn-act act"

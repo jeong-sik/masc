@@ -524,6 +524,52 @@ describe('SettingsSurface', () => {
       .toContain('compact')
   })
 
+  it('exports display HTML as a DOM snapshot without standalone resource claims', async () => {
+    route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:masc-dashboard-snapshot')
+    const revokeObjectURL = vi.fn()
+    class TestURL extends URL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = revokeObjectURL
+    }
+    vi.stubGlobal('URL', TestURL)
+    const originalClick = HTMLAnchorElement.prototype.click
+    let clickedAnchor: HTMLAnchorElement | null = null
+    HTMLAnchorElement.prototype.click = function clickSnapshotDownload() {
+      clickedAnchor = this
+    }
+
+    try {
+      render(html`<${SettingsSurface} />`, container)
+
+      await waitFor(() => {
+        expect(container.textContent).toContain('HTML 스냅샷 내보내기')
+      })
+      expect(container.textContent).toContain('현재 렌더링된 DOM을 HTML로 저장합니다')
+      expect(container.textContent).toContain('실행 상태는 파일에 내장되지 않습니다')
+      expect(container.textContent).not.toContain('Standalone HTML')
+      expect(container.textContent).not.toContain('모든 리소스')
+
+      const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find(candidate => candidate.textContent?.includes('다운로드'))
+      expect(button).toBeTruthy()
+
+      await fireEvent.click(button as HTMLButtonElement)
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      const blob = createObjectURL.mock.calls[0]?.[0] as Blob | undefined
+      expect(blob?.type).toBe('text/html;charset=utf-8')
+      await expect(blob?.text()).resolves.toContain('HTML 스냅샷 내보내기')
+      const anchor = clickedAnchor as HTMLAnchorElement | null
+      expect(anchor?.href).toBe('blob:masc-dashboard-snapshot')
+      expect(anchor?.download).toBe('MASC_Dashboard_snapshot.html')
+      expect(document.body.contains(clickedAnchor)).toBe(false)
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:masc-dashboard-snapshot')
+    } finally {
+      HTMLAnchorElement.prototype.click = originalClick
+    }
+  })
+
   it('falls invalid settings sections back to runtime without a fake subsection', () => {
     expect(normalizeSettingsSection('not-real')).toBe('runtime')
     route.value = { tab: 'settings', params: { section: 'not-real' }, postId: null }

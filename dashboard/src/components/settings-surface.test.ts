@@ -832,6 +832,11 @@ describe('SettingsSurface', () => {
           models: ['m1', 'm1-fallback'],
           temperature: 0.7,
           capabilities_declared: true,
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+          supports_reasoning_budget: true,
           note: 'verified by runtime discovery',
           parameter_policy: {
             reasoning_toggle_wire: 'chat-template-kwargs',
@@ -1023,6 +1028,8 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('models:2')
       expect(cards[0]?.textContent).toContain('model-temp:0.7')
       expect(cards[0]?.textContent).toContain('caps:declared')
+      expect(cards[0]?.textContent).toContain('audio:on')
+      expect(cards[0]?.textContent).toContain('video:off')
       expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
       expect(cards[0]?.textContent).toContain('source:oas-provider-config')
       expect(cards[0]?.textContent).toContain('path:/chat/completions')

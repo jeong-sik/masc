@@ -103,6 +103,7 @@ let test_accumulate_consolidate_recall () =
             ~complete:(fake_complete plan)
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ();

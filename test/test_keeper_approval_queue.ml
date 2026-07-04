@@ -373,9 +373,52 @@ let test_summary_survives_include_input_paths () =
          (summary_status_status detail_entry);
        (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
         | Ok () -> ()
-        | Error err ->
+       | Error err ->
           Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
        yield_until (fun () -> Option.is_some !result))
+;;
+
+let test_summary_worker_missing_root_switch_is_explicit_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       Eio.Switch.run
+       @@ fun turn_sw ->
+       let keeper_name = "summary-root-switch-missing-test" in
+       let id =
+         Eio_context.with_turn_switch turn_sw (fun () ->
+           AQ.submit_pending
+             ~keeper_name
+             ~tool_name:"keeper_continue_after_reconcile"
+             ~input:(`Assoc [ "kind", `String "medium_gate" ])
+             ~risk_level:AQ.Medium
+             ~base_path
+             ~on_resolution:(fun _decision -> ())
+             ())
+       in
+       let entry =
+         match AQ.get_pending_entry ~id with
+         | Some entry -> entry
+         | None -> Alcotest.fail "pending entry missing"
+       in
+       (match entry.summary_status with
+        | AQ.Summary_failed { reason; retryable } ->
+          Alcotest.(check string)
+            "missing root switch is explicit"
+            "HITL summary: server root switch unavailable"
+            reason;
+          Alcotest.(check bool) "not retryable without a root switch" false retryable
+        | other ->
+          Alcotest.failf
+            "expected Summary_failed, got %s"
+            (Yojson.Safe.to_string (AQ.summary_status_to_yojson other)));
+       match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err ->
+         Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err))
 ;;
 
 let test_pending_phase_conversions () =
@@ -429,6 +472,10 @@ let () =
             "context summary survives include_input:true JSON paths"
             `Quick
             test_summary_survives_include_input_paths
+        ; Alcotest.test_case
+            "missing root switch marks summary failed"
+            `Quick
+            test_summary_worker_missing_root_switch_is_explicit_failure
         ] )
     ; ( "conversions"
       , [ Alcotest.test_case

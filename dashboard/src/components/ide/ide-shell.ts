@@ -38,6 +38,7 @@ import {
   type KeeperCursor,
   type KeeperCursorOverlay,
 } from './keeper-cursor-overlay'
+import { lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -154,6 +155,7 @@ interface IdeStatusbarInput {
   readonly workspaceBasePath?: string | null
   readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
   readonly dashboardConnected?: boolean
+  readonly lspStatus?: LspStatusSnapshot
 }
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
@@ -430,6 +432,15 @@ function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string
     .join('\n')
 }
 
+function lspOverlayOnlyStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
+  return (status?.langs ?? [])
+    .filter(lang => lang.overlay_only)
+    .map(lang => {
+      const error = lang.last_error?.trim()
+      return error ? `${lang.lang}: ${error}` : lang.lang
+    })
+}
+
 function addStatusbarChip(
   chips: IdeStatusbarChip[],
   id: string,
@@ -458,6 +469,7 @@ export function deriveIdeStatusbarModel({
   workspaceBasePath = null,
   workspaceIssues = [],
   dashboardConnected = false,
+  lspStatus,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
   const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
@@ -479,6 +491,14 @@ export function deriveIdeStatusbarModel({
     issueLabels.length > 0 ? `IDE fetch degraded ${issueLabels.join('/')}` : undefined,
     'warn',
     workspaceIssueTitle(workspaceIssues),
+  )
+  const lspOverlayOnly = lspOverlayOnlyStatus(lspStatus)
+  addStatusbarChip(
+    chips,
+    'lsp-status',
+    lspOverlayOnly.length > 0 ? `LSP overlay-only ${lspOverlayOnly.length}` : undefined,
+    'warn',
+    lspOverlayOnly.join('\n'),
   )
   if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
@@ -912,6 +932,7 @@ export function IdeShell() {
 
   const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
+  const lspStatus = useSignalValue(lspStatusSnapshot)
   const reviewFocusActive = activeFocus === 'review' && activeView === 'unified'
   const activeLayers = layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null)
   const terminalOpen =
@@ -938,6 +959,7 @@ export function IdeShell() {
     workspaceBasePath,
     workspaceIssues,
     dashboardConnected: dashboardRuntimeConnected(),
+    lspStatus,
   })
 
   useEffect(() => {

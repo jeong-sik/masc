@@ -47,6 +47,7 @@ import { clearTraces, pushTrace } from './keeper-trace-store'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -152,6 +153,7 @@ describe('IdeShell', () => {
     activeIdeFile.value = 'package.json'
     ideContextFocus.value = null
     cursorOverlaySignal.value = { cursors: new Map(), heatmap: new Map(), collisions: [], active_file: null }
+    lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
     clearTraces()
     clearLocalStorage()
   })
@@ -515,6 +517,43 @@ describe('IdeShell', () => {
     })
     expect(chip.textContent).toBe('IDE fetch degraded diff')
     expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
+  })
+
+  it('surfaces overlay-only LSP languages in the IDE statusbar', async () => {
+    lspStatusSnapshot.value = {
+      langs: [
+        {
+          lang: 'ocaml',
+          connected: false,
+          overlay_only: true,
+          command: 'ocamllsp',
+          last_error: 'ocamllsp unavailable',
+        },
+        {
+          lang: 'typescript',
+          connected: true,
+          overlay_only: false,
+          command: 'typescript-language-server',
+          last_error: null,
+        },
+      ],
+    }
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-lsp-status"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('LSP overlay-only 1')
+    expect(chip.getAttribute('title')).toContain('ocaml: ocamllsp unavailable')
+    expect(chip.getAttribute('title')).not.toContain('typescript')
   })
 
   it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {

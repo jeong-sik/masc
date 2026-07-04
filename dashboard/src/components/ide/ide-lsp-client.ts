@@ -72,6 +72,21 @@ export interface LspDiagnosticAnchor {
 
 export const lspDiagnosticSnapshot = signal<ReadonlyMap<string, ReadonlyArray<LspDiagnosticAnchor>>>(new Map())
 
+export interface LspLanguageStatus {
+  readonly lang: string
+  readonly connected: boolean
+  readonly overlay_only: boolean
+  readonly command: string | null
+  readonly last_error: string | null
+}
+
+export interface LspStatusSnapshot {
+  readonly langs: ReadonlyArray<LspLanguageStatus>
+}
+
+export const EMPTY_LSP_STATUS_SNAPSHOT: LspStatusSnapshot = { langs: [] }
+export const lspStatusSnapshot = signal<LspStatusSnapshot>(EMPTY_LSP_STATUS_SNAPSHOT)
+
 const LSP_TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403])
 
 export interface SelectedAnnotation {
@@ -451,6 +466,8 @@ export class LspConnection {
         diagByLine.set(line, existing)
       }
       this.onDiagnostics(params.uri, diagByLine)
+    } else if (msg.method === 'masc/lspStatus') {
+      publishLspStatusSnapshot(msg.params)
     }
   }
 
@@ -703,6 +720,54 @@ function indexByLine<T>(items: ReadonlyArray<T>, getLine: (item: T) => number): 
     map.set(line, existing)
   }
   return map
+}
+
+export function parseLspStatusSnapshot(value: unknown): LspStatusSnapshot | null {
+  if (!isRecord(value)) return null
+  const langs = value.langs
+  if (!Array.isArray(langs)) return null
+
+  const parsed: LspLanguageStatus[] = []
+  for (const lang of langs) {
+    const status = parseLspLanguageStatus(lang)
+    if (status === null) return null
+    parsed.push(status)
+  }
+  return { langs: parsed }
+}
+
+function parseLspLanguageStatus(value: unknown): LspLanguageStatus | null {
+  if (!isRecord(value)) return null
+  const { lang, connected, overlay_only, command, last_error } = value
+  if (typeof lang !== 'string') return null
+  if (typeof connected !== 'boolean') return null
+  if (typeof overlay_only !== 'boolean') return null
+  if (!isStringOrNull(command)) return null
+  if (!isStringOrNull(last_error)) return null
+  return {
+    lang,
+    connected,
+    overlay_only,
+    command,
+    last_error,
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return typeof value === 'string' || value === null
+}
+
+function publishLspStatusSnapshot(value: unknown): void {
+  const parsed = parseLspStatusSnapshot(value)
+  if (parsed === null) {
+    console.warn('[LSP] invalid masc/lspStatus payload')
+    return
+  }
+  lspStatusSnapshot.value = parsed
 }
 
 function publishLspDiagnosticSnapshot(

@@ -3,6 +3,7 @@
 
 module Bank = Masc.Keeper_memory_bank
 module Policy = Masc.Keeper_memory_policy
+module Search = Masc.Keeper_tool_memory_runtime
 
 let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   let json = `Assoc [ ("name", `String name) ] in
@@ -30,7 +31,7 @@ let with_env key value f =
       f ())
 ;;
 
-let progress_row ~trace_id ~text : string =
+let progress_row ?(priority = 50) ~trace_id ~text : string =
   `Assoc
     [ ("schema_version", `Int Policy.keeper_memory_schema_version)
     ; ("kind", `String "progress")
@@ -38,7 +39,7 @@ let progress_row ~trace_id ~text : string =
     ; ("source", `String "tool_result")
     ; ("trace_id", `String trace_id)
     ; ("generation", `Int 1)
-    ; ("priority", `Int 50)
+    ; ("priority", `Int priority)
     ; ("text", `String text)
     ; ("ts_unix", `Float 1_700_000_000.0)
     ]
@@ -74,6 +75,55 @@ let with_eio_fs f () =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Fun.protect ~finally:Fs_compat.clear_fs f
+;;
+
+let assoc_field name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some value -> value
+     | None -> Alcotest.failf "missing JSON field %s" name)
+  | _ -> Alcotest.fail "expected JSON object"
+;;
+
+let json_int_field name json =
+  match assoc_field name json with
+  | `Int n -> n
+  | other ->
+    Alcotest.failf
+      "expected integer field %s, got %s"
+      name
+      (Yojson.Safe.to_string other)
+;;
+
+let json_string_field name json =
+  match assoc_field name json with
+  | `String s -> s
+  | other ->
+    Alcotest.failf
+      "expected string field %s, got %s"
+      name
+      (Yojson.Safe.to_string other)
+;;
+
+let json_float_field name json =
+  match assoc_field name json with
+  | `Float f -> f
+  | `Int n -> float_of_int n
+  | other ->
+    Alcotest.failf
+      "expected numeric field %s, got %s"
+      name
+      (Yojson.Safe.to_string other)
+;;
+
+let json_list_field name json =
+  match assoc_field name json with
+  | `List values -> values
+  | other ->
+    Alcotest.failf
+      "expected list field %s, got %s"
+      name
+      (Yojson.Safe.to_string other)
 ;;
 
 let test_schema_mismatch_surfaces_typed_error () =
@@ -121,6 +171,60 @@ let test_malformed_json_is_not_schema_mismatch () =
     "malformed json is not schema mismatch"
     None
     result.Policy.error
+;;
+
+let test_memory_search_json_returns_partial_bank_match () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "partial-search" in
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let relevant_text = "notable release lesson persisted for future keeper recall" in
+  let weaker_text = "event-only low priority note" in
+  let content =
+    String.concat
+      "\n"
+      [ progress_row ~priority:100 ~trace_id:"partial-1" ~text:relevant_text
+      ; progress_row ~priority:5 ~trace_id:"partial-2" ~text:weaker_text
+      ]
+    ^ "\n"
+  in
+  write_file path content;
+  let ctx_work =
+    Masc.Keeper_context_runtime.create
+      ~eio:false
+      ~system_prompt:"test"
+      ~max_tokens:4000
+  in
+  let raw =
+    Search.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work
+      ~args:
+        (`Assoc
+          [ ("source", `String "memory")
+          ; ("query", `String "notable event lesson learned")
+          ; ("limit", `Int 2)
+          ])
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check int) "bank candidates" 2 (json_int_field "total_candidates" json);
+  Alcotest.(check int) "partial matches returned" 2 (json_int_field "match_count" json);
+  (match List.assoc_opt "no_match" (match json with `Assoc fields -> fields | _ -> []) with
+   | None -> ()
+   | Some _ -> Alcotest.fail "partial memory search must not report no_match");
+  match json_list_field "matches" json with
+  | first :: _ ->
+    Alcotest.(check string)
+      "stronger partial match is ranked first"
+      relevant_text
+      (json_string_field "text" first);
+    Alcotest.(check bool)
+      "top score is positive"
+      true
+      (json_float_field "score" first > 0.0)
+  | [] -> Alcotest.fail "expected at least one memory match"
 ;;
 
 let test_write_failure_surfaces_typed_error () =
@@ -175,6 +279,10 @@ let () =
             "malformed json is not schema mismatch"
             `Quick
             (with_eio_fs test_malformed_json_is_not_schema_mismatch)
+        ; Alcotest.test_case
+            "partial search returns memory-bank match"
+            `Quick
+            (with_eio_fs test_memory_search_json_returns_partial_bank_match)
         ] )
     ]
 ;;

@@ -703,7 +703,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
   | "masc_keeper_msg_cancel" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_cancel ctx args))
   | "masc_keeper_msg_queue" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_queue ctx args))
-  | "masc_keeper_repair" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_repair ctx args))
   | "masc_keeper_adversarial_review" ->
       Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_adversarial_review ctx args))
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
@@ -760,7 +759,7 @@ let () =
 
 (* RFC-0182 §3.1 — register ctx-free keeper handlers with
    [Keeper_dispatch_ref].  Only [masc_keeper_list] today; the
-   remaining keeper tools (status, msg, clear, compact, repair,
+   remaining keeper tools (status, msg, clear, compact,
    sandbox lifecycle) use the keeper Eio context and are gated on
    Phase 5 Eio plumbing scope. *)
 (* RFC-0182 Phase 5 PR-B: [eio_context_missing] returns a typed "Eio context
@@ -814,11 +813,6 @@ let () =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.keeper_status_body ~config ~agent_name args))
-    | "masc_keeper_repair" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_repair_body ~config ~agent_name args))
     | "masc_keeper_adversarial_review" ->
       Some
         (tool_result_with_tool_name

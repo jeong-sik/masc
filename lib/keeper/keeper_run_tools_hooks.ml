@@ -56,6 +56,49 @@ let relax_strict_tool_choice_for_keeper = function
     Some Agent_sdk.Types.Auto
   | other -> other
 
+let relative_path_has_segment_prefix prefix raw =
+  String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
+;;
+
+let sandbox_rooted_relative_path raw =
+  Filename.is_relative raw
+  && List.exists
+       (fun prefix -> relative_path_has_segment_prefix prefix raw)
+       [ "repos"; "mind"; Common.masc_dirname; "playground" ]
+;;
+
+let non_empty_string_member name input =
+  match Yojson.Safe.Util.member name input with
+  | `String raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then None else Some raw
+  | _ -> None
+;;
+
+let observation_file_path_from_tool_input ~base_path input =
+  let path =
+    match non_empty_string_member "path" input with
+    | Some p -> Some p
+    | None -> non_empty_string_member "file_path" input
+  in
+  match path with
+  | None -> base_path
+  | Some p when Filename.is_relative p && not (sandbox_rooted_relative_path p) ->
+    (match non_empty_string_member "cwd" input with
+     | Some cwd -> Filename.concat cwd p
+     | None -> p)
+  | Some p -> p
+;;
+
+let observation_partition_for_tool_input ~config ~kind input =
+  let base_dir = Keeper_alerting_path.project_root_of_config config in
+  let file_path = observation_file_path_from_tool_input ~base_path:base_dir input in
+  Keeper_tool_filesystem_runtime.resolve_partition_for_write
+    ~base_dir
+    ~kind
+    ~file_path
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -190,9 +233,14 @@ let assemble_hooks
              | Some t -> Keeper_id.Task_id.to_string t
              | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
            in
+           (* task-1733: resolve the partition from the tool's actual edited
+              file (input.path / input.file_path, with explicit cwd honoured
+              for relative paths), not from the [.masc] runtime root. *)
            let partition, _ =
-             Keeper_tool_filesystem_runtime.resolve_partition_for_write
-               ~base_dir:config.base_path ~kind:"tool_event" ~file_path:config.base_path
+             observation_partition_for_tool_input
+               ~config
+               ~kind:"tool_event"
+               input
            in
            Agent_observation.emit_tool_event
              { base_path = config.base_path

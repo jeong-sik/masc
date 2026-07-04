@@ -36,6 +36,7 @@ val list_cursors :
     context and uses the provided [source] label as the tool_name field. *)
 val ingest_cursor_event :
   base_path:string ->
+  ?partition:Ide_paths.partition ->
   keeper_id:string ->
   file_path:string ->
   line:int ->
@@ -55,6 +56,7 @@ val install_agent_observation_sinks : unit -> unit
 
 val ingest_tool_event :
   base_path:string ->
+  ?partition:Ide_paths.partition ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->
@@ -70,6 +72,7 @@ val ingest_tool_event :
 
 val ingest_turn_event :
   base_path:string ->
+  partition:Ide_paths.partition ->
   turn_id:string ->
   keeper_id:string ->
   phase:string ->
@@ -84,6 +87,7 @@ val ingest_turn_event :
     [typed_outcome_str] is pre-computed from [Keeper_tool_outcome.t]. *)
 val ingest_tool_event_from_hook :
   base_path:string ->
+  partition:Ide_paths.partition ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->
@@ -96,6 +100,7 @@ val ingest_tool_event_from_hook :
 
 val ingest_pr_event :
   base_path:string ->
+  partition:Ide_paths.partition ->
   pr_number:int ->
   pull_request_url:string ->
   pr_title:string ->
@@ -113,6 +118,7 @@ val ingest_pr_event :
     successful wrapper result with a command descriptor may ingest PR events. *)
 val ingest_pr_event_from_hook :
   base_path:string ->
+  partition:Ide_paths.partition ->
   keeper_id:string ->
   turn_id:string ->
   output_text:string ->
@@ -127,6 +133,7 @@ val ingest_pr_event_from_hook :
     (auth/network/validation errors) must not produce phantom PR events. *)
 val ingest_pr_event_from_descriptor :
   base_path:string ->
+  partition:Ide_paths.partition ->
   keeper_id:string ->
   turn_id:string ->
   output_text:string ->

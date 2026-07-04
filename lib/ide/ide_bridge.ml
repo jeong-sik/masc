@@ -432,6 +432,7 @@ let list_events
 
 let ingest_tool_event
     ~base_path
+    ?(partition = default_partition)
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -462,12 +463,13 @@ let ingest_tool_event
       ; timestamp_ms
       }
   in
-  (try append_event ~base_dir:base_path ~partition:default_partition ~event
+  (try append_event ~base_dir:base_path ~partition ~event
    with exn ->
      Printf.eprintf "Ide_bridge.ingest_tool_event error: %s\n%!" (Printexc.to_string exn))
 
 let ingest_turn_event
     ~base_path
+    ~partition
     ~turn_id
     ~keeper_id
     ~phase
@@ -477,6 +479,13 @@ let ingest_turn_event
     ~duration_ms
     ~timestamp_ms
   =
+  (* DEFER (task-1733): the turn-event emit (keeper_agent_run.ml) resolves only
+     [config.base_path] because a turn carries no edited file_path, and no
+     keeper->active-repo/canonical_url mapping exists today. So [partition]
+     forwarded here is typically the coarse orphan partition. Forwarding it
+     (instead of hardcoding [default_partition]) removes the silent hardcode and
+     lets a future keeper->repo source flow through unchanged. Real per-turn
+     attribution requires that new source — tracked as task-1733 follow-up. *)
   let event =
     Turn_event
       { turn_id
@@ -489,12 +498,13 @@ let ingest_turn_event
       ; timestamp_ms
       }
   in
-  (try append_event ~base_dir:base_path ~partition:default_partition ~event
+  (try append_event ~base_dir:base_path ~partition ~event
    with exn ->
      Printf.eprintf "Ide_bridge.ingest_turn_event error: %s\n%!" (Printexc.to_string exn))
 
 let ingest_pr_event
     ~base_path
+    ~partition
     ~pr_number
     ~pull_request_url
     ~pr_title
@@ -520,7 +530,7 @@ let ingest_pr_event
       ; timestamp_ms
       }
   in
-  (try append_event ~base_dir:base_path ~partition:default_partition ~event
+  (try append_event ~base_dir:base_path ~partition ~event
    with exn ->
      Printf.eprintf "Ide_bridge.ingest_pr_event error: %s\n%!" (Printexc.to_string exn))
 
@@ -665,6 +675,7 @@ let cursor_event_json
 
 let ingest_cursor_event_from_hook
     ~base_path
+    ~partition
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -697,7 +708,7 @@ let ingest_cursor_event_from_hook
         ~turn_id
         ()
     in
-    (try append_cursor ~base_dir:base_path ~partition:default_partition json
+    (try append_cursor ~base_dir:base_path ~partition json
      with exn ->
        Printf.eprintf
          "Ide_bridge.ingest_cursor_event_from_hook error: %s\n%!"
@@ -706,6 +717,7 @@ let ingest_cursor_event_from_hook
 
 let ingest_cursor_event
     ~base_path
+    ?(partition = default_partition)
     ~keeper_id
     ~file_path
     ~line
@@ -715,6 +727,13 @@ let ingest_cursor_event
     ~source
     ()
   =
+  (* DEFER (task-1733): this is the human-IDE direct path (server_ide_http.ml
+     POST /api/v1/ide/cursors). [partition] is accepted so the caller CAN scope
+     the write, but the server call site does not yet resolve one from the
+     posted file_path (that resolver lives in lib/keeper and server must not
+     depend on it directly). Until the server layer wires a resolver, the
+     default keeps prior behavior. Real attribution here is a task-1733
+     follow-up at the server call site. *)
   let column = Option.value column ~default:0 in
   let focus_mode =
     match focus_mode with
@@ -739,7 +758,7 @@ let ingest_cursor_event
         ~turn_id:""
         ()
     in
-    (try append_cursor ~base_dir:base_path ~partition:default_partition json
+    (try append_cursor ~base_dir:base_path ~partition json
      with exn ->
        Printf.eprintf
          "Ide_bridge.ingest_cursor_event error: %s\n%!"
@@ -752,6 +771,7 @@ let ingest_cursor_event
     Separated for direct testability. *)
 let ingest_tool_event_from_hook
     ~base_path
+    ~partition
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -777,6 +797,7 @@ let ingest_tool_event_from_hook
   let timestamp_ms = now_ms () in
   ingest_tool_event
     ~base_path
+    ~partition
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -788,8 +809,11 @@ let ingest_tool_event_from_hook
     ?command_descriptor
     ~timestamp_ms
     ();
+  (* The hook cursor inherits the tool event's resolved partition: same tool
+     call, same edited file, so the cursor belongs in the same repo scope. *)
   ingest_cursor_event_from_hook
     ~base_path
+    ~partition
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -869,6 +893,7 @@ let explicit_tool_success_from_output output =
     (auth/network/validation errors) must not produce phantom PR events. *)
 let ingest_pr_event_from_descriptor
     ~base_path
+    ~partition
     ~keeper_id
     ~turn_id
     ~output_text
@@ -891,37 +916,37 @@ let ingest_pr_event_from_descriptor
             (descriptor_confirmed_pr_url_from_output output_text)
       in
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url ~pr_title:title
+        ~base_path ~partition ~pr_number ~pull_request_url ~pr_title:title
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_pr_merge { pr_number; squash = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
+        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"merged" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_pr_close { pr_number }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
+        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"closed" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_pr_comment { pr_number; body = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
+        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_pr_edit { pr_number; title = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
+        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_pr_review { pr_number }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
+        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
@@ -931,19 +956,19 @@ let ingest_pr_event_from_descriptor
         | None -> (0, "")
       in
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url ~pr_title:title
+        ~base_path ~partition ~pr_number ~pull_request_url ~pr_title:title
         ~pr_state:"open" ~repo ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_api_pr_merge { repo; pr_number }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
+        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"merged" ~repo ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_api_pr_comment { repo; pr_number; body = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
+        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo ~keeper_id ~turn_id
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(now_ms ())
@@ -955,6 +980,7 @@ let ingest_pr_event_from_descriptor
     ingestion only; raw stdout URL scanning is not a reliable PR signal. *)
 let ingest_pr_event_from_hook
     ~base_path
+    ~partition
     ~keeper_id
     ~turn_id
     ~output_text
@@ -962,6 +988,7 @@ let ingest_pr_event_from_hook
   =
   ingest_pr_event_from_descriptor
     ~base_path
+    ~partition
     ~keeper_id
     ~turn_id
     ~output_text
@@ -982,6 +1009,7 @@ let install_agent_observation_sinks () =
       Ide_ingest_queue.submit (fun () ->
         ingest_tool_event_from_hook
           ~base_path:event.base_path
+          ~partition:event.partition
           ~tool_name:event.tool_name
           ~keeper_id:event.keeper_id
           ~turn_id:event.turn_id
@@ -995,6 +1023,7 @@ let install_agent_observation_sinks () =
       Ide_ingest_queue.submit (fun () ->
         ingest_pr_event_from_descriptor
           ~base_path:event.base_path
+          ~partition:event.partition
           ~keeper_id:event.keeper_id
           ~turn_id:event.turn_id
           ~output_text:event.output_text
@@ -1003,8 +1032,11 @@ let install_agent_observation_sinks () =
   Agent_observation.register_turn_event_sink
     (fun (event : Agent_observation.turn_event) ->
       Ide_ingest_queue.submit (fun () ->
+        (* turn: forward event.partition (coarse today — see ingest_turn_event
+           DEFER note; keeper->repo mapping is task-1733 follow-up). *)
         ingest_turn_event
           ~base_path:event.base_path
+          ~partition:event.partition
           ~turn_id:event.turn_id
           ~keeper_id:event.keeper_id
           ~phase:event.phase

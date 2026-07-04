@@ -90,6 +90,7 @@ let test_ingest_turn_event () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_turn_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~turn_id:"turn-456"
       ~keeper_id:"keeper-beta"
       ~phase:"completed"
@@ -228,6 +229,7 @@ let test_list_events_merges_kinds_newest_first () =
       ();
     Ide_bridge.ingest_pr_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~pr_number:42
       ~pull_request_url:"https://github.com/owner/repo/pull/42"
       ~pr_title:"feat"
@@ -240,6 +242,7 @@ let test_list_events_merges_kinds_newest_first () =
       ~timestamp_ms:2000L;
     Ide_bridge.ingest_turn_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~turn_id:"t-turn"
       ~keeper_id:"k1"
       ~phase:"completed"
@@ -268,6 +271,7 @@ let test_cursor_from_hook_uses_real_file_and_line () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -295,6 +299,7 @@ let test_cursor_from_hook_skips_missing_line () =
     let input = `Assoc [ "file_path", `String "lib/test.ml" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -314,6 +319,7 @@ let test_cursor_from_hook_skips_missing_focus_mode () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -331,6 +337,7 @@ let test_hook_extracts_file_path_from_path_key () =
     let input = `Assoc [ "path", `String "lib/test.ml"; "content", `String "hello" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"fs_write"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -354,6 +361,7 @@ let test_hook_extracts_file_path_from_file_path_key () =
     let input = `Assoc [ "file_path", `String "src/main.ml" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"fs_edit"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -377,6 +385,7 @@ let test_hook_no_file_path () =
     let input = `Assoc [ "command", `String "ls" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -401,6 +410,7 @@ let test_hook_summary_truncation () =
     let input = `Assoc [] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -424,6 +434,7 @@ let test_hook_typed_outcome_mapping () =
     let input = `Assoc [] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -446,6 +457,7 @@ let test_pr_event_ingest () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_pr_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~pr_number:19872
       ~pull_request_url:"https://github.com/jeong-sik/masc/pull/19872"
       ~pr_title:"feat(ide): auto-collect tool/turn events"
@@ -476,6 +488,7 @@ let test_pr_event_from_hook_uses_structured_descriptor_output () =
     in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
@@ -500,6 +513,7 @@ let test_pr_event_from_hook_uses_descriptor_confirmed_cli_url () =
     in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
@@ -529,6 +543,7 @@ let test_pr_event_from_hook_uses_descriptor_for_any_tool_name () =
     in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
@@ -549,6 +564,7 @@ let test_pr_event_from_hook_ignores_no_url () =
     let output = "file written successfully\n" in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
@@ -563,6 +579,7 @@ let test_pr_event_from_hook_ignores_raw_url () =
     let output = "remote: https://github.com/jeong-sik/masc/pull/123\n" in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
@@ -578,6 +595,7 @@ let test_descriptor_gated_on_success () =
     let failed_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}, "error": "authentication failed"}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:failed_output
@@ -595,6 +613,7 @@ let test_legacy_hook_uses_explicit_success_flag () =
     in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:failed_output
@@ -610,6 +629,7 @@ let test_descriptor_ingested_on_success () =
     let success_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:success_output
@@ -890,6 +910,96 @@ let test_queue_writer_drains () =
     check int "writer drained all jobs" n (Atomic.get ran))
 ;;
 
+(* task-1733 regression: a partition threaded through the hook path (as the
+   agent-observation sink now does with [event.partition]) must route the tool
+   event AND its derived cursor into that partition's store — not the orphan
+   [Legacy_default]. This is the exact split that left dashboard by-url reads
+   empty while data piled up in _orphan. *)
+let test_partition_routes_tool_event_and_cursor_by_url () =
+  with_temp_dir (fun base_dir ->
+    let by_url = Ide_paths.By_url "github.com/jeong-sik/wkbl" in
+    let input =
+      `Assoc
+        [ "file_path", `String "lib/test.ml"
+        ; "line", `Int 7
+        ; "focus_mode", `String "editing"
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~partition:by_url
+      ~tool_name:"keeper_ide_annotate"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-1"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:5.0
+      ~output_text:"{}"
+      ~input;
+    (* Scoped (by-url) reads see both the tool event and the cursor. *)
+    let by_url_events =
+      Ide_bridge.list_events ~base_path:base_dir ~partition:by_url ()
+    in
+    check bool "by-url partition holds the tool event" true
+      (List.length by_url_events >= 1);
+    let by_url_cursors =
+      Ide_bridge.list_cursors ~base_path:base_dir ~partition:by_url ()
+    in
+    check bool "by-url partition holds the derived cursor" true
+      (List.length by_url_cursors >= 1);
+    (* The orphan partition (what an unscoped read used to fall back to) stays
+       empty for a scoped write — proving the write is no longer hardcoded to
+       Legacy_default. *)
+    let orphan_events =
+      Ide_bridge.list_events ~base_path:base_dir
+        ~partition:Ide_paths.Legacy_default ()
+    in
+    check int "orphan partition has no scoped tool event" 0
+      (List.length orphan_events);
+    let orphan_cursors =
+      Ide_bridge.list_cursors ~base_path:base_dir
+        ~partition:Ide_paths.Legacy_default ()
+    in
+    check int "orphan partition has no scoped cursor" 0
+      (List.length orphan_cursors))
+;;
+
+(* Backward compat: an explicit [Legacy_default] write still lands in the orphan
+   store and is invisible to a by-url read (partitions are isolated). *)
+let test_partition_legacy_default_isolated_from_by_url () =
+  with_temp_dir (fun base_dir ->
+    let input =
+      `Assoc
+        [ "file_path", `String "lib/test.ml"
+        ; "line", `Int 3
+        ; "focus_mode", `String "editing"
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
+      ~tool_name:"keeper_ide_annotate"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-1"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:5.0
+      ~output_text:"{}"
+      ~input;
+    let orphan_events =
+      Ide_bridge.list_events ~base_path:base_dir
+        ~partition:Ide_paths.Legacy_default ()
+    in
+    check bool "legacy write lands in orphan" true
+      (List.length orphan_events >= 1);
+    let by_url_events =
+      Ide_bridge.list_events ~base_path:base_dir
+        ~partition:(Ide_paths.By_url "github.com/jeong-sik/wkbl") ()
+    in
+    check int "by-url read does not see the orphan write" 0
+      (List.length by_url_events))
+;;
+
 let () =
   run
     "ide_bridge"
@@ -904,6 +1014,12 @@ let () =
       , [ test_case "tool event" `Quick test_ingest_tool_event
         ; test_case "turn event" `Quick test_ingest_turn_event
         ; test_case "multiple events" `Quick test_ingest_multiple_events
+        ] )
+    ; ( "partition_attribution"
+      , [ test_case "by-url routes tool event + cursor" `Quick
+            test_partition_routes_tool_event_and_cursor_by_url
+        ; test_case "legacy_default isolated from by-url" `Quick
+            test_partition_legacy_default_isolated_from_by_url
         ] )
     ; ( "read"
       , [ test_case "filters keeper and pages" `Quick test_list_events_filters_keeper_and_pages

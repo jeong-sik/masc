@@ -271,6 +271,7 @@ let test_descriptor_to_pr_event () =
     let output = {|{"ok":true,"output":"{\"number\":999,\"url\":\"https://github.com/jeong-sik/masc/pull/999\"}","command_descriptor":{"kind":"gh_pr_create","title":"test PR","base":"main","draft":false}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
@@ -294,6 +295,7 @@ let test_descriptor_merge_event () =
     let output = {|{"ok":true,"output":"","command_descriptor":{"kind":"gh_pr_merge","pr_number":456,"squash":true}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output

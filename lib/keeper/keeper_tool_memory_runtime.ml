@@ -179,8 +179,9 @@ let search_memory_bank
   (* Text match: query against text field (non-deterministic data).
      Partial-token match (count > 0), not strict token-AND — a natural-language
      query like "notable event lesson learned" previously matched 0 notes even
-     when 2 of 4 tokens overlapped a stored note. Exact-AND semantics survive
-     via the matched_token_ratio weight in scoring (full match = ratio 1.0). *)
+     when 2 of 4 tokens overlapped a stored note. The matched-token ratio is a
+     ranking signal only; priority, recency, horizon, source, and synthetic
+     penalties still participate in the final score. *)
   let matched =
     if query = ""
     then filtered

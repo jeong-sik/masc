@@ -391,7 +391,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('effective · ctx 131,072 · out 65,536 · tools · tool_choice+required+named+parallel')
     expect(container.textContent).toContain('runtime-mcp-tools')
     expect(container.textContent).toContain('reasoning · extended · budget · effort low,medium,high')
-    expect(container.textContent).toContain('reasoning-stream delta-reasoning-field')
+    expect(container.textContent).toContain('reasoning-stream delta-reasoning-field:reasoning_content')
     expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')

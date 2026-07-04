@@ -1079,6 +1079,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('reasoning-budget')
       expect(cards[0]?.textContent).toContain('effort:low,medium,high')
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
+      expect(cards[0]?.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
       expect(cards[0]?.textContent).toContain('task:transcription · native-stream')
       expect(cards[0]?.textContent).toContain('declared:api:chat-completions')
       expect(cards[0]?.textContent).toContain('transport:http')

@@ -532,6 +532,8 @@ let runtime_missing_from_report (report : missing_catalog_report) runtime_id =
     report.missing_models
 ;;
 
+let runtime_default_route_name = "[runtime].default"
+
 let dropped_assignment_label (entry : dropped_runtime_assignment) =
   Printf.sprintf "[runtime.assignments].%s=%S" entry.keeper_name entry.runtime_id
 ;;
@@ -550,6 +552,8 @@ let dropped_lane_label (prefix : string) (entry : dropped_runtime_lane) =
 
 let missing_reference_error
     ~(config_path : string)
+    ~(configured_default_runtime_id : string)
+    ~(default_drop : dropped_runtime_route option)
     ~(dropped_assignments : dropped_runtime_assignment list)
     ~(dropped_routes : dropped_runtime_route list)
     ~(dropped_media_failover : string list)
@@ -573,13 +577,29 @@ let missing_reference_error
       ; List.map (dropped_lane_label "[runtime.lanes].dropped") dropped_lanes
       ]
   in
+  let default_fallback_explanation =
+    match default_drop with
+    | Some _ ->
+      Printf.sprintf
+        "Configured %s=%S is absent from the OAS capability catalog; degraded \
+         boot will not select a different default runtime."
+        runtime_default_route_name
+        configured_default_runtime_id
+    | None ->
+      Printf.sprintf
+        "Configured %s=%S remains catalog-known, but degraded boot would erase \
+         the missing references above into that default fallback."
+        runtime_default_route_name
+        configured_default_runtime_id
+  in
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
-     are referenced by routing config: %s. Add catalog rows to oas-models.toml \
-     or remove those routing references; MASC will not erase explicit runtime \
-     intent into default fallback."
+     are referenced by routing config: %s. %s Add catalog rows to \
+     oas-models.toml or remove those routing references; MASC will not erase \
+     explicit runtime intent into default fallback."
     config_path
     (String.concat "; " references)
+    default_fallback_explanation
 ;;
 
 let degrade_loaded_for_missing_catalog
@@ -624,7 +644,7 @@ let degrade_loaded_for_missing_catalog
   in
   let default_drop =
     if is_missing configured_default.id
-    then Some { route_name = "[runtime].default"; runtime_id = configured_default.id }
+    then Some { route_name = runtime_default_route_name; runtime_id = configured_default.id }
     else None
   in
   let drop_route route_name = function
@@ -707,6 +727,8 @@ let degrade_loaded_for_missing_catalog
     Error
       (missing_reference_error
          ~config_path:report.config_path
+         ~configured_default_runtime_id:configured_default.id
+         ~default_drop
          ~dropped_assignments
          ~dropped_routes
          ~dropped_media_failover

@@ -636,6 +636,43 @@ let persist_terminal_turn_meta
   updated_meta
 ;;
 
+let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
+  let reset_failure_state () =
+    Keeper_registry.set_failure_reason
+      ~base_path:config.Workspace.base_path
+      updated_meta.name
+      None;
+    Keeper_registry.reset_turn_failures
+      ~base_path:config.Workspace.base_path
+      updated_meta.name;
+    Health.record_success ~agent_name:updated_meta.name
+  in
+  match result.Keeper_agent_run.stop_reason with
+  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
+    Log.Keeper.warn ~keeper_name:updated_meta.name
+      "turn budget exhausted (%d/%d), checkpoint saved; not recording health success \
+       or clearing turn-failure state"
+      turns_used
+      limit
+  | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "mutation boundary reached after %s, checkpoint saved — will resume next cycle"
+      (match tool_name with
+       | Some tool -> tool
+       | None -> "committed tool");
+    reset_failure_state ()
+  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
+    (* A clean, intentional yield to a parked chat, not a degraded outcome:
+       clear turn-failure state and record health success, like a completed
+       turn. The keeper resumes its own work on the next cycle. *)
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "yielded turn slot to a waiting chat request after %d turn(s), checkpoint \
+       saved — will resume next cycle"
+      turns_used;
+    reset_failure_state ()
+  | Runtime_agent.Completed -> reset_failure_state ()
+;;
+
 module For_testing = struct
   let budget_exhausted_no_progress_threshold_override =
     budget_exhausted_no_progress_threshold_override
@@ -677,40 +714,9 @@ module For_testing = struct
       ~original_meta
       ~clear_auto_resume_after_sec:(terminal_outcome_is_completed_turn terminal_outcome)
       ~updated_meta
-end
 
-let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
-  let reset_failure_state () =
-    Keeper_registry.reset_turn_failures
-      ~base_path:config.Workspace.base_path
-      updated_meta.name;
-    Health.record_success ~agent_name:updated_meta.name
-  in
-  match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "turn budget exhausted (%d/%d), checkpoint saved; not recording health success \
-       or clearing turn-failure state"
-      turns_used
-      limit
-  | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "mutation boundary reached after %s, checkpoint saved — will resume next cycle"
-      (match tool_name with
-       | Some tool -> tool
-       | None -> "committed tool");
-    reset_failure_state ()
-  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
-    (* A clean, intentional yield to a parked chat, not a degraded outcome:
-       clear turn-failure state and record health success, like a completed
-       turn. The keeper resumes its own work on the next cycle. *)
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "yielded turn slot to a waiting chat request after %d turn(s), checkpoint \
-       saved — will resume next cycle"
-      turns_used;
-    reset_failure_state ()
-  | Runtime_agent.Completed -> reset_failure_state ()
-;;
+  let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
+end
 
 let completion_contract_attention_detail ~reason_code =
   Printf.sprintf

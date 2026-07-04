@@ -8,6 +8,7 @@ import { fetchKeeperCompactionSnapshots, fetchRuntimeProviders } from '../../api
 import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
+import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
 import {
   compactionSnapshots,
@@ -121,6 +122,49 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('sonnet-4.6')
     expect(container.textContent).toContain('oas·seoul-1')
+  })
+
+  function mkDrift(partial: Partial<KeeperRuntimeLensConfigDriftAxis>): KeeperRuntimeLensConfigDriftAxis {
+    return {
+      present: true,
+      status: 'drift',
+      error: null,
+      has_live_override: true,
+      runtime_override: true,
+      override_fields: ['model.runtime_id'],
+      default_runtime_id: 'oas·tokyo-2',
+      live_runtime_id: 'oas·seoul-1',
+      active_config_root: null,
+      active_config_root_source: null,
+      default_manifest_path: null,
+      ...partial,
+    }
+  }
+
+  it('surfaces a pending runtime assignment (assigned ≠ live) in the runtime card', () => {
+    const { container, getByTestId } = render(
+      html`<${KeeperWorkspaceRail} keeper=${keeper} runtimeDrift=${mkDrift({})} />`,
+    )
+    // Live runtime stays as the card's primary id; the pending assignment is
+    // shown as a distinct drift line so a saved-but-not-adopted runtime is
+    // visible instead of looking like the save did nothing.
+    expect(container.textContent).toContain('oas·seoul-1')
+    const drift = getByTestId('runtime-drift')
+    expect(drift.textContent).toContain('지정됨')
+    expect(drift.textContent).toContain('oas·tokyo-2')
+  })
+
+  it('does not render the drift line when assigned and live runtimes match', () => {
+    const noDrift = mkDrift({ runtime_override: false, default_runtime_id: 'oas·seoul-1' })
+    const { container } = render(
+      html`<${KeeperWorkspaceRail} keeper=${keeper} runtimeDrift=${noDrift} />`,
+    )
+    expect(container.querySelector('[data-testid="runtime-drift"]')).toBeNull()
+  })
+
+  it('does not render the drift line when no runtime trace is available', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    expect(container.querySelector('[data-testid="runtime-drift"]')).toBeNull()
   })
 
   it('no longer renders the Selected-runtime top card (removed from the rail)', () => {

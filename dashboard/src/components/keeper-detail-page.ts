@@ -219,6 +219,10 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // Workaround Rejection Bar §2 anti-pattern this PR closes.
   const compositeSnapshot = evidenceFreshData(compositeEvidence)
   const runtimeTrace = evidenceFreshData(runtimeTraceEvidence)
+  // Config-domain read model of assigned-vs-live runtime, threaded to the
+  // context rail so its runtime card can surface a pending assignment (a saved
+  // runtime the running keeper has not yet adopted).
+  const runtimeDrift = runtimeTrace ? runtimeTrace.runtime_lens.axes.config_drift : null
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     const shouldOpenPendingConfig = pendingConfigKeeperRef.current === keeper.name
@@ -509,7 +513,9 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
                 ? html`<${ChevronRight} size=${14} aria-hidden="true" />`
                 : html`<${ChevronLeft} size=${14} aria-hidden="true" />`}
             </button>
-            ${!isMobile && railOpen ? html`<${KeeperWorkspaceRail} keeper=${keeper} />` : null}
+            ${!isMobile && railOpen
+              ? html`<${KeeperWorkspaceRail} keeper=${keeper} runtimeDrift=${runtimeDrift} />`
+              : null}
             ${isMobile && mobileRailOpen
               ? html`
                   <div
@@ -529,7 +535,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
                           onClick=${() => setMobileRailOpenForKeeper(false)}
                         >닫기</button>
                       </div>
-                      <${KeeperWorkspaceRail} keeper=${keeper} />
+                      <${KeeperWorkspaceRail} keeper=${keeper} runtimeDrift=${runtimeDrift} />
                     </div>
                   </div>
                 `

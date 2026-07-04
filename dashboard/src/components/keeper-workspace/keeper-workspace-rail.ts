@@ -12,6 +12,7 @@ import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
+import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
 import { navigate } from '../../router'
 import {
   keeperBucket,
@@ -333,13 +334,28 @@ function runtimeEffectiveCapabilitySummary(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
-function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
+function RuntimeSection({
+  keeper,
+  drift,
+}: {
+  keeper: Keeper
+  drift: KeeperRuntimeLensConfigDriftAxis | null
+}): VNode {
   useEffect(() => {
     loadRuntimeCatalog()
   }, [])
 
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
+  // The card's runtime id is the *live* runtime the keeper is running (from its
+  // meta, via the execution snapshot). Saving a new runtime in the config
+  // editor changes the *assigned* runtime (runtime.toml); the running keeper
+  // keeps its current runtime until its next turn-up. Surface that pending
+  // assignment here so a save that "does nothing" visibly is instead shown as
+  // "assigned X, still running Y". The drift axis is the config-domain read
+  // model — the rail does not reach into the config editor's write signal.
+  const pendingRuntime =
+    drift && drift.runtime_override ? drift.default_runtime_id : null
   const catalog = runtimeCatalogState.value.status === 'loaded' ? runtimeCatalogState.value.data : []
   const entry = runtime ? findRuntimeCatalogEntry(catalog, runtime) : null
   const ctxK = formatCtxK(entry?.max_context ?? contextMax(keeper))
@@ -364,6 +380,15 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
       <h4>런타임</h4>
       <div class="rtc-card">
         <div class="rtc-id mono">${runtime ?? '런타임 미수신'}</div>
+        ${pendingRuntime
+          ? html`<div
+              class="rtc-drift"
+              data-testid="runtime-drift"
+              title="저장된 런타임 지정은 키퍼가 다음 turn-up(재시작)할 때 적용됩니다. 현재 표시된 런타임은 지금 실제로 실행 중인 것입니다."
+            >
+              지정됨 <span class="mono">${pendingRuntime}</span> · 재시작 시 적용
+            </div>`
+          : null}
         <div class="rtc-model mono">
           ${entry?.model_api_name ?? model ?? '—'}${ctxK ? html` · ${ctxK}` : null}
         </div>
@@ -614,8 +639,10 @@ function toMemoryKeeper(k: Keeper): MemoryKeeper {
 
 export function KeeperWorkspaceRail({
   keeper,
+  runtimeDrift = null,
 }: {
   keeper: Keeper
+  runtimeDrift?: KeeperRuntimeLensConfigDriftAxis | null
 }): VNode {
   const [overlay, setOverlay] = useState<'compaction' | 'memory' | null>(null)
   const memoryKeeper = toMemoryKeeper(keeper)
@@ -625,7 +652,7 @@ export function KeeperWorkspaceRail({
     <aside class="ctx" aria-label="키퍼 컨텍스트">
       <div class="ctx-scroll">
         <${AttentionSection} keeper=${keeper} />
-        <${RuntimeSection} keeper=${keeper} />
+        <${RuntimeSection} keeper=${keeper} drift=${runtimeDrift} />
         <${ContextSection}
           keeper=${keeper}
           onOpenCompaction=${() => setOverlay('compaction')}

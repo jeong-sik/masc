@@ -1181,8 +1181,12 @@ export function RuntimeMonitor() {
                   ${provider.discovery
                     ? html`<div class="grid grid-cols-2 gap-3 text-xs text-[var(--color-fg-secondary)] pt-2 border-t border-[var(--color-border-default)]/50">
                         <div>discovery · ${provider.discovery.healthy ? 'healthy' : 'degraded'}</div>
+                        <div class="min-w-0 truncate" title=${provider.discovery.discovered_model ?? MISSING_DATA_DASH}>
+                          discovered · ${provider.discovery.discovered_model ?? MISSING_DATA_DASH}
+                        </div>
                         <div>ctx · ${formatNumber(provider.discovery.ctx_size)}</div>
                         <div>slots · ${formatNumber(provider.discovery.busy_slots)}/${formatNumber(provider.discovery.total_slots)}</div>
+                        <div>idle · ${formatNumber(provider.discovery.idle_slots)}</div>
                       </div>`
                     : null}
                 </article>

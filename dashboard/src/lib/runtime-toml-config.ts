@@ -428,6 +428,54 @@ function serializeValue(value: string | number | boolean): string {
   return String(value)
 }
 
+function serializeStringArray(values: readonly string[]): string {
+  return `[${values.map(serializeString).join(', ')}]`
+}
+
+function tomlArrayValueEndLine(
+  lines: readonly string[],
+  startIndex: number,
+  sectionEnd: number,
+  firstValueRaw: string,
+): number | null {
+  let quote: '"' | "'" | null = null
+  let escaped = false
+  let depth = 0
+  let sawOpen = false
+  for (let index = startIndex; index < sectionEnd; index += 1) {
+    const segment = index === startIndex ? firstValueRaw : lines[index] ?? ''
+    for (let offset = 0; offset < segment.length; offset += 1) {
+      const char = segment[offset]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\' && quote === '"') {
+        escaped = true
+        continue
+      }
+      if (char === '"' && quote !== "'") {
+        quote = quote === '"' ? null : '"'
+        continue
+      }
+      if (char === "'" && quote !== '"') {
+        quote = quote === "'" ? null : "'"
+        continue
+      }
+      if (char === '#' && quote === null) break
+      if (quote !== null) continue
+      if (char === '[') {
+        sawOpen = true
+        depth += 1
+      } else if (char === ']' && sawOpen) {
+        depth -= 1
+        if (depth <= 0) return index
+      }
+    }
+  }
+  return sawOpen ? null : startIndex
+}
+
 function joinLines(lines: string[]): string {
   return lines.join('\n')
 }
@@ -465,6 +513,32 @@ export function setRuntimeTomlKey(
       // deliberately by the backend/SSOT writer), so updating only the value
       // must not silently normalize `"nick0cave"` down to `nick0cave`.
       lines[index] = `${match[1] ?? ''}${match[2]}${match[3] ?? ' = '}${serialized}`
+      return joinLines(lines)
+    }
+  }
+  lines.splice(section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
+  return joinLines(lines)
+}
+
+export function setRuntimeTomlStringArrayKey(
+  sourceText: string,
+  sectionName: string,
+  key: string,
+  values: readonly string[],
+): string {
+  const initial = parseDocument(sourceText)
+  const ensured = ensureSection([...initial.lines], initial, sectionName)
+  const lines = ensured.lines
+  const section = ensured.section
+  const serialized = serializeStringArray(values)
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const match = keyLineMatch(lines[index] ?? '')
+    if (match && dequoteTomlKey(match[2]) === key) {
+      const endIndex = tomlArrayValueEndLine(lines, index, section.end, match[4] ?? '')
+      if (endIndex === null) {
+        throw new Error(`Cannot rewrite unterminated TOML array for [${sectionName}].${key}`)
+      }
+      lines.splice(index, endIndex - index + 1, `${match[1] ?? ''}${match[2]}${match[3] ?? ' = '}${serialized}`)
       return joinLines(lines)
     }
   }

@@ -266,9 +266,13 @@ let cursor_matches_file file_path json =
      | None -> false)
 ;;
 
-let valid_focus_mode = function
-  | "reading" | "editing" | "reviewing" | "planning" -> true
-  | _ -> false
+let cursor_focus_mode_of_string = function
+  | ("reading" | "editing" | "reviewing" | "planning") as mode -> Some mode
+  | _ -> None
+;;
+
+let valid_focus_mode mode =
+  Option.is_some (cursor_focus_mode_of_string mode)
 ;;
 
 let cursor_is_valid json =
@@ -729,13 +733,15 @@ let ingest_cursor_event
   let column = Option.value column ~default:0 in
   let focus_mode =
     match focus_mode with
-    | None -> Some "editing"
-    | Some mode when valid_focus_mode mode -> Some mode
-    | Some _ -> None
+    | None -> Ok "editing"
+    | Some mode ->
+      (match cursor_focus_mode_of_string mode with
+       | Some mode -> Ok mode
+       | None -> Error "Invalid focus_mode")
   in
   match focus_mode with
-  | None -> ()
-  | Some focus_mode ->
+  | Error msg -> Error msg
+  | Ok focus_mode ->
     let timestamp_ms = now_ms () in
     let json =
       cursor_event_json
@@ -750,11 +756,11 @@ let ingest_cursor_event
         ~turn_id:""
         ()
     in
-    (try append_cursor ~base_dir:base_path ~partition json
+    (try
+       append_cursor ~base_dir:base_path ~partition json;
+       Ok ()
      with exn ->
-       Printf.eprintf
-         "Ide_bridge.ingest_cursor_event error: %s\n%!"
-         (Printexc.to_string exn))
+       Error (Printf.sprintf "Failed to persist cursor event: %s" (Printexc.to_string exn)))
 ;;
 ;;
 

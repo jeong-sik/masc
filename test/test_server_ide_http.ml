@@ -238,6 +238,45 @@ let test_post_cursors_rejects_client_keeper_id () =
     check_status "POST cursor with keeper_id returns 403" 403 response)
 ;;
 
+let test_post_cursors_rejects_invalid_focus_mode () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let body = {|{"file_path":"lib/a.ml","line":1,"focus_mode":"hovering"}|} in
+    let request = http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) () in
+    let response = dispatch router request in
+    check_status "POST cursor with invalid focus_mode returns 400" 400 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    check
+      string
+      "invalid focus_mode error"
+      "focus_mode must be one of reading, editing, reviewing, planning"
+      (json_string_member "invalid focus_mode response" "error" json))
+;;
+
+let test_post_cursors_persists_valid_focus_mode () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let body = {|{"file_path":"lib/a.ml","line":7,"focus_mode":"reviewing"}|} in
+    let post_request =
+      http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) ()
+    in
+    let post_response = dispatch router post_request in
+    check_status "POST cursor with valid focus_mode returns 201" 201 post_response;
+    let get_request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors" () in
+    let get_response = dispatch router get_request in
+    check_status "GET cursors after POST succeeds" 200 get_response;
+    let json = get_response |> response_body |> Yojson.Safe.from_string in
+    let data = Json.member "data" json in
+    match json_list_member "cursor snapshot" "cursors" data with
+    | cursor :: _ ->
+      check
+        string
+        "persisted focus_mode"
+        "reviewing"
+        (json_string_member "cursor" "focus_mode" cursor)
+    | [] -> fail "expected persisted cursor")
+;;
+
 let test_post_annotations_requires_auth () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let body = {|{"file_path":"lib/a.ml","line_start":1,"line_end":2,"content":"note"}|} in
@@ -367,6 +406,10 @@ let () =
             test_post_annotations_rejects_client_keeper_id
         ; test_case "POST cursor rejects client keeper_id" `Quick
             test_post_cursors_rejects_client_keeper_id
+        ; test_case "POST cursor rejects invalid focus_mode" `Quick
+            test_post_cursors_rejects_invalid_focus_mode
+        ; test_case "POST cursor persists valid focus_mode" `Quick
+            test_post_cursors_persists_valid_focus_mode
         ; test_case "POST annotation requires auth" `Quick
             test_post_annotations_requires_auth
         ; test_case "DELETE annotation requires auth" `Quick

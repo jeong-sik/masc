@@ -134,6 +134,18 @@ let json_int_field key = function
   | _ -> None
 ;;
 
+let cursor_focus_mode_field = function
+  | `Assoc fields ->
+    (match List.assoc_opt "focus_mode" fields with
+     | None -> Ok None
+     | Some (`String mode) ->
+       (match Ide_bridge.cursor_focus_mode_of_string mode with
+        | Some mode -> Ok (Some mode)
+        | None -> Error "focus_mode must be one of reading, editing, reviewing, planning")
+     | Some _ -> Error "focus_mode must be a string")
+  | _ -> Ok None
+;;
+
 let log_keeper_id_not_accepted ~operation ~auth_identity ~requested =
   Log.Server.warn
     "IDE annotation %s rejected client-supplied keeper_id: requested_keeper_id=%S \
@@ -757,51 +769,69 @@ let add_routes router =
              let find_int key = json_int_field key json in
              (match find_string "file_path", find_int "line" with
               | Some file_path, Some line when line >= 1 ->
-               let column = find_int "column" in
-               let source =
-                 match find_string "source" with
-                 | Some source -> source
-                 | None ->
-                   (* DET-OK: absent source preserves legacy cursor telemetry. *)
-                   "editor"
-               in
-               let requested_keeper_id = find_string "keeper_id" in
-               (match
-                  bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
-                with
-                | Error msg ->
-                  Option.iter
-                    (fun requested ->
-                       log_keeper_id_not_accepted
-                         ~operation:"cursor"
-                         ~auth_identity
-                         ~requested)
-                    requested_keeper_id;
-                  Http.Response.json_value
-                    ~status:`Forbidden
-                    ~request
-                    (json_error msg)
-                    reqd
-                | Ok keeper_id ->
-                  Ide_bridge.ingest_cursor_event
-                    ~base_path:base
-                    ~keeper_id
-                    ~file_path
-                    ~line
-                    ?column
-                    ~source
-                    ();
-                  Http.Response.json_value
-                    ~status:`Created
-                    ~request
-                    (json_ok (`Assoc [ "ok", `Bool true ]))
-                    reqd)
+                let column = find_int "column" in
+                let source =
+                  match find_string "source" with
+                  | Some source -> source
+                  | None ->
+                    (* DET-OK: absent source preserves legacy cursor telemetry. *)
+                    "editor"
+                in
+                (match cursor_focus_mode_field json with
+                 | Error msg ->
+                   Http.Response.json_value
+                     ~status:`Bad_request
+                     ~request
+                     (json_error msg)
+                     reqd
+                 | Ok focus_mode ->
+                   let requested_keeper_id = find_string "keeper_id" in
+                   (match
+                      bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
+                    with
+                    | Error msg ->
+                      Option.iter
+                        (fun requested ->
+                           log_keeper_id_not_accepted
+                             ~operation:"cursor"
+                             ~auth_identity
+                             ~requested)
+                        requested_keeper_id;
+                      Http.Response.json_value
+                        ~status:`Forbidden
+                        ~request
+                        (json_error msg)
+                        reqd
+                    | Ok keeper_id ->
+                      (match
+                         Ide_bridge.ingest_cursor_event
+                           ~base_path:base
+                           ~keeper_id
+                           ~file_path
+                           ~line
+                           ?column
+                           ?focus_mode
+                           ~source
+                           ()
+                       with
+                       | Ok () ->
+                         Http.Response.json_value
+                           ~status:`Created
+                           ~request
+                           (json_ok (`Assoc [ "ok", `Bool true ]))
+                           reqd
+                       | Error msg ->
+                         Http.Response.json_value
+                           ~status:`Internal_server_error
+                           ~request
+                           (json_error msg)
+                           reqd)))
               | _ ->
-               Http.Response.json_value
-                 ~status:`Bad_request
-                 ~request
-                 (json_error "Missing required fields: file_path, line (>=1)")
-                 reqd)))
+                Http.Response.json_value
+                  ~status:`Bad_request
+                  ~request
+                  (json_error "Missing required fields: file_path, line (>=1)")
+                  reqd)))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->

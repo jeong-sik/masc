@@ -18,11 +18,10 @@
  * assumption cannot show a workspace deeper than the server's bounded scan,
  * and for the `project` workspace source the server returns root-only leaves
  * (all hasChildren=false), so no directory was ever expandable. The store now
- * supports on-expand children loading: `seed` records which directories
- * already have their children present, and `loadChildren` (via an injected
- * fetcher) fetches + merges the immediate children of a directory the first
- * time it is expanded. A directory whose children are already present is never
- * re-fetched.
+ * supports on-expand children loading. A bounded seed snapshot is not treated
+ * as a completeness signal: a directory with some children present may still be
+ * truncated by the server cap, so `loadChildren` remains the authority for
+ * marking that directory complete.
  */
 
 import { signal, computed } from '@preact/signals'
@@ -135,9 +134,10 @@ export function createFileTreeStore(
 ): FileTreeStore {
   const allNodes = signal<ReadonlyArray<FileTreeNode>>([])
   const expanded = signal<ReadonlySet<string>>(new Set())
-  // Directories whose children are already present in `allNodes` — either from
-  // the initial seed or a completed loadChildren. A directory in this set is
-  // never re-fetched on expand. The root sentinel ('') is always loaded.
+  // Directories whose immediate children have been fetched to completion by
+  // loadChildren. A bounded seed/reconcile snapshot can contain only a prefix
+  // of a directory, so child presence alone must not mark a directory loaded.
+  // The root sentinel ('') is always loaded.
   const loaded = signal<ReadonlySet<string>>(new Set(['']))
   // Directories with an in-flight children fetch (drives a spinner and guards
   // against duplicate concurrent fetches).
@@ -148,12 +148,11 @@ export function createFileTreeStore(
   // — a same-workspace refresh leaves in-flight fetches valid.
   let generation = 0
 
-  // The set of directories whose children are present in [nodes] (some node
-  // names the directory as its parent). Distinguishes an eagerly-fetched
-  // subtree (expand shows already-present children) from a lazy boundary
-  // directory (expand must fetch). The root sentinel ('') is always loaded.
-  const loadedDirsOf = (nodes: ReadonlyArray<FileTreeNode>): Set<string> => {
-    const dirs = new Set<string>([''])
+  // Directories that have at least one child in the bounded snapshot. This is
+  // useful for default expansion, but it is not a completeness signal: the
+  // snapshot may have been cut mid-directory by the max_nodes cap.
+  const parentsWithPresentChildren = (nodes: ReadonlyArray<FileTreeNode>): Set<string> => {
+    const dirs = new Set<string>()
     for (const n of nodes) {
       const parent = normalizedParent(n.parent)
       if (parent !== null) dirs.add(parent)
@@ -166,21 +165,25 @@ export function createFileTreeStore(
   const seed = (nodes: ReadonlyArray<FileTreeNode>): void => {
     generation += 1
     allNodes.value = nodes
-    const initiallyLoaded = loadedDirsOf(nodes)
+    const parentsWithChildren = parentsWithPresentChildren(nodes)
     const initiallyExpanded = new Set<string>()
-    // Auto-expand a depth-0 directory only when its children are already
-    // present (loaded). A root-only source (e.g. the `project` workspace)
-    // returns depth-0 directories with hasChildren=true but no children in the
-    // seed; auto-expanding those would show an open-but-empty row. They stay
-    // collapsed and fetch on demand via loadChildren.
+    // Auto-expand a depth-0 directory only when at least one child is present.
+    // A root-only source (e.g. the `project` workspace) returns depth-0
+    // directories with hasChildren=true but no children in the seed;
+    // auto-expanding those would show an open-but-empty row. Present children
+    // still do not imply completeness, so the directory remains not-loaded and
+    // the expansion kicks off the authoritative lazy fetch below.
     for (const n of nodes) {
-      if (n.depth === 0 && n.hasChildren && initiallyLoaded.has(n.path)) {
+      if (n.depth === 0 && n.hasChildren && parentsWithChildren.has(n.path)) {
         initiallyExpanded.add(n.path)
       }
     }
-    loaded.value = initiallyLoaded
+    loaded.value = new Set([''])
     loading.value = new Set()
     expanded.value = initiallyExpanded
+    for (const path of initiallyExpanded) {
+      void loadChildren(path)
+    }
   }
 
   const reconcile = (nodes: ReadonlyArray<FileTreeNode>): void => {
@@ -195,7 +198,7 @@ export function createFileTreeStore(
     const merged = [...nodes, ...preservedLazy]
     const present = new Set(merged.map(n => n.path))
 
-    const nextLoaded = loadedDirsOf(merged)
+    const nextLoaded = new Set<string>([''])
     // Preserve directories already marked loaded that still exist — notably an
     // empty directory whose loadChildren resolved to [] (it has no child node
     // to re-derive "loaded" from), so a refresh does not force a re-fetch.
@@ -206,7 +209,11 @@ export function createFileTreeStore(
     allNodes.value = merged
     loaded.value = nextLoaded
     loading.value = new Set([...loading.value].filter(p => present.has(p)))
-    expanded.value = new Set([...expanded.value].filter(p => present.has(p)))
+    const nextExpanded = new Set([...expanded.value].filter(p => present.has(p)))
+    expanded.value = nextExpanded
+    for (const path of nextExpanded) {
+      void loadChildren(path)
+    }
   }
 
   const mergeChildren = (
@@ -345,7 +352,10 @@ export function createFileTreeStore(
   const expandAll = (): void => {
     const all = new Set<string>()
     for (const n of allNodes.value) {
-      if (n.hasChildren) all.add(n.path)
+      if (n.hasChildren) {
+        all.add(n.path)
+        void loadChildren(n.path)
+      }
     }
     expanded.value = all
   }

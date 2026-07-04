@@ -241,16 +241,48 @@ describe('createFileTreeStore lazy children loading', () => {
     file('README.md', 0, ''),
   ]
 
-  it('marks a directory whose children are present as already-loaded (no fetch on expand)', async () => {
-    const loadChildren = vi.fn(async () => [] as FileTreeNode[])
+  it('does not treat seed-present children as a completeness proof', async () => {
+    const loadChildren = vi.fn(async (): Promise<FileTreeNode[]> => [
+      file('lib/main.ml', 1, 'lib'),
+      file('lib/missing-from-bounded-scan.ml', 1, 'lib'),
+    ])
     const s = createFileTreeStore({ loadChildren })
-    // 'lib' has a child present in the seed -> loaded; expanding must not fetch.
+    // 'lib' has a child present in the bounded seed, but the server cap may
+    // have cut the directory before all siblings were returned. The store must
+    // not mark it loaded until the authoritative lazy children fetch completes.
     s.seed([dir('lib', 0, ''), file('lib/main.ml', 1, 'lib')])
 
+    expect(s.isExpanded('lib')).toBe(true)
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+    await flushMicrotasks()
+
+    expect(loadChildren).toHaveBeenCalledWith('lib')
     expect(s.isChildrenLoaded('lib')).toBe(true)
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/main.ml',
+      'lib/missing-from-bounded-scan.ml',
+    ])
+  })
+
+  it('fetches on expand when a partial seed child set is still not loaded', async () => {
+    const loadChildren = vi.fn(async (): Promise<FileTreeNode[]> => [
+      file('lib/main.ml', 1, 'lib'),
+      file('lib/other.ml', 1, 'lib'),
+    ])
+    const s = createFileTreeStore({ loadChildren })
+    s.seed([dir('lib', 0, ''), file('lib/main.ml', 1, 'lib')])
+    s.collapse('lib')
+
     s.expand('lib')
-    await Promise.resolve()
-    expect(loadChildren).not.toHaveBeenCalled()
+    await flushMicrotasks()
+
+    expect(loadChildren).toHaveBeenCalledTimes(1)
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/main.ml',
+      'lib/other.ml',
+    ])
   })
 
   it('treats a root-only directory as not-loaded and fetches its children on expand', async () => {
@@ -339,6 +371,7 @@ describe('createFileTreeStore lazy children loading', () => {
     const loadChildren = vi.fn(async (): Promise<FileTreeNode[]> => [file('lib/main.ml', 1, 'lib')])
     const s = createFileTreeStore({ loadChildren })
     s.seed([dir('lib', 0, ''), file('lib/main.ml', 1, 'lib')])
+    await flushMicrotasks()
     expect(s.isChildrenLoaded('lib')).toBe(true)
 
     // New repo: 'lib' is now a root-only leaf-dir with no children present.

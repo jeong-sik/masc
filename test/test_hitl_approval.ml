@@ -1761,7 +1761,7 @@ let test_callback_hitl_enabled_hard_forbidden_rejects_without_queuing () =
         initial_pending
         (AQ.pending_count ()))
 
-let test_callback_hitl_disabled_soft_forbidden_auto_approved () =
+let test_callback_hitl_disabled_soft_forbidden_requires_approval () =
   with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1804,21 +1804,21 @@ let test_callback_hitl_disabled_soft_forbidden_auto_approved () =
       in
       yield_until (fun () -> Option.is_some !result);
       Alcotest.(check bool)
-        "soft destructive op does not queue when HITL threshold is disabled"
-        false
+        "soft destructive op still queues when HITL threshold is disabled"
+        true
         queued;
       Alcotest.(check int)
-        "pending count unchanged"
+        "pending count restored after operator resolution"
         initial_pending
         (AQ.pending_count ());
       match !result with
       | Some Agent_sdk.Hooks.Approve -> ()
       | Some Agent_sdk.Hooks.Reject reason ->
-        Alcotest.fail ("expected Approve for HITL-disabled soft match, got reject: " ^ reason)
+        Alcotest.fail ("expected operator-approved soft match, got reject: " ^ reason)
       | Some Agent_sdk.Hooks.Edit _ ->
-        Alcotest.fail "expected Approve for HITL-disabled soft match, got edit"
+        Alcotest.fail "expected operator-approved soft match, got edit"
       | None ->
-        Alcotest.fail "HITL-disabled soft-forbidden callback did not return")
+        Alcotest.fail "HITL-disabled soft-forbidden callback did not return after approval")
 
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun base_path ->
@@ -2039,7 +2039,7 @@ let () =
         test_callback_hitl_disabled_hard_forbidden_rejects_without_queuing;
       Alcotest.test_case "HITL enabled hard-forbidden rejects without queuing" `Quick
         test_callback_hitl_enabled_hard_forbidden_rejects_without_queuing;
-      Alcotest.test_case "HITL disabled allows soft forbidden tools" `Quick
-        test_callback_hitl_disabled_soft_forbidden_auto_approved;
+      Alcotest.test_case "HITL disabled still queues soft forbidden tools" `Quick
+        test_callback_hitl_disabled_soft_forbidden_requires_approval;
     ]);
   ]

@@ -52,7 +52,14 @@ describe('RuntimeMonitor', () => {
           is_default_runtime: true,
           max_context: 200000,
           tools_support: true,
+          thinking_support: true,
           streaming: true,
+          temperature: 0.7,
+          capabilities_declared: true,
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_reasoning_budget: true,
+          thinking_control_format: 'reasoning-effort',
           model_count: 1,
           models: ['Qwen/Qwen3-32B'],
           parameter_policy: {
@@ -220,7 +227,7 @@ describe('RuntimeMonitor', () => {
           },
           source: 'runtime.toml',
           endpoint_url: 'https://example.invalid/v1',
-          note: null,
+          note: 'verified by runtime discovery',
           discovery: {
             healthy: true,
             discovered_model: 'Qwen/Qwen3-32B',
@@ -339,6 +346,14 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('rotation 2')
     expect(container.textContent).toContain('declared · api chat-completions')
     expect(container.textContent).toContain('auth env:RUNPOD_API_KEY')
+    expect(container.textContent).toContain('snapshot · source runtime.toml')
+    expect(container.textContent).toContain('protocol openai-http')
+    expect(container.textContent).toContain('model-temp 0.7')
+    expect(container.textContent).toContain('caps declared')
+    expect(container.textContent).toContain('tools on,thinking on,streaming on')
+    expect(container.textContent).toContain('multimodal on,image on,reasoning-budget on')
+    expect(container.textContent).toContain('thinking-control reasoning-effort')
+    expect(container.textContent).toContain('note verified by runtime discovery')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
       'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
@@ -357,6 +372,43 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('code-exec')
     expect(container.textContent).toContain('discovered · Qwen/Qwen3-32B')
     expect(container.textContent).toContain('idle · 3')
+  })
+
+  it('falls back to provider snapshot model count and auth kind when live probe rows are absent', async () => {
+    apiMocks.fetchDashboardRuntimeProbe.mockResolvedValueOnce({
+      generated_at: '2026-06-06T02:47:31Z',
+      refreshed_at_unix: 1780714051,
+      cache_ttl_sec: 30,
+      cache_age_sec: 0,
+      cache_hit: false,
+      probe: {
+        source: 'runtime.toml',
+        status: 'reachable',
+        checked_at: '2026-06-06T02:47:31Z',
+        probe_ok: true,
+        summary: {
+          runtimes: 1,
+          probed: 0,
+          reachable: 0,
+          failed: 0,
+          skipped: 1,
+          default_runtime_id: 'runpod_mtp.qwen',
+        },
+        providers: [],
+        errors: [],
+      },
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime snapshot fallback facts',
+    )
+
+    expect(container.textContent).toContain('models · 1')
+    expect(container.textContent).toContain('auth · env:RUNPOD_API_KEY')
+    expect(container.textContent).toContain('snapshot · source runtime.toml')
   })
 
   it('renders parameter facts as structured request declared and effective rows', async () => {

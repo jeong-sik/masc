@@ -223,6 +223,11 @@ function stringArrayText(values: readonly string[] | null | undefined): string |
   return values && values.length > 0 ? values.join(',') : null
 }
 
+function boolStateText(value: boolean | null | undefined, label: string): string | null {
+  if (typeof value !== 'boolean') return null
+  return `${label} ${value ? 'on' : 'off'}`
+}
+
 function detailRow(
   axis: string,
   label: string,
@@ -295,6 +300,48 @@ function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): s
     typeof request.connect_timeout_s === 'number' ? `connect ${request.connect_timeout_s}s` : null,
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeSnapshotModelCount(provider: DashboardRuntimeProviderSnapshot): number | null {
+  if (typeof provider.model_count === 'number') return provider.model_count
+  return provider.models.length > 0 ? provider.models.length : null
+}
+
+function runtimeProviderModelCount(
+  provider: DashboardRuntimeProviderSnapshot,
+  probe: DashboardRuntimeProviderProbe | null | undefined,
+): number | null {
+  return probe?.model_count ?? runtimeSnapshotModelCount(provider)
+}
+
+function runtimeProviderAuthText(
+  provider: DashboardRuntimeProviderSnapshot,
+  probe: DashboardRuntimeProviderProbe | null | undefined,
+): string {
+  if (probe) return runtimeProbeAuthLabel(probe)
+  return provider.auth_kind ?? MISSING_DATA_DASH
+}
+
+function runtimeSnapshotFactsText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const modelCount = runtimeSnapshotModelCount(provider)
+  const note = provider.note?.trim()
+  return textList([
+    provider.source ? `source ${provider.source}` : null,
+    provider.protocol ? `protocol ${provider.protocol}` : null,
+    typeof modelCount === 'number' ? `models ${formatNumber(modelCount)}` : null,
+    typeof provider.temperature === 'number' ? `model-temp ${provider.temperature}` : null,
+    typeof provider.capabilities_declared === 'boolean'
+      ? `caps ${provider.capabilities_declared ? 'declared' : 'missing'}`
+      : null,
+    boolStateText(provider.tools_support, 'tools'),
+    boolStateText(provider.thinking_support, 'thinking'),
+    boolStateText(provider.streaming, 'streaming'),
+    boolStateText(provider.supports_multimodal_inputs, 'multimodal'),
+    boolStateText(provider.supports_image_input, 'image'),
+    boolStateText(provider.supports_reasoning_budget, 'reasoning-budget'),
+    provider.thinking_control_format ? `thinking-control ${provider.thinking_control_format}` : null,
+    note ? `note ${note}` : null,
+  ])
 }
 
 function runtimeProviderBehaviorText(provider: DashboardRuntimeProviderSnapshot): string | null {
@@ -1113,6 +1160,7 @@ export function RuntimeMonitor() {
                 const requestConfig = runtimeRequestConfigText(provider)
                 const declaredSpec = runtimeDeclaredSpecText(provider)
                 const parameterDetails = runtimeParameterDetailRows(provider)
+                const snapshotFacts = runtimeSnapshotFactsText(provider)
                 return html`
                 <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
@@ -1132,9 +1180,14 @@ export function RuntimeMonitor() {
                     <div>ctx · ${formatNumber(provider.max_context)}</div>
                     <div>http · ${fmtProbeHttpStatus(liveProbe)}</div>
                     <div>latency · ${fmtProbeLatency(liveProbe)}</div>
-                    <div>models · ${formatNumber(liveProbe?.model_count)}</div>
-                    <div>auth · ${runtimeProbeAuthLabel(liveProbe)}</div>
+                    <div>models · ${formatNumber(runtimeProviderModelCount(provider, liveProbe))}</div>
+                    <div>auth · ${runtimeProviderAuthText(provider, liveProbe)}</div>
                   </div>
+                  ${snapshotFacts
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${snapshotFacts}>
+                        snapshot · ${snapshotFacts}
+                      </div>`
+                    : null}
                   ${liveProbe?.probe_url || provider.endpoint_url
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${liveProbe?.probe_url ?? provider.endpoint_url ?? ''}>
                         probe · ${liveProbe?.probe_url ?? provider.endpoint_url}

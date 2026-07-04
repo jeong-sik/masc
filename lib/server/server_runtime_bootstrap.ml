@@ -159,8 +159,11 @@ let resolve_oas_model_catalog_path
        (match
           config_root
           |> Option.map String.trim
-          |> Option.filter (fun value -> not (String.equal value ""))
-          |> Option.bind find_catalog_in_config_root
+          |> (fun opt ->
+               match opt with
+               | Some value when not (String.equal value "") -> Some value
+               | _ -> None)
+          |> (fun root -> Option.bind root find_catalog_in_config_root)
         with
         | Some _ as found -> found
         | None ->

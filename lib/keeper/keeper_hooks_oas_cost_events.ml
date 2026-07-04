@@ -39,6 +39,10 @@ let record_cost_emit_source source =
       ~labels:[ (label_source, source) ]
       ()
 
+let cache_miss_input_tokens ~input_tokens ~cache_creation_input_tokens
+    ~cache_read_input_tokens =
+  max 0 (input_tokens - cache_creation_input_tokens - cache_read_input_tokens)
+
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
     distinguish automatic entries from manual CLI entries.  #10318 adds
@@ -60,6 +64,8 @@ let assemble_cost_event_payload
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
+    ?(cache_creation_input_tokens : int = 0)
+    ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
@@ -77,8 +83,8 @@ let assemble_cost_event_payload
     {
       input_tokens;
       output_tokens;
-      cache_creation_input_tokens = 0;
-      cache_read_input_tokens = 0;
+      cache_creation_input_tokens;
+      cache_read_input_tokens;
       cost_usd = Some cost_usd;
     }
   in
@@ -93,6 +99,20 @@ let assemble_cost_event_payload
   let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
   let safe_input_tokens = if usage_trusted then input_tokens else 0 in
   let safe_output_tokens = if usage_trusted then output_tokens else 0 in
+  let safe_cache_creation_input_tokens =
+    if usage_trusted then cache_creation_input_tokens else 0
+  in
+  let safe_cache_read_input_tokens =
+    if usage_trusted then cache_read_input_tokens else 0
+  in
+  let safe_cache_miss_input_tokens =
+    if usage_trusted then
+      cache_miss_input_tokens
+        ~input_tokens
+        ~cache_creation_input_tokens
+        ~cache_read_input_tokens
+    else 0
+  in
   let provider = runtime_lane_label in
   let runtime_unknown = false in
   let runtime_unmetered = false in
@@ -139,7 +159,23 @@ let assemble_cost_event_payload
       [
         (key_raw_input_tokens, `Int input_tokens);
         (key_raw_output_tokens, `Int output_tokens);
+        ("raw_cache_creation_tokens", `Int cache_creation_input_tokens);
+        ("raw_cache_read_tokens", `Int cache_read_input_tokens);
         (key_raw_cost_usd, `Float cost_usd);
+      ]
+  in
+  let cache_token_fields =
+    if usage_missing || not usage_trusted then
+      [
+        ("cache_creation_tokens", `Null);
+        ("cache_read_tokens", `Null);
+        ("cache_miss_input_tokens", `Null);
+      ]
+    else
+      [
+        ("cache_creation_tokens", `Int safe_cache_creation_input_tokens);
+        ("cache_read_tokens", `Int safe_cache_read_input_tokens);
+        ("cache_miss_input_tokens", `Int safe_cache_miss_input_tokens);
       ]
   in
   let telemetry_fields = match telemetry with
@@ -187,6 +223,7 @@ let assemble_cost_event_payload
     (key_source, `String source_auto_trajectory);
   ]
   @ Keeper_usage_trust.json_fields usage_trust
+  @ cache_token_fields
   @ raw_usage_fields
   @ wall_tok_s_fields @ telemetry_fields) in
   {
@@ -203,6 +240,8 @@ let cost_event_payload
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
+    ?(cache_creation_input_tokens : int = 0)
+    ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
@@ -214,6 +253,8 @@ let cost_event_payload
      ~input_tokens
      ~output_tokens
      ~cost_usd
+     ~cache_creation_input_tokens
+     ~cache_read_input_tokens
      ~usage_missing
      ?usage_trust
      ?telemetry
@@ -231,6 +272,8 @@ let emit_cost_event
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
+    ?(cache_creation_input_tokens : int = 0)
+    ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
@@ -256,6 +299,8 @@ let emit_cost_event
       ~input_tokens
       ~output_tokens
       ~cost_usd
+      ~cache_creation_input_tokens
+      ~cache_read_input_tokens
       ~usage_missing
       ?usage_trust
       ?telemetry

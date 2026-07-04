@@ -1327,6 +1327,12 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                   | Some c -> `Float c
                   | None -> `Null
                 in
+                let cache_miss_input_tokens =
+                  max 0
+                    (u.input_tokens
+                     - u.cache_creation_input_tokens
+                     - u.cache_read_input_tokens)
+                in
                 let tool_call_evidence =
                   result.tool_calls
                   |> List.filter_map (fun detail ->
@@ -1355,6 +1361,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                     ("output_tokens", `Int u.output_tokens);
                     ("cache_creation_input_tokens", `Int u.cache_creation_input_tokens);
                     ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
+                    ("cache_miss_input_tokens", `Int cache_miss_input_tokens);
                     ("cost_usd", cost_field);
                   ]);
                   (* RFC-0233 §7: the turn's join key, minted once from the

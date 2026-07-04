@@ -306,6 +306,11 @@ let make_hooks
           | Some u -> u.input_tokens, u.output_tokens
           | None -> 0, 0
         in
+        let raw_cache_creation_input_tokens, raw_cache_read_input_tokens =
+          match response.usage with
+          | Some u -> u.cache_creation_input_tokens, u.cache_read_input_tokens
+          | None -> 0, 0
+        in
         let input_tok, output_tok, turn_cost_usd, usage_missing =
           match response.usage with
           | Some u when usage_trusted ->
@@ -462,6 +467,8 @@ let make_hooks
              ~agent_name:meta.name ~task_id:acc.task_id
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
+             ~cache_creation_input_tokens:raw_cache_creation_input_tokens
+             ~cache_read_input_tokens:raw_cache_read_input_tokens
              ~usage_trust
              ?telemetry:response.telemetry
              ~model:response.model ();

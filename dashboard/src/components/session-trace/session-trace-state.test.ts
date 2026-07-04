@@ -764,7 +764,13 @@ describe('getTraceSummary', () => {
             kind: 'lifecycle',
             sourceLane: 'oas',
             summary: 'agent completed',
-            detail: { input_tokens: 500, output_tokens: 150 },
+            detail: {
+              input_tokens: 500,
+              output_tokens: 150,
+              cache_creation_tokens: 30,
+              cache_read_tokens: 120,
+              cache_miss_input_tokens: 350,
+            },
             cost_usd: 0.003,
           },
           {
@@ -774,7 +780,12 @@ describe('getTraceSummary', () => {
             kind: 'lifecycle',
             sourceLane: 'oas',
             summary: 'agent completed',
-            detail: { input_tokens: 300, output_tokens: 80 },
+            detail: {
+              input_tokens: 300,
+              output_tokens: 80,
+              cache_creation_input_tokens: 20,
+              cache_read_input_tokens: 90,
+            },
             cost_usd: 0.002,
           },
         ],
@@ -790,6 +801,9 @@ describe('getTraceSummary', () => {
     const summary = getTraceSummary('agent-x')
     expect(summary.oas_input_tokens).toBe(800)
     expect(summary.oas_output_tokens).toBe(230)
+    expect(summary.oas_cache_creation_tokens).toBe(50)
+    expect(summary.oas_cache_read_tokens).toBe(210)
+    expect(summary.oas_cache_miss_input_tokens).toBe(540)
     expect(summary.total_cost_usd).toBeCloseTo(0.005)
     expect(summary.lifecycle_count).toBe(2)
   })

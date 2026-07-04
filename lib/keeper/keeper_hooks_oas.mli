@@ -119,6 +119,8 @@ val cost_event_payload :
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
+  ?cache_creation_input_tokens:int ->
+  ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
   ?telemetry:Agent_sdk.Types.inference_telemetry -> ?model:string -> unit -> Yojson.Safe.t
@@ -131,6 +133,8 @@ val emit_cost_event :
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
+  ?cache_creation_input_tokens:int ->
+  ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
   ?telemetry:Agent_sdk.Types.inference_telemetry ->

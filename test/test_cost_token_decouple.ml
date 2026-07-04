@@ -42,17 +42,43 @@ let float_field payload key =
       | None -> Alcotest.failf "%s absent from payload" key)
   | _ -> Alcotest.fail "payload not an object"
 
+let int_field payload key =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Int n) -> n
+      | Some other -> Alcotest.failf "%s not an int: %s" key (Yojson.Safe.to_string other)
+      | None -> Alcotest.failf "%s absent from payload" key)
+  | _ -> Alcotest.fail "payload not an object"
+
+let check_null_field payload key =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some `Null -> ()
+      | Some other -> Alcotest.failf "%s not null: %s" key (Yojson.Safe.to_string other)
+      | None -> Alcotest.failf "%s absent from payload" key)
+  | _ -> Alcotest.fail "payload not an object"
+
 (* The canonical untrusted-token signal: provider reported zero token counts. *)
 let untrusted_zero_tokens : Trust.t =
   Trust.Usage_untrusted [ "zero_token_usage_reported" ]
 
-let payload ~cost_usd ~usage_trust =
+let payload
+    ?(input_tokens = 0)
+    ?(output_tokens = 0)
+    ?(cache_creation_input_tokens = 0)
+    ?(cache_read_input_tokens = 0)
+    ~cost_usd
+    ~usage_trust =
   H.cost_event_payload
     ~agent_name:"test_agent"
     ~task_id:None
-    ~input_tokens:0
-    ~output_tokens:0
+    ~input_tokens
+    ~output_tokens
     ~cost_usd
+    ~cache_creation_input_tokens
+    ~cache_read_input_tokens
     ~usage_trust
     ()
 
@@ -99,6 +125,41 @@ let test_trusted_tokens_positive_cost_unchanged () =
   check string "trusted positive cost => reported" "reported"
     (string_field p "cost_status")
 
+let test_trusted_tokens_include_cache_delta () =
+  let p =
+    payload
+      ~input_tokens:100
+      ~output_tokens:50
+      ~cache_creation_input_tokens:10
+      ~cache_read_input_tokens:20
+      ~cost_usd:0.0042
+      ~usage_trust:Trust.Usage_trusted
+  in
+  check int "cache creation tokens are recorded" 10
+    (int_field p "cache_creation_tokens");
+  check int "cache read tokens are recorded" 20
+    (int_field p "cache_read_tokens");
+  check int "cache miss is derived from input minus read/write cache tokens" 70
+    (int_field p "cache_miss_input_tokens")
+
+let test_untrusted_tokens_mask_cache_delta () =
+  let p =
+    payload
+      ~input_tokens:100
+      ~output_tokens:50
+      ~cache_creation_input_tokens:10
+      ~cache_read_input_tokens:20
+      ~cost_usd:0.0
+      ~usage_trust:untrusted_zero_tokens
+  in
+  check_null_field p "cache_creation_tokens";
+  check_null_field p "cache_read_tokens";
+  check_null_field p "cache_miss_input_tokens";
+  check int "raw cache creation is still available for diagnosis" 10
+    (int_field p "raw_cache_creation_tokens");
+  check int "raw cache read is still available for diagnosis" 20
+    (int_field p "raw_cache_read_tokens")
+
 let () =
   run "cost_token_decouple"
     [
@@ -115,5 +176,12 @@ let () =
             test_untrusted_tokens_zero_cost_stays_zero;
           test_case "trusted tokens + positive cost unchanged" `Quick
             test_trusted_tokens_positive_cost_unchanged;
+        ] );
+      ( "cache-delta",
+        [
+          test_case "trusted tokens include cache delta" `Quick
+            test_trusted_tokens_include_cache_delta;
+          test_case "untrusted tokens mask cache delta" `Quick
+            test_untrusted_tokens_mask_cache_delta;
         ] );
     ]

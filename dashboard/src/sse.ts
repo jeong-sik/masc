@@ -1056,9 +1056,17 @@ function handleEvent(event: SSEEvent): void {
       const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
       const turn = asNumber(p.turn)
       const inputTokens = asNumber(p.input_tokens) ?? 0
+      const cacheReadTokens =
+        asNumber(p.cache_read_tokens)
+        ?? asNumber(p.cache_read_input_tokens)
+      const cacheMissInputTokens = asNumber(p.cache_miss_input_tokens)
+      const cacheSuffix =
+        cacheReadTokens != null || cacheMissInputTokens != null
+          ? ` · cache read ${cacheReadTokens ?? 0}tok · miss ${cacheMissInputTokens ?? 0}tok`
+          : ''
       addTypedJournalEntry(
         agentName,
-        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · runtime · ${inputTokens}tok`,
+        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · runtime · ${inputTokens}tok${cacheSuffix}`,
         'oas',
         'oas_event',
         {

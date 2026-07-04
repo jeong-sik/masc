@@ -475,7 +475,7 @@ let test_goalless_still_bounded_by_global_cap () =
     check string "reason" "global_cap"
       (Admission.reject_reason_to_string rejection.reason)
 
-(* --- env-configurable default_caps (MASC_KEEPER_WIP_*) --- *)
+(* --- env-configurable default_caps (MASC_KEEPER_WIP_ knobs) --- *)
 
 let with_env name value f =
   let prev = Sys.getenv_opt name in

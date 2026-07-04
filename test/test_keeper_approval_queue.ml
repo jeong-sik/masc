@@ -184,6 +184,143 @@ let test_critical_entry_phase_becomes_escalated_after_timer () =
        | None -> Alcotest.fail "Critical approval did not resume after escalation")
 ;;
 
+(* Regression: the HITL context summary must survive every JSON emission path,
+   including the [include_input:true] dashboard paths. A previous
+   [if include_input then ... else [] @ summary] precedence trap parsed the
+   trailing summary fields into the [else] branch, so [include_input:true]
+   ([list_pending_dashboard_json], [pending_entry_detail_json],
+   [broadcast_pending]) silently dropped the operator-facing summary the HITL
+   worker had computed. *)
+let sample_summary : AQ.hitl_context_summary =
+  { summary_version = 1
+  ; generated_at = 1_700_000_000.0
+  ; model_run_id = "test-model-run"
+  ; context_summary = "HITL-SUMMARY-MARKER"
+  ; key_questions = [ "is this action reversible?" ]
+  ; suggested_options =
+      [ { AQ.label = "approve once"
+        ; rationale = "blast radius is bounded to the sandbox"
+        ; estimated_risk_delta = Some AQ.Low
+        }
+      ]
+  ; risk_rationale = Some "irreversible write outside sandbox"
+  ; uncertainty = 0.25
+  }
+;;
+
+let entry_json_for_keeper ~keeper_name = function
+  | `List entries ->
+    List.find_opt
+      (function
+        | `Assoc kvs ->
+          (match List.assoc_opt "keeper_name" kvs with
+           | Some (`String name) -> String.equal name keeper_name
+           | _ -> false)
+        | _ -> false)
+      entries
+  | _ -> None
+;;
+
+let context_summary_text_opt json =
+  let open Yojson.Safe.Util in
+  match json |> member "context_summary" with
+  | `Null -> None
+  | summary_obj ->
+    (match summary_obj |> member "context_summary" with
+     | `String s -> Some s
+     | _ -> None)
+;;
+
+let summary_status_status json =
+  let open Yojson.Safe.Util in
+  match json |> member "summary_status" with
+  | `Null -> None
+  | `Assoc _ as obj -> obj |> member "status" |> to_string_option
+  | `String s -> Some s
+  | _ -> None
+;;
+
+let test_summary_survives_include_input_paths () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       Eio.Switch.run
+       @@ fun sw ->
+       let keeper_name = "summary-json-emission-test" in
+       let result = ref None in
+       Eio.Fiber.fork ~sw (fun () ->
+         let decision =
+           AQ.submit_and_await
+             ~keeper_name
+             ~tool_name:"keeper_continue_after_reconcile"
+             ~input:(`Assoc [ "kind", `String "critical_gate" ])
+             ~risk_level:AQ.Critical
+             ~base_path
+             ()
+         in
+         result := Some decision);
+       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+       let id =
+         match pending_id_for_keeper ~keeper_name with
+         | Some id -> id
+         | None -> Alcotest.fail "Critical approval was not queued"
+       in
+       (* Attach a known summary, then read synchronously (no [yield]) so the
+          async summary worker cannot overwrite the entry between write and
+          read under Eio's cooperative scheduler. *)
+       AQ.update_pending_entry ~id (fun e ->
+         { e with
+           context_summary = Some sample_summary
+         ; summary_status = AQ.Summary_available sample_summary
+         });
+       let dashboard_entry =
+         match
+           entry_json_for_keeper ~keeper_name (AQ.list_pending_dashboard_json ())
+         with
+         | Some json -> json
+         | None -> Alcotest.fail "entry missing from list_pending_dashboard_json"
+       in
+       let detail_entry =
+         match AQ.get_pending_json ~id with
+         | Some json -> json
+         | None -> Alcotest.fail "pending detail JSON not found"
+       in
+       let list_entry =
+         match entry_json_for_keeper ~keeper_name (AQ.list_pending_json ()) with
+         | Some json -> json
+         | None -> Alcotest.fail "entry missing from list_pending_json"
+       in
+       let expected = Some "HITL-SUMMARY-MARKER" in
+       Alcotest.(check (option string))
+         "dashboard list (include_input:true) carries context_summary"
+         expected
+         (context_summary_text_opt dashboard_entry);
+       Alcotest.(check (option string))
+         "detail view (include_input:true) carries context_summary"
+         expected
+         (context_summary_text_opt detail_entry);
+       Alcotest.(check (option string))
+         "plain list (include_input:false) carries context_summary"
+         expected
+         (context_summary_text_opt list_entry);
+       Alcotest.(check (option string))
+         "dashboard list exposes summary_status=available"
+         (Some "available")
+         (summary_status_status dashboard_entry);
+       Alcotest.(check (option string))
+         "detail view exposes summary_status=available"
+         (Some "available")
+         (summary_status_status detail_entry);
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       yield_until (fun () -> Option.is_some !result))
+;;
+
 let test_pending_phase_conversions () =
   Alcotest.(check string)
     "Awaiting_operator string"
@@ -223,6 +360,12 @@ let () =
             "Critical entry becomes Escalated after escalation timer"
             `Quick
             test_critical_entry_phase_becomes_escalated_after_timer
+        ] )
+    ; ( "summary"
+      , [ Alcotest.test_case
+            "context summary survives include_input:true JSON paths"
+            `Quick
+            test_summary_survives_include_input_paths
         ] )
     ; ( "conversions"
       , [ Alcotest.test_case

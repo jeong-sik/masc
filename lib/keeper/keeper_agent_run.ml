@@ -225,8 +225,13 @@ let run_turn
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
+  let partition, _ =
+    Keeper_tool_filesystem_runtime.resolve_partition_for_write
+      ~base_dir:config.base_path ~kind:"turn_event" ~file_path:config.base_path
+  in
   Agent_observation.emit_turn_event
     { base_path = config.base_path
+    ; partition
     ; turn_id =
         (match meta.current_task_id with
          | Some t -> Keeper_id.Task_id.to_string t
@@ -253,8 +258,13 @@ let run_turn
   let emit_observation_turn_end ~phase ~stop_reason () =
     let duration_ms = int_of_float ((Unix.gettimeofday () -. turn_start_time) *. 1000.0) in
     let turn_id = match meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "turn-" ^ meta.name in
+    let partition, _ =
+      Keeper_tool_filesystem_runtime.resolve_partition_for_write
+        ~base_dir:config.base_path ~kind:"turn_event" ~file_path:config.base_path
+    in
     Agent_observation.emit_turn_event
       { base_path = config.base_path
+      ; partition
       ; turn_id
       ; keeper_id = meta.name
       ; phase

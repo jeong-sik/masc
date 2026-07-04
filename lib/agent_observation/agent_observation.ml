@@ -1,36 +1,3 @@
-type tool_event =
-  { base_path : string
-  ; tool_name : string
-  ; keeper_id : string
-  ; turn_id : string
-  ; outcome : string
-  ; typed_outcome : string
-  ; duration_ms : float
-  ; output_text : string
-  ; input : Yojson.Safe.t
-  }
-
-type pr_event =
-  { base_path : string
-  ; keeper_id : string
-  ; turn_id : string
-  ; output_text : string
-  ; tool_name : string
-  ; success : bool
-  }
-
-type turn_event =
-  { base_path : string
-  ; turn_id : string
-  ; keeper_id : string
-  ; phase : string
-  ; model_used : string option
-  ; tools_used : string list
-  ; stop_reason : string option
-  ; duration_ms : int option
-  ; timestamp_ms : int64
-  }
-
 type codebase_partition =
   | By_url of string
       (** canonical URL 정상 resolved: host_path slug. *)
@@ -49,6 +16,43 @@ type codebase_partition =
           carries no [partition] field at all (tool/turn/pr_event,
           annotation_request). Structural ceiling, NOT a soft fallback.
           v2 §7 "(3) default 미갱신". *)
+
+type tool_event =
+  { base_path : string
+  ; partition : codebase_partition
+  ; tool_name : string
+  ; keeper_id : string
+  ; turn_id : string
+  ; outcome : string
+  ; typed_outcome : string
+  ; duration_ms : float
+  ; output_text : string
+  ; input : Yojson.Safe.t
+  }
+
+type pr_event =
+  { base_path : string
+  ; partition : codebase_partition
+  ; keeper_id : string
+  ; turn_id : string
+  ; output_text : string
+  ; tool_name : string
+  ; success : bool
+  }
+
+type turn_event =
+  { base_path : string
+  ; partition : codebase_partition
+  ; turn_id : string
+  ; keeper_id : string
+  ; phase : string
+  ; model_used : string option
+  ; tools_used : string list
+  ; stop_reason : string option
+  ; duration_ms : int option
+  ; timestamp_ms : int64
+  }
+
 
 (* RFC-0128 §4.1 neutral codebase slug derivation.
 
@@ -188,6 +192,7 @@ let annotation_kind_of_string = function
 
 type annotation_request =
   { base_path : string
+  ; partition : codebase_partition
   ; keeper_id : string
   ; file_path : string
   ; line_start : int

@@ -251,13 +251,19 @@ function runtimeDeclaredSpecSummary(
     : []
   const controls = [
     caps?.supports_tool_choice ? 'tool-choice' : null,
+    caps?.supports_required_tool_choice ? 'required' : null,
+    caps?.supports_named_tool_choice ? 'named' : null,
+    caps?.supports_parallel_tool_calls ? 'parallel' : null,
     caps?.supports_native_streaming ? 'native-stream' : null,
+    caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_caching ? 'cache' : null,
     caps?.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
       : null,
+    caps?.supports_seed_with_images ? 'seed+images' : null,
     caps?.emits_usage_tokens ? 'usage' : null,
     caps?.supports_computer_use ? 'computer-use' : null,
+    caps?.supports_code_execution ? 'code-exec' : null,
   ].filter((value): value is string => Boolean(value))
   let thinking: string | null = null
   if (typeof spec.model?.thinking_support === 'boolean') {

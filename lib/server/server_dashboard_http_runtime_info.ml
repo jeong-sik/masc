@@ -1598,6 +1598,9 @@ let runtime_declared_model_capabilities_json
       [ "source", `String runtime_inventory_source
       ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
       ; "supports_tool_choice", `Bool caps.supports_tool_choice
+      ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
+      ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
+      ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
       ; "supports_extended_thinking", `Bool caps.supports_extended_thinking
       ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
       ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
@@ -1608,14 +1611,17 @@ let runtime_declared_model_capabilities_json
       ; "supports_response_format_json", `Bool caps.supports_response_format_json
       ; "supports_structured_output", `Bool caps.supports_structured_output
       ; "supports_native_streaming", `Bool caps.supports_native_streaming
+      ; "supports_system_prompt", `Bool caps.supports_system_prompt
       ; "supports_caching", `Bool caps.supports_caching
       ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
       ; "prompt_cache_alignment", Json_util.int_opt_to_json caps.prompt_cache_alignment
       ; "supports_top_k", `Bool caps.supports_top_k
       ; "supports_min_p", `Bool caps.supports_min_p
       ; "supports_seed", `Bool caps.supports_seed
+      ; "supports_seed_with_images", `Bool caps.supports_seed_with_images
       ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
       ; "supports_computer_use", `Bool caps.supports_computer_use
+      ; "supports_code_execution", `Bool caps.supports_code_execution
       ]
 ;;
 

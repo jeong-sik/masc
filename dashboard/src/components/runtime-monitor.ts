@@ -313,13 +313,19 @@ function runtimeDeclaredModelControlText(provider: DashboardRuntimeProviderSnaps
   if (!caps) return null
   return textList([
     flagText(caps.supports_tool_choice, 'tool-choice'),
+    flagText(caps.supports_required_tool_choice, 'required'),
+    flagText(caps.supports_named_tool_choice, 'named'),
+    flagText(caps.supports_parallel_tool_calls, 'parallel'),
     flagText(caps.supports_native_streaming, 'native-stream'),
+    flagText(caps.supports_system_prompt, 'system-prompt'),
     flagText(caps.supports_caching, 'cache'),
     caps.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
       : flagText(caps.supports_prompt_caching, 'prompt-cache'),
+    flagText(caps.supports_seed_with_images, 'seed+images'),
     flagText(caps.emits_usage_tokens, 'usage'),
     flagText(caps.supports_computer_use, 'computer-use'),
+    flagText(caps.supports_code_execution, 'code-exec'),
   ])
 }
 
@@ -581,13 +587,19 @@ function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): st
     : []
   const declaredModelControls = [
     declaredCaps?.supports_tool_choice ? 'tool-choice' : null,
+    declaredCaps?.supports_required_tool_choice ? 'required' : null,
+    declaredCaps?.supports_named_tool_choice ? 'named' : null,
+    declaredCaps?.supports_parallel_tool_calls ? 'parallel' : null,
     declaredCaps?.supports_native_streaming ? 'native-stream' : null,
+    declaredCaps?.supports_system_prompt ? 'system-prompt' : null,
     declaredCaps?.supports_caching ? 'cache' : null,
     declaredCaps?.supports_prompt_caching
       ? `prompt-cache${typeof declaredCaps.prompt_cache_alignment === 'number' ? `@${declaredCaps.prompt_cache_alignment}` : ''}`
       : null,
+    declaredCaps?.supports_seed_with_images ? 'seed+images' : null,
     declaredCaps?.emits_usage_tokens ? 'usage' : null,
     declaredCaps?.supports_computer_use ? 'computer-use' : null,
+    declaredCaps?.supports_code_execution ? 'code-exec' : null,
   ].filter((value): value is string => Boolean(value))
   let declaredThinking: string | null = null
   if (typeof spec.model?.thinking_support === 'boolean') {

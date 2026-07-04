@@ -738,10 +738,11 @@ let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
     (fun () ->
       Client_registry_eio.reset_for_testing ();
       let json = Server_dashboard_http.dashboard_ide_snapshot_json ~config in
+      let partition = Ide_paths.Legacy_default in
       let open Yojson.Safe.Util in
-      check string "partition kind" "legacy_default"
+      check string "partition kind" (Ide_paths.partition_kind partition)
         (json |> member "partition_kind" |> to_string);
-      check bool "partition is orphan" true
+      check bool "partition is orphan" (Ide_paths.partition_is_orphan partition)
         (json |> member "partition_orphan" |> to_bool);
       check int "events count metadata" 0
         (json |> member "events_count" |> to_int);

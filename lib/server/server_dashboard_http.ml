@@ -634,8 +634,8 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
   let regions_count = List.length regions in
   let active_keepers_count = List.length active_keepers in
   `Assoc
-    [ "partition_kind", `String "legacy_default"
-    ; "partition_orphan", `Bool true
+    [ "partition_kind", `String (Ide_paths.partition_kind partition)
+    ; "partition_orphan", `Bool (Ide_paths.partition_is_orphan partition)
     ; "events_count", `Int events_count
     ; "cursors_count", `Int cursors_count
     ; "annotations_count", `Int annotations_count

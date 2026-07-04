@@ -1814,6 +1814,8 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "capabilities_declared", `Bool capabilities_declared
     ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
     ; "supports_image_input", `Bool caps.supports_image_input
+    ; "supports_audio_input", `Bool caps.supports_audio_input
+    ; "supports_video_input", `Bool caps.supports_video_input
     ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
     ; "effective_capabilities", effective_capabilities_json rt

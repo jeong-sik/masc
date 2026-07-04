@@ -228,6 +228,15 @@ function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapshot): st
     typeof item.capabilities_declared === 'boolean'
       ? `caps:${item.capabilities_declared ? 'declared' : 'missing'}`
       : null,
+    typeof item.supports_multimodal_inputs === 'boolean'
+      ? `multimodal:${item.supports_multimodal_inputs ? 'on' : 'off'}`
+      : null,
+    typeof item.supports_image_input === 'boolean' ? `image:${item.supports_image_input ? 'on' : 'off'}` : null,
+    typeof item.supports_audio_input === 'boolean' ? `audio:${item.supports_audio_input ? 'on' : 'off'}` : null,
+    typeof item.supports_video_input === 'boolean' ? `video:${item.supports_video_input ? 'on' : 'off'}` : null,
+    typeof item.supports_reasoning_budget === 'boolean'
+      ? `reasoning-budget:${item.supports_reasoning_budget ? 'on' : 'off'}`
+      : null,
     note ? `note:${note}` : null,
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null

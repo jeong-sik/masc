@@ -2423,6 +2423,8 @@ describe('fetchRuntimeProviders', () => {
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
             temperature: 0.65,
+            supports_audio_input: true,
+            supports_video_input: false,
             parameter_policy: {
               reasoning_toggle_wire: 'chat_template_kwargs',
               reasoning_replay_policy: 'preserve_always',
@@ -2642,6 +2644,8 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[0]?.supports_audio_input).toBe(true)
+    expect(result.providers[0]?.supports_video_input).toBe(false)
     expect(result.providers[0]?.parameter_policy?.reasoning_toggle_wire).toBe('chat_template_kwargs')
     expect(result.providers[0]?.parameter_policy?.reasoning_replay_policy).toBe('preserve_always')
     expect(result.providers[0]?.parameter_policy?.ignored_sampling_params).toEqual(['temperature', 'top_p'])

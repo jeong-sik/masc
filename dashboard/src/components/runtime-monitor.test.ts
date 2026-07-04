@@ -58,6 +58,8 @@ describe('RuntimeMonitor', () => {
           capabilities_declared: true,
           supports_multimodal_inputs: true,
           supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
           supports_reasoning_budget: true,
           thinking_control_format: 'reasoning-effort',
           model_count: 1,
@@ -351,7 +353,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('model-temp 0.7')
     expect(container.textContent).toContain('caps declared')
     expect(container.textContent).toContain('tools on,thinking on,streaming on')
-    expect(container.textContent).toContain('multimodal on,image on,reasoning-budget on')
+    expect(container.textContent).toContain('multimodal on,image on,audio on,video off,reasoning-budget on')
     expect(container.textContent).toContain('thinking-control reasoning-effort')
     expect(container.textContent).toContain('note verified by runtime discovery')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge,argv-preflight,anthropic-cache')

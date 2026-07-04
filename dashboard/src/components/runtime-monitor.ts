@@ -338,6 +338,8 @@ function runtimeSnapshotFactsText(provider: DashboardRuntimeProviderSnapshot): s
     boolStateText(provider.streaming, 'streaming'),
     boolStateText(provider.supports_multimodal_inputs, 'multimodal'),
     boolStateText(provider.supports_image_input, 'image'),
+    boolStateText(provider.supports_audio_input, 'audio'),
+    boolStateText(provider.supports_video_input, 'video'),
     boolStateText(provider.supports_reasoning_budget, 'reasoning-budget'),
     provider.thinking_control_format ? `thinking-control ${provider.thinking_control_format}` : null,
     note ? `note ${note}` : null,

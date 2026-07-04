@@ -186,6 +186,8 @@ supports-named-tool-choice = true
 supports-parallel-tool-calls = true
 supports-response-format-json = true
 supports-structured-output = true
+supports-audio-input = true
+supports-video-input = true
 supports-system-prompt = true
 supports-seed = true
 supports-seed-with-images = true
@@ -478,6 +480,22 @@ let test_runtime_inventory_surfaces_declared_model_capabilities () =
       "declared named tool choice"
       true
       (caps |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level audio input"
+      true
+      (gpt |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level video input"
+      true
+      (gpt |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared audio input"
+      true
+      (caps |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared video input"
+      true
+      (caps |> J.member "supports_video_input" |> J.to_bool);
     Alcotest.(check bool)
       "declared parallel tool calls"
       true

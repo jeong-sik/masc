@@ -156,6 +156,163 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   return provider.discovery?.healthy === false ? 'degraded' : 'unknown'
 }
 
+function runtimeParameterPolicyText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const policy = provider.parameter_policy
+  if (!policy) return null
+  const parts = [
+    policy.reasoning_toggle_wire ? `wire ${policy.reasoning_toggle_wire}` : null,
+    policy.reasoning_replay_policy ? `replay ${policy.reasoning_replay_policy}` : null,
+    policy.ignored_sampling_params.length > 0
+      ? `ignored ${policy.ignored_sampling_params.join(',')}`
+      : null,
+    policy.always_ignored_sampling_params.length > 0
+      ? `always ignored ${policy.always_ignored_sampling_params.join(',')}`
+      : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeRequestToolChoiceText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const choice = provider.request_config?.tool_choice
+  if (!choice?.kind) return null
+  return choice.name ? `${choice.kind}:${choice.name}` : choice.kind
+}
+
+function runtimeRequestFormatText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const format = provider.request_config?.response_format
+  if (!format?.kind) return null
+  return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const request = provider.request_config
+  if (!request) return null
+  const sampling = [
+    typeof request.temperature === 'number' ? `temp ${request.temperature}` : null,
+    typeof request.top_p === 'number' ? `top_p ${request.top_p}` : null,
+    typeof request.top_k === 'number' ? `top_k ${request.top_k}` : null,
+    typeof request.min_p === 'number' ? `min_p ${request.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = runtimeRequestToolChoiceText(provider)
+  const format = runtimeRequestFormatText(provider)
+  let requestPath: string | null = null
+  if (request.request_path_targets_responses_api) {
+    requestPath = 'responses-api'
+  } else if (request.request_path) {
+    requestPath = `path ${request.request_path}`
+  }
+  const parts = [
+    request.provider_kind ? `kind ${request.provider_kind}` : null,
+    requestPath,
+    typeof request.max_tokens === 'number' ? `out ${formatNumber(request.max_tokens)}` : null,
+    typeof request.max_context === 'number' ? `ctx ${formatNumber(request.max_context)}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
+    typeof request.thinking_budget === 'number' ? `budget ${formatNumber(request.thinking_budget)}` : null,
+    request.resolved_reasoning_effort ? `effort ${request.resolved_reasoning_effort}` : null,
+    toolChoice ? `tool ${toolChoice}` : null,
+    request.disable_parallel_tool_use ? 'parallel off' : null,
+    format ? `format ${format}` : null,
+    typeof request.seed === 'number' ? `seed ${request.seed}` : null,
+    typeof request.num_ctx === 'number' ? `num_ctx ${formatNumber(request.num_ctx)}` : null,
+    request.keep_alive ? `keep ${request.keep_alive}` : null,
+    typeof request.connect_timeout_s === 'number' ? `connect ${request.connect_timeout_s}s` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const spec = provider.declared_spec
+  if (!spec) return null
+  const declaredCaps = spec.model?.capabilities
+  const declaredSampling = [
+    declaredCaps?.supports_top_k ? 'top_k' : null,
+    declaredCaps?.supports_min_p ? 'min_p' : null,
+    declaredCaps?.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const declaredFormats = [
+    declaredCaps?.supports_response_format_json ? 'json' : null,
+    declaredCaps?.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const declaredInputs = [
+    declaredCaps?.supports_image_input ? 'image' : null,
+    declaredCaps?.supports_audio_input ? 'audio' : null,
+    declaredCaps?.supports_video_input ? 'video' : null,
+  ].filter((value): value is string => Boolean(value))
+  let declaredThinking: string | null = null
+  if (typeof spec.model?.thinking_support === 'boolean') {
+    declaredThinking = spec.model.thinking_support ? 'think on' : 'think off'
+  }
+  const providerParts = [
+    spec.provider?.api_format ? `api ${spec.provider.api_format}` : null,
+    spec.provider?.protocol ? `protocol ${spec.provider.protocol}` : null,
+    spec.provider?.transport ? `transport ${spec.provider.transport}` : null,
+    typeof spec.provider?.custom_header_count === 'number'
+      ? `headers ${spec.provider.custom_header_count}`
+      : null,
+  ].filter((value): value is string => Boolean(value))
+  const modelParts = [
+    spec.model?.api_name ? `model ${spec.model.api_name}` : null,
+    typeof spec.model?.max_context === 'number' ? `ctx ${formatNumber(spec.model.max_context)}` : null,
+    typeof spec.model?.temperature === 'number' ? `temp ${spec.model.temperature}` : null,
+    declaredThinking,
+    typeof spec.model?.max_thinking_budget === 'number'
+      ? `budget ${formatNumber(spec.model.max_thinking_budget)}`
+      : null,
+    declaredCaps?.thinking_control_format ? `wire ${declaredCaps.thinking_control_format}` : null,
+    typeof declaredCaps?.max_output_tokens === 'number'
+      ? `out ${formatNumber(declaredCaps.max_output_tokens)}`
+      : null,
+    declaredFormats.length > 0 ? `format ${declaredFormats.join(',')}` : null,
+    declaredSampling.length > 0 ? `sampling ${declaredSampling.join(',')}` : null,
+    declaredInputs.length > 0 ? `input ${declaredInputs.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const bindingParts = [
+    typeof spec.binding?.max_concurrent === 'number' ? `concurrency ${spec.binding.max_concurrent}` : null,
+    spec.binding?.keep_alive ? `keep ${spec.binding.keep_alive}` : null,
+    typeof spec.binding?.num_ctx === 'number' ? `num_ctx ${formatNumber(spec.binding.num_ctx)}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const parts = [
+    providerParts.length > 0 ? providerParts.join(',') : null,
+    modelParts.length > 0 ? modelParts.join(',') : null,
+    bindingParts.length > 0 ? bindingParts.join(',') : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = provider.effective_capabilities
+  if (!caps) return null
+  const sampling = [
+    caps.supports_top_k ? 'top_k' : null,
+    caps.supports_min_p ? 'min_p' : null,
+    caps.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const modalities = [
+    caps.supports_image_input ? 'image' : null,
+    caps.supports_audio_input ? 'audio' : null,
+    caps.supports_video_input ? 'video' : null,
+  ].filter((value): value is string => Boolean(value))
+  const output = typeof caps.max_output_tokens === 'number'
+    ? `out ${formatNumber(caps.max_output_tokens)}`
+    : null
+  const tools = caps.supports_tool_choice
+    ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    : null
+  const formats = [
+    caps.supports_response_format_json ? 'json' : null,
+    caps.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const parts = [
+    output,
+    tools,
+    formats.length > 0 ? `format ${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    modalities.length > 0 ? `input ${modalities.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function providerProbeKey(probe: DashboardRuntimeProviderProbe): string | null {
   return probe.runtime_id ?? null
 }
@@ -529,8 +686,12 @@ export function RuntimeMonitor() {
           : null}
         <div class="flex flex-col gap-3">
           ${(providers?.providers ?? []).length > 0
-            ? providers?.providers.map(provider => {
+              ? providers?.providers.map(provider => {
                 const liveProbe = providerProbes.get(providerRuntimeKey(provider)) ?? null
+                const effectiveCapabilities = runtimeEffectiveCapabilitiesText(provider)
+                const parameterPolicy = runtimeParameterPolicyText(provider)
+                const requestConfig = runtimeRequestConfigText(provider)
+                const declaredSpec = runtimeDeclaredSpecText(provider)
                 return html`
                 <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
@@ -556,6 +717,26 @@ export function RuntimeMonitor() {
                   ${liveProbe?.probe_url || provider.endpoint_url
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${liveProbe?.probe_url ?? provider.endpoint_url ?? ''}>
                         probe · ${liveProbe?.probe_url ?? provider.endpoint_url}
+                      </div>`
+                    : null}
+                  ${parameterPolicy
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${parameterPolicy}>
+                        params · ${parameterPolicy}
+                      </div>`
+                    : null}
+                  ${requestConfig
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${requestConfig}>
+                        request · ${requestConfig}
+                      </div>`
+                    : null}
+                  ${declaredSpec
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${declaredSpec}>
+                        declared · ${declaredSpec}
+                      </div>`
+                    : null}
+                  ${effectiveCapabilities
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${effectiveCapabilities}>
+                        caps · ${effectiveCapabilities}
                       </div>`
                     : null}
                   ${liveProbe?.error

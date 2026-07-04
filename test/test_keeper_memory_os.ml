@@ -1417,6 +1417,30 @@ let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
     (parse_result {|{"text":"Remember exact command."}|})
 ;;
 
+let test_memory_llm_summary_requires_clock_before_provider_call () =
+  with_eio (fun ~sw ~net ~clock:_ ->
+    let runtime_id = "summary-clock-required-runtime" in
+    let called = ref false in
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+      called := true;
+      Ok (fake_response {|{"summary":"should not run"}|})
+    in
+    let result =
+      Memory_summary.For_testing.summarize_with_provider
+        ~complete
+        ~timeout_sec:1.0
+        ~runtime_id
+        ~sw
+        ~net
+        ~provider_cfg:(test_provider_cfg ())
+        ~trace_id:"summary-clock-required-trace"
+        ~texts:[ "remember this only if timeout can be enforced" ]
+        ()
+    in
+    Alcotest.(check (option string)) "summary skipped" None result;
+    Alcotest.(check bool) "provider was not called" false !called)
+;;
+
 let json_episode_file_count ~keeper_id =
   Memory_io.episodes_dir ~keeper_id
   |> Sys.readdir
@@ -5748,6 +5772,10 @@ let () =
             "memory llm summary accepts only summary json"
             `Quick
             test_memory_llm_summary_response_parser_accepts_only_summary_json
+        ; Alcotest.test_case
+            "memory llm summary requires clock before provider call"
+            `Quick
+            test_memory_llm_summary_requires_clock_before_provider_call
         ; Alcotest.test_case
             "librarian runtime appends episode bundle"
             `Quick

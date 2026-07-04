@@ -105,7 +105,7 @@ let extract_region_from_full_file ~keeper_id ~file_path ~turn ~tool_name ~conten
 let is_file_write_tool name =
   name = "write_file" || name = "edit_file" || name = "apply_patch"
 
-let regions_file ~base_dir ?(partition = Ide_paths.Orphan) () =
+let regions_file ~base_dir ?(partition = Ide_paths.Legacy_default) () =
   Filename.concat (Ide_paths.partition_store_dir ~base_dir partition) "regions.jsonl"
 
 let rec ensure_dir path =
@@ -116,7 +116,7 @@ let rec ensure_dir path =
     try Unix.mkdir path 0o755 with
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 
-let append_region ~base_dir ?(partition = Ide_paths.Orphan) region =
+let append_region ~base_dir ?(partition = Ide_paths.Legacy_default) region =
   let path = regions_file ~base_dir ~partition () in
   ensure_dir (Filename.dirname path);
   Fs_compat.append_jsonl path (region_to_json region)
@@ -156,10 +156,10 @@ let region_key (r : code_region) =
     r.timestamp_ms
     src_tag
 
-let read_regions ~base_dir ?(partition = Ide_paths.Orphan) ?file_path () =
+let read_regions ~base_dir ?(partition = Ide_paths.Legacy_default) ?file_path () =
   load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
 
-let ingest_tool_call ~base_dir ?(partition = Ide_paths.Orphan) ~keeper_id ~turn json =
+let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy_default) ~keeper_id ~turn json =
   let tool_name =
     match json with
     | `Assoc fields -> (

@@ -74,14 +74,32 @@ export function agentsToPresence(
   }
 }
 
+/** The standard MASC API endpoints ([/api/v1/status], [/api/v1/agents]) wrap
+    their payload in an [{ ok, data }] envelope, unlike the dashboard-specific
+    [/api/v1/providers] which returns its payload at the top level. [get()]
+    returns the raw parsed body without unwrapping, so a consumer must pull
+    [.data] out. Reading the envelope's absent top-level fields (e.g.
+    [status.cluster], which actually lives at [status.data.cluster]) is what
+    made this strip render a permanent [disconnected (runtime_unknown)]
+    regardless of the live runtime. Falls back to the raw value when no [data]
+    key is present, so an un-enveloped response still works.
+    @internal — exported for {@link ./ide-presence-strip.test.ts}. */
+export function unwrapEnvelope<T>(raw: unknown): T | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined
+  if ('data' in raw) return (raw as { data: T }).data
+  return raw as T
+}
+
 async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
   try {
-    const [agentsData, statusData] = await Promise.all([
-      get<{ agents: ApiAgent[] }>('/api/v1/agents?limit=20'),
-      get<ApiStatus>('/api/v1/status'),
+    const [agentsRaw, statusRaw] = await Promise.all([
+      get<unknown>('/api/v1/agents?limit=20'),
+      get<unknown>('/api/v1/status'),
     ])
-    const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
-    return agentsToPresence(agents, statusData)
+    const agentsData = unwrapEnvelope<{ agents?: ApiAgent[] }>(agentsRaw)
+    const statusData = unwrapEnvelope<ApiStatus>(statusRaw)
+    const agents: ApiAgent[] = Array.isArray(agentsData?.agents) ? agentsData.agents : []
+    return agentsToPresence(agents, statusData ?? {})
   } catch {
     return disconnectedSnapshot('fetch_failed')
   }

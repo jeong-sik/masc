@@ -19,7 +19,7 @@ val store_path : base_dir:string -> string
 
 val ensure_store : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
 (** Create the partition's directory if absent. Idempotent. Default
-    [partition] is {!Ide_paths.Orphan}. *)
+    [partition] is {!Ide_paths.Legacy_default}. *)
 
 val create
   :  base_dir:string
@@ -43,7 +43,7 @@ val create
   -> unit
   -> (annotation, string) result
 (** Append a new annotation to the chosen partition. Default
-    [partition] is {!Ide_paths.Orphan}. *)
+    [partition] is {!Ide_paths.Legacy_default}. *)
 
 val list
   :  base_dir:string
@@ -53,7 +53,7 @@ val list
   -> annotation list
 (** Read all annotations for the chosen partition. Tombstoned entries
     are excluded. Sorted by [created_at_ms] descending (newest first).
-    Default [partition] is {!Ide_paths.Orphan}. *)
+    Default [partition] is {!Ide_paths.Legacy_default}. *)
 
 val delete
   :  base_dir:string
@@ -66,7 +66,7 @@ val delete
 (** Soft-delete: append a tombstone record. Only the original
     [keeper_id] may delete its own annotation. The [?partition] must
     match the one the annotation was created under. Default
-    [partition] is {!Ide_paths.Orphan}.
+    [partition] is {!Ide_paths.Legacy_default}.
 
     [?expected_version] enables optimistic concurrency: pass the
     annotation's [updated_at_ms] (its version token, exposed in
@@ -77,7 +77,7 @@ val delete
 val compact : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
 (** Append a compaction snapshot marker that lets readers ignore earlier
     tombstoned state while replaying records written during the compaction
-    window. Default [partition] is {!Ide_paths.Orphan}. *)
+    window. Default [partition] is {!Ide_paths.Legacy_default}. *)
 
 val annotation_kind_of_string : string -> annotation_kind option
 (** Parse kind string, returning [None] for unknown values. *)

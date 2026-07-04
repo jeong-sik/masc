@@ -169,6 +169,7 @@ endpoint = "https://api.openai.example/v1"
 [models.qwen]
 api-name = "qwen"
 max-context = 128000
+temperature = 0.65
 tools-support = true
 streaming = true
 
@@ -375,6 +376,17 @@ let test_runtime_inventory_surfaces_assignment_governance () =
   with_runtime_initialized (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
     let governance = J.member "assignment_governance" json in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let provider_by_runtime_id runtime_id =
+      List.find
+        (fun provider ->
+           String.equal
+             runtime_id
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let qwen = provider_by_runtime_id "runpod_mtp.qwen" in
+    let gpt = provider_by_runtime_id "openai.gpt" in
     Alcotest.(check string)
       "schema"
       "masc.runtime_assignment_governance.v1"
@@ -404,7 +416,17 @@ let test_runtime_inventory_surfaces_assignment_governance () =
       true
       (string_contains
          (Yojson.Safe.to_string governance)
-         "single_runtime_assignment_pin"))
+         "single_runtime_assignment_pin");
+    Alcotest.(check (float 0.0001))
+      "model temperature override"
+      0.65
+      (qwen |> J.member "temperature" |> J.to_float);
+    Alcotest.(check bool)
+      "absent model temperature is null"
+      true
+      (match gpt |> J.member "temperature" with
+       | `Null -> true
+       | _ -> false))
 ;;
 
 let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =

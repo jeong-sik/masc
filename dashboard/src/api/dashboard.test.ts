@@ -2422,11 +2422,17 @@ describe('fetchRuntimeProviders', () => {
             available: true,
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
+            temperature: 0.65,
             source: 'runtime.toml',
             discovery: {
               healthy: true,
               ctx_size: 200000,
             },
+          },
+          {
+            provider: 'openai.gpt',
+            runtime_id: 'openai.gpt',
+            temperature: null,
           },
         ],
         assignment_governance: {
@@ -2466,6 +2472,8 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.model_api_name).toBe('Qwen/Qwen3-32B')
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
+    expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
     expect(result.assignment_governance?.status).toBe('degraded')
     expect(result.assignment_governance?.assignment_count).toBe(2)

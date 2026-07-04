@@ -395,6 +395,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
+    expect(container.textContent).toContain('wire chat-template-kwargs · preserve chat-template-kwargs-preserve-thinking')
     expect(container.textContent).toContain('preserve chat-template-kwargs-preserve-thinking')
     expect(container.textContent).toContain('task transcription · native-stream')
     expect(container.textContent).toContain('seed+images')

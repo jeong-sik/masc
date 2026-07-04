@@ -290,6 +290,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
       ? `effort:${caps.accepted_reasoning_efforts.join(',')}`
       : null,
+    caps.thinking_control_format ? `wire:${caps.thinking_control_format}` : null,
     caps.preserve_thinking_control_format ? `preserve:${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out:${caps.reasoning_output_format}` : null,
     reasoningStream ? `reasoning-stream:${reasoningStream}` : null,

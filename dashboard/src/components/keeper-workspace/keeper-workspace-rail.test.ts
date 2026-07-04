@@ -265,10 +265,15 @@ describe('KeeperWorkspaceRail', () => {
             assistant_tool_content_format: 'null',
             supports_response_format_json: true,
             supports_structured_output: true,
+            supports_multimodal_inputs: true,
+            supports_image_input: true,
+            supports_audio_input: true,
+            supports_video_input: false,
             supports_reasoning: true,
             supports_extended_thinking: true,
             supports_reasoning_budget: true,
             accepted_reasoning_efforts: ['low', 'medium', 'high'],
+            thinking_control_format: 'chat-template-kwargs',
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -406,14 +411,18 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain(
       'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
+    expect(container.textContent).toContain('source oas-provider-config-model')
     expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
     expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
+    expect(container.textContent).toContain('input multimodal,image,audio')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
     expect(container.textContent).toContain('extended thinking')
     expect(container.textContent).toContain('reasoning budget')
     expect(container.textContent).toContain('effort low,medium,high')
+    expect(container.textContent).toContain('wire chat-template-kwargs')
     expect(container.textContent).toContain('preserve always-preserved')
+    expect(container.textContent).toContain('reasoning-stream delta-reasoning-field:reasoning_content')
     expect(container.textContent).toContain('task transcription · native-stream')
     // the "no source" stub is replaced once the catalog reports capabilities
     expect(container.textContent).not.toContain('조정 정보 미수신')

@@ -313,6 +313,13 @@ function runtimeDeclaredSpecSummary(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeReasoningStreamingFormatSummary(
+  format: { kind?: string | null; field?: string | null } | null | undefined,
+): string | null {
+  if (!format?.kind) return null
+  return format.field ? `${format.kind}:${format.field}` : format.kind
+}
+
 function runtimeEffectiveCapabilitySummary(
   entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
 ): string | null {
@@ -328,7 +335,15 @@ function runtimeEffectiveCapabilitySummary(
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
+  const inputs = [
+    caps.supports_multimodal_inputs ? 'multimodal' : null,
+    caps.supports_image_input ? 'image' : null,
+    caps.supports_audio_input ? 'audio' : null,
+    caps.supports_video_input ? 'video' : null,
+  ].filter((value): value is string => Boolean(value))
+  const reasoningStream = runtimeReasoningStreamingFormatSummary(caps.reasoning_streaming_format)
   const parts = [
+    caps.source ? `source ${caps.source}` : null,
     typeof caps.max_context_tokens === 'number' ? `ctx ${caps.max_context_tokens}` : null,
     typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
     caps.supports_tools ? 'tools' : null,
@@ -344,6 +359,7 @@ function runtimeEffectiveCapabilitySummary(
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     ignoredSampling ? `ignored ${ignoredSampling}` : null,
+    inputs.length > 0 ? `input ${inputs.join(',')}` : null,
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
@@ -352,9 +368,10 @@ function runtimeEffectiveCapabilitySummary(
     caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
       ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
       : null,
+    caps.thinking_control_format ? `wire ${caps.thinking_control_format}` : null,
     caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
-    caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
+    reasoningStream ? `reasoning-stream ${reasoningStream}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
     caps.supports_native_streaming ? 'native-stream' : null,

@@ -13,6 +13,7 @@ const mockFindRuntimeCatalogEntry = vi.hoisted(() => vi.fn())
 const mockLoadRuntimeCatalog = vi.hoisted(() => vi.fn())
 const mockRuntimeCatalogState = vi.hoisted(() => ({ value: { status: 'idle' } }))
 const mockRuntimeCatalogSnapshotFacts = vi.hoisted(() => vi.fn())
+const mockRuntimeCatalogEffectiveCapabilities = vi.hoisted(() => vi.fn())
 
 vi.mock('../../lib/keeper-utils', () => ({
   findKeeper: (...args: Parameters<typeof mockFindKeeper>) => mockFindKeeper(...args),
@@ -32,6 +33,8 @@ vi.mock('../../lib/runtime-catalog-resource', () => ({
 }))
 
 vi.mock('../../lib/runtime-provider-summary', () => ({
+  runtimeCatalogEffectiveCapabilities: (...args: Parameters<typeof mockRuntimeCatalogEffectiveCapabilities>) =>
+    mockRuntimeCatalogEffectiveCapabilities(...args),
   runtimeCatalogSnapshotFacts: (...args: Parameters<typeof mockRuntimeCatalogSnapshotFacts>) =>
     mockRuntimeCatalogSnapshotFacts(...args),
 }))
@@ -55,6 +58,7 @@ describe('AgentRuntimeStrip', () => {
     mockFindRuntimeCatalogEntry.mockReset()
     mockLoadRuntimeCatalog.mockReset()
     mockRuntimeCatalogSnapshotFacts.mockReset()
+    mockRuntimeCatalogEffectiveCapabilities.mockReset()
     mockKeeperDisplayRuntime.mockReturnValue(null)
     mockRuntimeCatalogState.value = { status: 'idle' }
     mockFormatDuration.mockImplementation((s: number) => `${s}s`)
@@ -141,6 +145,7 @@ describe('AgentRuntimeStrip', () => {
     expect(mockLoadRuntimeCatalog).not.toHaveBeenCalled()
     expect(mockFindRuntimeCatalogEntry).not.toHaveBeenCalled()
     expect(mockRuntimeCatalogSnapshotFacts).not.toHaveBeenCalled()
+    expect(mockRuntimeCatalogEffectiveCapabilities).not.toHaveBeenCalled()
   })
 
   it('renders runtime lane when present', () => {
@@ -172,11 +177,19 @@ describe('AgentRuntimeStrip', () => {
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     mockFindRuntimeCatalogEntry.mockReturnValue(entry)
     mockRuntimeCatalogSnapshotFacts.mockReturnValue('caps:declared · format:json,schema')
+    mockRuntimeCatalogEffectiveCapabilities.mockReturnValue(
+      'source:oas-provider-config-model · input:multimodal,image · wire:chat-template-kwargs',
+    )
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
     expect(mockFindRuntimeCatalogEntry).toHaveBeenCalledWith([entry], 'oas.primary')
+    expect(mockRuntimeCatalogSnapshotFacts).toHaveBeenCalledWith(entry)
+    expect(mockRuntimeCatalogEffectiveCapabilities).toHaveBeenCalledWith(entry)
     expect(container.textContent).toContain('SPEC')
     expect(container.textContent).toContain('caps:declared · format:json,schema')
+    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('input:multimodal,image')
+    expect(container.textContent).toContain('wire:chat-template-kwargs')
   })
 
   it('renders explicit spec status when the catalog load failed', () => {

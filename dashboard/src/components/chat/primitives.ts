@@ -65,6 +65,13 @@ export interface ChatComposerCommand {
 }
 
 type TraceToolStatus = NonNullable<ChatTraceToolStep['status']>
+type TraceSourceBadgeTone = 'stream' | 'tool' | 'reply' | 'warn'
+
+interface TraceSourceBadgeInfo {
+  label: string
+  title: string
+  tone: TraceSourceBadgeTone
+}
 
 const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 'pending'; title: string }> = {
   pending: { className: 'pending', title: '출력 대기 중' },
@@ -76,6 +83,59 @@ export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
 
 function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
+}
+
+function oasBlockBadge(index: number | undefined): string | null {
+  return index === undefined ? null : `OAS #${index}`
+}
+
+function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
+  const oasBlock = step.kind === 'think' || step.kind === 'tool'
+    ? oasBlockBadge(step.oasBlockIndex)
+    : null
+  if (step.kind === 'think') {
+    return {
+      label: oasBlock ?? 'thinking_delta',
+      title: oasBlock
+        ? `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`
+        : 'source: KEEPER_THINKING_DELTA',
+      tone: 'stream',
+    }
+  }
+  if (step.kind === 'reason') {
+    return {
+      label: 'reason_trace',
+      title: 'source: trace.kind=reason',
+      tone: 'stream',
+    }
+  }
+  const callId = step.toolCallId?.trim()
+  if (callId) {
+    return {
+      label: oasBlock ?? 'tool_call_id',
+      title: oasBlock
+        ? `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`
+        : `source: TOOL_CALL_*, tool_call_id=${callId}`,
+      tone: 'tool',
+    }
+  }
+  return {
+    label: 'unlinked_trace',
+    title: 'source: trace.kind=tool without tool_call_id',
+    tone: 'warn',
+  }
+}
+
+function TraceSourceBadge({ info }: { info: TraceSourceBadgeInfo }) {
+  return html`
+    <span
+      class=${`chat-block-source-badge ${info.tone}`}
+      title=${info.title}
+      data-chat-trace-provenance=${info.label}
+    >
+      ${info.label}
+    </span>
+  `
 }
 
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
@@ -1247,6 +1307,7 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
 
 function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; streaming?: boolean }) {
   const [open, setOpen] = useState(false)
+  const sourceBadge = traceSourceBadge(step)
 
   if (step.kind === 'think') {
     const longThinking = !streaming && step.text.length > THINKING_TRACE_PREVIEW_CHARS
@@ -1259,6 +1320,7 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
             ${longThinking
               ? html`
                   <button
@@ -1300,6 +1362,7 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row ${exp ? 'click' : ''}" onClick=${() => { if (exp) setOpen((o) => !o) }}>
             <span class="chat-block-tstep-kind">Reasoning</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
             <span class="chat-block-tstep-text" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.text) }} />
             ${exp ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
           </div>
@@ -1319,6 +1382,7 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
       <div class="min-w-0 flex-1">
         <div class="chat-block-tstep-row click" onClick=${() => setOpen((o) => !o)}>
           <span class="chat-block-tstep-kind">Tool</span>
+          <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${step.name}</span>
           <span
             class="chat-block-tstep-status ${statusUi.className}"
@@ -2469,9 +2533,12 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
-const TOOL_STATUS_TITLE: Record<'pending' | 'missing' | 'ok' | 'bad', string> = {
+type ToolTraceDisplayStatus = 'pending' | 'missing' | 'unlinked' | 'ok' | 'bad'
+
+const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
   pending: '출력 대기 중',
   missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
+  unlinked: '도구 호출 ID 없음 — 출력 조인 불가',
   ok: '성공',
   bad: '실패',
 }
@@ -2494,6 +2561,32 @@ function isToolOutputCoveredByHydration(
   return Number.isFinite(timestampMs)
     && (coveredSinceMs == null || timestampMs >= coveredSinceMs)
     && timestampMs <= coveredThroughMs
+}
+
+function toolTraceCallId(entry: KeeperConversationEntry, traceStep?: ChatTraceToolStep): string | null {
+  const traceCallId = traceStep?.toolCallId?.trim()
+  if (traceCallId) return traceCallId
+  return toolCallIdFromToolEntryId(entry.id)
+}
+
+function toolTraceSourceBadge(entry: KeeperConversationEntry, traceStep?: ChatTraceToolStep): TraceSourceBadgeInfo {
+  if (traceStep) return traceSourceBadge(traceStep)
+  const callId = toolCallIdFromToolEntryId(entry.id)
+  return callId
+    ? {
+        label: 'tool_call_id',
+        title: `source: tool transcript row, tool_call_id=${callId}`,
+        tone: 'tool',
+      }
+    : {
+        label: 'unlinked_row',
+        title: 'source: tool transcript row without tool_call_id',
+        tone: 'warn',
+      }
+}
+
+function isUnlinkedTraceTool(entry: KeeperConversationEntry, traceStep?: ChatTraceToolStep): boolean {
+  return traceStep !== undefined && toolTraceCallId(entry, traceStep) === null
 }
 
 // One step of a grouped tool-trace card: a single tool call rendered from REAL
@@ -2531,8 +2624,12 @@ function ToolTraceStep({
   const name = traceStep?.name || entry.label || 'tool'
   const displayArgs = prettyJsonish(entry.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
-  const status: 'pending' | 'missing' | 'ok' | 'bad' =
-    output === null
+  const unlinkedTraceTool = isUnlinkedTraceTool(entry, traceStep)
+  const sourceBadge = toolTraceSourceBadge(entry, traceStep)
+  const status: ToolTraceDisplayStatus =
+    unlinkedTraceTool
+      ? 'unlinked'
+      : output === null
       ? traceStep?.status === 'err'
         ? 'bad'
         : traceStep?.status === 'ok'
@@ -2549,7 +2646,7 @@ function ToolTraceStep({
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
   // call (so the operator can open it and see "출력 대기 중…").
-  const hasBody = !isEmptyArgs || hasResult || output === null
+  const hasBody = unlinkedTraceTool || !isEmptyArgs || hasResult || output === null
 
   return html`
     <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
@@ -2560,6 +2657,7 @@ function ToolTraceStep({
           onClick=${() => { if (hasBody) setOpen((o) => !o) }}
         >
           <span class="chat-block-tstep-kind">Tool</span>
+          <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${name}</span>
           <span
             class="chat-block-tstep-status ${status}"
@@ -2571,8 +2669,10 @@ function ToolTraceStep({
         </div>
         ${open && hasBody
           ? html`
-              <div class="chat-block-tool-body">
-                ${isEmptyArgs
+            <div class="chat-block-tool-body">
+                ${unlinkedTraceTool
+                  ? html`<div class="chat-block-tool-label">도구 호출 ID 없음 — 출력 조인 불가</div>`
+                  : isEmptyArgs
                   ? html`<div class="chat-block-tool-label">입력 없음</div>`
                   : html`
                       <div class="chat-block-tool-label">args</div>
@@ -2584,7 +2684,9 @@ function ToolTraceStep({
                       <pre class="m-0 max-h-64 overflow-y-auto whitespace-pre-wrap break-all text-2xs">${resultView.text}</pre>
                     `
                   : output === null
-                    ? html`<div class="chat-block-tool-label">${canMarkMissing ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
+                    ? unlinkedTraceTool
+                      ? null
+                      : html`<div class="chat-block-tool-label">${canMarkMissing ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
                     : null}
               </div>
             `
@@ -2668,12 +2770,18 @@ function chatResponsePreview(entry: KeeperConversationEntry): string {
 }
 
 function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
+  const sourceBadge: TraceSourceBadgeInfo = {
+    label: 'reply',
+    title: 'source: assistant reply entry',
+    tone: 'reply',
+  }
   return html`
     <div class="chat-block-tstep chat" data-chat-trace-step="chat">
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
         <div class="chat-block-tstep-row">
           <span class="chat-block-tstep-kind">Chat</span>
+          <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">응답</span>
           <span class="chat-block-tstep-text">${chatResponsePreview(entry)}</span>
         </div>
@@ -2725,6 +2833,9 @@ function ToolTraceCard({
   const missingN = orderedToolSteps.filter(
     (s) => s.output === null && s.entry !== null && canMarkMissingForEntry(s.entry),
   ).length
+  const unlinkedN = orderedToolSteps.filter(
+    (s) => s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
+  ).length
   const totalMs = orderedToolSteps.reduce(
     (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),
     0,
@@ -2751,6 +2862,7 @@ function ToolTraceCard({
           ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
           ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
+          ${unlinkedN > 0 ? html`<span class="text-[var(--color-status-warn)]">조인 불가 ${unlinkedN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
         </span>
       </button>

@@ -223,11 +223,11 @@ type pr_event_sink = pr_event -> unit
 type turn_event_sink = turn_event -> unit
 type write_region_error =
   | Write_region_sink_not_installed
-  | Write_region_sink_failed of string
+  | Write_region_sink_failed
 
 let write_region_error_to_string = function
   | Write_region_sink_not_installed -> "write_region sink is not installed"
-  | Write_region_sink_failed msg -> msg
+  | Write_region_sink_failed -> "write_region sink failed"
 ;;
 
 type write_region_sink = write_region_event -> (unit, write_region_error) result

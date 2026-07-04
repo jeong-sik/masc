@@ -113,7 +113,7 @@ type pr_event_sink = pr_event -> unit
 type turn_event_sink = turn_event -> unit
 type write_region_error =
   | Write_region_sink_not_installed
-  | Write_region_sink_failed of string
+  | Write_region_sink_failed
 
 val write_region_error_to_string : write_region_error -> string
 

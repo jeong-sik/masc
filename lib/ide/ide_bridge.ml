@@ -1057,7 +1057,10 @@ let install_agent_observation_sinks () =
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-        Error (Agent_observation.Write_region_sink_failed (Printexc.to_string exn)));
+        Printf.eprintf
+          "Ide_bridge.ingest_write_region_event error: %s\n%!"
+          (Printexc.to_string exn);
+        Error Agent_observation.Write_region_sink_failed);
   Agent_observation.register_annotation_sink
     (fun ({ base_path
            ; partition

@@ -387,6 +387,35 @@ let test_write_file_surfaces_missing_ide_observation_sink () =
     (Some "write_region sink is not installed")
     (parse_write_region_observation_error raw)
 
+let test_write_file_sanitizes_ide_observation_sink_failure () =
+  setup @@ fun ~config ~meta ~playground ->
+  Agent_observation.reset_for_testing ();
+  Agent_observation.register_write_region_sink (fun _ ->
+    Error Agent_observation.Write_region_sink_failed);
+  Fun.protect
+    ~finally:Agent_observation.reset_for_testing
+    (fun () ->
+       let path = Filename.concat playground "observed-sink-failure.ml" in
+       let raw =
+         Keeper_tool_filesystem_runtime.handle_file_write
+           ~turn_sandbox_factory:None
+           ~config
+           ~keeper_name:meta.name
+           ~args:
+             (`Assoc
+               [ "path", `String path
+               ; "mode", `String "overwrite"
+               ; "content", `String "let observed = true\n"
+               ])
+       in
+       Alcotest.(check bool) "ok" true (parse_ok raw);
+       Alcotest.(check string) "file written despite observation failure"
+         "let observed = true\n" (Fs_compat.load_file path);
+       Alcotest.(check (option string))
+         "write-region observation failure is sanitized"
+         (Some "write_region sink failed")
+         (parse_write_region_observation_error raw))
+
 let () =
   Alcotest.run "Keeper_fs_edit_patch"
     [
@@ -420,5 +449,7 @@ let () =
             test_public_write_file_maps_top_relative_single_repo_path;
           Alcotest.test_case "write_file surfaces missing IDE observation sink" `Quick
             test_write_file_surfaces_missing_ide_observation_sink;
+          Alcotest.test_case "write_file sanitizes IDE observation sink failure" `Quick
+            test_write_file_sanitizes_ide_observation_sink_failure;
         ] );
     ]

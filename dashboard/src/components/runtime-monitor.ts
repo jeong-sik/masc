@@ -162,6 +162,7 @@ function runtimeParameterPolicyText(provider: DashboardRuntimeProviderSnapshot):
   const parts = [
     policy.reasoning_toggle_wire ? `wire ${policy.reasoning_toggle_wire}` : null,
     policy.reasoning_replay_policy ? `replay ${policy.reasoning_replay_policy}` : null,
+    policy.requires_reasoning_replay_on_tool_call ? 'tool-call replay required' : null,
     policy.ignored_sampling_params.length > 0
       ? `ignored ${policy.ignored_sampling_params.join(',')}`
       : null,
@@ -208,14 +209,32 @@ function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): s
     typeof request.max_context === 'number' ? `ctx ${formatNumber(request.max_context)}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
+    typeof request.preserve_thinking === 'boolean' ? `preserve ${request.preserve_thinking ? 'on' : 'off'}` : null,
+    typeof request.clear_thinking === 'boolean' ? `clear ${request.clear_thinking ? 'on' : 'off'}` : null,
     typeof request.thinking_budget === 'number' ? `budget ${formatNumber(request.thinking_budget)}` : null,
     request.resolved_reasoning_effort ? `effort ${request.resolved_reasoning_effort}` : null,
+    request.glm_clear_thinking ? 'glm clear' : null,
+    request.glm_replay_reasoning ? 'glm replay' : null,
+    typeof request.tool_stream === 'boolean' ? `tool stream ${request.tool_stream ? 'on' : 'off'}` : null,
     toolChoice ? `tool ${toolChoice}` : null,
     request.disable_parallel_tool_use ? 'parallel off' : null,
     format ? `format ${format}` : null,
+    request.has_output_schema ? 'output schema' : null,
+    request.cache_system_prompt ? 'cache system' : null,
+    typeof request.supports_tool_choice_override === 'boolean'
+      ? `tool override ${request.supports_tool_choice_override ? 'on' : 'off'}`
+      : null,
+    typeof request.supports_structured_output_override === 'boolean'
+      ? `schema override ${request.supports_structured_output_override ? 'on' : 'off'}`
+      : null,
+    request.has_model_capabilities_override ? 'cap override' : null,
     typeof request.seed === 'number' ? `seed ${request.seed}` : null,
+    typeof request.internal_model_rotation_count === 'number'
+      ? `rotation ${request.internal_model_rotation_count}`
+      : null,
     typeof request.num_ctx === 'number' ? `num_ctx ${formatNumber(request.num_ctx)}` : null,
     request.keep_alive ? `keep ${request.keep_alive}` : null,
+    request.has_previous_response_id ? 'previous response' : null,
     typeof request.connect_timeout_s === 'number' ? `connect ${request.connect_timeout_s}s` : null,
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null
@@ -235,9 +254,36 @@ function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): st
     declaredCaps?.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
   const declaredInputs = [
+    declaredCaps?.supports_multimodal_inputs ? 'multimodal' : null,
     declaredCaps?.supports_image_input ? 'image' : null,
     declaredCaps?.supports_audio_input ? 'audio' : null,
     declaredCaps?.supports_video_input ? 'video' : null,
+  ].filter((value): value is string => Boolean(value))
+  const providerBehavior = spec.provider?.behavior_capabilities
+  const providerBehaviorParts = providerBehavior
+    ? [
+        providerBehavior.supports_inline_tools ? 'inline-tools' : null,
+        providerBehavior.requires_per_keeper_bridging_for_bound_actor_tools ? 'keeper-bridge' : null,
+        providerBehavior.argv_prompt_preflight ? 'argv-preflight' : null,
+        providerBehavior.uses_anthropic_caching ? 'anthropic-cache' : null,
+        typeof providerBehavior.max_turns_per_attempt === 'number'
+          ? `max-turns ${providerBehavior.max_turns_per_attempt}`
+          : null,
+        providerBehavior.tolerates_bound_actor_fallback ? 'bound-fallback' : null,
+        providerBehavior.identity_runtime_mcp_header_keys.length > 0
+          ? `mcp headers ${providerBehavior.identity_runtime_mcp_header_keys.join(',')}`
+          : null,
+      ].filter((value): value is string => Boolean(value))
+    : []
+  const declaredModelControls = [
+    declaredCaps?.supports_tool_choice ? 'tool-choice' : null,
+    declaredCaps?.supports_native_streaming ? 'native-stream' : null,
+    declaredCaps?.supports_caching ? 'cache' : null,
+    declaredCaps?.supports_prompt_caching
+      ? `prompt-cache${typeof declaredCaps.prompt_cache_alignment === 'number' ? `@${declaredCaps.prompt_cache_alignment}` : ''}`
+      : null,
+    declaredCaps?.emits_usage_tokens ? 'usage' : null,
+    declaredCaps?.supports_computer_use ? 'computer-use' : null,
   ].filter((value): value is string => Boolean(value))
   let declaredThinking: string | null = null
   if (typeof spec.model?.thinking_support === 'boolean') {
@@ -247,15 +293,26 @@ function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): st
     spec.provider?.api_format ? `api ${spec.provider.api_format}` : null,
     spec.provider?.protocol ? `protocol ${spec.provider.protocol}` : null,
     spec.provider?.transport ? `transport ${spec.provider.transport}` : null,
+    spec.provider?.auth_kind ? `auth ${spec.provider.auth_kind}` : null,
+    spec.provider?.is_non_interactive ? 'non-interactive' : null,
     typeof spec.provider?.custom_header_count === 'number'
       ? `headers ${spec.provider.custom_header_count}`
       : null,
+    typeof spec.provider?.connect_timeout_s === 'number'
+      ? `connect ${spec.provider.connect_timeout_s}s`
+      : null,
+    providerBehaviorParts.length > 0 ? `behavior ${providerBehaviorParts.join(',')}` : null,
   ].filter((value): value is string => Boolean(value))
   const modelParts = [
     spec.model?.api_name ? `model ${spec.model.api_name}` : null,
     typeof spec.model?.max_context === 'number' ? `ctx ${formatNumber(spec.model.max_context)}` : null,
     typeof spec.model?.temperature === 'number' ? `temp ${spec.model.temperature}` : null,
+    typeof spec.model?.tools_support === 'boolean' ? `tools ${spec.model.tools_support ? 'on' : 'off'}` : null,
+    typeof spec.model?.streaming === 'boolean' ? `stream ${spec.model.streaming ? 'on' : 'off'}` : null,
     declaredThinking,
+    typeof spec.model?.preserve_thinking === 'boolean'
+      ? `preserve ${spec.model.preserve_thinking ? 'on' : 'off'}`
+      : null,
     typeof spec.model?.max_thinking_budget === 'number'
       ? `budget ${formatNumber(spec.model.max_thinking_budget)}`
       : null,
@@ -266,9 +323,14 @@ function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): st
     declaredFormats.length > 0 ? `format ${declaredFormats.join(',')}` : null,
     declaredSampling.length > 0 ? `sampling ${declaredSampling.join(',')}` : null,
     declaredInputs.length > 0 ? `input ${declaredInputs.join(',')}` : null,
+    declaredModelControls.length > 0 ? `controls ${declaredModelControls.join(',')}` : null,
+    spec.model?.match_prefixes.length ? `match ${spec.model.match_prefixes.join(',')}` : null,
   ].filter((value): value is string => Boolean(value))
   const bindingParts = [
+    spec.binding?.is_default ? 'default' : null,
     typeof spec.binding?.max_concurrent === 'number' ? `concurrency ${spec.binding.max_concurrent}` : null,
+    typeof spec.binding?.price_input === 'number' ? `price-in ${spec.binding.price_input}` : null,
+    typeof spec.binding?.price_output === 'number' ? `price-out ${spec.binding.price_output}` : null,
     spec.binding?.keep_alive ? `keep ${spec.binding.keep_alive}` : null,
     typeof spec.binding?.num_ctx === 'number' ? `num_ctx ${formatNumber(spec.binding.num_ctx)}` : null,
   ].filter((value): value is string => Boolean(value))
@@ -306,9 +368,25 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
   const parts = [
     output,
     tools,
+    caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
+    caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     modalities.length > 0 ? `input ${modalities.join(',')}` : null,
+    caps.supports_reasoning ? 'reasoning' : null,
+    caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
+    caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
+    caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
+    caps.supports_system_prompt ? 'system-prompt' : null,
+    caps.supports_prompt_caching
+      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
+      : null,
+    caps.supports_caching ? 'cache' : null,
+    caps.supports_seed_with_images ? 'seed+images' : null,
+    caps.supports_computer_use ? 'computer-use' : null,
+    caps.supports_code_execution ? 'code-exec' : null,
+    caps.emits_usage_tokens ? 'usage' : null,
+    caps.supported_models && caps.supported_models.length > 0 ? `models ${caps.supported_models.length}` : null,
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null
 }
@@ -736,7 +814,7 @@ export function RuntimeMonitor() {
                     : null}
                   ${effectiveCapabilities
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${effectiveCapabilities}>
-                        caps · ${effectiveCapabilities}
+                        effective · ${effectiveCapabilities}
                       </div>`
                     : null}
                   ${liveProbe?.error

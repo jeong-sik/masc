@@ -13,7 +13,11 @@ val clone : repository:repository -> (unit, string) result
 (** [clone ~repository] clones [repository.url] into [repository.local_path]. *)
 
 val run_git :
-  cwd:string -> ?env:(string * string) list -> string list -> (string list, string) result
+  cwd:string ->
+  ?env:(string * string) list ->
+  ?timeout_sec:float ->
+  string list ->
+  (string list, string) result
 (** [run_git ~cwd args] runs [git -C cwd args] through the repo-manager Git
     execution wrapper and returns non-empty stdout lines. Callers must pass
     argv tokens, never shell text. *)
@@ -44,5 +48,6 @@ val get_recent_commits :
 
 val status_summary : repository:repository -> (status_summary, string) result
 (** [status_summary ~repository] returns a read-only dirty-tree summary using
-    [git status --porcelain=v1]. It returns [Error _] instead of inventing a
-    clean result when Git cannot inspect the repository. *)
+    [git --no-optional-locks status --porcelain=v1] with
+    [GIT_OPTIONAL_LOCKS=0]. It returns [Error _] instead of inventing a clean
+    result when Git cannot inspect the repository. *)

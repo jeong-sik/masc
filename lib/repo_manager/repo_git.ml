@@ -29,6 +29,10 @@ let non_interactive_git_env =
     ("GCM_INTERACTIVE", "Never");
   ]
 
+let read_only_git_env = ("GIT_OPTIONAL_LOCKS", "0") :: non_interactive_git_env
+
+let status_summary_timeout_sec = 5.0
+
 let split_lines text =
   if text = "" then []
   else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
@@ -41,14 +45,14 @@ type status_summary = {
   conflicted_files : int;
 }
 
-let run_git ~cwd ?(env = []) args : (string list, string) result =
+let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   let argv = "git" :: "-C" :: cwd :: args in
   let envp = merge_env env in
   let raw_source = String.concat " " (List.map Filename.quote argv) in
   let status, stdout, stderr =
     Masc_exec.Exec_gate.run_argv_with_status_split
       ~actor:(Masc_exec.Agent_id.of_string "repo-manager/git") ~raw_source ~summary:"repo manager git"
- ~env:envp argv
+      ~env:envp ?timeout_sec argv
   in
   match status with
   | Unix.WEXITED 0 -> Ok (split_lines stdout)
@@ -185,8 +189,9 @@ let summarize_porcelain_lines lines =
 
 let status_summary ~repository =
   match
-    run_git ~cwd:repository.local_path
-      ["status"; "--porcelain=v1"; "--untracked-files=normal"]
+    run_git ~cwd:repository.local_path ~env:read_only_git_env
+      ~timeout_sec:status_summary_timeout_sec
+      ["--no-optional-locks"; "status"; "--porcelain=v1"; "--untracked-files=normal"]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok lines -> summarize_porcelain_lines lines

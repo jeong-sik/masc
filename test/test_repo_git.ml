@@ -214,6 +214,27 @@ let test_status_summary_counts_porcelain_rows () =
           Alcotest.(check int) "staged unstaged" 0 summary.unstaged_files;
           Alcotest.(check int) "staged untracked" 1 summary.untracked_files)
 
+let test_status_summary_uses_read_only_git_conventions () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      let repo = sample_repo ~url:source source in
+      let captured = ref [] in
+      Fun.protect
+        ~finally:(fun () -> Exec_tap.disable ())
+        (fun () ->
+          Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+          match Repo_git.status_summary ~repository:repo with
+          | Error e -> Alcotest.fail ("status failed: " ^ e)
+          | Ok _ ->
+              let joined = String.concat "\n" (List.rev !captured) in
+              Alcotest.(check bool)
+                "uses --no-optional-locks" true
+                (contains_substring joined "--no-optional-locks");
+              Alcotest.(check bool)
+                "sets GIT_OPTIONAL_LOCKS env key" true
+                (contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
+
 let () =
   Alcotest.run "Repo_git"
     [
@@ -231,5 +252,7 @@ let () =
         [
           Alcotest.test_case "counts porcelain rows" `Quick
             test_status_summary_counts_porcelain_rows;
+          Alcotest.test_case "uses read-only git conventions" `Quick
+            test_status_summary_uses_read_only_git_conventions;
         ] );
     ]

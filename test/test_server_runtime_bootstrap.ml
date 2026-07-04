@@ -129,6 +129,10 @@ let model_catalog_resolution_source_label resolution =
   Server_runtime_bootstrap.model_catalog_env_source_to_string
     resolution.Server_runtime_bootstrap.source
 
+let capability_manifest_resolution_source_label resolution =
+  Server_runtime_bootstrap.capability_manifest_env_source_to_string
+    resolution.Server_runtime_bootstrap.source
+
 let test_model_catalog_resolution_prefers_explicit_env () =
   let env = function
     | "OAS_MODEL_CATALOG" -> Some "/explicit/oas-models.toml"
@@ -170,9 +174,61 @@ let test_model_catalog_resolution_prefers_explicit_env () =
       "MASC_MODEL_CATALOG"
       (model_catalog_resolution_source_label resolution);
     Alcotest.(check string)
-      "path"
-      "/explicit/masc-models.toml"
-      resolution.Server_runtime_bootstrap.path
+	      "path"
+	      "/explicit/masc-models.toml"
+	      resolution.Server_runtime_bootstrap.path
+
+let test_capability_manifest_resolution_prefers_explicit_env () =
+  let env = function
+    | "OAS_CAPABILITY_MANIFEST" -> Some "/explicit/capability-manifest.json"
+    | _ -> None
+  in
+  with_temp_dir "capability-manifest-bootstrap-explicit" (fun dir ->
+    match
+      Server_runtime_bootstrap.resolve_oas_capability_manifest_path
+        ~env
+        ~config_root:dir
+        ()
+    with
+    | None -> Alcotest.fail "expected explicit OAS_CAPABILITY_MANIFEST resolution"
+    | Some resolution ->
+      Alcotest.(check string)
+        "source"
+        "OAS_CAPABILITY_MANIFEST"
+        (capability_manifest_resolution_source_label resolution);
+      Alcotest.(check string)
+        "path"
+        "/explicit/capability-manifest.json"
+        resolution.Server_runtime_bootstrap.path)
+
+let test_capability_manifest_configuration_uses_config_root_file () =
+  with_temp_dir "capability-manifest-bootstrap-config-root" (fun config_root ->
+    let manifest = Filename.concat config_root "capability-manifest.json" in
+    write_file manifest {|{"schema_version":1,"models":[]}|};
+    let putenv_calls = ref [] in
+    let env _ = None in
+    let result =
+      Server_runtime_bootstrap.configure_oas_capability_manifest_env
+        ~env
+        ~config_root
+        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected config-root capability manifest resolution"
+     | Some resolution ->
+       Alcotest.(check string)
+         "source"
+         "config-root:capability-manifest.json"
+         (capability_manifest_resolution_source_label resolution);
+       Alcotest.(check string)
+         "path"
+         (canonical_path manifest)
+         (canonical_path resolution.Server_runtime_bootstrap.path));
+    Alcotest.(check (list (pair string string)))
+      "putenv"
+      [ "OAS_CAPABILITY_MANIFEST", manifest ]
+      (List.rev !putenv_calls))
 
 let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path () =
   with_temp_dir "model-catalog-bootstrap" (fun dir ->
@@ -4183,6 +4239,12 @@ let () =
           Alcotest.test_case
             "model catalog resolution prefers explicit env"
             `Quick test_model_catalog_resolution_prefers_explicit_env;
+          Alcotest.test_case
+            "capability manifest resolution prefers explicit env"
+            `Quick test_capability_manifest_resolution_prefers_explicit_env;
+          Alcotest.test_case
+            "capability manifest configuration uses config root"
+            `Quick test_capability_manifest_configuration_uses_config_root_file;
           Alcotest.test_case
             "model catalog resolution falls back to executable parent"
             `Quick

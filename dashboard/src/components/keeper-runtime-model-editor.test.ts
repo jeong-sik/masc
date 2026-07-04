@@ -110,6 +110,53 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
     supports_computer_use: false,
     supports_code_execution: true,
     source: 'runtime.toml',
+    effective_capabilities: {
+      source: 'oas-provider-config-model',
+      max_context_tokens: 128000,
+      max_output_tokens: 8192,
+      supports_tools: true,
+      supports_tool_choice: true,
+      supports_required_tool_choice: true,
+      supports_named_tool_choice: true,
+      supports_parallel_tool_calls: true,
+      supports_runtime_mcp_tools: true,
+      supports_runtime_tool_events: true,
+      assistant_tool_content_format: 'empty-string',
+      supports_reasoning: true,
+      supports_extended_thinking: true,
+      supports_reasoning_budget: true,
+      accepted_reasoning_efforts: ['low', 'medium', 'high'],
+      thinking_control_format: 'chat-template-kwargs',
+      preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
+      reasoning_output_format: 'split-reasoning-fields',
+      reasoning_streaming_format: {
+        kind: 'delta-reasoning-field',
+        field: 'reasoning_content',
+      },
+      reasoning_replay_override: 'preserve-always',
+      supports_response_format_json: true,
+      supports_structured_output: true,
+      supports_multimodal_inputs: true,
+      supports_image_input: true,
+      supports_audio_input: true,
+      supports_video_input: false,
+      modality_priority: 'visual-first',
+      task: 'chat',
+      supports_native_streaming: true,
+      supports_system_prompt: true,
+      supports_caching: true,
+      supports_prompt_caching: true,
+      prompt_cache_alignment: 1024,
+      supports_top_k: true,
+      supports_min_p: true,
+      supports_seed: true,
+      supports_seed_with_images: true,
+      ignored_sampling_parameters: ['temperature', 'top_p'],
+      supports_computer_use: false,
+      supports_code_execution: true,
+      emits_usage_tokens: true,
+      supported_models: ['claude'],
+    },
     parameter_policy: {
       reasoning_toggle_wire: 'responses.reasoning',
       reasoning_replay_policy: 'preserve',
@@ -209,6 +256,10 @@ describe('KeeperRuntimeModelEditor', () => {
     expect(container.textContent).toContain('Provider A')
     expect(container.textContent).toContain('claude')
     expect(container.textContent).toContain('caps:declared')
+    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('input:multimodal,image,audio')
+    expect(container.textContent).toContain('wire:chat-template-kwargs')
+    expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
     expect(container.textContent).toContain('format:json,schema')
     expect(container.textContent).toContain('prompt-cache@1024')
     expect(container.textContent).toContain('wire:responses.reasoning')

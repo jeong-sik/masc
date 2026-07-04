@@ -62,6 +62,9 @@ val configure_oas_model_catalog_env :
   ?putenv:(string -> string -> unit) ->
   ?preload_agent_sdk_catalog:(unit -> unit) ->
   ?agent_sdk_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
+  ?clear_catalog:(unit -> unit) ->
+  ?load_catalog:(string -> Llm_provider.Model_catalog.t option) ->
+  ?set_catalog:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
   model_catalog_env_resolution option
 
@@ -69,6 +72,9 @@ val configure_oas_capability_manifest_env :
   ?env:(string -> string option) ->
   config_root:string ->
   ?putenv:(string -> string -> unit) ->
+  ?clear_manifest:(unit -> unit) ->
+  ?load_manifest:(string -> Llm_provider.Capability_manifest.t option) ->
+  ?set_manifest:(Llm_provider.Capability_manifest.t -> unit) ->
   unit ->
   capability_manifest_env_resolution option
 

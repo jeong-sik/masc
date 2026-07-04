@@ -90,6 +90,15 @@ let observation_file_path_from_tool_input ~base_path input =
   | Some p -> p
 ;;
 
+let observation_partition_for_tool_input ~config ~kind input =
+  let base_dir = Keeper_alerting_path.project_root_of_config config in
+  let file_path = observation_file_path_from_tool_input ~base_path:base_dir input in
+  Keeper_tool_filesystem_runtime.resolve_partition_for_write
+    ~base_dir
+    ~kind
+    ~file_path
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -226,18 +235,12 @@ let assemble_hooks
            in
            (* task-1733: resolve the partition from the tool's actual edited
               file (input.path / input.file_path, with explicit cwd honoured
-              for relative paths), not [config.base_path]. base_path is the
-              .masc project root, which almost always resolves to the orphan
-              partition; the edited file is what carries the registered-repo
-              attribution. Falls back to base_path only when the tool input
-              names no file (e.g. non-filesystem tools). *)
-           let tool_file_path =
-             observation_file_path_from_tool_input ~base_path:config.base_path input
-           in
+              for relative paths), not from the [.masc] runtime root. *)
            let partition, _ =
-             Keeper_tool_filesystem_runtime.resolve_partition_for_write
-               ~base_dir:config.base_path ~kind:"tool_event"
-               ~file_path:tool_file_path
+             observation_partition_for_tool_input
+               ~config
+               ~kind:"tool_event"
+               input
            in
            Agent_observation.emit_tool_event
              { base_path = config.base_path

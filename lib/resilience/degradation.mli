@@ -33,11 +33,12 @@
     the canonical bridges; the integer encoding is the lattice
     ordinal (lower = higher capability).
 
-    {1 Policy lineage (placeholder)}
+    {1 Policy boundary}
 
-    {!authorize_transition} returns [Ok ()] unconditionally in
-    this PR; the real OAS [Policy.evaluate_with_lineage] integration
-    lands in a follow-up tier (A11b) without renaming the function.
+    {!authorize_transition} is the local lattice guard: staying at the same
+    level or moving to a lower-capability degradation level is allowed;
+    capability restoration requires an explicit policy authorizer outside this
+    module.
 
     @stability Evolving
     @since 0.18.10 *)
@@ -89,12 +90,14 @@ val any_to_int : any_level -> int
 val of_int_opt : int -> any_level option
 (** [Some] for [1..4], [None] otherwise. *)
 
-(** {1 Authorization (stub)} *)
+(** {1 Authorization} *)
 
 val authorize_transition :
   from:any_level -> to_:any_level -> (unit, string) result
-(** Stub: returns [Ok ()] for any pair. Tier A11b wires real
-    OAS Policy lineage. *)
+(** Returns [Ok ()] when [to_] is the same level as [from] or a
+    lower-capability degradation level. Returns [Error _] for capability
+    restoration attempts, so callers cannot silently regain capability without
+    a policy decision. *)
 
 (** {1 Strategy adjustment} *)
 

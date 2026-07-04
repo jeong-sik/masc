@@ -328,6 +328,8 @@ function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapshot): str
     caps?.supports_required_tool_choice ? 'required' : null,
     caps?.supports_named_tool_choice ? 'named' : null,
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
+    caps?.supports_extended_thinking ? 'extended-thinking' : null,
+    caps?.supports_reasoning_budget ? 'reasoning-budget' : null,
     caps?.supports_native_streaming ? 'native-stream' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_caching ? 'cache' : null,
@@ -386,16 +388,23 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     caps.supports_min_p ? 'min_p' : null,
     caps.supports_seed ? 'seed' : null,
   ].filter((value): value is string => Boolean(value))
+  const context = typeof caps.max_context_tokens === 'number' ? `ctx:${caps.max_context_tokens}` : null
   const output = typeof caps.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null
   const format = [
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
   const toolChoice = caps.supports_tool_choice
-    ? `tool-choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    ? `tool-choice${[
+      caps.supports_required_tool_choice ? 'required' : null,
+      caps.supports_named_tool_choice ? 'named' : null,
+      caps.supports_parallel_tool_calls ? 'parallel' : null,
+    ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
     : null
   const parts = [
+    context,
     output,
+    caps.supports_tools ? 'tools' : null,
     toolChoice,
     item.effective_capabilities?.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     item.effective_capabilities?.supports_runtime_tool_events ? 'runtime-tool-events' : null,
@@ -429,6 +438,7 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     item.effective_capabilities?.task
       ? `task:${item.effective_capabilities.task}`
       : null,
+    item.effective_capabilities?.supports_native_streaming ? 'native-stream' : null,
     item.effective_capabilities?.supports_system_prompt ? 'system-prompt' : null,
     item.effective_capabilities?.supports_prompt_caching
       ? `prompt-cache${typeof item.effective_capabilities.prompt_cache_alignment === 'number'

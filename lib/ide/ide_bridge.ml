@@ -600,15 +600,7 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
   with _ -> None
 
 let cursor_file_path_of_input input =
-  let non_empty = function
-    | Some s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-    | None -> None
-  in
-  match non_empty (string_field "file_path" input) with
-  | Some _ as path -> path
-  | None -> non_empty (string_field "path" input)
+  Tool_input_path.tool_input_file_path input
 ;;
 
 let cursor_line_of_input input =
@@ -781,14 +773,7 @@ let ingest_tool_event_from_hook
     ~output_text
     ~(input : Yojson.Safe.t)
   =
-  let file_path =
-    match Yojson.Safe.Util.member "path" input with
-    | `String p -> Some p
-    | _ ->
-      match Yojson.Safe.Util.member "file_path" input with
-      | `String p -> Some p
-      | _ -> None
-  in
+  let file_path = Tool_input_path.tool_input_file_path input in
   let summary =
     if String.length output_text > 200 then String.sub output_text 0 200
     else output_text

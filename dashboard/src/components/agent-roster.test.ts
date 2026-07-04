@@ -1216,7 +1216,7 @@ describe('AgentRoster live-only cards', () => {
     expect(presence.textContent).toContain('대기 중')
   })
 
-  it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {
+  it('uses heartbeat and shared runtime labels for cards when action/model fallbacks disagree', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
     agents.value = [
@@ -1232,6 +1232,7 @@ describe('AgentRoster live-only cards', () => {
         name: 'sangsu',
         agent_name: 'keeper-sangsu-agent',
         status: 'active',
+        runtime_canonical: 'oas.primary',
         active_model: 'claude-code:auto',
         model: 'claude',
         last_heartbeat: '2026-04-24T17:54:00Z',
@@ -1251,9 +1252,8 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('sangsu')
     expect(text).toContain('하트비트')
     expect(text).toContain('6분 전')
-    // Full model id is surfaced verbatim — the `claude-` prefix is no longer
-    // truncated so multi-provider model names stay distinguishable (audit P1-5).
-    expect(text).toContain('claude-code:auto')
+    expect(text).toContain('oas.primary')
+    expect(text).not.toContain('claude-code:auto')
     expect(text).not.toContain('마지막 행동 이후')
     expect(text).not.toContain('최근 모델claude')
   })

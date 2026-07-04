@@ -13,7 +13,7 @@
 //   - KPI strip       — running / attention / context pressure / avg ctx / tasks / traces
 //   - Attention queue — keepers flagged for operator attention with reason + action
 //   - Telemetry bars  — deterministic 28-bar trace histogram
-//   - Keeper fleet    — full keeper grid with status, model, context meter
+//   - Keeper fleet    — full keeper grid with status, runtime, context meter
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
@@ -27,7 +27,7 @@ import type {
   DashboardMissionSessionCard,
 } from '../../types/dashboard-mission'
 import { useNowSecondsTicker } from '../../lib/now-signal'
-import { keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
+import { keeperDisplayRuntime, keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
 import { attentionReasonLabel, nextHumanActionLabel } from '../../lib/keeper-attention-labels'
 import { isAgentOffline } from '../../lib/agent-status'
@@ -148,14 +148,8 @@ function keeperTraceCount(keeper: Keeper): number {
   return keeper.total_turns ?? keeper.turn_count ?? keeper.autonomous_turn_count ?? 0
 }
 
-export function keeperModelLabel(keeper: Keeper): string {
-  const model = keeper.active_model_label
-    ?? keeper.active_model
-    ?? keeper.model
-    ?? keeper.primary_model
-    ?? keeper.last_model_used
-    ?? ''
-  return model.replace(/^claude-/, '')
+export function keeperRuntimeLabel(keeper: Keeper): string {
+  return keeperDisplayRuntime(keeper)?.value ?? ''
 }
 
 export function computeOverviewStats(keeperList: readonly Keeper[], taskList: readonly Task[]): OverviewStats {

@@ -22,7 +22,7 @@ import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { formatRelativeSec } from '../../lib/format-time'
-import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
+import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import { sortByRecency } from '../../lib/keeper-recency'
@@ -178,9 +178,9 @@ function compareKeepers(a: Keeper, b: Keeper, sort: 'name' | 'att'): number {
 }
 
 /** ns proxy: keepers have no namespace field; the skill path is the closest
- *  real scope signal, with the model as fallback. */
+ *  real scope signal, with runtime identity as fallback. */
 function keeperScope(keeper: Keeper): string | null {
-  return keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? null
+  return keeper.skill_primary ?? keeperDisplayRuntime(keeper)?.value ?? null
 }
 
 /** The keeper's sandbox location — the design's roster identity sub-line
@@ -189,7 +189,7 @@ function keeperScope(keeper: Keeper): string | null {
  *  profile it is the worktree root path, for `docker` the container target.
  *  Unlike the alert strip, this deliberately does NOT fall back to
  *  `sandbox_profile`: a bare 'local'/'docker' literal is not a useful roster
- *  identity, so RosterRow falls through to the scope proxy (skill/model) instead. */
+ *  identity, so RosterRow falls through to the scope proxy (skill/runtime) instead. */
 function keeperBasepath(keeper: Keeper): string {
   return keeper.sandbox_target?.trim() ?? ''
 }
@@ -229,7 +229,7 @@ function keeperRecentTool(keeper: Keeper): { label: string; title: string } | nu
 
 function matchesQuery(keeper: Keeper, q: string): boolean {
   if (!q) return true
-  const hay = `${keeper.name} ${keeper.koreanName ?? ''} ${keeperScope(keeper) ?? ''} ${keeper.model ?? ''} ${keeperBasepath(keeper)}`.toLowerCase()
+  const hay = `${keeper.name} ${keeper.koreanName ?? ''} ${keeperScope(keeper) ?? ''} ${keeperBasepath(keeper)}`.toLowerCase()
   return hay.includes(q.toLowerCase())
 }
 

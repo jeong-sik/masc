@@ -20,6 +20,9 @@ type t =
   | Timed_out
       (** [Eio.Time.with_timeout_exn] raised before the provider
           completed.  Counter increment + warn already exists. *)
+  | Clock_unavailable
+      (** MASC had switch/net context but no Eio clock, so the provider call
+          was refused instead of running without the configured timeout. *)
   | Http_error
       (** Provider returned a non-2xx response or transport-level
           failure (deserialised by [Llm_provider.Http_client]). *)

@@ -39,6 +39,20 @@ module For_testing : sig
     runtime_id:string ->
     outcome:Keeper_memory_llm_summary_outcome.t ->
     unit
+
+  val summarize_with_provider :
+    ?complete:complete_fn ->
+    ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+    ?timeout_sec:float ->
+    ?runtime_id:string ->
+    sw:Eio.Switch.t ->
+    net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+    provider_cfg:Llm_provider.Provider_config.t ->
+    trace_id:string ->
+    texts:string list ->
+    unit ->
+    string option
+  (** Test-only access to the provider-call boundary. *)
 end
 
 val make :

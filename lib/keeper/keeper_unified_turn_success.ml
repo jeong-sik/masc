@@ -352,6 +352,12 @@ let emit_activity_graph
   =
   try
     let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
+    let cache_miss_input_tokens =
+      Keeper_hooks_oas.cache_miss_input_tokens
+        ~input_tokens:result.Keeper_agent_run.usage.input_tokens
+        ~cache_creation_input_tokens:result.usage.cache_creation_input_tokens
+        ~cache_read_input_tokens:result.usage.cache_read_input_tokens
+    in
     let event =
       Activity_graph.emit
         config
@@ -371,6 +377,8 @@ let emit_activity_graph
                    else `Null )
                ; ( "cache_read_tokens"
                  , if usage_trusted then `Int result.usage.cache_read_input_tokens else `Null )
+               ; ( "cache_miss_input_tokens"
+                 , if usage_trusted then `Int cache_miss_input_tokens else `Null )
                ; ("cost_usd", if usage_trusted then `Float turn_cost else `Null)
                ; "latency_ms", `Int latency_ms
                ; "model_used", `Null

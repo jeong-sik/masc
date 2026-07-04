@@ -505,6 +505,13 @@ function ingestRuntimeProjection(
         const turn = asNumber(payload.turn)
         const runtime = 'runtime'
         const inputTokens = asNumber(payload.input_tokens) ?? 0
+        const cacheCreationTokens =
+          asNumber(payload.cache_creation_tokens)
+          ?? asNumber(payload.cache_creation_input_tokens)
+        const cacheReadTokens =
+          asNumber(payload.cache_read_tokens)
+          ?? asNumber(payload.cache_read_input_tokens)
+        const cacheMissInputTokens = asNumber(payload.cache_miss_input_tokens)
         maybeAppendLiveTrace(agentName, event, {
           idSuffix: `llm_request|${turn ?? 'na'}`,
           kind: 'lifecycle',
@@ -514,6 +521,9 @@ function ingestRuntimeProjection(
             turn: turn ?? null,
             model: runtime,
             input_tokens: inputTokens,
+            cache_creation_tokens: cacheCreationTokens ?? null,
+            cache_read_tokens: cacheReadTokens ?? null,
+            cache_miss_input_tokens: cacheMissInputTokens ?? null,
           },
         })
       }

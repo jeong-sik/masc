@@ -32,6 +32,14 @@ const TRACE_TONE = {
   infoPanel: 'bg-[var(--color-info-soft)] border border-[var(--color-info-border)]',
 } as const
 
+function detailNumber(detail: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const value = detail[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return null
+}
+
 // ── Trace badge helper ──────────────────────────────────
 
 function TraceBadge({
@@ -656,12 +664,44 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
 
   if (durableKind === 'llm_request') {
     const inputTokens = typeof d.input_tokens === 'number' ? d.input_tokens : 0
+    const cacheCreationTokens = detailNumber(
+      d,
+      'cache_creation_tokens',
+      'cache_creation_input_tokens',
+    )
+    const cacheReadTokens = detailNumber(
+      d,
+      'cache_read_tokens',
+      'cache_read_input_tokens',
+    )
+    const cacheMissInputTokens =
+      detailNumber(d, 'cache_miss_input_tokens')
+      ?? (
+        cacheCreationTokens != null || cacheReadTokens != null
+          ? Math.max(0, inputTokens - (cacheCreationTokens ?? 0) - (cacheReadTokens ?? 0))
+          : null
+      )
+    const cacheSeenTokens = (cacheReadTokens ?? 0) + (cacheMissInputTokens ?? 0)
+    const cacheHitPct =
+      cacheSeenTokens > 0
+        ? Math.round(((cacheReadTokens ?? 0) / cacheSeenTokens) * 100)
+        : null
     const turn = d.turn
     return html`
       <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.infoPanel} space-y-1">
-        <div class="flex items-center gap-3 text-xs">
+        <div class="flex flex-wrap items-center gap-3 text-xs">
           <span><span class="text-[var(--color-fg-disabled)]">런타임:</span> <span class="font-mono">runtime</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
+          ${cacheReadTokens != null ? html`
+            <span><span class="text-[var(--color-fg-disabled)]">캐시 read:</span> <span class="font-mono">${cacheReadTokens.toLocaleString()}tok</span></span>
+          ` : null}
+          ${cacheCreationTokens != null ? html`
+            <span><span class="text-[var(--color-fg-disabled)]">캐시 write:</span> <span class="font-mono">${cacheCreationTokens.toLocaleString()}tok</span></span>
+          ` : null}
+          ${cacheMissInputTokens != null ? html`
+            <span><span class="text-[var(--color-fg-disabled)]">캐시 miss:</span> <span class="font-mono">${cacheMissInputTokens.toLocaleString()}tok</span></span>
+          ` : null}
+          ${cacheHitPct != null ? html`<span><span class="text-[var(--color-fg-disabled)]">hit:</span> <span class="font-mono">${cacheHitPct}%</span></span>` : null}
           ${turn != null ? html`<span><span class="text-[var(--color-fg-disabled)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
         </div>
       </div>

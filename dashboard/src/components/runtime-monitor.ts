@@ -770,6 +770,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
   ].filter((value): value is string => Boolean(value))
   const ignoredSampling = caps.ignored_sampling_parameters.join(',')
   const modalities = [
+    caps.supports_multimodal_inputs ? 'multimodal' : null,
     caps.supports_image_input ? 'image' : null,
     caps.supports_audio_input ? 'audio' : null,
     caps.supports_video_input ? 'video' : null,

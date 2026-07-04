@@ -228,12 +228,32 @@ export interface DashboardRuntimeProviderSnapshot {
    *  null when unset (runtime keeps the fleet fallback). */
   temperature?: number | null
   capabilities_declared?: boolean
+  max_output_tokens?: number | null
+  supports_tool_choice?: boolean
+  supports_required_tool_choice?: boolean
+  supports_named_tool_choice?: boolean
+  supports_parallel_tool_calls?: boolean
+  supports_extended_thinking?: boolean
   supports_multimodal_inputs?: boolean
   supports_image_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
   supports_reasoning_budget?: boolean
   thinking_control_format?: string | null
+  supports_response_format_json?: boolean
+  supports_structured_output?: boolean
+  supports_native_streaming?: boolean
+  supports_system_prompt?: boolean
+  supports_caching?: boolean
+  supports_prompt_caching?: boolean
+  prompt_cache_alignment?: number | null
+  supports_top_k?: boolean
+  supports_min_p?: boolean
+  supports_seed?: boolean
+  supports_seed_with_images?: boolean
+  emits_usage_tokens?: boolean
+  supports_computer_use?: boolean
+  supports_code_execution?: boolean
   effective_capabilities?: DashboardRuntimeEffectiveCapabilities | null
   parameter_policy?: DashboardRuntimeParameterPolicy | null
   request_config?: DashboardRuntimeRequestConfig | null
@@ -661,12 +681,32 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     streaming: asBoolean(raw.streaming),
     temperature: asNumber(raw.temperature) ?? null,
     capabilities_declared: asBoolean(raw.capabilities_declared),
+    max_output_tokens: asNumber(raw.max_output_tokens) ?? null,
+    supports_tool_choice: asBoolean(raw.supports_tool_choice),
+    supports_required_tool_choice: asBoolean(raw.supports_required_tool_choice),
+    supports_named_tool_choice: asBoolean(raw.supports_named_tool_choice),
+    supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
+    supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_image_input: asBoolean(raw.supports_image_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     thinking_control_format: asNullableString(raw.thinking_control_format),
+    supports_response_format_json: asBoolean(raw.supports_response_format_json),
+    supports_structured_output: asBoolean(raw.supports_structured_output),
+    supports_native_streaming: asBoolean(raw.supports_native_streaming),
+    supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_caching: asBoolean(raw.supports_caching),
+    supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
+    prompt_cache_alignment: asNumber(raw.prompt_cache_alignment) ?? null,
+    supports_top_k: asBoolean(raw.supports_top_k),
+    supports_min_p: asBoolean(raw.supports_min_p),
+    supports_seed: asBoolean(raw.supports_seed),
+    supports_seed_with_images: asBoolean(raw.supports_seed_with_images),
+    emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
+    supports_computer_use: asBoolean(raw.supports_computer_use),
+    supports_code_execution: asBoolean(raw.supports_code_execution),
     effective_capabilities: decodeRuntimeEffectiveCapabilities(raw.effective_capabilities),
     parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
     request_config: decodeRuntimeRequestConfig(raw.request_config),

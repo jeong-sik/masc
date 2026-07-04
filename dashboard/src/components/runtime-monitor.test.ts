@@ -56,12 +56,32 @@ describe('RuntimeMonitor', () => {
           streaming: true,
           temperature: 0.7,
           capabilities_declared: true,
+          max_output_tokens: 65536,
+          supports_tool_choice: true,
+          supports_required_tool_choice: true,
+          supports_named_tool_choice: true,
+          supports_parallel_tool_calls: true,
+          supports_extended_thinking: true,
           supports_multimodal_inputs: true,
           supports_image_input: true,
           supports_audio_input: true,
           supports_video_input: false,
           supports_reasoning_budget: true,
           thinking_control_format: 'reasoning-effort',
+          supports_response_format_json: true,
+          supports_structured_output: true,
+          supports_native_streaming: true,
+          supports_system_prompt: true,
+          supports_caching: true,
+          supports_prompt_caching: true,
+          prompt_cache_alignment: 1024,
+          supports_top_k: true,
+          supports_min_p: true,
+          supports_seed: true,
+          supports_seed_with_images: true,
+          emits_usage_tokens: true,
+          supports_computer_use: true,
+          supports_code_execution: true,
           model_count: 1,
           models: ['Qwen/Qwen3-32B'],
           parameter_policy: {
@@ -352,9 +372,14 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('protocol openai-http')
     expect(container.textContent).toContain('model-temp 0.7')
     expect(container.textContent).toContain('caps declared')
+    expect(container.textContent).toContain('format json,schema')
+    expect(container.textContent).toContain('sampling top_k,min_p,seed')
     expect(container.textContent).toContain('tools on,thinking on,streaming on')
     expect(container.textContent).toContain('multimodal on,image on,audio on,video off,reasoning-budget on')
     expect(container.textContent).toContain('thinking-control reasoning-effort')
+    expect(container.textContent).toContain(
+      'controls tool-choice,required,named,parallel,extended-thinking,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+    )
     expect(container.textContent).toContain('note verified by runtime discovery')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(

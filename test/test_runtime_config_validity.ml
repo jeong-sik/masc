@@ -1363,7 +1363,7 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
                  (Runtime.Missing_catalog_models report))
               "provider_label=openai_compat"))
 
-let test_server_degraded_init_disables_uncatalogued_runtimes () =
+let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
@@ -1406,9 +1406,66 @@ let test_server_degraded_init_disables_uncatalogued_runtimes () =
        with_model_catalog_content catalog @@ fun () ->
        with_temp_runtime_toml runtime_toml @@ fun path ->
        match Runtime.init_default_degraded_report ~config_path:path with
+       | Ok Runtime.Initialized -> fail "expected referenced missing runtime to fail"
+       | Ok (Runtime.Initialized_degraded _) ->
+         fail "referenced missing runtime must not degrade into fallback routing"
+       | Error (Runtime.Missing_catalog_models report) ->
+         failf
+           "expected routing-reference config error, got missing catalog report: %s"
+           (Runtime.strict_init_error_to_string (Runtime.Missing_catalog_models report))
+       | Error (Runtime.Runtime_config_error msg) ->
+         check bool "diagnostic names default route" true
+           (String_util.contains_substring msg "[runtime].default");
+         check bool "diagnostic names keeper assignment" true
+           (String_util.contains_substring msg "[runtime.assignments].keeper_a");
+         check bool "diagnostic rejects fallback erasure" true
+           (String_util.contains_substring msg "default fallback"))
+
+let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-oas-catalog\"\n\
+     max-context = 1024\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.good\"\n\
+     librarian = \"ollama.good\"\n\
+     media_failover = [\"ollama.good\"]\n\
+     \n\
+     [runtime.assignments]\n\
+     keeper_b = \"ollama.good\"\n\
+     \n\
+     [runtime.lanes.safe]\n\
+     candidates = [\"ollama.good\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_degraded_report ~config_path:path with
        | Error err ->
          failf
-           "server degraded init should keep a catalog-known runtime alive: %s"
+           "server degraded init should disable only unreferenced catalog gaps: %s"
            (Runtime.strict_init_error_to_string err)
        | Ok Runtime.Initialized -> fail "expected degraded startup outcome"
        | Ok (Runtime.Initialized_degraded degradation) ->
@@ -1421,14 +1478,16 @@ let test_server_degraded_init_disables_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
-         check (option string) "dropped assignment falls back to default"
-           None
-           (Runtime.runtime_id_for_keeper "keeper_a");
+         check (list string) "no dropped assignment"
+           []
+           (List.map
+              (fun (entry : Runtime.dropped_runtime_assignment) -> entry.keeper_name)
+              degradation.dropped_assignments);
          check (option string) "catalog-known assignment preserved"
            (Some "ollama.good")
            (Runtime.runtime_id_for_keeper "keeper_b");
-         check (option string) "librarian route dropped"
-           None
+         check (option string) "librarian route preserved"
+           (Some "ollama.good")
            (Runtime.librarian_runtime_id ());
          check (list string) "media failover keeps known ids only"
            [ "ollama.good" ]
@@ -1880,8 +1939,11 @@ let () =
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
           test_case
-            "server degraded init disables uncatalogued runtimes"
-            `Quick test_server_degraded_init_disables_uncatalogued_runtimes;
+            "server degraded init rejects referenced uncatalogued runtimes"
+            `Quick test_server_degraded_init_rejects_referenced_uncatalogued_runtimes;
+          test_case
+            "server degraded init disables unreferenced uncatalogued runtimes"
+            `Quick test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes;
           test_case
             "server degraded init rejects uncatalogued default"
             `Quick test_server_degraded_init_rejects_uncatalogued_default;

@@ -1631,9 +1631,9 @@ let runtime_declared_spec_json (rt : Runtime.t) =
             , runtime_provider_behavior_capabilities_json rt.provider.capabilities )
           ; ( "custom_header_count"
             , `Int
-                (rt.provider.headers
-                 |> Option.map List.length
-                 |> Option.value ~default:0) )
+                (match rt.provider.headers with
+                 | None -> 0
+                 | Some headers -> List.length headers) )
           ; "connect_timeout_s", Json_util.float_opt_to_json rt.provider.connect_timeout_s
           ] )
     ; ( "model"

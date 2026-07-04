@@ -994,13 +994,13 @@ export function SettingsSurface() {
     navigate('settings', id === DEFAULT_SETTINGS_SECTION ? {} : { section: id })
   }
 
-  function handleExportHtml() {
+  function handleExportHtmlSnapshot() {
     const htmlContent = document.documentElement.outerHTML
     const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `MASC_Keeper_Agent_standalone.html`
+    a.download = `MASC_Dashboard_snapshot.html`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -1700,14 +1700,14 @@ export function SettingsSurface() {
               <div class="set-rt-launch" style=${{ marginTop: '16px', border: '1px solid var(--color-border-default)', padding: '16px', borderRadius: '8px', background: 'var(--color-bg-elevated)' }}>
                 <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <div style=${{ fontWeight: 'bold', fontSize: '14px', color: 'var(--color-fg-primary)' }}>Standalone HTML 내보내기</div>
-                    <div class="set-hint" style=${{ marginTop: '4px' }}>대시보드의 모든 리소스와 현재 상태를 포함하는 오프라인 단일 HTML 파일을 생성하여 다운로드합니다.</div>
+                    <div style=${{ fontWeight: 'bold', fontSize: '14px', color: 'var(--color-fg-primary)' }}>HTML 스냅샷 내보내기</div>
+                    <div class="set-hint" style=${{ marginTop: '4px' }}>현재 렌더링된 DOM을 HTML로 저장합니다. 외부 asset, API 데이터, 실행 상태는 파일에 내장되지 않습니다.</div>
                   </div>
                   <button
                     type="button"
                     class="cn-act act"
                     style=${{ background: 'var(--color-brand)', color: 'var(--volt-ink)', fontWeight: '600' }}
-                    onClick=${handleExportHtml}
+                    onClick=${handleExportHtmlSnapshot}
                   >
                     다운로드 ⤓
                   </button>

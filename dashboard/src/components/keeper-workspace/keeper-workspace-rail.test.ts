@@ -253,6 +253,8 @@ describe('KeeperWorkspaceRail', () => {
             max_output_tokens: 65536,
             supports_tools: true,
             supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
@@ -396,7 +398,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain(
       'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
-    expect(container.textContent).toContain('out 65536 · tools · tool_choice+parallel')
+    expect(container.textContent).toContain('out 65536 · tools · tool_choice+required+named+parallel')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
     expect(container.textContent).toContain('extended thinking')

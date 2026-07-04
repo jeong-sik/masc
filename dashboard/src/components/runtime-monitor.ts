@@ -676,7 +676,11 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     ? `out ${formatNumber(caps.max_output_tokens)}`
     : null
   const tools = caps.supports_tool_choice
-    ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    ? `tool_choice${[
+      caps.supports_required_tool_choice ? 'required' : null,
+      caps.supports_named_tool_choice ? 'named' : null,
+      caps.supports_parallel_tool_calls ? 'parallel' : null,
+    ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
     : null
   const formats = [
     caps.supports_response_format_json ? 'json' : null,

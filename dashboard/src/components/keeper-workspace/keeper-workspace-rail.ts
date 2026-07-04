@@ -321,7 +321,13 @@ function runtimeEffectiveCapabilitySummary(
   const parts = [
     typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
     caps.supports_tools ? 'tools' : null,
-    caps.supports_tool_choice ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}` : null,
+    caps.supports_tool_choice
+      ? `tool_choice${[
+        caps.supports_required_tool_choice ? 'required' : null,
+        caps.supports_named_tool_choice ? 'named' : null,
+        caps.supports_parallel_tool_calls ? 'parallel' : null,
+      ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
+      : null,
     caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,

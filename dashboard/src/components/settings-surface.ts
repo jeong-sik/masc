@@ -392,7 +392,11 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
   const toolChoice = caps.supports_tool_choice
-    ? `tool-choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    ? `tool-choice${[
+      caps.supports_required_tool_choice ? 'required' : null,
+      caps.supports_named_tool_choice ? 'named' : null,
+      caps.supports_parallel_tool_calls ? 'parallel' : null,
+    ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
     : null
   const parts = [
     output,

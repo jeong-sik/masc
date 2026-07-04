@@ -829,6 +829,8 @@ describe('SettingsSurface', () => {
             max_output_tokens: 4096,
             supports_tools: true,
             supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
@@ -967,7 +969,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
-      expect(cards[0]?.textContent).toContain('out:4096 · tools · tool-choice+parallel')
+      expect(cards[0]?.textContent).toContain('out:4096 · tools · tool-choice+required+named+parallel')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
       expect(cards[0]?.textContent).toContain('extended-thinking')

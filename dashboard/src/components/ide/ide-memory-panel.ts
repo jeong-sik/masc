@@ -34,6 +34,7 @@ interface MemoryResponse {
 
 interface IdeMemoryPanelProps {
   readonly keeperName?: string | null
+  readonly repoId?: string | null
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -139,7 +140,7 @@ function buildLensGraph(entries: ReadonlyArray<MemoryEntry>): {
   return { nodes, edges, start: entries[0]!.id }
 }
 
-export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
+export function IdeMemoryPanel({ keeperName, repoId }: IdeMemoryPanelProps) {
   const [entries, setEntries] = useState<ReadonlyArray<MemoryEntry>>([])
   const [total, setTotal] = useState(0)
   const [contract, setContract] = useState<MemoryContract | null>(null)
@@ -152,6 +153,7 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
     try {
       const params = new URLSearchParams()
       if (keeperName) params.set('keeper_id', keeperName)
+      if (repoId) params.set('repo_id', repoId)
       params.set('limit', '50')
       const res = await fetch(`/api/v1/ide/memory?${params}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -164,7 +166,7 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
     } finally {
       setLoading(false)
     }
-  }, [keeperName])
+  }, [keeperName, repoId])
 
   useEffect(() => {
     fetchMemory()

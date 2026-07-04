@@ -16,9 +16,18 @@ val resolve_partition_for_write
       repository whose [url] normalises via
       {!Agent_observation.canonical_url_of_remote}. [rel_path] is the path
       relative to that repository's [local_path].
-    - [(Orphan, original_path)] otherwise. Increments
-      [masc_ide_orphan_writes_total] with the failure reason label
-      ([unregistered_repo] / [blank_url] / [url_unparseable]).
+    - [(No_canonical_url, original_path)] when a matched repository has a blank
+      or malformed [url].
+    - [(Base_unresolved, original_path)] when no registered repository contains
+      the path.
+    - [(Unmatched, original_path)] when a sandbox playground [repo_id] cannot
+      be found in the repository store.
+
+      The three non-[By_url] variants all write under the shared
+      [.masc-ide/_orphan/] directory, but keep the typed reason in memory and
+      in emitted observation records. Increments [masc_ide_orphan_writes_total]
+      with the concrete failure reason label ([unregistered_repo] /
+      [blank_url] / [url_unparseable] / sandbox variants).
 
     [kind] selects the metric label ([annotation] or [region]). *)
 

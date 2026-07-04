@@ -54,6 +54,14 @@ let touch path =
   close_out oc
 ;;
 
+let partition_to_string = function
+  | Ide_paths.By_url slug -> "By_url " ^ slug
+  | Ide_paths.No_canonical_url -> "No_canonical_url"
+  | Ide_paths.Unmatched -> "Unmatched"
+  | Ide_paths.Base_unresolved -> "Base_unresolved"
+  | Ide_paths.Legacy_default -> "Legacy_default"
+;;
+
 let test_sandbox_write_joins_with_worktree_read () =
   with_temp_base_dir (fun base_dir ->
     (* 1. Build two clones of the same upstream. *)
@@ -131,7 +139,7 @@ let test_sandbox_write_joins_with_worktree_read () =
     check string "worktree rel_path stripped" "lib/foo.ml" worktree_rel)
 ;;
 
-let test_unregistered_path_lands_in_orphan () =
+let test_unregistered_path_lands_in_base_unresolved () =
   with_temp_base_dir (fun base_dir ->
     let elsewhere = Filename.concat base_dir "elsewhere/foo.ml" in
     let partition, original =
@@ -141,12 +149,15 @@ let test_unregistered_path_lands_in_orphan () =
         ~file_path:elsewhere
     in
     (match partition with
-     | Ide_paths.Legacy_default -> ()
-     | _ -> fail "expected Orphan for unregistered path");
+     | Ide_paths.Base_unresolved -> ()
+     | got ->
+       failf
+         "expected Base_unresolved for unregistered path, got %s"
+         (partition_to_string got));
     check string "rel_path passes through unchanged" elsewhere original)
 ;;
 
-let test_blank_url_lands_in_orphan () =
+let test_blank_url_lands_in_no_canonical_url () =
   with_temp_base_dir (fun base_dir ->
     let local = Filename.concat base_dir "blank/repo" in
     mkdir_p local;
@@ -176,8 +187,11 @@ let test_blank_url_lands_in_orphan () =
         ~file_path:file
     in
     match partition with
-    | Ide_paths.Legacy_default -> ()
-    | _ -> fail "expected Orphan for blank-URL repo")
+    | Ide_paths.No_canonical_url -> ()
+    | got ->
+      failf
+        "expected No_canonical_url for blank-URL repo, got %s"
+        (partition_to_string got))
 ;;
 
 (* RFC-0128 PR-6 — sandbox playground path resolution. Keeper writes
@@ -299,13 +313,13 @@ let () =
             `Quick
             test_sandbox_write_joins_with_worktree_read
         ; test_case
-            "unregistered path → Orphan"
+            "unregistered path → Base_unresolved"
             `Quick
-            test_unregistered_path_lands_in_orphan
+            test_unregistered_path_lands_in_base_unresolved
         ; test_case
-            "blank URL → Orphan"
+            "blank URL → No_canonical_url"
             `Quick
-            test_blank_url_lands_in_orphan
+            test_blank_url_lands_in_no_canonical_url
         ; test_case
             "sandbox playground path joins with working-tree (PR-6)"
             `Quick

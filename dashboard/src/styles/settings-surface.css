@@ -615,21 +615,32 @@
   padding: 12px 14px;
   margin-top: 10px;
   background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .set-rt-top {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 10px;
+  min-width: 0;
 }
 
 .set-rt-name {
+  flex: 1 1 150px;
   font-size: var(--fs-13);
+  line-height: 1.35;
   color: var(--text-bright);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .set-rt-kind {
+  flex: none;
   font-family: var(--font-ui);
   font-size: 9.5px;
   letter-spacing: 0.1em;
@@ -641,6 +652,7 @@
 }
 
 .set-rt-keepers {
+  flex: none;
   font-size: var(--fs-11);
   color: var(--text-dim);
 }
@@ -653,15 +665,95 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 6px;
+  min-width: 0;
 }
 
 .set-rt-row .sub-k {
+  flex: none;
   min-width: 62px;
+}
+
+.set-rt-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .set-rt-row .set-input {
   flex: 1;
+}
+
+.settings-surf .set-rt .rt-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 0;
+  min-width: 0;
+}
+
+.settings-surf .set-rt .rt-cap {
+  flex: none;
+}
+
+.settings-surf .set-rt-facts {
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  min-width: 0;
+  padding-top: 7px;
+}
+
+.settings-surf .set-rt-facts > summary {
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  letter-spacing: 0.04em;
+  list-style-position: inside;
+  text-transform: uppercase;
+}
+
+.settings-surf .set-rt-facts > summary .mono {
+  color: var(--info);
+  margin-left: 4px;
+}
+
+.settings-surf .set-rt-facts-body {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+  min-width: 0;
+}
+
+.settings-surf .set-rt-fact {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.settings-surf .set-rt-fact-k {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  line-height: 1.45;
+  text-transform: uppercase;
+}
+
+.settings-surf .set-rt-fact-v {
+  color: var(--info);
+  line-height: 1.45;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-surf .set-rt-facts[open] .set-rt-fact-v {
+  overflow-wrap: anywhere;
+  text-overflow: initial;
+  white-space: normal;
 }
 
 .set-rt-launch {

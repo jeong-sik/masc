@@ -221,6 +221,33 @@ function RuntimeCatalogCapability({ label, value }: { label: string; value: bool
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
 }
 
+type RuntimeCatalogFact = {
+  readonly id: string
+  readonly label: string
+  readonly value: string
+}
+
+function RuntimeCatalogDiagnostics({ facts }: { facts: readonly RuntimeCatalogFact[] }) {
+  if (facts.length === 0) return null
+  return html`
+    <details class="set-rt-facts" data-testid="runtime-catalog-diagnostics">
+      <summary>Diagnostics <span class="mono">${facts.length}</span></summary>
+      <div class="set-rt-facts-body">
+        ${facts.map(fact => html`
+          <div
+            key=${fact.id}
+            class="set-rt-fact"
+            data-testid=${`runtime-catalog-fact-${fact.id}`}
+          >
+            <span class="set-rt-fact-k">${fact.label}:</span>
+            <span class="set-rt-fact-v mono" title=${fact.value}>${fact.value}</span>
+          </div>
+        `)}
+      </div>
+    </details>
+  `
+}
+
 function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
   if (!defaults) return []
   return defaults.runtimes.map((entry: RuntimeEntry) => ({
@@ -261,6 +288,13 @@ function RuntimeCatalogCard({
   const requestConfig = runtimeCatalogRequestConfig(item)
   const declaredSpec = runtimeCatalogDeclaredSpec(item)
   const snapshotFacts = runtimeCatalogSnapshotFacts(item)
+  const diagnosticFacts = [
+    snapshotFacts ? { id: 'snapshot', label: 'snapshot', value: snapshotFacts } : null,
+    effectiveCapabilities ? { id: 'effective', label: 'effective', value: effectiveCapabilities } : null,
+    parameterPolicy ? { id: 'policy', label: 'policy', value: parameterPolicy } : null,
+    requestConfig ? { id: 'request', label: 'request', value: requestConfig } : null,
+    declaredSpec ? { id: 'declared', label: 'declared', value: declaredSpec } : null,
+  ].filter((fact): fact is RuntimeCatalogFact => fact !== null)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -272,11 +306,11 @@ function RuntimeCatalogCard({
       </div>
       <div class="set-rt-row">
         <span class="sub-k">provider</span>
-        <span class="mono">${providerName}</span>
+        <span class="mono set-rt-value" title=${providerName}>${providerName}</span>
       </div>
       <div class="set-rt-row">
         <span class="sub-k">model</span>
-        <span class="mono">${modelName}</span>
+        <span class="mono set-rt-value" title=${modelName}>${modelName}</span>
       </div>
       <div class="set-rt-row">
         <span class="sub-k">context</span>
@@ -286,25 +320,11 @@ function RuntimeCatalogCard({
         <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
         <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
         <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
-        ${snapshotFacts
-          ? html`<span class="rt-cap tcf mono" title=${snapshotFacts}>snapshot:${snapshotFacts}</span>`
-          : null}
-        ${effectiveCapabilities
-          ? html`<span class="rt-cap tcf mono" title=${effectiveCapabilities}>${effectiveCapabilities}</span>`
-          : null}
-        ${parameterPolicy
-          ? html`<span class="rt-cap tcf mono" title=${parameterPolicy}>${parameterPolicy}</span>`
-          : null}
-        ${requestConfig
-          ? html`<span class="rt-cap tcf mono" title=${requestConfig}>${requestConfig}</span>`
-          : null}
-        ${declaredSpec
-          ? html`<span class="rt-cap tcf mono" title=${declaredSpec}>declared:${declaredSpec}</span>`
-          : null}
       </div>
+      <${RuntimeCatalogDiagnostics} facts=${diagnosticFacts} />
       <div class="set-rt-row">
         <span class="sub-k">transport</span>
-        <span class="mono set-runtime-transport">${transport}</span>
+        <span class="mono set-rt-value set-runtime-transport" title=${transport}>${transport}</span>
       </div>
     </div>
   `

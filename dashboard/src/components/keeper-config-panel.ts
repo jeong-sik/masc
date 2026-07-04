@@ -12,17 +12,30 @@ import {
   setKeeperToolPolicy,
 } from '../api/dashboard'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
-import type { DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
+import type { DashboardRuntimeProviderSnapshot, DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
+import type { AsyncState } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
 import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource } from '../lib/async-state'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../lib/runtime-catalog-resource'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+  runtimeCatalogSnapshotFacts,
+} from '../lib/runtime-provider-summary'
 import { refreshKeeperRuntimeStatus } from '../store'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
@@ -407,6 +420,63 @@ function dedupeStrings(values: readonly string[]): string[] {
     next.push(value)
   }
   return next
+}
+
+function runtimeCatalogRuntimeKey(entry: DashboardRuntimeProviderSnapshot): string {
+  return entry.runtime_id?.trim() || entry.provider.trim()
+}
+
+function runtimeCatalogProviderLabel(entry: DashboardRuntimeProviderSnapshot): string {
+  return entry.provider_display_name ?? entry.provider_id ?? entry.provider
+}
+
+function runtimeCatalogModelLabel(entry: DashboardRuntimeProviderSnapshot): string {
+  return entry.model_api_name ?? entry.model_id ?? entry.models[0] ?? MISSING_DATA_DASH
+}
+
+function selectedRuntimeCatalogEntry(
+  state: AsyncState<DashboardRuntimeProviderSnapshot[]>,
+  runtimeId: string,
+): DashboardRuntimeProviderSnapshot | null {
+  if (state.status !== 'loaded') return null
+  return findRuntimeCatalogEntry(state.data, runtimeId)
+}
+
+function runtimeCatalogStateRows(
+  state: AsyncState<DashboardRuntimeProviderSnapshot[]>,
+  runtimeId: string,
+  entry: DashboardRuntimeProviderSnapshot | null,
+): readonly KcfFactRow[] {
+  if (state.status === 'idle' || state.status === 'loading') {
+    return [['catalog 상태', state.status]]
+  }
+  if (state.status === 'error') {
+    return [
+      ['catalog 상태', 'error'],
+      ['catalog error', state.message, true],
+    ]
+  }
+  if (runtimeId.trim() !== '' && !entry) {
+    return [
+      ['catalog 상태', 'runtime 미수집'],
+      ['선택 runtime', runtimeId, true],
+      ['catalog entries', String(state.data.length)],
+    ]
+  }
+  return []
+}
+
+function runtimeCatalogSpecRows(entry: DashboardRuntimeProviderSnapshot): readonly KcfFactRow[] {
+  return [
+    ['runtime catalog', runtimeCatalogRuntimeKey(entry), true],
+    ['provider', runtimeCatalogProviderLabel(entry)],
+    ['model', runtimeCatalogModelLabel(entry), true],
+    ['snapshot', runtimeCatalogSnapshotFacts(entry), true],
+    ['effective', runtimeCatalogEffectiveCapabilities(entry), true],
+    ['request', runtimeCatalogRequestConfig(entry), true],
+    ['declared', runtimeCatalogDeclaredSpec(entry), true],
+    ['policy', runtimeCatalogParameterPolicy(entry), true],
+  ]
 }
 
 function updateRuntimeActiveGoalIds(values: readonly string[]) {
@@ -1014,6 +1084,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   if (toolInventoryState.value.status === 'idle') {
     void loadToolInventory()
   }
+  if (runtimeCatalogState.value.status === 'idle') {
+    loadRuntimeCatalog()
+  }
 
   // Loading / error states render inside the same .kcf-overlay frame so the
   // modal does not pop in only after the config resolves (the panel is mounted
@@ -1071,6 +1144,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         ...(c.execution.runtime_options ?? []),
       ])
     : []
+  const runtimeCatalog = runtimeCatalogState.value
+  const selectedRuntimeId = rd?.runtime_id || (c.execution.selected_runtime_id ?? '')
+  const selectedRuntimeCatalog = selectedRuntimeCatalogEntry(runtimeCatalog, selectedRuntimeId)
+  const selectedRuntimeCatalogRows = selectedRuntimeCatalog
+    ? runtimeCatalogSpecRows(selectedRuntimeCatalog)
+    : runtimeCatalogStateRows(runtimeCatalog, selectedRuntimeId, selectedRuntimeCatalog)
 
   async function saveRuntimeConfig() {
     if (!rd) return
@@ -1337,6 +1416,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         ? html`<${KcfFacts} rows=${[['정규화 runtime', c.execution.selected_runtime_canonical, true]]} />`
         : null}
     </${KcfSec}>
+
+    ${selectedRuntimeCatalogRows.length > 0
+      ? html`
+        <${KcfSec} title="Runtime catalog spec" desc="선택 runtime 의 /api/v1/providers Provider × Model projection입니다. 요청 파라미터와 effective capability는 여기서 읽기 전용으로 확인합니다.">
+          <${KcfFacts} rows=${selectedRuntimeCatalogRows} />
+        </${KcfSec}>
+      `
+      : null}
 
     <${KcfSec} title="실행" desc="런타임 후보·타임아웃은 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
       <${KcfFacts} rows=${[

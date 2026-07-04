@@ -635,6 +635,143 @@ const mocks = vi.hoisted(() => {
         },
       ],
     })),
+    fetchRuntimeProviders: vi.fn(async () => ({
+      updated_at: '2026-07-05T00:00:00Z',
+      summary: {
+        providers: 1,
+        runtimes: 1,
+        local_models: 0,
+        cloud_models: 1,
+        cli_models: 0,
+        default_runtime_id: 'tier-group.keeper_unified',
+      },
+      providers: [
+        {
+          provider: 'tier-group.keeper_unified',
+          runtime_id: 'tier-group.keeper_unified',
+          provider_id: 'runpod_mtp',
+          provider_display_name: 'RunPod MTP',
+          model_id: 'qwen',
+          model_api_name: 'Qwen/Qwen3-32B',
+          models: ['Qwen/Qwen3-32B'],
+          status: 'configured',
+          available: true,
+          source: 'runtime.toml',
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+          parameter_policy: {
+            reasoning_toggle_wire: 'chat_template_kwargs',
+            reasoning_replay_policy: 'preserve_always',
+            requires_reasoning_replay_on_tool_call: true,
+            ignored_sampling_params: ['temperature'],
+            always_ignored_sampling_params: [],
+          },
+          request_config: {
+            source: 'oas-provider-config',
+            provider_kind: 'openai_compat',
+            request_path: '/chat/completions',
+            request_path_targets_responses_api: false,
+            enable_thinking: true,
+            preserve_thinking: true,
+            thinking_budget: 32768,
+            glm_replay_reasoning: true,
+            has_model_capabilities_override: true,
+          },
+          declared_spec: {
+            source: 'runtime.toml',
+            provider: {
+              id: 'runpod_mtp',
+              display_name: 'RunPod MTP',
+              protocol: 'openai-compatible-http',
+              api_format: 'chat-completions',
+              transport: 'http',
+              auth_kind: 'env:RUNPOD_API_KEY',
+              is_non_interactive: true,
+              has_capabilities: true,
+              behavior_capabilities: {
+                supports_inline_tools: true,
+                requires_per_keeper_bridging_for_bound_actor_tools: true,
+                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+                argv_prompt_preflight: true,
+                uses_anthropic_caching: false,
+                max_turns_per_attempt: 3,
+                tolerates_bound_actor_fallback: true,
+              },
+              custom_header_count: 1,
+              connect_timeout_s: 120,
+            },
+            model: {
+              id: 'qwen',
+              api_name: 'Qwen/Qwen3-32B',
+              tools_support: true,
+              max_context: 128000,
+              thinking_support: true,
+              preserve_thinking: true,
+              max_thinking_budget: 32768,
+              streaming: true,
+              temperature: 0.65,
+              capabilities: {
+                source: 'runtime.toml',
+                supports_tool_choice: true,
+                supports_required_tool_choice: true,
+                supports_named_tool_choice: true,
+                supports_parallel_tool_calls: true,
+                supports_extended_thinking: true,
+                supports_reasoning_budget: true,
+                thinking_control_format: 'chat-template-kwargs',
+                supports_multimodal_inputs: true,
+                supports_image_input: true,
+                supports_audio_input: true,
+                supports_video_input: false,
+                supports_response_format_json: true,
+                supports_structured_output: true,
+              },
+              match_prefixes: ['Qwen/'],
+            },
+            binding: {
+              provider_id: 'runpod_mtp',
+              model_id: 'qwen',
+              is_default: true,
+              max_concurrent: 4,
+              price_input: 0.1,
+              price_output: 0.2,
+              keep_alive: '30m',
+              num_ctx: 131072,
+            },
+          },
+          effective_capabilities: {
+            source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
+            max_output_tokens: 65536,
+            supports_tools: true,
+            supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
+            supports_parallel_tool_calls: true,
+            supports_runtime_mcp_tools: true,
+            supports_runtime_tool_events: true,
+            supports_reasoning: true,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
+            thinking_control_format: 'chat-template-kwargs',
+            preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
+            reasoning_output_format: 'split-reasoning-fields',
+            reasoning_streaming_format: {
+              kind: 'delta-reasoning-field',
+              field: 'reasoning_content',
+            },
+            supports_multimodal_inputs: true,
+            supports_image_input: true,
+            supports_audio_input: true,
+            supports_video_input: false,
+            ignored_sampling_parameters: ['temperature'],
+          },
+        },
+      ],
+    })),
     patchKeeperConfig: vi.fn(),
     updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
     setKeeperToolPolicy: vi.fn(async () => makeKeeperConfig()),
@@ -658,6 +795,7 @@ vi.mock('../api/dashboard', () => ({
   fetchRuntimeProfiles: mocks.fetchRuntimeProfiles,
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
   fetchKeeperConfig: mocks.fetchKeeperConfig,
+  fetchRuntimeProviders: mocks.fetchRuntimeProviders,
   patchKeeperConfig: mocks.patchKeeperConfig,
   updateKeeperRuntime: mocks.updateKeeperRuntime,
   setKeeperToolPolicy: mocks.setKeeperToolPolicy,
@@ -678,6 +816,7 @@ import {
   loadKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
+import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 import type { GoalTreeNode } from '../types'
 
 async function flush() {
@@ -702,9 +841,11 @@ describe('KeeperConfigPanel', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     resetKeeperConfig()
+    resetRuntimeCatalog()
     mocks.fetchKeeperConfig.mockClear()
     mocks.fetchDashboardGoalsTree.mockClear()
     mocks.fetchRuntimeProfiles.mockClear()
+    mocks.fetchRuntimeProviders.mockClear()
     mocks.patchKeeperConfig.mockClear()
     mocks.updateKeeperRuntime.mockClear()
     mocks.setKeeperToolPolicy.mockClear()
@@ -718,6 +859,7 @@ describe('KeeperConfigPanel', () => {
     render(null, container)
     container.remove()
     resetKeeperConfig()
+    resetRuntimeCatalog()
   })
 
   it('separates editable prompt controls from read-only runtime metadata', async () => {
@@ -741,6 +883,15 @@ describe('KeeperConfigPanel', () => {
     await flush()
     expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
+    expect(container.textContent).toContain('Runtime catalog spec')
+    expect(container.textContent).toContain('RunPod MTP')
+    expect(container.textContent).toContain('Qwen/Qwen3-32B')
+    expect(container.textContent).toContain('effective')
+    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('request')
+    expect(container.textContent).toContain('think:on')
+    expect(container.textContent).toContain('policy')
+    expect(container.textContent).toContain('wire:chat_template_kwargs')
     expect(container.textContent).toContain('활성 런타임')
 
     // goals tab: assigned goal-store bindings.

@@ -22,6 +22,7 @@ and capability_manifest_env_resolution =
 
 and model_catalog_env_source =
   | Env_var of model_catalog_env_var
+  | Config_root_catalog_file of string
   | Parent_file of
       { origin : model_catalog_parent_origin
       ; filename : string
@@ -44,6 +45,7 @@ val capability_manifest_env_source_to_string : capability_manifest_env_source ->
 
 val resolve_oas_model_catalog_path :
   ?env:(string -> string option) ->
+  ?config_root:string ->
   ?cwd:string ->
   ?argv0:string ->
   unit ->
@@ -57,6 +59,7 @@ val resolve_oas_capability_manifest_path :
 
 val configure_oas_model_catalog_env :
   ?env:(string -> string option) ->
+  ?config_root:string ->
   ?cwd:string ->
   ?argv0:string ->
   ?putenv:(string -> string -> unit) ->

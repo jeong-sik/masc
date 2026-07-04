@@ -48,6 +48,7 @@ let read_file path =
 
 let repo_runtime_toml = "# repo runtime seed\n"
 let local_runtime_toml = "# local runtime seed\n"
+let repo_model_catalog_toml = "[[models]]\nid_prefix = \"repo-runtime\"\n"
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -117,6 +118,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
+  write_file (Filename.concat root "oas-models.toml") repo_model_catalog_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "tool_policy.toml")
     "[groups.base]\ntools = [\"keeper_time_now\"]\n";
@@ -278,6 +280,51 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
        Alcotest.(check string)
          "source"
          "argv0-parent:oas-models.toml"
+         (model_catalog_resolution_source_label resolution);
+       Alcotest.(check string)
+         "path"
+         (canonical_path catalog)
+         (canonical_path resolution.Server_runtime_bootstrap.path));
+    Alcotest.(check (list (pair string string)))
+      "putenv"
+      [ "OAS_MODEL_CATALOG", catalog ]
+      (List.rev !putenv_calls);
+    Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
+    Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
+    Alcotest.(check int) "set catalog override" 1 !set_calls)
+
+let test_model_catalog_configuration_prefers_config_root_catalog () =
+  with_temp_dir "model-catalog-bootstrap-config-root" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let outside = Filename.concat dir "outside" in
+    let catalog = Filename.concat config_root "oas-models.toml" in
+    mkdir_p config_root;
+    mkdir_p outside;
+    write_file catalog "[[models]]\nid_prefix = \"config-root-runtime\"\n";
+    let putenv_calls = ref [] in
+    let clear_calls = ref 0 in
+    let load_calls = ref [] in
+    let set_calls = ref 0 in
+    let result =
+      Server_runtime_bootstrap.configure_oas_model_catalog_env
+        ~env:(fun _ -> None)
+        ~config_root
+        ~cwd:outside
+        ~argv0:(Filename.concat outside "main_eio.exe")
+        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
+        ~clear_catalog:(fun () -> incr clear_calls)
+        ~load_catalog:(fun path ->
+          load_calls := path :: !load_calls;
+          Some Llm_provider.Model_catalog.empty)
+        ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected config-root model catalog resolution"
+     | Some resolution ->
+       Alcotest.(check string)
+         "source"
+         "config-root:oas-models.toml"
          (model_catalog_resolution_source_label resolution);
        Alcotest.(check string)
          "path"
@@ -864,6 +911,8 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
         (read_file (Filename.concat config_root "runtime.toml"));
       Alcotest.(check bool) "tool policy not copied (deleted module)" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
+      Alcotest.(check string) "model catalog copied" repo_model_catalog_toml
+        (read_file (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
@@ -872,7 +921,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
-let test_bootstrap_base_path_config_root_backfills_missing_prompts_only () =
+let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -898,6 +947,8 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_only () =
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
       Alcotest.(check string) "backfilled prompt content" "prompt"
         (read_file (Filename.concat config_root "prompts/keeper.unified.system.md"));
+      Alcotest.(check string) "model catalog backfilled" repo_model_catalog_toml
+        (read_file (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "versioned persona not resurrected" false
         (Sys.file_exists (Filename.concat config_root "personas/example.txt"));
       Alcotest.(check bool) "tool policy not backfilled" false
@@ -4310,6 +4361,9 @@ let () =
             "model catalog configuration installs resolved catalog"
             `Quick test_model_catalog_configuration_installs_resolved_catalog;
           Alcotest.test_case
+            "model catalog configuration prefers config-root catalog"
+            `Quick test_model_catalog_configuration_prefers_config_root_catalog;
+          Alcotest.test_case
             "model catalog resolution falls back to executable parent"
             `Quick
             test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path;
@@ -4326,9 +4380,9 @@ let () =
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config backfills missing prompts only"
+            "bootstrap base-path config backfills prompts and catalog"
             `Quick
-            test_bootstrap_base_path_config_root_backfills_missing_prompts_only;
+            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick

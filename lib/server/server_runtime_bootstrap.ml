@@ -22,6 +22,7 @@ and capability_manifest_env_resolution =
 
 and model_catalog_env_source =
   | Env_var of model_catalog_env_var
+  | Config_root_catalog_file of string
   | Parent_file of
       { origin : model_catalog_parent_origin
       ; filename : string
@@ -49,6 +50,7 @@ let model_catalog_parent_origin_label = function
 
 let model_catalog_env_source_to_string = function
   | Env_var var -> model_catalog_env_var_name var
+  | Config_root_catalog_file filename -> Printf.sprintf "config-root:%s" filename
   | Parent_file { origin; filename } ->
     Printf.sprintf "%s:%s" (model_catalog_parent_origin_label origin) filename
 
@@ -100,6 +102,17 @@ let find_catalog_in_parents ~origin dir =
        Some { path; source = Parent_file { origin; filename = oas_models_toml_filename } }
      | None -> None)
 
+let find_catalog_in_config_root config_root =
+  let catalog_file filename =
+    let candidate = Filename.concat config_root filename in
+    match existing_file candidate with
+    | Some path -> Some { path; source = Config_root_catalog_file filename }
+    | None -> None
+  in
+  match catalog_file models_toml_filename with
+  | Some _ as found -> found
+  | None -> catalog_file oas_models_toml_filename
+
 let absolute_or_cwd ~cwd path =
   let path = String.trim path in
   if String.equal path "" then
@@ -114,7 +127,13 @@ let argv0_parent_dir ~cwd argv0 =
   | None -> None
   | Some path -> Some (Filename.dirname path)
 
-let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
+let resolve_oas_model_catalog_path
+      ?(env = Sys.getenv_opt)
+      ?config_root
+      ?cwd
+      ?argv0
+      ()
+  =
   match nonempty_env env (model_catalog_env_var_name Oas_model_catalog) with
   | Some path -> Some { path; source = Env_var Oas_model_catalog }
   | None ->
@@ -137,22 +156,34 @@ let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
            | head :: _ -> head
            | [] -> "")
        in
-       (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
-	        | Some _ as found -> found
-	        | None ->
-	          (match argv0_parent_dir ~cwd:process_cwd argv0 with
-	           | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
-	           | None -> None)))
+       (match
+          config_root
+          |> Option.map String.trim
+          |> Option.filter (fun value -> not (String.equal value ""))
+          |> Option.bind find_catalog_in_config_root
+        with
+        | Some _ as found -> found
+        | None ->
+          (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
+           | Some _ as found -> found
+           | None ->
+             (match argv0_parent_dir ~cwd:process_cwd argv0 with
+              | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
+              | None -> None))))
 
 let resolve_oas_capability_manifest_path ?(env = Sys.getenv_opt) ~config_root ()
   : capability_manifest_env_resolution option
   =
   match nonempty_env env oas_capability_manifest_env_var_name with
-  | Some path -> Some { path; source = Capability_manifest_env_var }
+  | Some path ->
+    Some ({ path; source = Capability_manifest_env_var } : capability_manifest_env_resolution)
   | None ->
     let candidate = Filename.concat config_root capability_manifest_filename in
     (match existing_file candidate with
-     | Some path -> Some { path; source = Config_root_file capability_manifest_filename }
+     | Some path ->
+       Some
+         ({ path; source = Config_root_file capability_manifest_filename }
+          : capability_manifest_env_resolution)
      | None -> None)
 
 let install_runtime_model_catalog_override ~clear_catalog ~load_catalog ~set_catalog path =
@@ -222,6 +253,7 @@ let configure_oas_capability_manifest_env
 
 let configure_oas_model_catalog_env
       ?(env = Sys.getenv_opt)
+      ?config_root
       ?cwd
       ?argv0
       ?(putenv = Unix.putenv)
@@ -232,7 +264,7 @@ let configure_oas_model_catalog_env
       ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
-  match resolve_oas_model_catalog_path ~env ?cwd ?argv0 () with
+  match resolve_oas_model_catalog_path ~env ?config_root ?cwd ?argv0 () with
   | Some { source = Env_var Oas_model_catalog; path } as resolution ->
     let installed =
       install_runtime_model_catalog_override
@@ -332,7 +364,6 @@ let init_runtime_context env =
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
-  let (_ : model_catalog_env_resolution option) = configure_oas_model_catalog_env () in
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
 let metric_keeper_runtime_config_load_failures =
@@ -416,6 +447,9 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
+  let (_ : model_catalog_env_resolution option) =
+    configure_oas_model_catalog_env ~config_root ()
+  in
   let (_ : capability_manifest_env_resolution option) =
     configure_oas_capability_manifest_env ~config_root ()
   in

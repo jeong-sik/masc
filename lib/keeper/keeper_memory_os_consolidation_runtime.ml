@@ -86,15 +86,10 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
     ; disable_parallel_tool_use = true
     }
   in
-  let native_cfg =
-    Keeper_structured_output_schema.apply_to_provider_config
-      Keeper_structured_output_schema.consolidation_plan_output_schema tuned_cfg
-  in
-  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-  | Ok () -> native_cfg
-  (* Schema unavailable (GLM, MiMo, ollama cloud): prompt-tier fallback. Mirrors
-     fusion_judge's fallback; caller's parse-retry is the silent-failure net. *)
-  | Error _ -> tuned_cfg
+  Keeper_structured_output_schema.apply_schema_or_prompt_tier
+    ~log_label:"memory os consolidation output contract"
+    Keeper_structured_output_schema.consolidation_plan_output_schema
+    tuned_cfg
 ;;
 
 let validate_provider_for_consolidation provider_cfg =

@@ -74,6 +74,17 @@ let schema_capable_oas_provider_config () =
     ()
 ;;
 
+let prompt_tier_oas_provider_config () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"prompt-tier-ratchet"
+    ~base_url:"https://prompt-tier.invalid/v1"
+    ~supports_structured_output_override:false
+    ~model_capabilities_override:
+      Llm_provider.Capabilities.openai_compat_chat_extended_capabilities
+    ()
+;;
+
 let test_all_schemas_apply_as_oas_native_json_schema () =
   let base = schema_capable_oas_provider_config () in
   List.iter
@@ -103,6 +114,57 @@ let test_all_schemas_apply_as_oas_native_json_schema () =
            label
            msg)
     all_provider_native_schema_cases
+;;
+
+let has_json_schema_response_format schema provider_cfg =
+  match provider_cfg.Llm_provider.Provider_config.response_format with
+  | Agent_sdk.Types.JsonSchema actual -> Yojson.Safe.equal schema actual
+  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false
+;;
+
+let test_apply_schema_or_prompt_tier_uses_native_when_supported () =
+  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
+  let base = schema_capable_oas_provider_config () in
+  let configured =
+    Keeper_structured_output_schema.apply_schema_or_prompt_tier
+      ~log_label:"test native"
+      schema
+      base
+  in
+  check bool "native schema is attached" true
+    (has_json_schema_response_format schema configured);
+  check (option bool) "output_schema mirrors native schema" (Some true)
+    (Option.map
+       (Yojson.Safe.equal schema)
+       configured.Llm_provider.Provider_config.output_schema)
+;;
+
+let test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected () =
+  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
+  let base = prompt_tier_oas_provider_config () in
+  let native_cfg = Keeper_structured_output_schema.apply_to_provider_config schema base in
+  (match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
+   | Ok () -> fail "prompt-tier provider unexpectedly accepted native schema"
+   | Error _ -> ());
+  let configured =
+    Keeper_structured_output_schema.apply_schema_or_prompt_tier
+      ~log_label:"test prompt"
+      schema
+      base
+  in
+  check bool "prompt tier has no native schema" false
+    (has_json_schema_response_format schema configured);
+  check (option bool) "prompt tier leaves output_schema empty" None
+    (Option.map
+       (Yojson.Safe.equal schema)
+       configured.Llm_provider.Provider_config.output_schema);
+  check
+    bool
+    "prompt-tier config still validates without native schema"
+    true
+    (match Llm_provider.Provider_config.validate_output_schema_request configured with
+     | Ok () -> true
+     | Error _ -> false)
 ;;
 
 let operator_recommended_action_schema () =
@@ -277,6 +339,14 @@ let () =
             "all schemas apply as OAS native JSON schema requests"
             `Quick
             test_all_schemas_apply_as_oas_native_json_schema
+        ; test_case
+            "schema-or-prompt helper uses native schema when supported"
+            `Quick
+            test_apply_schema_or_prompt_tier_uses_native_when_supported
+        ; test_case
+            "schema-or-prompt helper keeps prompt tier when native rejected"
+            `Quick
+            test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected
         ] )
     ; ( "dashboard schemas"
       , [ test_case

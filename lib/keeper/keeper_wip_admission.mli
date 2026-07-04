@@ -15,7 +15,6 @@ val category_of_string : string -> category
 val title_category : string -> category
 
 type scope = {
-  repo : string option;
   goal_id : string option;
   category : category;
 }
@@ -25,7 +24,6 @@ val scope_of_task :
 
 type caps = {
   max_global : int option;
-  max_per_repo : int option;
   max_per_goal : int option;
   max_per_category : int option;
 }
@@ -34,9 +32,9 @@ val default_caps : unit -> caps
 (** WIP admission caps, resolved at call time from the [keeper.wip.*] runtime
     params (registered via {!Keeper_config_rp_helpers._rp_int}, so they surface in
     runtime.toml and the dashboard knob table rather than being env-only). Each
-    knob's default reads [MASC_KEEPER_WIP_MAX_GLOBAL] / [_MAX_PER_REPO] /
-    [_MAX_PER_GOAL] / [_MAX_PER_CATEGORY]: an unset knob keeps the historical
-    default (16 / 12 / 3 / 4), a positive value overrides, and 0 (or a negative
+    knob's default reads [MASC_KEEPER_WIP_MAX_GLOBAL] / [_MAX_PER_GOAL] /
+    [_MAX_PER_CATEGORY]: an unset knob keeps the historical
+    default (16 / 3 / 4), a positive value overrides, and 0 (or a negative
     value, clamped to 0) disables that axis ([None] = unbounded, deferring to the
     remaining caps). A runtime.toml / dashboard override takes precedence over the
     env default. Read lazily per call. *)
@@ -56,7 +54,6 @@ val active_items_of_tasks :
 
 type reject_reason =
   | Global_cap
-  | Repo_cap
   | Goal_cap
   | Category_cap
 

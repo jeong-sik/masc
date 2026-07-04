@@ -828,6 +828,11 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders({
       providers: [
         makeRuntimeProvider({
+          model_count: 2,
+          models: ['m1', 'm1-fallback'],
+          temperature: 0.7,
+          capabilities_declared: true,
+          note: 'verified by runtime discovery',
           parameter_policy: {
             reasoning_toggle_wire: 'chat-template-kwargs',
             reasoning_replay_policy: 'preserve-always',
@@ -1014,6 +1019,11 @@ describe('SettingsSurface', () => {
         expect.stringContaining('Provider B'),
       ])
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
+      expect(cards[0]?.textContent).toContain('snapshot:source:runtime.toml')
+      expect(cards[0]?.textContent).toContain('models:2')
+      expect(cards[0]?.textContent).toContain('model-temp:0.7')
+      expect(cards[0]?.textContent).toContain('caps:declared')
+      expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
       expect(cards[0]?.textContent).toContain('source:oas-provider-config')
       expect(cards[0]?.textContent).toContain('path:/chat/completions')
       expect(cards[0]?.textContent).toContain('system-prompt')

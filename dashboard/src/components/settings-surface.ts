@@ -214,6 +214,25 @@ function RuntimeCatalogCapability({ label, value }: { label: string; value: bool
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
 }
 
+function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapshot): string | null {
+  const modelCount = typeof item.model_count === 'number'
+    ? item.model_count
+    : item.models.length > 0
+      ? item.models.length
+      : null
+  const note = item.note?.trim()
+  const parts = [
+    item.source ? `source:${item.source}` : null,
+    typeof modelCount === 'number' ? `models:${modelCount}` : null,
+    typeof item.temperature === 'number' ? `model-temp:${item.temperature}` : null,
+    typeof item.capabilities_declared === 'boolean'
+      ? `caps:${item.capabilities_declared ? 'declared' : 'missing'}`
+      : null,
+    note ? `note:${note}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnapshot): string | null {
   const policy = item.parameter_policy
   if (!policy) return null
@@ -503,6 +522,7 @@ function RuntimeCatalogCard({
   const parameterPolicy = runtimeCatalogParameterPolicy(item)
   const requestConfig = runtimeCatalogRequestConfig(item)
   const declaredSpec = runtimeCatalogDeclaredSpec(item)
+  const snapshotFacts = runtimeCatalogSnapshotFacts(item)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -528,6 +548,9 @@ function RuntimeCatalogCard({
         <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
         <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
         <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
+        ${snapshotFacts
+          ? html`<span class="rt-cap tcf mono" title=${snapshotFacts}>snapshot:${snapshotFacts}</span>`
+          : null}
         ${effectiveCapabilities
           ? html`<span class="rt-cap tcf mono" title=${effectiveCapabilities}>${effectiveCapabilities}</span>`
           : null}

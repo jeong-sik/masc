@@ -156,6 +156,11 @@ let transition_task_outcome_r
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)"))
+          | Error Workspace_task_lifecycle.Verification_required_use_submit ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "Task is verifier-required (completion_contract or goal verifier_policy set); use submit_for_verification instead of done (RFC-0307)"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with

@@ -56,6 +56,40 @@ let relax_strict_tool_choice_for_keeper = function
     Some Agent_sdk.Types.Auto
   | other -> other
 
+let relative_path_has_segment_prefix prefix raw =
+  String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
+;;
+
+let sandbox_rooted_relative_path raw =
+  Filename.is_relative raw
+  && List.exists
+       (fun prefix -> relative_path_has_segment_prefix prefix raw)
+       [ "repos"; "mind"; Common.masc_dirname; "playground" ]
+;;
+
+let non_empty_string_member name input =
+  match Yojson.Safe.Util.member name input with
+  | `String raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then None else Some raw
+  | _ -> None
+;;
+
+let observation_file_path_from_tool_input ~base_path input =
+  let path =
+    match non_empty_string_member "path" input with
+    | Some p -> Some p
+    | None -> non_empty_string_member "file_path" input
+  in
+  match path with
+  | None -> base_path
+  | Some p when Filename.is_relative p && not (sandbox_rooted_relative_path p) ->
+    (match non_empty_string_member "cwd" input with
+     | Some cwd -> Filename.concat cwd p
+     | None -> p)
+  | Some p -> p
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -191,24 +225,14 @@ let assemble_hooks
              | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
            in
            (* task-1733: resolve the partition from the tool's actual edited
-              file (input.path / input.file_path), not [config.base_path].
-              base_path is the .masc project root, which almost always resolves
-              to the orphan partition; the edited file is what carries the
-              registered-repo attribution. Falls back to base_path only when the
-              tool input names no file (e.g. non-filesystem tools). *)
+              file (input.path / input.file_path, with explicit cwd honoured
+              for relative paths), not [config.base_path]. base_path is the
+              .masc project root, which almost always resolves to the orphan
+              partition; the edited file is what carries the registered-repo
+              attribution. Falls back to base_path only when the tool input
+              names no file (e.g. non-filesystem tools). *)
            let tool_file_path =
-             let non_empty_string = function
-               | `String p when String.trim p <> "" -> Some p
-               | _ -> None
-             in
-             match non_empty_string (Yojson.Safe.Util.member "path" input) with
-             | Some p -> p
-             | None ->
-               (match
-                  non_empty_string (Yojson.Safe.Util.member "file_path" input)
-                with
-                | Some p -> p
-                | None -> config.base_path)
+             observation_file_path_from_tool_input ~base_path:config.base_path input
            in
            let partition, _ =
              Keeper_tool_filesystem_runtime.resolve_partition_for_write

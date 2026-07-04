@@ -38,6 +38,7 @@ import {
 } from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
 import { isAbortError } from '../../lib/async-state'
+import { isDiffEditorView, viewFromRoute } from './ide-view-route'
 
 export interface IdeDataWorkspaceStore {
   readonly documentStore: CodeDocumentStore
@@ -473,10 +474,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       })
     })
 
-    // Load blame & diff conditionally on view tab to prevent over-fetching
-    const currentView = route.value.params.view?.trim().toLowerCase() || 'source'
+    // Load blame & diff conditionally on view tab to prevent over-fetching.
+    // Use the same route normalization as IdeShell so legacy aliases such as
+    // "merge" do not silently suppress the diff fetch.
+    const currentView = viewFromRoute(route.value.params.view)
     const isBlameView = currentView === 'blame'
-    const isDiffView = currentView === 'split-diff' || currentView === 'split' || currentView === 'unified' || currentView === 'diff'
+    const isDiffView = isDiffEditorView(currentView)
 
     if (isBlameView) {
       fetchGitBlame(filePath, opts).then(blocks => {

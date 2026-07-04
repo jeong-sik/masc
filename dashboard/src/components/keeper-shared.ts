@@ -35,6 +35,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  setRecordValue,
 } from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
@@ -614,6 +615,23 @@ export function KeeperConversationPanel({
       : '아직 표시할 대화가 없습니다. 내부 메시지는 토글로 볼 수 있습니다.'
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
+  const renderError = (extraClass = 'mt-2') => {
+    if (!error) return null
+    return html`
+      <div class="${extraClass} flex items-start justify-between gap-2 rounded border border-[var(--err-border)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel" role="alert">
+        <span class="flex-1">${error}</span>
+        <button
+          type="button"
+          aria-label="에러 메시지 닫기"
+          class="shrink-0 text-[var(--bad-light)] opacity-70 hover:opacity-100 transition-opacity ml-1 cursor-pointer font-bold select-none"
+          title="에러 메시지 닫기"
+          onClick=${() => setRecordValue(keeperActionErrors, keeperName, null)}
+        >
+          ✕
+        </button>
+      </div>
+    `
+  }
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const composerDisabled = !keeperName || chatAccess.blocked
 
@@ -842,7 +860,7 @@ export function KeeperConversationPanel({
               onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
               layout="primary"
             />
-            ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
+            ${renderError()}
           </div>
         </div>
       </div>
@@ -967,7 +985,7 @@ export function KeeperConversationPanel({
           />
         </div>
 
-        ${error ? html`<div class="shrink-0 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
+        ${renderError('shrink-0')}
       </div>
     `
   }
@@ -1087,7 +1105,7 @@ export function KeeperConversationPanel({
         </div>
       </div>
 
-      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
+      ${renderError()}
     </div>
   `
 }

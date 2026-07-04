@@ -571,7 +571,11 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Keep the job budget above the sum of cold dune build time and the
+    # quick-suite step timeout. On 2026-07-04, PRs #23060/#23121 built
+    # successfully but cancelled during quick suite after ~42-43m builds,
+    # so a 60m job cap left less time than the suite's own 25m bound.
+    timeout-minutes: 90
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
     # (branch push to main/develop, workflow_dispatch) always run Build and Test

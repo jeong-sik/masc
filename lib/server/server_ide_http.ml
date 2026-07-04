@@ -51,11 +51,9 @@ let resolve_workspace_base ~state ~uri =
         partition, but now typed as structural-default rather than an
         ambiguous bucket.
 
-   TODO(v2 §9 read-path visibility): emit an [IdeOrphanReads_total] OTel
-   counter with a reason label for each non-[By_url] arm — currently the
-   write path ([keeper_tool_filesystem_runtime]) has [IdeOrphanWrites] but the
-   read path has no counter, so read-side orphan reasons stay invisible to
-   operators. Tracked as a follow-up sub-PR to keep this PR to typed reasons. *)
+   Read-side orphan visibility is emitted by [resolve_partition_for_read],
+   not here, so mutation routes can keep using this pure resolver without
+   being counted as reads. *)
 let resolve_partition_for_query ~state ~uri =
   let project_base = base_path_of_state state in
   match Uri.get_query_param uri "canonical_url" with
@@ -75,6 +73,30 @@ let resolve_partition_for_query ~state ~uri =
            | None -> Ide_paths.No_canonical_url)
         | None -> Ide_paths.Unmatched)
      | _ -> Ide_paths.Legacy_default)
+;;
+
+let orphan_read_reason_label = function
+  | Ide_paths.By_url _ -> None
+  | Ide_paths.No_canonical_url -> Some "no_canonical_url"
+  | Ide_paths.Unmatched -> Some "unmatched"
+  | Ide_paths.Base_unresolved -> Some "base_unresolved"
+  | Ide_paths.Legacy_default -> Some "legacy_default"
+;;
+
+let observe_orphan_read partition =
+  match orphan_read_reason_label partition with
+  | None -> ()
+  | Some reason ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_ide_orphan_reads
+      ~labels:[ "reason", reason ]
+      ()
+;;
+
+let resolve_partition_for_read ~state ~uri =
+  let partition = resolve_partition_for_query ~state ~uri in
+  observe_orphan_read partition;
+  partition
 ;;
 
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
@@ -273,7 +295,7 @@ let build_presence_snapshot state =
 let build_cursor_snapshot state uri =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
-  let partition = resolve_partition_for_query ~state ~uri in
+  let partition = resolve_partition_for_read ~state ~uri in
   let keeper_id = keeper_id_param uri in
   let file_path = file_path_param uri in
   let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
@@ -376,7 +398,7 @@ let add_routes router =
            | _ -> None
          in
          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
-         let partition = resolve_partition_for_query ~state ~uri in
+         let partition = resolve_partition_for_read ~state ~uri in
          let annotations =
            Ide_annotations.list
              ~base_dir:base
@@ -619,7 +641,7 @@ let add_routes router =
            | Some p when p <> "" -> Some p
            | _ -> None
          in
-         let partition = resolve_partition_for_query ~state ~uri in
+         let partition = resolve_partition_for_read ~state ~uri in
          let regions =
            Ide_region_tracker.read_regions
              ~base_dir:base
@@ -648,7 +670,7 @@ let add_routes router =
              reqd
          | Ok kind ->
            let base = base_path_of_state state in
-           let partition = resolve_partition_for_query ~state ~uri in
+           let partition = resolve_partition_for_read ~state ~uri in
            let keeper_id = keeper_id_param uri in
            let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
            let offset = parse_non_negative_int_query ~default:0 uri "offset" in
@@ -895,7 +917,8 @@ let add_routes router =
          let filter : Ide_annotation_types.annotation_filter =
            { file_path = None; keeper_id; goal_id = None; task_id = None }
          in
-         let annotations = Ide_annotations.list ~base_dir:base ~filter () in
+         let partition = resolve_partition_for_read ~state ~uri in
+         let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
          let entries =
            List.map (fun (a : Ide_annotation_types.annotation) ->
              `Assoc [

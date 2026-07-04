@@ -95,51 +95,78 @@ let http_request ~meth ~path ?(body = "") ?(token = None) () =
 ;;
 
 let dispatch router (request, body) =
-  let response_buf = Buffer.create 1024 in
-  let conn =
-    Httpun.Server_connection.create (fun reqd ->
-      Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
-  in
-  let request_bytes =
-    let req_str =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+    in
+    let feed input =
+      let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length input) input in
+      let rec loop off =
+        let remaining = Bigstringaf.length bytes - off in
+        if remaining > 0
+        then (
+          let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+          if consumed <= 0 then failf "httpun test feed made no progress";
+          loop (off + consumed))
+      in
+      loop 0
+    in
+    let feed_eof input =
+      let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length input) input in
+      let rec loop off =
+        let remaining = Bigstringaf.length bytes - off in
+        if remaining > 0
+        then (
+          let consumed = Httpun.Server_connection.read_eof conn bytes ~off ~len:remaining in
+          if consumed <= 0 then failf "httpun test EOF feed made no progress";
+          loop (off + consumed))
+      in
+      loop 0
+    in
+    let request_head =
       Printf.sprintf
-        "%s %s HTTP/1.1\r\n%s\r\n%s"
+        "%s %s HTTP/1.1\r\n%s"
         (Httpun.Method.to_string request.Httpun.Request.meth)
         request.Httpun.Request.target
         (Httpun.Headers.to_string request.Httpun.Request.headers)
-        body
     in
-    Bigstringaf.of_string ~off:0 ~len:(String.length req_str) req_str
-  in
-  ignore
-    (Httpun.Server_connection.read conn request_bytes ~off:0 ~len:(Bigstringaf.length request_bytes));
-  let rec flush () =
-    match Httpun.Server_connection.next_write_operation conn with
-    | `Write iovecs ->
-      List.iter
-        (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
-           Buffer.add_string
-             response_buf
-             (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
-        iovecs;
-      let written =
-        List.fold_left
-          (fun acc (iov : Bigstringaf.t Httpun.IOVec.t) -> acc + iov.len)
-          0
-          iovecs
-      in
-      Httpun.Server_connection.report_write_result conn (`Ok written);
-      flush ()
-    | `Yield | `Close _ -> ()
-  in
-  flush ();
-  Buffer.contents response_buf
+    feed request_head;
+    if not (String.equal body "") then feed_eof body;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun acc (iov : Bigstringaf.t Httpun.IOVec.t) -> acc + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    Buffer.contents response_buf)
 ;;
 
 let status_of_response response =
   match String.split_on_char ' ' response with
   | _ :: status :: _ -> int_of_string status
   | _ -> failf "could not parse status from response: %S" response
+;;
+
+let check_status label expected response =
+  let actual = status_of_response response in
+  if actual <> expected
+  then failf "%s: expected status %d, got %d; response=%S" label expected actual response
 ;;
 
 let setup_state base_path =
@@ -168,7 +195,7 @@ let test_post_annotations_rejects_client_keeper_id () =
     in
     let request = http_request ~meth:`POST ~path:"/api/v1/ide/annotations" ~body ~token:(Some token) () in
     let response = dispatch router request in
-    check int "POST with keeper_id returns 403" 403 (status_of_response response))
+    check_status "POST with keeper_id returns 403" 403 response)
 ;;
 
 let test_post_cursors_rejects_client_keeper_id () =
@@ -177,7 +204,7 @@ let test_post_cursors_rejects_client_keeper_id () =
     let body = {|{"file_path":"lib/a.ml","line":1,"keeper_id":"bob"}|} in
     let request = http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) () in
     let response = dispatch router request in
-    check int "POST cursor with keeper_id returns 403" 403 (status_of_response response))
+    check_status "POST cursor with keeper_id returns 403" 403 response)
 ;;
 
 let test_post_annotations_requires_auth () =
@@ -195,6 +222,35 @@ let test_delete_annotation_requires_auth () =
     check int "DELETE without token returns 401/403" 401 (status_of_response response))
 ;;
 
+let orphan_read_count reason =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_ide_orphan_reads
+    ~labels:[ "reason", reason ]
+    ()
+;;
+
+let test_read_annotations_records_legacy_default_orphan_metric () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let before = orphan_read_count "legacy_default" in
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/annotations" () in
+    let response = dispatch router request in
+    check int "GET annotations succeeds" 200 (status_of_response response);
+    let after = orphan_read_count "legacy_default" in
+    check (float 0.0001) "legacy_default orphan read increments" (before +. 1.0) after)
+;;
+
+let test_read_cursors_records_unmatched_repo_orphan_metric () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let before = orphan_read_count "unmatched" in
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/cursors?repo_id=missing-repo" ()
+    in
+    let response = dispatch router request in
+    check int "GET cursors succeeds" 200 (status_of_response response);
+    let after = orphan_read_count "unmatched" in
+    check (float 0.0001) "unmatched orphan read increments" (before +. 1.0) after)
+;;
+
 let () =
   run
     "server_ide_http"
@@ -206,6 +262,16 @@ let () =
         ; test_case "POST /api/v1/ide/cursors registered" `Quick
             test_post_cursors_route_is_registered
         ; test_case "read routes stay public" `Quick test_read_routes_stay_public
+        ] )
+    ; ( "read_metrics"
+      , [ test_case
+            "GET annotations records legacy_default orphan read metric"
+            `Quick
+            test_read_annotations_records_legacy_default_orphan_metric
+        ; test_case
+            "GET cursors records unmatched repo orphan read metric"
+            `Quick
+            test_read_cursors_records_unmatched_repo_orphan_metric
         ] )
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick

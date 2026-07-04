@@ -832,11 +832,31 @@ describe('SettingsSurface', () => {
           models: ['m1', 'm1-fallback'],
           temperature: 0.7,
           capabilities_declared: true,
+          max_output_tokens: 4096,
+          supports_tool_choice: true,
+          supports_required_tool_choice: true,
+          supports_named_tool_choice: true,
+          supports_parallel_tool_calls: true,
+          supports_extended_thinking: true,
           supports_multimodal_inputs: true,
           supports_image_input: true,
           supports_audio_input: true,
           supports_video_input: false,
           supports_reasoning_budget: true,
+          supports_response_format_json: true,
+          supports_structured_output: true,
+          supports_native_streaming: true,
+          supports_system_prompt: true,
+          supports_caching: true,
+          supports_prompt_caching: true,
+          prompt_cache_alignment: 1024,
+          supports_top_k: true,
+          supports_min_p: true,
+          supports_seed: true,
+          supports_seed_with_images: true,
+          emits_usage_tokens: true,
+          supports_computer_use: true,
+          supports_code_execution: true,
           note: 'verified by runtime discovery',
           parameter_policy: {
             reasoning_toggle_wire: 'chat-template-kwargs',
@@ -1026,10 +1046,17 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
       expect(cards[0]?.textContent).toContain('snapshot:source:runtime.toml')
       expect(cards[0]?.textContent).toContain('models:2')
+      expect(cards[0]?.textContent).toContain('ctx:128000')
+      expect(cards[0]?.textContent).toContain('out:4096')
       expect(cards[0]?.textContent).toContain('model-temp:0.7')
       expect(cards[0]?.textContent).toContain('caps:declared')
+      expect(cards[0]?.textContent).toContain('format:json,schema')
+      expect(cards[0]?.textContent).toContain('sampling:top_k,min_p,seed')
       expect(cards[0]?.textContent).toContain('audio:on')
       expect(cards[0]?.textContent).toContain('video:off')
+      expect(cards[0]?.textContent).toContain(
+        'controls:tool-choice,required,named,parallel,extended-thinking,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      )
       expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
       expect(cards[0]?.textContent).toContain('source:oas-provider-config')
       expect(cards[0]?.textContent).toContain('path:/chat/completions')

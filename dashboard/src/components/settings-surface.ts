@@ -214,6 +214,11 @@ function RuntimeCatalogCapability({ label, value }: { label: string; value: bool
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
 }
 
+function runtimeSnapshotPromptCache(item: DashboardRuntimeProviderSnapshot): string | null {
+  if (item.supports_prompt_caching !== true) return null
+  return `prompt-cache${typeof item.prompt_cache_alignment === 'number' ? `@${item.prompt_cache_alignment}` : ''}`
+}
+
 function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapshot): string | null {
   const modelCount = typeof item.model_count === 'number'
     ? item.model_count
@@ -221,13 +226,41 @@ function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapshot): st
       ? item.models.length
       : null
   const note = item.note?.trim()
+  const formats = [
+    item.supports_response_format_json ? 'json' : null,
+    item.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const sampling = [
+    item.supports_top_k ? 'top_k' : null,
+    item.supports_min_p ? 'min_p' : null,
+    item.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const controls = [
+    item.supports_tool_choice ? 'tool-choice' : null,
+    item.supports_required_tool_choice ? 'required' : null,
+    item.supports_named_tool_choice ? 'named' : null,
+    item.supports_parallel_tool_calls ? 'parallel' : null,
+    item.supports_extended_thinking ? 'extended-thinking' : null,
+    item.supports_native_streaming ? 'native-stream' : null,
+    item.supports_system_prompt ? 'system-prompt' : null,
+    item.supports_caching ? 'cache' : null,
+    runtimeSnapshotPromptCache(item),
+    item.supports_seed_with_images ? 'seed+images' : null,
+    item.emits_usage_tokens ? 'usage' : null,
+    item.supports_computer_use ? 'computer-use' : null,
+    item.supports_code_execution ? 'code-exec' : null,
+  ].filter((value): value is string => Boolean(value))
   const parts = [
     item.source ? `source:${item.source}` : null,
     typeof modelCount === 'number' ? `models:${modelCount}` : null,
+    typeof item.max_context === 'number' ? `ctx:${item.max_context}` : null,
+    typeof item.max_output_tokens === 'number' ? `out:${item.max_output_tokens}` : null,
     typeof item.temperature === 'number' ? `model-temp:${item.temperature}` : null,
     typeof item.capabilities_declared === 'boolean'
       ? `caps:${item.capabilities_declared ? 'declared' : 'missing'}`
       : null,
+    formats.length > 0 ? `format:${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
     typeof item.supports_multimodal_inputs === 'boolean'
       ? `multimodal:${item.supports_multimodal_inputs ? 'on' : 'off'}`
       : null,
@@ -237,6 +270,7 @@ function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapshot): st
     typeof item.supports_reasoning_budget === 'boolean'
       ? `reasoning-budget:${item.supports_reasoning_budget ? 'on' : 'off'}`
       : null,
+    controls.length > 0 ? `controls:${controls.join(',')}` : null,
     note ? `note:${note}` : null,
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null

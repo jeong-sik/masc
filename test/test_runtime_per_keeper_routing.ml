@@ -180,6 +180,7 @@ tools-support = true
 streaming = true
 
 [models.gpt.capabilities]
+max-output-tokens = 32000
 supports-tool-choice = true
 supports-required-tool-choice = true
 supports-named-tool-choice = true
@@ -188,9 +189,15 @@ supports-response-format-json = true
 supports-structured-output = true
 supports-audio-input = true
 supports-video-input = true
+supports-native-streaming = true
 supports-system-prompt = true
+supports-prompt-caching = true
+prompt-cache-alignment = 1024
+supports-top-k = true
+supports-min-p = true
 supports-seed = true
 supports-seed-with-images = true
+emits-usage-tokens = true
 supports-code-execution = true
 
 [runpod_mtp.qwen]
@@ -488,6 +495,70 @@ let test_runtime_inventory_surfaces_declared_model_capabilities () =
       "top-level video input"
       true
       (gpt |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check int)
+      "top-level max output tokens"
+      32000
+      (gpt |> J.member "max_output_tokens" |> J.to_int);
+    Alcotest.(check bool)
+      "top-level required tool choice"
+      true
+      (gpt |> J.member "supports_required_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level named tool choice"
+      true
+      (gpt |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level parallel tool calls"
+      true
+      (gpt |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level response format json"
+      true
+      (gpt |> J.member "supports_response_format_json" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level structured output"
+      true
+      (gpt |> J.member "supports_structured_output" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level native streaming"
+      true
+      (gpt |> J.member "supports_native_streaming" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level system prompt"
+      true
+      (gpt |> J.member "supports_system_prompt" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level prompt caching"
+      true
+      (gpt |> J.member "supports_prompt_caching" |> J.to_bool);
+    Alcotest.(check int)
+      "top-level prompt cache alignment"
+      1024
+      (gpt |> J.member "prompt_cache_alignment" |> J.to_int);
+    Alcotest.(check bool)
+      "top-level top_k"
+      true
+      (gpt |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level min_p"
+      true
+      (gpt |> J.member "supports_min_p" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level seed"
+      true
+      (gpt |> J.member "supports_seed" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level seed with images"
+      true
+      (gpt |> J.member "supports_seed_with_images" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level usage tokens"
+      true
+      (gpt |> J.member "emits_usage_tokens" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level code execution"
+      true
+      (gpt |> J.member "supports_code_execution" |> J.to_bool);
     Alcotest.(check bool)
       "declared audio input"
       true

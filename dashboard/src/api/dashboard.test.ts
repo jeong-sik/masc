@@ -2423,6 +2423,26 @@ describe('fetchRuntimeProviders', () => {
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
             temperature: 0.65,
+            max_output_tokens: 65536,
+            supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
+            supports_parallel_tool_calls: true,
+            supports_extended_thinking: true,
+            supports_response_format_json: true,
+            supports_structured_output: true,
+            supports_native_streaming: true,
+            supports_system_prompt: true,
+            supports_caching: true,
+            supports_prompt_caching: true,
+            prompt_cache_alignment: 1024,
+            supports_top_k: true,
+            supports_min_p: true,
+            supports_seed: true,
+            supports_seed_with_images: true,
+            emits_usage_tokens: true,
+            supports_computer_use: false,
+            supports_code_execution: true,
             supports_audio_input: true,
             supports_video_input: false,
             parameter_policy: {
@@ -2644,6 +2664,24 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[0]?.max_output_tokens).toBe(65536)
+    expect(result.providers[0]?.supports_tool_choice).toBe(true)
+    expect(result.providers[0]?.supports_required_tool_choice).toBe(true)
+    expect(result.providers[0]?.supports_named_tool_choice).toBe(true)
+    expect(result.providers[0]?.supports_parallel_tool_calls).toBe(true)
+    expect(result.providers[0]?.supports_extended_thinking).toBe(true)
+    expect(result.providers[0]?.supports_response_format_json).toBe(true)
+    expect(result.providers[0]?.supports_structured_output).toBe(true)
+    expect(result.providers[0]?.supports_native_streaming).toBe(true)
+    expect(result.providers[0]?.supports_system_prompt).toBe(true)
+    expect(result.providers[0]?.supports_prompt_caching).toBe(true)
+    expect(result.providers[0]?.prompt_cache_alignment).toBe(1024)
+    expect(result.providers[0]?.supports_top_k).toBe(true)
+    expect(result.providers[0]?.supports_min_p).toBe(true)
+    expect(result.providers[0]?.supports_seed).toBe(true)
+    expect(result.providers[0]?.supports_seed_with_images).toBe(true)
+    expect(result.providers[0]?.emits_usage_tokens).toBe(true)
+    expect(result.providers[0]?.supports_code_execution).toBe(true)
     expect(result.providers[0]?.supports_audio_input).toBe(true)
     expect(result.providers[0]?.supports_video_input).toBe(false)
     expect(result.providers[0]?.parameter_policy?.reasoning_toggle_wire).toBe('chat_template_kwargs')

@@ -252,9 +252,14 @@ function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapshot): st
   ].filter((value): value is string => Boolean(value))
   const toolChoice = runtimeCatalogRequestToolChoice(item)
   const format = runtimeCatalogRequestFormat(item)
+  const requestPath = request.request_path_targets_responses_api
+    ? 'responses-api'
+    : request.request_path
+      ? `path:${request.request_path}`
+      : null
   const parts = [
     request.provider_kind ? `kind:${request.provider_kind}` : null,
-    request.request_path_targets_responses_api ? 'responses-api' : null,
+    requestPath,
     typeof request.max_tokens === 'number' ? `out:${request.max_tokens}` : null,
     typeof request.max_context === 'number' ? `ctx:${request.max_context}` : null,
     sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,

@@ -190,16 +190,14 @@ let prompt_for_facts facts_json =
 
 let apply_operator_judge_output_schema provider_cfg =
   let schema = Keeper_structured_output_schema.operator_judge_output_schema in
-  let provider_cfg =
+  let native_cfg =
     Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
   in
-  match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
-  | Ok () -> Ok provider_cfg
-  | Error detail ->
-      Error
-        (Agent_sdk.Error.Config
-           (Agent_sdk.Error.InvalidConfig
-              { field = "dashboard.operator_judge.output_schema"; detail }))
+  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
+  | Ok () -> Ok native_cfg
+  | Error _ ->
+      (* Schema unavailable (GLM, MiMo, ollama cloud): prompt-tier fallback. *)
+      Ok provider_cfg
 
 let workspace_judgment_json json =
   match Json_util.assoc_member_opt "workspace" json with

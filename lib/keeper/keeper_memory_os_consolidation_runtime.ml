@@ -78,14 +78,23 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
     | Some n when n > 0 -> Some n
     | Some _ | None -> Some consolidation_max_tokens
   in
-  { provider_cfg with
-    Llm_provider.Provider_config.max_tokens
-  ; temperature = Some 0.0
-  ; tool_choice = None
-  ; disable_parallel_tool_use = true
-  }
-    |> Keeper_structured_output_schema.apply_to_provider_config
-         Keeper_structured_output_schema.consolidation_plan_output_schema
+  let tuned_cfg =
+    { provider_cfg with
+      Llm_provider.Provider_config.max_tokens
+    ; temperature = Some 0.0
+    ; tool_choice = None
+    ; disable_parallel_tool_use = true
+    }
+  in
+  let native_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config
+      Keeper_structured_output_schema.consolidation_plan_output_schema tuned_cfg
+  in
+  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
+  | Ok () -> native_cfg
+  (* Schema unavailable (GLM, MiMo, ollama cloud): prompt-tier fallback. Mirrors
+     fusion_judge's fallback; caller's parse-retry is the silent-failure net. *)
+  | Error _ -> tuned_cfg
 ;;
 
 let validate_provider_for_consolidation provider_cfg =

@@ -29,7 +29,9 @@ type outcome =
     and (unless [dry_run]) rewrite the store atomically only if the fact snapshot
     still matches the model's input. Below a minimum fact count it skips the LLM
     call. Returns the outcome without raising for the expected failure modes so a
-    caller fiber stays alive. *)
+    caller fiber stays alive. If [timeout_sec] is configured but no [clock] is
+    available, the provider call is refused as [Transport_failed _] rather than
+    running without a deadline. *)
 val consolidate_keeper
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

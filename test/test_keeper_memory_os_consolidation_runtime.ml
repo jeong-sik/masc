@@ -124,6 +124,7 @@ let test_consolidate_applies_plan () =
             ~complete:(fake_complete plan)
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -158,6 +159,7 @@ let test_consolidate_skips_too_few () =
             ~complete:(fake_complete "{}")
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -187,6 +189,7 @@ let test_consolidate_dry_run_preserves_store () =
             ~dry_run:true
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -227,6 +230,7 @@ let test_consolidate_rejects_stale_snapshot () =
             ~complete
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -274,6 +278,7 @@ let test_consolidate_rejects_malformed_fact_store () =
             ~complete:(fake_complete "{}")
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -302,6 +307,7 @@ let test_consolidate_classifies_empty_provider_response () =
             ~complete:(fake_complete "   ")
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -326,6 +332,7 @@ let test_consolidate_classifies_invalid_structured_response () =
             ~complete:(fake_complete "not json {{{")
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -346,6 +353,46 @@ let test_consolidate_classifies_invalid_structured_response () =
         | _ ->
           Alcotest.fail
             "expected Invalid_structured_response for malformed provider output"))))
+;;
+
+let test_consolidate_requires_clock_before_provider_call () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let called = ref false in
+        let complete : Runtime.complete_fn =
+          fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+          called := true;
+          Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
+        in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete
+            ~timeout_sec:1.0
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        Alcotest.(check bool) "provider was not called" false !called;
+        match outcome with
+        | Runtime.Transport_failed msg ->
+          Alcotest.(check bool)
+            "message names unavailable clock"
+            true
+            (contains "clock unavailable" msg);
+          Alcotest.(check bool)
+            "message names timeout"
+            true
+            (contains "timeout_sec=1.0" msg)
+        | _ -> Alcotest.fail "expected Transport_failed for missing clock"))))
 ;;
 
 let test_consolidate_respects_provider_config_and_prompt_template () =
@@ -392,6 +439,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
             ~complete
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~provider_cfg:(provider_cfg ~max_tokens:512 ())
             ~now
             ~keeper_id
@@ -440,6 +488,10 @@ let () =
             "classifies invalid structured provider response"
             `Quick
             test_consolidate_classifies_invalid_structured_response
+        ; Alcotest.test_case
+            "requires clock before provider call"
+            `Quick
+            test_consolidate_requires_clock_before_provider_call
         ; Alcotest.test_case
             "respects provider config and prompt template"
             `Quick

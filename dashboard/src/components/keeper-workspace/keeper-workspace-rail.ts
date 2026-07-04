@@ -272,6 +272,7 @@ function runtimeDeclaredSpecSummary(
   const parts = [
     spec.provider?.api_format ? spec.provider.api_format : null,
     spec.provider?.protocol ? spec.provider.protocol : null,
+    spec.provider?.transport ? `transport ${spec.provider.transport}` : null,
     spec.provider?.auth_kind ? `auth ${spec.provider.auth_kind}` : null,
     spec.provider?.is_non_interactive ? 'non-interactive' : null,
     typeof spec.provider?.custom_header_count === 'number' ? `headers ${spec.provider.custom_header_count}` : null,

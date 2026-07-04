@@ -214,6 +214,119 @@ function RuntimeCatalogCapability({ label, value }: { label: string; value: bool
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
 }
 
+function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnapshot): string | null {
+  const policy = item.parameter_policy
+  if (!policy) return null
+  const ignored = policy.ignored_sampling_params.join(',')
+  const alwaysIgnored = policy.always_ignored_sampling_params.join(',')
+  const parts = [
+    policy.reasoning_toggle_wire ? `wire:${policy.reasoning_toggle_wire}` : null,
+    policy.reasoning_replay_policy ? `replay:${policy.reasoning_replay_policy}` : null,
+    ignored ? `ignore:${ignored}` : null,
+    alwaysIgnored ? `always:${alwaysIgnored}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeCatalogRequestToolChoice(item: DashboardRuntimeProviderSnapshot): string | null {
+  const choice = item.request_config?.tool_choice
+  if (!choice?.kind) return null
+  return choice.name ? `${choice.kind}:${choice.name}` : choice.kind
+}
+
+function runtimeCatalogRequestFormat(item: DashboardRuntimeProviderSnapshot): string | null {
+  const format = item.request_config?.response_format
+  if (!format?.kind) return null
+  return format.has_schema ? `${format.kind}+schema` : format.kind
+}
+
+function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapshot): string | null {
+  const request = item.request_config
+  if (!request) return null
+  const sampling = [
+    typeof request.temperature === 'number' ? `temp:${request.temperature}` : null,
+    typeof request.top_p === 'number' ? `top_p:${request.top_p}` : null,
+    typeof request.top_k === 'number' ? `top_k:${request.top_k}` : null,
+    typeof request.min_p === 'number' ? `min_p:${request.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = runtimeCatalogRequestToolChoice(item)
+  const format = runtimeCatalogRequestFormat(item)
+  const parts = [
+    request.provider_kind ? `kind:${request.provider_kind}` : null,
+    request.request_path_targets_responses_api ? 'responses-api' : null,
+    typeof request.max_tokens === 'number' ? `out:${request.max_tokens}` : null,
+    typeof request.max_context === 'number' ? `ctx:${request.max_context}` : null,
+    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+    typeof request.enable_thinking === 'boolean' ? `think:${request.enable_thinking ? 'on' : 'off'}` : null,
+    request.resolved_reasoning_effort ? `effort:${request.resolved_reasoning_effort}` : null,
+    toolChoice ? `tool:${toolChoice}` : null,
+    request.disable_parallel_tool_use ? 'parallel:off' : null,
+    format ? `format:${format}` : null,
+    typeof request.seed === 'number' ? `seed:${request.seed}` : null,
+    typeof request.num_ctx === 'number' ? `num_ctx:${request.num_ctx}` : null,
+    request.keep_alive ? `keep:${request.keep_alive}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapshot): string | null {
+  const spec = item.declared_spec
+  if (!spec) return null
+  const caps = spec.model?.capabilities
+  const sampling = [
+    caps?.supports_top_k ? 'top_k' : null,
+    caps?.supports_min_p ? 'min_p' : null,
+    caps?.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const formats = [
+    caps?.supports_response_format_json ? 'json' : null,
+    caps?.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  let thinking: string | null = null
+  if (typeof spec.model?.thinking_support === 'boolean') {
+    thinking = spec.model.thinking_support ? 'think:on' : 'think:off'
+  }
+  const parts = [
+    spec.provider?.api_format ? `api:${spec.provider.api_format}` : null,
+    spec.provider?.protocol ? `protocol:${spec.provider.protocol}` : null,
+    typeof spec.model?.max_context === 'number' ? `ctx:${spec.model.max_context}` : null,
+    thinking,
+    caps?.thinking_control_format ? `wire:${caps.thinking_control_format}` : null,
+    typeof caps?.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null,
+    formats.length > 0 ? `format:${formats.join(',')}` : null,
+    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+    typeof spec.binding?.max_concurrent === 'number' ? `concurrency:${spec.binding.max_concurrent}` : null,
+    spec.binding?.keep_alive ? `keep:${spec.binding.keep_alive}` : null,
+    typeof spec.binding?.num_ctx === 'number' ? `num_ctx:${spec.binding.num_ctx}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnapshot): string | null {
+  const caps = item.effective_capabilities
+  if (!caps) return null
+  const sampling = [
+    caps.supports_top_k ? 'top_k' : null,
+    caps.supports_min_p ? 'min_p' : null,
+    caps.supports_seed ? 'seed' : null,
+  ].filter((value): value is string => Boolean(value))
+  const output = typeof caps.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null
+  const format = [
+    caps.supports_response_format_json ? 'json' : null,
+    caps.supports_structured_output ? 'schema' : null,
+  ].filter((value): value is string => Boolean(value))
+  const toolChoice = caps.supports_tool_choice
+    ? `tool-choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    : null
+  const parts = [
+    output,
+    toolChoice,
+    format.length > 0 ? `format:${format.join(',')}` : null,
+    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
   if (!defaults) return []
   return defaults.runtimes.map((entry: RuntimeEntry) => ({
@@ -249,6 +362,10 @@ function RuntimeCatalogCard({
   const transport = item.endpoint_url ?? item.transport ?? item.kind ?? 'transport 미수집'
   const status = item.available === false ? 'unavailable' : item.status ?? 'configured'
   const isDefault = runtimeId === (defaultRuntimeId ?? '')
+  const effectiveCapabilities = runtimeCatalogEffectiveCapabilities(item)
+  const parameterPolicy = runtimeCatalogParameterPolicy(item)
+  const requestConfig = runtimeCatalogRequestConfig(item)
+  const declaredSpec = runtimeCatalogDeclaredSpec(item)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -274,6 +391,18 @@ function RuntimeCatalogCard({
         <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
         <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
         <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
+        ${effectiveCapabilities
+          ? html`<span class="rt-cap tcf mono" title=${effectiveCapabilities}>${effectiveCapabilities}</span>`
+          : null}
+        ${parameterPolicy
+          ? html`<span class="rt-cap tcf mono" title=${parameterPolicy}>${parameterPolicy}</span>`
+          : null}
+        ${requestConfig
+          ? html`<span class="rt-cap tcf mono" title=${requestConfig}>${requestConfig}</span>`
+          : null}
+        ${declaredSpec
+          ? html`<span class="rt-cap tcf mono" title=${declaredSpec}>declared:${declaredSpec}</span>`
+          : null}
       </div>
       <div class="set-rt-row">
         <span class="sub-k">transport</span>

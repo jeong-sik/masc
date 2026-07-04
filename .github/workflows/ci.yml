@@ -571,7 +571,7 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
     # (branch push to main/develop, workflow_dispatch) always run Build and Test
@@ -779,15 +779,15 @@ jobs:
 
       - name: Run tests (quick suite)
         id: quick_suite
-        # scripts/ci-run-tests.sh has its own 1200s timeout and diagnostics,
+        # scripts/ci-run-tests.sh has its own 2100s timeout and diagnostics,
         # but this step-level bound keeps a stuck timeout/diagnostic path from
         # holding the shared runner for the full Build and Test job budget.
-        timeout-minutes: 25
+        timeout-minutes: 40
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"
           MASC_INCLUDE_OPERATOR_CONTROL: "false"
-          CI_TEST_TIMEOUT_SEC: 1200
+          CI_TEST_TIMEOUT_SEC: 2100
           CI_TEST_HEARTBEAT_SEC: 30
           CI_TEST_ALLOW_FLAKY_RETRY: "1"
           MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'

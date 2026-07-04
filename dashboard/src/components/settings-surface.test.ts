@@ -968,6 +968,7 @@ describe('SettingsSurface', () => {
         expect.stringContaining('Provider B'),
       ])
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
+      expect(cards[0]?.textContent).toContain('path:/chat/completions')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
       expect(cards[0]?.textContent).toContain('ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')

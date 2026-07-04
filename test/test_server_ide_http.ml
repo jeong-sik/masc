@@ -10,6 +10,7 @@ open Alcotest
 
 module Auth = Masc.Auth
 module Http = Masc.Http_server_eio
+module Json = Yojson.Safe.Util
 
 let has_route meth path router =
   List.exists
@@ -169,6 +170,36 @@ let check_status label expected response =
   then failf "%s: expected status %d, got %d; response=%S" label expected actual response
 ;;
 
+let response_body response =
+  let marker = "\r\n\r\n" in
+  let marker_len = String.length marker in
+  let response_len = String.length response in
+  let rec loop i =
+    if i + marker_len > response_len
+    then failf "could not find response body separator in: %S" response
+    else if String.equal (String.sub response i marker_len) marker
+    then
+      String.sub
+        response
+        (i + marker_len)
+        (response_len - i - marker_len)
+    else loop (i + 1)
+  in
+  loop 0
+;;
+
+let json_string_member label key json =
+  match Json.member key json with
+  | `String value -> value
+  | other -> failf "%s: expected string member %s, got %s" label key (Yojson.Safe.to_string other)
+;;
+
+let json_list_member label key json =
+  match Json.member key json with
+  | `List values -> values
+  | other -> failf "%s: expected list member %s, got %s" label key (Yojson.Safe.to_string other)
+;;
+
 let setup_state base_path =
   save_auth_config base_path;
   let state = Masc.Mcp_server.create_state ~base_path in
@@ -251,6 +282,60 @@ let test_read_cursors_records_unmatched_repo_orphan_metric () =
     check (float 0.0001) "unmatched orphan read increments" (before +. 1.0) after)
 ;;
 
+let test_memory_response_declares_annotation_source_contract () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    (match
+       Ide_annotations.create
+         ~base_dir:base_path
+         ~keeper_id:"alice"
+         ~file_path:"lib/a.ml"
+         ~line_start:1
+         ~line_end:1
+         ~kind:Ide_annotation_types.Comment
+         ~content:"remember annotation source"
+         ()
+     with
+     | Ok _ -> ()
+     | Error msg -> failf "create annotation failed: %s" msg);
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/memory?keeper_id=alice" ()
+    in
+    let response = dispatch router request in
+    check int "GET memory succeeds" 200 (status_of_response response);
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    let contract = Json.member "contract" json in
+    check
+      string
+      "memory contract source"
+      "ide_annotation"
+      (json_string_member "contract" "source_kind" contract);
+    check
+      string
+      "memory contract retrieval"
+      "annotation_index_only"
+      (json_string_member "contract" "retrieval_status" contract);
+    check
+      string
+      "semantic status"
+      "not_configured"
+      (json_string_member "contract" "semantic_memory_status" contract);
+    let entry =
+      match json_list_member "memory response" "entries" json with
+      | entry :: _ -> entry
+      | [] -> fail "expected memory response entry"
+    in
+    check
+      string
+      "entry source"
+      "ide_annotation"
+      (json_string_member "entry" "source_kind" entry);
+    check
+      string
+      "entry retrieval"
+      "annotation_index_only"
+      (json_string_member "entry" "retrieval_status" entry))
+;;
+
 let () =
   run
     "server_ide_http"
@@ -272,6 +357,10 @@ let () =
             "GET cursors records unmatched repo orphan read metric"
             `Quick
             test_read_cursors_records_unmatched_repo_orphan_metric
+        ; test_case
+            "GET memory declares annotation source contract"
+            `Quick
+            test_memory_response_declares_annotation_source_contract
         ] )
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick

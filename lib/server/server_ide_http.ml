@@ -83,6 +83,11 @@ let orphan_read_reason_label = function
   | Ide_paths.Legacy_default -> Some "legacy_default"
 ;;
 
+let ide_memory_source_kind = "ide_annotation"
+let ide_memory_retrieval_status = "annotation_index_only"
+let ide_memory_semantic_status = "not_configured"
+let ide_memory_episodic_status = "not_configured"
+
 let observe_orphan_read partition =
   match orphan_read_reason_label partition with
   | None -> ()
@@ -930,6 +935,8 @@ let add_routes router =
                ("line_end", `Int a.line_end);
                ("keeper_id", `String a.keeper_id);
                ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
+               ("source_kind", `String ide_memory_source_kind);
+               ("retrieval_status", `String ide_memory_retrieval_status);
                ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
                ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
              ])
@@ -939,6 +946,13 @@ let add_routes router =
            ("entries", `List entries);
            ("total", `Int (List.length annotations));
            ("limit", `Int limit);
+           ( "contract"
+           , `Assoc
+               [ ("source_kind", `String ide_memory_source_kind)
+               ; ("retrieval_status", `String ide_memory_retrieval_status)
+               ; ("semantic_memory_status", `String ide_memory_semantic_status)
+               ; ("episodic_memory_status", `String ide_memory_episodic_status)
+               ] );
          ] in
          let origin = get_origin request in
          let headers =

@@ -19,11 +19,19 @@ describe('IdeMemoryPanel', () => {
           line_end: 12,
           keeper_id: 'sangsu',
           created_at_ms: Date.now(),
+          source_kind: 'ide_annotation',
+          retrieval_status: 'annotation_index_only',
           goal_id: 'goal-runtime',
           task_id: null,
         }],
         total: 1,
         limit: 50,
+        contract: {
+          source_kind: 'ide_annotation',
+          retrieval_status: 'annotation_index_only',
+          semantic_memory_status: 'not_configured',
+          episodic_memory_status: 'not_configured',
+        },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
   })
@@ -41,5 +49,8 @@ describe('IdeMemoryPanel', () => {
       expect(container.querySelector('.ide-memory-panel__entry.v2-ide-row')).not.toBeNull()
     })
     expect(container.querySelector('.ide-memory-panel__refresh.v2-ide-action')).not.toBeNull()
+    expect(container.textContent).toContain('source:annotation')
+    expect(container.textContent).toContain('semantic:not configured')
+    expect(container.textContent).toContain('retrieval:annotation index')
   })
 })

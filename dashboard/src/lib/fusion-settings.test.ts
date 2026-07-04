@@ -4,6 +4,7 @@ import {
   readFusionSettingsResult,
   readFusionPresetMinAnswered,
   applyFusionSettings,
+  applyFusionPresetComposition,
   FUSION_SETTINGS_DEFAULTS,
 } from './fusion-settings'
 
@@ -194,5 +195,30 @@ min_answered = 1
     expect(next).toContain('[runtime]')
     expect(next).toContain('default = "x.y"')
     expect(next).toContain('judge = "j"')
+  })
+
+  it('writes active flat preset panel runtimes and judge runtime', () => {
+    const next = applyFusionPresetComposition(SAMPLE, {
+      preset: 'trio',
+      panel: ['a', 'b', 'd', 'd', ' '],
+      judge: 'meta.judge',
+    })
+
+    const trio = next.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0] ?? ''
+    expect(trio).toContain('panel = ["a", "b", "d"]')
+    expect(trio).toContain('judge = "meta.judge"')
+    expect(trio).toContain('min_answered = 2')
+  })
+
+  it('refuses to flatten grouped panel presets', () => {
+    const grouped = `${SAMPLE}
+[[fusion.presets.trio.panels]]
+panel = ["a", "b"]
+`
+    expect(() => applyFusionPresetComposition(grouped, {
+      preset: 'trio',
+      panel: ['x'],
+      judge: 'j',
+    })).toThrow(/grouped fusion panel presets/)
   })
 })

@@ -16,7 +16,7 @@
 // inside a `[section]` (dotted section names like `fusion.presets.trio` are
 // matched as literal headers). Inline tables and multi-line string values are
 // out of scope — the fusion keys here are all scalar single-line values.
-import { deleteRuntimeTomlKey, getRuntimeTomlKey, setRuntimeTomlKey } from './runtime-toml-config'
+import { deleteRuntimeTomlKey, getRuntimeTomlKey, setRuntimeTomlKey, setRuntimeTomlStringArrayKey } from './runtime-toml-config'
 
 // TOML section/key names, kept in one place rather than inlined at each call
 // site (mirrors lib/fusion_core/fusion_config.ml — the OCaml parser is the SSOT
@@ -26,6 +26,8 @@ const KEY_ENABLED = 'enabled'
 const KEY_DEFAULT_PRESET = 'default_preset'
 const KEY_MAX_CONCURRENT_PANELS = 'max_concurrent_panels'
 const KEY_MIN_ANSWERED = 'min_answered'
+const KEY_PANEL = 'panel'
+const KEY_JUDGE = 'judge'
 const presetSection = (preset: string): string => `${SECTION_FUSION}.presets.${preset}`
 
 export interface FusionSettings {
@@ -34,6 +36,12 @@ export interface FusionSettings {
   readonly maxConcurrentPanels: number
   // min_answered for the default preset (RFC-0252 answered-panel quorum).
   readonly minAnswered: number
+}
+
+export interface FusionPresetComposition {
+  readonly preset: string
+  readonly panel: readonly string[]
+  readonly judge: string
 }
 
 export interface FusionSettingsParseIssue {
@@ -162,6 +170,23 @@ function sectionExists(sourceText: string, sectionName: string): boolean {
   return new RegExp(`^\\s*\\[${escaped}\\]\\s*(?:#.*)?$`, 'm').test(sourceText)
 }
 
+function hasArrayOfTables(sourceText: string, sectionName: string, child: string): boolean {
+  const escaped = `${sectionName}.${child}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^\\s*\\[\\[${escaped}\\]\\]\\s*(?:#.*)?$`, 'm').test(sourceText)
+}
+
+function uniqueNonEmpty(values: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const trimmed = value.trim()
+    if (trimmed === '' || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    result.push(trimmed)
+  }
+  return result
+}
+
 export function readFusionSettingsResult(sourceText: string): FusionSettingsReadResult {
   const issues: FusionSettingsParseIssue[] = []
   const enabledParsed = parseBoolean(
@@ -273,5 +298,22 @@ export function applyFusionSettings(sourceText: string, s: FusionSettings): stri
   if (s.defaultPreset !== '') {
     text = setRuntimeTomlKey(text, presetSection(s.defaultPreset), KEY_MIN_ANSWERED, s.minAnswered)
   }
+  return text
+}
+
+export function applyFusionPresetComposition(sourceText: string, composition: FusionPresetComposition): string {
+  const preset = composition.preset.trim()
+  if (preset === '') throw new Error('fusion preset composition requires a default_preset')
+  const section = presetSection(preset)
+  if (hasArrayOfTables(sourceText, section, 'panels')) {
+    throw new Error('grouped fusion panel presets cannot be edited by the flat preset writer')
+  }
+  const panel = uniqueNonEmpty(composition.panel)
+  let text = sourceText
+  text = setRuntimeTomlStringArrayKey(text, section, KEY_PANEL, panel)
+  const judge = composition.judge.trim()
+  text = judge === ''
+    ? deleteRuntimeTomlKey(text, section, KEY_JUDGE)
+    : setRuntimeTomlKey(text, section, KEY_JUDGE, judge)
   return text
 }

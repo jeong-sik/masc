@@ -119,17 +119,19 @@ let () =
   (match
      stimulus_of_yojson
        (stimulus_to_yojson
-          { post_id = hitl_resolution_post_id { approval_id = "appr-9"; decision = "approve" }
+          { post_id =
+              hitl_resolution_post_id
+                { approval_id = "appr-9"; decision = Hitl_approved }
           ; urgency = Immediate
           ; arrived_at = 4.0
-          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = "approve" }
+          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved }
           })
    with
    | Ok s ->
      (match s.payload with
       | Hitl_resolved { approval_id; decision } ->
         assert (String.equal approval_id "appr-9");
-        assert (String.equal decision "approve");
+        assert (decision = Hitl_approved);
         assert (String.equal s.post_id "hitl-approval:appr-9")
       | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));

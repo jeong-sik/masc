@@ -794,7 +794,11 @@ let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
    pre-bootstrap contexts stay wake-free; [Server_bootstrap] installs the real
    [Keeper_keepalive_signal]-backed wake. *)
 let approval_resolution_wake_hook :
-    (base_path:string -> keeper_name:string -> approval_id:string -> decision:string -> unit)
+    (base_path:string ->
+     keeper_name:string ->
+     approval_id:string ->
+     decision:Keeper_event_queue.hitl_resolution_decision ->
+     unit)
     ref =
   ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ())
 
@@ -809,6 +813,12 @@ let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~dec
       "hitl resolution wake failed approval=%s: %s"
       approval_id
       (Printexc.to_string exn)
+;;
+
+let hitl_resolution_decision_of_approval_decision = function
+  | Agent_sdk.Hooks.Approve -> Keeper_event_queue.Hitl_approved
+  | Agent_sdk.Hooks.Reject _ -> Keeper_event_queue.Hitl_rejected
+  | Agent_sdk.Hooks.Edit _ -> Keeper_event_queue.Hitl_edited
 ;;
 
 let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
@@ -861,7 +871,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ~base_path
     ~keeper_name:entry.keeper_name
     ~approval_id:entry.id
-    ~decision:decision_str;
+    ~decision:(hitl_resolution_decision_of_approval_decision decision);
   try
     Sse.broadcast
       (`Assoc
@@ -1454,7 +1464,7 @@ let expire_stale ~max_wait_s =
          ~base_path:entry.audit_base_path
          ~keeper_name:entry.keeper_name
          ~approval_id:id
-         ~decision:"reject";
+         ~decision:Keeper_event_queue.Hitl_rejected;
        (match entry.resolver with
         | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
         | None -> ());

@@ -202,7 +202,7 @@ let consume_single_heartbeat_stimulus
     Log.Keeper.info
       "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
       r.approval_id
-      r.decision
+      (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
       meta_after_triage.name;
     []
 ;;

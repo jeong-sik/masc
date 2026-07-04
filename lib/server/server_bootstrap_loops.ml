@@ -505,6 +505,7 @@ let start_keeper_loops
   Keeper_approval_queue.set_approval_resolution_wake_hook
     (fun ~base_path ~keeper_name ~approval_id ~decision ->
        let resolution = Keeper_event_queue.{ approval_id; decision } in
+       let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
        let stimulus : Keeper_event_queue.stimulus =
          { Keeper_event_queue.post_id = Keeper_event_queue.hitl_resolution_post_id resolution
          ; urgency = Keeper_event_queue.Immediate
@@ -516,7 +517,7 @@ let start_keeper_loops
          "hitl resolution wake: keeper=%s approval=%s decision=%s"
          keeper_name
          approval_id
-         decision;
+         decision_label;
        Keeper_keepalive_signal.wakeup_keeper ~base_path ~stimulus keeper_name);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in

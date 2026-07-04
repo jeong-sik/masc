@@ -169,7 +169,10 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
   | Keeper_event_queue.Connector_attention ca ->
     Printf.sprintf "connector_attention event_id=%s" ca.event_id
   | Keeper_event_queue.Hitl_resolved r ->
-    Printf.sprintf "hitl_resolved approval=%s decision=%s" r.approval_id r.decision
+    Printf.sprintf
+      "hitl_resolved approval=%s decision=%s"
+      r.approval_id
+      (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =

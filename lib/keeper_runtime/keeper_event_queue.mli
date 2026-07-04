@@ -109,9 +109,14 @@ and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
 
+and hitl_resolution_decision =
+  | Hitl_approved
+  | Hitl_rejected
+  | Hitl_edited
+
 and hitl_resolution = {
   approval_id : string;
-  decision : string;
+  decision : hitl_resolution_decision;
 }
 (** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
     pending-approval queue entry; [decision] is the resolved label
@@ -137,6 +142,9 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)
+
+val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
+(** Stable wire/log label for a HITL resolution wake decision. *)
 
 val bg_job_kind_to_string : bg_job_kind -> string
 (** RFC-0290: stable label for a background job kind, for logs and correlation

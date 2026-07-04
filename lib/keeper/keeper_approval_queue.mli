@@ -317,7 +317,11 @@ val submit_pending :
     [has_pending_for_keeper]. The default is a no-op; [Server_bootstrap]
     installs the [Hitl_resolved]-stimulus wake. *)
 val set_approval_resolution_wake_hook :
-  (base_path:string -> keeper_name:string -> approval_id:string -> decision:string -> unit) ->
+  (base_path:string ->
+   keeper_name:string ->
+   approval_id:string ->
+   decision:Keeper_event_queue.hitl_resolution_decision ->
+   unit) ->
   unit
 
 (** Resolve a pending approval and optionally remember the decision

@@ -162,9 +162,9 @@ let test_resolve_fires_keeper_wake_hook () =
           Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
           Alcotest.(check string) "wake carries the resolved approval id" id aid;
           Alcotest.(check bool)
-            "wake carries a non-empty decision label"
+            "wake carries the typed decision label"
             true
-            (String.length decision > 0)
+            (decision = Keeper_event_queue.Hitl_approved)
         | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
        yield_until (fun () -> Option.is_some !result))
 ;;

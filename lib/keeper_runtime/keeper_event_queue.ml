@@ -71,13 +71,18 @@ and bg_job_kind = Subprocess
       (* RFC-0290: closed sum of background job kinds (v1 = [Subprocess]); a new
          kind forces every match to add an arm rather than defaulting. *)
 
+and hitl_resolution_decision =
+  | Hitl_approved
+  | Hitl_rejected
+  | Hitl_edited
+
 and hitl_resolution = {
   approval_id : string;
   (* the resolved pending-approval id; correlates to the queue entry. *)
-  decision : string;
-  (* resolved decision label ("approve" | "reject" | ...); carried for
-     observability, not for control flow — the keeper re-evaluates from its
-     own state once the approval is gone from the queue. *)
+  decision : hitl_resolution_decision;
+  (* resolved decision label carried for observability, not control flow — the
+     keeper re-evaluates from its own state once the approval is gone from the
+     queue. *)
 }
 
 and bg_job_outcome =
@@ -98,6 +103,17 @@ let bg_job_completion_post_id (c : bg_job_completion) =
   else c.bg_board_post_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
+
+let hitl_resolution_decision_to_string = function
+  | Hitl_approved -> "approve"
+  | Hitl_rejected -> "reject"
+  | Hitl_edited -> "edit"
+
+let hitl_resolution_decision_of_string = function
+  | "approve" -> Ok Hitl_approved
+  | "reject" -> Ok Hitl_rejected
+  | "edit" -> Ok Hitl_edited
+  | other -> Error (Printf.sprintf "unknown hitl_resolution decision: %s" other)
 
 let bg_job_kind_to_string = function
   | Subprocess -> "subprocess"
@@ -353,7 +369,7 @@ let payload_to_yojson = function
     `Assoc
       [ "kind", `String "hitl_resolved"
       ; "approval_id", `String r.approval_id
-      ; "decision", `String r.decision
+      ; "decision", `String (hitl_resolution_decision_to_string r.decision)
       ]
 
 let payload_of_yojson json =
@@ -394,7 +410,8 @@ let payload_of_yojson json =
     Ok (Connector_attention { event_id })
   | "hitl_resolved" ->
     let* approval_id = string_field ~context "approval_id" fields in
-    let* decision = string_field ~context "decision" fields in
+    let* decision_s = string_field ~context "decision" fields in
+    let* decision = hitl_resolution_decision_of_string decision_s in
     Ok (Hitl_resolved { approval_id; decision })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 

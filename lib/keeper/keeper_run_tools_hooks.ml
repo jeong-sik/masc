@@ -17,6 +17,7 @@ type agent_setup =
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -36,7 +37,9 @@ type ctx =
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
+  ; max_context : int
   ; meta : Keeper_meta_contract.keeper_meta
+  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_oas. *)
@@ -82,7 +85,9 @@ let assemble_hooks
   let config = ctx.config in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
+  let max_context = ctx.max_context in
   let meta = ctx.meta in
+  let tool_context_estimate = ctx.tool_context_estimate in
   let turn_ctx_cell = ctx.turn_ctx_cell in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
@@ -268,26 +273,23 @@ let assemble_hooks
                 let record_block block text =
                   recorded_blocks := (block, text) :: !recorded_blocks
                 in
-                let ctx =
-                  if String.trim dynamic_context = ""
-                  then current_params.extra_system_context
-                  else (
-                    record_block Prompt_block_id.Dynamic_context dynamic_context;
-                    match current_params.extra_system_context with
-                    | None -> Some dynamic_context
-                    | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context))
+                let preflight_accounted_blocks = ref [] in
+                let record_preflight_accounted_block block text =
+                  record_block block text;
+                  preflight_accounted_blocks := block :: !preflight_accounted_blocks
                 in
-                let ctx =
-                  match Masc_context_injector.render_temporal_summary shared_context with
-                  | None -> ctx
-                  | Some temporal ->
-                    record_block Prompt_block_id.Temporal_summary temporal;
-                    (match ctx with
-                     | None -> Some temporal
-                     | Some existing -> Some (existing ^ "\n\n" ^ temporal))
-                in
-                let ctx =
-                  match acc.meta.current_task_id with
+                (if String.trim dynamic_context <> ""
+                 then
+                   record_preflight_accounted_block
+                     Prompt_block_id.Dynamic_context
+                     dynamic_context);
+                (match Masc_context_injector.render_temporal_summary shared_context with
+                 | None -> ()
+                 | Some temporal ->
+                   record_preflight_accounted_block
+                     Prompt_block_id.Temporal_summary
+                     temporal);
+                (match acc.meta.current_task_id with
                   | Some task_id ->
                     let last_tool_names =
                       let rev = List.rev messages in
@@ -321,12 +323,8 @@ let assemble_hooks
                           (Keeper_id.Task_id.to_string task_id)
                       in
                       record_block Prompt_block_id.Claimed_task_nudge nudge;
-                      match ctx with
-                      | None -> Some nudge
-                      | Some existing -> Some (existing ^ "\n\n" ^ nudge))
-                    else ctx
-                  | None -> ctx
-                in
+                      ())
+                  | None -> ());
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
@@ -335,72 +333,69 @@ let assemble_hooks
                     ~decay_discovered:true
                     ()
                 in
-                let append_ctx ctx text =
-                  Some
-                    (match ctx with
-                     | None -> text
-                     | Some e -> e ^ "\n\n" ^ text)
-                in
-                let ctx =
-                  if is_retry
-                  then (
+                (if is_retry
+                 then (
                     let retry_nudge =
                       "[RETRY] The previous attempt overflowed the model context. \
                        Stay concise, prefer already-loaded context, and only use the \
                        smallest essential tool set if a tool call is strictly \
                        necessary."
                     in
-                    record_block Prompt_block_id.Retry_nudge retry_nudge;
-                    append_ctx ctx retry_nudge)
-                  else ctx
+                    record_block Prompt_block_id.Retry_nudge retry_nudge));
+                (match
+                   (* Off-main: [render_if_enabled] performs synchronous file I/O
+                      (stat/readdir/open over the persisted memory store). Running
+                      it directly on the main Eio domain blocks the cooperative
+                      scheduler, head-of-line-blocking every sibling keeper fiber
+                      until the syscalls return. Push the I/O onto the shared
+                      domain pool ([submit_io_or_inline] runs inline when no pool
+                      is configured, e.g. tests). The render is read-side only and
+                      keeps no module-level mutable state, so it is domain-safe. *)
+                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                     Keeper_user_model.render_if_enabled
+                       ~keeper_id:meta.name
+                       ~now:(Time_compat.now ())
+                       ())
+                 with
+                 | None -> ()
+                 | Some block -> record_block Prompt_block_id.User_model block);
+                (match
+                   (* Memory OS recall — bounded advisory block rendered from
+                      persisted facts/episodes (read side; the write side is
+                      the librarian wired in #20897). Opt-in via
+                      MASC_KEEPER_MEMORY_OS_RECALL. RFC-0247 removed the lexical
+                      seed: recall now orders by structural recency, so the
+                      current-turn text no longer reranks the recalled facts. *)
+                   (* Off-main: same rationale as the user-model render above —
+                      the recall reads persisted facts/episodes via synchronous
+                      file I/O, which would starve the main Eio domain and HOL
+                      sibling keepers. Read-side only, no module-level mutable
+                      state, so it is domain-safe on the shared pool. *)
+                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                     Keeper_memory_os_recall.render_if_enabled
+                       ~keeper_id:meta.name
+                       ~now:(Time_compat.now ())
+                       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                       ~turn
+                       ~masc_root:(Workspace.masc_root_dir config)
+                       ())
+                 with
+                 | None -> ()
+                 | Some block -> record_block Prompt_block_id.Memory_os_recall block);
+                let extra_system_context_budget =
+                  Keeper_run_prompt.budget_extra_system_context
+                    ~estimated_input_tokens_with_tools:
+                      tool_context_estimate.estimated_input_tokens_with_tools
+                    ~max_context
+                    ~existing_extra_system_context:
+                      current_params.extra_system_context
+                    ~preflight_accounted_blocks:
+                      (List.rev !preflight_accounted_blocks)
+                    ~blocks:(List.rev !recorded_blocks)
                 in
-                let ctx =
-                  (* Off-main: [render_if_enabled] performs synchronous file I/O
-                     (stat/readdir/open over the persisted memory store). Running
-                     it directly on the main Eio domain blocks the cooperative
-                     scheduler, head-of-line-blocking every sibling keeper fiber
-                     until the syscalls return. Push the I/O onto the shared
-                     domain pool ([submit_io_or_inline] runs inline when no pool
-                     is configured, e.g. tests). The render is read-side only and
-                     keeps no module-level mutable state, so it is domain-safe. *)
-                  match
-                    Domain_pool_ref.submit_io_or_inline (fun () ->
-                      Keeper_user_model.render_if_enabled
-                        ~keeper_id:meta.name
-                        ~now:(Time_compat.now ())
-                        ())
-                  with
-                  | None -> ctx
-                  | Some block ->
-                    record_block Prompt_block_id.User_model block;
-                    append_ctx ctx block
-                in
-                let ctx =
-                  (* Memory OS recall — bounded advisory block rendered from
-                     persisted facts/episodes (read side; the write side is
-                     the librarian wired in #20897). Opt-in via
-                     MASC_KEEPER_MEMORY_OS_RECALL. RFC-0247 removed the lexical
-                     seed: recall now orders by structural recency, so the
-                     current-turn text no longer reranks the recalled facts. *)
-                  (* Off-main: same rationale as the user-model render above —
-                     the recall reads persisted facts/episodes via synchronous
-                     file I/O, which would starve the main Eio domain and HOL
-                     sibling keepers. Read-side only, no module-level mutable
-                     state, so it is domain-safe on the shared pool. *)
-                  match
-                    Domain_pool_ref.submit_io_or_inline (fun () ->
-                      Keeper_memory_os_recall.render_if_enabled
-                        ~keeper_id:meta.name
-                        ~now:(Time_compat.now ())
-                        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                        ~turn
-                        ~masc_root:(Workspace.masc_root_dir config)
-                        ())
-                  with
-                  | None -> ctx
-                  | Some block ->
-                    record_block Prompt_block_id.Memory_os_recall block;
-                    append_ctx ctx block
+                let ctx = extra_system_context_budget.extra_system_context in
+                let recorded_blocks_for_receipt =
+                  extra_system_context_budget.included_blocks
                 in
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
@@ -505,15 +500,121 @@ let assemble_hooks
                 in
                 acc.prompt_blocks
                 <- persona_blocks
-                   @ List.rev_map
+                   @ List.map
                        (fun (block, text) ->
                           { Turn_record.block
                           ; bytes = String.length text
                           ; digest = sha256_hex text
                           })
-                       !recorded_blocks;
+                       recorded_blocks_for_receipt;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
+                let extra_system_context_estimated_tokens =
+                  Option.map Keeper_context_core_accessors.estimate_char_tokens ctx
+                in
+                let hook_extra_system_context_estimated_tokens =
+                  extra_system_context_budget
+                    .hook_extra_system_context_estimated_tokens
+                in
+                let post_hook_estimated_input_tokens =
+                  extra_system_context_budget.post_hook_estimated_input_tokens
+                in
+                let post_hook_context_window_budget =
+                  extra_system_context_budget.post_hook_context_window_budget
+                in
+                (* [budget_extra_system_context] computes the post-hook ledger
+                   from the assembled [extra_system_context] string, subtracting
+                   only blocks already represented in the pre-dispatch estimate.
+                   When the base tool-inclusive estimate fits the window, hook
+                   additions that would push the request over are skipped before
+                   this check. Any remaining overflow is therefore the base
+                   request overflow that must reach OAS' typed ContextOverflow
+                   retry path, not a silent hook-induced overrun. *)
+                let post_hook_context_window_error =
+                  Keeper_run_prompt.preflight_context_window
+                    ~estimated_input_tokens:post_hook_estimated_input_tokens
+                    ~max_context
+                in
+                let post_hook_over_context_window =
+                  match post_hook_context_window_error with
+                  | Ok () -> false
+                  | Error _ -> true
+                in
+                (match runtime_manifest_context, runtime_manifest_append with
+                 | Some manifest_context, Some append_manifest ->
+                   let post_tool_context =
+                     last_tool_results <> []
+                   in
+                   append_manifest
+                     (Keeper_runtime_manifest.make_for_context
+                        manifest_context
+                        ~event:Keeper_runtime_manifest.Context_injected
+                        ~oas_turn_count:turn
+                        ~runtime_id:runtime_id_string
+                        ~status:
+                          (if post_hook_over_context_window
+                           then "post_hook_context_overflow"
+                           else if post_tool_context
+                           then "post_tool_context_injection"
+                           else "pre_tool_context_injection")
+                        ~decision:
+                          (Keeper_runtime_manifest.with_payload_role
+                             ~payload_role:Keeper_runtime_manifest.Model_input
+                             (`Assoc
+                               [ ( "sdk_turn", `Int turn )
+                               ; ( "post_tool_context_injection",
+                                   `Bool post_tool_context )
+                               ; ( "last_tool_result_count",
+                                   `Int (List.length last_tool_results) )
+                               ; ( "prompt_block_count",
+                                   `Int (List.length acc.prompt_blocks) )
+                               ; ( "extra_system_context_digest",
+                                   Json_util.string_opt_to_json
+                                     acc.extra_system_context_digest )
+                               ; ( "extra_system_context_computed_size",
+                                   Json_util.int_opt_to_json
+                                     acc.extra_system_context_size )
+                               ; ( "extra_system_context_estimated_tokens",
+                                   Json_util.int_opt_to_json
+                                     extra_system_context_estimated_tokens )
+                               ; ( "hook_extra_system_context_estimated_tokens",
+                                   `Int hook_extra_system_context_estimated_tokens )
+                               ; ( "estimated_input_tokens_with_tools",
+                                   `Int
+                                     tool_context_estimate.estimated_input_tokens_with_tools )
+                               ; ( "post_hook_estimated_input_tokens",
+                                   `Int post_hook_estimated_input_tokens )
+                               ; ( "context_window",
+                                   `Int max_context )
+                               ; ( "post_hook_remaining_context_tokens",
+                                   `Int
+                                     post_hook_context_window_budget
+                                       .remaining_context_tokens )
+                               ; ( "post_hook_over_context_tokens",
+                                   `Int
+                                     post_hook_context_window_budget
+                                       .over_context_tokens )
+                               ; ( "post_hook_context_usage_ratio",
+                                   `Float
+                                     post_hook_context_window_budget
+                                       .context_usage_ratio )
+                               ; ( "post_hook_over_context_window",
+                                   `Bool post_hook_over_context_window )
+                               ; ( "skipped_extra_system_context_blocks",
+                                   `List
+                                     (List.map
+                                        (fun block ->
+                                           `String
+                                             (Prompt_block_id.to_string block))
+                                        extra_system_context_budget
+                                          .skipped_blocks) )
+                               ; ( "skipped_extra_system_context_estimated_tokens",
+                                   `Int
+                                     extra_system_context_budget
+                                       .skipped_estimated_tokens )
+                               ]))
+                        ())
+                 | _ -> ());
                 (* Phase O observability: capture the effective OAS request
                    boundary after keeper-owned context injection has finalized
                    [extra_system_context]. *)
@@ -542,8 +643,6 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    ignore runtime_manifest_context;
-    ignore runtime_manifest_append;
     (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator
      during Agent.run. The drain happens in keeper_post_turn.ml
@@ -631,6 +730,7 @@ let assemble_hooks
       ; reducer
       ; acc
       ; all_tool_names
+      ; tool_context_estimate
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref

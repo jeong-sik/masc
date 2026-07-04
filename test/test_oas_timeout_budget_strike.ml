@@ -362,6 +362,536 @@ let test_runtime_provider_path_does_not_forward_execution_idle_timeout () =
     false
     (contains_substring source "execution_idle_timeout_s = ctx.execution_idle_timeout_s")
 
+let test_preflight_context_window_allows_exact_budget () =
+  match
+    Keeper_run_prompt.preflight_context_window
+      ~estimated_input_tokens:131_072
+      ~max_context:131_072
+  with
+  | Ok () -> ()
+  | Error err ->
+    Alcotest.fail
+      ("expected exact-budget context preflight to pass, got "
+       ^ Agent_sdk.Error.to_string err)
+
+let test_preflight_context_window_reports_overflow_signal () =
+  match
+    Keeper_run_prompt.preflight_context_window
+      ~estimated_input_tokens:131_073
+      ~max_context:131_072
+  with
+  | Ok () -> Alcotest.fail "expected oversized context preflight to report overflow"
+  | Error
+      (Agent_sdk.Error.Api
+         (Llm_provider.Retry.ContextOverflow { message; limit })) ->
+    Alcotest.(check (option int)) "overflow limit" (Some 131_072) limit;
+    Alcotest.(check bool)
+      "overflow message marks pre-dispatch source"
+      true
+      (contains_substring
+         message
+         "pre-dispatch input estimate exceeds context window")
+  | Error err ->
+    Alcotest.fail
+      ("expected pre-dispatch ContextOverflow, got "
+       ^ Agent_sdk.Error.to_string err)
+
+let test_preflight_context_window_rejects_nonpositive_max_context () =
+  match
+    Keeper_run_prompt.preflight_context_window
+      ~estimated_input_tokens:1
+      ~max_context:0
+  with
+  | Ok () -> Alcotest.fail "expected non-positive max_context to fail closed"
+  | Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig { field = "max_context"; detail })) ->
+    Alcotest.(check bool)
+      "invalid config detail names non-positive context window"
+      true
+      (contains_substring detail "must be positive")
+  | Error err ->
+    Alcotest.fail
+      ("expected invalid max_context config error, got "
+       ^ Agent_sdk.Error.to_string err)
+
+let make_tool name description : Agent_sdk.Tool.t =
+  Agent_sdk.Tool.create ~name ~description ~parameters:[]
+    (fun _input -> Ok { Agent_sdk.Types.content = "ok"; _meta = None })
+
+let test_tool_schema_estimate_adds_provider_payload () =
+  let tool = make_tool "large_schema_probe" (String.make 2048 'd') in
+  let estimate =
+    Keeper_run_prompt.estimate_tool_schema_context
+      ~estimated_input_tokens:10
+      ~tools:[ tool ]
+  in
+  Alcotest.(check int) "tool count" 1 estimate.tool_count;
+  Alcotest.(check bool)
+    "tool schema contributes tokens"
+    true
+    (estimate.tool_schema_tokens > 0);
+  Alcotest.(check int)
+    "tool-inclusive estimate is prompt estimate plus schema"
+    (10 + estimate.tool_schema_tokens)
+    estimate.estimated_input_tokens_with_tools;
+  match
+    Keeper_run_prompt.preflight_context_window
+      ~estimated_input_tokens:estimate.estimated_input_tokens_with_tools
+      ~max_context:(estimate.estimated_input_tokens_with_tools - 1)
+  with
+  | Error
+      (Agent_sdk.Error.Api
+         (Llm_provider.Retry.ContextOverflow { limit = Some _; _ })) ->
+    ()
+  | Ok () ->
+    Alcotest.fail "expected tool-inclusive over-budget request to fail"
+  | Error err ->
+    Alcotest.fail
+      ("expected tool-inclusive ContextOverflow, got "
+       ^ Agent_sdk.Error.to_string err)
+
+let test_hook_context_estimate_skips_base_prompt_layers () =
+  let dynamic = String.make 400 'd' in
+  let temporal = String.make 400 't' in
+  let retry = String.make 400 'r' in
+  let user_model = String.make 400 'u' in
+  let expected =
+    Agent_sdk.Context_reducer.estimate_char_tokens retry
+    + Agent_sdk.Context_reducer.estimate_char_tokens user_model
+  in
+  Alcotest.(check int)
+    "only hook-only blocks are added to the post-hook estimate"
+    expected
+    (Keeper_run_prompt.estimate_unaccounted_extra_system_context_tokens
+       ~preflight_accounted_blocks:
+         [ Prompt_block_id.Dynamic_context; Prompt_block_id.Temporal_summary ]
+       [ Prompt_block_id.Dynamic_context, dynamic
+       ; Prompt_block_id.Temporal_summary, temporal
+       ; Prompt_block_id.Retry_nudge, retry
+       ; Prompt_block_id.User_model, user_model
+       ])
+
+let test_extra_system_context_budget_skips_over_window_hook_blocks () =
+  let budget =
+    Keeper_run_prompt.budget_extra_system_context
+      ~estimated_input_tokens_with_tools:90
+      ~max_context:100
+      ~existing_extra_system_context:None
+      ~preflight_accounted_blocks:[ Prompt_block_id.Dynamic_context ]
+      ~blocks:
+        [ Prompt_block_id.Dynamic_context, String.make 400 'd'
+        ; Prompt_block_id.Retry_nudge, String.make 400 'r'
+        ; Prompt_block_id.User_model, "short user model"
+        ]
+  in
+  Alcotest.(check bool)
+    "dynamic context remains because preflight already accounted it"
+    true
+    (List.exists
+       (fun (block, _) ->
+          Prompt_block_id.equal block Prompt_block_id.Dynamic_context)
+       budget.included_blocks);
+  Alcotest.(check bool)
+    "oversized hook-only retry nudge is skipped"
+    true
+    (List.exists
+       (Prompt_block_id.equal Prompt_block_id.Retry_nudge)
+       budget.skipped_blocks);
+  Alcotest.(check bool)
+    "later hook-only block can still fit"
+    true
+    (List.exists
+       (fun (block, _) -> Prompt_block_id.equal block Prompt_block_id.User_model)
+       budget.included_blocks);
+  Alcotest.(check bool)
+    "post-hook estimate stays within context window"
+    true
+    (budget.post_hook_estimated_input_tokens <= 100)
+
+let test_extra_system_context_budget_accounts_assembled_overhead () =
+  let dynamic = String.make 40 'd' in
+  let hook_only = String.make 40 'u' in
+  let budget =
+    Keeper_run_prompt.budget_extra_system_context
+      ~estimated_input_tokens_with_tools:10
+      ~max_context:1_000
+      ~existing_extra_system_context:None
+      ~preflight_accounted_blocks:[ Prompt_block_id.Dynamic_context ]
+      ~blocks:
+        [ Prompt_block_id.Dynamic_context, dynamic
+        ; Prompt_block_id.User_model, hook_only
+        ]
+  in
+  let assembled =
+    match budget.extra_system_context with
+    | Some text -> text
+    | None -> Alcotest.fail "expected assembled extra_system_context"
+  in
+  let assembled_tokens =
+    Agent_sdk.Context_reducer.estimate_char_tokens assembled
+  in
+  let preflight_accounted_tokens =
+    Agent_sdk.Context_reducer.estimate_char_tokens dynamic
+  in
+  Alcotest.(check int)
+    "post-hook estimate accounts assembled context minus preflight-accounted blocks"
+    (10 + max 0 (assembled_tokens - preflight_accounted_tokens))
+    budget.post_hook_estimated_input_tokens
+
+let test_keeper_preflight_wires_tool_inclusive_estimate () =
+  let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
+  let setup_source = read_file "lib/keeper/keeper_run_tools_setup.ml" in
+  Alcotest.(check bool)
+    "keeper computes tool schema context estimate"
+    true
+    (contains_substring setup_source "estimate_tool_schema_context");
+  Alcotest.(check bool)
+    "keeper preflight uses tool-inclusive estimate"
+    true
+    (contains_substring agent_run_source "estimated_input_tokens_with_tools");
+  Alcotest.(check bool)
+    "keeper writes context preflight manifest"
+    true
+    (contains_substring agent_run_source "context_preflight")
+
+let test_context_window_budget_reports_remaining_and_overage () =
+  let within =
+    Keeper_run_prompt.context_window_budget
+      ~estimated_input_tokens:100
+      ~max_context:128
+  in
+  Alcotest.(check int) "remaining under window" 28 within.remaining_context_tokens;
+  Alcotest.(check int) "overage under window" 0 within.over_context_tokens;
+  Alcotest.(check (float 0.0001))
+    "ratio under window"
+    (100.0 /. 128.0)
+    within.context_usage_ratio;
+  let over =
+    Keeper_run_prompt.context_window_budget
+      ~estimated_input_tokens:140
+      ~max_context:128
+  in
+  Alcotest.(check int) "remaining over window" 0 over.remaining_context_tokens;
+  Alcotest.(check int) "overage over window" 12 over.over_context_tokens;
+  Alcotest.(check (float 0.0001))
+    "ratio over window"
+    (140.0 /. 128.0)
+    over.context_usage_ratio
+
+let test_context_layer_budget_records_decisions () =
+  let kept =
+    Keeper_run_prompt.estimate_context_layer_budget
+      ~layer_name:"pending_mentions"
+      ~priority:"high"
+      ~cap_tokens:64
+      ~text:"short mention"
+  in
+  Alcotest.(check string) "kept layer name" "pending_mentions"
+    kept.context_layer_name;
+  Alcotest.(check string) "kept priority" "high" kept.context_layer_priority;
+  Alcotest.(check bool) "kept decision" true
+    (kept.context_layer_decision = Keeper_run_prompt.Within_cap);
+  let over_cap =
+    Keeper_run_prompt.estimate_context_layer_budget
+      ~layer_name:"board_activity"
+      ~priority:"normal"
+      ~cap_tokens:1
+      ~text:(String.make 200 'b')
+  in
+  Alcotest.(check bool) "over-cap decision" true
+    (over_cap.context_layer_decision = Keeper_run_prompt.Over_cap_observed);
+  Alcotest.(check int) "over-cap would-fit tokens equals cap" 1
+    over_cap.context_layer_would_fit_tokens;
+  let empty =
+    Keeper_run_prompt.estimate_context_layer_budget
+      ~layer_name:"continuity_summary"
+      ~priority:"required"
+      ~cap_tokens:64
+      ~text:""
+  in
+  Alcotest.(check bool) "empty layer decision" true
+    (empty.context_layer_decision = Keeper_run_prompt.Empty);
+  (match Keeper_run_prompt.context_layer_budget_to_json over_cap with
+   | `Assoc fields ->
+     Alcotest.(check bool)
+       "json carries decision"
+       true
+       (List.assoc_opt "decision" fields = Some (`String "over_cap_observed"));
+     Alcotest.(check bool)
+       "json marks diagnostic semantics"
+       true
+       (List.assoc_opt "semantics" fields = Some (`String "diagnostic_only"));
+     Alcotest.(check bool)
+       "json carries would-fit tokens, not kept/truncated claim"
+       true
+       (List.assoc_opt "would_fit_tokens" fields = Some (`Int 1)
+        && List.assoc_opt "budgeted_tokens" fields = None
+        && List.assoc_opt "kept_tokens" fields = None)
+   | _ -> Alcotest.fail "expected context layer budget JSON object")
+
+let test_context_layer_policy_caps_are_typed () =
+  let budget policy text =
+    Keeper_run_prompt.estimate_context_layer_policy_budget
+      ~max_context:160
+      ~policy
+      ~text
+  in
+  let dynamic =
+    budget Keeper_run_prompt.world_dynamic_context_layer_policy "dynamic"
+  in
+  Alcotest.(check string)
+    "dynamic policy name"
+    "world_dynamic_context"
+    dynamic.context_layer_name;
+  Alcotest.(check string) "dynamic priority" "high" dynamic.context_layer_priority;
+  Alcotest.(check int) "dynamic cap" 40 dynamic.context_layer_cap_tokens;
+  let memory = budget Keeper_run_prompt.memory_context_layer_policy "memory" in
+  Alcotest.(check int) "memory cap" 20 memory.context_layer_cap_tokens;
+  let temporal =
+    budget Keeper_run_prompt.temporal_context_layer_policy "temporal"
+  in
+  Alcotest.(check int) "temporal cap" 10 temporal.context_layer_cap_tokens;
+  let user =
+    budget Keeper_run_prompt.user_message_context_layer_policy "user"
+  in
+  Alcotest.(check int) "user cap" 160 user.context_layer_cap_tokens
+
+let test_context_preflight_manifest_records_budget_delta () =
+  let source = read_file "lib/keeper/keeper_agent_run.ml" in
+  Alcotest.(check bool)
+    "context preflight records remaining tokens"
+    true
+    (contains_substring source "remaining_context_tokens");
+  Alcotest.(check bool)
+    "context preflight records overage tokens"
+    true
+    (contains_substring source "over_context_tokens");
+  Alcotest.(check bool)
+    "context preflight records usage ratio"
+    true
+    (contains_substring source "context_usage_ratio");
+  Alcotest.(check bool)
+    "context preflight records context layer budgets"
+    true
+    (contains_substring source "context_layers")
+
+let test_context_injection_hook_records_post_tool_ledger () =
+  let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
+  Alcotest.(check bool)
+    "agent run passes runtime manifest append into hooks"
+    true
+    (contains_substring agent_run_source "context_injection_hook");
+  let hook_source = read_file "lib/keeper/keeper_run_tools_hooks.ml" in
+  Alcotest.(check bool)
+    "hook emits context injected manifest"
+    true
+    (contains_substring hook_source "Keeper_runtime_manifest.Context_injected");
+  Alcotest.(check bool)
+    "hook distinguishes post-tool context injection"
+    true
+    (contains_substring hook_source "post_tool_context_injection");
+  Alcotest.(check bool)
+    "hook records last tool result count"
+    true
+    (contains_substring hook_source "last_tool_result_count");
+  Alcotest.(check bool)
+    "hook records extra system context token estimate"
+    true
+    (contains_substring hook_source "extra_system_context_estimated_tokens");
+  Alcotest.(check bool)
+    "hook gates post-hook context against context window"
+    true
+    (contains_substring hook_source "post_hook_estimated_input_tokens");
+  Alcotest.(check bool)
+    "hook budgets extra context before params are adjusted"
+    true
+    (contains_substring hook_source "budget_extra_system_context"
+     && contains_substring hook_source "Agent_sdk.Hooks.AdjustParams");
+  Alcotest.(check bool)
+    "hook records skipped context blocks instead of silently dropping them"
+    true
+    (contains_substring hook_source "skipped_extra_system_context_blocks"
+     && contains_substring hook_source
+          "skipped_extra_system_context_estimated_tokens");
+  Alcotest.(check bool)
+    "hook does not use an out-of-band overflow ref"
+    false
+    (contains_substring hook_source "post_hook_context_window_error_ref"
+     || contains_substring agent_run_source "post_hook_context_window_error_ref")
+
+let test_keeper_preflight_reuses_setup_tool_estimate () =
+  let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
+  Alcotest.(check bool)
+    "keeper run reads setup tool estimate"
+    true
+    (contains_substring agent_run_source "s.Keeper_run_tools.tool_context_estimate");
+  Alcotest.(check bool)
+    "keeper run does not recompute tool schemas"
+    false
+    (contains_substring agent_run_source "estimate_tool_schema_context")
+
+let test_keeper_budget_estimates_use_context_facade () =
+  let prompt_source = read_file "lib/keeper/keeper_run_prompt.ml" in
+  let hook_source = read_file "lib/keeper/keeper_run_tools_hooks.ml" in
+  Alcotest.(check bool)
+    "budgeting uses keeper estimation facade"
+    true
+    (contains_substring prompt_source
+       "Keeper_context_core_accessors.estimate_char_tokens"
+     && contains_substring hook_source
+          "Keeper_context_core_accessors.estimate_char_tokens");
+  Alcotest.(check bool)
+    "budgeting avoids direct OAS estimator calls"
+    false
+    (contains_substring prompt_source
+       "Agent_sdk.Context_reducer.estimate_char_tokens"
+     || contains_substring hook_source
+          "Agent_sdk.Context_reducer.estimate_char_tokens")
+
+let checkpoint_hygiene_meta () =
+  match
+    Keeper_meta_json_parse.meta_of_json
+      (`Assoc
+        [ "name", `String "checkpoint-hygiene"
+        ; "agent_name", `String "checkpoint-hygiene"
+        ; "trace_id", `String "trace-checkpoint-hygiene"
+        ; "last_model_used", `String "ollama_cloud.stalecontext"
+        ; "tool_access", `List []
+        ])
+  with
+  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+  | Ok meta ->
+    { meta with
+      compaction =
+        { meta.compaction with
+          ratio_gate = 0.5
+        ; message_gate = 999
+        ; token_gate = 0
+        ; cooldown_sec = 999
+        ; max_checkpoint_messages = 32
+        }
+    }
+
+let text_message ?(role = Agent_sdk.Types.User) text : Agent_sdk.Types.message =
+  { role; content = [ Agent_sdk.Types.text_block text ]; name = None; tool_call_id = None; metadata = [] }
+
+let checkpoint_context ~max_context =
+  Keeper_context_runtime.create ~eio:false ~system_prompt:"checkpoint hygiene test"
+    ~max_tokens:max_context
+  |> fun ctx ->
+  Keeper_context_runtime.append
+    ctx
+    (text_message (String.make 320_000 'x'))
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+
+let runtime_fixture =
+  {|
+[runtime]
+default = "ollama_cloud.stalecontext"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.stalecontext]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama_cloud.stalecontext]
+max-concurrent = 1
+|}
+
+let with_runtime_fixture f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "checkpoint-hygiene-runtime" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+      write_file path runtime_fixture;
+      match Runtime.init_default ~config_path:path with
+      | Error msg -> Alcotest.fail ("Runtime.init_default failed: " ^ msg)
+      | Ok () -> f ())
+
+let run_checkpoint_hygiene ~save_called ~meta ctx =
+  Keeper_agent_checkpoint_hygiene.prepare_resume_checkpoint_for_dispatch
+    ~meta
+    ~now_ts:1_000.0
+    ~loaded_checkpoint_present:true
+    ~save_checkpoint:(fun compacted_ctx ->
+      save_called := true;
+      Ok
+        (Keeper_context_runtime.resume_checkpoint_of_context
+           ~max_checkpoint_messages:meta.Keeper_meta_contract.compaction.max_checkpoint_messages
+           compacted_ctx))
+    ctx
+
+let test_pre_dispatch_rebudgets_checkpoint_against_smaller_window () =
+  with_runtime_fixture @@ fun () ->
+  let meta = checkpoint_hygiene_meta () in
+  let large_save_called = ref false in
+  let large_ctx = checkpoint_context ~max_context:524_288 in
+  let large =
+    run_checkpoint_hygiene ~save_called:large_save_called ~meta large_ctx
+  in
+  Alcotest.(check bool)
+    "same checkpoint stays below large-window ratio"
+    false
+    large.Keeper_agent_checkpoint_hygiene.applied;
+  Alcotest.(check bool)
+    "large-window skip does not persist a compacted checkpoint"
+    false
+    !large_save_called;
+  let small_save_called = ref false in
+  let small_ctx = Keeper_context_runtime.with_max_tokens large_ctx 131_072 in
+  let small =
+    run_checkpoint_hygiene ~save_called:small_save_called ~meta small_ctx
+  in
+  Alcotest.(check bool)
+    "same checkpoint compacts after smaller-window rebudget"
+    true
+    small.Keeper_agent_checkpoint_hygiene.applied;
+  Alcotest.(check bool)
+    "small-window compaction persists the compacted checkpoint"
+    true
+    !small_save_called;
+  Alcotest.(check bool)
+    "small-window hygiene records over-budget starting point"
+    true
+    (small.before_tokens > (131_072 / 2));
+  Alcotest.(check int)
+    "compacted context keeps smaller provider window"
+    131_072
+    (Keeper_context_runtime.max_tokens_of_context small.context)
+
+let test_keeper_passes_context_window_to_oas_thresholds () =
+  let source = read_file "lib/keeper/keeper_agent_run.ml" in
+  Alcotest.(check bool)
+    "keeper run_named receives effective max_context as context window"
+    true
+    (contains_substring source "~context_window_tokens:max_context")
+
+let test_oas_thresholds_do_not_use_output_max_tokens_as_context_window () =
+  let source = read_file "lib/runtime/runtime_agent_context.ml" in
+  Alcotest.(check bool)
+    "thresholds use explicit context_window_tokens"
+    true
+    (contains_substring source "match config.context_window_tokens with");
+  Alcotest.(check bool)
+    "output max_tokens is not reused as context window"
+    false
+    (contains_substring source "~context_window_tokens:config.max_tokens")
+
 let () =
   Alcotest.run "provider_timeout_strike"
   [
@@ -418,5 +948,47 @@ let () =
           test_runtime_provider_path_has_no_cumulative_run_timeout;
         Alcotest.test_case "runtime provider path does not forward idle timeout" `Quick
           test_runtime_provider_path_does_not_forward_execution_idle_timeout;
+        Alcotest.test_case "preflight context window allows exact budget" `Quick
+          test_preflight_context_window_allows_exact_budget;
+        Alcotest.test_case "preflight context window reports overflow signal" `Quick
+          test_preflight_context_window_reports_overflow_signal;
+        Alcotest.test_case "preflight context window rejects invalid max" `Quick
+          test_preflight_context_window_rejects_nonpositive_max_context;
+        Alcotest.test_case "tool schema estimate adds provider payload" `Quick
+          test_tool_schema_estimate_adds_provider_payload;
+        Alcotest.test_case
+          "hook context estimate skips base prompt layers"
+          `Quick
+          test_hook_context_estimate_skips_base_prompt_layers;
+        Alcotest.test_case "extra system context budget skips overflow blocks" `Quick
+          test_extra_system_context_budget_skips_over_window_hook_blocks;
+        Alcotest.test_case
+          "extra system context budget accounts assembled overhead"
+          `Quick
+          test_extra_system_context_budget_accounts_assembled_overhead;
+        Alcotest.test_case "keeper preflight wires tool-inclusive estimate" `Quick
+          test_keeper_preflight_wires_tool_inclusive_estimate;
+        Alcotest.test_case "context window budget reports remaining and overage" `Quick
+          test_context_window_budget_reports_remaining_and_overage;
+        Alcotest.test_case "context layer budget records decisions" `Quick
+          test_context_layer_budget_records_decisions;
+        Alcotest.test_case "context layer policy caps are typed" `Quick
+          test_context_layer_policy_caps_are_typed;
+        Alcotest.test_case "context preflight manifest records budget delta" `Quick
+          test_context_preflight_manifest_records_budget_delta;
+        Alcotest.test_case "context injection hook records post-tool ledger" `Quick
+          test_context_injection_hook_records_post_tool_ledger;
+        Alcotest.test_case "keeper preflight reuses setup tool estimate" `Quick
+          test_keeper_preflight_reuses_setup_tool_estimate;
+        Alcotest.test_case "keeper budget estimates use context facade" `Quick
+          test_keeper_budget_estimates_use_context_facade;
+        Alcotest.test_case
+          "pre-dispatch hygiene rebudgets checkpoint against smaller window"
+          `Quick
+          test_pre_dispatch_rebudgets_checkpoint_against_smaller_window;
+        Alcotest.test_case "keeper passes context window to OAS thresholds" `Quick
+          test_keeper_passes_context_window_to_oas_thresholds;
+        Alcotest.test_case "OAS thresholds keep output max_tokens separate" `Quick
+          test_oas_thresholds_do_not_use_output_max_tokens_as_context_window;
       ] );
   ]

@@ -6,6 +6,50 @@ module KP = Keeper_state_machine
 
 let keeper_name = "test-keeper"
 
+let source_path path =
+  if Filename.is_relative path then
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> Filename.concat root path
+    | None -> path
+  else path
+
+let read_file path = In_channel.with_open_text (source_path path) In_channel.input_all
+
+let contains_substring ~needle haystack =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop index =
+      index + needle_len <= haystack_len
+      && (String.sub haystack index needle_len = needle || loop (index + 1))
+    in
+    loop 0
+
+let index_of_substring ~needle haystack =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then Some 0
+  else
+    let rec loop index =
+      if index + needle_len > haystack_len then None
+      else if String.sub haystack index needle_len = needle then Some index
+      else loop (index + 1)
+    in
+    loop 0
+
+let index_of_substring_from ~start ~needle haystack =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then Some (max 0 start)
+  else
+    let rec loop index =
+      if index + needle_len > haystack_len then None
+      else if String.sub haystack index needle_len = needle then Some index
+      else loop (index + 1)
+    in
+    loop (max 0 start)
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -65,8 +109,8 @@ let test_is_context_overflow_only_for_overflow_errors () =
    Keeper_fiber_crash after keeper_max_turn_failures). Now that the retry
    loop (keeper_unified_turn_execution.ml) drives
    Keeper_turn_runtime_budget.pause_keeper_for_overflow at the point of
-   detection — the Overflowed/Compacting FSM's retry-exhausted path,
-   auto-resume-with-backoff — this error must be classified as
+   detection — the Overflowed/Compacting FSM's retry-exhausted path — this
+   error must be classified as
    auto-recoverable so [record_failure_and_maybe_escalate] does not also
    count it toward that same crash threshold. *)
 let test_context_overflow_is_auto_recoverable () =
@@ -77,6 +121,75 @@ let test_context_overflow_is_auto_recoverable () =
     true
     (EC.is_auto_recoverable_turn_error
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
+;;
+
+let test_overflow_pause_contract_uses_policy_breaker () =
+  let budget_src = read_file "lib/keeper/keeper_turn_runtime_budget.ml" in
+  check bool "overflow pause reads the failure-policy decision" true
+    (contains_substring
+       ~needle:
+         "Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause"
+       budget_src);
+  check bool "operator-breaker overflow pause requires manual resume" true
+    (contains_substring
+       ~needle:"Keeper_supervisor_pause_policy.Manual_resume_required"
+       budget_src);
+  check bool "overflow pause records typed token-budget blocker" true
+    (contains_substring
+       ~needle:"~blocker_class:(Some Sdk_token_budget_exceeded)"
+       budget_src);
+  check bool "overflow pause latches overflow failure reason" true
+    (contains_substring
+       ~needle:"Some Keeper_registry.Turn_overflow_pause"
+       budget_src);
+  let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
+  check bool "post-OAS retry overflow has dedicated phase label" true
+    (contains_substring ~needle:"Context_overflow_after_oas_retry" execution_src);
+  check bool "post-OAS retry overflow calls overflow pause helper" true
+    (contains_substring ~needle:"pause_keeper_for_overflow" execution_src);
+  check bool "paused meta is carried through turn state" true
+    (contains_substring ~needle:"paused_meta_override = Some paused_meta" execution_src)
+;;
+
+let test_preflight_overflow_does_not_bypass_driver_retry () =
+  let agent_run_src = read_file "lib/keeper/keeper_agent_run.ml" in
+  check bool "preflight includes context-window overflow" true
+    (contains_substring ~needle:"pre_dispatch_context_window_error" agent_run_src);
+  check bool "preflight overflow is not a pre-dispatch terminal error" true
+    (match
+       index_of_substring ~needle:"let pre_dispatch_error =" agent_run_src
+     with
+     | Some preflight ->
+       (match
+          ( index_of_substring_from
+              ~start:preflight
+              ~needle:"pre_dispatch_context_window_error"
+              agent_run_src
+          , index_of_substring_from
+              ~start:preflight
+              ~needle:"let call_run_named ?raw_trace ~initial_messages () ="
+              agent_run_src
+          )
+        with
+        | Some context_error_use, Some driver -> driver < context_error_use
+        | None, Some _driver -> true
+        | _ -> false)
+     | None -> false);
+  let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
+  check bool "overflow branch stamps current turn blocker" true
+    (contains_substring ~needle:"current_turn_blocker_info =" execution_src);
+  check bool "overflow blocker uses typed token-budget class" true
+    (contains_substring
+       ~needle:"Keeper_meta_contract.blocker_info_of_class"
+       execution_src
+     && contains_substring ~needle:"Sdk_token_budget_exceeded" execution_src);
+  check bool "overflow branch pauses with fallback helper" true
+    (contains_substring ~needle:"pause_keeper_for_overflow" execution_src);
+  let rollover_src = read_file "lib/keeper/keeper_rollover.ml" in
+  check bool "rollover gate reads current-turn blocker" true
+    (contains_substring ~needle:"current_turn_signal" rollover_src);
+  check bool "rollover gate uses typed overflow predicate" true
+    (contains_substring ~needle:"blocker_class_indicates_overflow klass" rollover_src)
 ;;
 
 let test_summarize_turn_event_bus_extracts_overflow_signal () =
@@ -162,6 +275,55 @@ let test_summarize_turn_event_bus_extracts_compaction_signal () =
   | None -> fail "expected last compaction summary"
 ;;
 
+let test_overflow_evidence_detail_preserves_oas_retry_attempts () =
+  let events =
+    [ Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-retry"
+        ~run_id:"run-compact-start-1"
+        (Agent_sdk.Event_bus.ContextCompactStarted
+           { agent_name = keeper_name; trigger = "proactive" })
+    ; Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-retry"
+        ~run_id:"run-compact-start-2"
+        (Agent_sdk.Event_bus.ContextCompactStarted
+           { agent_name = keeper_name; trigger = "emergency_retry" })
+    ; Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-retry"
+        ~run_id:"run-compact-done"
+        (Agent_sdk.Event_bus.ContextCompacted
+           { agent_name = keeper_name
+           ; before_tokens = 220_000
+           ; after_tokens = 130_000
+           ; phase = "emergency_retry"
+           })
+    ; Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-retry"
+        ~run_id:"run-overflow"
+        (Agent_sdk.Event_bus.ContextOverflowImminent
+           { agent_name = keeper_name
+           ; estimated_tokens = 180_000
+           ; limit_tokens = 131_072
+           ; ratio = 1.37
+           })
+    ]
+  in
+  let summary = UT.summarize_turn_event_bus events in
+  let detail = UT.turn_event_bus_overflow_evidence_detail summary in
+  check bool "detail carries compact start count" true
+    (contains_substring ~needle:"context_compact_started=2" detail);
+  check bool "detail carries compact done count" true
+    (contains_substring ~needle:"context_compacted=1" detail);
+  check bool "detail carries emergency retry phase" true
+    (contains_substring ~needle:"last_compaction_phase=emergency_retry" detail);
+  check bool "detail carries final provider limit" true
+    (contains_substring ~needle:"overflow_limit_tokens=131072" detail);
+  let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
+  check bool "execution writes OAS retry evidence into blocker detail" true
+    (contains_substring
+       ~needle:"turn_event_bus_overflow_evidence_detail"
+       execution_src)
+;;
+
 let test_context_overflow_event_prefers_event_bus_signal () =
   let turn_event_bus : UT.turn_event_bus_summary =
     { correlation_id = Some "cid-123"
@@ -222,6 +384,14 @@ let () =
             `Quick
             test_context_overflow_is_auto_recoverable
         ; test_case
+            "overflow pause uses policy breaker"
+            `Quick
+            test_overflow_pause_contract_uses_policy_breaker
+        ; test_case
+            "preflight overflow does not bypass driver retry"
+            `Quick
+            test_preflight_overflow_does_not_bypass_driver_retry
+        ; test_case
             "summarize_turn_event_bus extracts overflow signal"
             `Quick
             test_summarize_turn_event_bus_extracts_overflow_signal
@@ -229,6 +399,10 @@ let () =
             "summarize_turn_event_bus extracts compaction signal"
             `Quick
             test_summarize_turn_event_bus_extracts_compaction_signal
+        ; test_case
+            "overflow evidence detail preserves OAS retry attempts"
+            `Quick
+            test_overflow_evidence_detail_preserves_oas_retry_attempts
         ; test_case
             "context_overflow_event prefers event bus signal"
             `Quick

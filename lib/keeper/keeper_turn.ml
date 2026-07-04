@@ -718,7 +718,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                 meta.name requested resolution.turn_budget resolution.primary_budget
                 resolution.effective_budget
 	            | None -> ());
-	              resolution.turn_budget
+	              resolution.effective_budget
 	            in
 		            let profile_defaults =
 		              Keeper_types_profile.load_keeper_profile_defaults meta.name

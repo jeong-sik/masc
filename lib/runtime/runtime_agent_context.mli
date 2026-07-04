@@ -72,6 +72,10 @@ type config = {
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  context_window_tokens : int option;
+      (** Input/context window basis forwarded to OAS
+          [Builder.with_context_thresholds]. Distinct from [max_tokens],
+          which limits response output tokens. *)
   oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
@@ -103,7 +107,7 @@ type config = {
   tool_selector : Agent_sdk.Tool_selector.strategy option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
-(** Per-worker configuration.  56 fields — concrete record because
+(** Per-worker configuration.  57 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

@@ -718,11 +718,14 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ~registry_entry
           in
 
-          let primary_max_context =
-            let resolution =
-              Keeper_context_runtime.resolve_max_context_resolution_of_meta m
-            in
-            resolution.effective_budget
+          let max_context_resolution =
+            Keeper_context_runtime.resolve_max_context_resolution_of_meta m
+          in
+          let primary_max_context = max_context_resolution.effective_budget in
+          let context_budget =
+            Keeper_context_runtime.context_budget_json_of_resolution
+              ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta m)
+              max_context_resolution
           in
           let context =
             match last_metrics with
@@ -1079,6 +1082,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("trust", trust_json);
               ("context", context);
               ("context_source", context_source);
+              ("context_budget", context_budget);
               ("runtime_warning_ctx_ratio", `Float runtime_warning_ctx_ratio);
               (* Eval feed: latest verdict snapshot for this keeper (RFC-MASC-005) *)
               ("eval_latest",

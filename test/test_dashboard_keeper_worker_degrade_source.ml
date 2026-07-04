@@ -11,6 +11,9 @@
 open Alcotest
 
 let target_file = "lib/dashboard/dashboard_http_keeper.ml"
+let status_detail_file = "lib/keeper/keeper_status_detail.ml"
+let context_runtime_file = "lib/keeper/keeper_context_runtime.ml"
+let heartbeat_snapshot_file = "lib/keeper/keeper_heartbeat_snapshot.ml"
 
 let load_source rel =
   let source_root =
@@ -102,6 +105,78 @@ let test_context_max_fallback_uses_pure_runtime_budget () =
   ; check bool "dashboard read path avoids turn resolver side effects" false
       (contains ~needle:"Keeper_turn_runtime_budget.resolved_max_context_for_turn" src)
 
+let test_dashboard_row_context_budget_reports_runtime_source () =
+  let src = load_source target_file in
+  check_contains
+    "dashboard row keeps max context resolution"
+    src
+    "let max_context_resolution =";
+  check_contains
+    "dashboard row context_budget is emitted"
+    src
+    "(\"context_budget\", context_budget)";
+  check_contains
+    "dashboard row context_budget includes runtime id"
+    src
+    "~runtime_id:(Keeper_meta_contract.runtime_id_of_meta m)";
+  check_contains
+    "dashboard row context_budget uses shared JSON SSOT"
+    src
+    "Keeper_context_runtime.context_budget_json_of_resolution"
+
+let test_status_detail_context_budget_reports_runtime_source () =
+  let src = load_source status_detail_file in
+  check_contains
+    "status detail resolves meta-aware context budget"
+    src
+    "Keeper_context_runtime.resolve_max_context_resolution_of_meta m";
+  check_contains
+    "status detail context budget includes runtime id"
+    src
+    "~runtime_id:(runtime_id_of_meta m)";
+  check_contains
+    "status detail context_budget uses shared JSON SSOT"
+    src
+    "Keeper_context_runtime.context_budget_json_of_resolution"
+
+let test_context_budget_json_schema_lives_in_context_runtime () =
+  let src = load_source context_runtime_file in
+  check_contains
+    "shared context budget JSON helper exists"
+    src
+    "let context_budget_json_of_resolution";
+  check_contains "shared helper emits runtime id" src "\"runtime_id\"";
+  check_contains
+    "shared helper emits provider context window"
+    src
+    "\"provider_context_window\"";
+  check_contains "shared helper emits budget source" src "\"budget_source\"";
+  check_contains
+    "shared helper emits requested override"
+    src
+    "\"requested_override\"";
+  check_contains "shared helper emits primary budget" src "\"primary_budget\"";
+  check_contains "shared helper emits runtime budget" src "\"runtime_budget\"";
+  check_contains "shared helper emits turn budget" src "\"turn_budget\"";
+  check_contains "shared helper emits effective budget" src "\"effective_budget\""
+
+let test_heartbeat_snapshot_uses_runtime_effective_budget () =
+  let src = load_source heartbeat_snapshot_file in
+  check_contains
+    "heartbeat snapshot resolves runtime id from meta"
+    src
+    "Keeper_meta_contract.runtime_id_of_meta meta_current";
+  check_contains
+    "heartbeat snapshot uses context resolver"
+    src
+    "Keeper_context_runtime.resolve_max_context_resolution";
+  check_contains
+    "heartbeat snapshot passes effective budget to checkpoint load"
+    src
+    "resolution.effective_budget";
+  check bool "heartbeat snapshot avoids global default direct budget" false
+    (contains ~needle:"Runtime.default_max_context ()" src)
+
 let () =
   run
     "dashboard_keeper_worker_degrade_source"
@@ -118,5 +193,21 @@ let () =
             "context max fallback uses pure runtime budget"
             `Quick
             test_context_max_fallback_uses_pure_runtime_budget
+        ; test_case
+            "dashboard row context budget reports runtime source"
+            `Quick
+            test_dashboard_row_context_budget_reports_runtime_source
+        ; test_case
+            "status detail context budget reports runtime source"
+            `Quick
+            test_status_detail_context_budget_reports_runtime_source
+        ; test_case
+            "context budget JSON schema lives in context runtime"
+            `Quick
+            test_context_budget_json_schema_lives_in_context_runtime
+        ; test_case
+            "heartbeat snapshot uses runtime effective budget"
+            `Quick
+            test_heartbeat_snapshot_uses_runtime_effective_budget
         ] )
     ]

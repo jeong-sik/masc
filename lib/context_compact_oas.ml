@@ -54,10 +54,23 @@ let memory_summary_prefix = "[MEMORY_SUMMARY]"
 
 let goal_prefix = "[GOAL]"
 
+let legacy_memory_summary_prefix = "[MASC_MEMORY_SUMMARY"
+
+let legacy_goal_prefix = "[MASC_GOAL"
+
 (** Identity anchor tag injected by [Keeper_prompt.build_keeper_system_prompt].
     Messages containing this tag are never dropped or summarized — they anchor
     the keeper's self-identity and survive compaction intact. *)
 let identity_anchor_tag = "<identity_anchor>"
+
+let has_continuity_anchor_prefix msg_text =
+  List.exists
+    (fun prefix -> String.starts_with ~prefix msg_text)
+    [ memory_summary_prefix
+    ; goal_prefix
+    ; legacy_memory_summary_prefix
+    ; legacy_goal_prefix
+    ]
 
 let first_sentence (s : string) =
   let s = String.trim s in
@@ -118,7 +131,8 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
     Special cases: Memory summaries and goal messages are boosted to
     [anchor_boost] regardless of computed score — they anchor the keeper's purpose.
 
-    Memory summaries and goal messages use MASC-specific prefix matching. *)
+    Memory summaries and goal messages use MASC-specific prefix matching,
+    including known legacy continuity markers from older checkpoints. *)
 
 (** Importance scoring weights. See rationale in comment block above. *)
 let w_recency = Env_config.ContextCompact.w_recency
@@ -166,9 +180,7 @@ let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
   let tool_w = if has_tool_content then tool_present else tool_absent in
   let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in
   let score =
-    if String.starts_with ~prefix:memory_summary_prefix msg_text
-       || String.starts_with ~prefix:goal_prefix msg_text then
-      Float.max score anchor_boost
+    if has_continuity_anchor_prefix msg_text then Float.max score anchor_boost
     else score
   in
   (* Identity anchor and System messages are never dropped.

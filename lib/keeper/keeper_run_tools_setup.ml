@@ -21,6 +21,8 @@ let prepare_agent_setup
       ~(dynamic_context : string)
       ~(history_messages : Agent_sdk.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
+      ~(estimated_input_tokens : int)
+      ~(max_context : int)
       ~(shared_context : Agent_sdk.Context.t)
       ~(context_injector : Agent_sdk.Hooks.context_injector)
       ~(start_turn_count : int)
@@ -127,6 +129,9 @@ let prepare_agent_setup
       ()
   in
   let tools = keeper_tools in
+  let tool_context_estimate =
+    Keeper_run_prompt.estimate_tool_schema_context ~estimated_input_tokens ~tools
+  in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with
       top_k = Keeper_config.keeper_tool_search_top_k ()
@@ -606,7 +611,9 @@ let prepare_agent_setup
     ; config
     ; keeper_tools_cleanup
     ; manifest_keeper_turn_id
+    ; max_context
     ; meta
+    ; tool_context_estimate
     ; turn_ctx_cell
     ; receipt_turn_count_ref
     ; receipt_model_used_ref

@@ -664,7 +664,25 @@ let test_repo_runtime_toml_loads () =
      | Some runtime ->
        check (option (float 0.0)) "DeepSeek keeps OAS connect timeout default"
          None
-         runtime.provider_config.connect_timeout_s);
+         runtime.provider_config.connect_timeout_s;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "DeepSeek Pro structured output disabled" false
+            caps.supports_structured_output
+        | None -> fail "expected DeepSeek Pro capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "deepseek.deepseek-v4-flash")
+         runtimes
+     with
+     | None -> fail "expected DeepSeek Flash runtime in seed"
+     | Some runtime ->
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "DeepSeek Flash structured output disabled" false
+            caps.supports_structured_output
+        | None -> fail "expected DeepSeek Flash capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1123,6 +1141,52 @@ let with_model_catalog_content content f =
          Llm_provider.Model_catalog.set_global catalog;
          f ())
 
+let test_runtime_locality_uses_provider_schema () =
+  let content =
+    "[providers.local]\n\
+     display-name = \"Local Ollama\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [providers.remote]\n\
+     display-name = \"Remote API\"\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://api.example.com/v1\"\n\
+     \n\
+     [providers.remote.credentials]\n\
+     type = \"env\"\n\
+     key = \"REMOTE_API_KEY\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.remote]\n\
+     api-name = \"remote\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [remote.remote]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_runtime_toml content @@ fun path ->
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> failf "runtime init_default should load: %s" msg
+       | Ok () ->
+         check (option bool) "loopback no-auth runtime is local" (Some true)
+           (Runtime.is_local_runtime_id "local.chat");
+         check (option bool) "remote credentialed runtime is not local" (Some false)
+           (Runtime.is_local_runtime_id "remote.remote");
+         check (option bool) "unknown runtime locality is unknown" None
+           (Runtime.is_local_runtime_id "missing.runtime"))
+
 let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
     "[[models]]\n\
@@ -1164,9 +1228,88 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
              "provider-qualified catalog row should satisfy strict runtime \
               capability gate: %s"
              msg
+       | Ok () ->
+         check (option bool) "provider-qualified preserve policy" None
+           (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
+
+let test_runtime_assignment_rejects_commented_disabled_binding () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     \n\
+     # Disabled runtime binding. An assignment to it must fail closed rather\n\
+     # than inheriting [runtime].default.\n\
+     # [models.disabled]\n\
+     # api-name = \"disabled\"\n\
+     # max-context = 1024\n\
+     # [local.disabled]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n\
+     \n\
+     [runtime.assignments]\n\
+     keeper_a = \"local.disabled\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "assignment to commented/disabled runtime should be rejected"
+    | Error msg ->
+      check bool "error mentions assignment table" true
+        (String_util.contains_substring msg "[runtime.assignments].keeper_a");
+      check bool "error mentions disabled runtime id" true
+        (String_util.contains_substring msg "local.disabled"))
+
+let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"chat\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-oas-catalog\"\n\
+     max-context = 1024\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.good\"\n\
+     \n\
+     [runtime.assignments]\n\
+     keeper_a = \"ollama.missing\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default_strict ~config_path:path with
          | Ok () ->
-           check (option bool) "provider-qualified preserve policy" None
-             (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
+           failf "strict runtime init should reject assigned uncatalogued runtime"
+         | Error msg ->
+           check bool "error mentions OAS catalog gate" true
+             (String_util.contains_substring msg "absent from the OAS capability catalog");
+           check bool "error mentions assigned runtime id" true
+             (String_util.contains_substring msg "ollama.missing")))
 
 let test_runtime_capability_gate_reports_missing_catalog_models () =
   let catalog =
@@ -1586,9 +1729,17 @@ let () =
           test_case
             "runtime capability gate uses provider-qualified OAS catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
+          test_case "runtime locality uses provider schema" `Quick
+            test_runtime_locality_uses_provider_schema;
           test_case
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
+          test_case
+            "runtime assignment rejects commented disabled binding"
+            `Quick test_runtime_assignment_rejects_commented_disabled_binding;
+          test_case
+            "strict init rejects assigned runtime absent from OAS catalog"
+            `Quick test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog;
           test_case "atomic runtime getters are consistent after init" `Quick
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick

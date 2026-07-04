@@ -197,10 +197,27 @@ val get_runtime_by_id : string -> t option
     keeper's persona [model] selection or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 
+val is_local_runtime : t -> bool
+(** [is_local_runtime rt] classifies runtime locality from the materialized
+    provider schema: CLI transports are local; HTTP transports are local only
+    when their endpoint is loopback and the provider declares no credential. *)
+
+val is_local_runtime_id : string -> bool option
+(** Locality classification for a configured runtime id, or [None] when the
+    runtime id is not currently materialized. *)
+
+val max_context_of_runtime : t -> int
+(** Effective input context window for a materialized runtime.  This applies the
+    same provider-cap clamp as [max_context_of_runtime_id] without re-resolving
+    the runtime id. *)
+
 val max_context_of_runtime_id : string -> int option
-(** Context window for the materialized runtime [id], or [None] when the id is
-    not configured.  Budgeting callers use this to size a per-keeper routed turn
-    against the same runtime that dispatch will use. *)
+(** Effective input context window for the materialized runtime [id], or [None]
+    when the id is not configured.  Budgeting callers use this to size a
+    per-keeper routed turn against the same runtime that dispatch will use.
+    When the OAS provider capability catalog declares a context cap, the value
+    is clamped to [min runtime.toml max-context provider cap] so MASC cannot
+    admit a prompt larger than the provider-owned window. *)
 
 val max_output_tokens_of_runtime_id : string -> int option
 (** Declared max output tokens (OAS capability catalog) for the model bound to
@@ -307,10 +324,11 @@ val set_runtime_media_failover :
     in-process runtime cache. The list order is preserved. *)
 
 val default_max_context : unit -> int
-(** Context-window budget of the default runtime's model (RFC-0206
-    single-binding). Replaces the deleted [Runtime_runtime.resolve_*_max_context]
-    label scans. Falls back to [Runtime_constants.fallback_context_window]
-    before {!init_default} runs. *)
+(** Effective context-window budget of the default runtime's model (RFC-0206
+    single-binding), clamped by the OAS provider capability catalog when that
+    cap is available. Replaces the deleted
+    [Runtime_runtime.resolve_*_max_context] label scans. Falls back to
+    [Runtime_constants.fallback_context_window] before {!init_default} runs. *)
 
 val default_model_api_name : unit -> string
 (** API model name of the default runtime, sent to the runtime completion

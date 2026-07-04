@@ -170,22 +170,39 @@ let test_scoring_single () =
   let (_, score) = List.hd scores in
   check bool "score in range" true (score >= 0.0 && score <= 1.0)
 
-let test_old_masc_memory_marker_is_not_anchor () =
+let test_legacy_masc_memory_marker_is_anchor () =
   let msgs = [
     msg Agent_sdk.Types.Assistant "[MASC_MEMORY_SUMMARY v1] old format summary";
     msg Agent_sdk.Types.Assistant "normal message";
   ] in
   let scores = Scoring.score_messages msgs in
   let old_score = List.assoc 0 scores in
-  check bool "old memory marker is not sticky" true (old_score < 0.95)
+  check bool "legacy memory marker is sticky" true (old_score >= 0.95)
 
-let test_old_masc_goal_marker_is_not_anchor () =
+let test_legacy_masc_goal_marker_is_anchor () =
   let msgs = [
     msg Agent_sdk.Types.User "[MASC_GOAL] old format goal";
   ] in
   let scores = Scoring.score_messages msgs in
   let score = List.assoc 0 scores in
-  check bool "old goal marker is not sticky" true (score < 0.95)
+  check bool "legacy goal marker is sticky" true (score >= 0.95)
+
+let test_legacy_masc_markers_survive_drop_low_importance () =
+  let msgs = [
+    msg Agent_sdk.Types.Assistant "[MASC_MEMORY_SUMMARY v1] old format summary";
+    msg Agent_sdk.Types.User "[MASC_GOAL] old format goal";
+    msg Agent_sdk.Types.Assistant "low value assistant text";
+  ] in
+  let result =
+    Compact.compact ~messages:msgs ~strategies:[Compact.DropLowImportance] ()
+  in
+  let texts = List.map Agent_sdk.Types.text_of_message result in
+  check bool "legacy memory summary survives" true
+    (List.exists
+       (starts_with ~prefix:"[MASC_MEMORY_SUMMARY")
+       texts);
+  check bool "legacy goal survives" true
+    (List.exists (starts_with ~prefix:"[MASC_GOAL") texts)
 
 (* ================================================================ *)
 (* Dynamic Strategy Resolution Tests (#3164)                        *)
@@ -313,10 +330,12 @@ let () =
       test_case "sticky goal" `Quick test_scoring_goal_sticky;
       test_case "empty input" `Quick test_scoring_empty;
       test_case "single message" `Quick test_scoring_single;
-      test_case "old MASC memory marker not anchored" `Quick
-        test_old_masc_memory_marker_is_not_anchor;
-      test_case "old MASC goal marker not anchored" `Quick
-        test_old_masc_goal_marker_is_not_anchor;
+      test_case "legacy MASC memory marker anchored" `Quick
+        test_legacy_masc_memory_marker_is_anchor;
+      test_case "legacy MASC goal marker anchored" `Quick
+        test_legacy_masc_goal_marker_is_anchor;
+      test_case "legacy MASC markers survive drop" `Quick
+        test_legacy_masc_markers_survive_drop_low_importance;
     ];
     "dynamic_strategy", [
       test_case "high pressure multi-agent" `Quick test_dynamic_high_pressure_multi_agent;

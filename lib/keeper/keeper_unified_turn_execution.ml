@@ -651,6 +651,9 @@ let run (ctx : ctx)
               ~turn_event_bus:current_turn_event_bus
               err
           in
+          let overflow_evidence_detail =
+            turn_event_bus_overflow_evidence_detail current_turn_event_bus
+          in
           let turn_state =
             { turn_state with
               current_turn_blocker_info =
@@ -658,6 +661,8 @@ let run (ctx : ctx)
                   (Keeper_meta_contract.blocker_info_of_class
                      ~detail:
                        (Keeper_state_machine.event_to_string overflow_event
+                        ^ ": "
+                        ^ overflow_evidence_detail
                         ^ ": "
                         ^ Agent_sdk.Error.to_string err)
                      Sdk_token_budget_exceeded)
@@ -675,7 +680,7 @@ let run (ctx : ctx)
           Log.Keeper.warn
             "%s: OAS returned context overflow after its own retry \
              path; MASC will not compact/retry within this turn — \
-             pausing with auto-resume-with-backoff: %s"
+             pausing via Turn_overflow_pause policy: %s"
             meta.name
             (short_preview (Agent_sdk.Error.to_string err));
           (* OAS already exhausted its own proactive + emergency compaction
@@ -686,9 +691,9 @@ let run (ctx : ctx)
              counter (which has no auto-recovery and only escalates to a
              hard [Keeper_fiber_crash]), drive the already-implemented
              Overflowed/Compacting FSM's retry-exhausted path directly:
-             this pauses the keeper with [Auto_resume_with_backoff] so it
-             comes back on its own once the backoff elapses, instead of
-             requiring operator intervention. *)
+             this pauses the keeper through the [Turn_overflow_pause]
+             failure-policy breaker instead of repeatedly auto-resuming the
+             same oversized deterministic turn. *)
           let paused_meta =
             pause_keeper_for_overflow
               ~config

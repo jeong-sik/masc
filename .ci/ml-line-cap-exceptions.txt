@@ -13,8 +13,12 @@ test/test_sidecar_lifecycle_routes.ml
 # lines but below 1000-line godfile threshold. Further decomposition in later steps.
 lib/keeper/keeper_run_tools_hooks.ml
 lib/keeper/keeper_run_tools_setup.ml
+lib/keeper/keeper_turn_driver.ml
 lib/keeper/keeper_turn_driver_try_runtime.ml
 lib/keeper/keeper_unified_turn_execution.ml
+# Context budgeting regression harness grew during PR #22925; keep new tests
+# focused here until the provider-timeout strike harness is split.
+test/test_oas_timeout_budget_strike.ml
 # Fusion core test monolith pre-dates the adaptive-timeout schema expansion.
 # New focused cases live in test/test_fusion_adaptive_timeout.ml; full extraction
 # should happen separately from the feature hardening branch.

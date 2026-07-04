@@ -456,6 +456,7 @@ let run_turn
             ("history_message_count", `Int (List.length history_messages));
             ("history_messages_digest", `String history_messages_digest);
             ("estimated_input_tokens", `Int estimated_input_tokens);
+            ("context_window", `Int max_context);
             ("context_digest", `String context_digest);
           ]))
     Keeper_runtime_manifest.Context_injected;
@@ -473,6 +474,8 @@ let run_turn
       ~dynamic_context
       ~history_messages
       ~prompt_metrics
+      ~estimated_input_tokens
+      ~max_context
       ~shared_context
       ~context_injector
       ~start_turn_count
@@ -485,6 +488,12 @@ let run_turn
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context
+      ~runtime_manifest_append:
+        (fun manifest ->
+           Keeper_runtime_manifest.append_best_effort
+             ~site:"context_injection_hook"
+             config
+             manifest)
       ()
   in
   (* Section 2: prepare runtime tools and hooks. *)
@@ -497,6 +506,85 @@ let run_turn
     Turn_helpers.run_with_setup_cleanup ~cleanup:cleanup_agent_setup
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
+    let tool_context_estimate =
+      s.Keeper_run_tools.tool_context_estimate
+    in
+    let context_window_budget =
+      Keeper_run_prompt.context_window_budget
+        ~estimated_input_tokens:
+          tool_context_estimate.estimated_input_tokens_with_tools
+        ~max_context
+    in
+    (* Pre-dispatch context-window estimate is intentionally observational:
+       the definitive ledger includes [extra_system_context] injected by
+       [before_turn_params] hooks, which has not run yet. If the request is
+       still over budget after hooks, we rely on the OAS/driver's
+       [oas_auto_context_overflow_retry] path to compact and retry rather
+       than hard-failing here and bypassing that recovery path. *)
+    let pre_dispatch_context_window_error =
+      match
+        Keeper_run_prompt.preflight_context_window
+          ~estimated_input_tokens:
+            tool_context_estimate.estimated_input_tokens_with_tools
+          ~max_context
+      with
+      | Ok () -> None
+      | Error err -> Some err
+    in
+    let context_layer policy text =
+      Keeper_run_prompt.estimate_context_layer_policy_budget
+        ~max_context
+        ~policy
+        ~text
+    in
+    let context_layers =
+      [ context_layer
+          Keeper_run_prompt.world_dynamic_context_layer_policy
+          dynamic_context
+      ; context_layer Keeper_run_prompt.memory_context_layer_policy memory_context
+      ; context_layer
+          Keeper_run_prompt.temporal_context_layer_policy
+          temporal_context
+      ; context_layer
+          Keeper_run_prompt.user_message_context_layer_policy
+          user_message
+      ]
+    in
+    append_manifest ~site:"context_preflight"
+      ~keeper_turn_id:manifest_keeper_turn_id
+      ~status:
+        (if Option.is_some pre_dispatch_context_window_error
+         then "over_context_window_observed"
+         else "ok")
+      ~decision:
+        (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
+          (`Assoc
+            [
+              ( "prompt_estimated_input_tokens",
+                `Int estimated_input_tokens );
+              ( "tool_count",
+                `Int tool_context_estimate.tool_count );
+              ( "tool_schema_estimated_tokens",
+                `Int tool_context_estimate.tool_schema_tokens );
+              ( "estimated_input_tokens_with_tools",
+                `Int tool_context_estimate.estimated_input_tokens_with_tools );
+              ("context_window", `Int max_context);
+              ( "remaining_context_tokens",
+                `Int context_window_budget.remaining_context_tokens );
+              ( "over_context_tokens",
+                `Int context_window_budget.over_context_tokens );
+              ( "context_usage_ratio",
+                `Float context_window_budget.context_usage_ratio );
+              ( "context_layers",
+                `List
+                  (List.map
+                     Keeper_run_prompt.context_layer_budget_to_json
+                     context_layers) );
+              ( "pre_dispatch_over_context_window",
+                `Bool
+                  (Option.is_some pre_dispatch_context_window_error) );
+            ]))
+      Keeper_runtime_manifest.Context_injected;
     let hooks = s.Keeper_run_tools.hooks in
     let reducer = s.Keeper_run_tools.reducer in
     let acc = s.Keeper_run_tools.acc in
@@ -569,13 +657,15 @@ let run_turn
          ~max_context
          ~pre_dispatch_compacted;
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
-       let turn_result =
+       let pre_dispatch_error =
          match pre_dispatch_checkpoint_error with
+         | Some err -> Some err
+         | None -> pre_dispatch_max_tokens_error
+       in
+       let turn_result =
+         match pre_dispatch_error with
          | Some err -> Error err
          | None ->
-           (match pre_dispatch_max_tokens_error with
-            | Some err -> Error err
-            | None ->
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
@@ -628,6 +718,7 @@ let run_turn
                     ~system_prompt:turn_system_prompt
                     ~tools
                     ~compact_ratio:meta.compaction.ratio_gate
+                    ~context_window_tokens:max_context
                     ~oas_auto_context_overflow_retry:true
                     ~initial_messages
                     ~hooks
@@ -810,7 +901,7 @@ let run_turn
                                 ~trace_id:meta.runtime.trace_id
                                 ~response_text
                                 ())
-                          ())))
+                          ()))
                in
        let receipt_result =
          Keeper_agent_run_receipt.finalize

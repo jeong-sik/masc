@@ -55,11 +55,11 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.18 (oas#2468). Beyond v0.208.17 (oas#2463) it adds
-  ;; the Xiaomi MiMo v2.5 capability catalog (oas#2466) and a fix for
-  ;; type-suppressed sampling parameters (oas#2467). Exact pin sha lives
+  ;; Pinned to OAS v0.208.19 (oas#2474). Beyond v0.208.18 (oas#2468) it adds
+  ;; the reasoning replay token-waste fix (oas#2470, released via oas#2473).
+  ;; Exact pin sha lives
   ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.208.18))
+  (agent_sdk (>= 0.208.19))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

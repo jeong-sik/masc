@@ -1356,7 +1356,12 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
                  (Runtime.Missing_catalog_models report))
-              "oas-models.toml"))
+              "oas-models.toml");
+         check bool "diagnostic reports provider label" true
+           (String_util.contains_substring
+              (Runtime.strict_init_error_to_string
+                 (Runtime.Missing_catalog_models report))
+              "provider_label=openai_compat"))
 
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->

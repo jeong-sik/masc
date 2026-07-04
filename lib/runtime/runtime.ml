@@ -338,7 +338,11 @@ type strict_init_error =
   | Missing_catalog_models of missing_catalog_report
 
 let missing_catalog_model_label (missing : missing_catalog_model) =
-  Printf.sprintf "%s (model=%s)" missing.runtime_id missing.model_id
+  Printf.sprintf
+    "%s (provider_label=%s, model=%s)"
+    missing.runtime_id
+    missing.provider_label
+    missing.model_id
 ;;
 
 let missing_catalog_report_to_string (report : missing_catalog_report) =

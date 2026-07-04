@@ -182,11 +182,13 @@ type dashboard_deferred_chat =
 let dashboard_busy_queue_state ~base_path ~keeper_name =
   let in_flight = Keeper_turn_admission.in_flight ~base_path ~keeper_name in
   let chat_waiting = Keeper_turn_admission.chat_waiting ~base_path ~keeper_name in
-  match in_flight, chat_waiting with
-  | None, false -> None
-  | None, true -> Some (None, true)
-  | Some info, false -> Some (Some info, false)
-  | Some info, true -> Some (Some info, true)
+  let queue_waiting = Keeper_chat_queue.length ~keeper_name > 0 in
+  match in_flight, chat_waiting, queue_waiting with
+  | None, false, false -> None
+  | None, false, true -> Some (None, false)
+  | None, true, _ -> Some (None, true)
+  | Some info, false, _ -> Some (Some info, false)
+  | Some info, true, _ -> Some (Some info, true)
 
 let dashboard_deferred_ack_text ~keeper_name =
   Printf.sprintf

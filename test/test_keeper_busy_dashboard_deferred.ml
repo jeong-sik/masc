@@ -134,6 +134,35 @@ let test_free_dashboard_not_enqueued () =
   check "queue remains empty" (Keeper_chat_queue.length ~keeper_name = 0)
 ;;
 
+let test_existing_backlog_defers_new_dashboard_message () =
+  Printf.printf "Test: existing dashboard backlog keeps newer messages queued\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  Keeper_chat_queue.enqueue ~keeper_name
+    { Keeper_chat_queue.content = "older queued message"
+    ; user_blocks = []
+    ; attachments = []
+    ; timestamp = Eio.Time.now clock
+    ; source = Dashboard
+    };
+  (match
+     Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
+       ~base_path:base
+       ~clock
+       (payload ~content:"newer dashboard message" ())
+   with
+   | `Queued len -> check "newer message joins existing backlog" (len = 2)
+   | `Not_busy -> check "existing backlog should force queue path" false);
+  (match Keeper_chat_queue.dequeue ~keeper_name with
+   | Some { Keeper_chat_queue.content; _ } ->
+     check "older queued message stays first" (String.equal content "older queued message")
+   | None -> check "older queued message is present" false);
+  (match Keeper_chat_queue.dequeue ~keeper_name with
+   | Some { Keeper_chat_queue.content; _ } ->
+     check "newer dashboard message stays second" (String.equal content "newer dashboard message")
+   | None -> check "newer queued message is present" false)
+;;
+
 let test_concurrent_busy_dashboard_enqueues_are_per_keeper () =
   Printf.printf
     "Test: concurrent busy dashboard dispatches enqueue per keeper\n%!";
@@ -210,6 +239,7 @@ let test_stream_headers_close_per_turn_response () =
 let () =
   test_busy_dashboard_enqueues ();
   test_free_dashboard_not_enqueued ();
+  test_existing_backlog_defers_new_dashboard_message ();
   test_concurrent_busy_dashboard_enqueues_are_per_keeper ();
   test_stream_headers_close_per_turn_response ();
   if !failures > 0

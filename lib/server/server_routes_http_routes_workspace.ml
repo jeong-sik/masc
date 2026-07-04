@@ -133,20 +133,23 @@ let sanitize_header_value s =
     let code = Char.code c in
     if code < 0x20 || code = 0x7f then '_' else c) s
 
+(* Single SSOT encoding of the workspace source variant. Used by
+   [source_header] (HTTP header — sanitized there) and by the
+   tree/blame/diff cache keys (internal string, no sanitization). *)
+let source_to_string = function
+  | `Project -> "project"
+  | `Repository repo_id -> "repository:" ^ repo_id
+  | `RepositoryMissing repo_id -> "repository_missing:" ^ repo_id
+  | `RepositoryUnknown repo_id -> "repository_unknown:" ^ repo_id
+  | `Playground name -> "playground:" ^ name
+  | `PlaygroundMissing name -> "playground_missing:" ^ name
+  | `KeeperUnknown name -> "keeper_unknown:" ^ name
+
 (* Encode the workspace source tag as a single header value so the
    frontend can render hints ("Playground 없음 — 프로젝트로 fallback")
    without parsing the JSON body. *)
 let source_header source =
-  let v = match source with
-    | `Project -> "project"
-    | `Repository repo_id -> "repository:" ^ sanitize_header_value repo_id
-    | `RepositoryMissing repo_id -> "repository_missing:" ^ sanitize_header_value repo_id
-    | `RepositoryUnknown repo_id -> "repository_unknown:" ^ sanitize_header_value repo_id
-    | `Playground name -> "playground:" ^ sanitize_header_value name
-    | `PlaygroundMissing name -> "playground_missing:" ^ sanitize_header_value name
-    | `KeeperUnknown name -> "keeper_unknown:" ^ sanitize_header_value name
-  in
-  [("X-Workspace-Source", v)]
+  [("X-Workspace-Source", sanitize_header_value (source_to_string source))]
 
 let json_response_with_source ~status ~source req reqd json =
   Http.Response.json_value ~status ~extra_headers:(source_header source)
@@ -787,14 +790,7 @@ let add_routes router =
            let cache_key =
              Printf.sprintf "workspace:tree:%s:%s:%d:%d:%b"
                base
-               (match source with
-                | `Project -> "project"
-                | `Repository repo_id -> "repository:" ^ repo_id
-                | `RepositoryMissing repo_id -> "repository_missing:" ^ repo_id
-                | `RepositoryUnknown repo_id -> "repository_unknown:" ^ repo_id
-                | `Playground name -> "playground:" ^ name
-                | `PlaygroundMissing name -> "playground_missing:" ^ name
-                | `KeeperUnknown name -> "keeper_unknown:" ^ name)
+               (source_to_string source)
                effective_depth effective_max_nodes include_diff
            in
            let json =
@@ -944,14 +940,7 @@ let add_routes router =
                   let cache_key =
                     Printf.sprintf "git:blame:%s:%s:%s"
                       base
-                      (match source with
-                       | `Project -> "project"
-                       | `Repository repo_id -> "repository:" ^ repo_id
-                       | `RepositoryMissing repo_id -> "repository_missing:" ^ repo_id
-                       | `RepositoryUnknown repo_id -> "repository_unknown:" ^ repo_id
-                       | `Playground name -> "playground:" ^ name
-                       | `PlaygroundMissing name -> "playground_missing:" ^ name
-                       | `KeeperUnknown name -> "keeper_unknown:" ^ name)
+                      (source_to_string source)
                       rel
                   in
                   let json =
@@ -974,70 +963,60 @@ let add_routes router =
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
-            let uri = Uri.of_string request.target in
-            let base, source = resolve_workspace_base ~state ~uri in
-            let file_path =
-              match Uri.get_query_param uri "path" with
-              | Some p -> p
-              | None -> ""
-            in
-            if file_path = "" then
-              json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
-            else
-              let base_ref =
-                match Uri.get_query_param uri "base_ref" with
-                | Some r -> r
-                | None -> "HEAD"
-              in
-              if not (valid_git_ref base_ref) then
-                json_response ~status:`Bad_request request reqd
-                  (json_error "Invalid base_ref")
-              else
-              (match resolve_workspace_file base file_path with
-               | Error _ ->
-                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-               | Ok safe ->
-                 let rel = rel_under base safe.lexical_path in
-                 let cache_key =
-                   Printf.sprintf "git:diff:%s:%s:%s:%s"
-                     base
-                     (match source with
-                      | `Project -> "project"
-                      | `Repository repo_id -> "repository:" ^ repo_id
-                      | `RepositoryMissing repo_id -> "repository_missing:" ^ repo_id
-                      | `RepositoryUnknown repo_id -> "repository_unknown:" ^ repo_id
-                      | `Playground name -> "playground:" ^ name
-                      | `PlaygroundMissing name -> "playground_missing:" ^ name
-                      | `KeeperUnknown name -> "keeper_unknown:" ^ name)
-                     base_ref
-                     rel
-                 in
-                 let json =
-                   Dashboard_cache.get_or_compute cache_key
-                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                     (fun () ->
-                        Domain_pool_ref.submit_io_or_inline (fun () ->
-                          match git_run_lines_or_error ~cwd:base
-                                  ["diff"; base_ref; "--"; rel]
-                          with
-                          | Error _ ->
-                            `Assoc [("ok", `Bool false); ("error", `String "git diff failed")]
-                          | Ok [] ->
-                            `Assoc [("ok", `Bool true); ("data", `Assoc [("unified", `List []); ("has_changes", `Bool false)])]
-                          | Ok diff_lines ->
-                            let unified = parse_unified_diff diff_lines in
-                            `Assoc [("ok", `Bool true); ("data", `Assoc [("unified", `List unified); ("has_changes", `Bool true)])]))
-                 in
-                 (match json with
-                  | `Assoc fields ->
-                    (match List.assoc_opt "ok" fields with
-                     | Some (`Bool true) ->
-                       let data = List.assoc "data" fields in
-                       json_response_with_source ~status:`OK ~source request reqd data
-                     | _ ->
-                       json_response ~status:`Bad_request request reqd
-                         (json_error "git diff failed"))
-                  | _ ->
-                    json_response ~status:`Bad_request request reqd
-                      (json_error "git diff failed"))))
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let file_path =
+             match Uri.get_query_param uri "path" with
+             | Some p -> p
+             | None -> ""
+           in
+           if file_path = "" then
+             json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+           else
+             let base_ref =
+               match Uri.get_query_param uri "base_ref" with
+               | Some r -> r
+               | None -> "HEAD"
+             in
+             if not (valid_git_ref base_ref) then
+               json_response ~status:`Bad_request request reqd
+                 (json_error "Invalid base_ref")
+             else
+             (match resolve_workspace_file base file_path with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+              | Ok safe ->
+                let rel = rel_under base safe.lexical_path in
+                let cache_key =
+                  Printf.sprintf "git:diff:%s:%s:%s:%s"
+                    base
+                    (source_to_string source)
+                    base_ref
+                    rel
+                in
+                let result =
+                  Dashboard_cache.get_or_compute cache_key
+                    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                    (fun () ->
+                       Domain_pool_ref.submit_io_or_inline (fun () ->
+                         match git_run_lines_or_error ~cwd:base
+                                 ["diff"; base_ref; "--"; rel]
+                         with
+                         | Error _ ->
+                           observe_workspace_route_failure
+                             ~site:"git_run" ~path:rel
+                             (Failure "git diff failed");
+                           `Null
+                         | Ok [] ->
+                           `Assoc [("unified", `List []); ("has_changes", `Bool false)]
+                         | Ok diff_lines ->
+                           let unified = parse_unified_diff diff_lines in
+                           `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
+                in
+                (match result with
+                 | `Null ->
+                   json_response ~status:`Bad_request request reqd
+                     (json_error "git diff failed")
+                 | data ->
+                   json_response_with_source ~status:`OK ~source request reqd data)))
          request reqd)

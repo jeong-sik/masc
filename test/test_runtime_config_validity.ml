@@ -535,7 +535,7 @@ let test_repo_oas_model_catalog_modality_priorities_resolve () =
     List.filter
       (fun (entry : Llm_provider.Model_catalog.model_entry) ->
          Option.is_some entry.modality_priority)
-      catalog
+      (Llm_provider.Model_catalog.model_entries catalog)
   in
   check bool "repo OAS catalog has modality priority rows" true (rows <> []);
   List.iter

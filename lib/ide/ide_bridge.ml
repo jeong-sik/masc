@@ -722,7 +722,12 @@ let ingest_cursor_event
     ?focus_mode
     ~source
     ()
+    : (unit, string) result
   =
+  (* The explicit return annotation pins the branches to [result]: this file
+     [open Ide_event_types], whose [exit_semantics] also has an [Error of
+     string] constructor, so a bare [Error msg] arm would otherwise infer
+     [exit_semantics] and reject the sibling [Ok ()]. *)
   (* DEFER (task-1733): this is the human-IDE direct path (server_ide_http.ml
      POST /api/v1/ide/cursors). [partition] is accepted so the caller CAN scope
      the write, but the server call site does not yet resolve one from the

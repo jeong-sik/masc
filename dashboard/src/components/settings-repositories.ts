@@ -1,7 +1,7 @@
 // Settings — Repositories section (keeper-v2 design settings.jsx `repositories`).
 // Live-backed: GET/POST /api/v1/repositories, DELETE /api/v1/repositories/:id.
-// Keeper-repo mapping stays in Workspace › Repositories; this section only owns
-// registration (list / add / remove) plus the auto-sync posture of each repo.
+// Keeper-repo mapping is owned by Workspace › Repositories; this section links
+// directly to that SSOT so Settings does not look incomplete.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -16,6 +16,7 @@ import { createAsyncResource } from '../lib/async-state'
 import { requestConfirm } from './common/confirm-dialog'
 import { showToast } from './common/toast'
 import { errorMessageOr } from '../lib/format-string'
+import { replaceRoute } from '../router'
 
 const SYNC_INTERVAL_MIN_S = 60
 const SYNC_INTERVAL_MAX_S = 3600
@@ -110,6 +111,10 @@ async function deleteRepo(repo: Repository): Promise<void> {
   } catch (err) {
     showToast(errorMessageOr(err, '저장소 제거 실패'), 'error')
   }
+}
+
+function openKeeperRepoMappings(): void {
+  replaceRoute('workspace', { section: 'repositories', view: 'mappings' })
 }
 
 // ── Local form primitives (design settings.jsx SetRow/SetToggle/SetStepper DOM) ──
@@ -277,8 +282,23 @@ export function SettingsRepositoriesSection() {
     <div data-testid="settings-repositories-section">
       <div class="set-hint" style=${{ marginBottom: '12px' }}>
         keeper 가 작업하는 git 저장소. 등록하면 <span class="mono">POST /api/v1/repositories</span> 로
-        클론되고, keeper 별 매핑은 워크스페이스 › Repositories 에서. 워크트리는
-        <span class="mono">.masc/repos/${'<id>'}</span> 아래.
+        클론되고, keeper 별 매핑은 워크스페이스 › Repositories 에서 관리합니다. 등록 기본 경로는
+        <span class="mono">.masc/repos/${'<id>'}</span>, keeper 작업 clone 은 각 sandbox 의
+        <span class="mono">repos/</span> 아래.
+      </div>
+      <div class="set-row" data-testid="settings-repo-mapping-entry">
+        <div class="set-row-l">
+          <div class="set-label">Keeper 접근</div>
+          <div class="set-hint">명시 매핑은 선택 접근 필터입니다. 매핑이 없으면 등록된 keeper 개인 clone 기본 범위를 사용합니다.</div>
+        </div>
+        <div class="set-row-c">
+          <button
+            type="button"
+            class="set-btn-ghost"
+            data-testid="settings-repo-mapping-open"
+            onClick=${openKeeperRepoMappings}
+          >Keeper 접근 매핑 열기</button>
+        </div>
       </div>
 
       ${state.status === 'loading'

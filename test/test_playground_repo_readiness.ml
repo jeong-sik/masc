@@ -76,7 +76,8 @@ let repo_mapping_decision_metric_total () =
   List.fold_left
     (fun total metric -> total +. metric_total metric)
     0.0
-    [ Keeper_metrics.KeeperRepoMappingDeniedMissing;
+    [ Keeper_metrics.KeeperRepoMappingDefaultScopeAllowed;
+      Keeper_metrics.KeeperRepoMappingDeniedUnregistered;
       Keeper_metrics.KeeperRepoMappingDeniedNotInMapping;
       Keeper_metrics.KeeperRepoMappingLoadError;
       Keeper_metrics.KeeperRepoMappingRepositoryIdentityMismatch;
@@ -117,9 +118,15 @@ let repository_fixture ~id ~name ~url ~local_path : Repo_manager_types.repositor
   ; updated_at = 0L
   }
 
+let normalize_path path =
+  Masc.Keeper_alerting_path.normalize_path_for_check path
+  |> Masc.Keeper_alerting_path.strip_trailing_slashes
+
 let playground_repo_path ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta)
       repo_name =
-  let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let playground =
+    Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  in
   Filename.concat playground (Filename.concat "repos" repo_name)
 
 let create_playground_repo_marker ~config ~meta repo_name =
@@ -145,10 +152,6 @@ let playground_repo_entry ~config ~meta ~repo_name =
         (Printf.sprintf "expected playground repo entry for %s, got: %s"
            repo_name
            (Yojson.Safe.to_string (`List repos)))
-
-let normalize_path path =
-  Masc.Keeper_alerting_path.normalize_path_for_check path
-  |> Masc.Keeper_alerting_path.strip_trailing_slashes
 
 let test_missing_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
@@ -192,18 +195,27 @@ let test_invalid_repo_name () =
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "invalid_repo_name" (json_string "state" json)
 
-let test_playground_repos_mark_missing_mapping_denied () =
+let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc-mcp" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc-mcp"
+        ~name:"masc-mcp"
+        ~url:"https://github.com/jeong-sik/masc-mcp.git"
+        ~local_path:repo_path
+    ];
   create_playground_repo_marker ~config ~meta "masc-mcp";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc-mcp" in
-  check bool "policy denies missing mapping" false
+  check bool "policy allows missing mapping default scope" true
     (json_bool "policy_allowed" json);
   check string "policy status"
-    (Keeper_sandbox_control.playground_policy_status_to_string
-       Policy_denied_missing_mapping)
+    (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
     (json_string "policy_status" json);
+  check bool "policy marks default scope" true
+    (json_bool "policy_default_scope" json);
   check string "policy source"
     Keeper_repo_mapping.mappings_toml_basename
     (json_string "policy_source" json)
@@ -226,6 +238,14 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+    ];
   write_mapping base_path meta.name [ "*" ];
   create_playground_repo_marker ~config ~meta "masc";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
@@ -326,10 +346,18 @@ let test_playground_repos_projection_does_not_record_policy_metrics () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+    ];
   create_playground_repo_marker ~config ~meta "masc";
   let before = repo_mapping_decision_metric_total () in
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
-  check bool "policy projection still denies missing mapping" false
+  check bool "policy projection allows missing mapping default scope" true
     (json_bool "policy_allowed" json);
   check (float 0.0) "policy projection does not record decision metrics"
     before
@@ -679,8 +707,8 @@ let () =
       ];
       "playground_policy",
       [
-        test_case "filesystem repo without mapping is marked denied" `Quick
-          test_playground_repos_mark_missing_mapping_denied;
+        test_case "filesystem repo without mapping uses default scope" `Quick
+          test_playground_repos_mark_missing_mapping_default_scope_allowed;
         test_case "filesystem repo outside mapping is marked denied" `Quick
           test_playground_repos_mark_repo_not_in_mapping_denied;
         test_case "filesystem repo under wildcard mapping is marked allowed"

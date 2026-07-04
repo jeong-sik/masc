@@ -17,6 +17,25 @@ let configured_port () = Env_config.Transport.grpc_port
 (** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
 let is_enabled () = Env_config.Transport.grpc_enabled ()
 
+let parse_lsp_jsonrpc_request jsonrpc_request_json =
+  try
+    match Yojson.Safe.from_string jsonrpc_request_json with
+    | `Assoc fields ->
+      (match List.assoc_opt "method" fields with
+       | Some (`String method_) ->
+         let params = Option.value ~default:`Null (List.assoc_opt "params" fields) in
+         Ok (method_, params)
+       | Some _ -> Error "JSON-RPC request method field must be a string"
+       | None -> Error "JSON-RPC request missing method field")
+    | _ -> Error "JSON-RPC request must be a JSON object"
+  with
+  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON-RPC parse error: %s" msg)
+;;
+
+module For_testing = struct
+  let parse_lsp_jsonrpc_request = parse_lsp_jsonrpc_request
+end
+
 module Reflection_bridge = struct
   let reflection_v1_service_name = "grpc.reflection.v1.ServerReflection"
   let reflection_v1alpha_service_name = "grpc.reflection.v1alpha.ServerReflection"
@@ -553,19 +572,10 @@ let start
       match ensure_proc () with
       | Error _ as e -> e
       | Ok proc ->
-        (* Parse the JSON-RPC request and extract method + params. *)
-        (try
-           let json = Yojson.Safe.from_string jsonrpc_request_json in
-           match json with
-           | `Assoc fields ->
-             let method_ =
-               match List.assoc_opt "method" fields with
-               | Some (`String m) -> m
-               | _ -> failwith "missing method field"
-             in
-             let params =
-               Option.value ~default:`Null (List.assoc_opt "params" fields)
-             in
+        (match parse_lsp_jsonrpc_request jsonrpc_request_json with
+         | Error _ as error -> error
+         | Ok (method_, params) ->
+           try
              let promise =
                Lsp_message_router.send_request
                  lsp_router proc
@@ -578,10 +588,9 @@ let start
                 Ok (Yojson.Safe.to_string result)
               | Error msg ->
                 Error (Printf.sprintf "LSP request failed: %s" msg))
-           | _ -> Error "JSON-RPC request must be a JSON object"
-         with
-         | exn ->
-           Error (Printf.sprintf "LSP dispatch error: %s" (Printexc.to_string exn)))
+           with
+           | exn ->
+             Error (Printf.sprintf "LSP dispatch error: %s" (Printexc.to_string exn)))
     in
     Eio.Fiber.fork ~sw (fun () ->
       try

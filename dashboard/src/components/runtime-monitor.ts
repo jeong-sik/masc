@@ -259,10 +259,12 @@ function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): s
   }
   const parts = [
     request.provider_kind ? `kind ${request.provider_kind}` : null,
+    request.source ? `source ${request.source}` : null,
     requestPath,
     typeof request.max_tokens === 'number' ? `out ${formatNumber(request.max_tokens)}` : null,
     typeof request.max_context === 'number' ? `ctx ${formatNumber(request.max_context)}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    request.has_system_prompt ? 'system prompt' : null,
     typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
     typeof request.preserve_thinking === 'boolean' ? `preserve ${request.preserve_thinking ? 'on' : 'off'}` : null,
     typeof request.clear_thinking === 'boolean' ? `clear ${request.clear_thinking ? 'on' : 'off'}` : null,
@@ -316,6 +318,8 @@ function runtimeDeclaredModelControlText(provider: DashboardRuntimeProviderSnaps
     flagText(caps.supports_required_tool_choice, 'required'),
     flagText(caps.supports_named_tool_choice, 'named'),
     flagText(caps.supports_parallel_tool_calls, 'parallel'),
+    flagText(caps.supports_extended_thinking, 'extended-thinking'),
+    flagText(caps.supports_reasoning_budget, 'reasoning-budget'),
     flagText(caps.supports_native_streaming, 'native-stream'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
     flagText(caps.supports_caching, 'cache'),
@@ -383,6 +387,7 @@ function runtimeEffectiveControlText(provider: DashboardRuntimeProviderSnapshot)
   const caps = provider.effective_capabilities
   if (!caps) return null
   return textList([
+    flagText(caps.supports_native_streaming, 'native-stream'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
     flagText(caps.supports_caching, 'cache'),
     caps.supports_prompt_caching
@@ -590,6 +595,8 @@ function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): st
     declaredCaps?.supports_required_tool_choice ? 'required' : null,
     declaredCaps?.supports_named_tool_choice ? 'named' : null,
     declaredCaps?.supports_parallel_tool_calls ? 'parallel' : null,
+    declaredCaps?.supports_extended_thinking ? 'extended-thinking' : null,
+    declaredCaps?.supports_reasoning_budget ? 'reasoning-budget' : null,
     declaredCaps?.supports_native_streaming ? 'native-stream' : null,
     declaredCaps?.supports_system_prompt ? 'system-prompt' : null,
     declaredCaps?.supports_caching ? 'cache' : null,
@@ -671,18 +678,27 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.supports_audio_input ? 'audio' : null,
     caps.supports_video_input ? 'video' : null,
   ].filter((value): value is string => Boolean(value))
+  const context = typeof caps.max_context_tokens === 'number'
+    ? `ctx ${formatNumber(caps.max_context_tokens)}`
+    : null
   const output = typeof caps.max_output_tokens === 'number'
     ? `out ${formatNumber(caps.max_output_tokens)}`
     : null
   const tools = caps.supports_tool_choice
-    ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
+    ? `tool_choice${[
+      caps.supports_required_tool_choice ? 'required' : null,
+      caps.supports_named_tool_choice ? 'named' : null,
+      caps.supports_parallel_tool_calls ? 'parallel' : null,
+    ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
     : null
   const formats = [
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
   const parts = [
+    context,
     output,
+    caps.supports_tools ? 'tools' : null,
     tools,
     caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
@@ -692,11 +708,17 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
+    caps.supports_extended_thinking ? 'extended' : null,
+    caps.supports_reasoning_budget ? 'budget' : null,
+    caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
+      ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
+      : null,
     caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
+    caps.supports_native_streaming ? 'native-stream' : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
     caps.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`

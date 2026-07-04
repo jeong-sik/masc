@@ -250,8 +250,12 @@ describe('KeeperWorkspaceRail', () => {
           },
           effective_capabilities: {
             source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
             max_output_tokens: 65536,
+            supports_tools: true,
             supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
@@ -259,6 +263,9 @@ describe('KeeperWorkspaceRail', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -266,6 +273,7 @@ describe('KeeperWorkspaceRail', () => {
               field: 'reasoning_content',
             },
             reasoning_replay_override: 'preserve-always',
+            supports_native_streaming: true,
             supports_system_prompt: true,
             supports_caching: true,
             supports_prompt_caching: true,
@@ -379,7 +387,10 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('params')
     expect(container.textContent).toContain('chat_template_kwargs · preserve_always')
     expect(container.textContent).toContain('request')
-    expect(container.textContent).toContain('openai_compat · out 65536 · ctx 131072')
+    expect(container.textContent).toContain(
+      'openai_compat · source oas-provider-config · path /chat/completions · out 65536 · ctx 131072',
+    )
+    expect(container.textContent).toContain('system prompt')
     expect(container.textContent).toContain('tool required')
     expect(container.textContent).toContain('declared')
     expect(container.textContent).toContain('chat-completions · openai-compatible-http')
@@ -389,12 +400,16 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('budget 32768')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge')
     expect(container.textContent).toContain(
-      'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
+    expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
+    expect(container.textContent).toContain('extended thinking')
+    expect(container.textContent).toContain('reasoning budget')
+    expect(container.textContent).toContain('effort low,medium,high')
     expect(container.textContent).toContain('preserve always-preserved')
-    expect(container.textContent).toContain('task transcription')
+    expect(container.textContent).toContain('task transcription · native-stream')
     // the "no source" stub is replaced once the catalog reports capabilities
     expect(container.textContent).not.toContain('조정 정보 미수신')
   })

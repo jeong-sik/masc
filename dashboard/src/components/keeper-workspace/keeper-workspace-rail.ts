@@ -176,12 +176,19 @@ function runtimeRequestConfigSummary(
   ].filter((value): value is string => Boolean(value))
   const toolChoice = runtimeRequestToolChoiceSummary(entry)
   const format = runtimeRequestFormatSummary(entry)
+  const requestPath = request.request_path_targets_responses_api
+    ? 'responses-api'
+    : request.request_path
+      ? `path ${request.request_path}`
+      : null
   const parts = [
     request.provider_kind ? request.provider_kind : null,
-    request.request_path_targets_responses_api ? 'responses-api' : null,
+    request.source ? `source ${request.source}` : null,
+    requestPath,
     typeof request.max_tokens === 'number' ? `out ${request.max_tokens}` : null,
     typeof request.max_context === 'number' ? `ctx ${request.max_context}` : null,
     sampling.length > 0 ? sampling.join(',') : null,
+    request.has_system_prompt ? 'system prompt' : null,
     typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
     typeof request.preserve_thinking === 'boolean' ? `preserve ${request.preserve_thinking ? 'on' : 'off'}` : null,
     typeof request.clear_thinking === 'boolean' ? `clear ${request.clear_thinking ? 'on' : 'off'}` : null,
@@ -254,6 +261,8 @@ function runtimeDeclaredSpecSummary(
     caps?.supports_required_tool_choice ? 'required' : null,
     caps?.supports_named_tool_choice ? 'named' : null,
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
+    caps?.supports_extended_thinking ? 'extended-thinking' : null,
+    caps?.supports_reasoning_budget ? 'reasoning-budget' : null,
     caps?.supports_native_streaming ? 'native-stream' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_caching ? 'cache' : null,
@@ -319,8 +328,16 @@ function runtimeEffectiveCapabilitySummary(
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
   const parts = [
+    typeof caps.max_context_tokens === 'number' ? `ctx ${caps.max_context_tokens}` : null,
     typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
-    caps.supports_tool_choice ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}` : null,
+    caps.supports_tools ? 'tools' : null,
+    caps.supports_tool_choice
+      ? `tool_choice${[
+        caps.supports_required_tool_choice ? 'required' : null,
+        caps.supports_named_tool_choice ? 'named' : null,
+        caps.supports_parallel_tool_calls ? 'parallel' : null,
+      ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
+      : null,
     caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
@@ -328,11 +345,17 @@ function runtimeEffectiveCapabilitySummary(
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
+    caps.supports_extended_thinking ? 'extended thinking' : null,
+    caps.supports_reasoning_budget ? 'reasoning budget' : null,
+    caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
+      ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
+      : null,
     caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
+    caps.supports_native_streaming ? 'native-stream' : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
     caps.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`

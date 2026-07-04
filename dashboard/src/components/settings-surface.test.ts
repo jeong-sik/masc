@@ -826,8 +826,12 @@ describe('SettingsSurface', () => {
           },
           effective_capabilities: {
             source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
             max_output_tokens: 4096,
+            supports_tools: true,
             supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
@@ -835,7 +839,9 @@ describe('SettingsSurface', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
-            accepted_reasoning_efforts: null,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -843,6 +849,7 @@ describe('SettingsSurface', () => {
               field: 'reasoning_content',
             },
             reasoning_replay_override: 'preserve-always',
+            supports_native_streaming: true,
             supports_system_prompt: true,
             supports_caching: true,
             supports_prompt_caching: true,
@@ -961,19 +968,26 @@ describe('SettingsSurface', () => {
         expect.stringContaining('Provider B'),
       ])
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
+      expect(cards[0]?.textContent).toContain('source:oas-provider-config')
+      expect(cards[0]?.textContent).toContain('path:/chat/completions')
+      expect(cards[0]?.textContent).toContain('system-prompt')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
+      expect(cards[0]?.textContent).toContain('ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
+      expect(cards[0]?.textContent).toContain('extended-thinking')
+      expect(cards[0]?.textContent).toContain('reasoning-budget')
+      expect(cards[0]?.textContent).toContain('effort:low,medium,high')
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
-      expect(cards[0]?.textContent).toContain('task:transcription')
+      expect(cards[0]?.textContent).toContain('task:transcription · native-stream')
       expect(cards[0]?.textContent).toContain('declared:api:chat-completions')
       expect(cards[0]?.textContent).toContain('transport:http')
       expect(cards[0]?.textContent).toContain('headers:1')
       expect(cards[0]?.textContent).toContain('temp:0.65')
       expect(cards[0]?.textContent).toContain('budget:8192')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+        'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
       )
       expect(cards[0]?.textContent).toContain('behavior:inline-tools,keeper-bridge')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')

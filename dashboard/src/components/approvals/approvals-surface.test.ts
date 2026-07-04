@@ -135,6 +135,72 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('[data-testid="approvals-queue"]')).not.toBeNull()
   }, 20000)
 
+  it('renders the HITL context summary (available) inside the pending card', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({
+        id: 'appr-summary',
+        keeper_name: 'masc-improver',
+        summary_status: {
+          status: 'available',
+          summary: {
+            summary_version: 1,
+            generated_at_iso: '2026-07-04T00:00:00Z',
+            model_run_id: 'run-1',
+            context_summary: 'Deletes the production database — irreversible.',
+            key_questions: ['Is there a verified backup?'],
+            suggested_options: [
+              { label: '거부', rationale: '복구 불가', estimated_risk_delta: 'critical' },
+            ],
+            risk_rationale: 'writes outside the sandbox',
+            uncertainty: 0.6,
+          },
+        },
+      }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const summaryEl = container.querySelector('[data-testid="approval-summary"]')
+    expect(summaryEl).not.toBeNull()
+    expect(summaryEl?.getAttribute('data-summary-state')).toBe('available')
+    expect(container.textContent).toContain('Deletes the production database')
+    expect(container.textContent).toContain('Is there a verified backup?')
+    expect(container.textContent).toContain('복구 불가')
+    // uncertainty rendered as a rounded percentage
+    expect(container.textContent).toContain('60%')
+  }, 20000)
+
+  it('surfaces pending and failed summary states rather than hiding them', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({ id: 'appr-pending', summary_status: { status: 'pending' } }),
+      queueItem({
+        id: 'appr-failed',
+        summary_status: { status: 'failed', reason: 'provider unavailable', retryable: true },
+      }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const states = Array.from(
+      container.querySelectorAll('[data-testid="approval-summary"]'),
+    ).map(el => el.getAttribute('data-summary-state'))
+    expect(states).toContain('pending')
+    expect(states).toContain('failed')
+    expect(container.textContent).toContain('provider unavailable')
+  }, 20000)
+
+  it('renders no summary block when the approval has no summary status', async () => {
+    const { ApprovalsSurface } = await loadSurface([queueItem({ id: 'appr-nosummary' })])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="approval-card"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="approval-summary"]')).toBeNull()
+  }, 20000)
+
   it('counts only the bad (critical) visual band in the 비가역·위험 KPI, matching the red card rails', async () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({ id: 'c1', risk_level: 'critical' }),

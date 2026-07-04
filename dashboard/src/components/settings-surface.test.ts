@@ -779,6 +779,133 @@ describe('SettingsSurface', () => {
   })
 
   it('runtime overview shows resolved defaults and the live provider catalog', async () => {
+    apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders({
+      providers: [
+        makeRuntimeProvider({
+          parameter_policy: {
+            reasoning_toggle_wire: 'chat-template-kwargs',
+            reasoning_replay_policy: 'preserve-always',
+            requires_reasoning_replay_on_tool_call: true,
+            ignored_sampling_params: ['temperature'],
+            always_ignored_sampling_params: ['top_p'],
+          },
+          request_config: {
+            source: 'oas-provider-config',
+            provider_kind: 'openai_compat',
+            request_path: '/chat/completions',
+            request_path_targets_responses_api: false,
+            max_tokens: 4096,
+            max_context: 131072,
+            temperature: null,
+            top_p: null,
+            top_k: 40,
+            min_p: 0.05,
+            has_system_prompt: true,
+            enable_thinking: true,
+            preserve_thinking: true,
+            thinking_budget: 8192,
+            clear_thinking: false,
+            resolved_reasoning_effort: 'high',
+            glm_clear_thinking: false,
+            glm_replay_reasoning: false,
+            tool_stream: true,
+            tool_choice: { kind: 'required' },
+            disable_parallel_tool_use: true,
+            response_format: { kind: 'json_schema', has_schema: true },
+            has_output_schema: true,
+            cache_system_prompt: true,
+            supports_tool_choice_override: true,
+            supports_structured_output_override: true,
+            has_model_capabilities_override: true,
+            keep_alive: '30m',
+            internal_model_rotation_count: 2,
+            num_ctx: 131072,
+            seed: 42,
+            has_previous_response_id: true,
+            connect_timeout_s: 120,
+          },
+          declared_spec: {
+            source: 'runtime.toml',
+            provider: {
+              id: 'provider-a',
+              display_name: 'Provider A',
+              protocol: 'openai-compatible-http',
+              api_format: 'chat-completions',
+              transport: 'http',
+              auth_kind: 'env:RUNPOD_API_KEY',
+              is_non_interactive: true,
+              has_capabilities: true,
+              behavior_capabilities: {
+                supports_inline_tools: true,
+                requires_per_keeper_bridging_for_bound_actor_tools: true,
+                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+                argv_prompt_preflight: true,
+                uses_anthropic_caching: true,
+                max_turns_per_attempt: 3,
+                tolerates_bound_actor_fallback: true,
+              },
+              custom_header_count: 1,
+              connect_timeout_s: 120,
+            },
+            model: {
+              id: 'm1',
+              api_name: 'm1',
+              tools_support: true,
+              max_context: 131072,
+              thinking_support: true,
+              preserve_thinking: true,
+              max_thinking_budget: 8192,
+              streaming: true,
+              temperature: 0.65,
+              capabilities: {
+                source: 'runtime.toml',
+                max_output_tokens: 4096,
+                supports_tool_choice: true,
+                supports_extended_thinking: true,
+                supports_reasoning_budget: true,
+                thinking_control_format: 'chat-template-kwargs',
+                supports_image_input: true,
+                supports_audio_input: false,
+                supports_video_input: false,
+                supports_multimodal_inputs: true,
+                supports_response_format_json: true,
+                supports_structured_output: true,
+                supports_native_streaming: true,
+                supports_caching: true,
+                supports_prompt_caching: true,
+                prompt_cache_alignment: 1024,
+                supports_top_k: true,
+                supports_min_p: true,
+                supports_seed: true,
+                emits_usage_tokens: true,
+                supports_computer_use: false,
+              },
+              match_prefixes: ['m1'],
+            },
+            binding: {
+              provider_id: 'provider-a',
+              model_id: 'm1',
+              is_default: true,
+              max_concurrent: 4,
+              price_input: 0.1,
+              price_output: 0.2,
+              keep_alive: '30m',
+              num_ctx: 131072,
+            },
+          },
+        }),
+        makeRuntimeProvider({
+          provider: 'rt-b',
+          runtime_id: 'rt-b',
+          provider_display_name: 'Provider B',
+          model_id: 'm2',
+          model_api_name: 'm2',
+          is_default_runtime: false,
+          thinking_support: true,
+        }),
+      ],
+    }))
+
     render(html`<${SettingsSurface} />`, container)
 
     const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
@@ -794,6 +921,11 @@ describe('SettingsSurface', () => {
         expect.stringContaining('Provider A'),
         expect.stringContaining('Provider B'),
       ])
+      expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
+      expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
+      expect(cards[0]?.textContent).toContain('tool:required')
+      expect(cards[0]?.textContent).toContain('declared:api:chat-completions')
+      expect(cards[0]?.textContent).toContain('behavior:inline-tools,keeper-bridge')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')
       expect(
         Array.from(container.querySelectorAll('[data-runtime-section]'))

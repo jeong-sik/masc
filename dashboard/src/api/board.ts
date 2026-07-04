@@ -1,5 +1,5 @@
 import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
-import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
+import { isRecord, asNullableString, asString, asNumber, asInt, asStringList, asBoolean } from '../components/common/normalize'
 import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
@@ -12,6 +12,7 @@ import type {
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
+  HitlContextSummary, HitlSuggestedOption, HitlSummaryStatus,
   GovernanceResolvedAction, GovernanceTimelineEvent,
   SubBoard, SubBoardAccess,
 } from '../types'
@@ -110,6 +111,62 @@ function normalizeBoardKarmaTargetKind(raw: unknown): BoardKarmaLedgerEvent['tar
 // normalizePendingConfirmation re-exported from pending-confirm.ts (SSOT)
 export { normalizePendingConfirmation }
 
+function normalizeHitlSuggestedOption(raw: unknown): HitlSuggestedOption | null {
+  if (!isRecord(raw)) return null
+  const label = asString(raw.label, '').trim()
+  if (!label) return null
+  return {
+    label,
+    rationale: asString(raw.rationale, '').trim(),
+    estimated_risk_delta: asKeeperApprovalRiskLevel(raw.estimated_risk_delta) ?? null,
+  }
+}
+
+function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
+  if (!isRecord(raw)) return null
+  const summaryText = asString(raw.context_summary, '').trim()
+  // A summary with no body carries no operator value; treat it as absent rather
+  // than rendering an empty briefing card.
+  if (!summaryText) return null
+  return {
+    summary_version: asInt(raw.summary_version) ?? 0,
+    generated_at_iso: asNullableString(raw.generated_at_iso),
+    model_run_id: asNullableString(raw.model_run_id),
+    context_summary: summaryText,
+    key_questions: asStringList(raw.key_questions),
+    suggested_options: Array.isArray(raw.suggested_options)
+      ? raw.suggested_options
+          .map(normalizeHitlSuggestedOption)
+          .filter((o): o is HitlSuggestedOption => o !== null)
+      : [],
+    risk_rationale: asNullableString(raw.risk_rationale),
+    uncertainty: asNumber(raw.uncertainty) ?? null,
+  }
+}
+
+/** Parse the backend `summary_status` wire value into the typed union. Returns
+ *  `null` for an absent or contract-violating shape — a malformed status must
+ *  not silently read as `not_requested`, which would hide a wiring fault. */
+function normalizeHitlSummaryStatus(raw: unknown): HitlSummaryStatus | null {
+  if (raw === 'not_requested') return { status: 'not_requested' }
+  if (raw === 'pending') return { status: 'pending' }
+  if (!isRecord(raw)) return null
+  switch (raw.status) {
+    case 'available': {
+      const summary = normalizeHitlContextSummary(raw.summary)
+      return summary ? { status: 'available', summary } : null
+    }
+    case 'failed':
+      return {
+        status: 'failed',
+        reason: asString(raw.reason, '').trim(),
+        retryable: asBoolean(raw.retryable, false),
+      }
+    default:
+      return null
+  }
+}
+
 export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQueueItem | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -154,6 +211,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     rule_match: ruleMatch,
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
+    summary_status: normalizeHitlSummaryStatus(raw.summary_status),
   }
 }
 

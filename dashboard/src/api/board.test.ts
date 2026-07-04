@@ -246,6 +246,86 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(result!.waiting_s).toBe(30)
     expect(result!.input_preview).toBe('ls -la')
   })
+
+  const baseItem = {
+    id: 'q-summary',
+    keeper_name: 'janitor',
+    tool_name: 'shell_exec',
+    risk_level: 'high' as const,
+  }
+
+  it('parses an available summary into the typed union', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      summary_status: {
+        status: 'available',
+        summary: {
+          summary_version: 2,
+          generated_at_iso: '2026-07-04T00:00:00Z',
+          model_run_id: 'run-9',
+          context_summary: 'This deletes the production config.',
+          key_questions: ['Is there a backup?'],
+          suggested_options: [
+            { label: 'Reject', rationale: 'irreversible', estimated_risk_delta: 'critical' },
+          ],
+          risk_rationale: 'writes outside sandbox',
+          uncertainty: 0.4,
+        },
+      },
+    })
+    expect(result!.summary_status).toEqual({
+      status: 'available',
+      summary: {
+        summary_version: 2,
+        generated_at_iso: '2026-07-04T00:00:00Z',
+        model_run_id: 'run-9',
+        context_summary: 'This deletes the production config.',
+        key_questions: ['Is there a backup?'],
+        suggested_options: [
+          { label: 'Reject', rationale: 'irreversible', estimated_risk_delta: 'critical' },
+        ],
+        risk_rationale: 'writes outside sandbox',
+        uncertainty: 0.4,
+      },
+    })
+  })
+
+  it('parses bare-string pending / not_requested statuses', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'pending' })!.summary_status,
+    ).toEqual({ status: 'pending' })
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'not_requested' })!
+        .summary_status,
+    ).toEqual({ status: 'not_requested' })
+  })
+
+  it('parses a failed status with retryable flag', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: { status: 'failed', reason: 'provider down', retryable: true },
+      })!.summary_status,
+    ).toEqual({ status: 'failed', reason: 'provider down', retryable: true })
+  })
+
+  it('returns null summary_status for absent or malformed shapes (no fabricated state)', () => {
+    expect(normalizeKeeperApprovalQueueItem(baseItem)!.summary_status).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'garbage' })!.summary_status,
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: { status: 'weird' } })!
+        .summary_status,
+    ).toBeNull()
+    // available with an empty summary body carries no operator value -> null
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: { status: 'available', summary: { context_summary: '  ' } },
+      })!.summary_status,
+    ).toBeNull()
+  })
 })
 
 // ================================================================

@@ -588,18 +588,25 @@ let pending_entry_json_fields
                ] )
        ]
      else [])
-  @
-  if include_input
-  then
-    [ "input", entry.input; "input_preview", `String (input_preview_of_json entry.input) ]
-  else []
-  @
-  [ "summary_status", summary_status_to_yojson entry.summary_status
-  ; ( "context_summary"
-    , match entry.context_summary with
-      | Some summary -> hitl_context_summary_to_yojson summary
-      | None -> `Null )
-  ]
+  @ (if include_input
+     then
+       [ "input", entry.input
+       ; "input_preview", `String (input_preview_of_json entry.input)
+       ]
+     else [])
+    (* The [include_input] conditional MUST stay parenthesized. Without the
+       parens the trailing [@ summary fields] is parsed as part of the [else]
+       branch ([else ([] @ summary)]), so [include_input = true] silently drops
+       [summary_status]/[context_summary] from the payload. Every dashboard
+       path ([list_pending_dashboard_json], [pending_entry_detail_json],
+       [broadcast_pending]) passes [include_input:true], so the HITL context
+       summary would never reach an operator. *)
+  @ [ "summary_status", summary_status_to_yojson entry.summary_status
+    ; ( "context_summary"
+      , match entry.context_summary with
+        | Some summary -> hitl_context_summary_to_yojson summary
+        | None -> `Null )
+    ]
 ;;
 
 let broadcast_pending entry =

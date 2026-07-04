@@ -61,6 +61,28 @@
    cursor:pointer / hover shift, so a non-clickable span is not a false affordance. */
 .ap-req-meta { font-size: var(--fs-10); color: var(--text-dim); }
 
+/* HITL context-summary worker briefing (approvals-surface.ts approvalSummaryBlock).
+   The available card carries the LLM operator briefing; pending/failed states are
+   surfaced rather than hidden so a stuck or errored summary is visible. */
+.ap-summary { margin: 8px 0 4px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-soft); background: var(--bg-sunken); display: flex; flex-direction: column; gap: 6px; }
+.ap-summary.sev-summary { border-color: color-mix(in oklab, var(--volt-strong) 30%, var(--border-soft)); background: color-mix(in oklab, var(--volt-strong) 6%, transparent); }
+.ap-summary-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ap-summary-label { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.06em; color: var(--volt-strong); font-weight: 600; }
+.ap-summary-uncertainty { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
+.ap-summary-text { margin: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-primary); word-break: break-word; }
+.ap-summary-questions { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+.ap-summary-questions li { font-size: var(--fs-12); color: var(--text-dim); line-height: 1.4; }
+.ap-summary-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ap-summary-option { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: var(--fs-12); }
+.ap-summary-option-label { color: var(--text-bright); font-weight: 600; }
+.ap-summary-option-rationale { color: var(--text-dim); }
+.ap-summary-option-risk { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); border: 1px solid var(--border-soft); border-radius: var(--radius-xs); padding: 0 5px; }
+.ap-summary-rationale { margin: 0; font-size: var(--fs-10); color: var(--text-dim); line-height: 1.4; }
+.ap-summary-reason { font-size: var(--fs-12); color: var(--text-dim); word-break: break-word; }
+.ap-summary-pending .ap-summary-label { color: var(--text-dim); }
+.ap-summary-failed { border-color: color-mix(in oklab, var(--status-bad) 35%, var(--border-soft)); background: color-mix(in oklab, var(--status-bad) 7%, transparent); }
+.ap-summary-failed .ap-summary-label { color: var(--status-bad); }
+
 /* Live decision set: disabled (in-flight) state + the "항상 승인" Approve+Always
    action, plus :hover:not(:disabled) guards so a busy button shows no hover. */
 .ap-act:disabled { opacity: 0.5; cursor: default; }

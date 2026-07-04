@@ -413,6 +413,70 @@ function sampleAutomation(): DashboardScheduledAutomation {
   }
 }
 
+function payloadSupportAutomation(): DashboardScheduledAutomation {
+  const auto = sampleAutomation()
+  auto.request_count = 3
+  auto.counts = { failed: 1, scheduled: 1, expired: 1 }
+  auto.derived_counts = {
+    due_effective: 0,
+    blocked_approval: 0,
+    due_execution_ready: 0,
+    expired_effective: 1,
+    unsupported_payload_kind: 2,
+    unknown_payload_kind: 1,
+  }
+  auto.payload_support = {
+    supported_kinds: ['keeper.smoke'],
+    unsupported_request_count: 2,
+    unsupported_kinds: [
+      { kind: 'backlog_depletion_check', count: 1 },
+      { kind: 'orphan_auto_release', count: 1 },
+    ],
+    unknown_request_count: 1,
+  }
+  auto.requests = [
+    {
+      ...auto.requests[0]!,
+      schedule_id: 'sched-unsupported-failed',
+      status: 'failed',
+      effective_status: 'failed',
+      execution_readiness: 'terminal',
+      operator_action: null,
+      approval_required: false,
+      payload_kind: 'backlog_depletion_check',
+      payload_support: 'unsupported',
+      payload_summary: 'Backlog depletion check cannot be executed by the current payload catalog.',
+      last_execution: {
+        execution_id: 'exec-unsupported',
+        schedule_id: 'sched-unsupported-failed',
+        status: 'failed',
+        error: 'unsupported payload kind',
+      },
+    },
+    {
+      ...auto.requests[1]!,
+      schedule_id: 'sched-unsupported-expired',
+      status: 'expired',
+      effective_status: 'expired',
+      execution_readiness: 'expired',
+      payload_kind: 'orphan_auto_release',
+      payload_support: 'unsupported',
+      payload_summary: 'Orphan auto release payload is not registered.',
+    },
+    {
+      ...auto.requests[1]!,
+      schedule_id: 'sched-unknown-scheduled',
+      status: 'scheduled',
+      effective_status: 'scheduled',
+      execution_readiness: 'scheduled',
+      payload_kind: 'keeper.future',
+      payload_support: 'unknown',
+      payload_summary: 'Payload catalog has not classified this kind yet.',
+    },
+  ]
+  return auto
+}
+
 describe('ScheduledAutomationPanel', () => {
   let container: HTMLDivElement
 
@@ -550,6 +614,41 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).not.toContain('거부')
     expect(container.textContent).not.toContain('취소')
   })
+
+  it('surfaces v2 payload support failures from the scheduler projection', async () => {
+    render(
+      html`<${ScheduledAutomationPanel} automation=${payloadSupportAutomation()} variant="v2" />`,
+      container,
+    )
+
+    const alert = container.querySelector('[data-testid="schedule-payload-support-alert"]')
+    expect(alert).not.toBeNull()
+    expect(alert?.textContent).toContain('2 unsupported')
+    expect(alert?.textContent).toContain('1 unknown')
+    expect(alert?.textContent).toContain('backlog_depletion_check')
+    expect(alert?.textContent).toContain('orphan_auto_release')
+    expect(container.querySelector('[data-schedule-payload-support-row="sched-unsupported-failed"]')).not.toBeNull()
+
+    const alertRow = container.querySelector(
+      '[data-schedule-payload-support-row="sched-unsupported-failed"]',
+    ) as HTMLButtonElement
+    alertRow.click()
+    await flush()
+
+    const detail = container.querySelector('[data-schedule-detail-panel="sched-unsupported-failed"]')
+    expect(detail).not.toBeNull()
+    expect(detail?.textContent).toContain('payload unsupported')
+    expect(detail?.textContent).toContain('backlog_depletion_check')
+    expect(detail?.textContent).toContain('"support": "unsupported"')
+    expect(container.querySelector('[data-payload-support="unsupported"]')).not.toBeNull()
+
+    const doneFilter = container.querySelector('[data-schedule-filter="done"]') as HTMLButtonElement
+    doneFilter.click()
+    await flush()
+
+    expect(container.querySelector('[data-schedule-id="sched-unsupported-failed"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-unsupported-expired"]')).not.toBeNull()
+  })
 })
 
 describe('filterMatches', () => {
@@ -625,13 +724,20 @@ describe('ScheduleAside', () => {
         payload_summary: 'it broke',
         last_execution: { execution_id: 'exec-1', schedule_id: 'failed-1', status: 'execution_failed', error: 'runtime refused' },
       }),
+      request({
+        schedule_id: 'unsupported-1',
+        status: 'expired',
+        payload_support: 'unsupported',
+        payload_kind: 'orphan_auto_release',
+        payload_summary: 'unsupported payload row',
+      }),
       request({ schedule_id: 'done-1', status: 'succeeded', payload_summary: 'all good' }),
     ]
 
     render(
       html`<${ScheduleAside}
         requests=${requests}
-        sum=${{ scheduled: 2, dueRunning: 1, pending: 1, total: 4 }}
+        sum=${{ scheduled: 2, dueRunning: 1, pending: 1, total: 5 }}
         onOpen=${onOpen}
       />`,
       container,
@@ -645,6 +751,8 @@ describe('ScheduleAside', () => {
     expect(aside?.textContent).toContain('due soon') // due → 해야 할 일
     expect(aside?.textContent).toContain('it broke') // failed → 지금 상황
     expect(aside?.textContent).toContain('runtime refused') // failed execution error
+    expect(aside?.textContent).toContain('unsupported payload row') // unsupported payload → 지금 상황
+    expect(aside?.textContent).toContain('orphan_auto_release')
     expect(aside?.textContent).toContain('all good') // terminal → 최근 실행
     // Read-only: the aside never renders mutation controls.
     expect(aside?.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)

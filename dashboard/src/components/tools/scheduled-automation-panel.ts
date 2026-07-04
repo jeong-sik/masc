@@ -882,6 +882,166 @@ function riskSpecForLive(risk: string | null | undefined): { lbl: string; cls: s
   return schedRiskSpec(key ?? risk ?? undefined)
 }
 
+type PayloadSupportState = NonNullable<DashboardScheduledAutomationRequest['payload_support']>
+
+function payloadSupportLabel(support: PayloadSupportState): string {
+  switch (support) {
+    case 'supported':
+      return 'payload supported'
+    case 'unsupported':
+      return 'payload unsupported'
+    case 'unknown':
+      return 'payload unknown'
+    default:
+      return assertNever(support)
+  }
+}
+
+function payloadSupportToneClass(support: PayloadSupportState): string {
+  switch (support) {
+    case 'supported':
+      return 'ok'
+    case 'unsupported':
+      return 'bad'
+    case 'unknown':
+      return 'warn'
+    default:
+      return assertNever(support)
+  }
+}
+
+function isUnsupportedPayloadRequest(request: DashboardScheduledAutomationRequest): boolean {
+  return request.payload_support === 'unsupported'
+}
+
+function isUnknownPayloadRequest(request: DashboardScheduledAutomationRequest): boolean {
+  return request.payload_support === 'unknown'
+}
+
+function kindCountsFromRequests(
+  requests: readonly DashboardScheduledAutomationRequest[],
+): Array<{ kind: string; count: number }> {
+  const counts = new Map<string, number>()
+  for (const request of requests) {
+    const kind = request.payload_kind?.trim() || 'payload_kind 없음'
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([kind, count]) => ({ kind, count }))
+    .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
+}
+
+interface PayloadSupportSummary {
+  unsupportedCount: number
+  unknownCount: number
+  unsupportedKinds: Array<{ kind: string; count: number }>
+  unsupportedRequests: DashboardScheduledAutomationRequest[]
+  unknownRequests: DashboardScheduledAutomationRequest[]
+}
+
+function payloadSupportSummary(automation: DashboardScheduledAutomation): PayloadSupportSummary {
+  const requests = automation.requests ?? []
+  const unsupportedRequests = requests.filter(isUnsupportedPayloadRequest)
+  const unknownRequests = requests.filter(isUnknownPayloadRequest)
+  const unsupportedCount = Math.max(
+    automation.payload_support?.unsupported_request_count
+      ?? automation.derived_counts?.unsupported_payload_kind
+      ?? 0,
+    unsupportedRequests.length,
+  )
+  const unknownCount = Math.max(
+    automation.payload_support?.unknown_request_count
+      ?? automation.derived_counts?.unknown_payload_kind
+      ?? 0,
+    unknownRequests.length,
+  )
+  const projectedKinds = automation.payload_support?.unsupported_kinds ?? []
+  return {
+    unsupportedCount,
+    unknownCount,
+    unsupportedKinds: projectedKinds.length > 0 ? projectedKinds : kindCountsFromRequests(unsupportedRequests),
+    unsupportedRequests,
+    unknownRequests,
+  }
+}
+
+function SchPayloadSupportChip({
+  support,
+}: {
+  support: PayloadSupportState
+}) {
+  return html`
+    <span
+      class=${`sch-payload-support ${payloadSupportToneClass(support)}`}
+      data-payload-support=${support}
+    >
+      ${payloadSupportLabel(support)}
+    </span>
+  `
+}
+
+function SchPayloadSupportBanner({
+  summary,
+  onOpen,
+}: {
+  summary: PayloadSupportSummary
+  onOpen: (scheduleId: string) => void
+}) {
+  if (summary.unsupportedCount === 0 && summary.unknownCount === 0) return null
+  const affectedRows = [...summary.unsupportedRequests, ...summary.unknownRequests].slice(0, 6)
+  const hasUnsupported = summary.unsupportedCount > 0
+  return html`
+    <section
+      class=${`sch-banner payload ${hasUnsupported ? 'bad' : 'warn'}`}
+      data-testid="schedule-payload-support-alert"
+    >
+      <span class="sch-banner-ico">!</span>
+      <div class="sch-banner-txt">
+        <div>
+          <b>payload support</b>
+          ${hasUnsupported
+            ? html`<span class="mono"> ${summary.unsupportedCount.toLocaleString()} unsupported</span>`
+            : null}
+          ${summary.unknownCount > 0
+            ? html`<span class="mono"> ${summary.unknownCount.toLocaleString()} unknown</span>`
+            : null}
+        </div>
+        <div class="sch-banner-sub">
+          scheduler projection이 실행 불가 또는 확인 필요로 표시한 payload입니다.
+        </div>
+        ${summary.unsupportedKinds.length > 0
+          ? html`
+              <div class="sch-payload-kinds" aria-label="Unsupported payload kinds">
+                ${summary.unsupportedKinds.map(kind => html`
+                  <span class="sch-payload-kind">
+                    <span class="mono">${kind.count.toLocaleString()}</span>
+                    <span class="mono">${kind.kind}</span>
+                  </span>
+                `)}
+              </div>
+            `
+          : null}
+        ${affectedRows.length > 0
+          ? html`
+              <div class="sch-payload-rows" aria-label="Affected schedule requests">
+                ${affectedRows.map(request => html`
+                  <button
+                    type="button"
+                    class="sch-payload-row mono"
+                    data-schedule-payload-support-row=${request.schedule_id}
+                    onClick=${() => { onOpen(request.schedule_id) }}
+                  >
+                    ${request.schedule_id}
+                  </button>
+                `)}
+              </div>
+            `
+          : null}
+      </div>
+    </section>
+  `
+}
+
 // Card rail tone class. SCHED_STATUS specs only ever yield warn/info/ok/bad/dim
 // for statuses; .sch-card.st-volt is not defined, so clamp anything else to dim.
 const CARD_RAIL_TONES: ReadonlySet<string> = new Set(['ok', 'warn', 'bad', 'info', 'dim'])
@@ -968,6 +1128,9 @@ function SchCard({
           <span class="sch-kind">${payload.glyph} ${payload.lbl}</span>
           <span class="sch-id mono">${request.schedule_id}</span>
           <${SchRiskChip} risk=${request.risk_class} />
+          ${request.payload_support && request.payload_support !== 'supported'
+            ? html`<${SchPayloadSupportChip} support=${request.payload_support} />`
+            : null}
           <span class="sch-rec mono" title="recurrence">↻ ${recurrenceText(request)}</span>
           <span class="sch-head-sp"></span>
           <${SchStatusPill} status=${status} />
@@ -1022,6 +1185,7 @@ function SchDetail({
   const payloadEnvelope = JSON.stringify(
     {
       kind: request.payload_kind ?? null,
+      support: request.payload_support ?? null,
       digest: request.payload_digest ?? null,
       target: request.payload_target ?? null,
       summary: summary,
@@ -1090,6 +1254,20 @@ function SchDetail({
 
           <div class="turn-sec">
             <h4>payload 봉투</h4>
+            <div class="sch-kvs sch-payload-kvs">
+              <div class="sch-kv">
+                <span class="k">payload_support</span>
+                <span class="v mono">
+                  ${request.payload_support
+                    ? html`<${SchPayloadSupportChip} support=${request.payload_support} />`
+                    : html`<span data-stub="payload_support absent">projection field 없음</span>`}
+                </span>
+              </div>
+              <div class="sch-kv">
+                <span class="k">payload_kind</span>
+                <span class="v mono">${request.payload_kind ?? '-'}</span>
+              </div>
+            </div>
             <pre class="turn-pre" data-stub="payload body not in projection">${payloadEnvelope}</pre>
           </div>
 
@@ -1208,9 +1386,15 @@ function SchedulePrototypeSurface({
   const selected = selectedScheduleId
     ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
+  const payloadSummary = payloadSupportSummary(automation)
 
   return html`
     <div class="sch-panel">
+      <${SchPayloadSupportBanner}
+        summary=${payloadSummary}
+        onOpen=${setSelectedScheduleId}
+      />
+
       <div class="sch-tabs" role="tablist" aria-label="예약 필터">
         ${SCH_TABS.map(definition => {
           const count = definition.statuses === null
@@ -1308,7 +1492,8 @@ export function ScheduleAside({
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
     normalized(effectiveStatus(request))
-  const failed = requests.filter(request => asideStatus(request) === 'failed')
+  const unsupportedPayloads = requests.filter(isUnsupportedPayloadRequest)
+  const failed = requests.filter(request => asideStatus(request) === 'failed' && !isUnsupportedPayloadRequest(request))
   const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)))
   const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)))
   const recent = requests
@@ -1325,10 +1510,22 @@ export function ScheduleAside({
           <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning > 0 ? 'volt' : ''}`}>${sum.dueRunning}</b> due·실행</span>
           <span class="wka-pulse-i"><b class=${`mono ${sum.pending > 0 ? 'warn' : ''}`}>${sum.pending}</b> 승인대기</span>
         </div>
-        ${failed.length === 0
+        ${unsupportedPayloads.length === 0 && failed.length === 0
           ? html`<div class="wka-calm mono">실패한 실행 없음</div>`
           : html`
               <div class="wka-list">
+                ${unsupportedPayloads.map(request => html`
+                  <button
+                    type="button"
+                    class="wka-flag st-bad"
+                    data-schedule-aside-open=${request.schedule_id}
+                    onClick=${() => { onOpen(request.schedule_id) }}
+                  >
+                    <span class="wka-flag-tag bad">payload</span>
+                    <span class="wka-flag-title">${scheduleAsideSummary(request)}</span>
+                    <span class="wka-flag-reason mono">${request.payload_kind ?? 'payload_kind 없음'}</span>
+                  </button>
+                `)}
                 ${failed.map(request => html`
                   <button
                     type="button"

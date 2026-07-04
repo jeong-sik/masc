@@ -399,6 +399,56 @@ let test_memory_response_declares_annotation_source_contract () =
       (json_string_member "entry" "retrieval_status" entry))
 ;;
 
+let test_memory_response_honors_canonical_url_scope () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let remote = "https://github.com/jeong-sik/masc.git" in
+    let slug =
+      match Ide_paths.canonical_url_of_remote remote with
+      | Some slug -> slug
+      | None -> fail "test remote must produce a canonical IDE partition slug"
+    in
+    (match
+       Ide_annotations.create
+         ~base_dir:base_path
+         ~partition:(Ide_paths.By_url slug)
+         ~keeper_id:"alice"
+         ~file_path:"lib/scoped.ml"
+         ~line_start:4
+         ~line_end:4
+         ~kind:Ide_annotation_types.Comment
+         ~content:"scoped memory"
+         ()
+     with
+     | Ok _ -> ()
+     | Error msg -> failf "create scoped annotation failed: %s" msg);
+    let unscoped_request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/memory?keeper_id=alice" ()
+    in
+    let unscoped_response = dispatch router unscoped_request in
+    check int "GET unscoped memory succeeds" 200 (status_of_response unscoped_response);
+    let unscoped_json = unscoped_response |> response_body |> Yojson.Safe.from_string in
+    check
+      int
+      "scoped annotation is not exposed through legacy memory partition"
+      0
+      (List.length (json_list_member "unscoped memory" "entries" unscoped_json));
+    let scoped_path =
+      "/api/v1/ide/memory?keeper_id=alice&canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
+    in
+    let scoped_request = http_request ~meth:`GET ~path:scoped_path () in
+    let scoped_response = dispatch router scoped_request in
+    check int "GET scoped memory succeeds" 200 (status_of_response scoped_response);
+    let scoped_json = scoped_response |> response_body |> Yojson.Safe.from_string in
+    match json_list_member "scoped memory" "entries" scoped_json with
+    | entry :: _ ->
+      check
+        string
+        "scoped memory file"
+        "lib/scoped.ml"
+        (json_string_member "scoped memory entry" "file_path" entry)
+    | [] -> fail "expected scoped memory entry")
+;;
+
 let test_get_events_rejects_invalid_limit () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request = http_request ~meth:`GET ~path:"/api/v1/ide/events?limit=not-an-int" () in
@@ -456,6 +506,10 @@ let () =
             "GET memory declares annotation source contract"
             `Quick
             test_memory_response_declares_annotation_source_contract
+        ; test_case
+            "GET memory honors canonical_url scope"
+            `Quick
+            test_memory_response_honors_canonical_url_scope
         ] )
     ; ( "query_parsing"
       , [ test_case "GET events rejects invalid limit" `Quick

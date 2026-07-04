@@ -127,6 +127,7 @@ describe('RuntimeMonitor', () => {
             supports_image_input: true,
             supports_audio_input: true,
             supports_video_input: false,
+            modality_priority: 'visual-first',
             task: null,
             supports_native_streaming: true,
             supports_system_prompt: true,
@@ -334,6 +335,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('effective · out 65,536')
     expect(container.textContent).toContain('runtime-mcp-tools')
     expect(container.textContent).toContain('reasoning-stream delta-reasoning-field')
+    expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('seed+images')
     expect(container.textContent).toContain('code-exec')
   })
@@ -369,6 +371,8 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('chat-template-kwargs')
     expect(container.textContent).toContain('effective · preserve wire')
     expect(container.textContent).toContain('chat-template-kwargs-preserve-thinking')
+    expect(container.textContent).toContain('effective · modality priority')
+    expect(container.textContent).toContain('visual-first')
     expect(container.textContent).toContain('effective · tool content')
     expect(container.textContent).toContain('null')
   })

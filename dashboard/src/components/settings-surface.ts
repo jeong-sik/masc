@@ -391,6 +391,9 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     item.effective_capabilities?.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     format.length > 0 ? `format:${format.join(',')}` : null,
     sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+    item.effective_capabilities?.modality_priority
+      ? `modality:${item.effective_capabilities.modality_priority}`
+      : null,
     item.effective_capabilities?.supports_reasoning ? 'reasoning' : null,
     item.effective_capabilities?.reasoning_output_format
       ? `reasoning-out:${item.effective_capabilities.reasoning_output_format}`

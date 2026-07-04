@@ -369,6 +369,7 @@ function runtimeEffectiveInputText(provider: DashboardRuntimeProviderSnapshot): 
     flagText(caps.supports_image_input, 'image'),
     flagText(caps.supports_audio_input, 'audio'),
     flagText(caps.supports_video_input, 'video'),
+    caps.modality_priority ? `modality ${caps.modality_priority}` : null,
   ])
 }
 
@@ -535,6 +536,7 @@ function runtimeParameterDetailRows(
     detailRow('effective', 'reasoning replay', caps?.reasoning_replay_override),
     detailRow('effective', 'format', effectiveFormat),
     detailRow('effective', 'inputs', runtimeEffectiveInputText(provider)),
+    detailRow('effective', 'modality priority', caps?.modality_priority),
     detailRow('effective', 'task', caps?.task),
     detailRow('effective', 'controls', runtimeEffectiveControlText(provider)),
     detailRow('effective', 'sampling', effectiveSampling),
@@ -675,6 +677,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     modalities.length > 0 ? `input ${modalities.join(',')}` : null,
+    caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,

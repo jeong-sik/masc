@@ -314,6 +314,7 @@ function runtimeEffectiveCapabilitySummary(
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
     caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,

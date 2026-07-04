@@ -1090,7 +1090,14 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
     Alcotest.(check bool)
       "top_k"
       true
-      (caps |> J.member "supports_top_k" |> J.to_bool))
+      (caps |> J.member "supports_top_k" |> J.to_bool);
+    let modality_priority = caps |> J.member "modality_priority" |> J.to_string in
+    Alcotest.(check bool)
+      "effective modality priority wire enum"
+      true
+      (List.exists
+         (String.equal modality_priority)
+         [ "preserve-input-order"; "visual-first" ]))
 ;;
 
 let test_runtime_inventory_surfaces_request_config () =

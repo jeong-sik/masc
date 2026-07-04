@@ -407,13 +407,13 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
     let url = String.trim repo_url in
     if url = "" then begin
       bump_orphan ~reason:(snd orphan_reasons);
-      (Agent_observation.Orphan, file_path)
+      (Agent_observation.No_canonical_url, file_path)
     end
     else
       match Agent_observation.canonical_url_of_remote url with
       | None ->
         bump_orphan ~reason:(fst orphan_reasons);
-        (Agent_observation.Orphan, file_path)
+        (Agent_observation.No_canonical_url, file_path)
       | Some slug -> (Agent_observation.By_url slug, rel)
   in
   (* RFC-0128 §4.5 PR-6: keeper writes inside the sandbox playground
@@ -435,12 +435,12 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
          ~orphan_reasons:("sandbox_url_unparseable", "sandbox_blank_url")
      | None ->
        bump_orphan ~reason:"sandbox_unregistered_repo";
-       (Agent_observation.Orphan, file_path))
+       (Agent_observation.Unmatched, file_path))
   | None ->
     (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
      | None ->
        bump_orphan ~reason:"unregistered_repo";
-       (Agent_observation.Orphan, file_path)
+       (Agent_observation.Base_unresolved, file_path)
      | Some (repo, rel) ->
        resolve_by_url
          ~rel

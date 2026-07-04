@@ -35,38 +35,46 @@ let resolve_workspace_base ~state ~uri =
     ~keeper_param:(Uri.get_query_param uri "keeper")
 ;;
 
-(* RFC-0128 §4.5 — resolve the partition for a query.
+(* RFC-0128 §4.5 + IDE Observation Plane v2 §7 — resolve the partition for a
+   query with TYPED reasons (replaces the previous 3-branch collapse into
+   [Orphan]).
 
    Priority:
-     1. [?canonical_url=...] explicit override (still re-normalised so a
-        misspelt query falls back to Orphan rather than silently
-        creating a new bucket).
+     1. [?canonical_url=...] explicit override (re-normalised so a misspelt
+        query is [No_canonical_url] rather than silently creating a new bucket).
      2. [?repo_id=...] → lookup repo.url in [Repo_store] → normalise.
-     3. Default → [Orphan] so traffic that has not been updated to use
-        either parameter is preserved in the unresolved partition.
+          - repo_id not found            → [Unmatched]
+          - repo found but url blank/    → [No_canonical_url]
+            malformed
+     3. Default (neither param supplied) → [Legacy_default]: traffic that has
+        not been updated to use either parameter is preserved in the unresolved
+        partition, but now typed as structural-default rather than an
+        ambiguous bucket.
 
-   PR-1d removed the old [Legacy] constructor in favor of [Orphan]. *)
+   TODO(v2 §9 read-path visibility): emit an [IdeOrphanReads_total] OTel
+   counter with a reason label for each non-[By_url] arm — currently the
+   write path ([keeper_tool_filesystem_runtime]) has [IdeOrphanWrites] but the
+   read path has no counter, so read-side orphan reasons stay invisible to
+   operators. Tracked as a follow-up sub-PR to keep this PR to typed reasons. *)
 let resolve_partition_for_query ~state ~uri =
   let project_base = base_path_of_state state in
-  let from_canonical =
-    match Uri.get_query_param uri "canonical_url" with
-    | Some s when String.trim s <> "" -> Ide_paths.canonical_url_of_remote s
-    | _ -> None
-  in
-  let from_repo_id () =
-    match Uri.get_query_param uri "repo_id" with
-    | Some id when String.trim id <> "" ->
-      (match Repo_store.find_url_by_id ~base_path:project_base id with
-       | Some url -> Ide_paths.canonical_url_of_remote url
-       | None -> None)
-    | _ -> None
-  in
-  match from_canonical with
-  | Some slug -> Ide_paths.By_url slug
-  | None ->
-    (match from_repo_id () with
+  match Uri.get_query_param uri "canonical_url" with
+  | Some s when String.trim s <> "" ->
+    (* explicit canonical_url: malformed → No_canonical_url, not a silent new bucket *)
+    (match Ide_paths.canonical_url_of_remote s with
      | Some slug -> Ide_paths.By_url slug
-     | None -> Ide_paths.Orphan)
+     | None -> Ide_paths.No_canonical_url)
+  | _ ->
+    (match Uri.get_query_param uri "repo_id" with
+     | Some id when String.trim id <> "" ->
+       (match Repo_store.find_url_by_id ~base_path:project_base id with
+        | Some url ->
+          (* repo found but url blank/malformed → No_canonical_url *)
+          (match Ide_paths.canonical_url_of_remote url with
+           | Some slug -> Ide_paths.By_url slug
+           | None -> Ide_paths.No_canonical_url)
+        | None -> Ide_paths.Unmatched)
+     | _ -> Ide_paths.Legacy_default)
 ;;
 
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]

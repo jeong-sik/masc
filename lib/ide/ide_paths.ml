@@ -14,11 +14,19 @@ let orphan_path ~base_dir = Filename.concat (store_path ~base_dir) orphan_subdir
 type partition =
   Agent_observation.codebase_partition =
   | By_url of string
-  | Orphan
+  | No_canonical_url
+  | Unmatched
+  | Base_unresolved
+  | Legacy_default
 
 let partition_store_dir ~base_dir = function
   | By_url slug -> by_url_path ~base_dir ~canonical_url:slug
-  | Orphan -> orphan_path ~base_dir
+  (* Layout invariant: all non-By_url partitions share [_orphan/] so disk layout
+     is unchanged, but the typed variant carries the reason (RFC-0128 §4.2 +
+     IDE Observation Plane v2 §7). The 5-arm exhaustive match forces this site
+     to be revisited whenever a new variant is added (anti-pattern #4). *)
+  | No_canonical_url | Unmatched | Base_unresolved | Legacy_default ->
+    orphan_path ~base_dir
 ;;
 
 let canonical_url_of_remote = Agent_observation.canonical_url_of_remote

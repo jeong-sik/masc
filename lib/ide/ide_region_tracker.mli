@@ -42,7 +42,7 @@ val regions_file
   -> string
 (** Append-only region store path under the chosen
     {!Ide_paths.partition}. Default [partition] is
-    {!Ide_paths.Orphan}. *)
+    {!Ide_paths.Legacy_default}. *)
 
 val append_region
   :  base_dir:string
@@ -50,7 +50,7 @@ val append_region
   -> code_region
   -> unit
 (** Append one region to the chosen partition's [regions.jsonl].
-    Default [partition] is {!Ide_paths.Orphan}. *)
+    Default [partition] is {!Ide_paths.Legacy_default}. *)
 
 val ingest_tool_call
   :  base_dir:string
@@ -62,7 +62,7 @@ val ingest_tool_call
 (** Inspect a tool_call JSON record. If it is a file-writing tool,
     extract regions and append them to the chosen partition's
     [regions.jsonl]. Non-matching tool_calls are silently ignored.
-    Default [partition] is {!Ide_paths.Orphan}. *)
+    Default [partition] is {!Ide_paths.Legacy_default}. *)
 
 val read_regions
   :  base_dir:string

@@ -3,7 +3,7 @@
 
 open Ide_event_types
 
-let default_partition = Ide_paths.Orphan
+let default_partition = Ide_paths.Legacy_default
 
 type event_kind =
   | Tool

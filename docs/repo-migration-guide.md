@@ -84,10 +84,12 @@ let allowed = Keeper_repo_mapping.is_allowed
   ~base_path
 ```
 
-If no mapping exists for a keeper, access to registered repositories is denied.
-Use an explicit `repositories = ["*"]` mapping when a keeper should be allowed
-to use every registered repository. An explicit empty mapping grants access to
-no repositories.
+If no mapping exists for a keeper, it inherits the default wildcard scope over
+registered repositories only. Add an explicit mapping to restrict that keeper:
+`repositories = ["*"]` preserves all registered-repository access, selected
+IDs grant only those registered repositories, and an explicit empty mapping
+grants access to no repositories. Malformed mapping files and unregistered
+repository IDs still fail closed.
 
 ## Rollback
 

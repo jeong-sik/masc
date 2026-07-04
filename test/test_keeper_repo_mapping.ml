@@ -159,6 +159,8 @@ let sample_repo_at base_path id =
 
 let test_is_allowed_explicit () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path
+        [ sample_repo "repo-a"; sample_repo "repo-b"; sample_repo "repo-c" ];
       write_mapping base_path "keeper-1" [ "repo-a"; "repo-b" ];
       Alcotest.(check bool)
         "allowed repo-a" true
@@ -172,22 +174,31 @@ let test_is_allowed_explicit () =
 
 let test_is_allowed_wildcard () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path [ sample_repo "any-repo"; sample_repo "another" ];
       write_mapping base_path "keeper-wild" [ "*" ];
       Alcotest.(check bool)
-        "wildcard allows any" true
+        "wildcard allows registered repo" true
         (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-wild" ~repository_id:"any-repo" ~base_path);
       Alcotest.(check bool)
-        "wildcard allows another" true
-        (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-wild" ~repository_id:"another" ~base_path))
+        "wildcard allows another registered repo" true
+        (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-wild" ~repository_id:"another" ~base_path);
+      Alcotest.(check bool)
+        "wildcard denies unregistered repo id" false
+        (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-wild" ~repository_id:"not-registered" ~base_path))
 
 let test_is_allowed_no_mapping () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path [ sample_repo "repo-a" ];
       Alcotest.(check bool)
-        "no mapping denies access" false
-        (Keeper_repo_mapping.is_allowed ~keeper_id:"unknown" ~repository_id:"repo-a" ~base_path))
+        "no mapping defaults to registered repositories" true
+        (Keeper_repo_mapping.is_allowed ~keeper_id:"unknown" ~repository_id:"repo-a" ~base_path);
+      Alcotest.(check bool)
+        "no mapping denies unregistered repositories" false
+        (Keeper_repo_mapping.is_allowed ~keeper_id:"unknown" ~repository_id:"repo-b" ~base_path))
 
 let test_is_allowed_mapping_parse_error () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path [ sample_repo "repo-a" ];
       write_mapping_raw base_path
         "[mapping.keeper-1]\nrepositories = 42\n";
       Alcotest.(check bool)
@@ -225,6 +236,8 @@ let test_load_all_parses_wildcard_scope () =
 
 let test_is_allowed_reloads_after_external_revocation () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path
+        [ sample_repo "repo-a"; sample_repo "repo-revoked-target" ];
       write_mapping base_path "keeper-1" [ "repo-a" ];
       Alcotest.(check bool)
         "initial repo allowed"
@@ -246,6 +259,7 @@ let test_is_allowed_reloads_after_external_revocation () =
 
 let test_validate_access_allowed () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path [ sample_repo "repo-a" ];
       write_mapping base_path "keeper-1" [ "repo-a" ];
       match
         Keeper_repo_mapping.validate_access ~keeper_id:"keeper-1" ~repository_id:"repo-a" ~base_path
@@ -255,6 +269,7 @@ let test_validate_access_allowed () =
 
 let test_validate_access_denied () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path [ sample_repo "repo-a"; sample_repo "repo-b" ];
       write_mapping base_path "keeper-1" [ "repo-a" ];
       match
         Keeper_repo_mapping.validate_access ~keeper_id:"keeper-1" ~repository_id:"repo-b" ~base_path
@@ -265,12 +280,12 @@ let test_validate_access_denied () =
 
 let test_validate_access_no_mapping () =
   with_temp_base_path (fun base_path ->
+      write_repositories base_path [ sample_repo "repo-a" ];
       match
         Keeper_repo_mapping.validate_access ~keeper_id:"unknown" ~repository_id:"repo-a" ~base_path
       with
-      | Ok _ -> Alcotest.fail "expected Error"
-      | Error msg ->
-          Alcotest.(check bool) "mentions not allowed" true (contains_substring msg "not allowed"))
+      | Ok () -> ()
+      | Error msg -> Alcotest.fail ("expected Ok for default wildcard scope, got: " ^ msg))
 
 let test_validate_path_access_allowed () =
   with_temp_base_path (fun base_path ->
@@ -928,6 +943,69 @@ let test_validate_path_access_playground_unknown_repo_denied () =
           Alcotest.(check bool)
             "mentions not allowed" true (contains_substring msg "not allowed"))
 
+let test_validate_path_access_playground_unknown_repo_wildcard_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_path =
+        Filename.concat base_path "workspace/yousleepwhen/masc"
+      in
+      ensure_dir masc_path;
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          local_path = masc_path;
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "nick0cave" [ "*" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/nick0cave/repos/unknown/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected wildcard mapping to deny unknown repo"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions not allowed" true (contains_substring msg "not allowed"))
+
+let test_validate_path_access_playground_unknown_repo_no_mapping_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_path =
+        Filename.concat base_path "workspace/yousleepwhen/masc"
+      in
+      ensure_dir masc_path;
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          local_path = masc_path;
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/nick0cave/repos/unknown/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
+          ~base_path ~path
+      with
+      | Ok () ->
+          Alcotest.fail
+            "expected default scope to deny unregistered playground repo"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions not allowed" true (contains_substring msg "not allowed"))
+
 let test_apply_mapping_explicit () =
   with_temp_base_path (fun base_path ->
       write_mapping base_path "keeper-1" [ "repo-a"; "repo-c" ];
@@ -956,7 +1034,7 @@ let test_apply_mapping_no_mapping () =
       let filtered =
         Keeper_repo_mapping.apply_mapping ~keeper_id:"unknown" ~base_path ~repositories:repos
       in
-      Alcotest.(check int) "no mapping returns none" 0 (List.length filtered))
+      Alcotest.(check int) "no mapping returns all" 2 (List.length filtered))
 
 let test_apply_mapping_parse_error () =
   with_temp_base_path (fun base_path ->
@@ -981,9 +1059,8 @@ let test_allowed_repositories () =
 let test_allowed_repositories_no_mapping () =
   with_temp_base_path (fun base_path ->
       match Keeper_repo_mapping.allowed_repositories ~keeper_id:"unknown" ~base_path with
-      | Ok _ -> Alcotest.fail "expected Error"
-      | Error msg ->
-          Alcotest.(check bool) "mentions no mapping" true (contains_substring msg "No mapping"))
+      | Error msg -> Alcotest.fail ("unexpected error: " ^ msg)
+      | Ok ids -> Alcotest.(check (list string)) "default wildcard" ["*"] ids)
 
 let test_save_mapping_creates_config_dir () =
   with_empty_temp_base_path (fun base_path ->
@@ -1070,8 +1147,12 @@ let () =
             test_validate_path_access_playground_gitdir_parent_symlink_escape_denied;
           Alcotest.test_case "playground large git config is denied" `Quick
             test_validate_path_access_playground_large_git_config_denied;
-          Alcotest.test_case "playground unknown repo denied" `Quick
+          Alcotest.test_case "playground unknown repo denied by explicit mapping" `Quick
             test_validate_path_access_playground_unknown_repo_denied;
+          Alcotest.test_case "playground unknown repo denied by wildcard mapping" `Quick
+            test_validate_path_access_playground_unknown_repo_wildcard_denied;
+          Alcotest.test_case "playground unknown repo no mapping denied" `Quick
+            test_validate_path_access_playground_unknown_repo_no_mapping_denied;
         ] );
       ( "apply_mapping",
         [

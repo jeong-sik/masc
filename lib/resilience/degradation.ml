@@ -63,9 +63,21 @@ let of_int_opt = function
   | 4 -> Some (Any_level L4)
   | _ -> None
 
-(* ── Authorization (stub) ─────────────────────────────────────── *)
+(* ── Authorization ─────────────────────────────────────────────── *)
 
-let authorize_transition ~from:_ ~to_:_ = Ok ()
+let any_level_to_string (Any_level l) = level_to_string l
+
+let authorize_transition ~from ~to_ =
+  let from_rank = any_to_int from in
+  let to_rank = any_to_int to_ in
+  if to_rank >= from_rank
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "capability restoration from %s to %s requires explicit policy authorization"
+         (any_level_to_string from)
+         (any_level_to_string to_))
 
 (* ── Strategy adjustment ──────────────────────────────────────── *)
 

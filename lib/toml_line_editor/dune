@@ -1,0 +1,10 @@
+; Comment-preserving line-based TOML editing (RFC-0306 §3.2). Pure stdlib; the
+; single home for editing runtime.toml keys/tables without dropping comments.
+; Runtime and the fusion settings writer both delegate here.
+
+(include_subdirs no)
+
+(library
+ (name toml_line_editor)
+ (public_name masc.toml_line_editor)
+ (wrapped false))

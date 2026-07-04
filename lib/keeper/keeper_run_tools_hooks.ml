@@ -190,8 +190,13 @@ let assemble_hooks
              | Some t -> Keeper_id.Task_id.to_string t
              | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
            in
+           let partition, _ =
+             Keeper_tool_filesystem_runtime.resolve_partition_for_write
+               ~base_dir:config.base_path ~kind:"tool_event" ~file_path:config.base_path
+           in
            Agent_observation.emit_tool_event
              { base_path = config.base_path
+             ; partition
              ; tool_name
              ; keeper_id = acc.meta.name
              ; turn_id
@@ -203,6 +208,7 @@ let assemble_hooks
              };
            Agent_observation.emit_pr_event
              { base_path = config.base_path
+             ; partition
              ; keeper_id = acc.meta.name
              ; turn_id
              ; output_text

@@ -47,9 +47,14 @@ let handle_ide_annotate
       | Some k -> k
       | None -> Agent_observation.Comment
     in
+    let partition, _ =
+      Keeper_tool_filesystem_runtime.resolve_partition_for_write
+        ~base_dir:base_dir ~kind:"annotation" ~file_path
+    in
     match
       Agent_observation.emit_annotation_request
         { base_path = base_dir
+        ; partition
         ; keeper_id = keeper_name
         ; file_path
         ; line_start

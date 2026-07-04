@@ -108,7 +108,7 @@ val ingest_pr_event :
   timestamp_ms:int64 ->
   unit
 
-(** Ingest descriptor-backed PR events from successful Execute tool output.
+(** Ingest descriptor-backed PR events from successful tool output.
     Raw stdout URL scanning is intentionally not a PR signal; only an explicit
     successful wrapper result with a command descriptor may ingest PR events. *)
 val ingest_pr_event_from_hook :

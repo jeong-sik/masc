@@ -542,6 +542,26 @@ let add_routes ~sw ~clock router =
                ~status:(runtime_config_path_error_status msg)
                ~request:req reqd msg)
          request reqd)
+  (* RFC-0306 §3.1 — typed read of the active fusion config for the settings
+     editor. [Fusion_config_loader.load] returns [Ok disabled] when runtime.toml
+     or its [fusion] section is absent, and [Error] only when an existing section
+     fails to parse/validate (a broken on-disk config), which surfaces as 500. *)
+  |> Http.Router.get "/api/v1/runtime/config/fusion" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           match Fusion_config_loader.load ~base_path with
+           | Ok config ->
+             Http.Response.json_value ~compress:true ~request:req
+               (`Assoc
+                 [ ("generated_at", `String (Masc_domain.now_iso ()))
+                 ; ("config", Fusion_config_json.to_yojson config)
+                 ])
+               reqd
+           | Error msg ->
+             respond_dashboard_error ~status:`Internal_server_error
+               ~request:req reqd msg)
+         request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->

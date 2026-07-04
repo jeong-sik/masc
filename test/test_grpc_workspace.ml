@@ -357,7 +357,33 @@ let test_grpc_server_registers_health_service () =
          Alcotest.(check bool)
            "health service registered"
            true
-           (List.mem "grpc.health.v1.Health" services))
+         (List.mem "grpc.health.v1.Health" services))
+;;
+
+let test_lsp_jsonrpc_request_parse_missing_method () =
+  match
+    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
+      {|{"jsonrpc":"2.0","params":null}|}
+  with
+  | Ok _ -> Alcotest.fail "missing method should be rejected"
+  | Error msg ->
+    Alcotest.(check string)
+      "explicit missing method error"
+      "JSON-RPC request missing method field"
+      msg
+;;
+
+let test_lsp_jsonrpc_request_parse_method_not_string () =
+  match
+    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
+      {|{"jsonrpc":"2.0","method":17,"params":null}|}
+  with
+  | Ok _ -> Alcotest.fail "non-string method should be rejected"
+  | Error msg ->
+    Alcotest.(check string)
+      "explicit method type error"
+      "JSON-RPC request method field must be a string"
+      msg
 ;;
 
 let test_get_status_projects_backlog_tasks () =
@@ -674,6 +700,14 @@ let () =
             "registers_health_service"
             `Quick
             test_grpc_server_registers_health_service
+        ; Alcotest.test_case
+            "lsp_jsonrpc_missing_method"
+            `Quick
+            test_lsp_jsonrpc_request_parse_missing_method
+        ; Alcotest.test_case
+            "lsp_jsonrpc_method_not_string"
+            `Quick
+            test_lsp_jsonrpc_request_parse_method_not_string
         ] )
     ]
 ;;

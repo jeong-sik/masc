@@ -1,4 +1,10 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import {
+  parseTaskStatus,
+  parseExecutionTone,
+  parseSignalTruth,
+  parseEvidenceSource,
+} from './lib/core-parsers'
 import { normalizeKeeperTrust } from './keeper-store-normalize'
 import { normalizeStopCause } from './lib/stop-cause'
 import { parseAgentStatus } from './lib/agent-status'
@@ -47,19 +53,7 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
 }
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {
-  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (
-    raw === 'todo'
-    || raw === 'in_progress'
-    || raw === 'claimed'
-    || raw === 'awaiting_verification'
-    || raw === 'done'
-    || raw === 'cancelled'
-  ) {
-    return raw
-  }
-  if (raw === 'inprogress') return 'in_progress'
-  return undefined
+  return parseTaskStatus(value)
 }
 
 export function normalizeAgent(raw: unknown): Agent | null {
@@ -159,9 +153,7 @@ export function normalizeMessage(raw: unknown): Message | null {
 }
 
 export function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['severity'] {
-  const raw = typeof value === 'string' ? value.toLowerCase() : ''
-  if (raw === 'ok' || raw === 'warn' || raw === 'bad') return raw
-  return undefined
+  return parseExecutionTone(value)
 }
 
 export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
@@ -290,16 +282,8 @@ export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExe
   if (!name || !note || !focus || (state !== 'working' && state !== 'watching' && state !== 'quiet' && state !== 'offline')) {
     return null
   }
-  const signalTruthRaw = asString(raw.signal_truth)
-  const signalTruth =
-    signalTruthRaw === 'live' || signalTruthRaw === 'stale' || signalTruthRaw === 'absent'
-      ? signalTruthRaw
-      : undefined
-  const evidenceSourceRaw = asString(raw.evidence_source)
-  const evidenceSource =
-    evidenceSourceRaw === 'message' || evidenceSourceRaw === 'presence' || evidenceSourceRaw === 'none'
-      ? evidenceSourceRaw
-      : undefined
+  const signalTruth = parseSignalTruth(asString(raw.signal_truth))
+  const evidenceSource = parseEvidenceSource(asString(raw.evidence_source))
   return {
     name,
     agent_name: asString(raw.agent_name),

@@ -3,6 +3,7 @@ import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
+import { isInFlightDelivery } from '../lib/keeper-delivery'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import type {
@@ -231,7 +232,7 @@ function isActiveAssistantEntry(entry: KeeperConversationEntry): boolean {
   return (
     entry.role === 'assistant'
     && entry.source === 'direct_assistant'
-    && (entry.delivery === 'sending' || entry.delivery === 'streaming' || entry.delivery === 'queued')
+    && isInFlightDelivery(entry.delivery)
   )
 }
 

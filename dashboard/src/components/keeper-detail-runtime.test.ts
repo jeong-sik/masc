@@ -1006,6 +1006,79 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('ANTHROPIC_API_KEY saved to keeper')).toBeInTheDocument()
     expect(screen.queryByText('ghs_new_secret')).toBeNull()
   })
+
+  it('sets secret file values without rendering the submitted value', async () => {
+    const nextProjection = {
+      status: 'ready',
+      configured: true,
+      root: '/Users/dancer/me/.masc/secrets/sangsu',
+      source: 'workspace_masc_secrets',
+      effective_roots: [
+        {
+          root: '/Users/dancer/me/.masc/secrets/base',
+          source: 'workspace_masc_secrets',
+          status: 'absent',
+          configured: false,
+          env_count: 0,
+          file_count: 0,
+        },
+        {
+          root: '/Users/dancer/me/.masc/secrets/sangsu',
+          source: 'workspace_masc_secrets',
+          status: 'ready',
+          configured: true,
+          env_count: 0,
+          file_count: 1,
+        },
+      ],
+      env_count: 0,
+      file_count: 1,
+      env_names: [],
+      file_mounts: [
+        {
+          host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+          container_path: '/home/keeper/.ssh/id_ed25519',
+        },
+      ],
+      values_validated: true,
+      error: null,
+      next_action: 'none',
+    }
+    const setSecretFile = vi.fn().mockResolvedValue(nextProjection)
+
+    render(h(KeeperSecretProjectionPanel, {
+      keeperName: 'sangsu',
+      projection: {
+        ...nextProjection,
+        status: 'empty',
+        file_count: 0,
+        file_mounts: [],
+        next_action: 'add entries under env/ and/or files/',
+      },
+      setSecretFile,
+    }))
+
+    fireEvent.input(screen.getByTestId('keeper-secret-file-path'), {
+      target: { value: '/home/keeper/.ssh/id_ed25519' },
+    })
+    fireEvent.input(screen.getByLabelText('Secret file value'), {
+      target: { value: 'PRIVATE\nKEY\nCONTENT' },
+    })
+    fireEvent.submit(screen.getByTestId('keeper-secret-file-form'))
+
+    await waitFor(() => {
+      expect(setSecretFile).toHaveBeenCalledWith('sangsu', {
+        scope: 'keeper',
+        path: '/home/keeper/.ssh/id_ed25519',
+        value: 'PRIVATE\nKEY\nCONTENT',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('PRIVATE\nKEY\nCONTENT')).toBeNull()
+    })
+    expect(screen.getByText('/home/keeper/.ssh/id_ed25519 saved to keeper')).toBeInTheDocument()
+    expect(screen.queryByText('PRIVATE\nKEY\nCONTENT')).toBeNull()
+  })
 })
 
 describe('filterSignalGroups', () => {

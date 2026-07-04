@@ -795,6 +795,32 @@ let handle_keeper_secrets_post state req reqd body_str =
                     ~scope
                     ~name:env_name
                 | Error msg, _ | _, Error msg -> Error msg)
+             | Ok "set_file" ->
+               (match
+                  ( secret_scope_field args
+                  , required_secret_trimmed_string_field args "path"
+                  , required_secret_string_field args "value" )
+                with
+                | Ok scope, Ok container_path, Ok value ->
+                  Keeper_secret_projection.set_file_entry
+                    ~base_path:config.Workspace.base_path
+                    ~keeper_name:name
+                    ~scope
+                    ~container_path
+                    ~value
+                | Error msg, _, _ | _, Error msg, _ | _, _, Error msg -> Error msg)
+             | Ok "delete_file" ->
+               (match
+                  ( secret_scope_field args
+                  , required_secret_trimmed_string_field args "path" )
+                with
+                | Ok scope, Ok container_path ->
+                  Keeper_secret_projection.delete_file_entry
+                    ~base_path:config.Workspace.base_path
+                    ~keeper_name:name
+                    ~scope
+                    ~container_path
+                | Error msg, _ | _, Error msg -> Error msg)
              | Ok action ->
                Error
                  (Printf.sprintf

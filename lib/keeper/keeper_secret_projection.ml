@@ -603,6 +603,191 @@ let delete_env_entry ~base_path ~keeper_name ~scope ~name =
                   Error (unix_error_message err fn arg))))
 ;;
 
+let file_rel_components_of_container_path container_path =
+  let path = String.trim container_path in
+  if String.equal path ""
+  then Error "keeper secret file path is required"
+  else if contains_char path '\000'
+  then Error "keeper secret file path must not contain NUL"
+  else if not (String.starts_with ~prefix:"/" path)
+  then Error "keeper secret file path must be absolute"
+  else
+    let components =
+      match String.split_on_char '/' path with
+      | "" :: rest -> rest
+      | parts -> parts
+    in
+    if components = []
+    then Error "keeper secret file path must not be root"
+    else
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | component :: rest ->
+          if not (valid_rel_component component)
+          then
+            Error
+              (Printf.sprintf
+                 "invalid keeper secret file path component: %s"
+                 component)
+          else loop (component :: acc) rest
+      in
+      loop [] components
+;;
+
+let path_of_components root components =
+  List.fold_left Filename.concat root components
+;;
+
+let parent_components components =
+  match List.rev components with
+  | [] -> []
+  | _file :: parents_rev -> List.rev parents_rev
+;;
+
+let ensure_secret_directory_chain ~label root components =
+  match ensure_secret_directory ~label root with
+  | Error _ as err -> err
+  | Ok () ->
+    let rec loop current = function
+      | [] -> Ok ()
+      | component :: rest ->
+        let next = Filename.concat current component in
+        (match ensure_secret_directory ~label next with
+         | Error _ as err -> err
+         | Ok () -> loop next rest)
+    in
+    loop root components
+;;
+
+let existing_secret_directory ~label path =
+  try
+    let st = Unix.lstat path in
+    match st.Unix.st_kind with
+    | Unix.S_DIR -> Ok true
+    | Unix.S_LNK ->
+      Error
+        (Printf.sprintf
+           "keeper secret %s path must not be a symlink: %s"
+           label
+           path)
+    | _ ->
+      Error (Printf.sprintf "keeper secret %s path is not a directory: %s" label path)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
+;;
+
+let existing_secret_directory_chain ~label root components =
+  match existing_secret_directory ~label root with
+  | Error _ as err -> err
+  | Ok false -> Ok false
+  | Ok true ->
+    let rec loop current = function
+      | [] -> Ok true
+      | component :: rest ->
+        let next = Filename.concat current component in
+        (match existing_secret_directory ~label next with
+         | Error _ as err -> err
+         | Ok false -> Ok false
+         | Ok true -> loop next rest)
+    in
+    loop root components
+;;
+
+let validate_file_entry_target path =
+  try
+    let st = Unix.lstat path in
+    match st.Unix.st_kind with
+    | Unix.S_REG -> Ok ()
+    | Unix.S_LNK ->
+      Error
+        (Printf.sprintf "keeper secret file entry must not be a symlink: %s" path)
+    | _ ->
+      Error
+        (Printf.sprintf
+           "keeper secret file entry must be a regular file: %s"
+           path)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
+;;
+
+let set_file_entry ~base_path ~keeper_name ~scope ~container_path ~value =
+  if contains_char value '\000'
+  then Error "keeper secret file value must not contain NUL"
+  else
+    match file_rel_components_of_container_path container_path with
+    | Error _ as err -> err
+    | Ok components ->
+      let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+      let files_root = Filename.concat info.root "files" in
+      let parent_components = parent_components components in
+      (match ensure_secret_directory ~label:"root" info.root with
+       | Error _ as err -> err
+       | Ok () ->
+         (match ensure_secret_directory ~label:"files" files_root with
+          | Error _ as err -> err
+          | Ok () ->
+            (match
+               ensure_secret_directory_chain
+                 ~label:"files"
+                 files_root
+                 parent_components
+             with
+             | Error _ as err -> err
+             | Ok () ->
+               let path = path_of_components files_root components in
+               (match validate_file_entry_target path with
+                | Error _ as err -> err
+                | Ok () ->
+                  (match Fs_compat.save_file_atomic path value with
+                   | Error _ as err -> err
+                   | Ok () ->
+                     (try
+                        Unix.chmod path 0o600;
+                        Ok ()
+                      with
+                      | Unix.Unix_error (err, fn, arg) ->
+                        Error (unix_error_message err fn arg)))))))
+;;
+
+let delete_file_entry ~base_path ~keeper_name ~scope ~container_path =
+  match file_rel_components_of_container_path container_path with
+  | Error _ as err -> err
+  | Ok components ->
+    let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+    let files_root = Filename.concat info.root "files" in
+    let parent_components = parent_components components in
+    (match existing_secret_directory ~label:"root" info.root with
+     | Error _ as err -> err
+     | Ok false -> Ok ()
+     | Ok true ->
+       (match existing_secret_directory ~label:"files" files_root with
+        | Error _ as err -> err
+        | Ok false -> Ok ()
+        | Ok true ->
+          (match
+             existing_secret_directory_chain
+               ~label:"files"
+               files_root
+               parent_components
+           with
+           | Error _ as err -> err
+           | Ok false -> Ok ()
+           | Ok true ->
+             let path = path_of_components files_root components in
+             (match validate_file_entry_target path with
+              | Error _ as err -> err
+              | Ok () ->
+                (try
+                   if path_exists path then Sys.remove path;
+                   Ok ()
+                 with
+                 | Sys_error msg -> Error msg
+                 | Unix.Unix_error (err, fn, arg) ->
+                   Error (unix_error_message err fn arg))))))
+;;
+
 let private_tmp_dir ~base_path =
   let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "tmp" in
   ensure_dir dir;

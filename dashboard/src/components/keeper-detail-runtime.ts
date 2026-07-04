@@ -12,16 +12,20 @@ import {
   type KeeperRuntimeProjectionRuntimeInput,
 } from '../lib/keeper-runtime-projection'
 import {
+  deleteKeeperSecretFile,
   deleteKeeperSecretEnv,
+  setKeeperSecretFile,
   setKeeperSecretEnv,
   type KeeperSecretEnvMutation,
   type KeeperSecretEnvSetMutation,
+  type KeeperSecretFileMutation,
+  type KeeperSecretFileSetMutation,
   type KeeperSecretScope,
 } from '../api/dashboard-keeper-secrets'
 import { ActionButton } from './common/button'
 import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
-import { TextInput } from './common/input'
+import { TextArea, TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
 import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
@@ -372,7 +376,7 @@ function secretRootCounts(root: KeeperSecretProjection['effective_roots'][number
   return `${root.env_count} env · ${root.file_count} files`
 }
 
-type KeeperSecretPendingAction = 'set' | 'delete'
+type KeeperSecretPendingAction = 'set_env' | 'delete_env' | 'set_file' | 'delete_file'
 
 interface KeeperSecretProjectionPanelProps {
   projection: KeeperSecretProjection | null | undefined
@@ -380,6 +384,8 @@ interface KeeperSecretProjectionPanelProps {
   onProjectionChange?: (projection: KeeperSecretProjection) => void
   setSecretEnv?: typeof setKeeperSecretEnv
   deleteSecretEnv?: typeof deleteKeeperSecretEnv
+  setSecretFile?: typeof setKeeperSecretFile
+  deleteSecretFile?: typeof deleteKeeperSecretFile
 }
 
 function secretMutationErrorMessage(error: unknown): string {
@@ -394,11 +400,16 @@ export function KeeperSecretProjectionPanel({
   onProjectionChange,
   setSecretEnv = setKeeperSecretEnv,
   deleteSecretEnv = deleteKeeperSecretEnv,
+  setSecretFile = setKeeperSecretFile,
+  deleteSecretFile = deleteKeeperSecretFile,
 }: KeeperSecretProjectionPanelProps) {
   const [localProjection, setLocalProjection] = useState<KeeperSecretProjection | null>(projection ?? null)
-  const [scope, setScope] = useState<KeeperSecretScope>('keeper')
+  const [envScope, setEnvScope] = useState<KeeperSecretScope>('keeper')
   const [envName, setEnvName] = useState('GH_TOKEN')
   const [secretValue, setSecretValue] = useState('')
+  const [fileScope, setFileScope] = useState<KeeperSecretScope>('keeper')
+  const [filePath, setFilePath] = useState('/home/keeper/.ssh/id_ed25519')
+  const [fileValue, setFileValue] = useState('')
   const [pending, setPending] = useState<KeeperSecretPendingAction | null>(null)
   const [mutationMessage, setMutationMessage] = useState<string | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
@@ -409,7 +420,9 @@ export function KeeperSecretProjectionPanel({
 
   const visibleProjection = localProjection ?? projection
   const trimmedEnvName = envName.trim()
-  const canMutate = Boolean(keeperName) && pending === null && trimmedEnvName.length > 0
+  const trimmedFilePath = filePath.trim()
+  const canMutateEnv = Boolean(keeperName) && pending === null && trimmedEnvName.length > 0
+  const canMutateFile = Boolean(keeperName) && pending === null && trimmedFilePath.length > 0
 
   function adoptProjection(next: KeeperSecretProjection) {
     setLocalProjection(next)
@@ -419,11 +432,11 @@ export function KeeperSecretProjectionPanel({
   async function handleSetEnv(event: Event) {
     event.preventDefault()
     if (!keeperName || trimmedEnvName.length === 0 || pending !== null) return
-    setPending('set')
+    setPending('set_env')
     setMutationMessage(null)
     setMutationError(null)
     const mutation: KeeperSecretEnvSetMutation = {
-      scope,
+      scope: envScope,
       name: trimmedEnvName,
       value: secretValue,
     }
@@ -431,7 +444,7 @@ export function KeeperSecretProjectionPanel({
       const next = await setSecretEnv(keeperName, mutation)
       adoptProjection(next)
       setSecretValue('')
-      setMutationMessage(`${trimmedEnvName} saved to ${scope}`)
+      setMutationMessage(`${trimmedEnvName} saved to ${envScope}`)
     } catch (error) {
       setMutationError(secretMutationErrorMessage(error))
     } finally {
@@ -441,18 +454,62 @@ export function KeeperSecretProjectionPanel({
 
   async function handleDeleteEnv() {
     if (!keeperName || trimmedEnvName.length === 0 || pending !== null) return
-    setPending('delete')
+    setPending('delete_env')
     setMutationMessage(null)
     setMutationError(null)
     const mutation: KeeperSecretEnvMutation = {
-      scope,
+      scope: envScope,
       name: trimmedEnvName,
     }
     try {
       const next = await deleteSecretEnv(keeperName, mutation)
       adoptProjection(next)
       setSecretValue('')
-      setMutationMessage(`${trimmedEnvName} deleted from ${scope}`)
+      setMutationMessage(`${trimmedEnvName} deleted from ${envScope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function handleSetFile(event: Event) {
+    event.preventDefault()
+    if (!keeperName || trimmedFilePath.length === 0 || pending !== null) return
+    setPending('set_file')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretFileSetMutation = {
+      scope: fileScope,
+      path: trimmedFilePath,
+      value: fileValue,
+    }
+    try {
+      const next = await setSecretFile(keeperName, mutation)
+      adoptProjection(next)
+      setFileValue('')
+      setMutationMessage(`${trimmedFilePath} saved to ${fileScope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function handleDeleteFile() {
+    if (!keeperName || trimmedFilePath.length === 0 || pending !== null) return
+    setPending('delete_file')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretFileMutation = {
+      scope: fileScope,
+      path: trimmedFilePath,
+    }
+    try {
+      const next = await deleteSecretFile(keeperName, mutation)
+      adoptProjection(next)
+      setFileValue('')
+      setMutationMessage(`${trimmedFilePath} deleted from ${fileScope}`)
     } catch (error) {
       setMutationError(secretMutationErrorMessage(error))
     } finally {
@@ -549,10 +606,10 @@ export function KeeperSecretProjectionPanel({
           scope
           <select
             class="w-full rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm font-medium normal-case tracking-normal text-[var(--input-fg)]"
-            value=${scope}
+            value=${envScope}
             disabled=${pending !== null || !keeperName}
             data-testid="keeper-secret-scope"
-            onChange=${(event: Event) => setScope((event.currentTarget as HTMLSelectElement).value as KeeperSecretScope)}
+            onChange=${(event: Event) => setEnvScope((event.currentTarget as HTMLSelectElement).value as KeeperSecretScope)}
           >
             <option value="keeper">keeper</option>
             <option value="shared">shared</option>
@@ -585,26 +642,93 @@ export function KeeperSecretProjectionPanel({
           <${ActionButton}
             type="submit"
             size="sm"
-            disabled=${!canMutate}
-            ariaBusy=${pending === 'set'}
+            disabled=${!canMutateEnv}
+            ariaBusy=${pending === 'set_env'}
             testId="keeper-secret-save"
             class="inline-flex items-center gap-1.5"
           >
             <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
-            <span>${pending === 'set' ? 'Saving' : 'Save'}</span>
+            <span>${pending === 'set_env' ? 'Saving' : 'Save'}</span>
           <//>
           <${ActionButton}
             type="button"
             variant="danger"
             size="sm"
-            disabled=${!canMutate}
-            ariaBusy=${pending === 'delete'}
+            disabled=${!canMutateEnv}
+            ariaBusy=${pending === 'delete_env'}
             testId="keeper-secret-delete"
             class="inline-flex items-center gap-1.5"
             onClick=${handleDeleteEnv}
           >
             <${Trash2} size=${13} strokeWidth=${2.25} aria-hidden="true" />
-            <span>${pending === 'delete' ? 'Deleting' : 'Delete'}</span>
+            <span>${pending === 'delete_env' ? 'Deleting' : 'Delete'}</span>
+          <//>
+        </div>
+      </form>
+
+      <form
+        class="mt-3 grid grid-cols-1 gap-2 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] p-3 lg:grid-cols-[140px_minmax(180px,1fr)_minmax(220px,1.2fr)_auto]"
+        data-testid="keeper-secret-file-form"
+        onSubmit=${handleSetFile}
+      >
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          scope
+          <select
+            class="w-full rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm font-medium normal-case tracking-normal text-[var(--input-fg)]"
+            value=${fileScope}
+            disabled=${pending !== null || !keeperName}
+            data-testid="keeper-secret-file-scope"
+            onChange=${(event: Event) => setFileScope((event.currentTarget as HTMLSelectElement).value as KeeperSecretScope)}
+          >
+            <option value="keeper">keeper</option>
+            <option value="shared">shared</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          file path
+          <${TextInput}
+            value=${filePath}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret file path"
+            autoComplete="off"
+            testId="keeper-secret-file-path"
+            onInput=${(event: Event) => setFilePath((event.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          content
+          <${TextArea}
+            value=${fileValue}
+            rows=${3}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret file value"
+            onInput=${(event: Event) => setFileValue((event.currentTarget as HTMLTextAreaElement).value)}
+          />
+        </label>
+        <div class="flex flex-wrap items-end gap-2">
+          <${ActionButton}
+            type="submit"
+            size="sm"
+            disabled=${!canMutateFile}
+            ariaBusy=${pending === 'set_file'}
+            testId="keeper-secret-file-save"
+            class="inline-flex items-center gap-1.5"
+          >
+            <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'set_file' ? 'Saving' : 'Save'}</span>
+          <//>
+          <${ActionButton}
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled=${!canMutateFile}
+            ariaBusy=${pending === 'delete_file'}
+            testId="keeper-secret-file-delete"
+            class="inline-flex items-center gap-1.5"
+            onClick=${handleDeleteFile}
+          >
+            <${Trash2} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'delete_file' ? 'Deleting' : 'Delete'}</span>
           <//>
         </div>
       </form>

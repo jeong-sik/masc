@@ -65,5 +65,25 @@ val delete_env_entry :
 (** Remove one projected env secret. Missing files are treated as a no-op;
     symlinks and non-regular entries are rejected. *)
 
+val set_file_entry :
+  base_path:string ->
+  keeper_name:string ->
+  scope:secret_scope ->
+  container_path:string ->
+  value:string ->
+  (unit, string) result
+(** Persist one projected file secret under [secrets/base/files] or
+    [secrets/<keeper>/files]. [container_path] must be an absolute container
+    path; traversal components and symlink targets are rejected. *)
+
+val delete_file_entry :
+  base_path:string ->
+  keeper_name:string ->
+  scope:secret_scope ->
+  container_path:string ->
+  (unit, string) result
+(** Remove one projected file secret. Missing files are treated as a no-op;
+    symlinks and non-regular entries are rejected. *)
+
 val dashboard_status_json :
   base_path:string -> keeper_name:string -> Yojson.Safe.t

@@ -17,6 +17,15 @@ export interface KeeperSecretEnvSetMutation extends KeeperSecretEnvMutation {
   value: string
 }
 
+export interface KeeperSecretFileMutation {
+  scope: KeeperSecretScope
+  path: string
+}
+
+export interface KeeperSecretFileSetMutation extends KeeperSecretFileMutation {
+  value: string
+}
+
 function secretMutationPath(keeperName: string): string {
   return `/api/v1/keepers/${encodeURIComponent(keeperName)}/secrets`
 }
@@ -49,6 +58,33 @@ export async function deleteKeeperSecretEnv(
     action: 'delete_env',
     scope: mutation.scope,
     name: mutation.name,
+  })
+  return parseSecretMutationResponse(raw)
+}
+
+export async function setKeeperSecretFile(
+  keeperName: string,
+  mutation: KeeperSecretFileSetMutation,
+): Promise<KeeperSecretProjection> {
+  await ensureDevToken()
+  const raw = await post<unknown>(secretMutationPath(keeperName), {
+    action: 'set_file',
+    scope: mutation.scope,
+    path: mutation.path,
+    value: mutation.value,
+  })
+  return parseSecretMutationResponse(raw)
+}
+
+export async function deleteKeeperSecretFile(
+  keeperName: string,
+  mutation: KeeperSecretFileMutation,
+): Promise<KeeperSecretProjection> {
+  await ensureDevToken()
+  const raw = await post<unknown>(secretMutationPath(keeperName), {
+    action: 'delete_file',
+    scope: mutation.scope,
+    path: mutation.path,
   })
   return parseSecretMutationResponse(raw)
 }

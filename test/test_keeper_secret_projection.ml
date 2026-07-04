@@ -711,6 +711,153 @@ let test_set_env_entry_rejects_invalid_inputs () =
        (contains_substring msg "single-line"))
 ;;
 
+let test_set_and_delete_file_entry_updates_projection () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let base_root = base_secret_root_default ~base in
+  let keeper_root = secret_root_default ~base ~keeper_name:"minjae" in
+  let container_path = "/home/keeper/.ssh/id_ed25519" in
+  let shared_path =
+    Filename.concat
+      (Filename.concat base_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  let keeper_path =
+    Filename.concat
+      (Filename.concat keeper_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  (match
+     Keeper_secret_projection.set_file_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Shared_secret
+       ~container_path
+       ~value:"SHARED\nPRIVATE\nKEY\n"
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  (match
+     Keeper_secret_projection.set_file_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~container_path
+       ~value:"KEEPER\nPRIVATE\nKEY\n"
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  Alcotest.(check string) "shared file preserves newlines" "SHARED\nPRIVATE\nKEY\n"
+    (read_file shared_path);
+  Alcotest.(check string) "keeper file preserves newlines" "KEEPER\nPRIVATE\nKEY\n"
+    (read_file keeper_path);
+  let json =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:base
+      ~keeper_name:"minjae"
+  in
+  Alcotest.(check string) "status" "ready" (json_string "status" json);
+  Alcotest.(check int) "effective file count" 1 (json_int "file_count" json);
+  Alcotest.(check bool) "shared file value redacted" false
+    (contains_substring (Yojson.Safe.to_string json) "SHARED");
+  Alcotest.(check bool) "keeper file value redacted" false
+    (contains_substring (Yojson.Safe.to_string json) "KEEPER");
+  (match
+     Keeper_secret_projection.docker_args_for_keeper
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~container_name:"container"
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok projection ->
+     let args = String.concat " " projection.docker_args in
+     Alcotest.(check bool) "keeper file mount wins" true
+       (contains_substring args (keeper_path ^ ":" ^ container_path ^ ":ro"));
+     Alcotest.(check bool) "shared file mount omitted" false
+       (contains_substring args (shared_path ^ ":" ^ container_path ^ ":ro"));
+     projection.cleanup ());
+  (match
+     Keeper_secret_projection.delete_file_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~container_path
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  Alcotest.(check bool) "keeper file deleted" false (Sys.file_exists keeper_path);
+  let inherited_json =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:base
+      ~keeper_name:"minjae"
+  in
+  Alcotest.(check int) "inherits shared file" 1 (json_int "file_count" inherited_json);
+  (match
+     Keeper_secret_projection.docker_args_for_keeper
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~container_name:"container"
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok projection ->
+     let args = String.concat " " projection.docker_args in
+     Alcotest.(check bool) "shared file mount inherited" true
+       (contains_substring args (shared_path ^ ":" ^ container_path ^ ":ro"));
+     projection.cleanup ());
+  (match
+     Keeper_secret_projection.delete_file_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Shared_secret
+       ~container_path
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail msg);
+  Alcotest.(check bool) "shared file deleted" false (Sys.file_exists shared_path)
+;;
+
+let test_set_file_entry_rejects_invalid_inputs () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  (match
+     Keeper_secret_projection.set_file_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~container_path:"relative"
+       ~value:"secret"
+   with
+   | Ok () -> Alcotest.fail "expected relative path rejection"
+   | Error msg ->
+     Alcotest.(check bool) "mentions absolute path" true
+       (contains_substring msg "absolute"));
+  (match
+     Keeper_secret_projection.set_file_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~container_path:"/home/../secret"
+       ~value:"secret"
+   with
+   | Ok () -> Alcotest.fail "expected traversal rejection"
+   | Error msg ->
+     Alcotest.(check bool) "mentions path component" true
+       (contains_substring msg "invalid keeper secret file path component"));
+  (match
+     Keeper_secret_projection.set_file_entry
+       ~base_path:base
+       ~keeper_name:"minjae"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~container_path:"/home/keeper/secret"
+       ~value:"abc\000def"
+   with
+   | Ok () -> Alcotest.fail "expected NUL value rejection"
+   | Error msg ->
+     Alcotest.(check bool) "mentions NUL" true (contains_substring msg "NUL"))
+;;
+
 let test_env_value_leading_hash_rejects () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -764,6 +911,10 @@ let () =
             test_set_and_delete_env_entry_updates_projection
         ; Alcotest.test_case "set env entry rejects invalid inputs" `Quick
             test_set_env_entry_rejects_invalid_inputs
+        ; Alcotest.test_case "set/delete file entry updates projection" `Quick
+            test_set_and_delete_file_entry_updates_projection
+        ; Alcotest.test_case "set file entry rejects invalid inputs" `Quick
+            test_set_file_entry_rejects_invalid_inputs
         ; Alcotest.test_case "env value leading hash rejects" `Quick
             test_env_value_leading_hash_rejects
         ] )

@@ -2533,7 +2533,7 @@ describe('fetchRuntimeProviders', () => {
               supports_min_p: true,
               supports_seed: true,
               supports_seed_with_images: false,
-              ignored_sampling_parameters: ['temperature', 'top_p'],
+              ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
               supports_computer_use: false,
               supports_code_execution: false,
               emits_usage_tokens: true,
@@ -2703,7 +2703,12 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.effective_capabilities?.reasoning_streaming_format?.field).toBe('reasoning_content')
     expect(result.providers[0]?.effective_capabilities?.modality_priority).toBe('visual-first')
     expect(result.providers[0]?.effective_capabilities?.supports_top_k).toBe(true)
-    expect(result.providers[0]?.effective_capabilities?.ignored_sampling_parameters).toEqual(['temperature', 'top_p'])
+    expect(result.providers[0]?.effective_capabilities?.ignored_sampling_parameters).toEqual([
+      'temperature',
+      'top_p',
+      'presence_penalty',
+      'frequency_penalty',
+    ])
     expect(result.providers[0]?.declared_spec?.source).toBe('runtime.toml')
     expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')
     expect(

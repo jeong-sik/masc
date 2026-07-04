@@ -47,11 +47,17 @@ let claim_task_exn config ~agent_name ~task_id =
   | Ok _ -> ()
   | Error err -> fail ("claim_task_r failed: " ^ Masc_domain.masc_error_to_string err)
 
-let old_release_timestamp = "2020-01-01T00:00:00Z"
+let iso8601_seconds_precision_margin_s = 1.0
 
-let mark_agent_stale_for_release config ~agent_name =
+let stale_release_timestamp () =
+  let age_s =
+    Env_config_runtime.Claim.ttl_seconds +. iso8601_seconds_precision_margin_s
+  in
+  Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. age_s)
+
+let mark_agent_stale_for_release config ~agent_name ~last_seen =
   Masc.Workspace.update_local_agent_state config ~agent_name (fun agent ->
-    { agent with status = Masc_domain.Active; last_seen = old_release_timestamp })
+    { agent with status = Masc_domain.Active; last_seen })
 
 let rewrite_task_status config ~task_id ~f =
   let backlog = Masc.Workspace.read_backlog config in
@@ -65,10 +71,10 @@ let rewrite_task_status config ~task_id ~f =
   in
   Masc.Workspace.write_backlog config { backlog with tasks = updated_tasks }
 
-let age_claimed_task_for_release config ~task_id =
+let age_claimed_task_for_release config ~task_id ~claimed_at =
   rewrite_task_status config ~task_id ~f:(function
     | Masc_domain.Claimed { assignee; _ } ->
-      Masc_domain.Claimed { assignee; claimed_at = old_release_timestamp }
+      Masc_domain.Claimed { assignee; claimed_at }
     | other -> other)
 
 let meta_with_active_goal goal_id =
@@ -111,9 +117,12 @@ let test_keeper_task_claim_releases_stale_owners () =
        in
        List.iter
          (fun (agent_name, task_id) ->
+            let stale_timestamp = stale_release_timestamp () in
             claim_task_exn config ~agent_name ~task_id;
-            mark_agent_stale_for_release config ~agent_name;
-            age_claimed_task_for_release config ~task_id)
+            mark_agent_stale_for_release config ~agent_name
+              ~last_seen:stale_timestamp;
+            age_claimed_task_for_release config ~task_id
+              ~claimed_at:stale_timestamp)
          stale_claims;
        let payload =
          Task_runtime.handle_keeper_task_tool ~config

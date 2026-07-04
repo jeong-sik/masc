@@ -672,6 +672,9 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.supports_audio_input ? 'audio' : null,
     caps.supports_video_input ? 'video' : null,
   ].filter((value): value is string => Boolean(value))
+  const context = typeof caps.max_context_tokens === 'number'
+    ? `ctx ${formatNumber(caps.max_context_tokens)}`
+    : null
   const output = typeof caps.max_output_tokens === 'number'
     ? `out ${formatNumber(caps.max_output_tokens)}`
     : null
@@ -687,6 +690,7 @@ function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnap
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
   const parts = [
+    context,
     output,
     caps.supports_tools ? 'tools' : null,
     tools,

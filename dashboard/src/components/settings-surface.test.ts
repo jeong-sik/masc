@@ -826,6 +826,7 @@ describe('SettingsSurface', () => {
           },
           effective_capabilities: {
             source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
             max_output_tokens: 4096,
             supports_tools: true,
             supports_tool_choice: true,
@@ -969,7 +970,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
-      expect(cards[0]?.textContent).toContain('out:4096 · tools · tool-choice+required+named+parallel')
+      expect(cards[0]?.textContent).toContain('ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
       expect(cards[0]?.textContent).toContain('extended-thinking')

@@ -340,8 +340,8 @@ describe('RuntimeMonitor', () => {
       'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('price-in 0.1')
-    expect(container.textContent).toContain('effective · out 65,536')
-    expect(container.textContent).toContain('effective · out 65,536 · tools · tool_choice+required+named+parallel')
+    expect(container.textContent).toContain('effective · ctx 131,072 · out 65,536')
+    expect(container.textContent).toContain('effective · ctx 131,072 · out 65,536 · tools · tool_choice+required+named+parallel')
     expect(container.textContent).toContain('runtime-mcp-tools')
     expect(container.textContent).toContain('reasoning · extended · budget · effort low,medium,high')
     expect(container.textContent).toContain('reasoning-stream delta-reasoning-field')

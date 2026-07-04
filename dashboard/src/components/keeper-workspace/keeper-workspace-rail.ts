@@ -319,6 +319,7 @@ function runtimeEffectiveCapabilitySummary(
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
   const parts = [
+    typeof caps.max_context_tokens === 'number' ? `ctx ${caps.max_context_tokens}` : null,
     typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
     caps.supports_tools ? 'tools' : null,
     caps.supports_tool_choice

@@ -250,6 +250,7 @@ describe('KeeperWorkspaceRail', () => {
           },
           effective_capabilities: {
             source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
             max_output_tokens: 65536,
             supports_tools: true,
             supports_tool_choice: true,
@@ -398,7 +399,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain(
       'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
-    expect(container.textContent).toContain('out 65536 · tools · tool_choice+required+named+parallel')
+    expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
     expect(container.textContent).toContain('extended thinking')

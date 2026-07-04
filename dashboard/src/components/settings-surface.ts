@@ -386,6 +386,7 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     caps.supports_min_p ? 'min_p' : null,
     caps.supports_seed ? 'seed' : null,
   ].filter((value): value is string => Boolean(value))
+  const context = typeof caps.max_context_tokens === 'number' ? `ctx:${caps.max_context_tokens}` : null
   const output = typeof caps.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null
   const format = [
     caps.supports_response_format_json ? 'json' : null,
@@ -399,6 +400,7 @@ function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnaps
     ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
     : null
   const parts = [
+    context,
     output,
     caps.supports_tools ? 'tools' : null,
     toolChoice,

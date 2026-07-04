@@ -308,6 +308,24 @@ describe('parseKeeperCompositeSnapshot', () => {
         configured: true,
         root: '/Users/dancer/me/.masc/secrets/sangsu',
         source: 'workspace_masc_secrets',
+        effective_roots: [
+          {
+            root: '/Users/dancer/me/.masc/secrets/base',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 0,
+          },
+          {
+            root: '/Users/dancer/me/.masc/secrets/sangsu',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 1,
+          },
+        ],
         env_count: 1,
         file_count: 1,
         env_names: ['GH_TOKEN'],
@@ -324,6 +342,10 @@ describe('parseKeeperCompositeSnapshot', () => {
     })
 
     expect(result.secret_projection?.status).toBe('ready')
+    expect(result.secret_projection?.effective_roots.map(root => root.root)).toEqual([
+      '/Users/dancer/me/.masc/secrets/base',
+      '/Users/dancer/me/.masc/secrets/sangsu',
+    ])
     expect(result.secret_projection?.env_names).toEqual(['GH_TOKEN'])
     expect(JSON.stringify(result.secret_projection)).not.toContain('ghs_')
   })

@@ -353,6 +353,17 @@ function truncateSecretProjectionList(values: readonly string[], limit: number):
   return `${visible.join(', ')}${suffix}`
 }
 
+function secretRootScopeLabel(index: number, total: number): string {
+  if (total <= 1) return 'keeper'
+  if (index === 0) return 'shared'
+  if (index === total - 1) return 'keeper'
+  return `scope ${index + 1}`
+}
+
+function secretRootCounts(root: KeeperSecretProjection['effective_roots'][number]): string {
+  return `${root.env_count} env · ${root.file_count} files`
+}
+
 export function KeeperSecretProjectionPanel({
   projection,
 }: {
@@ -379,6 +390,18 @@ export function KeeperSecretProjectionPanel({
   const filePaths = projection.file_mounts.map(mount => mount.container_path)
   const envSummary = truncateSecretProjectionList(projection.env_names, 5)
   const fileSummary = truncateSecretProjectionList(filePaths, 4)
+  const effectiveRoots = projection.effective_roots ?? []
+  const rootRows = effectiveRoots.map((root, index) => ({
+    ...root,
+    label: secretRootScopeLabel(index, effectiveRoots.length),
+  }))
+  const scopeSummary = rootRows.length > 0 ? rootRows.map(row => row.label).join(' -> ') : 'keeper'
+  const rootSummary = rootRows.length > 0
+    ? truncateSecretProjectionList(rootRows.map(row => `${row.label}: ${row.status} · ${secretRootCounts(row)}`), 3)
+    : projection.root
+  const rootTitle = rootRows.length > 0
+    ? rootRows.map(row => `${row.label}: ${row.root}`).join('\n')
+    : projection.root
   const summary =
     projection.status === 'ready'
       ? `${projection.env_count} env · ${projection.file_count} files`
@@ -403,11 +426,27 @@ export function KeeperSecretProjectionPanel({
       </div>
 
       <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-        <${SignalRow} label="root" value=${projection.root} />
+        <${SignalRow} label="scope order" value=${scopeSummary} />
+        <${SignalRow} label="effective roots" value=${rootSummary} title=${rootTitle} />
+        <${SignalRow} label="keeper root" value=${projection.root} />
         <${SignalRow} label="env names" value=${envSummary} />
         <${SignalRow} label="file mounts" value=${fileSummary} />
         <${SignalRow} label="validation" value=${projection.values_validated ? 'values validated · values redacted' : 'structure only'} />
       </div>
+
+      ${rootRows.length > 1
+        ? html`
+            <div class="mt-3 divide-y divide-[var(--color-border-subtle)] rounded-[var(--r-1)] border border-[var(--color-border-subtle)]">
+              ${rootRows.map(row => html`
+                <div class="grid grid-cols-[minmax(72px,0.5fr)_minmax(0,1.5fr)_auto] items-center gap-3 px-3 py-2 text-xs">
+                  <span class="font-medium text-[var(--color-fg-secondary)]">${row.label}</span>
+                  <span class="truncate font-mono text-[var(--color-fg-muted)]" title=${row.root}>${row.root}</span>
+                  <span class="text-right text-[var(--color-fg-muted)]">${row.status} · ${secretRootCounts(row)}</span>
+                </div>
+              `)}
+            </div>
+          `
+        : null}
 
       ${projection.error
         ? html`

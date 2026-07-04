@@ -894,6 +894,24 @@ describe('RuntimeLensSection', () => {
         configured: true,
         root: '/Users/dancer/me/.masc/secrets/sangsu',
         source: 'workspace_masc_secrets',
+        effective_roots: [
+          {
+            root: '/Users/dancer/me/.masc/secrets/base',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 0,
+          },
+          {
+            root: '/Users/dancer/me/.masc/secrets/sangsu',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 1,
+          },
+        ],
         env_count: 1,
         file_count: 1,
         env_names: ['GH_TOKEN'],
@@ -912,6 +930,10 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByTestId('keeper-secret-projection')).toBeInTheDocument()
     expect(screen.getByText('ready')).toBeInTheDocument()
     expect(screen.getByText('1 env · 1 files')).toBeInTheDocument()
+    expect(screen.getByText('shared -> keeper')).toBeInTheDocument()
+    expect(screen.getByText('shared')).toBeInTheDocument()
+    expect(screen.getByText('keeper')).toBeInTheDocument()
+    expect(screen.getByText('/Users/dancer/me/.masc/secrets/base')).toBeInTheDocument()
     expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()

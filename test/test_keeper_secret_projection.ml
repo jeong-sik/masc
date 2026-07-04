@@ -82,6 +82,18 @@ let json_int name json =
   | _ -> Alcotest.failf "missing int field %s" name
 ;;
 
+let json_bool name json =
+  match assoc_member name json with
+  | Some (`Bool value) -> value
+  | _ -> Alcotest.failf "missing bool field %s" name
+;;
+
+let json_list name json =
+  match assoc_member name json with
+  | Some (`List values) -> values
+  | _ -> Alcotest.failf "missing list field %s" name
+;;
+
 let json_string_list name json =
   match assoc_member name json with
   | Some (`List values) ->
@@ -516,20 +528,40 @@ let test_dashboard_status_absent_root () =
   in
   Alcotest.(check string) "status" "absent" (json_string "status" json);
   Alcotest.(check int) "env count" 0 (json_int "env_count" json);
-  Alcotest.(check int) "file count" 0 (json_int "file_count" json)
+  Alcotest.(check int) "file count" 0 (json_int "file_count" json);
+  let roots = json_list "effective_roots" json in
+  Alcotest.(check int) "base and keeper roots reported" 2 (List.length roots);
+  (match roots with
+   | base_root :: keeper_root :: [] ->
+     Alcotest.(check string)
+       "base root path"
+       (base_secret_root_default ~base)
+       (json_string "root" base_root);
+     Alcotest.(check string)
+       "keeper root path"
+       (secret_root_default ~base ~keeper_name:"minjae")
+       (json_string "root" keeper_root);
+     Alcotest.(check string) "base root absent" "absent"
+       (json_string "status" base_root);
+     Alcotest.(check bool) "keeper root not configured" false
+       (json_bool "configured" keeper_root)
+   | _ -> Alcotest.fail "expected exactly base and keeper roots")
 ;;
 
 let test_dashboard_status_redacts_values () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let base_root = base_secret_root_default ~base in
   let root = secret_root_default ~base ~keeper_name:"minjae" in
+  let shared_token_path = Filename.concat (Filename.concat base_root "env") "GITHUB_TOKEN" in
   let token_path = Filename.concat (Filename.concat root "env") "GH_TOKEN" in
   let ssh_path =
     Filename.concat
       (Filename.concat root "files")
       "home/keeper/.ssh/id_ed25519"
   in
+  write_file shared_token_path "ghs_shared_dashboard_secret\n";
   write_file token_path "ghs_dashboard_secret\n";
   write_file ssh_path "PRIVATE KEY";
   let json =
@@ -539,12 +571,27 @@ let test_dashboard_status_redacts_values () =
   in
   let raw = Yojson.Safe.to_string json in
   Alcotest.(check string) "status" "ready" (json_string "status" json);
-  Alcotest.(check int) "env count" 1 (json_int "env_count" json);
+  Alcotest.(check int) "env count" 2 (json_int "env_count" json);
   Alcotest.(check int) "file count" 1 (json_int "file_count" json);
-  Alcotest.(check (list string)) "env names" [ "GH_TOKEN" ]
+  Alcotest.(check (list string)) "env names" [ "GITHUB_TOKEN"; "GH_TOKEN" ]
     (json_string_list "env_names" json);
   Alcotest.(check bool) "raw env value redacted" false
-    (contains_substring raw "ghs_dashboard_secret")
+    (contains_substring raw "ghs_dashboard_secret");
+  Alcotest.(check bool) "shared env value redacted" false
+    (contains_substring raw "ghs_shared_dashboard_secret");
+  let roots = json_list "effective_roots" json in
+  Alcotest.(check int) "effective root count" 2 (List.length roots);
+  (match roots with
+   | base_projection :: keeper_projection :: [] ->
+     Alcotest.(check string) "base status" "ready"
+       (json_string "status" base_projection);
+     Alcotest.(check int) "base env count" 1
+       (json_int "env_count" base_projection);
+     Alcotest.(check int) "keeper env count" 1
+       (json_int "env_count" keeper_projection);
+     Alcotest.(check int) "keeper file count" 1
+       (json_int "file_count" keeper_projection)
+   | _ -> Alcotest.fail "expected exactly base and keeper projections")
 ;;
 
 let test_dashboard_status_reports_projection_error () =

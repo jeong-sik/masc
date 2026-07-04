@@ -34,6 +34,8 @@ type ctx =
       current_tool_choice:Agent_sdk.Types.tool_choice option ->
       decay_discovered:bool -> unit ->
       string list * turn_lane
+  ; record_tool_assignment :
+      turn:int -> tool_list:string list -> lane:turn_lane -> unit
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
@@ -120,6 +122,7 @@ let assemble_hooks
   let acc = ctx.acc in
   let agent_name = ctx.agent_name in
   let compute_tool_surface = ctx.compute_tool_surface in
+  let record_tool_assignment = ctx.record_tool_assignment in
   let config = ctx.config in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
@@ -457,6 +460,7 @@ let assemble_hooks
                   relax_strict_tool_choice_for_keeper current_params.tool_choice
                 in
                 let lane = computed_turn_lane in
+                record_tool_assignment ~turn ~tool_list:schema_filter ~lane;
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names
                   acc
                   schema_filter;

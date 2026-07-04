@@ -297,6 +297,7 @@ let prepare_agent_setup
     List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
+  let tool_access_lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
   let policy_allowed_tool_names =
     Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta
   in
@@ -341,6 +342,26 @@ let prepare_agent_setup
     Keeper_tool_policy.StringSet.union
       base
       (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
+  in
+  let policy_allowed_tool_list =
+    Keeper_tool_policy.StringSet.elements policy_allowed_tool_set
+  in
+  let record_tool_assignment ~turn ~tool_list ~lane =
+    let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
+      Tool_assignment_telemetry.emit_assigned
+        ~agent_id:meta.agent_name
+        ~profile:"keeper"
+        ~tool_list
+        ~allow_set:policy_allowed_tool_list
+        ~deny_set:(Keeper_tool_policy.StringSet.elements tool_access_lookup.deny_set)
+        ~reason:
+          (Printf.sprintf
+             "keeper before_turn tool surface turn=%d lane=%s"
+             turn
+             (Keeper_agent_tool_surface.turn_lane_to_string lane))
+        ()
+    in
+    ()
   in
   let allowed_public_name_for_internal internal_name =
     Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
@@ -608,6 +629,7 @@ let prepare_agent_setup
     ; agent_name
     ; all_tool_names
     ; compute_tool_surface
+    ; record_tool_assignment
     ; config
     ; keeper_tools_cleanup
     ; manifest_keeper_turn_id

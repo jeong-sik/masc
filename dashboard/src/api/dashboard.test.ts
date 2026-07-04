@@ -2653,7 +2653,7 @@ describe('fetchRuntimeProviders', () => {
           terminal_reason: 'missing_oas_catalog_models',
           message: 'runtime catalog degraded boot',
           config_path: '/tmp/masc-test/runtime.toml',
-          configured_default_runtime_id: 'mimo.mimo-v2.5-pro',
+          configured_default_runtime_id: 'runpod_mtp.qwen',
           effective_default_runtime_id: 'runpod_mtp.qwen',
           missing_catalog_model_count: 1,
           missing_catalog_models: [
@@ -2669,7 +2669,7 @@ describe('fetchRuntimeProviders', () => {
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
-            { route_name: 'librarian', runtime_id: 'mimo.mimo-v2.5-pro' },
+            { route_name: 'runtime.librarian', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_media_failover: ['mimo.mimo-v2.5-pro'],
           dropped_lane_candidates: [
@@ -2762,7 +2762,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('librarian')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.librarian')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 })

@@ -228,7 +228,7 @@ describe('RuntimeHealthSnapshot', () => {
         terminal_reason: 'missing_oas_catalog_models',
         message: 'runtime catalog degraded boot',
         config_path: '/tmp/masc-test/runtime.toml',
-        configured_default_runtime_id: 'mimo.mimo-v2.5-pro',
+        configured_default_runtime_id: 'glm-coding.glm-5-turbo',
         effective_default_runtime_id: 'glm-coding.glm-5-turbo',
         missing_catalog_model_count: 2,
         missing_catalog_models: [

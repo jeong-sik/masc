@@ -3,6 +3,9 @@
    loop logs aggregate dispatch counts for runtime telemetry. *)
 
 let supported_payload_kinds = Schedule_supported_kinds.supported
+let board_post_created_kind = "masc.board_post.created"
+let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
+let keeper_event_queue_label = "keeper_event_queue"
 
 let ( let* ) = Result.bind
 
@@ -65,6 +68,63 @@ let optional_assoc_field name fields =
   | None | Some `Null -> Ok None
   | Some (`Assoc _ as value) -> Ok (Some value)
   | Some _ -> Error ("expected object field: " ^ name)
+;;
+
+type dispatch_receipt =
+  | Board_post_created of
+      { post_id : string
+      ; author : string
+      ; hearth : string option
+      }
+  | Keeper_wake_enqueued of
+      { keeper_name : string
+      ; schedule_id : string
+      ; urgency : string
+      ; post_id : string
+      ; queue : string
+      ; stimulus : string
+      }
+
+let dispatch_receipt_of_detail = function
+  | `Assoc fields ->
+    let* kind = string_field "kind" fields in
+    if String.equal kind board_post_created_kind
+    then
+      let* post_id = string_field "post_id" fields in
+      let* author = string_field "author" fields in
+      let* hearth = optional_string_field "hearth" fields in
+      Ok (Board_post_created { post_id; author; hearth })
+    else if String.equal kind keeper_wake_enqueued_kind
+    then
+      let* keeper_name = keeper_name_field "keeper_name" fields in
+      let* schedule_id = string_field "schedule_id" fields in
+      let* urgency = string_field "urgency" fields in
+      let* post_id = string_field "post_id" fields in
+      let* queue = string_field "queue" fields in
+      let* stimulus = string_field "stimulus" fields in
+      Ok (Keeper_wake_enqueued { keeper_name; schedule_id; urgency; post_id; queue; stimulus })
+    else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
+  | _ -> Error "schedule dispatch receipt detail must be an object"
+;;
+
+let dispatch_receipt_to_yojson = function
+  | Board_post_created { post_id; author; hearth } ->
+    `Assoc
+      [ "kind", `String board_post_created_kind
+      ; "post_id", `String post_id
+      ; "author", `String author
+      ; "hearth", (match hearth with None -> `Null | Some hearth -> `String hearth)
+      ]
+  | Keeper_wake_enqueued { keeper_name; schedule_id; urgency; post_id; queue; stimulus } ->
+    `Assoc
+      [ "kind", `String keeper_wake_enqueued_kind
+      ; "queue", `String queue
+      ; "stimulus", `String stimulus
+      ; "keeper_name", `String keeper_name
+      ; "schedule_id", `String schedule_id
+      ; "urgency", `String urgency
+      ; "post_id", `String post_id
+      ]
 ;;
 
 type payload_view =
@@ -172,7 +232,7 @@ let dispatch_board_post request payload =
     let post_id = Board.Post_id.to_string post.id in
     Ok
       (`Assoc
-        [ "kind", `String "masc.board_post.created"
+        [ "kind", `String board_post_created_kind
         ; "post_id", `String post_id
         ; "author", `String author
         ; ( "hearth"
@@ -215,7 +275,9 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     stimulus;
   Ok
     (`Assoc
-      [ "kind", `String "masc.keeper_wake.enqueued"
+      [ "kind", `String keeper_wake_enqueued_kind
+      ; "queue", `String keeper_event_queue_label
+      ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
       ; "keeper_name", `String keeper_name
       ; "schedule_id", `String request.schedule_id
       ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)

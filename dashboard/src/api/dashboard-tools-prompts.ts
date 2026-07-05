@@ -76,6 +76,20 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
+export interface DashboardScheduledAutomationDispatchReceipt {
+  projection_status: 'recognized' | 'unrecognized_detail'
+  kind?: string
+  queue?: string
+  stimulus?: string
+  keeper_name?: string
+  schedule_id?: string
+  urgency?: string
+  post_id?: string
+  author?: string
+  hearth?: string | null
+  reason?: string
+}
+
 export interface DashboardScheduledAutomationKeeperToolStatus {
   name: string
   registered_schema?: boolean
@@ -150,6 +164,7 @@ export interface DashboardScheduledAutomationRequest {
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
+  dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
 }
 
 export interface DashboardScheduledAutomationPayloadSupport {

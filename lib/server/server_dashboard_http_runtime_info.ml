@@ -2700,6 +2700,27 @@ let execution_record_dashboard_json (execution : Schedule_domain.execution_recor
   | other -> other
 ;;
 
+let schedule_dispatch_receipt_dashboard_json
+  (execution : Schedule_domain.execution_record option)
+  =
+  match execution with
+  | None -> `Null
+  | Some execution ->
+    (match execution.Schedule_domain.detail with
+     | None -> `Null
+     | Some detail ->
+    (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+     | Ok receipt ->
+       (match Server_schedule_consumers.dispatch_receipt_to_yojson receipt with
+        | `Assoc fields -> `Assoc (("projection_status", `String "recognized") :: fields)
+        | other -> other)
+     | Error reason ->
+       `Assoc
+         [ "projection_status", `String "unrecognized_detail"
+         ; "reason", `String reason
+         ]))
+;;
+
 let schedule_signal_projection_limit = 20
 
 let schedule_signal_payload_kind_json (signal : Schedule_runner.wake_signal) =
@@ -2801,6 +2822,7 @@ let schedule_request_dashboard_json
       , match last_execution with
         | None -> `Null
         | Some execution -> execution_record_dashboard_json execution )
+    ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
     ]
 ;;
 

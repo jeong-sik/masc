@@ -254,6 +254,10 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
         let open Yojson.Safe.Util in
         check string "execution detail kind" "masc.keeper_wake.enqueued"
           (detail |> member "kind" |> to_string);
+        check string "execution detail queue" "keeper_event_queue"
+          (detail |> member "queue" |> to_string);
+        check string "execution detail stimulus" "schedule_due"
+          (detail |> member "stimulus" |> to_string);
         check string "execution keeper" "schedule-keeper"
           (detail |> member "keeper_name" |> to_string)
       | None -> fail "execution detail missing"));
@@ -283,7 +287,40 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       | _ -> fail "expected Schedule_due payload"))
   ;
   check int "keeper wake does not create board posts" 0
-    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~limit:10 ()));
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let row =
+    dashboard
+    |> member "requests"
+    |> to_list
+    |> List.find_opt (fun row ->
+      String.equal
+        (row |> member "schedule_id" |> to_string)
+        request.schedule_id)
+  in
+  match row with
+  | None -> fail "keeper wake schedule missing from dashboard projection"
+  | Some row ->
+    let receipt = row |> member "dispatch_receipt" in
+    check string "receipt recognized" "recognized"
+      (receipt |> member "projection_status" |> to_string);
+    check string "receipt kind" "masc.keeper_wake.enqueued"
+      (receipt |> member "kind" |> to_string);
+    check string "receipt queue" "keeper_event_queue"
+      (receipt |> member "queue" |> to_string);
+    check string "receipt stimulus" "schedule_due"
+      (receipt |> member "stimulus" |> to_string);
+    check string "receipt keeper" "schedule-keeper"
+      (receipt |> member "keeper_name" |> to_string);
+    check string "receipt schedule" request.schedule_id
+      (receipt |> member "schedule_id" |> to_string);
+    check string "receipt urgency" "immediate"
+      (receipt |> member "urgency" |> to_string);
+    check string "receipt post id" "schedule-due:keeper-wake-sched-1"
+      (receipt |> member "post_id" |> to_string)
 ;;
 
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =

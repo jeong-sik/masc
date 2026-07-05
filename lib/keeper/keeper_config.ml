@@ -200,6 +200,24 @@ let keeper_proactive_task_min_cooldown_sec_rp =
 let keeper_proactive_task_min_cooldown_sec () : int =
   Runtime_params.get keeper_proactive_task_min_cooldown_sec_rp
 
+let keeper_proactive_noop_backoff_max_shift_rp =
+  _rp_int ~key:"keeper.proactive.noop_backoff_max_shift"
+    ~default:(fun () -> Env_config_keeper.KeeperProactivePolicy.noop_backoff_max_shift)
+    ~min_v:0 ~max_v:8
+    ~description:"Maximum exponent for no-op proactive cooldown backoff" ()
+
+let keeper_proactive_noop_backoff_max_shift () : int =
+  Runtime_params.get keeper_proactive_noop_backoff_max_shift_rp
+
+let keeper_proactive_idle_decay_max_periods_rp =
+  _rp_int ~key:"keeper.proactive.idle_decay_max_periods"
+    ~default:(fun () -> Env_config_keeper.KeeperProactivePolicy.idle_decay_max_periods)
+    ~min_v:0 ~max_v:16
+    ~description:"Maximum idle-decay periods for proactive cooldown decay" ()
+
+let keeper_proactive_idle_decay_max_periods () : int =
+  Runtime_params.get keeper_proactive_idle_decay_max_periods_rp
+
 let keeper_compaction_policy_from_env () : (float * int * int) =
   ( keeper_compact_ratio (),
     keeper_compact_max_messages (),

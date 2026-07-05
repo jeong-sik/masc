@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Autonomous, Proactive, Reactive Audit - 2026-07-05</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f8;
+      --paper: #ffffff;
+      --ink: #18212b;
+      --muted: #5c6875;
+      --line: #dbe1e7;
+      --accent: #176b87;
+      --accent-2: #3e7c59;
+      --danger: #b42318;
+      --warn: #a15c00;
+      --info: #285a99;
+      --code: #eef3f6;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      background: #10232e;
+      color: #f8fbfc;
+      border-bottom: 4px solid var(--accent);
+    }
+
+    .wrap {
+      width: min(1160px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    header .wrap {
+      padding: 32px 0 28px;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: clamp(28px, 4vw, 44px);
+      max-width: 980px;
+    }
+
+    header p {
+      margin: 14px 0 0;
+      max-width: 900px;
+      color: #cbd9df;
+      font-size: 16px;
+    }
+
+    main {
+      padding: 28px 0 56px;
+    }
+
+    section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+      margin: 18px 0;
+    }
+
+    h2 {
+      font-size: 22px;
+      margin-bottom: 14px;
+    }
+
+    h3 {
+      font-size: 17px;
+      margin: 18px 0 8px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul {
+      padding-left: 22px;
+      margin: 10px 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    code {
+      background: var(--code);
+      border: 1px solid #d7e1e7;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 4px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef3f6;
+      color: #243746;
+      font-weight: 700;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .meta div,
+    .finding,
+    .status-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 12px 14px;
+    }
+
+    .meta strong {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .status-card strong {
+      display: block;
+      font-size: 26px;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+
+    .status-card span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .verdict {
+      border-left: 5px solid var(--danger);
+    }
+
+    .good {
+      border-left: 5px solid var(--accent-2);
+    }
+
+    .evidence {
+      border-left: 5px solid var(--info);
+    }
+
+    .finding {
+      margin: 12px 0;
+    }
+
+    .finding h3 {
+      margin-top: 0;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      min-width: 34px;
+      justify-content: center;
+    }
+
+    .p1 { background: var(--danger); }
+    .p2 { background: var(--warn); }
+    .p3 { background: var(--muted); }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer {
+      color: var(--muted);
+      padding: 18px 0 34px;
+      font-size: 13px;
+    }
+
+    @media (max-width: 760px) {
+      .wrap { width: min(100% - 24px, 1160px); }
+      section { padding: 18px; }
+      .meta, .grid, .two-col { grid-template-columns: 1fr; }
+      table { font-size: 13px; }
+      th, td { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Keeper Autonomous, Proactive, Reactive Audit</h1>
+      <p>Adversarial source and live-runtime assessment for MASC Keeper behavior, checked against the project bar: no hardcoding, no heuristic judgment, no stub, no silent failure, clear MASC/OAS boundary, Lane Per Keeper, and observable production behavior.</p>
+      <div class="meta">
+        <div><strong>Checked</strong>2026-07-05T05:00:35+0900 KST</div>
+        <div><strong>Source</strong><code>cc9011d287</code> on MASC <code>main</code></div>
+        <div><strong>Runtime root</strong><code>/Users/dancer/me/.masc</code></div>
+        <div><strong>Validation</strong>Source audit + live health/log/queue inspection. No full local <code>dune build</code>; focused touched-path tests via <code>scripts/dune-local.sh exec</code>.</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="verdict">
+      <h2>Verdict</h2>
+      <p>MASC Keeper autonomy is real, not stubbed: the original live runtime probe had 14/14 healthy Keeper fibers, explicit board mentions woke Keepers, scheduled autonomous turns ran, busy connector messages went through a durable chat queue, HITL resolution wakes were wired, and Fusion completion returned into the Keeper event layer.</p>
+      <p>At original live-audit time it was not production-correct under the requested bar. Current branch <code>codex/keeper-autonomy-audit-20260705</code> has source-level fixes for board attention heuristics, cursor/drop safety, board collection failure visibility, durable queue health, chat admission policy, and typed scheduler wake. Live deployment and a fresh <code>/health?full=1</code> probe are still required before calling the running system production-correct.</p>
+    </section>
+
+    <section class="good">
+      <h2>Current Worktree Progress</h2>
+      <p>Implemented on branch <code>codex/keeper-autonomy-audit-20260705</code> after the audit:</p>
+      <ul>
+        <li>Board non-explicit wake no longer uses keyword/stigmergy score as final authority. Explicit mentions and thread replies remain deterministic; goal-token overlap no longer wakes.</li>
+        <li>Cursor-scanned board collection is gated before cursor advancement when the Keeper is cold, paused, blocked on HITL approval, under runtime backpressure, or blocked by provider cooldown.</li>
+        <li><code>/health?full=1</code> includes durable Keeper event-queue pending/inflight counts, payload-kind counts, immediate count, oldest/newest age data, durable-only keeper snapshot discovery, and durable snapshot read/parse errors.</li>
+        <li>Durable event-queue backlog degradation is now an explicit health policy: <code>MASC_KEEPER_DURABLE_QUEUE_STALE_SEC</code> / runtime.toml <code>[health].durable_queue_stale_sec</code>. Default <code>0.0</code> preserves existing operator-visible behavior, while larger values keep fresh handoff backlog visible without marking full health degraded.</li>
+        <li><code>/health?full=1</code> top-level <code>operator_action_reasons</code> now preserves component-level <code>status_reasons</code>, so reaction-ledger causes such as pending stimuli or stale durable event queues do not collapse into a generic <code>keeper_reaction_ledger:degraded</code>.</li>
+        <li>Board-event collection failures now surface as <code>keeper_board_event_collection</code> health with per-Keeper failure details, runtime-resolution visibility, and top-level <code>keeper_board_event_collection:board_event_collection_failure</code> operator reason; the next successful collection clears the failure.</li>
+        <li>Chat waiter cap moved to <code>MASC_KEEPER_TURN_CHAT_WAITING_CAP</code> / runtime.toml <code>[turn].chat_waiting_cap</code>.</li>
+        <li><code>/health?full=1</code> and dashboard runtime resolution now expose <code>keeper_turn_admission</code> with per-Keeper in-flight lane, waiting count, waiting cap, full flag, and rejected-chat counter. A currently full queue contributes <code>keeper_turn_admission:chat_waiting_queue_full</code> to top-level <code>operator_action_reasons</code>.</li>
+        <li>Scheduler can dispatch typed <code>masc.keeper_wake</code> payloads into a Keeper's event queue as <code>Schedule_due</code>, independent of board-post side effects.</li>
+        <li>Scheduled autonomous no-op backoff and idle decay caps are named runtime policy: <code>MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT</code>, <code>MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS</code>, with runtime.toml mappings under <code>[proactive]</code>.</li>
+        <li>Removed the dead <code>Keeper_relevance_check</code> keyword coverage module and its dedicated test so it cannot be accidentally wired in as a production relevance authority.</li>
+      </ul>
+      <p><strong>Remaining follow-up:</strong> re-run live <code>/health?full=1</code> after deployment because the original live-runtime evidence predates these source changes. Let CI own the full Dune build; local validation here stayed focused on touched paths.</p>
+    </section>
+
+    <section class="good">
+      <h2>Live Runtime Snapshot</h2>
+      <div class="grid">
+        <div class="status-card"><strong>14/14</strong><span>running and healthy Keeper fibers</span></div>
+        <div class="status-card"><strong>0</strong><span>failing, paused, or blocked Keepers in full health</span></div>
+        <div class="status-card"><strong>0.19.55</strong><span>runtime version from <code>/health?full=1</code></span></div>
+      </div>
+      <h3>Observed live activity</h3>
+      <ul>
+        <li>Explicit board wake: <code>board signal wakeup: keeper=sangsu reason=explicit_mention</code></li>
+        <li>Queued board stimulus consumed: <code>turn entry: consumed stimulus ... class=board_signal</code></li>
+        <li>Reactive turn scheduled: <code>keepalive turn scheduled ... reasons=board_event_pending</code></li>
+        <li>Scheduled autonomous turn: <code>keepalive turn scheduled for analyst: channel=scheduled_autonomous</code></li>
+        <li>HITL block visible: <code>keeper:rondo blocked on 1 pending HITL approval(s)</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Durable Queue Backlog</h2>
+      <p>Full health reported reaction-ledger <code>pending_stimulus_count = 0</code>, but disk queues under <code>/Users/dancer/me/.masc/keepers</code> contained durable pending event items. This is an operator-truth problem even if the fleet is actively draining work.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Keeper</th>
+            <th>Pending items</th>
+            <th>Main classes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>taskmaster</code></td><td>349</td><td>348 <code>board_signal</code>, 1 <code>bootstrap</code></td></tr>
+          <tr><td><code>albini</code></td><td>51</td><td>49 <code>board_signal</code>, 1 <code>bootstrap</code>, live drift during probe</td></tr>
+          <tr><td><code>sangsu</code></td><td>19-20</td><td><code>board_signal</code></td></tr>
+          <tr><td><code>executor</code></td><td>16</td><td>14 <code>board_signal</code>, 2 <code>hitl_resolved</code></td></tr>
+          <tr><td><code>idealist</code></td><td>9</td><td><code>board_signal</code></td></tr>
+          <tr><td><code>mad-improver</code></td><td>7</td><td>6 <code>board_signal</code>, 1 <code>hitl_resolved</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Findings</h2>
+      <div class="finding">
+        <h3><span class="badge p1">P1</span> Board relevance used production heuristic for non-explicit wakes</h3>
+        <p>Original finding: <code>stigmergy_match</code> was keyword scoring, not LLM judgment, and could false-wake or false-miss across Korean text, punctuation, aliases, and multi-context Keeper identity.</p>
+        <p><strong>Current source status:</strong> closed in this worktree. Explicit mention and thread reply remain deterministic; non-explicit keyword/stigmergy score no longer wakes as final authority; the dead keyword relevance module was removed.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="badge p1">P1</span> Cursor-scanned board events could be acked before later scheduling gates</h3>
+        <p>Original finding: <code>collect_board_events</code> advanced the per-Keeper board cursor before later approval/backpressure gates, creating a possible no-requeue drop path.</p>
+        <p><strong>Current source status:</strong> closed in this worktree. Board cursor collection now pre-gates on cold Keeper state, pause, pending HITL approval, runtime backpressure, and provider cooldown before cursor advancement. Board-event collection failures also degrade <code>keeper_board_event_collection</code> health and propagate to top-level operator action reasons until a successful collection clears the failure.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="badge p1">P1</span> Full health missed durable event-queue backlog</h3>
+        <p>Original finding: live disk state had non-empty pending queues while the reaction ledger said no pending stimuli, making a false-green health surface possible.</p>
+        <p><strong>Current source status:</strong> closed in this worktree. <code>/health?full=1</code> now includes durable queue pending/inflight counts, payload class counts, immediate counts, queue age, durable-only keeper snapshot discovery, and durable snapshot read/parse errors, with explicit stale policy.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="badge p2">P2</span> Chat waiter cap was hard-coded</h3>
+        <p>Original finding: <code>max_waiting_chat_requests = 8</code> was typed and observable, but arbitrary.</p>
+        <p><strong>Current source status:</strong> closed in this worktree. The cap is runtime policy via <code>MASC_KEEPER_TURN_CHAT_WAITING_CAP</code> / <code>[turn].chat_waiting_cap</code>, and <code>keeper_turn_admission</code> health exposes in-flight lane, waiting count, waiting cap, full flag, and rejected-chat counter per Keeper.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="badge p2">P2</span> Scheduler was not yet a general Keeper wake mechanism</h3>
+        <p>Original finding: the schedule consumer created board posts, making "Scheduler wakes Keeper" depend on board relevance side effects.</p>
+        <p><strong>Current source status:</strong> closed in this worktree. <code>masc.keeper_wake</code> schedule payloads now dispatch typed <code>Schedule_due</code> Keeper event-queue stimuli; board-post schedule remains a consumer, not the only wake semantics.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="badge p3">P3</span> Dead keyword relevance module should not become production path</h3>
+        <p>Resolved in this worktree by removing <code>Keeper_relevance_check</code> and its dedicated test. Any future relevance authority should be introduced through an explicit LLM-boundary contract instead of reviving keyword coverage logic.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Area Assessment</h2>
+      <div class="two-col">
+        <div>
+          <h3>Lane Per Keeper</h3>
+          <p>Status: mostly correct. Admission slots are keyed by <code>base_path</code> and <code>keeper_name</code>; autonomous yields when chat waits; chat serializes through the same per-Keeper slot. Current worktree also exposes admission pressure and rejection counters.</p>
+          <p class="small">Evidence: <code>lib/keeper/keeper_turn_admission.ml</code>, <code>test/test_keeper_turn_admission.ml</code>.</p>
+
+          <h3>Autonomous And Proactive</h3>
+          <p>Status: real and mostly justified. Bootstrap, due schedule, task backlog, pending board/scope/mention signals, and current task state can drive turns; blind no-signal housekeeping has been reduced. Current worktree names no-op backoff and idle-decay caps as runtime policy.</p>
+          <p class="small">Evidence: <code>lib/keeper/keeper_world_observation.ml:1102-1243</code>.</p>
+
+          <h3>Board Reactive</h3>
+          <p>Status: explicit mentions and thread replies work. The original non-explicit keyword/stigmergy final wake authority is removed in the current worktree.</p>
+          <p class="small">Evidence: <code>lib/server/server_bootstrap_loops.ml:496-499</code>, <code>lib/keeper/keeper_world_observation_board_signal.ml</code>.</p>
+
+          <h3>Event Queue Persistence</h3>
+          <p>Status: good durability model. Pending and inflight snapshots are persisted, reload combines both, and consumed ack removes from both snapshots. Current worktree exposes durable queue backlog, durable-only keeper snapshot discovery, discovery failures, read/parse errors, and stale policy in full health.</p>
+          <p class="small">Evidence: <code>lib/keeper_runtime/keeper_event_queue_persistence.ml</code>, <code>lib/keeper/keeper_registry_event_queue.ml</code>.</p>
+        </div>
+
+        <div>
+          <h3>Connector Reactive</h3>
+          <p>Status: strong for Discord. Busy Discord connector messages route to durable <code>Keeper_chat_queue</code> and are drained after the in-flight turn.</p>
+          <p class="small">Evidence: <code>lib/gate_keeper_backend.ml:17-41</code>, <code>424-532</code>, <code>test/test_keeper_busy_connector_deferred.ml</code>.</p>
+
+          <h3>HITL</h3>
+          <p>Status: correct design direction. Approval resolution/expiry emits typed <code>Hitl_resolved</code> immediate stimulus and wakes the Keeper.</p>
+          <p class="small">Evidence: <code>lib/keeper/keeper_approval_queue.ml:804-845</code>, <code>1440-1485</code>.</p>
+
+          <h3>Fusion</h3>
+          <p>Status: correct design direction. Fusion completion marks the run, broadcasts status, appends to Keeper chat lane, and wakes the Keeper; chat append failure is surfaced.</p>
+          <p class="small">Evidence: <code>lib/fusion/fusion_sink.ml:433-487</code>, <code>lib/keeper/keeper_heartbeat_stimulus_intake.ml:111-122</code>.</p>
+
+          <h3>Scheduler</h3>
+          <p>Status: typed Keeper wake semantics are present in the current worktree. <code>masc.keeper_wake</code> produces <code>Schedule_due</code> stimuli without relying on board-post relevance.</p>
+          <p class="small">Evidence: <code>lib/schedule/schedule_runner.ml</code>, <code>lib/server/server_schedule_consumers.ml</code>, <code>lib/keeper_runtime/keeper_event_queue.ml</code>.</p>
+
+          <h3>MASC/OAS Boundary</h3>
+          <p>Status: no production OAS dependency on MASC found in a focused source scan. OAS test fixtures contain MASC regression context comments, which is acceptable if kept out of public runtime API.</p>
+          <p class="small">Evidence: <code>rg</code> over <code>/Users/dancer/me/workspace/yousleepwhen/oas/lib</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="evidence">
+      <h2>OCaml 5.4 Baseline</h2>
+      <p>[근거] Official OCaml docs checked <code>2026-07-05 KST</code>, confidence High.</p>
+      <ul>
+        <li><a href="https://ocaml.org/releases/5.4.0">OCaml 5.4.0 release page</a></li>
+        <li><a href="https://ocaml.org/manual/5.4/api/Mutex.html">Mutex lock/protect semantics</a></li>
+        <li><a href="https://ocaml.org/manual/5.4/api/Lazy.html">Lazy concurrency warning</a></li>
+        <li><a href="https://ocaml.org/manual/5.4/api/Domain.html">Domain module and multicore API status</a></li>
+      </ul>
+      <p>The audited Keeper code generally uses <code>Eio.Mutex</code> for fiber-yielding turn critical sections and <code>Stdlib.Mutex</code> for short non-yielding state/table sections, which is consistent with the concurrency shape expected here.</p>
+    </section>
+
+    <section>
+      <h2>Pass Criteria For Next Round</h2>
+      <ul>
+        <li>Source-level pass: board non-explicit wake no longer uses substring/keyword score as final authority.</li>
+        <li>Source-level pass: board cursor collection pre-gates pending HITL and backpressure states before cursor advancement.</li>
+        <li>Source-level pass: board-event collection exceptions are visible in full health and runtime resolution, not only logs/metrics.</li>
+        <li>Source-level pass: <code>/health?full=1</code> reports durable event queue backlog, age, payload classes, durable-only keeper snapshot discovery, and snapshot read/parse errors.</li>
+        <li>Source-level pass: scheduler can emit a typed Keeper stimulus independent of board-post side effects.</li>
+        <li>Source-level pass: chat admission cap and proactive backoff/idle-decay caps are named policy, config-backed, and observable.</li>
+        <li>Remaining live pass: deploy this branch, let CI run full Dune build, and re-run <code>/health?full=1</code> plus durable queue probes against <code>/Users/dancer/me/.masc</code>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <p>Generated from <code>docs/audit/2026-07-05-keeper-autonomous-reactive-audit.md</code>. Full Dune build remains CI-owned; focused local tests were run for touched paths.</p>
+  </footer>
+</body>
+</html>

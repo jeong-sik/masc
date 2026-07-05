@@ -54,6 +54,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
   | Bg_completed
+  | Schedule_due
   | External_attention
 
 type pending_board_event = {
@@ -173,6 +174,7 @@ type keeper_cycle_channel =
 type event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Scheduled_automation_stimulus
   | Connector_attention_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
@@ -306,6 +308,15 @@ val pending_board_event_of_bg_job_completion :
   Keeper_event_queue.bg_job_completion ->
   pending_board_event
 
+(** Build the actionable observation for a direct scheduled keeper wake. The
+    schedule itself is the trusted timing source; the message is rendered as
+    automation-origin observational data, not trusted operator instruction. *)
+val pending_board_event_of_scheduled_wake :
+  meta:Keeper_meta_contract.keeper_meta ->
+  arrived_at:float ->
+  Keeper_event_queue.scheduled_wake ->
+  pending_board_event
+
 (** Build the actionable observation for a connector-recorded external
     attention item. Ambient connector chatter remains observational by default:
     it is not trusted operator instruction unless another typed path makes it
@@ -317,7 +328,7 @@ val pending_board_event_of_external_attention :
 
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
-    and [Bg_completed] (RFC-0290) produce [Some];
+    [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
     [Bootstrap]/[No_progress_recovery] return [None] (no prompt injection). *)
 val pending_board_event_of_stimulus :
   continuity_summary:string ->

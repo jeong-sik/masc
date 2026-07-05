@@ -49,6 +49,11 @@ type stimulus_payload =
          — wakes the calling keeper so the outcome arrives as actionable turn
          input. Phase 1 adds the variant only; no producer emits it yet
          (executor lands in RFC-0290 Phase 3). *)
+  | Schedule_due of scheduled_wake
+      (* A scheduled automation request reached its due time and explicitly
+         targets this keeper. The scheduler/consumer side owns timing,
+         approval, and payload validation; this queue payload only carries the
+         typed wake and operator-authored message. *)
   | Connector_attention of connector_attention
       (* RFC-connector-ambient-attention-wake: an ambient connector message
          recorded as external attention. Carries the [event_id] pointer (not
@@ -107,6 +112,14 @@ and connector_attention = { event_id : string }
          [Keeper_external_attention] for the ambient message; content/surface
          read from that store on the turn path. *)
 
+and scheduled_wake = {
+  schedule_id : string;
+  due_at : float;
+  payload_digest : string;
+  title : string option;
+  message : string;
+}
+
 let fusion_completion_post_id (fc : fusion_completion) =
   if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
   else fc.board_post_id
@@ -114,6 +127,8 @@ let fusion_completion_post_id (fc : fusion_completion) =
 let bg_job_completion_post_id (c : bg_job_completion) =
   if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
   else c.bg_board_post_id
+
+let schedule_due_post_id (sw : scheduled_wake) = "schedule-due:" ^ sw.schedule_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
@@ -239,13 +254,14 @@ let payload_kind_label = function
   | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed _ -> "fusion_completed"
   | Bg_completed _ -> "bg_completed"
+  | Schedule_due _ -> "schedule_due"
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
 
 let is_board_signal = function
   | Board_signal _ -> true
   | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
-  | Connector_attention _ | Hitl_resolved _ ->
+  | Schedule_due _ | Connector_attention _ | Hitl_resolved _ ->
     false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
@@ -397,6 +413,15 @@ let payload_to_yojson = function
       ; "payload", `String payload
       ; "board_post_id", `String c.bg_board_post_id
       ]
+  | Schedule_due sw ->
+    `Assoc
+      [ "kind", `String "schedule_due"
+      ; "schedule_id", `String sw.schedule_id
+      ; "due_at_unix", `Float sw.due_at
+      ; "payload_digest", `String sw.payload_digest
+      ; "title", option_json (fun value -> `String value) sw.title
+      ; "message", `String sw.message
+      ]
   | Connector_attention ca ->
     `Assoc
       [ "kind", `String "connector_attention"
@@ -453,6 +478,13 @@ let payload_of_yojson json =
     Ok
       (Bg_completed
          { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
+  | "schedule_due" ->
+    let* schedule_id = string_field ~context "schedule_id" fields in
+    let* due_at = float_field ~context "due_at_unix" fields in
+    let* payload_digest = string_field ~context "payload_digest" fields in
+    let* title = optional_string_field ~context "title" fields in
+    let* message = string_field ~context "message" fields in
+    Ok (Schedule_due { schedule_id; due_at; payload_digest; title; message })
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
     Ok (Connector_attention { event_id })

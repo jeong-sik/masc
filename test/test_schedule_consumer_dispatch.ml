@@ -374,7 +374,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   (match Keeper_registry_event_queue.drop_by_post_id ~base_path keeper_name ~post_id with
    | Error message -> fail ("drop failed: " ^ message)
    | Ok removed -> check int "removed current occurrence" 1 (List.length removed));
-  let stale_payload =
+  let stale_payload_json =
     `Assoc
       [ "kind", `String "masc.keeper_wake"
       ; "schema_version", `Int 1
@@ -386,6 +386,11 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
             ; "urgency", `String "immediate"
             ] )
       ]
+  in
+  let stale_payload =
+    match Schedule_domain.payload_of_yojson stale_payload_json with
+    | Ok payload -> payload
+    | Error message -> fail ("stale payload parse failed: " ^ message)
   in
   let stale_wake : Keeper_event_queue.scheduled_wake =
     { schedule_id = request.schedule_id

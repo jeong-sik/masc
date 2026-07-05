@@ -304,10 +304,13 @@ let () =
     keeper_stream_src
     "request continues for polling";
   assert_contains
-    ~label:"KS3: worker uses server switch"
+    ~label:"KS3a: worker owns connector user-line recording decision"
     keeper_stream_src
-    "process_single_turn ~connector_user_line_recorded_upstream:false\n\
-     \             ~state ~clock ~sw\n";
+    "process_single_turn ~connector_user_line_recorded_upstream:false";
+  assert_contains
+    ~label:"KS3b: worker uses server switch"
+    keeper_stream_src
+    "~state ~clock ~sw";
   assert_contains
     ~label:"KS4: disconnect watcher uses stream switch"
     keeper_stream_src

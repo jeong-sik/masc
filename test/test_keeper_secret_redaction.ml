@@ -47,6 +47,8 @@ let secret_root_default ~base ~keeper_name =
     (Filename.concat (Filename.concat base Common.masc_dirname) "secrets")
     (Workspace_utils.safe_filename keeper_name)
 
+let base_secret_root_default ~base = secret_root_default ~base ~keeper_name:"base"
+
 let not_contains label haystack needle =
   Alcotest.(check bool) label false (String_util.contains_substring haystack needle)
 
@@ -87,6 +89,19 @@ let test_short_values_are_not_exact_redacted () =
     "pin=1234567"
     (R.redact_text redaction "pin=1234567")
 
+let test_snapshot_redacts_base_secret_values () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let base_root = base_secret_root_default ~base in
+  let base_secret = "base.secret!" in
+  write_file (Filename.concat (Filename.concat base_root "env") "GH_TOKEN")
+    (base_secret ^ "\n");
+  let redaction = R.snapshot ~base_path:base ~keeper_name:"idealist" in
+  let redacted = R.redact_text redaction ("token=" ^ base_secret) in
+  not_contains "base env exact value hidden" redacted base_secret;
+  contains "redaction marker present" redacted "[REDACTED]"
+
 let test_json_redaction_preserves_shape () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -117,6 +132,8 @@ let () =
             test_snapshot_redacts_env_and_file_values;
           Alcotest.test_case "does not exact-redact short values" `Quick
             test_short_values_are_not_exact_redacted;
+          Alcotest.test_case "redacts base secret values" `Quick
+            test_snapshot_redacts_base_secret_values;
           Alcotest.test_case "redacts json while preserving shape" `Quick
             test_json_redaction_preserves_shape;
         ] )

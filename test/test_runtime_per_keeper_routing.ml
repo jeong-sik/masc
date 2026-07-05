@@ -1210,13 +1210,27 @@ let test_runtime_inventory_surfaces_parameter_policy () =
       false
       (policy |> J.member "requires_reasoning_replay_on_tool_call" |> J.to_bool);
     Alcotest.(check int)
-      "ignored sampling params empty"
-      0
+      "ignored sampling params count"
+      4
       (policy |> J.member "ignored_sampling_params" |> J.to_list |> List.length);
+    Alcotest.(check (list string))
+      "ignored sampling params"
+      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
+      (policy
+       |> J.member "ignored_sampling_params"
+       |> J.to_list
+       |> List.map J.to_string);
     Alcotest.(check int)
-      "always ignored sampling params empty"
-      0
-      (policy |> J.member "always_ignored_sampling_params" |> J.to_list |> List.length))
+      "always ignored sampling params count"
+      4
+      (policy |> J.member "always_ignored_sampling_params" |> J.to_list |> List.length);
+    Alcotest.(check (list string))
+      "always ignored sampling params"
+      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
+      (policy
+       |> J.member "always_ignored_sampling_params"
+       |> J.to_list
+       |> List.map J.to_string))
 ;;
 
 let test_runtime_inventory_surfaces_effective_capabilities () =

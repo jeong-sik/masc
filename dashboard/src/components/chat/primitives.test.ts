@@ -15,6 +15,7 @@ import {
   type ChatComposerSendPayload,
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
+import { chatHistoryEntriesFromRest } from '../../keeper-state'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
@@ -279,6 +280,77 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
       '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
     )
+  })
+
+  it('renders REST replay failure and no-turn-ref gaps as visible stream contract badges', () => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [
+      {
+        id: 'smoke-legacy-user',
+        role: 'user',
+        content: 'legacy row without turn ref',
+        ts: 1_780_000_000,
+        stream_contract: {
+          source: 'keeper_chat_store',
+          status: 'history_without_turn_ref',
+          delivery_receipt: 'no_delivery_receipt',
+          reason: 'history row has no durable turn_ref; cannot join stream events',
+        },
+      },
+      {
+        id: 'smoke-error-assistant',
+        role: 'assistant',
+        content: 'Keeper request failed: Timeout after 630.0s',
+        ts: 1_780_000_001,
+        kind: 'transport_failure',
+        turn_ref: 'trace-chat-contract-smoke#8',
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-chat-contract-smoke#8',
+          event_name: 'RUN_ERROR',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'RUN_ERROR',
+          ],
+          delivery_receipt: 'server_lifecycle_replay_only',
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      },
+    ])
+
+    render(
+      html`<${ChatTranscript}
+        entries=${entries}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const legacy = container.querySelector('[data-chat-entry-id="smoke-legacy-user"]') as HTMLElement
+    expect(legacy).not.toBeNull()
+    expect(legacy.getAttribute('data-chat-stream-contract-source')).toBe('keeper_chat_store')
+    expect(legacy.getAttribute('data-chat-stream-contract-status')).toBe('history_without_turn_ref')
+    expect(legacy.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(legacy.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
+    expect(legacy.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('턴 연결 없음')
+
+    const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
+    expect(failure).not.toBeNull()
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('error')
+    expect(failure.getAttribute('data-chat-turn-ref')).toBe('trace-chat-contract-smoke#8')
+    expect(failure.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
+    expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
+    expect(failure.getAttribute('data-chat-stream-contract-event')).toBe('RUN_ERROR')
+    expect(failure.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe('RUN_STARTED,RUN_ERROR')
+    expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
+    expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
+    expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
+    expect(failure.textContent).toContain('Timeout after 630.0s')
+    expect(
+      [...container.querySelectorAll('[data-chat-stream-contract-delivery-receipt]')]
+        .map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt')),
+    ).not.toContain('client_observed_sse_event')
   })
 
   it('exposes tool-call transcript provenance as rendered attributes', () => {

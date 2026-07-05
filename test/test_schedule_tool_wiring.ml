@@ -34,6 +34,15 @@ let board_post_payload =
     ]
 ;;
 
+let keeper_wake_payload_body =
+  `Assoc
+    [ "keeper_name", `String "schedule-keeper"
+    ; "title", `String "Scheduled lane wake"
+    ; "message", `String "Run the scheduled maintenance lane now."
+    ; "urgency", `String "normal"
+    ]
+;;
+
 let create_fields =
   [ "due_at_unix", `Float 200.0
   ; "risk_class", `String "read_only"
@@ -308,6 +317,150 @@ let test_dispatch_create_board_post_convenience_payload () =
     (row |> member "payload_target" |> to_string);
   check string "dashboard payload summary" "Scheduled check-in"
     (row |> member "payload_summary" |> to_string)
+;;
+
+let test_dispatch_create_keeper_wake_payload () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-keeper-wake"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "payload_kind", `String "masc.keeper_wake"
+      ; "payload_body", keeper_wake_payload_body
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create succeeds" true (Tool_result.is_success result);
+     let data = Tool_result.data result in
+     let open Yojson.Safe.Util in
+     check string "result payload kind" "masc.keeper_wake"
+       (data |> member "payload_kind" |> to_string);
+     check string "result payload target" "keeper:schedule-keeper"
+       (data |> member "payload_target" |> to_string);
+     check string "result payload summary" "Scheduled lane wake"
+       (data |> member "payload_summary" |> to_string);
+     check bool "result separate grant" true
+       (data |> member "requires_separate_human_grant" |> to_bool));
+  (match Schedule_store.get_schedule config ~schedule_id:"sched-keeper-wake" with
+   | None -> fail "schedule missing"
+   | Some request ->
+     check string "status" "pending_approval"
+       (Schedule_domain.schedule_status_to_string request.status);
+     let payload = Schedule_domain.payload_to_yojson request.payload in
+     let open Yojson.Safe.Util in
+     check string "stored payload kind" "masc.keeper_wake"
+       (payload |> member "kind" |> to_string);
+     check string "stored keeper" "schedule-keeper"
+       (payload |> member "body" |> member "keeper_name" |> to_string);
+     check string "stored message" "Run the scheduled maintenance lane now."
+       (payload |> member "body" |> member "message" |> to_string));
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let row =
+    dashboard
+    |> member "requests"
+    |> to_list
+    |> function
+    | [ row ] -> row
+    | rows -> failf "expected one dashboard row, got %d" (List.length rows)
+  in
+  check string "dashboard payload kind" "masc.keeper_wake"
+    (row |> member "payload_kind" |> to_string);
+  check string "dashboard payload target" "keeper:schedule-keeper"
+    (row |> member "payload_target" |> to_string);
+  check string "dashboard payload summary" "Scheduled lane wake"
+    (row |> member "payload_summary" |> to_string)
+;;
+
+let test_dispatch_create_rejects_keeper_wake_invalid_urgency () =
+  with_config
+  @@ fun config ->
+  let invalid_body =
+    `Assoc
+      [ "keeper_name", `String "schedule-keeper"
+      ; "message", `String "Run the scheduled maintenance lane now."
+      ; "urgency", `String "urgent-ish"
+      ]
+  in
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-keeper-wake-invalid-urgency"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "payload_kind", `String "masc.keeper_wake"
+      ; "payload_body", invalid_body
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects invalid keeper wake urgency" false
+       (Tool_result.is_success result);
+     check (option string) "failure class" (Some "workflow_rejection")
+       (Option.map Tool_result.tool_failure_class_to_string
+          (Tool_result.failure_class result));
+     check string "message" "unknown urgency: urgent-ish"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
+let test_dispatch_create_rejects_keeper_wake_invalid_target_name () =
+  with_config
+  @@ fun config ->
+  let invalid_body =
+    `Assoc
+      [ "keeper_name", `String "../bad"
+      ; "message", `String "Run the scheduled maintenance lane now."
+      ]
+  in
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-keeper-wake-invalid-name"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "payload_kind", `String "masc.keeper_wake"
+      ; "payload_body", invalid_body
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects invalid keeper wake target name" false
+       (Tool_result.is_success result);
+     check (option string) "failure class" (Some "workflow_rejection")
+       (Option.map Tool_result.tool_failure_class_to_string
+          (Tool_result.failure_class result));
+     check string "message"
+       (Schedule_supported_kinds.keeper_wake_target_name_error
+          ~field:"masc.keeper_wake payload body.keeper_name")
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
 ;;
 
 let test_dispatch_create_rejects_negative_board_ttl () =
@@ -845,6 +998,12 @@ let () =
             test_dispatch_create_derives_due_at_for_cron_recurrence
         ; test_case "dispatch create accepts board-post convenience payload" `Quick
             test_dispatch_create_board_post_convenience_payload
+        ; test_case "dispatch create accepts keeper wake payload" `Quick
+            test_dispatch_create_keeper_wake_payload
+        ; test_case "dispatch create rejects invalid keeper wake urgency" `Quick
+            test_dispatch_create_rejects_keeper_wake_invalid_urgency
+        ; test_case "dispatch create rejects invalid keeper wake target name" `Quick
+            test_dispatch_create_rejects_keeper_wake_invalid_target_name
         ; test_case "dispatch create rejects negative board ttl" `Quick
             test_dispatch_create_rejects_negative_board_ttl
         ; test_case "dispatch create rejects payload mixed with board fields" `Quick

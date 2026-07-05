@@ -35,6 +35,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  keeperStreamContract,
   setRecordValue,
 } from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'
@@ -66,6 +67,7 @@ import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
 import {
+  toolCallOutputHydrationContract,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
@@ -248,6 +250,9 @@ function liveAssistantPlaceholder(keeperName: string): KeeperConversationEntry {
     timestamp: null,
     delivery: 'streaming',
     streamState: 'streaming',
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      reason: 'UI-only placeholder while active stream entry mounts',
+    }),
     details: null,
     error: null,
   }
@@ -267,6 +272,12 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
     timestamp: queuedTimestampIso(msg.timestamp),
     delivery: 'queued',
     streamState: undefined,
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      deliveryReceipt: 'no_delivery_receipt',
+      reason: 'client-side composer queue item; not yet submitted to keeper runtime',
+    }),
+    queueSeq: msg.sequence,
+    queueClientActionId: msg.clientActionId ?? null,
     attachments: msg.attachments,
     blocks: msg.blocks,
     details: null,
@@ -438,7 +449,12 @@ function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5" data-chat-queue-item=${msg.id}>
+    <div
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5"
+      data-chat-queue-item=${msg.id}
+      data-chat-queue-seq=${msg.sequence}
+      data-chat-queue-client-action-id=${msg.clientActionId ?? undefined}
+    >
       ${editing
         ? html`
             <textarea
@@ -835,6 +851,7 @@ export function KeeperConversationPanel({
               showSourceBadge=${true}
               toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+              toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
               unreadAfterTs=${unreadAfterTs}
               onSeenBottom=${markTranscriptSeen}
               action=${inspectAction}
@@ -971,6 +988,7 @@ export function KeeperConversationPanel({
           groupToolCalls=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+          toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
           unreadAfterTs=${unreadAfterTs}
           onSeenBottom=${markTranscriptSeen}
           action=${inspectAction}
@@ -1090,6 +1108,7 @@ export function KeeperConversationPanel({
             groupToolCalls=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+            toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
             unreadAfterTs=${unreadAfterTs}
             onSeenBottom=${markTranscriptSeen}
             action=${inspectAction}

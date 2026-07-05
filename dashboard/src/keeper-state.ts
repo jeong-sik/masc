@@ -228,6 +228,7 @@ export function keeperStreamContract(
     requestId?: string | null
     turnRef?: string | null
     traceEventCount?: number | null
+    lifecycleEvents?: string[] | null
     reason?: string | null
   } = {},
 ): KeeperConversationStreamContract {
@@ -238,6 +239,7 @@ export function keeperStreamContract(
     requestId: opts.requestId ?? undefined,
     turnRef: opts.turnRef ?? undefined,
     traceEventCount: opts.traceEventCount ?? undefined,
+    lifecycleEvents: opts.lifecycleEvents ?? undefined,
     reason: opts.reason ?? undefined,
   })
 }
@@ -246,6 +248,8 @@ function normalizeStreamContractSource(value: unknown): KeeperConversationStream
   switch (asString(value)?.trim()) {
     case 'keeper_chat_store':
       return 'keeper_chat_store'
+    case 'backend_stream_lifecycle':
+      return 'backend_stream_lifecycle'
     case 'backend_turn_trace':
       return 'backend_turn_trace'
     case 'rest_history':
@@ -273,6 +277,8 @@ function normalizeStreamContractStatus(value: unknown): KeeperConversationStream
       return 'backend_stream_event'
     case 'backend_terminal_event':
       return 'backend_terminal_event'
+    case 'backend_lifecycle_replay':
+      return 'backend_lifecycle_replay'
     case 'backend_trace_join':
       return 'backend_trace_join'
     case 'history_without_turn_ref':
@@ -304,6 +310,7 @@ function normalizeStreamContract(raw: unknown): KeeperConversationStreamContract
     requestId: asString(raw.request_id) ?? asString(raw.requestId) ?? null,
     turnRef: asString(raw.turn_ref) ?? asString(raw.turnRef) ?? null,
     traceEventCount: asNumber(raw.trace_event_count) ?? asNumber(raw.traceEventCount) ?? null,
+    lifecycleEvents: normalizeStringArray(raw.lifecycle_events) ?? normalizeStringArray(raw.lifecycleEvents) ?? null,
     reason: asString(raw.reason) ?? null,
   })
 }

@@ -1628,6 +1628,112 @@ let test_to_json_array_stream_contract_trace_unavailable () =
            (contract |> member "reason" |> to_string)
            "no retained trajectory/internal-history events"))
 
+let json_string_list json =
+  Yojson.Safe.Util.to_list json |> List.map Yojson.Safe.Util.to_string
+
+let test_to_json_array_stream_contract_lifecycle_replay () =
+  let base_dir =
+    temp_base_path "keeper-chat-store-stream-contract-lifecycle"
+  in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-stream-contract-lifecycle" in
+      let tref =
+        Ids.Turn_ref.make ~trace_id:"trace-lifecycle" ~absolute_turn:6
+      in
+      let stream_lifecycle =
+        [ K.Run_started
+        ; K.Text_message_start
+        ; K.Text_message_end
+        ; K.Run_finished
+        ]
+      in
+      K.append_turn ~base_dir ~keeper_name ~user_content:"inspect"
+        ~user_attachments:[]
+        ~tool_calls:[ { K.call_id = "toolu_life"; call_name = "Read"; args = "{}" } ]
+        ~turn_ref:tref ~stream_lifecycle ~assistant_content:"done" ();
+      (match K.load ~base_dir ~keeper_name with
+       | [ user; tool; assistant ] ->
+           Alcotest.(check bool) "user row carries no stream lifecycle" true
+             (Option.is_none user.stream_lifecycle);
+           Alcotest.(check bool) "tool row carries no stream lifecycle" true
+             (Option.is_none tool.stream_lifecycle);
+           Alcotest.(check (option (list string)))
+             "stream lifecycle roundtrips on assistant row"
+             (Some
+                [ "RUN_STARTED"
+                ; "TEXT_MESSAGE_START"
+                ; "TEXT_MESSAGE_END"
+                ; "RUN_FINISHED"
+                ])
+             (Option.map
+                (List.map (fun event ->
+                   match event with
+                   | K.Run_started -> "RUN_STARTED"
+                   | K.Text_message_start -> "TEXT_MESSAGE_START"
+                   | K.Text_message_end -> "TEXT_MESSAGE_END"
+                   | K.Run_finished -> "RUN_FINISHED"
+                   | K.Run_error -> "RUN_ERROR"))
+                assistant.stream_lifecycle)
+       | messages ->
+           Alcotest.failf "expected user/tool/assistant rows, got %d"
+             (List.length messages));
+      let trace_block_by_turn_ref turn_ref =
+        if Ids.Turn_ref.equal turn_ref tref then
+          Some
+            (B.Trace
+               { trace =
+                   [ B.Trace_think
+                       { text = "retained trace";
+                         ts = Some "2026-07-05T00:00:00Z";
+                         oas_block_index = None;
+                       };
+                   ];
+               })
+        else None
+      in
+      let rows =
+        Yojson.Safe.Util.to_list
+          (K.to_json_array ~trace_block_by_turn_ref
+             (K.load ~base_dir ~keeper_name))
+      in
+      let contract = stream_contract_of (assistant_row rows) in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "source" "backend_stream_lifecycle"
+        (contract |> member "source" |> to_string);
+      Alcotest.(check string) "status" "backend_lifecycle_replay"
+        (contract |> member "status" |> to_string);
+      Alcotest.(check string) "terminal event" "RUN_FINISHED"
+        (contract |> member "event_name" |> to_string);
+      Alcotest.(check (list string)) "lifecycle events"
+        [ "RUN_STARTED"; "TEXT_MESSAGE_START"; "TEXT_MESSAGE_END"; "RUN_FINISHED" ]
+        (json_string_list (contract |> member "lifecycle_events")))
+
+let test_malformed_stream_lifecycle_reads_none () =
+  let base_dir = temp_base_path "keeper-chat-store-lifecycle-bad" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-store-lifecycle-bad" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"role":"assistant","content":"x","ts":1.0,"turn_ref":"trace-life#7","stream_lifecycle":["RUN_STARTED","NOT_A_REAL_EVENT"]}|}
+        ^ "\n");
+      (match K.load ~base_dir ~keeper_name with
+       | [ m ] ->
+           Alcotest.(check bool) "malformed lifecycle reads as None" true
+             (Option.is_none m.stream_lifecycle);
+           Alcotest.(check bool) "turn_ref still parsed" true
+             (Option.is_some m.turn_ref)
+       | messages ->
+           Alcotest.failf "expected 1 message, got %d" (List.length messages));
+      Alcotest.(check (float 0.001)) "drop counted as invalid payload"
+        1.0
+        (drop_value invalid_payload -. before))
+
 (* A malformed persisted turn_ref is surfaced as a read drop and reads as
    [None] — never repaired — while the row itself stays valid. *)
 let test_turn_ref_malformed_reads_none () =
@@ -1773,6 +1879,10 @@ let () =
             test_to_json_array_stream_contract_trace_join;
           Alcotest.test_case "history stream contract marks missing trace" `Quick
             test_to_json_array_stream_contract_trace_unavailable;
+          Alcotest.test_case "history stream contract replays durable lifecycle" `Quick
+            test_to_json_array_stream_contract_lifecycle_replay;
+          Alcotest.test_case "malformed stream lifecycle reads as None" `Quick
+            test_malformed_stream_lifecycle_reads_none;
         ] );
       ( "row_kind",
         [

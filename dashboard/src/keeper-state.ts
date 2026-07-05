@@ -11,6 +11,7 @@ import type {
   KeeperConversationRole,
   KeeperConversationSource,
   KeeperConversationStreamContract,
+  KeeperConversationStreamDeliveryReceipt,
   KeeperConversationStreamContractSource,
   KeeperConversationStreamContractStatus,
   KeeperConversationStreamState,
@@ -229,6 +230,7 @@ export function keeperStreamContract(
     turnRef?: string | null
     traceEventCount?: number | null
     lifecycleEvents?: string[] | null
+    deliveryReceipt?: KeeperConversationStreamDeliveryReceipt | null
     reason?: string | null
   } = {},
 ): KeeperConversationStreamContract {
@@ -240,7 +242,26 @@ export function keeperStreamContract(
     turnRef: opts.turnRef ?? undefined,
     traceEventCount: opts.traceEventCount ?? undefined,
     lifecycleEvents: opts.lifecycleEvents ?? undefined,
+    deliveryReceipt: opts.deliveryReceipt ?? undefined,
     reason: opts.reason ?? undefined,
+  })
+}
+
+export function keeperClientObservedSseStreamContract(
+  source: KeeperConversationStreamContractSource,
+  status: KeeperConversationStreamContractStatus,
+  opts: {
+    eventName?: string | null
+    requestId?: string | null
+    turnRef?: string | null
+    traceEventCount?: number | null
+    lifecycleEvents?: string[] | null
+    reason?: string | null
+  } = {},
+): KeeperConversationStreamContract {
+  return keeperStreamContract(source, status, {
+    ...opts,
+    deliveryReceipt: 'client_observed_sse_event',
   })
 }
 
@@ -300,6 +321,19 @@ function normalizeStreamContractStatus(value: unknown): KeeperConversationStream
   }
 }
 
+function normalizeStreamDeliveryReceipt(value: unknown): KeeperConversationStreamDeliveryReceipt | null {
+  switch (asString(value)?.trim()) {
+    case 'client_observed_sse_event':
+      return 'client_observed_sse_event'
+    case 'server_lifecycle_replay_only':
+      return 'server_lifecycle_replay_only'
+    case 'no_delivery_receipt':
+      return 'no_delivery_receipt'
+    default:
+      return null
+  }
+}
+
 function normalizeStreamContract(raw: unknown): KeeperConversationStreamContract | null {
   if (!isRecord(raw)) return null
   const source = normalizeStreamContractSource(raw.source)
@@ -311,6 +345,7 @@ function normalizeStreamContract(raw: unknown): KeeperConversationStreamContract
     turnRef: asString(raw.turn_ref) ?? asString(raw.turnRef) ?? null,
     traceEventCount: asNumber(raw.trace_event_count) ?? asNumber(raw.traceEventCount) ?? null,
     lifecycleEvents: normalizeStringArray(raw.lifecycle_events) ?? normalizeStringArray(raw.lifecycleEvents) ?? null,
+    deliveryReceipt: normalizeStreamDeliveryReceipt(raw.delivery_receipt) ?? normalizeStreamDeliveryReceipt(raw.deliveryReceipt) ?? null,
     reason: asString(raw.reason) ?? null,
   })
 }
@@ -968,6 +1003,7 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
     delivery: 'streaming',
     streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
       eventName: 'TEXT_MESSAGE_CONTENT',
+      deliveryReceipt: 'client_observed_sse_event',
     }),
   }))
 }
@@ -1026,6 +1062,7 @@ function writeAssistantThinkingText(
       delivery: 'streaming',
       streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
         eventName: 'KEEPER_THINKING_DELTA',
+        deliveryReceipt: 'client_observed_sse_event',
       }),
     }
   })

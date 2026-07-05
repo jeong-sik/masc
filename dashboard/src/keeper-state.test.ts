@@ -372,6 +372,7 @@ describe('thread history merge & persistence', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-rest#8',
           trace_event_count: 3,
+          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       },
@@ -382,6 +383,7 @@ describe('thread history merge & persistence', () => {
       status: 'backend_trace_join',
       turnRef: 'trace-rest#8',
       traceEventCount: 3,
+      deliveryReceipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
     })
   })
@@ -405,6 +407,7 @@ describe('thread history merge & persistence', () => {
             'TEXT_MESSAGE_END',
             'RUN_FINISHED',
           ],
+          delivery_receipt: 'server_lifecycle_replay_only',
           reason: 'history row records durable server stream lifecycle replay',
         },
       },
@@ -421,6 +424,7 @@ describe('thread history merge & persistence', () => {
         'TEXT_MESSAGE_END',
         'RUN_FINISHED',
       ],
+      deliveryReceipt: 'server_lifecycle_replay_only',
       reason: 'history row records durable server stream lifecycle replay',
     })
   })

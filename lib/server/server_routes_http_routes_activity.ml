@@ -350,9 +350,14 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
           board_context_inference_surface_context post comments );
       ]
   in
-  match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-  | None -> Error (`Internal_server_error, "masc_keeper_msg tool is unavailable")
-  | Some result ->
+  match
+    Eio.Time.with_timeout clock 45.0 (fun () ->
+      Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args)
+  with
+  | Error `Timeout ->
+      Error (`Internal_server_error, "masc_keeper_msg dispatch timed out (45s)")
+  | Ok None -> Error (`Internal_server_error, "masc_keeper_msg tool is unavailable")
+  | Ok (Some result) ->
       if Tool_result.is_success result
       then
         (match

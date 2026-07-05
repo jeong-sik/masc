@@ -665,6 +665,19 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('img[alt="screenshot.png"]')).not.toBeNull()
     expect(container.textContent).toContain('log.txt')
     expect(container.textContent).not.toContain('상세 보기')
+    const bubble = container.querySelector('[data-chat-entry-id="u1"]')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('2')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('persisted_attachment')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image,document')
+    const imageCard = container.querySelector('[data-chat-attachment-card="att-1"]')
+    expect(imageCard?.getAttribute('data-chat-multimodal-source')).toBe('persisted_attachment')
+    expect(imageCard?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(imageCard?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(imageCard?.getAttribute('data-chat-multimodal-size-bytes')).toBe('1024')
+    const fileCard = container.querySelector('[data-chat-attachment-card="att-2"]')
+    expect(fileCard?.getAttribute('data-chat-multimodal-kind')).toBe('document')
+    expect(fileCard?.getAttribute('data-chat-multimodal-mime')).toBe('text/plain')
   })
 
   it('does not show streaming ellipsis before elapsed time starts', () => {
@@ -1303,11 +1316,15 @@ describe('Keeper v2 chat blocks', () => {
             blocks: [
               {
                 t: 'attach',
+                id: 'srv-att-1',
                 name: 'screen.png',
+                kind: 'image',
                 dims: '100×100',
                 src: 'https://example.com/screen.png',
                 via: 'vision',
                 size: '12 KB',
+                mimeType: 'image/png',
+                sizeBytes: 12_288,
               },
             ],
           }),
@@ -1319,9 +1336,20 @@ describe('Keeper v2 chat blocks', () => {
 
     const blocks = container.querySelector('[data-chat-blocks]')
     const attach = container.querySelector('[data-chat-block="attach"]')
+    const bubble = container.querySelector('[data-chat-entry-id="u-rich"]')
     expect(blocks).not.toBeNull()
     expect(attach?.textContent).toContain('screen.png')
     expect(attach?.querySelector('img')?.getAttribute('src')).toBe('https://example.com/screen.png')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('1')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('server_block')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(attach?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-attachment-id')).toBe('srv-att-1')
+    expect(attach?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(attach?.getAttribute('data-chat-multimodal-size-bytes')).toBe('12288')
+    expect(attach?.getAttribute('data-chat-attach-via')).toBe('vision')
   })
 
   it('blocks unsafe attach image src and falls back to placeholder', () => {
@@ -1337,6 +1365,8 @@ describe('Keeper v2 chat blocks', () => {
     ])
 
     expect(container.querySelector('[data-chat-block="attach"] img')).toBeNull()
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-kind')).toBeNull()
     expect(container.textContent).toContain('unsafe URL')
   })
 
@@ -2135,6 +2165,60 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(chat.getAttribute('data-chat-trace-entry-id')).toBe('a-provenance')
     expect(chat.getAttribute('data-chat-trace-source')).toBe('direct_assistant')
     expect(chat.getAttribute('data-chat-trace-turn-ref')).toBe('trace-prov#7')
+  })
+
+  it('exposes structural turn order without timestamp sorting', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-t-order',
+            label: 'keeper_context_status',
+            text: '{"ok":true}',
+            timestamp: '2026-03-24T00:00:01.000Z',
+            turnRef: 'trace-order#1',
+          }),
+          entry({
+            id: 'assistant-order',
+            text: '완료했습니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            timestamp: '2026-03-24T00:00:00.000Z',
+            turnRef: 'trace-order#1',
+            traceSteps: [
+              { kind: 'think', text: 'first structural thought', ts: '2026-03-24T00:00:04.000Z' },
+              {
+                kind: 'tool',
+                name: 'keeper_context_status',
+                toolCallId: 't-order',
+                status: 'ok',
+                ts: '2026-03-24T00:00:02.000Z',
+              },
+              { kind: 'think', text: 'second structural thought', ts: '2026-03-24T00:00:03.000Z' },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-work-trace]') as HTMLElement
+    expect(trace.getAttribute('data-chat-turn-order-signature')).toBe(
+      'trace:think|tool:t-order|trace:think|chat:assistant-order',
+    )
+
+    const ordered = [...trace.querySelectorAll('[data-chat-turn-order-index]')] as HTMLElement[]
+    expect(ordered).toHaveLength(4)
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-index'))).toEqual(['0', '1', '2', '3'])
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-kind'))).toEqual(['trace', 'tool', 'trace', 'chat'])
+
+    const tool = ordered[1] as HTMLElement
+    expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('t-order')
+    expect(tool.getAttribute('data-chat-trace-entry-id')).toBe('tool-t-order')
+    expect(tool.getAttribute('data-chat-trace-link-state')).toBe('joined')
   })
 
   it('renders thinking text as sanitized markdown with newlines preserved', async () => {

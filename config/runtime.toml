@@ -160,6 +160,28 @@ supports-seed = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
+[models.gemma4-e2b-it-qat]
+api-name = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 131072
+tools-support = true
+# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# generic Ollama top-level think field for this model family.
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.gemma4-e2b-it-qat.capabilities]
+# This exact local model reports 131072 context and tools/vision/audio via
+# `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
+supports-tool-choice = false
+thinking-control-format = "chat_template_token"
+supports-native-streaming = true
+supports-top-k = true
+supports-seed = true
+supports-image-input = true
+supports-audio-input = true
+supports-multimodal-inputs = true
+
 [ollama_cloud.deepseek-v4-flash]
 
 [deepseek.deepseek-v4-pro]
@@ -914,6 +936,9 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-rnj-1-8b]
 
 [ollama.gemma4-26b-a4b-qat]
+max-concurrent = 1
+
+[ollama.gemma4-e2b-it-qat]
 max-concurrent = 1
 
 # ── Runtime lanes (ordered failover) ─────────────────────────────────

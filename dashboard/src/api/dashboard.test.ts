@@ -2423,6 +2423,9 @@ describe('fetchRuntimeProviders', () => {
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
             temperature: 0.65,
+            top_p: 0.91,
+            top_k: 42,
+            min_p: 0.07,
             max_output_tokens: 65536,
             supports_tool_choice: true,
             supports_required_tool_choice: true,
@@ -2572,6 +2575,9 @@ describe('fetchRuntimeProviders', () => {
                 max_thinking_budget: 32768,
                 streaming: true,
                 temperature: 0.65,
+                top_p: 0.91,
+                top_k: 42,
+                min_p: 0.07,
                 capabilities: {
                   source: 'runtime.toml',
                   max_output_tokens: 65536,
@@ -2700,6 +2706,9 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[0]?.top_p).toBe(0.91)
+    expect(result.providers[0]?.top_k).toBe(42)
+    expect(result.providers[0]?.min_p).toBe(0.07)
     expect(result.providers[0]?.max_output_tokens).toBe(65536)
     expect(result.providers[0]?.supports_tool_choice).toBe(true)
     expect(result.providers[0]?.supports_required_tool_choice).toBe(true)
@@ -2755,6 +2764,9 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_system_prompt).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_seed_with_images).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_code_execution).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.top_p).toBe(0.91)
+    expect(result.providers[0]?.declared_spec?.model?.top_k).toBe(42)
+    expect(result.providers[0]?.declared_spec?.model?.min_p).toBe(0.07)
     expect(result.providers[0]?.declared_spec?.binding?.max_concurrent).toBe(4)
     expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.discovered_model).toBe('Qwen/Qwen3-32B')

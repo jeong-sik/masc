@@ -22,6 +22,12 @@ module For_testing : sig
     cwd:string ->
     sandbox_extra_fields:(string * Yojson.Safe.t) list ->
     Yojson.Safe.t
+  val record_pr_action_metric :
+    keeper_name:string ->
+    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
+    status:Unix.process_status ->
+    Masc_exec.Shell_ir.t ->
+    unit
   val dispatch_error_deterministic_retry_fields :
     Keeper_tool_execute_shell_ir.dispatch_error -> (string * Yojson.Safe.t) list
 end

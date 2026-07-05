@@ -241,6 +241,10 @@ let inc_grpc_bytes_sent ~bytes =
 
 let inc_ws_delta_built () = Otel_metric_store.inc_counter Otel_metric_store.metric_ws_delta_built ()
 
+let inc_ws_delta_payload_serialization () =
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_delta_payload_serializations ()
+;;
+
 let inc_grpc_backlog_replay_lines_scanned ?(delta = 1) () =
   if delta > 0
   then
@@ -490,6 +494,7 @@ type ws_delivery_metric_names =
   ; bytes_cache_misses : string
   ; client_acks : string
   ; throttled_deliveries : string
+  ; delta_payload_serializations : string
   ; client_buffered_bytes : string
   ; client_buffered_bytes_count : string
   ; hello_latency : string
@@ -503,6 +508,7 @@ let ws_delivery_metric_names =
   ; bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
   ; client_acks = "masc_ws_client_acks_total"
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
+  ; delta_payload_serializations = "masc_ws_delta_payload_serializations_total"
   ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
   ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
   ; hello_latency = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
@@ -686,6 +692,10 @@ let transport_health_json ~config =
                   , `Int (int_of_float (v ws_delivery_metrics.client_acks ())) )
                 ; ( "throttled_deliveries"
                   , `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())) )
+                ; ( "delta_payload_serializations"
+                  , `Int
+                      (int_of_float
+                         (v ws_delivery_metrics.delta_payload_serializations ())) )
                 ; (* Histogram sum + auto _count give operators enough to compute
            average buffered bytes per ack without external telemetry queries. *)
                   ( "client_buffered_bytes_sum"

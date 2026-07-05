@@ -215,6 +215,33 @@ describe('ChatTranscript', () => {
     expect(surfaceLink?.textContent).toContain('Discord Thread')
   })
 
+  it('exposes tool-call transcript provenance as rendered attributes', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-toolu_prov',
+            label: 'keeper_context_status',
+            turnRef: 'trace-tool#3',
+            delivery: 'history',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${false}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-entry-id')).toBe('tool-toolu_prov')
+    expect(bubble.getAttribute('data-chat-role')).toBe('tool')
+    expect(bubble.getAttribute('data-chat-source')).toBe('tool_result')
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('history')
+    expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-tool#3')
+    expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
+  })
+
   it('marks a failed tool call with the error status glyph', () => {
     recordToolCallOutputs([
       toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),
@@ -2029,6 +2056,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
             text: '답합니다',
             role: 'assistant',
             source: 'direct_assistant',
+            turnRef: 'trace-prov#7',
             traceSteps: [
               { kind: 'think', text: 'checking context', oasBlockIndex: 3 },
               {
@@ -2054,6 +2082,24 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(badges).toContain('OAS #3')
     expect(badges).toContain('OAS #4')
     expect(badges).toContain('reply')
+
+    const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement
+    expect(think.getAttribute('data-chat-trace-provenance')).toBe('OAS #3')
+    expect(think.getAttribute('data-chat-trace-oas-block-index')).toBe('3')
+
+    const tool = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
+    expect(tool.getAttribute('data-chat-trace-provenance')).toBe('OAS #4')
+    expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-prov')
+    expect(tool.getAttribute('data-chat-trace-oas-block-index')).toBe('4')
+    expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
+    expect(tool.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(tool.getAttribute('data-chat-trace-entry-id')).toBeNull()
+
+    const chat = container.querySelector('[data-chat-trace-step="chat"]') as HTMLElement
+    expect(chat.getAttribute('data-chat-trace-provenance')).toBe('reply')
+    expect(chat.getAttribute('data-chat-trace-entry-id')).toBe('a-provenance')
+    expect(chat.getAttribute('data-chat-trace-source')).toBe('direct_assistant')
+    expect(chat.getAttribute('data-chat-trace-turn-ref')).toBe('trace-prov#7')
   })
 
   it('renders thinking text as sanitized markdown with newlines preserved', async () => {
@@ -2323,6 +2369,10 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(step?.querySelector('.chat-block-tstep-status.unlinked')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
     expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('unlinked_trace')
+    expect(step?.getAttribute('data-chat-trace-link-state')).toBe('unlinked')
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('unlinked')
+    expect(step?.getAttribute('data-chat-trace-tool-call-id')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-entry-id')).toBeNull()
 
     ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
     await flushUi()

@@ -25,7 +25,7 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, C
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById, toolEntryIdFromCallId } from '../../tool-call-output-store'
+import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
@@ -1295,7 +1295,13 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
       ? `${step.text.slice(0, THINKING_TRACE_PREVIEW_CHARS).trimEnd()}\n\n... ${step.text.length - THINKING_TRACE_PREVIEW_CHARS} chars hidden`
       : step.text
     return html`
-      <div class="chat-block-tstep think" data-chat-trace-step="think">
+      <div
+        class="chat-block-tstep think"
+        data-chat-trace-step="think"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
         <span class="chat-block-tnode"></span>
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
@@ -1337,7 +1343,12 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
   if (step.kind === 'reason') {
     const exp = !!step.detail
     return html`
-      <div class="chat-block-tstep reason ${open ? 'exp' : ''}" data-chat-trace-step="reason">
+      <div
+        class="chat-block-tstep reason ${open ? 'exp' : ''}"
+        data-chat-trace-step="reason"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
         <span class="chat-block-tnode"></span>
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row ${exp ? 'click' : ''}" onClick=${() => { if (exp) setOpen((o) => !o) }}>
@@ -1357,7 +1368,16 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
   const statusUi = traceToolStatusUi(step.status)
 
   return html`
-    <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
+    <div
+      class="chat-block-tstep tool ${open ? 'exp' : ''}"
+      data-chat-trace-step="tool"
+      data-chat-trace-provenance=${sourceBadge.label}
+      data-chat-trace-tool-call-id=${step.toolCallId?.trim() || undefined}
+      data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+      data-chat-trace-link-state=${step.toolCallId?.trim() ? 'trace-only' : 'unlinked'}
+      data-chat-trace-output-state=${step.status ?? 'pending'}
+      data-chat-trace-ts=${step.ts ?? undefined}
+    >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
         <div class="chat-block-tstep-row click" onClick=${() => setOpen((o) => !o)}>
@@ -2429,6 +2449,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const [expanded, setExpanded] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
   const toolName = entry.label || 'tool'
+  const toolCallId = toolCallIdFromToolEntryId(entry.id)
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
 
@@ -2456,6 +2477,12 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
     <article
       class="chat-bubble tool flex w-full flex-col rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-chat-variant="tool-call"
+      data-chat-entry-id=${entry.id}
+      data-chat-role=${entry.role}
+      data-chat-source=${entry.source}
+      data-chat-delivery-state=${entry.delivery}
+      data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-tool-call-id=${toolCallId ?? undefined}
     >
       <button
         type="button"
@@ -2549,15 +2576,15 @@ function isToolOutputCoveredByHydration(
     && timestampMs <= coveredThroughMs
 }
 
-function toolTraceCallId(entry: KeeperConversationEntry, traceStep?: ChatTraceToolStep): string | null {
+function toolTraceCallId(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): string | null {
   const traceCallId = traceStep?.toolCallId?.trim()
   if (traceCallId) return traceCallId
-  return toolCallIdFromToolEntryId(entry.id)
+  return entry ? toolCallIdFromToolEntryId(entry.id) : null
 }
 
-function toolTraceSourceBadge(entry: KeeperConversationEntry, traceStep?: ChatTraceToolStep): TraceSourceBadgeInfo {
+function toolTraceSourceBadge(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): TraceSourceBadgeInfo {
   if (traceStep) return traceSourceBadge(traceStep)
-  const callId = toolCallIdFromToolEntryId(entry.id)
+  const callId = entry ? toolCallIdFromToolEntryId(entry.id) : null
   return callId
     ? {
         label: 'tool_call_id',
@@ -2571,28 +2598,8 @@ function toolTraceSourceBadge(entry: KeeperConversationEntry, traceStep?: ChatTr
       }
 }
 
-function isUnlinkedTraceTool(entry: KeeperConversationEntry, traceStep?: ChatTraceToolStep): boolean {
+function isUnlinkedTraceTool(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): boolean {
   return traceStep !== undefined && toolTraceCallId(entry, traceStep) === null
-}
-
-// One step of a grouped tool-trace card: a single tool call rendered from REAL
-// data only. Name + input args come from the chat entry; status, duration and
-// result are joined from the tool-call output store. A null output is "pending"
-// until the owning turn and output hydration have both settled; after that, a
-// still-null output is "missing" (unknown outcome).
-function toolEntryFromTraceStep(step: ChatTraceToolStep): KeeperConversationEntry {
-  return {
-    id: step.toolCallId ? toolEntryIdFromCallId(step.toolCallId) : `trace-tool-${step.name}-${step.ts ?? 'unknown'}`,
-    role: 'tool',
-    source: 'tool_result',
-    label: step.name,
-    text: step.args ?? '',
-    rawText: step.args ?? '',
-    timestamp: step.ts ?? null,
-    delivery: step.status === 'err' ? 'error' : step.status === 'ok' ? 'delivered' : 'streaming',
-    streamState: step.status === 'pending' || step.status === undefined ? 'streaming' : null,
-    details: null,
-  }
 }
 
 function ToolTraceStep({
@@ -2601,14 +2608,15 @@ function ToolTraceStep({
   canMarkMissing = false,
   traceStep,
 }: {
-  entry: KeeperConversationEntry
+  entry: KeeperConversationEntry | null
   output: ToolCallEntry | null
   canMarkMissing?: boolean
   traceStep?: ChatTraceToolStep
 }) {
   const [open, setOpen] = useState(false)
-  const name = traceStep?.name || entry.label || 'tool'
-  const displayArgs = prettyJsonish(entry.text || traceStep?.args || '')
+  const name = traceStep?.name || entry?.label || 'tool'
+  const callId = toolTraceCallId(entry, traceStep)
+  const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   const unlinkedTraceTool = isUnlinkedTraceTool(entry, traceStep)
   const sourceBadge = toolTraceSourceBadge(entry, traceStep)
@@ -2635,7 +2643,16 @@ function ToolTraceStep({
   const hasBody = unlinkedTraceTool || !isEmptyArgs || hasResult || output === null
 
   return html`
-    <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
+    <div
+      class="chat-block-tstep tool ${open ? 'exp' : ''}"
+      data-chat-trace-step="tool"
+      data-chat-trace-provenance=${sourceBadge.label}
+      data-chat-trace-tool-call-id=${callId ?? undefined}
+      data-chat-trace-oas-block-index=${traceStep?.oasBlockIndex ?? undefined}
+      data-chat-trace-entry-id=${entry?.id ?? undefined}
+      data-chat-trace-link-state=${unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
+      data-chat-trace-output-state=${status}
+    >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
         <div
@@ -2762,7 +2779,14 @@ function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
     tone: 'reply',
   }
   return html`
-    <div class="chat-block-tstep chat" data-chat-trace-step="chat">
+    <div
+      class="chat-block-tstep chat"
+      data-chat-trace-step="chat"
+      data-chat-trace-provenance=${sourceBadge.label}
+      data-chat-trace-entry-id=${entry.id}
+      data-chat-trace-source=${entry.source}
+      data-chat-trace-turn-ref=${entry.turnRef ?? undefined}
+    >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
         <div class="chat-block-tstep-row">
@@ -2865,10 +2889,9 @@ function ToolTraceCard({
                     />`
                   : item.kind === 'tool'
                     ? (() => {
-                        const entry = item.entry ?? toolEntryFromTraceStep(item.step)
                         return html`<${ToolTraceStep}
                           key=${`tool-trace-${item.entry?.id ?? item.step.toolCallId ?? item.step.name}-${index}`}
-                          entry=${entry}
+                          entry=${item.entry}
                           output=${item.output}
                           canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
                           traceStep=${item.step}

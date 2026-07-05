@@ -258,13 +258,15 @@ let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) 
       Some summary_max_tokens
     | None -> Some summary_max_tokens
   in
-  { provider_cfg with
-    max_tokens
-  ; temperature = Some (Keeper_config.hitl_summary_temperature ())
-  ; tool_choice = None
-  ; disable_parallel_tool_use = true
-  }
-  |> Keeper_structured_output_schema.apply_hitl_summary_schema_to_config
+  let config =
+    { provider_cfg with
+      max_tokens
+    ; temperature = Some (Keeper_config.hitl_summary_temperature ())
+    ; tool_choice = None
+    ; disable_parallel_tool_use = true
+    }
+  in
+  Keeper_structured_output_schema.apply_hitl_summary_schema_to_config config
 ;;
 
 let call_summary_llm ~sw ~net ~provider_config ~context_bundle () =

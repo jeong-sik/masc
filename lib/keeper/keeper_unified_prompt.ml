@@ -141,6 +141,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Bg_completed -> "bg_completed"
+  | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
 ;;
 
@@ -177,6 +178,7 @@ let board_event_note = function
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
+  | Keeper_world_observation.Schedule_due
   | Keeper_world_observation.External_attention -> ""
 ;;
 

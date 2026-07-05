@@ -96,6 +96,59 @@ let test_path_priority_matches_ide_helper () =
        ])
 ;;
 
+let test_nested_arguments_path_is_observed () =
+  check
+    string
+    "nested arguments path"
+    "repos/masc/lib/nested.ml"
+    (observed_path
+       [ ( "arguments"
+         , `Assoc [ "path", `String "repos/masc/lib/nested.ml" ] )
+       ])
+;;
+
+let test_nested_arguments_relative_path_uses_cwd () =
+  check
+    string
+    "nested arguments cwd"
+    "repos/masc/lib/nested.ml"
+    (observed_path
+       [ ( "arguments"
+         , `Assoc [ "file_path", `String "lib/nested.ml" ] )
+       ; "cwd", `String "repos/masc"
+       ])
+;;
+
+let test_paths_list_uses_first_string_path () =
+  check
+    string
+    "paths list"
+    "repos/masc/lib/a.ml"
+    (observed_path
+       [ ( "paths"
+         , `List
+             [ `String "repos/masc/lib/a.ml"
+             ; `String "repos/masc/lib/b.ml"
+             ] )
+       ])
+;;
+
+let test_files_list_uses_first_object_file_path () =
+  check
+    string
+    "files object file_path"
+    "repos/masc/lib/from-file-object.ml"
+    (observed_path
+       [ ( "files"
+         , `List
+             [ `Assoc
+                 [ "file_path"
+                 , `String "repos/masc/lib/from-file-object.ml"
+                 ]
+             ] )
+       ])
+;;
+
 let test_missing_path_falls_back_to_base_path () =
   check string "base fallback" "/tmp/masc-base" (observed_path [])
 ;;
@@ -141,6 +194,14 @@ let () =
             test_blank_path_falls_back_to_file_path
         ; test_case "path priority matches IDE helper" `Quick
             test_path_priority_matches_ide_helper
+        ; test_case "nested arguments path is observed" `Quick
+            test_nested_arguments_path_is_observed
+        ; test_case "nested arguments relative path uses cwd" `Quick
+            test_nested_arguments_relative_path_uses_cwd
+        ; test_case "paths list uses first string path" `Quick
+            test_paths_list_uses_first_string_path
+        ; test_case "files list uses first object file_path" `Quick
+            test_files_list_uses_first_object_file_path
         ; test_case "missing path falls back to base_path" `Quick
             test_missing_path_falls_back_to_base_path
         ] )

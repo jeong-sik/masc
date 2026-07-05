@@ -15,6 +15,39 @@ type t =
   | Pipe_chain of { first_cmd : string; last_cmd : string; length : int }
   | Generic
 
+type pr_action_surface =
+  | Gh_cli
+
+type pr_action =
+  | Create
+  | Merge
+  | Comment
+  | Close
+  | Edit
+  | Review
+  | Reopen
+  | Ready
+
+type pr_action_event =
+  { surface : pr_action_surface
+  ; action : pr_action
+  }
+
+let pr_action_surface_to_string = function
+  | Gh_cli -> "gh_cli"
+;;
+
+let pr_action_to_string = function
+  | Create -> "create"
+  | Merge -> "merge"
+  | Comment -> "comment"
+  | Close -> "close"
+  | Edit -> "edit"
+  | Review -> "review"
+  | Reopen -> "reopen"
+  | Ready -> "ready"
+;;
+
 let to_json = function
   | Gh_pr_create { title; base; draft } ->
     `Assoc
@@ -116,6 +149,18 @@ let extract_number_from_rest rest =
 let string_or default = function
   | Some value -> value
   | None -> default
+;;
+
+let pr_action_of_gh_action = function
+  | Some "create" -> Some Create
+  | Some "merge" -> Some Merge
+  | Some "comment" -> Some Comment
+  | Some "close" -> Some Close
+  | Some "edit" -> Some Edit
+  | Some "review" -> Some Review
+  | Some "reopen" -> Some Reopen
+  | Some "ready" -> Some Ready
+  | Some _ | None -> None
 ;;
 
 let compute_typed : type i o r s. (i, o, r, s) Typed.command -> t = function
@@ -333,4 +378,134 @@ let rec compute ir =
           | Gh_api_pr_comment _
           | Pipe_chain _ ) as known -> known)
      | [] -> Generic)
+;;
+
+let pr_action_event_of_typed
+  : type i o r s. (i, o, r, s) Typed.command -> pr_action_event option
+  = function
+  | Typed.Gh { subcommand; action; _ } when String.equal subcommand "pr" ->
+    Option.map (fun action -> { surface = Gh_cli; action }) (pr_action_of_gh_action action)
+  | Typed.Gh _
+  | Typed.Ls _
+  | Typed.Cat _
+  | Typed.Rg _
+  | Typed.Git_status _
+  | Typed.Git_clone _
+  | Typed.Curl _
+  | Typed.Rm _
+  | Typed.Sudo _
+  | Typed.Find _
+  | Typed.Head _
+  | Typed.Tail _
+  | Typed.Grep _
+  | Typed.Mkdir _
+  | Typed.Wc _
+  | Typed.Git_diff _
+  | Typed.Git_log _
+  | Typed.Git_commit _
+  | Typed.Git_push _
+  | Typed.Git_pull _
+  | Typed.Git_stash _
+  | Typed.Git_rebase _
+  | Typed.Git_merge _
+  | Typed.Git_branch _
+  | Typed.Git_checkout _
+  | Typed.Git_fetch _
+  | Typed.Git_show _
+  | Typed.Git_reset _
+  | Typed.Git_blame _
+  | Typed.Git_add _
+  | Typed.Pwd _
+  | Typed.Echo _
+  | Typed.Which _
+  | Typed.Sort _
+  | Typed.Cut _
+  | Typed.Tr _
+  | Typed.Date _
+  | Typed.Env _
+  | Typed.Printenv _
+  | Typed.Uniq _
+  | Typed.Basename _
+  | Typed.Dirname _
+  | Typed.Test _
+  | Typed.Stat _
+  | Typed.Hostname _
+  | Typed.Whoami _
+  | Typed.Du _
+  | Typed.Df _
+  | Typed.File _
+  | Typed.Printf _
+  | Typed.Uname _
+  | Typed.Ps _
+  | Typed.Tty _
+  | Typed.Wget _
+  | Typed.Ssh _
+  | Typed.Scp _
+  | Typed.Tar _
+  | Typed.Make _
+  | Typed.Diff _
+  | Typed.Sed _
+  | Typed.Rsync _
+  | Typed.Node _
+  | Typed.Python _
+  | Typed.Python3 _
+  | Typed.Pip _
+  | Typed.Patch _
+  | Typed.Npm _
+  | Typed.Cargo _
+  | Typed.Go _
+  | Typed.Chmod _
+  | Typed.Chown _
+  | Typed.Docker _
+  | Typed.Opam _
+  | Typed.Npx _
+  | Typed.Yarn _
+  | Typed.Pnpm _
+  | Typed.Uv _
+  | Typed.Glab _
+  | Typed.Pytest _
+  | Typed.Terminal_notifier _
+  | Typed.Ruff _
+  | Typed.Pyright _
+  | Typed.Tsc _
+  | Typed.Ocamlfind _
+  | Typed.Rustc _
+  | Typed.Gofmt _
+  | Typed.Gradle _
+  | Typed.Ninja _
+  | Typed.Java _
+  | Typed.Javac _
+  | Typed.Mvn _
+  | Typed.Cmake _
+  | Typed.Dune_local_sh _
+  | Typed.Osascript _
+  | Typed.Play _
+  | Typed.Rec _
+  | Typed.Ffplay _
+  | Typed.Mpg123 _
+  | Typed.Open _
+  | Typed.Su _
+  | Typed.Dd _
+  | Typed.Mkfs _
+  | Typed.Cp _
+  | Typed.Mv _
+  | Typed.Ln _
+  | Typed.Touch _
+  | Typed.Tee _
+  | Typed.Awk _
+  | Typed.Xargs _
+  | Typed.Generic _ -> None
+;;
+
+let pr_action_events_of_simple simple =
+  match Masc_exec.Shell_ir_typed.of_simple simple with
+  | Typed.W command ->
+    (match pr_action_event_of_typed command with
+     | Some event -> [ event ]
+     | None -> [])
+;;
+
+let rec pr_action_events_of_ir = function
+  | Masc_exec.Shell_ir.Simple simple -> pr_action_events_of_simple simple
+  | Masc_exec.Shell_ir.Pipeline cmds -> List.concat_map pr_action_events_of_ir cmds
 ;;

@@ -78,7 +78,8 @@ ensure_contract_goal
 
 # ── Step 2/8: add_task ──
 echo "[2/8] masc_add_task"
-r2="$(call_tool 1002 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" --arg task_title "GP1 contract task $(date +%s)" '{title: $task_title, goal_id: $goal_id, priority: 2, description: "Automated golden path 1 contract verification"}')")"
+task_title="GP1 contract task $(date +%s)"
+r2="$(call_tool 1002 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" --arg task_title "$task_title" '{title: $task_title, goal_id: $goal_id, priority: 2, description: "Automated golden path 1 contract verification"}')")"
 if require_ok "$r2"; then
   step_pass
 else
@@ -148,7 +149,8 @@ fi
 
 # ── Step 8/8: done ──
 echo "[8/8] masc_transition (done)"
-r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"done\",\"notes\":\"Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success.\"}")"
+done_notes="completion_notes: Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success. Task scope satisfied: ${task_title} - Automated golden path 1 contract verification. reviewable_evidence_ref: contract-harness golden_path_1_contract live MCP transcript."
+r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes}')")"
 if require_ok "$r8"; then
   CLEANUP_TASK_FINALIZED=1
   step_pass

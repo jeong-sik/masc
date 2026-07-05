@@ -76,13 +76,14 @@ let test_applies_sleep_and_throttle_overrides () =
      sleep_chunk_sec = 1.5\n\
      board_wakeup_max = 6\n\
      [turn]\n\
+     chat_waiting_cap = 11\n\
      capacity_limit = 3\n\
      batch_limit = 9\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 6 count;
+  check int "applied sleep/throttle overrides" 7 count;
   check (option string) "autoboot max canonical env"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
@@ -98,6 +99,9 @@ let test_applies_sleep_and_throttle_overrides () =
   check (option string) "capacity limit"
     (Some "3")
     (List.assoc_opt "MASC_KEEPER_TURN_CAPACITY_LIMIT" overrides);
+  check (option string) "chat waiting cap"
+    (Some "11")
+    (List.assoc_opt "MASC_KEEPER_TURN_CHAT_WAITING_CAP" overrides);
   check (option string) "batch limit"
     (Some "9")
     (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides)
@@ -136,14 +140,40 @@ let test_applies_turn_execution_overrides () =
     (List.assoc_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" overrides)
 
 let test_applies_proactive_min_interval_override () =
-  let doc = parse_or_fail "[proactive]\nmin_interval_sec = 1234\n" in
+  let doc =
+    parse_or_fail
+      "[proactive]\n\
+       min_interval_sec = 1234\n\
+       noop_backoff_max_shift = 1\n\
+       idle_decay_max_periods = 2\n"
+  in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied count" 1 count;
+  check int "applied count" 3 count;
   check (option string) "proactive min interval"
     (Some "1234")
-    (List.assoc_opt "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" overrides);
+  check (option string) "proactive noop backoff max shift"
+    (Some "1")
+    (List.assoc_opt "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT" overrides);
+  check (option string) "proactive idle decay max periods"
+    (Some "2")
+    (List.assoc_opt "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS" overrides)
+
+let test_applies_health_overrides () =
+  let doc =
+    parse_or_fail
+      "[health]\n\
+       durable_queue_stale_sec = 45.5\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied health override count" 1 count;
+  check (option string) "durable queue stale threshold"
+    (Some "45.5")
+    (List.assoc_opt "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" overrides)
 
 (* RFC-0297 P0-1: the three lifecycle kill-switches must map TOML ->
    canonical env instead of being silently dropped. Before the key_to_env
@@ -520,6 +550,7 @@ let () =
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
+        ; test_case "applies health overrides" `Quick test_applies_health_overrides
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs

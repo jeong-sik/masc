@@ -230,7 +230,9 @@ let payload_from_args args =
       then Error "use either payload_body or board_* convenience fields, not both"
       else
         (match string_opt args "payload_kind" with
-         | None | Some "masc.board_post" -> board_post_payload_from_args args
+         | None -> board_post_payload_from_args args
+         | Some kind when String.equal kind Schedule_supported_kinds.board_post ->
+           board_post_payload_from_args args
          | Some kind ->
            Error
              ("board_* convenience fields require payload_kind omitted or masc.board_post, got "
@@ -244,32 +246,71 @@ let assoc_string_opt key fields =
   | _ -> None
 ;;
 
+let validate_payload_schema_version ~kind fields =
+  match List.assoc_opt "schema_version" fields with
+  | Some (`Int 1) -> Ok ()
+  | Some (`Int _) -> Error (kind ^ " only supports payload_schema_version=1")
+  | Some _ -> Error (kind ^ " payload.schema_version must be an integer")
+  | None -> Error (kind ^ " payload requires schema_version=1")
+;;
+
+let body_object ~kind fields =
+  match List.assoc_opt "body" fields with
+  | Some (`Assoc body) -> Ok body
+  | Some _ -> Error (kind ^ " payload.body must be an object")
+  | None -> Error (kind ^ " payload requires object body")
+;;
+
+let validate_keeper_wake_body body =
+  match assoc_string_opt "keeper_name" body, assoc_string_opt "message" body with
+  | None, _ -> Error "masc.keeper_wake payload requires non-empty body.keeper_name"
+  | _, None -> Error "masc.keeper_wake payload requires non-empty body.message"
+  | Some keeper_name, Some _
+    when not (Schedule_supported_kinds.valid_keeper_wake_target_name keeper_name) ->
+    Error
+      (Schedule_supported_kinds.keeper_wake_target_name_error
+         ~field:"masc.keeper_wake payload body.keeper_name")
+  | Some _, Some _ ->
+    (match assoc_string_opt "urgency" body with
+     | None -> Ok ()
+     | Some raw ->
+       (match Schedule_supported_kinds.keeper_wake_urgency_of_string raw with
+        | Ok _ -> Ok ()
+        | Error msg -> Error msg))
+;;
+
 let validate_known_payload_request ~payload ~risk_class =
   match payload with
   | `Assoc fields ->
     (match assoc_string_opt "kind" fields with
-     | Some "masc.board_post" ->
+     | Some kind when String.equal kind Schedule_supported_kinds.board_post ->
        let* () =
-         match List.assoc_opt "schema_version" fields with
-         | Some (`Int 1) -> Ok ()
-         | Some (`Int _) -> Error "masc.board_post only supports payload_schema_version=1"
-         | Some _ -> Error "masc.board_post payload.schema_version must be an integer"
-         | None -> Error "masc.board_post payload requires schema_version=1"
+         validate_payload_schema_version ~kind:Schedule_supported_kinds.board_post fields
        in
        if not (Schedule_domain.is_side_effecting risk_class)
        then Error "masc.board_post requires a side-effecting risk_class such as workspace_write"
        else (
-         match List.assoc_opt "body" fields with
-         | Some (`Assoc body) ->
+         match body_object ~kind:Schedule_supported_kinds.board_post fields with
+         | Ok body ->
            (match assoc_string_opt "content" body with
             | Some _ -> Ok ()
             | None ->
               Error
                 "masc.board_post payload requires non-empty body.content; use board_content for board schedules")
-         | Some _ -> Error "masc.board_post payload.body must be an object"
-         | None ->
+         | Error _ ->
            Error
              "masc.board_post payload requires object body with non-empty content; use board_content for board schedules")
+     | Some kind when String.equal kind Schedule_supported_kinds.keeper_wake ->
+       let* () =
+         validate_payload_schema_version ~kind:Schedule_supported_kinds.keeper_wake fields
+       in
+       if not (Schedule_domain.is_side_effecting risk_class)
+       then
+         Error
+           "masc.keeper_wake requires a side-effecting risk_class such as workspace_write"
+       else
+         let* body = body_object ~kind:Schedule_supported_kinds.keeper_wake fields in
+         validate_keeper_wake_body body
      | Some kind when Schedule_domain.is_side_effecting risk_class ->
        (* Only side-effecting work needs a consumer adapter that can dispatch
           it. Reject kinds the consumer cannot run so the queue is not filled

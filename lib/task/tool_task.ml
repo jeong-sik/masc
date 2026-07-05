@@ -438,13 +438,17 @@ and handle_transition ~tool_name ~start_time ctx args =
   (* RFC-0109 Phase D hard cut: contracted verification submissions
      require substantive evidence. Analysis-only tasks (no contract)
      bypass the gate. *)
+  (* Evidence gate is NOT bypassed by force=true. This is intentional:
+     force bypasses business-logic guards, but the evidence gate is a safety
+     invariant that prevents silent task_done without a substantiveness check.
+     Even operator-forced completions should produce auditable evidence. *)
   let evidence_decision =
     let needs_gate =
       match requested_action with
-      | Masc_domain.Submit_for_verification -> true
+      | Masc_domain.Submit_for_verification
+      | Masc_domain.Done_action -> true
       | Masc_domain.Claim
       | Masc_domain.Start
-      | Masc_domain.Done_action
       | Masc_domain.Cancel
       | Masc_domain.Release
       | Masc_domain.Approve_verification

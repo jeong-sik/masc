@@ -34,12 +34,13 @@ val check_self_comment_status
 
 type wake_reason =
   | Explicit_mention
-  | Stigmergy of { score : int }
   | Thread_reply_after_self_comment
   | Reaction_after_self_activity
 (** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
     Replaces the prior [string option] contract; consumers match exhaustively
-    so the previously dead ["board_activity"] generic bucket is gone. *)
+    so the previously dead ["board_activity"] generic bucket is gone. Semantic
+    relatedness is intentionally absent: it must enter through an LLM/Judge
+    attention boundary, not through board-publish keyword matching. *)
 
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)
@@ -49,5 +50,5 @@ val wake_reason
   -> meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
   -> wake_reason option
-(** [None] means the relevance pipeline found no reason for this keeper to
-    wake (counted as [BoardSignalNoWakeTotal] by the caller). *)
+(** [None] means the structural reactive pipeline found no deterministic
+    address for this keeper (counted as [BoardSignalNoWakeTotal] by the caller). *)

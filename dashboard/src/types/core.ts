@@ -145,6 +145,7 @@ export interface BoardContributorQuality {
   accountability_score?: number
   autonomy_level?: string
   thompson_confidence?: number
+  evidence_state?: 'default' | 'measured'
 }
 
 export interface BoardActorIdentity {

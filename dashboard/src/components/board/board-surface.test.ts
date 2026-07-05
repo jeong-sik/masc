@@ -9,9 +9,10 @@ import {
   BoardSurface,
   normalizeBoardDetailWidth,
 } from './board-surface'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary } from '../../store'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
 import { createPost, sendBroadcast } from '../../api'
+import { requestBoardContextInference } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
 import { PAGE_SIZE, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
@@ -47,6 +48,10 @@ vi.mock('../../api', () => ({
 
 vi.mock('../../api/actions', () => ({
   deleteBoardPost: vi.fn(),
+}))
+
+vi.mock('../../api/board', () => ({
+  requestBoardContextInference: vi.fn(),
 }))
 
 vi.mock('../../operator-store', async (importOriginal) => {
@@ -575,6 +580,7 @@ describe('BoardSurface Component', () => {
           response_rate: 0,
           autonomy_level: 'standard',
           thompson_confidence: 0.5,
+          evidence_state: 'default',
         },
       }),
     ]
@@ -582,6 +588,26 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.queryByText(/품질 100/)).not.toBeInTheDocument()
+  })
+
+  it('renders contributor quality badges even when score is 100 if evidence_state is measured', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-quality-100-measured',
+        title: 'Quality measured 100',
+        body: 'content',
+        author: 'ani1999',
+        contributor_quality: {
+          accountability_score: 1,
+          source: 'agent_reputation',
+          evidence_state: 'measured',
+        },
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText(/기여자 품질 100점/)).toHaveTextContent('품질 100')
   })
 
   it('renders a state block panel when the post body contains one', () => {
@@ -1128,5 +1154,66 @@ describe('BoardSurface Component', () => {
     const sigil = container.querySelector<HTMLElement>('.bd-sigil')
     expect(sigil).not.toBeNull()
     expect(sigil?.textContent).toBe('AL')
+  })
+
+  it('disables context inference button for non-keeper authored posts when keepers list is empty', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-non-keeper',
+        title: 'non keeper post',
+        body: 'hello world',
+        author: 'operator',
+        post_kind: 'direct',
+        author_identity: {
+          kind: 'agent',
+          id: 'operator-1',
+          key: 'operator',
+          display_name: 'Operator',
+          raw: 'operator-1',
+        },
+      }),
+    ]
+    keepers.value = []
+
+    render(h(BoardSurface, null))
+
+    const button = screen.getByTestId('bd-context-infer-post-non-keeper') as HTMLButtonElement
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', '맥락 추론을 실행할 등록된 keeper가 없습니다')
+  })
+
+  it('enables context inference button for non-keeper authored posts and uses first keeper as fallback', async () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-non-keeper-2',
+        title: 'non keeper post 2',
+        body: 'hello world 2',
+        author: 'operator',
+        post_kind: 'direct',
+        author_identity: {
+          kind: 'agent',
+          id: 'operator-1',
+          key: 'operator',
+          display_name: 'Operator',
+          raw: 'operator-1',
+        },
+      }),
+    ]
+    keepers.value = [
+      { name: 'keeper-sangsu' } as any,
+      { name: 'keeper-chulsoo' } as any,
+    ]
+
+    const mockInfer = vi.mocked(requestBoardContextInference)
+    mockInfer.mockResolvedValueOnce({ keeperName: 'keeper-sangsu', score: 1.0 } as any)
+
+    render(h(BoardSurface, null))
+
+    const button = screen.getByTestId('bd-context-infer-post-non-keeper-2') as HTMLButtonElement
+    expect(button).not.toBeDisabled()
+    expect(button).toHaveAttribute('title', '맥락 추론 요청 (keeper-sangsu)')
+
+    fireEvent.click(button)
+    expect(mockInfer).toHaveBeenCalledWith('post-non-keeper-2', 'keeper-sangsu')
   })
 })

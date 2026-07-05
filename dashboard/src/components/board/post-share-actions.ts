@@ -5,6 +5,7 @@ import { ActionButton } from '../common/button'
 import { copyToClipboard } from '../common/copyable-code'
 import { showToast } from '../common/toast'
 import { requestBoardContextInference } from '../../api/board'
+import { keepers } from '../../store'
 import {
   boardPostPermalink,
   boardPostTrackbackMarkdown,
@@ -14,8 +15,11 @@ import type { BoardPost } from './board-state'
 
 function contextInferenceTargetKeeper(post: BoardPost): string | undefined {
   const identity = post.author_identity
-  if (identity?.kind !== 'keeper') return undefined
-  return identity.id?.trim() || identity.runtime_agent_name?.trim() || identity.raw?.trim() || post.author.trim() || undefined
+  if (identity?.kind === 'keeper') {
+    return identity.id?.trim() || identity.runtime_agent_name?.trim() || identity.raw?.trim() || post.author.trim() || undefined
+  }
+  const list = keepers.value
+  return list[0]?.name || undefined
 }
 
 export function PostShareActions({ post, compact = false }: { post: BoardPost; compact?: boolean }) {
@@ -52,6 +56,12 @@ export function PostShareActions({ post, compact = false }: { post: BoardPost; c
     }
   }
 
+  const targetKeeper = contextInferenceTargetKeeper(post)
+  const isContextInferDisabled = contextPending || !targetKeeper
+  const contextInferTooltip = targetKeeper
+    ? `맥락 추론 요청 (${targetKeeper})`
+    : '맥락 추론을 실행할 등록된 keeper가 없습니다'
+
   return html`
     <span
       class=${`inline-flex items-center gap-1 ${compact ? 'text-2xs' : 'text-xs'}`}
@@ -81,10 +91,10 @@ export function PostShareActions({ post, compact = false }: { post: BoardPost; c
         variant="ghost"
         size="sm"
         class=${buttonClass}
-        disabled=${contextPending}
+        disabled=${isContextInferDisabled}
         ariaBusy=${contextPending}
         ariaLabel=${`맥락 추론 요청: ${post.id}`}
-        title="맥락 추론 요청"
+        title=${contextInferTooltip}
         testId=${`bd-context-infer-${post.id}`}
         onClick=${inferContext}
       ><${Sparkles} size=${13} strokeWidth=${2.2} aria-hidden="true" /><//>

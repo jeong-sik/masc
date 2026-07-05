@@ -245,15 +245,23 @@ function contributorQualityDisplayBand(
 
 function contributorQualityHasEvidence(quality?: BoardContributorQuality | null): boolean {
   if (!quality) return false
+  if (quality.evidence_state !== undefined) {
+    return quality.evidence_state === 'measured'
+  }
   if (quality.band) return true
   if (quality.score !== undefined && Number.isFinite(quality.score)) return true
   if ((quality.board_posts ?? 0) > 0) return true
   if ((quality.board_comments ?? 0) > 0) return true
   if ((quality.completion_rate ?? 0) > 0) return true
   if ((quality.response_rate ?? 0) > 0) return true
-  if (quality.accountability_score !== undefined && quality.accountability_score < 1) return true
-  if (quality.thompson_confidence !== undefined && quality.thompson_confidence !== 0.5) return true
-  return quality.autonomy_level !== undefined && quality.autonomy_level !== 'standard'
+
+  const DEFAULT_ACCOUNTABILITY_SCORE = 1.0
+  const DEFAULT_THOMPSON_CONFIDENCE = 0.5
+  const DEFAULT_AUTONOMY_LEVEL = 'standard'
+
+  if (quality.accountability_score !== undefined && quality.accountability_score < DEFAULT_ACCOUNTABILITY_SCORE) return true
+  if (quality.thompson_confidence !== undefined && quality.thompson_confidence !== DEFAULT_THOMPSON_CONFIDENCE) return true
+  return quality.autonomy_level !== undefined && quality.autonomy_level !== DEFAULT_AUTONOMY_LEVEL
 }
 
 /** Navigate to keeper detail if author is a keeper, otherwise agent profile. */

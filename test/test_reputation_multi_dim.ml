@@ -117,17 +117,22 @@ let test_default_reputation_v2_fields () =
   check (float 0.0001) "safety_compliance default" 1.0
     rep.safety_compliance;
   check string "autonomy_level default" "standard"
-    rep.autonomy_level
+    rep.autonomy_level;
+  check string "evidence_state default" "default"
+    rep.evidence_state
 
 let test_reputation_json_roundtrip_v2_fields () =
-  let rep = Reputation.default_reputation ~agent_name:"json-test" in
+  let rep = { (Reputation.default_reputation ~agent_name:"json-test") with
+              evidence_state = "measured" } in
   let json = Reputation.reputation_to_json rep in
   match Reputation.reputation_of_json json with
   | Some r ->
     check (float 0.0001) "execution_reliability preserved" 1.0
       r.execution_reliability;
     check string "autonomy_level preserved" "standard"
-      r.autonomy_level
+      r.autonomy_level;
+    check string "evidence_state preserved" "measured"
+      r.evidence_state
   | None ->
     fail "reputation_of_json returned None"
 

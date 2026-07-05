@@ -365,9 +365,9 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_keeper_behavior_trace
   test_keeper_wire_capture
-  test_board_rest_routes)
+  test_board_rest_routes
+  test_board_context_inference_resolution)
  (modules
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
@@ -713,10 +713,9 @@
   test_log_severity_outcome_level
   test_env_keeper_scrub
   test_event_log
-  test_relation_materializer
-  test_keeper_behavior_trace
   test_keeper_wire_capture
-  test_board_rest_routes)
+  test_board_rest_routes
+  test_board_context_inference_resolution)
  (libraries masc_test_deps multimodal bigstringaf))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.

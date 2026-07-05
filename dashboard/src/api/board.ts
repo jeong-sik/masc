@@ -491,6 +491,11 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
   const source = asString(raw.source, '').trim() || undefined
   const band = normalizeBoardContributorBand(raw.band)
   const autonomyLevel = asString(raw.autonomy_level, '').trim() || undefined
+  const rawEvidenceState = asString(raw.evidence_state, '').trim()
+  const evidenceState = rawEvidenceState === 'measured' || rawEvidenceState === 'default'
+    ? rawEvidenceState
+    : undefined
+
   if (
     score === undefined
     && completionRate === undefined
@@ -502,6 +507,7 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
     && source === undefined
     && band === undefined
     && autonomyLevel === undefined
+    && evidenceState === undefined
   ) return null
   return {
     score,
@@ -514,6 +520,7 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
     accountability_score: accountabilityScore,
     autonomy_level: autonomyLevel,
     thompson_confidence: thompsonConfidence,
+    evidence_state: evidenceState,
   }
 }
 

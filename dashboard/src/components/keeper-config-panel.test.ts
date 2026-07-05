@@ -425,6 +425,23 @@ describe('keeperConfigControlInventory', () => {
     expect(contextStatus.kind).toBe('ok')
   })
 
+  it('uses backend field-presence proof instead of normalized defaults for contract gaps', () => {
+    const c = makeKeeperConfig({
+      field_presence: {
+        schema: 'keeper.config.field_presence.v1',
+        producer: 'dashboard_http_keeper_snapshot',
+        present_paths: ['hooks', 'hooks.slots'],
+      },
+    })
+
+    const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
+    const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
+
+    expect(c.hooks?.deny_list).toEqual([])
+    expect(hookStatus.kind).toBe('missing-config-field')
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.deny_list', 'hooks.cost_budget'])
+  })
+
   it('keeps separate API writers live even when runtime manifest writes are unsupported', () => {
     const base = makeKeeperConfig()
     const persona = makeKeeperConfig({

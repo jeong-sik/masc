@@ -83,6 +83,8 @@ type config =
           to scrub [STATE] blocks before the 100-char truncation. *)
   execution_idle_timeout_s : float option;
   thinking_budget : int option;
+  top_p : float option;
+  top_k : int option;
   min_p : float option;
   on_run_complete : (bool -> unit) option;
   disclosure_level : Agent_sdk.Tool.disclosure_level option;

@@ -27,6 +27,9 @@ val collect_keepalive_board_events :
   ctx:'a context ->
   meta_current:keeper_meta ->
   proactive_warmup_elapsed:bool ->
+  approval_pending:bool ->
+  keeper_backpressured:bool ->
+  provider_cooldown_pending:bool ->
   Keeper_world_observation.pending_board_event list * keeper_meta
 
 val in_turn_liveness_pulse_interval_sec : unit -> float

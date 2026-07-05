@@ -111,14 +111,14 @@ let create_schema =
         "payload"
     ; string_prop
         ~description:
-          "Payload kind used when payload is omitted. Supported server consumer today: masc.board_post."
+          "Payload kind used when payload is omitted. Supported server consumers today: masc.board_post and masc.keeper_wake."
         "payload_kind"
     ; integer_prop
         ~description:"Payload schema version used when payload is omitted."
         "payload_schema_version"
     ; object_prop
         ~description:
-          "Payload body used when payload is omitted. For board posts, prefer the board_* convenience fields unless you need the raw envelope."
+          "Payload body used when payload is omitted. For board posts, prefer the board_* convenience fields unless you need the raw envelope. For masc.keeper_wake use {keeper_name, message, optional title, optional urgency}."
         "payload_body"
     ; string_prop
         ~description:

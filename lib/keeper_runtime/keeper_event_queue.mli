@@ -70,6 +70,10 @@ type stimulus_payload =
   | No_progress_recovery
   | Fusion_completed of fusion_completion
   | Bg_completed of bg_job_completion
+  | Schedule_due of scheduled_wake
+      (** A scheduled automation request has reached its due time and directly
+          targeted this keeper. The Scheduler owns timing/approval; the keeper
+          receives only a typed wake with the operator-authored message. *)
   | Connector_attention of connector_attention
       (** RFC-connector-ambient-attention-wake: an ambient connector message
           recorded as [Keeper_external_attention]. Carries the [event_id]
@@ -142,6 +146,18 @@ and connector_attention = { event_id : string }
     [event_id] is the pointer into [Keeper_external_attention] for the ambient
     message; content/surface are read from that store on the turn path. *)
 
+and scheduled_wake = {
+  schedule_id : string;
+  due_at : float;
+  payload_digest : string;
+  title : string option;
+  message : string;
+}
+(** Payload for [Schedule_due]: the schedule consumer has already validated the
+    request and enqueued this wake for the named keeper. [payload_digest]
+    preserves a stable audit correlation to the schedule payload without
+    duplicating its raw JSON envelope in the keeper queue. *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
     sink created a board evidence post, otherwise falls back to
@@ -150,6 +166,9 @@ val fusion_completion_post_id : fusion_completion -> post_id
 val bg_job_completion_post_id : bg_job_completion -> post_id
 (** RFC-0290 dedup/correlation id for [Bg_completed]. Uses [bg_board_post_id]
     when the producer set it, otherwise falls back to ["bg-run:<run_id>"]. *)
+
+val schedule_due_post_id : scheduled_wake -> post_id
+(** Dedup/correlation id for [Schedule_due]: ["schedule-due:<schedule_id>"]. *)
 
 val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
@@ -231,6 +250,9 @@ val summary : t -> string
 val payload_kind_label : stimulus_payload -> string
 (** Stable short label for logs/metrics: ["board_signal"], ["bootstrap"],
     ["no_progress_recovery"], ["fusion_completed"], or ["bg_completed"]. *)
+
+val urgency_to_string : urgency -> string
+val urgency_of_string : string -> (urgency, string) result
 
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)

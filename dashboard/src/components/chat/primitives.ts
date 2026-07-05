@@ -327,6 +327,64 @@ function sourceBadgeInfo(entry: KeeperConversationEntry): { label: string; cls: 
   return SOURCE_BADGE[entry.source] ?? null
 }
 
+type StreamContractBadgeInfo = {
+  label: string
+  title: string
+  state: 'contract-gap' | 'no-turn-ref' | 'server-replay'
+}
+
+function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContractBadgeInfo | null {
+  const contract = entry.streamContract
+  if (!contract) return null
+  const title = [
+    `source=${contract.source}`,
+    `status=${contract.status}`,
+    contract.eventName ? `event=${contract.eventName}` : null,
+    contract.deliveryReceipt ? `receipt=${contract.deliveryReceipt}` : null,
+    contract.reason ?? null,
+  ].filter((value): value is string => Boolean(value)).join(' · ')
+  switch (contract.deliveryReceipt) {
+    case 'server_lifecycle_replay_only':
+      return { label: '서버 replay', title, state: 'server-replay' }
+    case 'no_delivery_receipt':
+      switch (contract.status) {
+        case 'history_without_turn_ref':
+          return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
+        case 'contract_gap':
+          return { label: '수신 gap', title, state: 'contract-gap' }
+        default:
+          return null
+      }
+    default:
+      return null
+  }
+}
+
+function streamContractBadgeClass(state: StreamContractBadgeInfo['state']): string {
+  switch (state) {
+    case 'server-replay':
+      return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'contract-gap':
+      return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'no-turn-ref':
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)]'
+  }
+}
+
+function StreamContractBadge({ badge, compact }: { badge: StreamContractBadgeInfo | null; compact: boolean }) {
+  if (!badge) return null
+  const paddingClass = compact ? 'px-2 py-0.5' : 'px-2.5 py-1'
+  return html`
+    <span
+      class=${`inline-flex items-center rounded-[var(--r-0)] border ${paddingClass} text-2xs font-semibold ${streamContractBadgeClass(badge.state)}`}
+      title=${badge.title}
+      data-chat-stream-contract-badge=${badge.state}
+    >
+      ${badge.label}
+    </span>
+  `
+}
+
 // C1: group transcript messages by calendar day for the workspace day divider.
 // Absolute "M월 D일" labels (not relative 오늘/어제) so the output is a pure
 // function of the timestamp — deterministic and snapshot-test stable.
@@ -2153,6 +2211,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
   const sourceBadge = showSourceBadge ? sourceBadgeInfo(entry) : null
+  const streamContractBadge = streamContractBadgeInfo(entry)
   const attachments = entry.attachments ?? []
   const attachBlocks = effectiveBlocks.filter((block): block is Extract<ChatBlock, { t: 'attach' }> => block.t === 'attach')
   const persistedAttachmentKinds = attachments.map(userInputMediaKindForAttachment)
@@ -2188,6 +2247,10 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
       data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
+      data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
+      data-chat-stream-contract-badge-state=${streamContractBadge?.state ?? undefined}
+      data-chat-queue-seq=${entry.queueSeq ?? undefined}
+      data-chat-queue-client-action-id=${entry.queueClientActionId ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-attachment-count=${attachments.length}
@@ -2227,6 +2290,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     ${surfaceInfo && surfaceInfo.url !== '#'
                       ? html`
                           <a
@@ -2277,6 +2341,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${StreamContractBadge} badge=${streamContractBadge} compact=${false} />
                     ${surfaceInfo && surfaceInfo.url !== '#'
                       ? html`
                           <a
@@ -2567,6 +2632,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
       data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
+      data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
     >

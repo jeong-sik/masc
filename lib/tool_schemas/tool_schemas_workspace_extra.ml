@@ -108,6 +108,26 @@ Lifecycle status/phase fields are intentionally omitted here; use masc_goal_tran
           ];
     };
     {
+      name = "masc_goal_hygiene_review";
+      description =
+        "Review Goal Store hygiene for G-GHYG: stale executing goals and active \
+metricless goals. By default this is read-only and returns a typed issue rollup. \
+When apply=true, actor is required and must be the authenticated operator; \
+apply blocks executable hygiene violations instead of inventing metrics.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("apply", `Assoc [ ("type", `String "boolean") ]);
+                  ("actor", goal_principal_schema);
+                ] );
+            ("additionalProperties", `Bool false);
+          ];
+    };
+    {
       name = "masc_goal_transition";
       description =
         "Apply an explicit Goal FSM transition such as request_complete, pause, unblock, or approval resolution. \

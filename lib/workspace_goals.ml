@@ -663,6 +663,225 @@ let cancel_created_verification_request ctx ~goal_id ~request_id ~reason =
     Error cleanup_msg
 ;;
 
+let goal_hygiene_policy_id = "G-GHYG"
+let goal_hygiene_stale_executing_age_days = 14
+
+let goal_hygiene_stale_executing_age_seconds =
+  Masc_time_constants.days_to_seconds goal_hygiene_stale_executing_age_days
+;;
+
+type goal_hygiene_issue_kind =
+  | Stale_executing
+  | Metric_missing_active
+  | Invalid_updated_at
+
+type goal_hygiene_issue =
+  { kind : goal_hygiene_issue_kind
+  ; goal : Goal_store.goal
+  ; age_days : float option
+  ; detail : string
+  ; applyable : bool
+  }
+
+let goal_hygiene_issue_kind_to_string = function
+  | Stale_executing -> "stale_executing"
+  | Metric_missing_active -> "metric_missing_active"
+  | Invalid_updated_at -> "invalid_updated_at"
+;;
+
+let goal_hygiene_active_metric_phase = function
+  | Goal_phase.Executing
+  | Goal_phase.Awaiting_verification
+  | Goal_phase.Awaiting_approval ->
+    true
+  | Goal_phase.Blocked
+  | Goal_phase.Paused
+  | Goal_phase.Completed
+  | Goal_phase.Dropped ->
+    false
+;;
+
+let goal_hygiene_trimmed_string = function
+  | Some value when String.trim value <> "" -> Some value
+  | Some _ | None -> None
+;;
+
+let goal_hygiene_goal_missing_metric (goal : Goal_store.goal) =
+  Option.is_none (goal_hygiene_trimmed_string goal.metric)
+;;
+
+let goal_hygiene_age_days age_seconds = age_seconds /. Masc_time_constants.day
+
+let goal_hygiene_updated_age_seconds ~now (goal : Goal_store.goal) =
+  match Masc_domain.parse_iso8601_opt goal.updated_at with
+  | Some updated_at -> Ok (Float.max 0.0 (now -. updated_at))
+  | None -> Error goal.updated_at
+;;
+
+let goal_hygiene_issue_to_yojson (issue : goal_hygiene_issue) =
+  `Assoc
+    [ "kind", `String (goal_hygiene_issue_kind_to_string issue.kind)
+    ; "goal_id", `String issue.goal.id
+    ; "title", `String issue.goal.title
+    ; "phase", Goal_phase.to_yojson issue.goal.phase
+    ; "updated_at", `String issue.goal.updated_at
+    ; ( "age_days"
+      , match issue.age_days with
+        | Some days -> `Float days
+        | None -> `Null )
+    ; "detail", `String issue.detail
+    ; "applyable", `Bool issue.applyable
+    ]
+;;
+
+let goal_hygiene_count kind issues =
+  List_util.count_if (fun issue -> issue.kind = kind) issues
+;;
+
+let goal_hygiene_issue_goal_ids issues =
+  issues
+  |> List.filter_map (fun issue ->
+    if issue.applyable then Some issue.goal.id else None)
+  |> List.sort_uniq String.compare
+;;
+
+let goal_hygiene_issues_for_goal issues ~goal_id =
+  List.filter (fun issue -> String.equal issue.goal.id goal_id) issues
+;;
+
+let goal_hygiene_collect_issues ~now goals =
+  let collect_goal (goal : Goal_store.goal) =
+    let timestamp_issues, age_seconds =
+      match goal_hygiene_updated_age_seconds ~now goal with
+      | Ok age_seconds -> [], Some age_seconds
+      | Error raw ->
+        ( [ { kind = Invalid_updated_at
+            ; goal
+            ; age_days = None
+            ; detail = Printf.sprintf "updated_at is not parseable ISO-8601: %s" raw
+            ; applyable = false
+            }
+          ]
+        , None )
+    in
+    let stale_issues =
+      match goal.phase, age_seconds with
+      | Goal_phase.Executing, Some age_seconds
+        when Float.compare age_seconds goal_hygiene_stale_executing_age_seconds >= 0 ->
+        let days = goal_hygiene_age_days age_seconds in
+        [ { kind = Stale_executing
+          ; goal
+          ; age_days = Some days
+          ; detail =
+              Printf.sprintf
+                "executing goal has not updated for %.1f days; threshold=%d days"
+                days
+                goal_hygiene_stale_executing_age_days
+          ; applyable = true
+          }
+        ]
+      | ( Goal_phase.Executing
+        | Goal_phase.Awaiting_verification
+        | Goal_phase.Awaiting_approval
+        | Goal_phase.Blocked
+        | Goal_phase.Paused
+        | Goal_phase.Completed
+        | Goal_phase.Dropped ), _ ->
+        []
+    in
+    let metric_issues =
+      if
+        goal_hygiene_active_metric_phase goal.phase
+        && goal_hygiene_goal_missing_metric goal
+      then
+        [ { kind = Metric_missing_active
+          ; goal
+          ; age_days = Option.map goal_hygiene_age_days age_seconds
+          ; detail = "active goal has no metric; block until metric is set"
+          ; applyable = goal.phase = Goal_phase.Executing
+          }
+        ]
+      else []
+    in
+    timestamp_issues @ stale_issues @ metric_issues
+  in
+  List.concat_map collect_goal goals
+;;
+
+let goal_hygiene_summary_json ~issues =
+  let applyable_goal_ids = goal_hygiene_issue_goal_ids issues in
+  `Assoc
+    [ "policy", `String goal_hygiene_policy_id
+    ; "stale_executing_age_days", `Int goal_hygiene_stale_executing_age_days
+    ; "issue_count", `Int (List.length issues)
+    ; "stale_executing_count", `Int (goal_hygiene_count Stale_executing issues)
+    ; ( "metric_missing_active_count"
+      , `Int (goal_hygiene_count Metric_missing_active issues) )
+    ; "invalid_updated_at_count", `Int (goal_hygiene_count Invalid_updated_at issues)
+    ; "applyable_goal_count", `Int (List.length applyable_goal_ids)
+    ; ( "applyable_goal_ids"
+      , `List (List.map (fun goal_id -> `String goal_id) applyable_goal_ids) )
+    ; "issues", `List (List.map goal_hygiene_issue_to_yojson issues)
+    ]
+;;
+
+let goal_hygiene_block_note ~actor_id ~issues =
+  let reasons =
+    issues
+    |> List.map (fun issue -> goal_hygiene_issue_kind_to_string issue.kind)
+    |> List.sort_uniq String.compare
+    |> String.concat ","
+  in
+  Printf.sprintf
+    "%s auto-review by %s: blocked executing goal for %s"
+    goal_hygiene_policy_id
+    actor_id
+    reasons
+;;
+
+let goal_hygiene_apply_block ctx ~actor_id ~issues ~goal_id =
+  match goal_hygiene_issues_for_goal issues ~goal_id with
+  | [] -> Error (Printf.sprintf "no hygiene issue found for %s" goal_id)
+  | goal_issues ->
+    let note = goal_hygiene_block_note ~actor_id ~issues:goal_issues in
+    let reviewed_at = Masc_domain.now_iso () in
+    (match
+       Goal_store.update_goal ctx.config ~goal_id (fun goal ->
+         { goal with
+           phase = Goal_phase.Blocked
+         ; status = Goal_store.goal_status_of_phase Goal_phase.Blocked
+         ; last_review_note = Some note
+         ; last_review_at = Some reviewed_at
+         })
+     with
+     | Error msg -> Error msg
+     | Ok updated_goal ->
+       emit_goal_event
+         ctx
+         ~goal_id
+         ~event_type:"goal_hygiene_review"
+         ~payload:
+           (`Assoc
+               [ "policy", `String goal_hygiene_policy_id
+               ; "actor_id", `String actor_id
+               ; "action", `String "operator_block"
+               ; "note", `String note
+               ; ( "issues"
+                 , `List (List.map goal_hygiene_issue_to_yojson goal_issues) )
+               ]);
+       emit_goal_event
+         ctx
+         ~goal_id
+         ~event_type:"goal_phase"
+         ~payload:
+           (`Assoc
+               [ "phase", Goal_phase.to_yojson updated_goal.phase
+               ; "actor_id", `String actor_id
+               ; "policy", `String goal_hygiene_policy_id
+               ]);
+       Ok updated_goal)
+;;
+
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
@@ -673,6 +892,9 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
   | Ok (), Ok phase ->
     let goals = Goal_store.list_goals ctx.config ?phase () in
     let rollup = Goal_store.compute_rollup goals in
+    let hygiene_issues =
+      goal_hygiene_collect_issues ~now:(Time_compat.now ()) goals
+    in
     ok_result
       ~tool_name
       ~start_time
@@ -680,7 +902,92 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
       ; "count", `Int (List.length goals)
       ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
       ; "rollup", Goal_store.rollup_to_yojson rollup
+      ; "hygiene", goal_hygiene_summary_json ~issues:hygiene_issues
       ]
+;;
+
+let handle_goal_hygiene_review
+      ~tool_name
+      ~start_time
+      (ctx : context)
+      args
+  : Tool_result.result
+  =
+  match parse_optional_bool args "apply", parse_optional_principal args "actor" with
+  | Error err, _ | _, Error err ->
+    validation_error_result ~tool_name ~start_time [ err ]
+  | Ok apply_opt, Ok actor_opt ->
+    let apply =
+      match apply_opt with
+      | Some apply -> apply
+      | None -> false
+    in
+    let actor_result =
+      match actor_opt with
+      | Some actor when not (principal_matches_authenticated_caller ctx actor) ->
+        Error (principal_binding_error ~field:"actor" ctx actor)
+      | Some actor -> Ok actor
+      | None when apply -> Error "actor is required when apply=true"
+      | None -> Ok (canonical_principal_for_authenticated_caller ctx)
+    in
+    (match actor_result with
+     | Error msg ->
+       error_result_typed ~tool_name ~start_time ~code:Validation_error msg
+     | Ok actor ->
+       if apply && not (caller_is_goal_operator ctx)
+       then
+         error_result_typed
+           ~tool_name
+           ~start_time
+           ~code:Conflict
+           (operator_action_error Goal_phase.Operator_block)
+       else
+         let goals = Goal_store.list_goals ctx.config () in
+         let issues = goal_hygiene_collect_issues ~now:(Time_compat.now ()) goals in
+         let applyable_goal_ids = goal_hygiene_issue_goal_ids issues in
+         if not apply
+         then
+           ok_result
+             ~tool_name
+             ~start_time
+             [ "generated_at", `String (Masc_domain.now_iso ())
+             ; "applied", `Bool false
+             ; "hygiene", goal_hygiene_summary_json ~issues
+             ]
+         else
+           let applied, errors =
+             List.fold_left
+               (fun (applied, errors) goal_id ->
+                  match goal_hygiene_apply_block ctx ~actor_id:actor.id ~issues ~goal_id with
+                  | Ok goal -> goal :: applied, errors
+                  | Error msg -> applied, (goal_id, msg) :: errors)
+               ([], [])
+               applyable_goal_ids
+           in
+           if errors <> []
+           then
+             let message =
+               errors
+               |> List.rev
+               |> List.map (fun (goal_id, msg) -> goal_id ^ ": " ^ msg)
+               |> String.concat "; "
+             in
+             error_result_typed ~tool_name ~start_time ~code:Internal_error message
+           else
+             let refreshed_goals = Goal_store.list_goals ctx.config () in
+             let refreshed_issues =
+               goal_hygiene_collect_issues ~now:(Time_compat.now ()) refreshed_goals
+             in
+             ok_result
+               ~tool_name
+               ~start_time
+               [ "generated_at", `String (Masc_domain.now_iso ())
+               ; "applied", `Bool true
+               ; "applied_count", `Int (List.length applied)
+               ; ( "applied_goal_ids"
+                 , `List (List.map (fun goal -> `String goal.Goal_store.id) applied) )
+               ; "hygiene", goal_hygiene_summary_json ~issues:refreshed_issues
+               ])
 ;;
 
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =

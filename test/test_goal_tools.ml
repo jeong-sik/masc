@@ -212,6 +212,20 @@ let create_done_task config ~goal_id ~title =
   step Masc_domain.Done_action "test fixture done"
 ;;
 
+let restamp_goal_updated_at config ~goal_id ~updated_at =
+  let state = Goal_store.read_state config in
+  Goal_store.write_state
+    config
+    { state with
+      goals =
+        List.map
+          (fun (goal : Goal_store.goal) ->
+             if String.equal goal.id goal_id then { goal with updated_at } else goal)
+          state.goals
+    ; updated_at
+    }
+;;
+
 let expect_error (result : Tool_result.result option) =
   match result with
   | Some r when not (Tool_result.is_success r) -> Yojson.Safe.from_string ((Tool_result.message r))
@@ -310,6 +324,125 @@ let test_goal_list_filters_by_phase () =
   | [ goal_json ] ->
     check string "phase filter honored" "blocked" (get_string_field goal_json "phase")
   | _ -> fail "expected one filtered goal"
+;;
+
+let test_goal_list_includes_hygiene_rollup () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Metricless executing goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let listed =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_list"
+      ~args:(`Assoc [])
+  in
+  let listed_json =
+    match listed with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_list not handled"
+  in
+  let hygiene = Yojson.Safe.Util.member "hygiene" listed_json in
+  check
+    int
+    "metricless active goal is counted"
+    1
+    (Yojson.Safe.Util.member "metric_missing_active_count" hygiene
+     |> Yojson.Safe.Util.to_int);
+  check
+    (list string)
+    "metricless goal is applyable"
+    [ goal.id ]
+    (get_string_list_field hygiene "applyable_goal_ids")
+;;
+
+let test_goal_hygiene_review_blocks_stale_metricless_executing_goal () =
+  with_workspace
+  @@ fun config ->
+  seed_goal_operator config ~agent_name:"operator";
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Stale metricless goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let old_updated_at =
+    Masc_domain.iso8601_of_unix_seconds
+      (Time_compat.now () -. Masc_time_constants.days_to_seconds 15)
+  in
+  restamp_goal_updated_at config ~goal_id:goal.id ~updated_at:old_updated_at;
+  let reviewed =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_hygiene_review"
+      ~args:(`Assoc [])
+  in
+  let reviewed_json =
+    match reviewed with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_hygiene_review not handled"
+  in
+  let hygiene = Yojson.Safe.Util.member "hygiene" reviewed_json in
+  check
+    int
+    "stale executing goal counted"
+    1
+    (Yojson.Safe.Util.member "stale_executing_count" hygiene
+     |> Yojson.Safe.Util.to_int);
+  check
+    int
+    "metricless active goal counted before apply"
+    1
+    (Yojson.Safe.Util.member "metric_missing_active_count" hygiene
+     |> Yojson.Safe.Util.to_int);
+  let applied =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"operator" config)
+      ~name:"masc_goal_hygiene_review"
+      ~args:
+        (`Assoc
+            [ "apply", `Bool true
+            ; "actor", principal_json ~id:"operator"
+            ])
+  in
+  let applied_json =
+    match applied with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_hygiene_review apply not handled"
+  in
+  check
+    int
+    "one goal blocked"
+    1
+    (Yojson.Safe.Util.member "applied_count" applied_json |> Yojson.Safe.Util.to_int);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after hygiene apply"
+  in
+  check string "goal blocked" "blocked" (Goal_phase.to_string saved_goal.phase);
+  check
+    bool
+    "review note names G-GHYG"
+    true
+    (match saved_goal.last_review_note with
+     | Some note -> contains_substring note "G-GHYG"
+     | None -> false);
+  let refreshed_hygiene = Yojson.Safe.Util.member "hygiene" applied_json in
+  check
+    int
+    "blocked goal no longer stale executing"
+    0
+    (Yojson.Safe.Util.member "stale_executing_count" refreshed_hygiene
+     |> Yojson.Safe.Util.to_int);
+  check
+    int
+    "blocked goal no longer active metricless"
+    0
+    (Yojson.Safe.Util.member "metric_missing_active_count" refreshed_hygiene
+     |> Yojson.Safe.Util.to_int)
 ;;
 
 let test_goal_list_ignores_blank_optional_filters () =
@@ -1954,6 +2087,14 @@ let () =
     [ ( "tool_workspace"
       , [ test_case "upsert and list" `Quick test_goal_upsert_and_list
         ; test_case "list filters by phase" `Quick test_goal_list_filters_by_phase
+        ; test_case
+            "list includes hygiene rollup"
+            `Quick
+            test_goal_list_includes_hygiene_rollup
+        ; test_case
+            "hygiene review blocks stale metricless executing goal"
+            `Quick
+            test_goal_hygiene_review_blocks_stale_metricless_executing_goal
         ; test_case
             "list ignores blank optional filters"
             `Quick

@@ -712,6 +712,7 @@ let dispatch_bindings : (string * dispatch_handler) list =
   ; "masc_heartbeat", handle_heartbeat
   ; "masc_goal_list", Workspace_goals.handle_goal_list
   ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
+  ; "masc_goal_hygiene_review", Workspace_goals.handle_goal_hygiene_review
   ; "masc_goal_transition", Workspace_goals.handle_goal_transition
   ; "masc_goal_verify", Workspace_goals.handle_goal_verify
   ; "masc_reset", handle_reset

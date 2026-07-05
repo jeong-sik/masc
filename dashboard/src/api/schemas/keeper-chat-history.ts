@@ -227,6 +227,10 @@ export const KeeperChatHistoryStreamContractSchema = object({
   turnRef: optional(string()),
   trace_event_count: optional(number()),
   traceEventCount: optional(number()),
+  lifecycle_events: optional(array(string())),
+  lifecycleEvents: optional(array(string())),
+  delivery_receipt: optional(string()),
+  deliveryReceipt: optional(string()),
   reason: optional(string()),
 })
 

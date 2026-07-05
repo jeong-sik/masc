@@ -71,6 +71,16 @@ module Row_kind : sig
   val equal : t -> t -> bool
 end
 
+(** Closed, durable names for AG-UI lifecycle events recorded by the direct
+    Keeper chat stream. This is server lifecycle provenance, not a
+    client-delivery receipt. *)
+type stream_lifecycle_event =
+  | Run_started
+  | Text_message_start
+  | Text_message_end
+  | Run_finished
+  | Run_error
+
 (** Authority class of the human (or agent) whose message opened a
     turn. Derived structurally from the arrival route, never from
     message content: the authenticated dashboard route is [Owner];
@@ -174,6 +184,12 @@ type chat_message = {
           on inbound user lines (no turn yet) and rows written before §7.
           A malformed persisted value is reported as a persistence read
           drop and reads as [None]; the row stays valid. *)
+  stream_lifecycle : stream_lifecycle_event list option;
+      (** K1f: durable server lifecycle replay for the chat stream response
+          represented by this row. [None] means the row predates this field or
+          the writer could not prove lifecycle events. Malformed persisted
+          values are reported as persistence read drops and read as [None];
+          the row stays valid. *)
 }
 
 (** {1 I/O} *)
@@ -204,6 +220,7 @@ val append_turn :
   ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
   assistant_content:string ->
   unit ->
   unit
@@ -221,6 +238,7 @@ val append_assistant_message_result :
   ?audio:audio_clip ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
   unit ->
   (unit, string) result
 
@@ -238,6 +256,7 @@ val append_assistant_message :
   ?audio:audio_clip ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
   unit ->
   unit
 

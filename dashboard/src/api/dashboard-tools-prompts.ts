@@ -95,6 +95,7 @@ export interface DashboardScheduledAutomationDispatchReceipt {
 
 export interface DashboardScheduledAutomationKeeperReactionEvidence {
   projection_status:
+    | 'matched_consumed_ack'
     | 'matched_turn_started'
     | 'matched_stimulus'
     | 'not_found'
@@ -110,11 +111,14 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   reaction_kind?: string
   stimulus_seen?: boolean
   turn_started_seen?: boolean
+  event_queue_ack_seen?: boolean
   matched_record_count?: number
   stimulus_recorded_at?: number | null
   stimulus_recorded_at_iso?: string | null
   turn_started_recorded_at?: number | null
   turn_started_recorded_at_iso?: string | null
+  event_queue_ack_recorded_at?: number | null
+  event_queue_ack_recorded_at_iso?: string | null
   latest_recorded_at?: number | null
   latest_recorded_at_iso?: string | null
   reason?: string

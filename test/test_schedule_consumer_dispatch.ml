@@ -570,10 +570,37 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (reaction_evidence |> member "turn_started_seen" |> to_bool);
       check int "two matched ledger rows after turn" 2
         (reaction_evidence |> member "matched_record_count" |> to_int);
-      Keeper_registry_event_queue.ack_consumed
+      (match
+         Keeper_registry_event_queue.ack_consumed_result
+           ~base_path:config.Workspace_utils.base_path
+           keeper_name
+           [ leased ]
+       with
+       | Ok () -> ()
+       | Error msg -> fail ("scheduled wake ack failed: " ^ msg));
+      Keeper_reaction_ledger.record_event_queue_reaction
         ~base_path:config.Workspace_utils.base_path
-        keeper_name
-        [ leased ])
+        ~keeper_name
+        ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+        leased;
+      let acked_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let acked_queue_evidence = acked_row |> member "keeper_queue_evidence" in
+      check string "acked queue evidence drained" "not_found"
+        (acked_queue_evidence |> member "projection_status" |> to_string);
+      check int "pending count after ack" 0
+        (acked_queue_evidence |> member "pending_count" |> to_int);
+      check int "inflight count after ack" 0
+        (acked_queue_evidence |> member "inflight_count" |> to_int);
+      let acked_reaction_evidence = acked_row |> member "keeper_reaction_evidence" in
+      check string "reaction evidence matched ack" "matched_consumed_ack"
+        (acked_reaction_evidence |> member "projection_status" |> to_string);
+      check bool "reaction evidence event queue acked" true
+        (acked_reaction_evidence |> member "event_queue_ack_seen" |> to_bool);
+      check int "three matched ledger rows after ack" 3
+        (acked_reaction_evidence |> member "matched_record_count" |> to_int))
 ;;
 
 let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =

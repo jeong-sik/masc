@@ -2924,7 +2924,9 @@ let schedule_keeper_reaction_evidence_dashboard_json
                  ~stimulus_id
              in
              let projection_status =
-               if evidence.turn_started_seen
+               if evidence.event_queue_ack_seen
+               then "matched_consumed_ack"
+               else if evidence.turn_started_seen
                then "matched_turn_started"
                else if evidence.stimulus_seen
                then "matched_stimulus"
@@ -2936,6 +2938,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                 @ [ "stimulus_id", `String stimulus_id
                   ; "stimulus_seen", `Bool evidence.stimulus_seen
                   ; "turn_started_seen", `Bool evidence.turn_started_seen
+                  ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
                   ; "matched_record_count", `Int evidence.matched_record_count
                   ; ( "stimulus_recorded_at"
                     , match evidence.stimulus_recorded_at with
@@ -2949,6 +2952,12 @@ let schedule_keeper_reaction_evidence_dashboard_json
                       | Some ts -> `Float ts )
                   ; ( "turn_started_recorded_at_iso"
                     , unix_iso_option_json evidence.turn_started_recorded_at )
+                  ; ( "event_queue_ack_recorded_at"
+                    , match evidence.event_queue_ack_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "event_queue_ack_recorded_at_iso"
+                    , unix_iso_option_json evidence.event_queue_ack_recorded_at )
                   ; ( "latest_recorded_at"
                     , match evidence.latest_recorded_at with
                       | None -> `Null

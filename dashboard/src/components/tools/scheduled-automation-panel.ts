@@ -547,7 +547,10 @@ function reactionEvidenceTone(
   evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
 ): StatusChipTone {
   if (!evidence) return 'neutral'
-  if (evidence.projection_status === 'matched_turn_started') return 'ok'
+  if (
+    evidence.projection_status === 'matched_consumed_ack' ||
+    evidence.projection_status === 'matched_turn_started'
+  ) return 'ok'
   if (
     evidence.projection_status === 'matched_stimulus' ||
     evidence.projection_status === 'not_found' ||
@@ -571,9 +574,11 @@ function reactionEvidenceRows(
     { label: 'reaction_kind', value: evidence.reaction_kind },
     { label: 'stimulus_seen', value: evidence.stimulus_seen },
     { label: 'turn_started_seen', value: evidence.turn_started_seen },
+    { label: 'event_queue_ack_seen', value: evidence.event_queue_ack_seen },
     { label: 'matched_record_count', value: evidence.matched_record_count },
     { label: 'stimulus_recorded_at', value: evidence.stimulus_recorded_at_iso },
     { label: 'turn_started_recorded_at', value: evidence.turn_started_recorded_at_iso },
+    { label: 'event_queue_ack_recorded_at', value: evidence.event_queue_ack_recorded_at_iso },
     { label: 'latest_recorded_at', value: evidence.latest_recorded_at_iso },
     { label: 'reason', value: evidence.reason },
   ]

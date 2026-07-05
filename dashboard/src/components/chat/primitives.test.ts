@@ -202,6 +202,7 @@ describe('ChatTranscript', () => {
                 'TEXT_MESSAGE_END',
                 'RUN_FINISHED',
               ],
+              deliveryReceipt: 'server_lifecycle_replay_only',
               reason: 'history row records durable server stream lifecycle replay',
             },
             surface: {
@@ -231,6 +232,9 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-contract-event')).toBe('RUN_FINISHED')
     expect(bubble.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe(
       'RUN_STARTED,TEXT_MESSAGE_START,TEXT_MESSAGE_END,RUN_FINISHED',
+    )
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe(
+      'server_lifecycle_replay_only',
     )
     const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
     expect(surfaceLink?.textContent).toContain('Discord Thread')

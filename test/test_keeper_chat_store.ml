@@ -1550,6 +1550,8 @@ let test_to_json_array_stream_contract_without_turn_ref () =
             (contract |> member "source" |> to_string);
           Alcotest.(check string) "status" "history_without_turn_ref"
             (contract |> member "status" |> to_string);
+          Alcotest.(check string) "delivery receipt absent" "no_delivery_receipt"
+            (contract |> member "delivery_receipt" |> to_string);
           Alcotest.(check bool) "reason says no turn_ref" true
             (contains_substring
                (contract |> member "reason" |> to_string)
@@ -1593,6 +1595,9 @@ let test_to_json_array_stream_contract_trace_join () =
         (contract |> member "status" |> to_string);
       Alcotest.(check string) "turn_ref" "trace-stream#5"
         (contract |> member "turn_ref" |> to_string);
+      Alcotest.(check string) "trace join is not delivery receipt"
+        "no_delivery_receipt"
+        (contract |> member "delivery_receipt" |> to_string);
       Alcotest.(check int) "trace event count" 1
         (contract |> member "trace_event_count" |> to_int))
 
@@ -1623,6 +1628,9 @@ let test_to_json_array_stream_contract_trace_unavailable () =
         (contract |> member "status" |> to_string);
       Alcotest.(check string) "turn_ref" "trace-no-events#9"
         (contract |> member "turn_ref" |> to_string);
+      Alcotest.(check string) "missing trace is not delivery receipt"
+        "no_delivery_receipt"
+        (contract |> member "delivery_receipt" |> to_string);
       Alcotest.(check bool) "reason says no retained trace" true
         (contains_substring
            (contract |> member "reason" |> to_string)
@@ -1706,6 +1714,9 @@ let test_to_json_array_stream_contract_lifecycle_replay () =
         (contract |> member "status" |> to_string);
       Alcotest.(check string) "terminal event" "RUN_FINISHED"
         (contract |> member "event_name" |> to_string);
+      Alcotest.(check string) "lifecycle replay is server-side only"
+        "server_lifecycle_replay_only"
+        (contract |> member "delivery_receipt" |> to_string);
       Alcotest.(check (list string)) "lifecycle events"
         [ "RUN_STARTED"; "TEXT_MESSAGE_START"; "TEXT_MESSAGE_END"; "RUN_FINISHED" ]
         (json_string_list (contract |> member "lifecycle_events")))

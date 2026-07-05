@@ -94,6 +94,7 @@ describe('safeParseKeeperChatHistoryMessage', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-1780648779957-00000#4071',
           trace_event_count: 2,
+          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       }),
@@ -103,6 +104,7 @@ describe('safeParseKeeperChatHistoryMessage', () => {
       status: 'backend_trace_join',
       turn_ref: 'trace-1780648779957-00000#4071',
       trace_event_count: 2,
+      delivery_receipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
     })
   })
@@ -121,6 +123,7 @@ describe('safeParseKeeperChatHistoryMessage', () => {
             'TEXT_MESSAGE_END',
             'RUN_FINISHED',
           ],
+          delivery_receipt: 'server_lifecycle_replay_only',
           reason: 'history row records durable server stream lifecycle replay',
         },
       }),
@@ -136,6 +139,7 @@ describe('safeParseKeeperChatHistoryMessage', () => {
         'TEXT_MESSAGE_END',
         'RUN_FINISHED',
       ],
+      delivery_receipt: 'server_lifecycle_replay_only',
       reason: 'history row records durable server stream lifecycle replay',
     })
   })

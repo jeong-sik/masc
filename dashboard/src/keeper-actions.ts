@@ -48,6 +48,7 @@ import {
   clearActiveStream,
   clearActiveStreamRequestId,
   finalizeAssistantEntry,
+  keeperClientObservedSseStreamContract,
   keeperStreamContract,
   releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
@@ -1015,6 +1016,7 @@ export async function sendKeeperThreadMessage(
         timestamp: new Date().toISOString(),
         error: cutMessage,
         streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
           reason: cutMessage,
         }),
       })
@@ -1037,6 +1039,7 @@ export async function sendKeeperThreadMessage(
         timestamp: new Date().toISOString(),
         error: EMPTY_VISIBLE_REPLY_TEXT,
         streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
           reason: EMPTY_VISIBLE_REPLY_TEXT,
         }),
       })
@@ -1058,7 +1061,7 @@ export async function sendKeeperThreadMessage(
       streamState: null,
       timestamp: new Date().toISOString(),
       error: null,
-      streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
+      streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
         eventName: 'RUN_FINISHED',
       }),
     })
@@ -1086,6 +1089,7 @@ export async function sendKeeperThreadMessage(
         delivery: 'cancelled',
         error: null,
         streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
           requestId: requestId ?? undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
@@ -1098,6 +1102,7 @@ export async function sendKeeperThreadMessage(
         error: null,
         timestamp: new Date().toISOString(),
         streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
           requestId: requestId ?? undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
@@ -1114,6 +1119,7 @@ export async function sendKeeperThreadMessage(
       error: errorMessage,
       timestamp: new Date().toISOString(),
       streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+        deliveryReceipt: 'no_delivery_receipt',
         requestId: requestId ?? undefined,
         reason: errorMessage,
       }),
@@ -1122,6 +1128,7 @@ export async function sendKeeperThreadMessage(
       delivery: 'error' as KeeperConversationDelivery,
       error: errorMessage,
       streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+        deliveryReceipt: 'no_delivery_receipt',
         requestId: requestId ?? undefined,
         reason: errorMessage,
       }),

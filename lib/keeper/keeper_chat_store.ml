@@ -1214,6 +1214,9 @@ let rec last_opt = function
   | [ x ] -> Some x
   | _ :: rest -> last_opt rest
 
+let stream_delivery_receipt_field value =
+  [ ("delivery_receipt", `String value) ]
+
 let chat_stream_contract_json ~trace_lookup_available ~trace_block
     (m : chat_message) =
   let field key value = (key, value) in
@@ -1232,6 +1235,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
          ; field "lifecycle_events"
              (`List (List.map (fun label -> `String label) labels))
          ]
+        @ stream_delivery_receipt_field "server_lifecycle_replay_only"
         @ opt_string_field "event_name" (last_opt labels)
         @ base_fields)
   | None | Some [] -> (
@@ -1243,6 +1247,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
              ; string_field "reason"
                  "history row has no persisted turn_ref; no causal stream join is possible"
              ]
+            @ stream_delivery_receipt_field "no_delivery_receipt"
             @ base_fields)
       | Some _ -> (
           match trace_block with
@@ -1254,6 +1259,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
                      "turn_ref joined to retained trajectory/internal-history events"
                  ; field "trace_event_count" (`Int (List.length trace))
                  ]
+                @ stream_delivery_receipt_field "no_delivery_receipt"
                 @ base_fields)
           | Some _ | None ->
               let reason =
@@ -1266,6 +1272,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
                  ; string_field "status" "history_without_stream_events"
                  ; string_field "reason" reason
                  ]
+                @ stream_delivery_receipt_field "no_delivery_receipt"
                 @ base_fields)))
 
 let to_json_array ?base_dir ?trace_block_by_turn_ref

@@ -227,6 +227,11 @@ function runtimeDeclaredSpecSummary(
   const spec = entry.declared_spec
   if (!spec) return null
   const caps = spec.model?.capabilities
+  const samplingConfig = [
+    typeof spec.model?.top_p === 'number' ? `top_p ${spec.model.top_p}` : null,
+    typeof spec.model?.top_k === 'number' ? `top_k ${spec.model.top_k}` : null,
+    typeof spec.model?.min_p === 'number' ? `min_p ${spec.model.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
   const sampling = [
     caps?.supports_top_k ? 'top_k' : null,
     caps?.supports_min_p ? 'min_p' : null,
@@ -300,6 +305,7 @@ function runtimeDeclaredSpecSummary(
     typeof caps?.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     inputs.length > 0 ? `input ${inputs.join(',')}` : null,
+    samplingConfig.length > 0 ? `sampling config ${samplingConfig.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     controls.length > 0 ? `controls ${controls.join(',')}` : null,
     spec.model?.match_prefixes.length ? `match ${spec.model.match_prefixes.join(',')}` : null,

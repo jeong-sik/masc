@@ -97,13 +97,16 @@ let dedupe values =
        compare (String.length b, b) (String.length a, a))
 
 let snapshot ~base_path ~keeper_name =
-  let root = Keeper_secret_projection.secret_root ~base_path ~keeper_name in
-  let env_root = Filename.concat root "env" in
-  let files_root = Filename.concat root "files" in
   let values =
-    []
-    |> collect_env_values env_root
-    |> collect_file_values files_root
+    Keeper_secret_projection.secret_roots ~base_path ~keeper_name
+    |> List.fold_left
+         (fun acc info ->
+            let env_root = Filename.concat info.Keeper_secret_projection.root "env" in
+            let files_root =
+              Filename.concat info.Keeper_secret_projection.root "files"
+            in
+            acc |> collect_env_values env_root |> collect_file_values files_root)
+         []
     |> dedupe
   in
   let patterns =

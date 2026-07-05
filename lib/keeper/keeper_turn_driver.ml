@@ -123,23 +123,34 @@ let runtime_failed_decision ~idx ~runtime_id error =
       ("error_kind", `String (Oas_compat.error_kind error));
     ]
 
-let lane_retry_checkpoint ~is_last ~resume_checkpoint ~checkpoint_after error =
+let lane_retry_checkpoint
+    ~is_last
+    ~allow_accept_no_progress_retry
+    ~resume_checkpoint
+    ~checkpoint_after
+    error =
   if is_last then
     None
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
-    Some
-      (Keeper_turn_driver_try_runtime.checkpoint_for_accept_rejected_retry
-         ~resume_checkpoint
-         ~checkpoint_after
-         error)
+    if allow_accept_no_progress_retry
+    then
+      Some
+        (Keeper_turn_driver_try_runtime.checkpoint_for_accept_rejected_retry
+           ~resume_checkpoint
+           ~checkpoint_after
+           error)
+    else None
   else
     match Keeper_turn_driver_try_runtime.sdk_error_to_http_error error with
     | Some http_err when Runtime_attempt_fsm.should_try_next http_err ->
       Some checkpoint_after
     | _ -> None
 
-let attempt_runtime_candidates ~runtime_id ~runtime_id_of
+let attempt_runtime_candidates
+    ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
+      true)
+    ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
        ?decision:Yojson.Safe.t ->
@@ -172,8 +183,20 @@ let attempt_runtime_candidates ~runtime_id ~runtime_id_of
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
            Keeper_runtime_manifest.Runtime_failed;
          (match
+            let allow_accept_no_progress_retry =
+              if
+                Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
+                  error
+              then
+                allow_accept_no_progress_retry
+                  ~runtime_id:attempt_runtime_id
+                  ~attempt:idx
+                  error
+              else true
+            in
             lane_retry_checkpoint
               ~is_last
+              ~allow_accept_no_progress_retry
               ~resume_checkpoint
               ~checkpoint_after
               error
@@ -182,6 +205,39 @@ let attempt_runtime_candidates ~runtime_id ~runtime_id_of
           | None -> Error error))
   in
   loop 0 None candidates
+
+let elapsed_seconds_since started_at =
+  let ns =
+    Mtime.Span.to_uint64_ns (Mtime.span started_at (Mtime_clock.now ()))
+  in
+  Int64.to_float ns /. 1_000_000_000.
+
+let lane_accept_no_progress_retry_slot_available ~turn_start =
+  let elapsed_s = Float.max 0.0 (elapsed_seconds_since turn_start) in
+  let budget_s =
+    Env_config_keeper.KeeperRetryBackoff.degraded_retry_slot_phase_budget_sec
+  in
+  elapsed_s < budget_s
+
+let log_lane_accept_no_progress_retry_suppressed
+    ~keeper_name
+    ~runtime_id
+    ~attempt
+    ~turn_start
+    error =
+  let elapsed_s = Float.max 0.0 (elapsed_seconds_since turn_start) in
+  let budget_s =
+    Env_config_keeper.KeeperRetryBackoff.degraded_retry_slot_phase_budget_sec
+  in
+  Log.Keeper.warn
+    "%s: suppressing lane no-progress retry for runtime=%s attempt=%d \
+     elapsed=%.3fs budget=%.3fs error=%s"
+    keeper_name
+    runtime_id
+    attempt
+    elapsed_s
+    budget_s
+    (Agent_sdk.Error.to_string error)
 
 let runtime_candidate_missing_error id =
   Agent_sdk.Error.Internal
@@ -539,6 +595,23 @@ let run_named
     ~runtime_id
     ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
     ~emit_runtime_manifest
+    ~allow_accept_no_progress_retry:
+      (fun ~runtime_id:attempt_runtime_id ~attempt error ->
+         if
+           not
+             (Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
+                error)
+         then true
+         else if lane_accept_no_progress_retry_slot_available ~turn_start then
+           true
+         else (
+           log_lane_accept_no_progress_retry_suppressed
+             ~keeper_name
+             ~runtime_id:attempt_runtime_id
+             ~attempt
+             ~turn_start
+             error;
+           false))
     ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
       let error_runtime_id = attempt_runtime_id in
       let inference_policy =

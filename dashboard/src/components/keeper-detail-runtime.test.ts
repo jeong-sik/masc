@@ -1025,14 +1025,32 @@ describe('RuntimeLensSection', () => {
       projection: {
         status: 'ready',
         configured: true,
-        root: '/Users/dancer/me/.masc/secrets/sangsu',
+        root: '/mock/workspace/.masc/secrets/sangsu',
         source: 'workspace_masc_secrets',
+        effective_roots: [
+          {
+            root: '/mock/workspace/.masc/secrets/base',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 0,
+          },
+          {
+            root: '/mock/workspace/.masc/secrets/sangsu',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 1,
+          },
+        ],
         env_count: 1,
         file_count: 1,
         env_names: ['GH_TOKEN'],
         file_mounts: [
           {
-            host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+            host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
             container_path: '/home/keeper/.ssh/id_ed25519',
           },
         ],
@@ -1045,9 +1063,154 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByTestId('keeper-secret-projection')).toBeInTheDocument()
     expect(screen.getByText('ready')).toBeInTheDocument()
     expect(screen.getByText('1 env · 1 files')).toBeInTheDocument()
+    expect(screen.getByText('shared -> keeper')).toBeInTheDocument()
+    expect(screen.getAllByText('shared').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('keeper').length).toBeGreaterThan(0)
+    expect(screen.getByText('/mock/workspace/.masc/secrets/base')).toBeInTheDocument()
     expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()
+  })
+
+  it('sets secret env values without rendering the submitted value', async () => {
+    const nextProjection = {
+      status: 'ready',
+      configured: true,
+      root: '/mock/workspace/.masc/secrets/sangsu',
+      source: 'workspace_masc_secrets',
+      effective_roots: [
+        {
+          root: '/mock/workspace/.masc/secrets/base',
+          source: 'workspace_masc_secrets',
+          status: 'absent',
+          configured: false,
+          env_count: 0,
+          file_count: 0,
+        },
+        {
+          root: '/mock/workspace/.masc/secrets/sangsu',
+          source: 'workspace_masc_secrets',
+          status: 'ready',
+          configured: true,
+          env_count: 1,
+          file_count: 0,
+        },
+      ],
+      env_count: 1,
+      file_count: 0,
+      env_names: ['ANTHROPIC_API_KEY'],
+      file_mounts: [],
+      values_validated: true,
+      error: null,
+      next_action: 'none',
+    }
+    const setSecretEnv = vi.fn().mockResolvedValue(nextProjection)
+
+    render(h(KeeperSecretProjectionPanel, {
+      keeperName: 'sangsu',
+      projection: {
+        ...nextProjection,
+        status: 'empty',
+        env_count: 0,
+        env_names: [],
+        next_action: 'add entries under env/ and/or files/',
+      },
+      setSecretEnv,
+    }))
+
+    fireEvent.input(screen.getByTestId('keeper-secret-env-name'), {
+      target: { value: 'ANTHROPIC_API_KEY' },
+    })
+    fireEvent.input(screen.getByTestId('keeper-secret-value'), {
+      target: { value: 'ghs_new_secret' },
+    })
+    fireEvent.submit(screen.getByTestId('keeper-secret-projection-form'))
+
+    await waitFor(() => {
+      expect(setSecretEnv).toHaveBeenCalledWith('sangsu', {
+        scope: 'keeper',
+        name: 'ANTHROPIC_API_KEY',
+        value: 'ghs_new_secret',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('ghs_new_secret')).toBeNull()
+    })
+    expect(screen.getByText('ANTHROPIC_API_KEY saved to keeper')).toBeInTheDocument()
+    expect(screen.queryByText('ghs_new_secret')).toBeNull()
+  })
+
+  it('sets secret file values without rendering the submitted value', async () => {
+    const nextProjection = {
+      status: 'ready',
+      configured: true,
+      root: '/mock/workspace/.masc/secrets/sangsu',
+      source: 'workspace_masc_secrets',
+      effective_roots: [
+        {
+          root: '/mock/workspace/.masc/secrets/base',
+          source: 'workspace_masc_secrets',
+          status: 'absent',
+          configured: false,
+          env_count: 0,
+          file_count: 0,
+        },
+        {
+          root: '/mock/workspace/.masc/secrets/sangsu',
+          source: 'workspace_masc_secrets',
+          status: 'ready',
+          configured: true,
+          env_count: 0,
+          file_count: 1,
+        },
+      ],
+      env_count: 0,
+      file_count: 1,
+      env_names: [],
+      file_mounts: [
+        {
+          host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+          container_path: '/home/keeper/.ssh/id_ed25519',
+        },
+      ],
+      values_validated: true,
+      error: null,
+      next_action: 'none',
+    }
+    const setSecretFile = vi.fn().mockResolvedValue(nextProjection)
+
+    render(h(KeeperSecretProjectionPanel, {
+      keeperName: 'sangsu',
+      projection: {
+        ...nextProjection,
+        status: 'empty',
+        file_count: 0,
+        file_mounts: [],
+        next_action: 'add entries under env/ and/or files/',
+      },
+      setSecretFile,
+    }))
+
+    fireEvent.input(screen.getByTestId('keeper-secret-file-path'), {
+      target: { value: '/home/keeper/.ssh/id_ed25519' },
+    })
+    fireEvent.input(screen.getByLabelText('Secret file value'), {
+      target: { value: 'PRIVATE\nKEY\nCONTENT' },
+    })
+    fireEvent.submit(screen.getByTestId('keeper-secret-file-form'))
+
+    await waitFor(() => {
+      expect(setSecretFile).toHaveBeenCalledWith('sangsu', {
+        scope: 'keeper',
+        path: '/home/keeper/.ssh/id_ed25519',
+        value: 'PRIVATE\nKEY\nCONTENT',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('PRIVATE\nKEY\nCONTENT')).toBeNull()
+    })
+    expect(screen.getByText('/home/keeper/.ssh/id_ed25519 saved to keeper')).toBeInTheDocument()
+    expect(screen.queryByText('PRIVATE\nKEY\nCONTENT')).toBeNull()
   })
 })
 

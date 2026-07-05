@@ -4,16 +4,28 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { Save, Trash2 } from 'lucide-preact'
 import { formatPct1 } from '../lib/format-number'
 import {
   compactToken,
   deriveKeeperRuntimeProjection,
   type KeeperRuntimeProjectionRuntimeInput,
 } from '../lib/keeper-runtime-projection'
+import {
+  deleteKeeperSecretFile,
+  deleteKeeperSecretEnv,
+  setKeeperSecretFile,
+  setKeeperSecretEnv,
+  type KeeperSecretEnvMutation,
+  type KeeperSecretEnvSetMutation,
+  type KeeperSecretFileMutation,
+  type KeeperSecretFileSetMutation,
+  type KeeperSecretScope,
+} from '../api/dashboard-keeper-secrets'
 import { ActionButton } from './common/button'
 import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
-import { TextInput } from './common/input'
+import { TextArea, TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
 import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
@@ -366,12 +378,159 @@ function truncateSecretProjectionList(values: readonly string[], limit: number):
   return `${visible.join(', ')}${suffix}`
 }
 
+function secretRootScopeLabel(index: number, total: number): string {
+  if (total <= 1) return 'keeper'
+  if (index === 0) return 'shared'
+  if (index === total - 1) return 'keeper'
+  return `scope ${index + 1}`
+}
+
+function secretRootCounts(root: KeeperSecretProjection['effective_roots'][number]): string {
+  return `${root.env_count} env · ${root.file_count} files`
+}
+
+type KeeperSecretPendingAction = 'set_env' | 'delete_env' | 'set_file' | 'delete_file'
+
+interface KeeperSecretProjectionPanelProps {
+  projection: KeeperSecretProjection | null | undefined
+  keeperName?: string
+  onProjectionChange?: (projection: KeeperSecretProjection) => void
+  setSecretEnv?: typeof setKeeperSecretEnv
+  deleteSecretEnv?: typeof deleteKeeperSecretEnv
+  setSecretFile?: typeof setKeeperSecretFile
+  deleteSecretFile?: typeof deleteKeeperSecretFile
+}
+
+function secretMutationErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return 'secret mutation failed'
+}
+
 export function KeeperSecretProjectionPanel({
   projection,
-}: {
-  projection: KeeperSecretProjection | null | undefined
-}) {
-  if (!projection) {
+  keeperName,
+  onProjectionChange,
+  setSecretEnv = setKeeperSecretEnv,
+  deleteSecretEnv = deleteKeeperSecretEnv,
+  setSecretFile = setKeeperSecretFile,
+  deleteSecretFile = deleteKeeperSecretFile,
+}: KeeperSecretProjectionPanelProps) {
+  const [localProjection, setLocalProjection] = useState<KeeperSecretProjection | null>(projection ?? null)
+  const [envScope, setEnvScope] = useState<KeeperSecretScope>('keeper')
+  const [envName, setEnvName] = useState('GH_TOKEN')
+  const [secretValue, setSecretValue] = useState('')
+  const [fileScope, setFileScope] = useState<KeeperSecretScope>('keeper')
+  const [filePath, setFilePath] = useState('/home/keeper/.ssh/id_ed25519')
+  const [fileValue, setFileValue] = useState('')
+  const [pending, setPending] = useState<KeeperSecretPendingAction | null>(null)
+  const [mutationMessage, setMutationMessage] = useState<string | null>(null)
+  const [mutationError, setMutationError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLocalProjection(projection ?? null)
+  }, [projection])
+
+  const visibleProjection = localProjection ?? projection
+  const trimmedEnvName = envName.trim()
+  const trimmedFilePath = filePath.trim()
+  const canMutateEnv = Boolean(keeperName) && pending === null && trimmedEnvName.length > 0
+  const canMutateFile = Boolean(keeperName) && pending === null && trimmedFilePath.length > 0
+
+  function adoptProjection(next: KeeperSecretProjection) {
+    setLocalProjection(next)
+    onProjectionChange?.(next)
+  }
+
+  async function handleSetEnv(event: Event) {
+    event.preventDefault()
+    if (!keeperName || trimmedEnvName.length === 0 || pending !== null) return
+    setPending('set_env')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretEnvSetMutation = {
+      scope: envScope,
+      name: trimmedEnvName,
+      value: secretValue,
+    }
+    try {
+      const next = await setSecretEnv(keeperName, mutation)
+      adoptProjection(next)
+      setSecretValue('')
+      setMutationMessage(`${trimmedEnvName} saved to ${envScope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function handleDeleteEnv() {
+    if (!keeperName || trimmedEnvName.length === 0 || pending !== null) return
+    setPending('delete_env')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretEnvMutation = {
+      scope: envScope,
+      name: trimmedEnvName,
+    }
+    try {
+      const next = await deleteSecretEnv(keeperName, mutation)
+      adoptProjection(next)
+      setSecretValue('')
+      setMutationMessage(`${trimmedEnvName} deleted from ${envScope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function handleSetFile(event: Event) {
+    event.preventDefault()
+    if (!keeperName || trimmedFilePath.length === 0 || pending !== null) return
+    setPending('set_file')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretFileSetMutation = {
+      scope: fileScope,
+      path: trimmedFilePath,
+      value: fileValue,
+    }
+    try {
+      const next = await setSecretFile(keeperName, mutation)
+      adoptProjection(next)
+      setFileValue('')
+      setMutationMessage(`${trimmedFilePath} saved to ${fileScope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function handleDeleteFile() {
+    if (!keeperName || trimmedFilePath.length === 0 || pending !== null) return
+    setPending('delete_file')
+    setMutationMessage(null)
+    setMutationError(null)
+    const mutation: KeeperSecretFileMutation = {
+      scope: fileScope,
+      path: trimmedFilePath,
+    }
+    try {
+      const next = await deleteSecretFile(keeperName, mutation)
+      adoptProjection(next)
+      setFileValue('')
+      setMutationMessage(`${trimmedFilePath} deleted from ${fileScope}`)
+    } catch (error) {
+      setMutationError(secretMutationErrorMessage(error))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  if (!visibleProjection) {
     return html`
       <div
         class="v2-monitoring-detail rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
@@ -388,16 +547,29 @@ export function KeeperSecretProjectionPanel({
     `
   }
 
-  const tone = secretProjectionTone(projection.status)
-  const filePaths = projection.file_mounts.map(mount => mount.container_path)
-  const envSummary = truncateSecretProjectionList(projection.env_names, 5)
+  const projectionView = visibleProjection
+  const tone = secretProjectionTone(projectionView.status)
+  const filePaths = projectionView.file_mounts.map(mount => mount.container_path)
+  const envSummary = truncateSecretProjectionList(projectionView.env_names, 5)
   const fileSummary = truncateSecretProjectionList(filePaths, 4)
+  const effectiveRoots = projectionView.effective_roots ?? []
+  const rootRows = effectiveRoots.map((root, index) => ({
+    ...root,
+    label: secretRootScopeLabel(index, effectiveRoots.length),
+  }))
+  const scopeSummary = rootRows.length > 0 ? rootRows.map(row => row.label).join(' -> ') : 'keeper'
+  const rootSummary = rootRows.length > 0
+    ? truncateSecretProjectionList(rootRows.map(row => `${row.label}: ${row.status} · ${secretRootCounts(row)}`), 3)
+    : projectionView.root
+  const rootTitle = rootRows.length > 0
+    ? rootRows.map(row => `${row.label}: ${row.root}`).join('\n')
+    : projectionView.root
   const summary =
-    projection.status === 'ready'
-      ? `${projection.env_count} env · ${projection.file_count} files`
-      : projection.status === 'error'
-        ? projection.error ?? 'projection error'
-        : projection.next_action
+    projectionView.status === 'ready'
+      ? `${projectionView.env_count} env · ${projectionView.file_count} files`
+      : projectionView.status === 'error'
+        ? projectionView.error ?? 'projection error'
+        : projectionView.next_action
 
   return html`
     <div
@@ -408,24 +580,192 @@ export function KeeperSecretProjectionPanel({
         <div class="min-w-0">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Secret projection</div>
           <div class="mt-1 flex flex-wrap items-center gap-2">
-            <${StatusChip} tone=${tone} uppercase=${false}>${secretProjectionLabel(projection.status)}<//>
+            <${StatusChip} tone=${tone} uppercase=${false}>${secretProjectionLabel(projectionView.status)}<//>
             <span class="text-sm font-medium text-[var(--color-fg-primary)]">${summary}</span>
           </div>
         </div>
-        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${projection.source}</span>
+        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${projectionView.source}</span>
       </div>
 
       <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-        <${SignalRow} label="root" value=${projection.root} />
+        <${SignalRow} label="scope order" value=${scopeSummary} />
+        <${SignalRow} label="effective roots" value=${rootSummary} title=${rootTitle} />
+        <${SignalRow} label="keeper root" value=${projectionView.root} />
         <${SignalRow} label="env names" value=${envSummary} />
         <${SignalRow} label="file mounts" value=${fileSummary} />
-        <${SignalRow} label="validation" value=${projection.values_validated ? 'values validated · values redacted' : 'structure only'} />
+        <${SignalRow} label="validation" value=${projectionView.values_validated ? 'values validated · values redacted' : 'structure only'} />
       </div>
 
-      ${projection.error
+      ${rootRows.length > 1
+        ? html`
+            <div class="mt-3 divide-y divide-[var(--color-border-subtle)] rounded-[var(--r-1)] border border-[var(--color-border-subtle)]">
+              ${rootRows.map(row => html`
+                <div class="grid grid-cols-[minmax(72px,0.5fr)_minmax(0,1.5fr)_auto] items-center gap-3 px-3 py-2 text-xs">
+                  <span class="font-medium text-[var(--color-fg-secondary)]">${row.label}</span>
+                  <span class="truncate font-mono text-[var(--color-fg-muted)]" title=${row.root}>${row.root}</span>
+                  <span class="text-right text-[var(--color-fg-muted)]">${row.status} · ${secretRootCounts(row)}</span>
+                </div>
+              `)}
+            </div>
+          `
+        : null}
+
+      <form
+        class="mt-3 grid grid-cols-1 gap-2 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] p-3 lg:grid-cols-[140px_minmax(140px,0.7fr)_minmax(180px,1fr)_auto]"
+        data-testid="keeper-secret-projection-form"
+        onSubmit=${handleSetEnv}
+      >
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          scope
+          <select
+            class="w-full rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm font-medium normal-case tracking-normal text-[var(--input-fg)]"
+            value=${envScope}
+            disabled=${pending !== null || !keeperName}
+            data-testid="keeper-secret-scope"
+            onChange=${(event: Event) => setEnvScope((event.currentTarget as HTMLSelectElement).value as KeeperSecretScope)}
+          >
+            <option value="keeper">keeper</option>
+            <option value="shared">shared</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          env
+          <${TextInput}
+            value=${envName}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret env name"
+            autoComplete="off"
+            testId="keeper-secret-env-name"
+            onInput=${(event: Event) => setEnvName((event.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          value
+          <${TextInput}
+            type="password"
+            value=${secretValue}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret env value"
+            autoComplete="new-password"
+            testId="keeper-secret-value"
+            onInput=${(event: Event) => setSecretValue((event.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
+        <div class="flex flex-wrap items-end gap-2">
+          <${ActionButton}
+            type="submit"
+            size="sm"
+            disabled=${!canMutateEnv}
+            ariaBusy=${pending === 'set_env'}
+            testId="keeper-secret-save"
+            class="inline-flex items-center gap-1.5"
+          >
+            <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'set_env' ? 'Saving' : 'Save'}</span>
+          <//>
+          <${ActionButton}
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled=${!canMutateEnv}
+            ariaBusy=${pending === 'delete_env'}
+            testId="keeper-secret-delete"
+            class="inline-flex items-center gap-1.5"
+            onClick=${handleDeleteEnv}
+          >
+            <${Trash2} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'delete_env' ? 'Deleting' : 'Delete'}</span>
+          <//>
+        </div>
+      </form>
+
+      <form
+        class="mt-3 grid grid-cols-1 gap-2 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] p-3 lg:grid-cols-[140px_minmax(180px,1fr)_minmax(220px,1.2fr)_auto]"
+        data-testid="keeper-secret-file-form"
+        onSubmit=${handleSetFile}
+      >
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          scope
+          <select
+            class="w-full rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-sm font-medium normal-case tracking-normal text-[var(--input-fg)]"
+            value=${fileScope}
+            disabled=${pending !== null || !keeperName}
+            data-testid="keeper-secret-file-scope"
+            onChange=${(event: Event) => setFileScope((event.currentTarget as HTMLSelectElement).value as KeeperSecretScope)}
+          >
+            <option value="keeper">keeper</option>
+            <option value="shared">shared</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          file path
+          <${TextInput}
+            value=${filePath}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret file path"
+            autoComplete="off"
+            testId="keeper-secret-file-path"
+            onInput=${(event: Event) => setFilePath((event.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          content
+          <${TextArea}
+            value=${fileValue}
+            rows=${3}
+            disabled=${pending !== null || !keeperName}
+            ariaLabel="Secret file value"
+            onInput=${(event: Event) => setFileValue((event.currentTarget as HTMLTextAreaElement).value)}
+          />
+        </label>
+        <div class="flex flex-wrap items-end gap-2">
+          <${ActionButton}
+            type="submit"
+            size="sm"
+            disabled=${!canMutateFile}
+            ariaBusy=${pending === 'set_file'}
+            testId="keeper-secret-file-save"
+            class="inline-flex items-center gap-1.5"
+          >
+            <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'set_file' ? 'Saving' : 'Save'}</span>
+          <//>
+          <${ActionButton}
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled=${!canMutateFile}
+            ariaBusy=${pending === 'delete_file'}
+            testId="keeper-secret-file-delete"
+            class="inline-flex items-center gap-1.5"
+            onClick=${handleDeleteFile}
+          >
+            <${Trash2} size=${13} strokeWidth=${2.25} aria-hidden="true" />
+            <span>${pending === 'delete_file' ? 'Deleting' : 'Delete'}</span>
+          <//>
+        </div>
+      </form>
+
+      ${mutationMessage
+        ? html`
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--ok-light)]">
+              ${mutationMessage}
+            </div>
+          `
+        : null}
+
+      ${mutationError
         ? html`
             <div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
-              ${projection.error}
+              ${mutationError}
+            </div>
+          `
+        : null}
+
+      ${projectionView.error
+        ? html`
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
+              ${projectionView.error}
             </div>
           `
         : null}

@@ -3,6 +3,8 @@
 open Alcotest
 
 module Desc = Command_descriptor
+module Execute_runtime = Masc.Keeper_tool_execute_runtime.For_testing
+module Metrics = Masc.Otel_metric_store
 
 let with_temp_dir f =
   let dir = Filename.temp_file "cmd_desc_test" "" in
@@ -200,6 +202,85 @@ let test_pipe_chain_git_push () =
   | other -> failf "expected Git_push, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
 ;;
 
+(** {1 PR action metrics} *)
+
+let single_pr_action_labels ir =
+  match Desc.pr_action_events_of_ir ir with
+  | [ event ] ->
+    ( Desc.pr_action_surface_to_string event.surface
+    , Desc.pr_action_to_string event.action )
+  | events -> failf "expected one PR action event, got %d" (List.length events)
+;;
+
+let test_pr_action_projection_uses_typed_gh_only () =
+  let surface, action =
+    parse_ir "gh pr create --title 'feat: metrics' --draft"
+    |> single_pr_action_labels
+  in
+  check string "surface" "gh_cli" surface;
+  check string "action" "create" action;
+  let pipeline_surface, pipeline_action =
+    parse_ir "cat body.md | gh pr comment 123 --body LGTM"
+    |> single_pr_action_labels
+  in
+  check string "pipeline surface" "gh_cli" pipeline_surface;
+  check string "pipeline action" "comment" pipeline_action;
+  let git_merge_ir = parse_ir "git merge feature-branch --squash" in
+  check int "git merge is not gh PR action" 0
+    (List.length (Desc.pr_action_events_of_ir git_merge_ir))
+;;
+
+let test_tool_execute_pr_action_metric_labels () =
+  let ir = parse_ir "gh pr create --title 'feat: metrics' --draft" in
+  let metric = Keeper_metrics.(to_string ToolExecutePrActionTotal) in
+  let keeper_name = "test-pr-action-metric" in
+  let labels =
+    [ "keeper", keeper_name
+    ; "surface", "gh_cli"
+    ; "action", "create"
+    ; "status", "success"
+    ; "risk_class", "R1"
+    ]
+  in
+  let before = Metrics.metric_value_or_zero metric ~labels () in
+  Execute_runtime.record_pr_action_metric
+    ~keeper_name
+    ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
+    ~status:(Unix.WEXITED 0)
+    ir;
+  let after = Metrics.metric_value_or_zero metric ~labels () in
+  check bool "success metric increments" true (after >= before +. 1.0);
+  let failed_labels =
+    [ "keeper", keeper_name
+    ; "surface", "gh_cli"
+    ; "action", "create"
+    ; "status", "exit_nonzero"
+    ; "risk_class", "R1"
+    ]
+  in
+  let failed_before =
+    Metrics.metric_value_or_zero metric ~labels:failed_labels ()
+  in
+  Execute_runtime.record_pr_action_metric
+    ~keeper_name
+    ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
+    ~status:(Unix.WEXITED 1)
+    ir;
+  let failed_after =
+    Metrics.metric_value_or_zero metric ~labels:failed_labels ()
+  in
+  check bool "failed attempt metric increments" true
+    (failed_after >= failed_before +. 1.0);
+  let total_before = Metrics.metric_total metric in
+  Execute_runtime.record_pr_action_metric
+    ~keeper_name
+    ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
+    ~status:(Unix.WEXITED 0)
+    (parse_ir "git merge feature-branch --squash");
+  let total_after = Metrics.metric_total metric in
+  check (float 0.0) "non-gh command does not increment" total_before total_after
+;;
+
 (** {1 Exit code semantics} *)
 
 let test_exit_code_grep_no_match () =
@@ -345,6 +426,10 @@ let () =
       , [ test_case "rg|grep|head" `Quick test_pipe_chain_rg_grep_head
         ; test_case "gh in last position" `Quick test_pipe_chain_gh_in_last
         ; test_case "git push in last" `Quick test_pipe_chain_git_push
+        ] )
+    ; ( "pr_action_metrics"
+      , [ test_case "typed gh projection" `Quick test_pr_action_projection_uses_typed_gh_only
+        ; test_case "tool_execute metric labels" `Quick test_tool_execute_pr_action_metric_labels
         ] )
     ; ( "exit_code_semantics"
       , [ test_case "grep no match" `Quick test_exit_code_grep_no_match

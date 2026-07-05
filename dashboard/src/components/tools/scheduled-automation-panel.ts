@@ -237,6 +237,25 @@ function canProjectUpcomingWake(request: DashboardScheduledAutomationRequest): b
   return true
 }
 
+function payloadBlockedScheduleIds(
+  requests: readonly DashboardScheduledAutomationRequest[],
+): ReadonlySet<string> {
+  const blockedIds = new Set<string>()
+  for (const request of requests) {
+    if (payloadSupportBlocksWake(request)) blockedIds.add(request.schedule_id)
+  }
+  return blockedIds
+}
+
+function selectDurableWakeSignals(
+  automation: DashboardScheduledAutomation,
+): DashboardScheduledAutomationSignal[] {
+  const blockedIds = payloadBlockedScheduleIds(automation.requests ?? [])
+  return [...(automation.signals ?? [])]
+    .filter(signal => !blockedIds.has(signal.schedule_id))
+    .sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+}
+
 export function selectWakeSignals(
   automation: DashboardScheduledAutomation | null | undefined,
 ): WakeSignal[] {
@@ -1395,7 +1414,8 @@ function SchedulePrototypeSurface({
   const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
   const filtered = rows.filter(request => schTabMatches(tabDef, request))
   // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
-  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const durableSignals = selectDurableWakeSignals(automation)
+  const rawDurableSignalCount = automation.signals?.length ?? 0
   const selected = selectedScheduleId
     ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
@@ -1443,7 +1463,7 @@ function SchedulePrototypeSurface({
       <section class="sch-signals">
         <div class="ov-card-h"><h3>wake signal 피드 · schedule_runner.tick</h3></div>
         ${durableSignals.length === 0
-          ? html`<div class="sch-empty" data-stub="no durable runner signals">durable wake signal 없음</div>`
+          ? html`<div class="sch-empty" data-stub="no durable runner signals">${rawDurableSignalCount > 0 ? '표시 가능한 durable wake signal 없음' : 'durable wake signal 없음'}</div>`
           : html`
               <div class="sch-sig-list">
                 ${durableSignals.map(signal => {
@@ -1660,7 +1680,8 @@ export function ScheduledAutomationPanel({
   const wakeRows = rows
     .filter(canProjectUpcomingWake)
     .sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
-  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const durableSignals = selectDurableWakeSignals(automation)
+  const rawDurableSignalCount = automation.signals?.length ?? 0
   const hasDurableSignals = durableSignals.length > 0
   const selectedRequest =
     rows.find(request => request.schedule_id === selectedScheduleId)
@@ -1803,7 +1824,9 @@ export function ScheduledAutomationPanel({
                   <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
                     ${hasDurableSignals
                       ? `출처 ${automation.signal_source ?? 'schedule_runner_signals'} · ${durableSignals.length.toLocaleString()} / ${(automation.signal_count ?? durableSignals.length).toLocaleString()} signals 표시`
-                      : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
+                      : rawDurableSignalCount > 0
+                        ? '표시 가능한 durable runner signal이 없어 request rows에서 파생했습니다.'
+                        : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
                   </div>
                 </div>
                 <ul class="grid gap-2">

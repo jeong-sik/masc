@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationRequest,
+  DashboardScheduledAutomationSignal,
 } from '../../api'
 
 const mocks = vi.hoisted(() => ({
@@ -53,6 +54,21 @@ function automation(
     },
     fsm: { state: 'idle', active_count: requests.length, terminal_count: 0 },
     requests,
+  }
+}
+
+function signal(
+  overrides: Partial<DashboardScheduledAutomationSignal> & { signal_id: string; schedule_id: string },
+): DashboardScheduledAutomationSignal {
+  const { signal_id, schedule_id, ...rest } = overrides
+  return {
+    signal_id,
+    kind: 'schedule.due_candidate',
+    schedule_id,
+    emitted_at_iso: '2026-06-21T00:00:00Z',
+    due_at_iso: '2026-06-21T00:10:00Z',
+    risk_class: 'read_only',
+    ...rest,
   }
 }
 
@@ -601,6 +617,73 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-schedule-signal-schedule="sched-supported"]')).not.toBeNull()
     expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported"]')).toBeNull()
     expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown"]')).toBeNull()
+  })
+
+  it('keeps payload-blocked rows out of every durable wake signal feed', () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.smoke',
+        payload_support: 'supported',
+      }),
+      request({
+        schedule_id: 'sched-unsupported',
+        next_due_at: 200,
+        next_due_at_iso: '2026-06-21T00:20:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'orphan_auto_release',
+        payload_support: 'unsupported',
+      }),
+      request({
+        schedule_id: 'sched-unknown',
+        next_due_at: 300,
+        next_due_at_iso: '2026-06-21T00:30:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.future',
+        payload_support: 'unknown',
+      }),
+    ])
+    auto.signal_source = 'schedule_runner_signals'
+    auto.signal_count = 3
+    auto.signals = [
+      signal({
+        signal_id: 'sig-supported',
+        schedule_id: 'sched-supported',
+        payload_kind: 'keeper.smoke',
+      }),
+      signal({
+        signal_id: 'sig-unsupported',
+        schedule_id: 'sched-unsupported',
+        payload_kind: 'orphan_auto_release',
+      }),
+      signal({
+        signal_id: 'sig-unknown',
+        schedule_id: 'sched-unknown',
+        payload_kind: 'keeper.future',
+      }),
+    ]
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      if (variant === 'v2') {
+        expect(container.querySelector('[data-schedule-payload-support-row="sched-unsupported"]')).not.toBeNull()
+        expect(container.querySelector('[data-schedule-payload-support-row="sched-unknown"]')).not.toBeNull()
+      } else {
+        expect(container.querySelector('[data-schedule-id="sched-unsupported"]')).not.toBeNull()
+        expect(container.querySelector('[data-schedule-id="sched-unknown"]')).not.toBeNull()
+      }
+      expect(container.querySelector('[data-schedule-signal-id="sig-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unsupported"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unknown"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown"]')).toBeNull()
+    }
   })
 
   it('uses explicit ready and terminal status matching', async () => {

@@ -269,11 +269,16 @@ let resolve_board_context_inference_target ~config (post : Board.post) target_ke
     | Ok None ->
         Error
           (`Bad_request
-            (Printf.sprintf "target_keeper %S is not a registered keeper" requested))
+             (Printf.sprintf
+                "target_keeper %S is not a registered keeper"
+                requested))
     | Error msg ->
         Error
           (`Internal_server_error
-            (Printf.sprintf "failed to read keeper metadata for %S: %s" requested msg))
+             (Printf.sprintf
+                "failed to read keeper metadata for %S: %s"
+                requested
+                msg))
   in
   match target_keeper with
   | Some requested -> resolve Explicit_target requested
@@ -284,13 +289,16 @@ let resolve_board_context_inference_target ~config (post : Board.post) target_ke
        | Ok None ->
            Error
              (`Bad_request
-               (Printf.sprintf
-                  "target_keeper is required because board post author %S is not a registered keeper"
-                  author))
+                (Printf.sprintf
+                   "target_keeper is required because board post author %S is not a registered keeper"
+                   author))
        | Error msg ->
            Error
              (`Internal_server_error
-               (Printf.sprintf "failed to read keeper metadata for board author %S: %s" author msg)))
+                (Printf.sprintf
+                   "failed to read keeper metadata for board author %S: %s"
+                   author
+                   msg)))
 
 let non_empty_json_string_member field json =
   match json_assoc_member field json with
@@ -390,10 +398,12 @@ let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body 
               with
               | Error (`Bad_request message) ->
                   respond_board_context_inference_error request reqd
-                    ~status:`Bad_request ~message
+                    ~status:`Bad_request
+                    ~message
               | Error (`Internal_server_error message) ->
                   respond_board_context_inference_error request reqd
-                    ~status:`Internal_server_error ~message
+                    ~status:`Internal_server_error
+                    ~message
               | Ok (target_keeper, target_source) -> (
                   match
                     dispatch_board_context_inference ~state ~sw ~clock ~request

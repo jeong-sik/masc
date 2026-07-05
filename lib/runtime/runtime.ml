@@ -596,7 +596,7 @@ let missing_reference_error
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
      are referenced by routing config: %s. %s Add catalog rows to \
      oas-models.toml or remove those routing references; MASC will not erase \
-     explicit runtime intent into default fallback."
+     explicit runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)
     default_fallback_explanation
@@ -1101,6 +1101,24 @@ let thinking_support_of_runtime_id (id : string) : bool option =
 let temperature_of_runtime_id (id : string) : float option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.temperature
+  | None -> None
+;;
+
+let top_p_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.top_p
+  | None -> None
+;;
+
+let top_k_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.top_k
+  | None -> None
+;;
+
+let min_p_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.min_p
   | None -> None
 ;;
 

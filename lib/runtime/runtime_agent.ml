@@ -83,6 +83,8 @@ type config =
           to scrub [STATE] blocks before the 100-char truncation. *)
   execution_idle_timeout_s : float option;
   thinking_budget : int option;
+  top_p : float option;
+  top_k : int option;
   min_p : float option;
   on_run_complete : (bool -> unit) option;
   disclosure_level : Agent_sdk.Tool.disclosure_level option;
@@ -199,6 +201,11 @@ let request_runtime_fields_on_base_config
     ~(base : Llm_provider.Provider_config.t)
     (req_config : Llm_provider.Provider_config.t)
   =
+  let request_option_or_base req base =
+    match req with
+    | Some _ as value -> value
+    | None -> base
+  in
   let response_format, output_schema =
     match req_config.response_format, req_config.output_schema with
     | Agent_sdk.Types.Off, None -> base.response_format, base.output_schema
@@ -215,9 +222,9 @@ let request_runtime_fields_on_base_config
   { base with
     max_tokens = req_config.max_tokens;
     temperature = req_config.temperature;
-    top_p = req_config.top_p;
-    top_k = req_config.top_k;
-    min_p = req_config.min_p;
+    top_p = request_option_or_base req_config.top_p base.top_p;
+    top_k = request_option_or_base req_config.top_k base.top_k;
+    min_p = request_option_or_base req_config.min_p base.min_p;
     system_prompt = req_config.system_prompt;
     enable_thinking = req_config.enable_thinking;
     preserve_thinking = req_config.preserve_thinking;

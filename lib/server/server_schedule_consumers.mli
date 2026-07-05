@@ -1,5 +1,9 @@
 val supported_payload_kinds : string list
 
+type keeper_wake_reaction_ledger_status =
+  | Keeper_wake_reaction_ledger_recorded
+  | Keeper_wake_reaction_ledger_record_failed of string
+
 type dispatch_receipt =
   | Board_post_created of
       { post_id : string
@@ -14,6 +18,7 @@ type dispatch_receipt =
       ; queue : string
       ; stimulus : string
       ; stimulus_id : string option
+      ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
       }
 
 val dispatch_receipt_of_detail :

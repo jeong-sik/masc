@@ -82,6 +82,8 @@ export interface DashboardScheduledAutomationDispatchReceipt {
   queue?: string
   stimulus?: string
   stimulus_id?: string | null
+  reaction_ledger_status?: string | null
+  reaction_ledger_error?: string | null
   keeper_name?: string
   schedule_id?: string
   urgency?: string

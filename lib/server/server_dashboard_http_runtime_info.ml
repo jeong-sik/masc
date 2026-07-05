@@ -2814,6 +2814,7 @@ let schedule_keeper_queue_evidence_dashboard_json
               ; queue
               ; stimulus
               ; stimulus_id = _
+              ; reaction_ledger_status = _
               }) ->
           let due_at = execution.Schedule_domain.due_at in
           let payload_digest = execution.Schedule_domain.payload_digest in
@@ -2891,6 +2892,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
               ; queue = _
               ; stimulus
               ; stimulus_id
+              ; reaction_ledger_status = _
               }) ->
           let base_fields =
             [ "source", `String "keeper_reaction_ledger"

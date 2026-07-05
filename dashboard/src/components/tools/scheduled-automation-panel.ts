@@ -414,6 +414,8 @@ function dispatchReceiptRows(
     { label: 'queue', value: receipt.queue },
     { label: 'stimulus', value: receipt.stimulus },
     { label: 'stimulus_id', value: receipt.stimulus_id },
+    { label: 'reaction_ledger_status', value: receipt.reaction_ledger_status },
+    { label: 'reaction_ledger_error', value: receipt.reaction_ledger_error },
     { label: 'keeper', value: receipt.keeper_name },
     { label: 'schedule', value: receipt.schedule_id },
     { label: 'urgency', value: receipt.urgency },

@@ -6,6 +6,8 @@ let supported_payload_kinds = Schedule_supported_kinds.supported
 let board_post_created_kind = "masc.board_post.created"
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
 let keeper_event_queue_label = "keeper_event_queue"
+let reaction_ledger_recorded_label = "recorded"
+let reaction_ledger_record_failed_label = "record_failed"
 
 let ( let* ) = Result.bind
 
@@ -70,6 +72,44 @@ let optional_assoc_field name fields =
   | Some _ -> Error ("expected object field: " ^ name)
 ;;
 
+type keeper_wake_reaction_ledger_status =
+  | Keeper_wake_reaction_ledger_recorded
+  | Keeper_wake_reaction_ledger_record_failed of string
+
+let keeper_wake_reaction_ledger_status_to_string = function
+  | Keeper_wake_reaction_ledger_recorded -> reaction_ledger_recorded_label
+  | Keeper_wake_reaction_ledger_record_failed _ -> reaction_ledger_record_failed_label
+;;
+
+let keeper_wake_reaction_ledger_error = function
+  | Keeper_wake_reaction_ledger_recorded -> None
+  | Keeper_wake_reaction_ledger_record_failed reason -> Some reason
+;;
+
+let keeper_wake_reaction_ledger_status_of_fields fields =
+  match optional_string_field "reaction_ledger_status" fields with
+  | Error reason -> Error reason
+  | Ok None -> Ok None
+  | Ok (Some value) when String.equal value reaction_ledger_recorded_label ->
+    Ok (Some Keeper_wake_reaction_ledger_recorded)
+  | Ok (Some value) when String.equal value reaction_ledger_record_failed_label ->
+    let* reason = string_field "reaction_ledger_error" fields in
+    Ok (Some (Keeper_wake_reaction_ledger_record_failed reason))
+  | Ok (Some value) -> Error ("unsupported reaction_ledger_status: " ^ value)
+;;
+
+let keeper_wake_reaction_ledger_status_json_fields = function
+  | None -> [ "reaction_ledger_status", `Null; "reaction_ledger_error", `Null ]
+  | Some status ->
+    [ "reaction_ledger_status"
+    , `String (keeper_wake_reaction_ledger_status_to_string status)
+    ; ( "reaction_ledger_error"
+      , match keeper_wake_reaction_ledger_error status with
+        | None -> `Null
+        | Some reason -> `String reason )
+    ]
+;;
+
 type dispatch_receipt =
   | Board_post_created of
       { post_id : string
@@ -84,6 +124,7 @@ type dispatch_receipt =
       ; queue : string
       ; stimulus : string
       ; stimulus_id : string option
+      ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
       }
 
 let dispatch_receipt_of_detail = function
@@ -104,9 +145,20 @@ let dispatch_receipt_of_detail = function
       let* queue = string_field "queue" fields in
       let* stimulus = string_field "stimulus" fields in
       let* stimulus_id = optional_string_field "stimulus_id" fields in
+      let* reaction_ledger_status =
+        keeper_wake_reaction_ledger_status_of_fields fields
+      in
       Ok
         (Keeper_wake_enqueued
-           { keeper_name; schedule_id; urgency; post_id; queue; stimulus; stimulus_id })
+           { keeper_name
+           ; schedule_id
+           ; urgency
+           ; post_id
+           ; queue
+           ; stimulus
+           ; stimulus_id
+           ; reaction_ledger_status
+           })
     else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
   | _ -> Error "schedule dispatch receipt detail must be an object"
 ;;
@@ -120,17 +172,26 @@ let dispatch_receipt_to_yojson = function
       ; "hearth", (match hearth with None -> `Null | Some hearth -> `String hearth)
       ]
   | Keeper_wake_enqueued
-      { keeper_name; schedule_id; urgency; post_id; queue; stimulus; stimulus_id } ->
+      { keeper_name
+      ; schedule_id
+      ; urgency
+      ; post_id
+      ; queue
+      ; stimulus
+      ; stimulus_id
+      ; reaction_ledger_status
+      } ->
     `Assoc
-      [ "kind", `String keeper_wake_enqueued_kind
-      ; "queue", `String queue
-      ; "stimulus", `String stimulus
-      ; "stimulus_id", (match stimulus_id with None -> `Null | Some value -> `String value)
-      ; "keeper_name", `String keeper_name
-      ; "schedule_id", `String schedule_id
-      ; "urgency", `String urgency
-      ; "post_id", `String post_id
-      ]
+      ([ "kind", `String keeper_wake_enqueued_kind
+       ; "queue", `String queue
+       ; "stimulus", `String stimulus
+       ; "stimulus_id", (match stimulus_id with None -> `Null | Some value -> `String value)
+       ; "keeper_name", `String keeper_name
+       ; "schedule_id", `String schedule_id
+       ; "urgency", `String urgency
+       ; "post_id", `String post_id
+       ]
+       @ keeper_wake_reaction_ledger_status_json_fields reaction_ledger_status)
 ;;
 
 type payload_view =
@@ -251,11 +312,11 @@ let dispatch_board_post request payload =
 let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
   try
     Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
-    Ok ()
+    Keeper_wake_reaction_ledger_recorded
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Error
+    Keeper_wake_reaction_ledger_record_failed
       (Printf.sprintf
          "failed to persist keeper reaction ledger stimulus: %s"
          (Printexc.to_string exn))
@@ -293,23 +354,32 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     ~base_path:config.Workspace_utils.base_path
     keeper_name
     stimulus;
-  let* () =
+  let reaction_ledger_status =
     record_keeper_wake_stimulus
       ~base_path:config.Workspace_utils.base_path
       ~keeper_name
       stimulus
   in
+  (match reaction_ledger_status with
+   | Keeper_wake_reaction_ledger_recorded -> ()
+   | Keeper_wake_reaction_ledger_record_failed reason ->
+     Log.Keeper.warn
+       "schedule keeper wake reaction ledger append failed schedule_id=%s keeper=%s: %s"
+       request.schedule_id
+       keeper_name
+       reason);
   Ok
     (`Assoc
-      [ "kind", `String keeper_wake_enqueued_kind
-      ; "queue", `String keeper_event_queue_label
-      ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-      ; "stimulus_id", `String stimulus_id
-      ; "keeper_name", `String keeper_name
-      ; "schedule_id", `String request.schedule_id
-      ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
-      ; "post_id", `String stimulus.post_id
-      ])
+      ([ "kind", `String keeper_wake_enqueued_kind
+       ; "queue", `String keeper_event_queue_label
+       ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+       ; "stimulus_id", `String stimulus_id
+       ; "keeper_name", `String keeper_name
+       ; "schedule_id", `String request.schedule_id
+       ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
+       ; "post_id", `String stimulus.post_id
+       ]
+       @ keeper_wake_reaction_ledger_status_json_fields (Some reaction_ledger_status)))
 ;;
 
 let dispatch config ~now request =

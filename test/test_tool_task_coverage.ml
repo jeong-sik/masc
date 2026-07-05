@@ -1322,6 +1322,42 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
               (Masc_domain.task_status_to_string other)))
 )
 
+let () = test "handle_transition_done_default_contract_accepts_default_evidence_tokens" (fun () ->
+  let ctx = make_test_ctx () in
+  let add_result =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("title", `String "Default contract Done task");
+          ("description", `String "Mirrors contract harness task completion.");
+        ])
+  in
+  if not (Tool_result.is_success add_result) then
+    failwith (Tool_result.message add_result);
+  start_task_001 ctx;
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ( "notes",
+            `String
+              "completion_notes: contract harness completed the live workflow. \
+               reviewable_evidence_ref: contract-harness transcript." );
+        ])
+  in
+  if not (Tool_result.is_success result) then
+    failwith (Tool_result.message result);
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
+  | other ->
+    failwith
+      (Printf.sprintf
+         "expected Done after default-contract CDAL pass, got: %s"
+         (Masc_domain.task_status_to_string other))
+)
+
 let () = test "handle_transition_force_done_still_rejects_cdal_evidence_incomplete" (fun () ->
   let ctx = make_test_ctx_with_agent "admin-agent" in
   let add_result =

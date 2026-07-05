@@ -148,6 +148,7 @@ val metric_ws_slice_fanout_skipped : string
 val metric_ws_bytes_sent : string
 val metric_grpc_bytes_sent : string
 val metric_ws_delta_built : string
+val metric_ws_delta_payload_serializations : string
 
 (** Histogram of WebSocket message payload size in bytes, observed at
     the wire boundary. Labels: [direction = send | recv]. Complements

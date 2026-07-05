@@ -107,6 +107,11 @@ let metric_ws_slice_fanout_skipped = Otel_metric_store_core.declare_counter "mas
 let metric_ws_bytes_sent = Otel_metric_store_core.declare_counter "masc_ws_bytes_sent_total"
 let metric_grpc_bytes_sent = Otel_metric_store_core.declare_counter "masc_grpc_bytes_sent_total"
 let metric_ws_delta_built = Otel_metric_store_core.declare_counter "masc_ws_delta_built_total"
+
+let metric_ws_delta_payload_serializations =
+  Otel_metric_store_core.declare_counter "masc_ws_delta_payload_serializations_total"
+;;
+
 let metric_ws_message_bytes = "masc_ws_message_bytes"
 
 let metric_grpc_backlog_replay_lines_scanned =

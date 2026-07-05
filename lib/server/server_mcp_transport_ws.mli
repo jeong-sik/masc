@@ -3,7 +3,7 @@
     replacing SSE for dashboard / agent connections that
     need full-duplex.
 
-    External surface (20 entries + 5 types):
+    External surface:
     - {b session record} ({!ws_session}) — concrete because
       [server_ws_standalone] passes session values to
       {!read_inbound_message_frame} /
@@ -56,8 +56,12 @@
     [verify_dashboard_token], [dashboard_snapshot],
     [parse_cache] / [sse_data_prefix] /
     [extract_sse_data_*],
-    [dashboard_delta_for_parsed] /
-    [dashboard_delta_for_sse], [env_cache_ttl_s],
+    [dashboard_delta_payload_text_cache] /
+    [dashboard_delta_payload_text_for_parsed] /
+    [dashboard_delta_seq_notification] /
+    [send_dashboard_delta_frame] /
+    [send_dashboard_delta_for_parsed] /
+    [send_dashboard_delta_for_sse], [env_cache_ttl_s],
     [client_buffer_limit_cache] /
     [client_buffer_limit_bytes],
     [dashboard_ack_stale_threshold_cache] /
@@ -145,6 +149,14 @@ type parsed_sse_event = {
 (** Result of {!parse_sse_dashboard_event}.  Exposed for
     the [#10194] regression test which pattern-matches on
     [parsed.event_type] / [parsed.slice]. *)
+
+type dashboard_delta_payload_frame = {
+  slice : string;
+  text : string;
+}
+(** Shared dashboard/delta payload frame for one SSE broadcast.  [text] is a
+    serialized JSON-RPC notification without the per-session [seq], so every
+    subscribed session can share the same physical string/bytes in fan-out. *)
 
 (** {1 Send outcome} *)
 
@@ -485,3 +497,10 @@ val __test_dashboard_seq_value : ws_session -> int
 (** Test-only seam: reads the current per-session dashboard seq counter so the
     cross-domain gate can assert the final value equals the total number of
     allocations (no lost updates under true parallelism). *)
+
+val __test_dashboard_delta_payload_text_for_sse :
+  string -> dashboard_delta_payload_frame option
+(** Test-only seam: serializes the shared dashboard/delta payload frame for
+    one SSE broadcast.  The returned text deliberately excludes the
+    per-session seq so tests can prove payload serialization is cached by
+    physical broadcast reference rather than multiplied by session count. *)

@@ -242,6 +242,12 @@ val observe_ws_message_bytes_recv : int -> unit
 (** Increments [masc_ws_delta_built]. *)
 val inc_ws_delta_built : unit -> unit
 
+(** Increments [masc_ws_delta_payload_serializations_total] once when a
+    broadcast's shared dashboard/delta payload frame is serialized.  This is
+    the Wave-A proof counter for keeping payload serialization independent of
+    subscribed WS session count. *)
+val inc_ws_delta_payload_serialization : unit -> unit
+
 (** {1 Transport listen state} *)
 
 (** Explanatory status for why gRPC is or is not listening.

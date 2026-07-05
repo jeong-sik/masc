@@ -517,6 +517,64 @@ let test_bytes_cache_counters () =
   Alcotest.(check (float 0.001)) "fresh allocation forces another miss"
     2.0 (read_counter misses_name -. misses0)
 
+let test_dashboard_delta_payload_text_excludes_seq () =
+  let event =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("type", `String "goal_loop_status");
+          ("payload", `Assoc [ ("status", `String "running") ]);
+        ])
+  in
+  match Ws.__test_dashboard_delta_payload_text_for_sse event with
+  | None -> Alcotest.fail "expected shared dashboard delta payload"
+  | Some frame ->
+      Alcotest.(check string) "slice" "goals" frame.slice;
+      let json = Yojson.Safe.from_string frame.text in
+      let params =
+        match json with
+        | `Assoc fields -> List.assoc "params" fields
+        | _ -> Alcotest.fail "expected JSON-RPC object"
+      in
+      let fields =
+        match params with
+        | `Assoc fields -> fields
+        | _ -> Alcotest.fail "expected params object"
+      in
+      Alcotest.(check bool) "seq is split out"
+        false
+        (List.mem_assoc "seq" fields);
+      Alcotest.(check (option string)) "event type preserved"
+        (Some "goal_loop_status")
+        (Option.bind (List.assoc_opt "event_type" fields) (function
+          | `String s -> Some s
+          | _ -> None))
+
+let test_dashboard_delta_payload_serializes_once_per_broadcast_ref () =
+  let metric_name =
+    Masc.Otel_metric_store.metric_ws_delta_payload_serializations
+  in
+  let before = read_counter metric_name in
+  let event =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("type", `String "execution_snapshot");
+          ("payload", `Assoc [ ("agents", `List []) ]);
+        ])
+  in
+  let first = Ws.__test_dashboard_delta_payload_text_for_sse event in
+  let second = Ws.__test_dashboard_delta_payload_text_for_sse event in
+  let after = read_counter metric_name in
+  Alcotest.(check bool) "payload frame exists" true (Option.is_some first);
+  Alcotest.(check bool) "same broadcast ref reuses same text"
+    true
+    (match first, second with
+     | Some a, Some b -> a.text == b.text
+     | _ -> false);
+  Alcotest.(check (float 0.001)) "one payload serialization"
+    1.0 (after -. before)
+
 (* ====== dashboard/ack observability metrics ====== *)
 
 (* The server needs to see how fast each dashboard client is draining its
@@ -1179,6 +1237,10 @@ let () =
         test_bytes_of_shared_text_invalidates_on_new_ref;
       Alcotest.test_case "hit/miss counters track reuse" `Quick
         test_bytes_cache_counters;
+      Alcotest.test_case "dashboard delta shared payload excludes seq" `Quick
+        test_dashboard_delta_payload_text_excludes_seq;
+      Alcotest.test_case "dashboard delta payload serializes once per broadcast ref" `Quick
+        test_dashboard_delta_payload_serializes_once_per_broadcast_ref;
     ]);
     ("ack_observability", [
       Alcotest.test_case "buffered_bytes sum and count track observations" `Quick

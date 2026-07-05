@@ -17,6 +17,8 @@
     7. [top-p], [top-k], and [min-p] parse into model sampling fields.
     8. Sampling probability fields are finite numbers in [0.0, 1.0].
     9. [top-k] is a positive integer.
+    10. [top-k]/[min-p] fail closed when declared model capabilities say the
+        field is unsupported.
 
     Motivation: Kimi K2.7 (kimi-for-coding) accepts only [temperature = 1.0] and
     rejects any other value ("only 1 is allowed for this model"). This field lets
@@ -45,6 +47,19 @@ let parse_string_expect_error label s =
   match Toml.parse_string s with
   | Ok _ -> failf "%s: expected parse error, got Ok" label
   | Error _ -> ()
+;;
+
+let parse_string_expect_error_entry label ~path ~message s =
+  match Toml.parse_string s with
+  | Ok _ -> failf "%s: expected parse error, got Ok" label
+  | Error errors ->
+    let found =
+      List.exists
+        (fun (err : Toml.parse_error) ->
+           String.equal err.path path && String.equal err.message message)
+        errors
+    in
+    check bool label true found
 ;;
 
 let model_temperature cfg id =
@@ -119,6 +134,18 @@ let test_sampling_probability_integer_bounds_parse () =
   check (option (float 0.0001)) "min-p = 0 parses" (Some 0.0) min_p
 ;;
 
+let test_sampling_fields_parse_with_declared_capabilities () =
+  let cfg =
+    parse_string_or_fail
+      (model_toml
+         ~extra_lines:
+           "top-k = 42\nmin-p = 0.07\n[models.m.capabilities]\nsupports-top-k = true\nsupports-min-p = true\n")
+  in
+  let _, top_k, min_p = model_sampling cfg "m" in
+  check (option int) "top-k parses when declared supported" (Some 42) top_k;
+  check (option (float 0.0001)) "min-p parses when declared supported" (Some 0.07) min_p
+;;
+
 let test_absent_sampling_fields_are_none () =
   let cfg = parse_string_or_fail (model_toml ~extra_lines:"") in
   let top_p, top_k, min_p = model_sampling cfg "m" in
@@ -148,6 +175,24 @@ let test_top_k_invalid_values_fail_closed () =
     (model_toml ~extra_lines:"top-k = 1.5\n")
 ;;
 
+let test_sampling_fields_conflicting_declared_capabilities_fail_closed () =
+  let content =
+    model_toml
+      ~extra_lines:
+        "top-k = 42\nmin-p = 0.07\n[models.m.capabilities]\nsupports-top-k = false\nsupports-min-p = false\n"
+  in
+  parse_string_expect_error_entry
+    "top-k conflicts with declared capabilities"
+    ~path:"models.m.top-k"
+    ~message:"top-k is set but models.m.capabilities.supports-top-k is false"
+    content;
+  parse_string_expect_error_entry
+    "min-p conflicts with declared capabilities"
+    ~path:"models.m.min-p"
+    ~message:"min-p is set but models.m.capabilities.supports-min-p is false"
+    content
+;;
+
 let () =
   run "runtime_model_temperature_toml"
     [ ( "valid values"
@@ -159,6 +204,8 @@ let () =
         ; test_case "sampling fields parse" `Quick test_sampling_fields_parse
         ; test_case "sampling probability integer bounds parse" `Quick
             test_sampling_probability_integer_bounds_parse
+        ; test_case "sampling fields parse with declared capabilities" `Quick
+            test_sampling_fields_parse_with_declared_capabilities
         ; test_case "absent sampling fields are None" `Quick
             test_absent_sampling_fields_are_none
         ] )
@@ -173,6 +220,8 @@ let () =
             test_sampling_probability_non_number_fails_closed
         ; test_case "top-k invalid values fail parse" `Quick
             test_top_k_invalid_values_fail_closed
+        ; test_case "sampling fields conflict with declared capabilities" `Quick
+            test_sampling_fields_conflicting_declared_capabilities_fail_closed
         ] )
     ]
 ;;

@@ -563,6 +563,39 @@ let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
                value))
 ;;
 
+let sampling_capability_errors
+      ~(path : string)
+      ~(capabilities : Runtime_schema.model_capabilities option)
+      ~(top_k : int option)
+      ~(min_p : float option)
+  : parse_error list
+  =
+  match capabilities with
+  | None -> []
+  | Some capabilities ->
+    let top_k_errors =
+      match top_k with
+      | Some _ when not capabilities.supports_top_k ->
+        error
+          (path ^ ".top-k")
+          (Printf.sprintf
+             "top-k is set but %s.capabilities.supports-top-k is false"
+             path)
+      | Some _ | None -> []
+    in
+    let min_p_errors =
+      match min_p with
+      | Some _ when not capabilities.supports_min_p ->
+        error
+          (path ^ ".min-p")
+          (Printf.sprintf
+             "min-p is set but %s.capabilities.supports-min-p is false"
+             path)
+      | Some _ | None -> []
+    in
+    top_k_errors @ min_p_errors
+;;
+
 let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
@@ -629,22 +662,25 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* top_p = top_p_result in
     let* top_k = top_k_result in
     let* min_p = min_p_result in
-    Ok
-      { Runtime_schema.id
-      ; api_name
-      ; tools_support
-      ; max_context
-      ; thinking_support
-      ; preserve_thinking
-      ; max_thinking_budget
-      ; streaming
-      ; temperature
-      ; top_p
-      ; top_k
-      ; min_p
-      ; capabilities
-      ; match_prefixes
-      })
+    match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
+    | _ :: _ as errors -> Error errors
+    | [] ->
+      Ok
+        { Runtime_schema.id
+        ; api_name
+        ; tools_support
+        ; max_context
+        ; thinking_support
+        ; preserve_thinking
+        ; max_thinking_budget
+        ; streaming
+        ; temperature
+        ; top_p
+        ; top_k
+        ; min_p
+        ; capabilities
+        ; match_prefixes
+        })
 ;;
 
 let parse_models (toml : Otoml.t)

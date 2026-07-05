@@ -83,7 +83,8 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
-  | Keeper_event_queue.Hitl_resolved _ ->
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Goal_verification_failed _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle. Once the resolved
        approval has left the queue the keeper no longer skips on
@@ -139,6 +140,17 @@ let consume_single_heartbeat_stimulus
       "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
       sw.schedule_id
       sw.due_at
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    (* A rejected completion claim is actionable work for the assigned keeper.
+       Promote it to a pending observation so the cycle does not wake empty. *)
+    Log.Keeper.info
+      "turn entry: goal verification failure delivered goal_id=%s request_id=%s \
+       rejected_by=%s (keeper=%s)"
+      failure.goal_id
+      failure.request_id
+      failure.rejected_by
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->

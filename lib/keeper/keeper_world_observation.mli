@@ -56,6 +56,7 @@ type pending_board_event_kind =
   | Bg_completed
   | Schedule_due
   | External_attention
+  | Goal_verification_failed
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;
@@ -326,9 +327,19 @@ val pending_board_event_of_external_attention :
   Keeper_external_attention.item ->
   pending_board_event
 
+(** Build the actionable observation for a rejected goal verification. The
+    event is synthetic system output, not trusted operator direction, but it is
+    actionable because the assigned keeper must resume goal work. *)
+val pending_board_event_of_goal_verification_failure :
+  meta:Keeper_meta_contract.keeper_meta ->
+  arrived_at:float ->
+  Keeper_event_queue.goal_verification_failure ->
+  pending_board_event
+
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
-    [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
+    [Bg_completed] (RFC-0290), [Schedule_due], and
+    [Goal_verification_failed] produce [Some];
     [Bootstrap]/[No_progress_recovery] return [None] (no prompt injection). *)
 val pending_board_event_of_stimulus :
   continuity_summary:string ->

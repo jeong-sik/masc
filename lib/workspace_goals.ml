@@ -67,6 +67,112 @@ let canonical_principal_for_authenticated_caller (ctx : context)
   { id = ctx.agent_name; display_name = None }
 ;;
 
+let list_mem_string needle values =
+  List.exists (String.equal needle) values
+;;
+
+let uniq_strings values =
+  List.fold_left
+    (fun acc value -> if list_mem_string value acc then acc else value :: acc)
+    []
+    values
+  |> List.rev
+;;
+
+let keeper_assigned_to_goal ~goal_id (meta : Keeper_meta_contract.keeper_meta) =
+  list_mem_string goal_id meta.active_goal_ids
+;;
+
+let assigned_keeper_names_for_goal (config : Workspace.config) ~goal_id =
+  let registered =
+    Keeper_registry.all ~base_path:config.base_path ()
+    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
+      if keeper_assigned_to_goal ~goal_id entry.meta then Some entry.name else None)
+  in
+  let persisted =
+    Keeper_meta_store.keeper_names config
+    |> List.filter_map (fun keeper_name ->
+      match Keeper_meta_store.read_meta config keeper_name with
+      | Ok (Some meta) ->
+        if keeper_assigned_to_goal ~goal_id meta then Some meta.name else None
+      | Ok None -> None
+      | Error msg ->
+        Log.Keeper.warn
+          "goal verification wake: failed to read keeper meta keeper=%s goal_id=%s: %s"
+          keeper_name
+          goal_id
+          msg;
+        None)
+  in
+  uniq_strings (registered @ persisted)
+;;
+
+let wake_summary_json keeper_names =
+  `Assoc
+    [ "keeper_names", `List (List.map (fun name -> `String name) keeper_names)
+    ; "keeper_count", `Int (List.length keeper_names)
+    ]
+;;
+
+let enqueue_goal_verification_failed_wake
+      (ctx : context)
+      ~(goal : Goal_store.goal)
+      ~(request : Goal_verification.goal_verification_request)
+      ~(principal : Goal_verification.goal_principal)
+      ?note
+      ~(evidence_refs : string list)
+      ()
+  =
+  let failure : Keeper_event_queue.goal_verification_failure =
+    { goal_id = goal.id
+    ; request_id = request.id
+    ; goal_title = goal.title
+    ; phase = Goal_phase.to_string goal.phase
+    ; metric = goal.metric
+    ; target_value = goal.target_value
+    ; rejected_by = principal.id
+    ; note
+    ; evidence_refs
+    }
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.goal_verification_failure_post_id failure
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = Time_compat.now ()
+    ; payload = Keeper_event_queue.Goal_verification_failed failure
+    }
+  in
+  let keeper_names = assigned_keeper_names_for_goal ctx.config ~goal_id:goal.id in
+  (match keeper_names with
+   | [] ->
+     Log.Keeper.warn
+       "goal verification wake: no keeper has active_goal_ids containing goal_id=%s"
+       goal.id
+   | _ ->
+     List.iter
+       (fun keeper_name ->
+          Keeper_registry_event_queue.enqueue
+            ~base_path:ctx.config.base_path
+            keeper_name
+            stimulus;
+          match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
+          | Some entry when entry.phase = Keeper_state_machine.Running ->
+            Keeper_registry.wakeup ~base_path:ctx.config.base_path keeper_name
+          | Some entry ->
+            Log.Keeper.info
+              "goal verification wake queued without fiber wake keeper=%s phase=%s goal_id=%s"
+              keeper_name
+              (Keeper_state_machine.phase_to_string entry.phase)
+              goal.id
+          | None ->
+            Log.Keeper.info
+              "goal verification wake persisted for unregistered keeper=%s goal_id=%s"
+              keeper_name
+              goal.id)
+       keeper_names);
+  keeper_names
+;;
+
 let caller_is_goal_operator (ctx : context) =
   if not (Auth.is_auth_enabled ctx.config.base_path)
   then true
@@ -1075,7 +1181,7 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                            Goal_verification.goal_verification_vote_to_yojson last_vote
                          | [] -> `Null )
                      ]);
-             let finalize ~phase ~event_status =
+             let finalize_with_extra ~phase ~event_status ~extra_fields =
                match
                  update_goal_phase
                    ctx
@@ -1102,11 +1208,9 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                    ~goal_id
                    ~event_type:"goal_phase"
                    ~payload:(`Assoc [ "phase", Goal_phase.to_yojson updated_goal.phase ]);
-                 ok_result
-                   ~tool_name
-                   ~start_time
-                 [ "goal_id", `String goal_id
-                 ; "goal", Goal_store.goal_to_yojson updated_goal
+                 let fields =
+                   [ "goal_id", `String goal_id
+                   ; "goal", Goal_store.goal_to_yojson updated_goal
                    ; ( "verification_request"
                      , Goal_verification.goal_verification_request_to_yojson request )
                    ; ( "verification_summary"
@@ -1118,6 +1222,15 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                           then Some request
                           else None) )
                    ]
+                   @ extra_fields updated_goal
+                 in
+                 ok_result ~tool_name ~start_time fields
+             in
+             let finalize ~phase ~event_status =
+               finalize_with_extra
+                 ~phase
+                 ~event_status
+                 ~extra_fields:(fun (_ : Goal_store.goal) -> [])
              in
              (match quorum_result with
               | Goal_verification.Pending ->
@@ -1161,7 +1274,21 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                    result)
                 else finalize ~phase:Goal_phase.Completed ~event_status:"approved"
               | Goal_verification.Failed ->
-                finalize ~phase:Goal_phase.Executing ~event_status:"rejected"))))
+                finalize_with_extra
+                  ~phase:Goal_phase.Executing
+                  ~event_status:"rejected"
+                  ~extra_fields:(fun updated_goal ->
+                    let keeper_names =
+                      enqueue_goal_verification_failed_wake
+                        ctx
+                        ~goal:updated_goal
+                        ~request
+                        ~principal
+                        ?note
+                        ~evidence_refs
+                        ()
+                    in
+                    [ "goal_verification_failed_wake", wake_summary_json keeper_names ])))))
   | Ok _, Ok None, _, _ ->
     validation_error_result
       ~tool_name

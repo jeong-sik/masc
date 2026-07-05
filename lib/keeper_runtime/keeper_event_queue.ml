@@ -67,6 +67,11 @@ type stimulus_payload =
          30-minute approval janitor. Mirrors [Fusion_completed]/[Bg_completed]:
          a HITL decision is an async completion the waiting keeper must be
          notified of. *)
+  | Goal_verification_failed of goal_verification_failure
+      (* A goal completion verification was rejected for a goal assigned to this
+         keeper. Wakes the keeper lane so it resumes the goal after the phase
+         returns to [executing], instead of discovering the rejection only via
+         unrelated board/task activity. *)
 
 and fusion_completion = {
   run_id : string;
@@ -120,6 +125,18 @@ and scheduled_wake = {
   message : string;
 }
 
+and goal_verification_failure = {
+  goal_id : string;
+  request_id : string;
+  goal_title : string;
+  phase : string;
+  metric : string option;
+  target_value : string option;
+  rejected_by : string;
+  note : string option;
+  evidence_refs : string list;
+}
+
 let fusion_completion_post_id (fc : fusion_completion) =
   if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
   else fc.board_post_id
@@ -131,6 +148,9 @@ let bg_job_completion_post_id (c : bg_job_completion) =
 let schedule_due_post_id (sw : scheduled_wake) = "schedule-due:" ^ sw.schedule_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
+
+let goal_verification_failure_post_id (failure : goal_verification_failure) =
+  "goal-verification-failed:" ^ failure.goal_id ^ ":" ^ failure.request_id
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -257,11 +277,13 @@ let payload_kind_label = function
   | Schedule_due _ -> "schedule_due"
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
+  | Goal_verification_failed _ -> "goal_verification_failed"
 
 let is_board_signal = function
   | Board_signal _ -> true
   | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
-  | Schedule_due _ | Connector_attention _ | Hitl_resolved _ ->
+  | Schedule_due _ | Connector_attention _ | Hitl_resolved _
+  | Goal_verification_failed _ ->
     false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
@@ -368,6 +390,19 @@ let string_field ~context name fields =
   let* json = required_field ~context name fields in
   string_of_json ~context:(context ^ "." ^ name) json
 
+let string_list_field ~context name fields =
+  let* json = required_field ~context name fields in
+  match json with
+  | `List items ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* value = string_of_json ~context:(context ^ "." ^ name) item in
+        loop (value :: acc) rest
+    in
+    loop [] items
+  | _ -> Error (Printf.sprintf "%s.%s must be a JSON list" context name)
+
 let bool_field ~context name fields =
   let* json = required_field ~context name fields in
   bool_of_json ~context:(context ^ "." ^ name) json
@@ -433,6 +468,19 @@ let payload_to_yojson = function
       ; "approval_id", `String r.approval_id
       ; "decision", `String (hitl_resolution_decision_to_string r.decision)
       ]
+  | Goal_verification_failed failure ->
+    `Assoc
+      [ "kind", `String "goal_verification_failed"
+      ; "goal_id", `String failure.goal_id
+      ; "request_id", `String failure.request_id
+      ; "goal_title", `String failure.goal_title
+      ; "phase", `String failure.phase
+      ; "metric", option_json (fun value -> `String value) failure.metric
+      ; "target_value", option_json (fun value -> `String value) failure.target_value
+      ; "rejected_by", `String failure.rejected_by
+      ; "note", option_json (fun value -> `String value) failure.note
+      ; "evidence_refs", `List (List.map (fun value -> `String value) failure.evidence_refs)
+      ]
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -493,6 +541,28 @@ let payload_of_yojson json =
     let* decision_s = string_field ~context "decision" fields in
     let* decision = hitl_resolution_decision_of_string decision_s in
     Ok (Hitl_resolved { approval_id; decision })
+  | "goal_verification_failed" ->
+    let* goal_id = string_field ~context "goal_id" fields in
+    let* request_id = string_field ~context "request_id" fields in
+    let* goal_title = string_field ~context "goal_title" fields in
+    let* phase = string_field ~context "phase" fields in
+    let* metric = optional_string_field ~context "metric" fields in
+    let* target_value = optional_string_field ~context "target_value" fields in
+    let* rejected_by = string_field ~context "rejected_by" fields in
+    let* note = optional_string_field ~context "note" fields in
+    let* evidence_refs = string_list_field ~context "evidence_refs" fields in
+    Ok
+      (Goal_verification_failed
+         { goal_id
+         ; request_id
+         ; goal_title
+         ; phase
+         ; metric
+         ; target_value
+         ; rejected_by
+         ; note
+         ; evidence_refs
+         })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

@@ -8,6 +8,10 @@ val take : int -> 'a list -> 'a list
 
 val keeper_reaction_ledger_health_json : unit -> Yojson.Safe.t
 
+val keeper_turn_admission_health_json : unit -> Yojson.Safe.t
+
+val keeper_board_event_collection_health_json : unit -> Yojson.Safe.t
+
 val paused_keeper_count : Yojson.Safe.t -> int
 
 val bool_field : string -> Yojson.Safe.t -> bool

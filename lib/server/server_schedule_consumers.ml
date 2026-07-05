@@ -36,6 +36,30 @@ let optional_int_field name fields =
   | Some _ -> Error ("expected int field: " ^ name)
 ;;
 
+let optional_keeper_wake_urgency_field name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) ->
+    let* urgency =
+      Schedule_supported_kinds.keeper_wake_urgency_of_string (String.trim value)
+    in
+    Ok (Some urgency)
+  | Some _ -> Error ("expected string field: " ^ name)
+;;
+
+let keeper_name_field name fields =
+  let* value = string_field name fields in
+  if Schedule_supported_kinds.valid_keeper_wake_target_name value
+  then Ok value
+  else Error (Schedule_supported_kinds.keeper_wake_target_name_error ~field:name)
+;;
+
+let keeper_queue_urgency_of_schedule_urgency = function
+  | Schedule_supported_kinds.Keeper_wake_immediate -> Keeper_event_queue.Immediate
+  | Schedule_supported_kinds.Keeper_wake_normal -> Keeper_event_queue.Normal
+  | Schedule_supported_kinds.Keeper_wake_low -> Keeper_event_queue.Low
+;;
+
 let optional_assoc_field name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
@@ -70,7 +94,7 @@ let payload_view (request : Schedule_domain.schedule_request) =
 ;;
 
 let accepts_board_post (request : Schedule_domain.schedule_request) payload =
-  if not (String.equal payload.kind "masc.board_post") then
+  if not (String.equal payload.kind Schedule_supported_kinds.board_post) then
     Error ("unsupported schedule payload kind: " ^ payload.kind)
   else if payload.schema_version <> 1 then
     Error "masc.board_post only supports schema_version=1"
@@ -84,9 +108,26 @@ let accepts_board_post (request : Schedule_domain.schedule_request) payload =
     | _ -> Ok ()
 ;;
 
+let accepts_keeper_wake (request : Schedule_domain.schedule_request) payload =
+  if not (String.equal payload.kind Schedule_supported_kinds.keeper_wake) then
+    Error ("unsupported schedule payload kind: " ^ payload.kind)
+  else if payload.schema_version <> 1 then
+    Error "masc.keeper_wake only supports schema_version=1"
+  else if not (Schedule_domain.is_side_effecting request.risk_class) then
+    Error "masc.keeper_wake requires a side-effecting risk_class"
+  else
+    let* _keeper_name = keeper_name_field "keeper_name" payload.body in
+    let* _message = string_field "message" payload.body in
+    let* _title = optional_string_field "title" payload.body in
+    let* _urgency = optional_keeper_wake_urgency_field "urgency" payload.body in
+    Ok ()
+;;
+
 let accepts request =
   let* payload = payload_view request in
-  accepts_board_post request payload
+  if String.equal payload.kind Schedule_supported_kinds.board_post
+  then accepts_board_post request payload
+  else accepts_keeper_wake request payload
 ;;
 
 let schedule_meta_json (request : Schedule_domain.schedule_request) payload user_meta =
@@ -141,10 +182,56 @@ let dispatch_board_post request payload =
         ])
 ;;
 
-let dispatch request =
+let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request) payload =
+  let* keeper_name = keeper_name_field "keeper_name" payload.body in
+  let* message = string_field "message" payload.body in
+  let* title = optional_string_field "title" payload.body in
+  let* urgency = optional_keeper_wake_urgency_field "urgency" payload.body in
+  let urgency =
+    urgency
+    (* DET-OK: absent masc.keeper_wake urgency is the schema-v1 default;
+       invalid or unknown urgency strings are rejected above. *)
+    |> Option.value ~default:Schedule_supported_kinds.default_keeper_wake_urgency
+    |> keeper_queue_urgency_of_schedule_urgency
+  in
+  let wake : Keeper_event_queue.scheduled_wake =
+    { schedule_id = request.Schedule_domain.schedule_id
+    ; due_at = request.due_at
+    ; payload_digest = Schedule_domain.payload_digest request.payload
+    ; title
+    ; message
+    }
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.schedule_due_post_id wake
+    ; urgency
+    ; arrived_at = now
+    ; payload = Keeper_event_queue.Schedule_due wake
+    }
+  in
+  Keeper_registry_event_queue.enqueue
+    ~base_path:config.Workspace_utils.base_path
+    keeper_name
+    stimulus;
+  Ok
+    (`Assoc
+      [ "kind", `String "masc.keeper_wake.enqueued"
+      ; "keeper_name", `String keeper_name
+      ; "schedule_id", `String request.schedule_id
+      ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
+      ; "post_id", `String stimulus.post_id
+      ])
+;;
+
+let dispatch config ~now request =
   let* payload = payload_view request in
-  let* () = accepts_board_post request payload in
-  dispatch_board_post request payload
+  if String.equal payload.kind Schedule_supported_kinds.board_post
+  then (
+    let* () = accepts_board_post request payload in
+    dispatch_board_post request payload)
+  else (
+    let* () = accepts_keeper_wake request payload in
+    dispatch_keeper_wake config ~now request payload)
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch }

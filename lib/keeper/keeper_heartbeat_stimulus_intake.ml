@@ -76,6 +76,8 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
   | Keeper_event_queue.No_progress_recovery ->
     Some Keeper_world_observation.No_progress_recovery_stimulus
+  | Keeper_event_queue.Schedule_due _ ->
+    Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
     Some Keeper_world_observation.Connector_attention_stimulus
   | Keeper_event_queue.Board_signal _
@@ -130,6 +132,13 @@ let consume_single_heartbeat_stimulus
       (match c.bg_outcome with
        | Keeper_event_queue.Bg_ok _ -> true
        | Keeper_event_queue.Bg_failed _ -> false)
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Schedule_due sw ->
+    Log.Keeper.info
+      "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
+      sw.schedule_id
+      sw.due_at
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->

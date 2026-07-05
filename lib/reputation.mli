@@ -60,6 +60,8 @@ type agent_reputation = {
   thompson_confidence: float;
   (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
       0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
+  evidence_state: string;
+  (** "measured" if there is any backlog, mention, board, ledger or TS activity; otherwise "default". *)
 }
 
 val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t

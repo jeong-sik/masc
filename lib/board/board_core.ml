@@ -507,6 +507,18 @@ let get_comments store ~post_id : (comment list, board_error) Result.t =
            comments))
 ;;
 
+let get_comment store ~comment_id : (comment, board_error) Result.t =
+  maybe_sweep store;
+  match Comment_id.of_string comment_id with
+  | Error e -> Error e
+  | Ok cid ->
+    with_lock store (fun () ->
+      let comment_key = Comment_id.to_string cid in
+      match Hashtbl.find_opt store.comments comment_key with
+      | Some comment -> Ok comment
+      | None -> Error (Comment_not_found comment_id))
+;;
+
 (** List all comments (for profile aggregation) *)
 let list_comments store ?(limit = 1000) () : comment list =
   maybe_sweep store;

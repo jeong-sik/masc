@@ -109,30 +109,32 @@ describe('contentCategory', () => {
     expect(contentCategory(makePost({ post_kind: 'system' }))).toBe('system')
   })
 
-  it('classifies review by title keywords', () => {
-    expect(contentCategory(makePost({ title: 'verdict: 코드 품질 양호' }))).toBe('review')
-    expect(contentCategory(makePost({ title: 'PR 리뷰 완료' }))).toBe('review')
-    expect(contentCategory(makePost({ title: 'Code Review 결과' }))).toBe('review')
+  it('uses explicit content category metadata before fallback policy', () => {
+    expect(contentCategory(makePost({
+      title: '일반 제목',
+      meta: { content_category: 'review' },
+    }))).toBe('review')
+    expect(contentCategory(makePost({
+      title: '일반 제목',
+      meta: { board_category: 'notice' },
+    }))).toBe('notice')
   })
 
-  it('classifies notice by title keywords', () => {
-    expect(contentCategory(makePost({ title: 'alert: 서버 과부하' }))).toBe('notice')
-    expect(contentCategory(makePost({ title: '상태 업데이트' }))).toBe('notice')
-    expect(contentCategory(makePost({ title: 'Warning: CPU 90%' }))).toBe('notice')
+  it('does not use flair labels as category signals', () => {
+    expect(contentCategory(makePost({ flair: 'review' }))).toBe('article')
+    expect(contentCategory(makePost({ flair: 'notice', post_kind: 'automation' }))).toBe('notice')
   })
 
-  it('classifies article by title keywords', () => {
-    expect(contentCategory(makePost({ title: '기술 탐색: WebAssembly' }))).toBe('article')
-    expect(contentCategory(makePost({ title: '연구 결과' }))).toBe('article')
-    expect(contentCategory(makePost({ title: 'POC 실험' }))).toBe('article')
+  it('does not infer category from title keywords', () => {
+    expect(contentCategory(makePost({ title: 'verdict: 코드 품질 양호' }))).toBe('article')
+    expect(contentCategory(makePost({ title: 'alert: 서버 과부하' }))).toBe('article')
   })
 
-  it('falls back to article for long body content', () => {
-    const longBody = 'x'.repeat(301)
-    expect(contentCategory(makePost({ title: '일반 제목', body: longBody }))).toBe('article')
+  it('falls back to notice for automation posts', () => {
+    expect(contentCategory(makePost({ post_kind: 'automation' }))).toBe('notice')
   })
 
-  it('falls back to article for default case', () => {
+  it('falls back to article for direct posts', () => {
     expect(contentCategory(makePost({ title: '일반 제목', body: '보통 내용' }))).toBe('article')
   })
 })

@@ -46,6 +46,14 @@ vi.mock('../../api/board', () => ({
   fetchBoardReactions: vi.fn().mockResolvedValue([]),
   votePost: vi.fn().mockResolvedValue(undefined),
   voteComment: vi.fn().mockResolvedValue(undefined),
+  requestBoardContextInference: vi.fn().mockResolvedValue({
+    ok: true,
+    requestId: 'kmsg-post-share',
+    keeperName: 'sleepers',
+    postId: 'post-share',
+    status: 'queued',
+    targetSource: 'explicit_target',
+  }),
   toggleReaction: vi.fn().mockResolvedValue({
     target_type: 'comment',
     target_id: 'c1',
@@ -113,7 +121,7 @@ import {
   filterCommentTree,
 } from './post-detail'
 import { detailComments } from './board-state'
-import { toggleReaction, voteComment, votePost } from '../../api/board'
+import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
 afterEach(() => {
@@ -625,6 +633,43 @@ describe('PostDetail', () => {
     render(h(PostDetail, { post }))
 
     expect(screen.getByLabelText('게시글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
+  it('renders permalink, trackback, context inference, and X share actions on the full post detail route', async () => {
+    const post = {
+      id: 'post-share',
+      author: 'sleepers',
+      author_identity: {
+        kind: 'keeper',
+        id: 'sleepers',
+        key: 'keeper:sleepers',
+        display_name: 'Sleepers',
+        raw: 'sleepers',
+      },
+      title: 'Share **this**',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByTestId('bd-share-post-share')).toBeInTheDocument()
+    expect(screen.getByTestId('bd-share-link-post-share')).toHaveAttribute('aria-label', '게시글 링크 복사: post-share')
+    expect(screen.getByTestId('bd-share-trackback-post-share')).toHaveAttribute('aria-label', '트랙백 링크 복사: post-share')
+    expect(screen.getByTestId('bd-context-infer-post-share')).toHaveAttribute('aria-label', '맥락 추론 요청: post-share')
+    expect(screen.getByTestId('bd-share-x-post-share')).toHaveAttribute('href', expect.stringContaining('https://twitter.com/intent/tweet?'))
+
+    fireEvent.click(screen.getByTestId('bd-context-infer-post-share'))
+
+    await waitFor(() => {
+      expect(requestBoardContextInference).toHaveBeenCalledWith('post-share', 'sleepers')
+    })
   })
 
   it('renders board visibility audit details on post detail', () => {

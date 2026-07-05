@@ -150,7 +150,8 @@ let test_exact_duplicate_comment_returns_same_comment () =
   Board_dispatch.set_board_signal_hook (fun signal ->
     match signal.kind with
     | Board_dispatch.Board_comment_added -> incr keeper_comment_signals
-    | Board_dispatch.Board_post_created -> ());
+    | Board_dispatch.Board_post_created
+    | Board_dispatch.Board_reaction_changed _ -> ());
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Comment_added _ -> incr sse_comment_events
     | Board_dispatch.Post_created _

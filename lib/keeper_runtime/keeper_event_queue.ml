@@ -13,6 +13,19 @@ type post_id = string
 type board_stimulus_kind =
   | Post_created
   | Comment_added
+  | Reaction_changed of board_reaction_change
+
+and board_reaction_target_type =
+  | Reaction_post
+  | Reaction_comment
+
+and board_reaction_change = {
+  target_type : board_reaction_target_type;
+  target_id : string;
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+}
 
 type board_stimulus = {
   kind : board_stimulus_kind;
@@ -262,17 +275,37 @@ let urgency_of_string = function
 let board_stimulus_kind_to_string = function
   | Post_created -> "post_created"
   | Comment_added -> "comment_added"
+  | Reaction_changed _ -> "reaction_changed"
 
 let board_stimulus_kind_of_string = function
   | "post_created" -> Ok Post_created
   | "comment_added" -> Ok Comment_added
+  | "reaction_changed" ->
+    Error "reaction_changed board stimulus requires reaction payload fields"
   | value -> Error (Printf.sprintf "unknown board stimulus kind: %s" value)
+
+let board_reaction_target_type_to_string = function
+  | Reaction_post -> "post"
+  | Reaction_comment -> "comment"
+
+let board_reaction_target_type_of_string = function
+  | "post" -> Ok Reaction_post
+  | "comment" -> Ok Reaction_comment
+  | value -> Error (Printf.sprintf "unknown board reaction target type: %s" value)
 
 let option_json f = function
   | Some value -> f value
   | None -> `Null
 
 let ( let* ) = Result.bind
+
+let board_reaction_change_fields (reaction : board_reaction_change) =
+  [ "reaction_target_type", `String (board_reaction_target_type_to_string reaction.target_type)
+  ; "reaction_target_id", `String reaction.target_id
+  ; "reaction_user_id", `String reaction.user_id
+  ; "reaction_emoji", `String reaction.emoji
+  ; "reaction_active", `Bool reaction.reacted
+  ]
 
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
@@ -330,14 +363,18 @@ let float_field ~context name fields =
 let payload_to_yojson = function
   | Board_signal board ->
     `Assoc
-      [ "kind", `String "board_signal"
-      ; "board_kind", `String (board_stimulus_kind_to_string board.kind)
-      ; "author", `String board.author
-      ; "title", `String board.title
-      ; "content", `String board.content
-      ; "hearth", option_json (fun value -> `String value) board.hearth
-      ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
-      ]
+      ([ "kind", `String "board_signal"
+       ; "board_kind", `String (board_stimulus_kind_to_string board.kind)
+       ; "author", `String board.author
+       ; "title", `String board.title
+       ; "content", `String board.content
+       ; "hearth", option_json (fun value -> `String value) board.hearth
+       ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+       ]
+       @
+       (match board.kind with
+       | Post_created | Comment_added -> []
+       | Reaction_changed reaction -> board_reaction_change_fields reaction))
   | Bootstrap -> `Assoc [ "kind", `String "bootstrap" ]
   | No_progress_recovery -> `Assoc [ "kind", `String "no_progress_recovery" ]
   | Fusion_completed fusion ->
@@ -379,7 +416,18 @@ let payload_of_yojson json =
   match kind with
   | "board_signal" ->
     let* board_kind = string_field ~context "board_kind" fields in
-    let* kind = board_stimulus_kind_of_string board_kind in
+    let* kind =
+      match board_kind with
+      | "reaction_changed" ->
+        let* target_type_raw = string_field ~context "reaction_target_type" fields in
+        let* target_type = board_reaction_target_type_of_string target_type_raw in
+        let* target_id = string_field ~context "reaction_target_id" fields in
+        let* user_id = string_field ~context "reaction_user_id" fields in
+        let* emoji = string_field ~context "reaction_emoji" fields in
+        let* reacted = bool_field ~context "reaction_active" fields in
+        Ok (Reaction_changed { target_type; target_id; user_id; emoji; reacted })
+      | _ -> board_stimulus_kind_of_string board_kind
+    in
     let* author = string_field ~context "author" fields in
     let* title = string_field ~context "title" fields in
     let* content = string_field ~context "content" fields in

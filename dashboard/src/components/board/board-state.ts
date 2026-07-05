@@ -57,7 +57,7 @@ export const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'hot', label: '인기순' },
   { id: 'trending', label: '급상승' },
   { id: 'updated', label: '최근 갱신' },
-  { id: 'discussed', label: '토론 많은 순' },
+  { id: 'discussed', label: '댓글 많은 순' },
 ]
 
 // ── Signals: detail view ───────────────────────────────────────────
@@ -187,30 +187,31 @@ export function boardPostKind(post: BoardPost): 'direct' | 'automation' | 'syste
 // ── Content-based category (replaces post_kind for filtering) ─────
 export type ContentCategory = 'article' | 'review' | 'notice' | 'system'
 
-const ARTICLE_SIGNALS = ['기술 탐색', '탐색:', '발견', 'poc', '실험', '연구', '분석', '핵심 발견', '코드스멜', 'exploration', 'research']
-const REVIEW_SIGNALS = ['verdict', '판정', 'pr 리뷰', 'pr review', 'code review', '리뷰:', 'issue 사냥', 'issue 현황', 'assignee', 'needs-evidence', '우회 누적']
-const NOTICE_SIGNALS = ['alert', '알림', '경고', 'warning', '상태 업데이트', 'status', 'sprint 상태', '불균형 경고', 'health check']
-
-function matchesAny(text: string, signals: string[]): boolean {
-  const lower = text.toLowerCase()
-  return signals.some(s => lower.includes(s))
+function contentCategoryFromValue(value: unknown): ContentCategory | null {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  switch (normalized) {
+    case 'article':
+      return 'article'
+    case 'review':
+      return 'review'
+    case 'notice':
+      return 'notice'
+    case 'system':
+      return 'system'
+    default:
+      return null
+  }
 }
 
 export function contentCategory(post: BoardPost): ContentCategory {
   if (boardPostKind(post) === 'system') return 'system'
 
-  const title = post.title || ''
-  const body = post.body || ''
+  const metaCategory = contentCategoryFromValue(post.meta?.content_category)
+    ?? contentCategoryFromValue(post.meta?.category)
+    ?? contentCategoryFromValue(post.meta?.board_category)
+  if (metaCategory) return metaCategory
 
-  if (matchesAny(title, REVIEW_SIGNALS)) return 'review'
-  if (matchesAny(title, NOTICE_SIGNALS)) return 'notice'
-  if (matchesAny(title, ARTICLE_SIGNALS)) return 'article'
-
-  // Fallback: long content is likely an article, short is notice
-  if (body.length > 300) return 'article'
-  if (body.length < 80 && boardPostKind(post) !== 'direct') return 'notice'
-
-  return 'article'
+  return boardPostKind(post) === 'automation' ? 'notice' : 'article'
 }
 
 export const CONTENT_CATEGORIES: { id: ContentCategory; label: string; icon: string }[] = [

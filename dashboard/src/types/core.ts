@@ -1539,6 +1539,12 @@ interface KeeperConfigLimits {
   max_context_override_tokens: number | null
 }
 
+export interface KeeperConfigFieldPresence {
+  schema: string
+  producer: string
+  present_paths: string[]
+}
+
 export interface KeeperHookSlot {
   active: boolean
   source: string
@@ -1580,4 +1586,5 @@ export interface KeeperConfig {
   tools: KeeperConfigTools
   sources: KeeperConfigSources
   metrics: KeeperConfigMetrics
+  field_presence?: KeeperConfigFieldPresence
 }

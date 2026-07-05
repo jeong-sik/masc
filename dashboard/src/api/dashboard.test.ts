@@ -2078,6 +2078,70 @@ describe('fetchKeeperConfig', () => {
     expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
+    expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
+    expect(result.field_presence?.present_paths).toContain('tools.tool_access')
+    expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')
+  })
+
+  it('tracks raw keeper config field presence before defaults are normalized', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          prompt: {
+            goal: 'raw goal only',
+          },
+          metrics: {},
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.prompt.goal).toBe('raw goal only')
+    expect(result.prompt.instructions).toBe('')
+    expect(result.metrics.last_model_used).toBe('')
+    expect(result.field_presence?.present_paths).toContain('prompt.goal')
+    expect(result.field_presence?.present_paths).toContain('metrics')
+    expect(result.field_presence?.present_paths).not.toContain('prompt.instructions')
+    expect(result.field_presence?.present_paths).not.toContain('metrics.last_model_used')
+  })
+
+  it('preserves backend keeper config field-presence proof when supplied', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          field_presence: {
+            schema: 'keeper.config.field_presence.v1',
+            producer: 'dashboard_http_keeper_snapshot',
+            present_paths: ['name', 'prompt', 'prompt.goal'],
+          },
+          prompt: {
+            goal: 'server proof',
+            instructions: 'present but intentionally absent from proof',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.field_presence).toEqual({
+      schema: 'keeper.config.field_presence.v1',
+      producer: 'dashboard_http_keeper_snapshot',
+      present_paths: ['name', 'prompt', 'prompt.goal'],
+    })
   })
 
   it('normalizes default per-provider timeout mode without legacy label', async () => {

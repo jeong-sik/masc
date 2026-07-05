@@ -176,6 +176,17 @@ type model_spec =
         value at request time ("only 1 is allowed for this model"). Resolved via
         {!Runtime.temperature_of_runtime_id} → {!Runtime_inference.resolve_temperature},
         symmetric to the [max-output-tokens]/[max_tokens] path. *)
+  ; top_p : float option
+    (** [top_p] — per-model nucleus sampling probability forwarded through the
+        materialized OAS [Provider_config]. [None] leaves the caller/OAS profile
+        unchanged. *)
+  ; top_k : int option
+    (** [top_k] — per-model top-k sampling cap forwarded through the materialized
+        OAS [Provider_config]. [None] leaves the caller/OAS profile unchanged. *)
+  ; min_p : float option
+    (** [min_p] — per-model minimum probability sampling value forwarded through
+        the materialized OAS [Provider_config]. [None] leaves the caller/OAS
+        profile unchanged. *)
   ; capabilities : model_capabilities option
   ; match_prefixes : string list
   }

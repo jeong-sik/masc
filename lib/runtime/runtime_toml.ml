@@ -474,16 +474,13 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
    positive-float path. *)
 let temperature_min = 0.0
 let temperature_max = 2.0
+let probability_min = 0.0
+let probability_max = 1.0
 
-(* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
-   both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
-   [Ok None] (caller keeps its fallback). Wrong type or out of
-   [temperature_min, temperature_max] → parse error: reject at load rather than
-   send an out-of-range value the provider would reject at request time. *)
-let temperature_opt_field ~(path : string) (tbl : Otoml.t)
+let number_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
-  match Otoml.find_opt tbl Fun.id [ "temperature" ] with
+  match Otoml.find_opt tbl Fun.id [ key ] with
   | None -> Ok None
   | Some value ->
     let as_float =
@@ -493,19 +490,77 @@ let temperature_opt_field ~(path : string) (tbl : Otoml.t)
       | _ -> None
     in
     (match as_float with
-     | None ->
-       Error (error (path ^ ".temperature") "temperature must be a number (e.g. 1.0)")
-     | Some t when Float.is_finite t && t >= temperature_min && t <= temperature_max ->
-       Ok (Some t)
-     | Some t ->
+     | None -> Error (error (path ^ "." ^ key) (key ^ " must be a number"))
+     | Some value -> Ok (Some value))
+;;
+
+let bounded_number_opt_field
+      ~(path : string)
+      ~(key : string)
+      ~(lower : float)
+      ~(upper : float)
+      (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match number_opt_field ~path ~key tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when Float.is_finite value && value >= lower && value <= upper ->
+    Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf
+            "%s must be a finite number in [%g, %g]; got %g"
+            key
+            lower
+            upper
+            value))
+;;
+
+(* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
+   both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
+   [Ok None] (caller keeps its fallback). Wrong type or out of
+   [temperature_min, temperature_max] → parse error: reject at load rather than
+   send an out-of-range value the provider would reject at request time. *)
+let temperature_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key:"temperature"
+    ~lower:temperature_min
+    ~upper:temperature_max
+    tbl
+;;
+
+let probability_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key
+    ~lower:probability_min
+    ~upper:probability_max
+    tbl
+;;
+
+let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (int option, parse_error list) result
+  =
+  match typed_find "an integer" path tbl key Otoml.get_integer with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value > 0 -> Ok (Some value)
+  | Ok (Some value) ->
        Error
          (error
-            (path ^ ".temperature")
+            (path ^ "." ^ key)
             (Printf.sprintf
-               "temperature must be a finite number in [%g, %g]; got %g"
-               temperature_min
-               temperature_max
-               t)))
+               "%s must be a positive integer; got %d"
+               key
+               value))
 ;;
 
 let parse_model (id : string) (tbl : Otoml.t)
@@ -565,9 +620,15 @@ let parse_model (id : string) (tbl : Otoml.t)
            [])
     in
     let temperature_result = temperature_opt_field ~path tbl in
+    let top_p_result = probability_opt_field ~path ~key:"top-p" tbl in
+    let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
+    let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
     let ( let* ) = Result.bind in
     let* capabilities = capabilities_result in
     let* temperature = temperature_result in
+    let* top_p = top_p_result in
+    let* top_k = top_k_result in
+    let* min_p = min_p_result in
     Ok
       { Runtime_schema.id
       ; api_name
@@ -578,6 +639,9 @@ let parse_model (id : string) (tbl : Otoml.t)
       ; max_thinking_budget
       ; streaming
       ; temperature
+      ; top_p
+      ; top_k
+      ; min_p
       ; capabilities
       ; match_prefixes
       })

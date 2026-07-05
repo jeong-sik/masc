@@ -51,6 +51,9 @@ let qwen_model =
   ; max_thinking_budget = None
   ; streaming = true
   ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
   ; capabilities = None
   ; match_prefixes = []
   }
@@ -66,7 +69,7 @@ let runpod_binding =
   ; num_ctx = None
   }
 
-let runtime_toml_with_credentials ?(provider_extra = "") credentials =
+let runtime_toml_with_credentials ?(provider_extra = "") ?(model_extra = "") credentials =
   Printf.sprintf
     {|
 [runtime]
@@ -85,6 +88,7 @@ endpoint = "https://example-runpod.proxy.runpod.net/v1"
 api-name = "qwen"
 max-context = 160000
 tools-support = true
+%s
 
 [runpod_mtp.qwen]
 is-default = true
@@ -92,6 +96,7 @@ max-concurrent = 4
 |}
     provider_extra
     credentials
+    model_extra
 
 let check_parse_error errors expected_path expected_message =
   let matches =
@@ -166,6 +171,47 @@ let test_runtime_toml_threads_provider_connect_timeout () =
      | providers, bindings ->
        failf "expected one provider/binding, got %d/%d"
          (List.length providers)
+         (List.length bindings))
+
+let test_runtime_toml_threads_model_sampling_config () =
+  let content =
+    runtime_toml_with_credentials
+      ~model_extra:{|top-p = 0.91
+top-k = 42
+min-p = 0.07
+|}
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML model sampling config to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models, cfg.bindings with
+     | [ model ], [ binding ] ->
+       check (option (float 0.0001)) "model top_p" (Some 0.91)
+         model.Runtime_schema.top_p;
+       check (option int) "model top_k" (Some 42) model.Runtime_schema.top_k;
+       check (option (float 0.0001)) "model min_p" (Some 0.07)
+         model.Runtime_schema.min_p;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check (option (float 0.0001)) "provider config top_p" (Some 0.91)
+            provider_cfg.top_p;
+          check (option int) "provider config top_k" (Some 42)
+            provider_cfg.top_k;
+          check (option (float 0.0001)) "provider config min_p" (Some 0.07)
+            provider_cfg.min_p)
+     | models, bindings ->
+       failf "expected one model/binding, got %d/%d"
+         (List.length models)
          (List.length bindings))
 
 let test_runtime_toml_rejects_non_positive_provider_connect_timeout () =
@@ -1435,6 +1481,10 @@ let () =
             "runtime TOML threads provider connect timeout"
             `Quick
             test_runtime_toml_threads_provider_connect_timeout
+        ; test_case
+            "runtime TOML threads model sampling config"
+            `Quick
+            test_runtime_toml_threads_model_sampling_config
         ; test_case
             "runtime TOML rejects non-positive provider connect timeout"
             `Quick

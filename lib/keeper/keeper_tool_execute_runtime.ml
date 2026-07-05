@@ -305,12 +305,35 @@ let dispatch_error_deterministic_retry_fields error =
   | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
   | None -> []
 
+let pr_action_status_label = function
+  | Unix.WEXITED 0 -> "success"
+  | Unix.WEXITED _ -> "exit_nonzero"
+  | Unix.WSIGNALED _ -> "signaled"
+  | Unix.WSTOPPED _ -> "stopped"
+;;
+
+let record_pr_action_metric ~keeper_name ~risk_class ~status ir =
+  Command_descriptor.pr_action_events_of_ir ir
+  |> List.iter (fun (event : Command_descriptor.pr_action_event) ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ToolExecutePrActionTotal)
+      ~labels:
+        [ "keeper", keeper_name
+        ; "surface", Command_descriptor.pr_action_surface_to_string event.surface
+        ; "action", Command_descriptor.pr_action_to_string event.action
+        ; "status", pr_action_status_label status
+        ; "risk_class", Masc_exec.Shell_ir_risk.string_of_risk_class risk_class
+        ]
+      ())
+;;
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let path_probe_json ~cwd path = path_probe_json ~cwd (path_probe ~cwd path)
   let repo_root_public_prefix_from_cwd = repo_root_public_prefix_from_cwd
   let repo_cwd_relative_rewrite = repo_cwd_relative_rewrite
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
+  let record_pr_action_metric = record_pr_action_metric
   let dispatch_error_deterministic_retry_fields =
     dispatch_error_deterministic_retry_fields
 end
@@ -855,6 +878,12 @@ let handle_tool_execute_typed
                of live traffic observable. An offline scan of typed_hit=true
                / total gives the real exercise rate of the typed model vs the
                Generic escape hatch. *)
+            let risk_class = Masc_exec.Shell_ir_risk.risk_class envelope in
+            record_pr_action_metric
+              ~keeper_name:meta.name
+              ~risk_class
+              ~status:result.status
+              ir;
             let effects = Masc_exec.Exec_effect.extract ir in
             let effects_str = Format.asprintf "%a" Masc_exec.Exec_effect.pp_set effects in
             Log.Keeper.info
@@ -863,16 +892,14 @@ let handle_tool_execute_typed
               (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
               (Keeper_sandbox_exec_failure.status_label result.status)
               elapsed_ms
-              (Masc_exec.Shell_ir_risk.string_of_risk_class
-                 (Masc_exec.Shell_ir_risk.risk_class envelope))
+              (Masc_exec.Shell_ir_risk.string_of_risk_class risk_class)
               (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir)
               effects_str;
             Otel_spans.add_attrs
               ~attrs:[
                 ( "shell_ir.risk_class"
                 , `String
-                    (Masc_exec.Shell_ir_risk.string_of_risk_class
-                       (Masc_exec.Shell_ir_risk.risk_class envelope)) )
+                    (Masc_exec.Shell_ir_risk.string_of_risk_class risk_class) )
               ; ( "shell_ir.typed_hit"
                 , `Bool (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir) )
               ; "shell_ir.effects", `String effects_str

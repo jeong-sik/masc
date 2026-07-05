@@ -247,6 +247,95 @@
   border-style: dashed;
 }
 
+.set-control-ledger {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-well);
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+
+.set-control-ledger-h {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-mid);
+  display: flex;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  justify-content: space-between;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+
+.set-control-ledger-grid {
+  display: grid;
+  gap: 0;
+}
+
+.set-control-ledger-row {
+  align-items: start;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(88px, 0.7fr) minmax(140px, 1fr) minmax(180px, 1.25fr) minmax(180px, 1.25fr);
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.set-control-ledger-row:first-child {
+  border-top: 0;
+}
+
+.set-control-kind {
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  display: inline-flex;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  justify-content: center;
+  line-height: 1.2;
+  padding: 3px 6px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.set-control-ledger-row.live-write .set-control-kind {
+  border-color: color-mix(in oklab, var(--status-ok) 45%, transparent);
+  color: var(--status-ok);
+}
+
+.set-control-ledger-row.browser-local .set-control-kind {
+  border-color: color-mix(in oklab, var(--status-warn) 45%, transparent);
+  color: var(--status-warn);
+}
+
+.set-control-ledger-row.unsupported .set-control-kind {
+  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
+  color: var(--status-fail);
+}
+
+.set-control-label {
+  color: var(--text-primary);
+  font-size: var(--fs-12);
+  min-width: 0;
+}
+
+.set-control-source,
+.set-control-action {
+  color: var(--text-dim);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .set-control-ledger-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-surf .set-card-b {
   padding: 8px 28px 40px;
   max-width: 760px;

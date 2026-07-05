@@ -42,7 +42,11 @@ and dispatch_result =
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
-  ; dispatch : Schedule_domain.schedule_request -> (Yojson.Safe.t, string) result
+  ; dispatch :
+      Workspace_utils.config ->
+      now:float ->
+      Schedule_domain.schedule_request ->
+      (Yojson.Safe.t, string) result
   }
 
 type runner_error =

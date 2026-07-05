@@ -120,22 +120,25 @@ Legacy compatibility names are not TOML preemption keys. For example,
 only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
 canonical process env var is already set.
 
-**Sections** (73 knobs total):
+**Sections** (85 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
 | `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
-| `[autonomous]` | 2 | `fairness_cooldown_sec`, `max_idle_turns` |
-| `[reactive]` | 1 | `max_idle_turns` |
-| `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
-| `[turn]` | 19 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
-| `[proactive]` | 1 | `min_interval_sec` |
+| `[autonomous]` | 3 | `enabled`, `fairness_cooldown_sec`, `max_idle_turns` |
+| `[reactive]` | 2 | `enabled`, `max_idle_turns` |
+| `[heartbeat]` | 8 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_wakeup_max` |
+| `[health]` | 1 | `durable_queue_stale_sec` |
+| `[wire_capture]` | 1 | `enabled` |
+| `[proactive]` | 4 | `enabled`, `min_interval_sec`, `noop_backoff_max_shift`, `idle_decay_max_periods` |
+| `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `chat_waiting_cap`, `temperature` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
 | `[budget]` | 1 | `daily_usd` |
 | `[metrics]` | 2 | `max_bytes`, `max_rotated` |
 | `[memory]` | 6 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
 | `[alert]` | 17 | `slack_enabled`, `slack_dm_user_id`, `github_enabled`, `github_min_score` |
+| `[web_search]` | 8 | `provider`, `fallbacks`, `timeout_sec`, `rate_limit_max_calls` |
 | `[debug]` | 1 | `enabled` |
 
 **Example** (`<active config root>/runtime.toml`):
@@ -146,9 +149,10 @@ canonical process env var is already set.
 [reactive]
 
 [heartbeat]
-board_generic_wakeup_limit = 3 # caps non-explicit board_activity fanout; explicit mentions bypass this cap
-board_debounce_sec = 30
 board_wakeup_max = 4 # caps total non-explicit board wakeups after reason prioritization
+
+[health]
+durable_queue_stale_sec = 0.0 # default: any durable backlog degrades full health; raise to tolerate fresh handoff
 
 [bootstrap]
 max_active_keepers = 12
@@ -668,6 +672,7 @@ MASC_KEEPER_DEAD_TTL_SEC
 MASC_KEEPER_DEBUG
 MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC
 MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD
+MASC_KEEPER_DURABLE_QUEUE_STALE_SEC
 MASC_KEEPER_GRPC_MAX_RECONNECT
 MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC
 MASC_KEEPER_HEARTBEAT_INTERVAL_SEC
@@ -684,7 +689,9 @@ MASC_KEEPER_METRICS_MAX_ROTATED
 MASC_KEEPER_OAS_MAX_TURNS_PER_CALL
 MASC_KEEPER_OAS_TIMEOUT_SEC
 MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC
+MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS
 MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS
+MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT
 MASC_KEEPER_REDUCER_CAP_TOKENS
 MASC_KEEPER_REDUCER_KEEP_RECENT
 MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES
@@ -697,6 +704,7 @@ MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S
 MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S
 MASC_KEEPER_SUPERVISOR_MAX_RESTARTS
 MASC_KEEPER_SUPERVISOR_SWEEP_SEC
+MASC_KEEPER_TURN_CHAT_WAITING_CAP
 MASC_KEEPER_TURN_TIMEOUT_SEC
 MASC_KEEPER_WORK_AS_HEARTBEAT
 ```

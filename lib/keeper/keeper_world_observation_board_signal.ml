@@ -166,43 +166,19 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
           , short_preview ~max_len:60 latest.content ))
 ;;
 
-type stigmergy_match_result = { overall_score : int }
-
-let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.board_signal)
-  : stigmergy_match_result
-  =
-  let signal_text = String.lowercase_ascii (text signal) in
-  let goal_keywords =
-    [ meta.goal ]
-    |> List.filter (fun s -> String.trim s <> "")
-    |> List.concat_map (fun g ->
-      String.split_on_char ' ' (String.lowercase_ascii g)
-      |> List.map String.trim
-      |> List.filter (fun s -> String.length s > 3))
-    |> List.sort_uniq String.compare
-  in
-  let score =
-    List.fold_left
-      (fun acc kw -> if String_util.contains_substring signal_text kw then acc + 5 else acc)
-      0
-      goal_keywords
-  in
-  { overall_score = min score 50 }
-;;
-
 (** Why a keeper woke for a board signal. Closed set replacing the prior
     [string option] producer/consumer contract (RFC-0020): the matchers in
     {!wake_reason} are the only producers, so a reason no matcher emits — e.g.
     the previously dead ["board_activity"] generic bucket the consumer used to
     match — is now unrepresentable rather than a string the consumer guesses
-    at. [None] stays an [option] at the call site: it means the relevance
-    pipeline examined the signal and found nothing for this keeper. *)
+    at. [None] stays an [option] at the call site: it means the structural
+    reactive pipeline examined the signal and found no deterministic address for
+    this keeper. Semantic relatedness is intentionally not represented here: it
+    requires an LLM/Judge attention boundary, not goal-keyword matching in the
+    board publish hook. *)
 type wake_reason =
   | Explicit_mention
       (** The signal mentions one of the keeper's identity targets. *)
-  | Stigmergy of { score : int }
-      (** The signal text overlaps the keeper's goal keywords; [score] is the
-          match strength from {!stigmergy_match}. *)
   | Thread_reply_after_self_comment
       (** A new external comment arrived on a post the keeper had commented on. *)
   | Reaction_after_self_activity
@@ -211,7 +187,6 @@ type wake_reason =
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
-  | Stigmergy { score } -> "stigmergy: score=" ^ string_of_int score
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
 ;;
@@ -254,16 +229,9 @@ let wake_reason
       if reaction_touches_self_activity ~self_ids ~signal
       then Some Reaction_after_self_activity
       else None
-    | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added ->
-      let stigmergy = stigmergy_match ~meta ~signal in
-      if stigmergy.overall_score > 0
-      then Some (Stigmergy { score = stigmergy.overall_score })
-      else (
-        match signal.kind with
-        | Board_dispatch.Board_comment_added ->
-          (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-           | `New_external _ -> Some Thread_reply_after_self_comment
-           | `Never | `No_new_external -> None)
-        | Board_dispatch.Board_post_created
-        | Board_dispatch.Board_reaction_changed _ -> None))
+    | Board_dispatch.Board_comment_added ->
+      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+       | `New_external _ -> Some Thread_reply_after_self_comment
+       | `Never | `No_new_external -> None)
+    | Board_dispatch.Board_post_created -> None)
 ;;

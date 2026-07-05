@@ -218,10 +218,63 @@ const NON_UPCOMING_WAKE_STATUS: ReadonlySet<string> = new Set([
   'terminal',
   'expired',
   'cancelled',
+  'canceled',
   'succeeded',
   'failed',
   'rejected',
 ])
+
+function payloadSupportBlocksWake(request: DashboardScheduledAutomationRequest): boolean {
+  return request.payload_support === 'unsupported' || request.payload_support === 'unknown'
+}
+
+function canProjectUpcomingWake(request: DashboardScheduledAutomationRequest): boolean {
+  if (payloadSupportBlocksWake(request)) return false
+  const readiness = normalized(request.execution_readiness)
+  const status = normalized(effectiveStatus(request))
+  if (readiness && NON_UPCOMING_WAKE_READINESS.has(readiness)) return false
+  if (NON_UPCOMING_WAKE_STATUS.has(status)) return false
+  return true
+}
+
+function payloadBlockedScheduleIds(
+  requests: readonly DashboardScheduledAutomationRequest[],
+): ReadonlySet<string> {
+  const blockedIds = new Set<string>()
+  for (const request of requests) {
+    if (payloadSupportBlocksWake(request)) blockedIds.add(request.schedule_id)
+  }
+  return blockedIds
+}
+
+function supportedPayloadKindSet(
+  automation: DashboardScheduledAutomation,
+): ReadonlySet<string> | null {
+  const kinds = automation.payload_support?.supported_kinds
+  if (!kinds) return null
+  return new Set(kinds.map(kind => kind.trim()).filter(Boolean))
+}
+
+function durableSignalPayloadBlocksWake(
+  signal: DashboardScheduledAutomationSignal,
+  supportedKinds: ReadonlySet<string> | null,
+): boolean {
+  if (!supportedKinds) return false
+  const kind = signal.payload_kind?.trim()
+  return !kind || !supportedKinds.has(kind)
+}
+
+function selectDurableWakeSignals(
+  automation: DashboardScheduledAutomation,
+): DashboardScheduledAutomationSignal[] {
+  const blockedIds = payloadBlockedScheduleIds(automation.requests ?? [])
+  const supportedKinds = supportedPayloadKindSet(automation)
+  return [...(automation.signals ?? [])]
+    .filter(signal =>
+      !blockedIds.has(signal.schedule_id)
+      && !durableSignalPayloadBlocksWake(signal, supportedKinds))
+    .sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+}
 
 export function selectWakeSignals(
   automation: DashboardScheduledAutomation | null | undefined,
@@ -229,13 +282,12 @@ export function selectWakeSignals(
   if (!automation) return []
   const signals: WakeSignal[] = []
   for (const request of automation.requests ?? []) {
+    if (!canProjectUpcomingWake(request)) continue
     const at = request.next_due_at ?? request.due_at ?? null
     // No concrete wake time → no signal to surface (parse, don't validate).
     if (at == null) continue
     const readiness = request.execution_readiness ?? null
     const status = request.effective_status ?? request.status
-    if (readiness != null && NON_UPCOMING_WAKE_READINESS.has(readiness)) continue
-    if (NON_UPCOMING_WAKE_STATUS.has(status)) continue
     signals.push({
       id: request.schedule_id,
       at,
@@ -1382,7 +1434,8 @@ function SchedulePrototypeSurface({
   const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
   const filtered = rows.filter(request => schTabMatches(tabDef, request))
   // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
-  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const durableSignals = selectDurableWakeSignals(automation)
+  const rawDurableSignalCount = automation.signals?.length ?? 0
   const selected = selectedScheduleId
     ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
@@ -1430,7 +1483,7 @@ function SchedulePrototypeSurface({
       <section class="sch-signals">
         <div class="ov-card-h"><h3>wake signal 피드 · schedule_runner.tick</h3></div>
         ${durableSignals.length === 0
-          ? html`<div class="sch-empty" data-stub="no durable runner signals">durable wake signal 없음</div>`
+          ? html`<div class="sch-empty" data-stub="no durable runner signals">${rawDurableSignalCount > 0 ? '표시 가능한 durable wake signal 없음' : 'durable wake signal 없음'}</div>`
           : html`
               <div class="sch-sig-list">
                 ${durableSignals.map(signal => {
@@ -1492,10 +1545,10 @@ export function ScheduleAside({
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
     normalized(effectiveStatus(request))
-  const unsupportedPayloads = requests.filter(isUnsupportedPayloadRequest)
-  const failed = requests.filter(request => asideStatus(request) === 'failed' && !isUnsupportedPayloadRequest(request))
-  const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)))
-  const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)))
+  const payloadBlocked = requests.filter(payloadSupportBlocksWake)
+  const failed = requests.filter(request => asideStatus(request) === 'failed' && !payloadSupportBlocksWake(request))
+  const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
+  const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
   const recent = requests
     .filter(request => SCHEDULE_ASIDE_TERMINAL.has(asideStatus(request)))
     .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
@@ -1510,22 +1563,26 @@ export function ScheduleAside({
           <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning > 0 ? 'volt' : ''}`}>${sum.dueRunning}</b> due·실행</span>
           <span class="wka-pulse-i"><b class=${`mono ${sum.pending > 0 ? 'warn' : ''}`}>${sum.pending}</b> 승인대기</span>
         </div>
-        ${unsupportedPayloads.length === 0 && failed.length === 0
+        ${payloadBlocked.length === 0 && failed.length === 0
           ? html`<div class="wka-calm mono">실패한 실행 없음</div>`
           : html`
               <div class="wka-list">
-                ${unsupportedPayloads.map(request => html`
-                  <button
-                    type="button"
-                    class="wka-flag st-bad"
-                    data-schedule-aside-open=${request.schedule_id}
-                    onClick=${() => { onOpen(request.schedule_id) }}
-                  >
-                    <span class="wka-flag-tag bad">payload</span>
-                    <span class="wka-flag-title">${scheduleAsideSummary(request)}</span>
-                    <span class="wka-flag-reason mono">${request.payload_kind ?? 'payload_kind 없음'}</span>
-                  </button>
-                `)}
+                ${payloadBlocked.map(request => {
+                  const support = request.payload_support === 'unknown' ? 'unknown' : 'unsupported'
+                  const tone = support === 'unknown' ? 'warn' : 'bad'
+                  return html`
+                    <button
+                      type="button"
+                      class=${`wka-flag st-${tone}`}
+                      data-schedule-aside-open=${request.schedule_id}
+                      onClick=${() => { onOpen(request.schedule_id) }}
+                    >
+                      <span class=${`wka-flag-tag ${tone}`}>payload</span>
+                      <span class="wka-flag-title">${scheduleAsideSummary(request)}</span>
+                      <span class="wka-flag-reason mono">${support} · ${request.payload_kind ?? 'payload_kind 없음'}</span>
+                    </button>
+                  `
+                })}
                 ${failed.map(request => html`
                   <button
                     type="button"
@@ -1640,8 +1697,11 @@ export function ScheduledAutomationPanel({
   const rows = automation.requests ?? []
   const wakeSignals = selectWakeSignals(automation)
   const filteredRows = rows.filter(request => filterMatches(activeFilter, request))
-  const wakeRows = [...rows].sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
-  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const wakeRows = rows
+    .filter(canProjectUpcomingWake)
+    .sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
+  const durableSignals = selectDurableWakeSignals(automation)
+  const rawDurableSignalCount = automation.signals?.length ?? 0
   const hasDurableSignals = durableSignals.length > 0
   const selectedRequest =
     rows.find(request => request.schedule_id === selectedScheduleId)
@@ -1784,7 +1844,9 @@ export function ScheduledAutomationPanel({
                   <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
                     ${hasDurableSignals
                       ? `출처 ${automation.signal_source ?? 'schedule_runner_signals'} · ${durableSignals.length.toLocaleString()} / ${(automation.signal_count ?? durableSignals.length).toLocaleString()} signals 표시`
-                      : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
+                      : rawDurableSignalCount > 0
+                        ? '표시 가능한 durable runner signal이 없어 request rows에서 파생했습니다.'
+                        : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
                   </div>
                 </div>
                 <ul class="grid gap-2">

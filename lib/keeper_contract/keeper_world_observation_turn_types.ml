@@ -29,6 +29,7 @@ type keeper_cycle_channel =
 type event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Scheduled_automation_stimulus
   | Connector_attention_stimulus
       (** RFC-connector-ambient-attention-wake P1: an ambient connector message
           recorded as Keeper_external_attention. Edge-triggered (dequeued once),
@@ -94,6 +95,7 @@ let turn_reason_to_string = function
 let turn_reason_of_event_queue_trigger = function
   | Bootstrap_stimulus -> Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus -> No_progress_recovery_stimulus_pending
+  | Scheduled_automation_stimulus -> Scheduled_automation_due
   | Connector_attention_stimulus -> Connector_attention_pending
 ;;
 

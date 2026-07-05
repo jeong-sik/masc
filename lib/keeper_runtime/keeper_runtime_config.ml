@@ -31,11 +31,15 @@ let key_to_env =
     "heartbeat.jitter_factor",          "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR";
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
+    (* [health] *)
+    "health.durable_queue_stale_sec",   "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC";
     (* [wire_capture] *)
     "wire_capture.enabled",             "MASC_KEEPER_WIRE_CAPTURE";
     (* [proactive] *)
     "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
+    "proactive.noop_backoff_max_shift", "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT";
+    "proactive.idle_decay_max_periods", "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS";
     (* [turn] *)
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";
@@ -45,6 +49,7 @@ let key_to_env =
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
+    "turn.chat_waiting_cap",          "MASC_KEEPER_TURN_CHAT_WAITING_CAP";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
     "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
     "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";

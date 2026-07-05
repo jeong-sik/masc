@@ -1025,11 +1025,11 @@ describe('RuntimeLensSection', () => {
       projection: {
         status: 'ready',
         configured: true,
-        root: '/Users/dancer/me/.masc/secrets/sangsu',
+        root: '/mock/workspace/.masc/secrets/sangsu',
         source: 'workspace_masc_secrets',
         effective_roots: [
           {
-            root: '/Users/dancer/me/.masc/secrets/base',
+            root: '/mock/workspace/.masc/secrets/base',
             source: 'workspace_masc_secrets',
             status: 'ready',
             configured: true,
@@ -1037,7 +1037,7 @@ describe('RuntimeLensSection', () => {
             file_count: 0,
           },
           {
-            root: '/Users/dancer/me/.masc/secrets/sangsu',
+            root: '/mock/workspace/.masc/secrets/sangsu',
             source: 'workspace_masc_secrets',
             status: 'ready',
             configured: true,
@@ -1050,7 +1050,7 @@ describe('RuntimeLensSection', () => {
         env_names: ['GH_TOKEN'],
         file_mounts: [
           {
-            host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+            host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
             container_path: '/home/keeper/.ssh/id_ed25519',
           },
         ],
@@ -1066,7 +1066,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('shared -> keeper')).toBeInTheDocument()
     expect(screen.getAllByText('shared').length).toBeGreaterThan(0)
     expect(screen.getAllByText('keeper').length).toBeGreaterThan(0)
-    expect(screen.getByText('/Users/dancer/me/.masc/secrets/base')).toBeInTheDocument()
+    expect(screen.getByText('/mock/workspace/.masc/secrets/base')).toBeInTheDocument()
     expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()
@@ -1076,11 +1076,11 @@ describe('RuntimeLensSection', () => {
     const nextProjection = {
       status: 'ready',
       configured: true,
-      root: '/Users/dancer/me/.masc/secrets/sangsu',
+      root: '/mock/workspace/.masc/secrets/sangsu',
       source: 'workspace_masc_secrets',
       effective_roots: [
         {
-          root: '/Users/dancer/me/.masc/secrets/base',
+          root: '/mock/workspace/.masc/secrets/base',
           source: 'workspace_masc_secrets',
           status: 'absent',
           configured: false,
@@ -1088,7 +1088,7 @@ describe('RuntimeLensSection', () => {
           file_count: 0,
         },
         {
-          root: '/Users/dancer/me/.masc/secrets/sangsu',
+          root: '/mock/workspace/.masc/secrets/sangsu',
           source: 'workspace_masc_secrets',
           status: 'ready',
           configured: true,
@@ -1144,11 +1144,11 @@ describe('RuntimeLensSection', () => {
     const nextProjection = {
       status: 'ready',
       configured: true,
-      root: '/Users/dancer/me/.masc/secrets/sangsu',
+      root: '/mock/workspace/.masc/secrets/sangsu',
       source: 'workspace_masc_secrets',
       effective_roots: [
         {
-          root: '/Users/dancer/me/.masc/secrets/base',
+          root: '/mock/workspace/.masc/secrets/base',
           source: 'workspace_masc_secrets',
           status: 'absent',
           configured: false,
@@ -1156,7 +1156,7 @@ describe('RuntimeLensSection', () => {
           file_count: 0,
         },
         {
-          root: '/Users/dancer/me/.masc/secrets/sangsu',
+          root: '/mock/workspace/.masc/secrets/sangsu',
           source: 'workspace_masc_secrets',
           status: 'ready',
           configured: true,
@@ -1169,7 +1169,7 @@ describe('RuntimeLensSection', () => {
       env_names: [],
       file_mounts: [
         {
-          host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+          host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
           container_path: '/home/keeper/.ssh/id_ed25519',
         },
       ],

@@ -93,7 +93,7 @@ const kcfTab = signal<KcfTabId>('identity')
 const goalOptionsResource = createAsyncResource<GoalTreeNode[]>()
 const goalOptionsState = goalOptionsResource.state
 // Client-only search over the goal catalogue (title/id substring). The catalogue
-// runs 70+ entries, so the goals tab filters the rendered list without a fetch.
+// can be large, so the goals tab filters the rendered list without a fetch.
 const goalSearchQuery = signal('')
 // Live tool registry (GET /api/v1/dashboard/tools) — the per-tool policy grid is
 // derived from this, never a hardcoded catalogue, so a tool added to the runtime
@@ -325,6 +325,22 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     handoff_threshold: c.handoff.threshold,
     handoff_cooldown_sec: c.handoff.cooldown_sec,
   }
+}
+
+export function keeperRuntimeConfigWriteUnsupportedReason(c: KeeperConfig): string | null {
+  const kind = c.sources.default_source_kind ?? 'unknown'
+  if (kind !== 'toml') {
+    return `runtime 설정 저장은 TOML-backed keeper manifest에서만 지원됩니다. 현재 기본 소스: ${kind}.`
+  }
+  const manifestPath = c.sources.default_manifest_path?.trim()
+  if (!manifestPath) {
+    return 'runtime 설정 저장은 기본 매니페스트 경로가 확인될 때만 지원됩니다.'
+  }
+  return null
+}
+
+export function keeperRuntimeConfigCanWrite(c: KeeperConfig): boolean {
+  return keeperRuntimeConfigWriteUnsupportedReason(c) === null
 }
 
 export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
@@ -1125,16 +1141,17 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const c = state.data
   const isEditing = editMode.value
   const isSaving = saving.value
-  const runtimeCanEdit = c.sources.default_source_kind === 'toml' && Boolean(c.sources.default_manifest_path)
+  const runtimeWriteUnsupportedReason = keeperRuntimeConfigWriteUnsupportedReason(c)
+  const runtimeCanEdit = runtimeWriteUnsupportedReason === null
 
   // Initialize runtime draft if not yet set
-  if (!runtimeDraft.value) {
+  if (!runtimeDraft.value && c.name === keeperName) {
     runtimeDraft.value = initRuntimeDraftFromConfig(c)
   }
   const rd = runtimeDraft.value
   const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
 
-  const runtimeHasChanges = rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
+  const runtimeHasChanges = runtimeCanEdit && rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
   const maxContextOverrideTokens = c.limits.max_context_override_tokens ?? undefined
   const runtimeOptions = rd
     ? dedupeStrings([
@@ -1150,9 +1167,17 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const selectedRuntimeCatalogRows = selectedRuntimeCatalog
     ? runtimeCatalogSpecRows(selectedRuntimeCatalog)
     : runtimeCatalogStateRows(runtimeCatalog, selectedRuntimeId, selectedRuntimeCatalog)
+  const runtimeWriteUnsupportedNotice = runtimeWriteUnsupportedReason ? html`
+    <div data-testid="keeper-runtime-write-unsupported" class="mb-3">
+      <${Callout}
+        title="런타임 설정 읽기 전용"
+        body=${`${runtimeWriteUnsupportedReason} runtime.toml [runtime.assignments]와 keeper manifest 출처가 확인되면 이 패널의 runtime 설정 쓰기가 활성화됩니다.`}
+      />
+    </div>
+  ` : null
 
   async function saveRuntimeConfig() {
-    if (!rd) return
+    if (!rd || !runtimeCanEdit) return
     const payload = buildRuntimePayload(rd, c)
     if (Object.keys(payload).length === 0) return
     runtimeSaving.value = true
@@ -1399,6 +1424,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   // runtime ◷ — runtime selection + execution profile (read-only introspection + runtime_id picker)
   const runtimeTab = html`
+    ${runtimeWriteUnsupportedNotice}
     <${KcfSec} title="Runtime 선택" desc=${runtimeSelectionSummary(c)}>
       ${rd && runtimeCanEdit ? html`
         <${InlineSelectRow}
@@ -1430,14 +1456,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
         ['runtime timeout', perProviderTimeoutLabel(c.execution), true],
       ]} />
-      ${rd ? html`
+      ${rd && runtimeCanEdit ? html`
         <${InlineNumberRow} label="컨텍스트 오버라이드" value=${rd.max_context_override}
           onChange=${(v: number) => updateRuntimeDraft('max_context_override', normalizeMaxContextOverrideDraft(v, c.limits.max_context_override_tokens))}
           min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
           dirty=${dirtyFlags.max_context_override} />
-      ` : c.max_context_override != null ? html`
-        <${ConfigRow} label="컨텍스트 오버라이드" value=${formatTokens(c.max_context_override)} />
-      ` : null}
+      ` : html`
+        <${ConfigRow} label="컨텍스트 오버라이드" value=${c.max_context_override != null ? formatTokens(c.max_context_override) : MISSING_DATA_DASH} />
+      `}
       <div style="margin-top:14px;">
         <div class="kcf-tf-h"><label>런타임 후보</label></div>
         <${RuntimeList} runtimes=${c.execution.models} />
@@ -1447,11 +1473,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   // policy ⚖ — verify gate + compaction + proactive + handoff + tool policy
   const policyTab = html`
+    ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
 
     <${SectionHeader} title="컴팩션" />
-    ${rd ? html`
+    ${rd && runtimeCanEdit ? html`
       <${InlineSelectRow}
         label="compaction_profile"
         value=${rd.compaction_profile}
@@ -1485,7 +1512,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     `}
 
     <${SectionHeader} title="프로액티브" />
-    ${rd ? html`
+    ${rd && runtimeCanEdit ? html`
       <${SetRow} label="자동 부팅" hint="서버 시작 시 keeper 등록" dirty=${dirtyFlags.autoboot_enabled}>
         <${SetToggle} ariaLabel="자동 부팅" on=${rd.autoboot_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('autoboot_enabled', v)} />
@@ -1510,7 +1537,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     `}
 
     <${SectionHeader} title="핸드오프" />
-    ${rd ? html`
+    ${rd && runtimeCanEdit ? html`
       <${SetRow} label="자동" hint="컨텍스트 임계 도달 시 자동 인계" dirty=${dirtyFlags.auto_handoff}>
         <${SetToggle} ariaLabel="자동 핸드오프" on=${rd.auto_handoff}
           onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)} />
@@ -1640,8 +1667,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   // access ⚿ — sandbox / network / allowed_paths + mention targets + bound namespaces
   const accessTab = html`
+    ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="실행 범위 · 샌드박스" />
-    ${rd ? html`
+    ${rd && runtimeCanEdit ? html`
       <${InlineSelectRow}
         label="sandbox_profile"
         value=${rd.sandbox_profile}
@@ -1704,7 +1732,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ` : null}
 
     <${SectionHeader} title="멘션 · 네임스페이스" />
-    ${rd ? html`
+    ${rd && runtimeCanEdit ? html`
       <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.mention_targets ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
         <div class="flex items-center justify-between mb-2">
           <span class="text-sm text-[var(--color-fg-secondary)]">mention_targets</span>
@@ -1732,13 +1760,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
   const filteredGoalOptions = filterGoalOptions(goalOptions, goalSearchQuery.value)
   const goalsTab = html`
+    ${runtimeWriteUnsupportedNotice}
     <${KcfSec}
       title="배정 목표"
-      desc="goal store 카탈로그에서 이 keeper가 소유할 goal을 고릅니다."
+      desc=${runtimeCanEdit ? 'goal store 카탈로그에서 이 keeper가 소유할 goal을 고릅니다.' : '현재 배정된 goal-store 연결을 읽기 전용으로 표시합니다.'}
       right=${html`<span class="kcf-goals-count mono">active_goal_ids · ${selectedActiveGoalIds.length} 배정</span>`}
     >
       <div class="kcf-goals">
-        ${goalOptions.length > 0 && rd ? html`
+        ${goalOptions.length > 0 && rd && runtimeCanEdit ? html`
           <div class="kcf-goals-bar">
             <div class="kcf-search">
               <span class="kcf-search-ic" aria-hidden="true">◌</span>
@@ -1757,7 +1786,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
         ` : goalState.status === 'error' ? html`
           <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
-        ` : goalOptions.length > 0 && rd ? (
+        ` : goalOptions.length > 0 && rd && runtimeCanEdit ? (
           filteredGoalOptions.length > 0 ? html`
           <div class="kcf-goals-list">
             ${filteredGoalOptions.map((goal) => {

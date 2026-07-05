@@ -36,6 +36,59 @@ let () =
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
   assert (String.equal (payload_kind_label No_progress_recovery) "no_progress_recovery");
 
+  let reaction_payload () =
+    Board_signal
+      { kind =
+          Reaction_changed
+            { target_type = Reaction_comment
+            ; target_id = "c1"
+            ; user_id = "reactor"
+            ; emoji = "👏"
+            ; reacted = true
+            }
+      ; author = "reactor"
+      ; title = "parent"
+      ; content = "body"
+      ; hearth = Some "research"
+      ; updated_at = Some 5.0
+      }
+  in
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "p-reaction"
+          ; urgency = Normal
+          ; arrived_at = 5.0
+          ; payload = reaction_payload ()
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Board_signal
+          { kind =
+              Reaction_changed
+                { target_type = Reaction_comment
+                ; target_id
+                ; user_id
+                ; emoji
+                ; reacted
+                }
+          ; author
+          ; hearth = Some hearth
+          ; updated_at = Some updated_at
+          ; _
+          } ->
+        assert (String.equal s.post_id "p-reaction");
+        assert (String.equal target_id "c1");
+        assert (String.equal user_id "reactor");
+        assert (String.equal emoji "👏");
+        assert reacted;
+        assert (String.equal author "reactor");
+        assert (String.equal hearth "research");
+        assert (Float.equal updated_at 5.0)
+      | _ -> Alcotest.fail "reaction board stimulus round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("reaction board stimulus round-trip failed: " ^ msg));
+
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
     Fusion_completed

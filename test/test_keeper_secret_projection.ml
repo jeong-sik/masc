@@ -309,7 +309,7 @@ let test_local_env_missing_secret_dir_is_scrubbed () =
     [| "PATH=/usr/bin"
      ; "GH_TOKEN=ambient-gh"
      ; "GITHUB_TOKEN=ambient-github"
-     ; "GH_CONFIG_DIR=/Users/operator/.config/gh"
+     ; "GH_CONFIG_DIR=/home/operator/.config/gh"
      ; "SSH_AUTH_SOCK=/tmp/operator-agent.sock"
      ; "GIT_TERMINAL_PROMPT=1"
     |]
@@ -329,7 +329,7 @@ let test_local_env_missing_secret_dir_is_scrubbed () =
     Alcotest.(check (option string)) "ambient github token stripped" None
       (env_value "GITHUB_TOKEN" env);
     Alcotest.(check bool) "ambient gh config not inherited" true
-      (env_value "GH_CONFIG_DIR" env <> Some "/Users/operator/.config/gh");
+      (env_value "GH_CONFIG_DIR" env <> Some "/home/operator/.config/gh");
     if Sys.file_exists "/var/empty" && Sys.is_directory "/var/empty"
     then
       Alcotest.(check (option string))
@@ -358,11 +358,11 @@ let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
   write_file (Filename.concat files_root "ssh/id_ed25519") "PRIVATE KEY";
   let host_env =
     [| "PATH=/usr/bin"
-     ; "HOME=/Users/operator"
+     ; "HOME=/home/operator"
      ; "FOO=bar"
      ; "GH_TOKEN=ambient-gh"
      ; "GITHUB_TOKEN=ambient-github"
-     ; "GH_CONFIG_DIR=/Users/operator/.config/gh"
+     ; "GH_CONFIG_DIR=/home/operator/.config/gh"
      ; "SSH_AUTH_SOCK=/tmp/operator-agent.sock"
      ; "GIT_TERMINAL_PROMPT=1"
     |]
@@ -388,7 +388,7 @@ let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
     Alcotest.(check bool)
       "ambient gh config not inherited"
       true
-      (env_value "GH_CONFIG_DIR" env <> Some "/Users/operator/.config/gh");
+      (env_value "GH_CONFIG_DIR" env <> Some "/home/operator/.config/gh");
     if Sys.file_exists "/var/empty" && Sys.is_directory "/var/empty"
     then
       Alcotest.(check (option string))
@@ -423,7 +423,7 @@ let test_local_env_inherits_base_secret_and_sets_git_config_global () =
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let root = base_secret_root_default ~base in
   write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") "base-token\n";
-  let host_env = [| "PATH=/usr/bin"; "HOME=/Users/operator" |] in
+  let host_env = [| "PATH=/usr/bin"; "HOME=/home/operator" |] in
   match
     Keeper_secret_projection.local_env_for_keeper
       ~host_env

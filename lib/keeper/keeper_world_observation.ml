@@ -30,8 +30,25 @@ type observation_provenance =
          id); defaults to the quarantine side — see {!should_quarantine} *)
 [@@deriving show, eq]
 
+type board_reaction_event =
+  { target_type : Board.reaction_target_type
+  ; target_id : string
+  ; user_id : string
+  ; emoji : string
+  ; reacted : bool
+  }
+
+type pending_board_event_kind =
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed of board_reaction_event
+  | Fusion_completed
+  | Bg_completed
+  | External_attention
+
 type pending_board_event =
-  { post_id : string
+  { event_kind : pending_board_event_kind
+  ; post_id : string
   ; author : string
   ; title : string
   ; preview : string
@@ -375,6 +392,26 @@ let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
 
+let board_reaction_event_of_dispatch
+      (reaction : Board_dispatch.board_reaction_change)
+  : board_reaction_event
+  =
+  { target_type = reaction.target_type
+  ; target_id = reaction.target_id
+  ; user_id = reaction.user_id
+  ; emoji = reaction.emoji
+  ; reacted = reaction.reacted
+  }
+;;
+
+let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
+  match signal.kind with
+  | Board_dispatch.Board_post_created -> Board_post_created
+  | Board_dispatch.Board_comment_added -> Board_comment_added
+  | Board_dispatch.Board_reaction_changed reaction ->
+    Board_reaction_changed (board_reaction_event_of_dispatch reaction)
+;;
+
 let pending_board_event_of_board_signal
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -404,6 +441,7 @@ let pending_board_event_of_board_signal
       , Board.Human_post
       , arrived_at )
   in
+  let event_kind = pending_board_event_kind_of_signal signal in
   let self_commented, new_external_since, latest_external_author, latest_external_preview =
     match signal.kind with
     | Board_dispatch.Board_post_created -> false, 0, None, None
@@ -414,8 +452,13 @@ let pending_board_event_of_board_signal
          true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
        | `Never ->
          false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content))
+    | Board_dispatch.Board_reaction_changed _ ->
+      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+       | `Never -> false, 0, None, None
+       | `No_new_external | `New_external _ -> true, 0, None, None)
   in
-  { post_id = signal.post_id
+  { event_kind
+  ; post_id = signal.post_id
   ; author = signal.author
   ; title
   ; preview
@@ -462,7 +505,8 @@ let pending_board_event_of_fusion_completion
     then Printf.sprintf "Fusion deliberation complete (run %s)" fc.run_id
     else Printf.sprintf "Fusion deliberation failed (run %s)" fc.run_id
   in
-  { post_id
+  { event_kind = Fusion_completed
+  ; post_id
   ; author = meta.name
   ; title
   ; preview = short_preview ~max_len:fusion_result_preview_max_len fc.resolved_answer
@@ -505,7 +549,8 @@ let pending_board_event_of_bg_job_completion
     | Keeper_event_queue.Bg_failed _ ->
       Printf.sprintf "Background %s failed (run %s)" kind c.bg_run_id
   in
-  { post_id
+  { event_kind = Bg_completed
+  ; post_id
   ; author = meta.name
   ; title
   ; preview =
@@ -551,7 +596,8 @@ let pending_board_event_of_external_attention
     | Keeper_external_attention.System ->
       false, []
   in
-  { post_id = "connector-attention:" ^ item.event_id
+  { event_kind = External_attention
+  ; post_id = "connector-attention:" ^ item.event_id
   ; author = actor
   ; title =
       Printf.sprintf
@@ -689,7 +735,8 @@ let collect_board_events_with_cursor_policy
              consume_posts
                
                (Some next_cursor)
-               ({ post_id
+               ({ event_kind = Board_post_created
+                ; post_id
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
                 ; preview = short_preview ~max_len:80 p.content
@@ -724,7 +771,8 @@ let collect_board_events_with_cursor_policy
              consume_posts
                
                (Some next_cursor)
-               ({ post_id
+               ({ event_kind = Board_post_created
+                ; post_id
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
                 ; preview = short_preview ~max_len:80 p.content

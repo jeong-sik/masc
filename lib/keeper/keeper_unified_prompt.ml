@@ -135,9 +135,40 @@ type board_line =
   | Trusted_line of string
   | Observation_line of string
 
+let board_event_kind_label = function
+  | Keeper_world_observation.Board_post_created -> "post_created"
+  | Keeper_world_observation.Board_comment_added -> "comment_added"
+  | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
+  | Keeper_world_observation.Fusion_completed -> "fusion_completed"
+  | Keeper_world_observation.Bg_completed -> "bg_completed"
+  | Keeper_world_observation.External_attention -> "external_attention"
+;;
+
+let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
+  Printf.sprintf
+    " reaction=%s target=%s:%s user=%s emoji=%S"
+    (if reaction.reacted then "added" else "removed")
+    (Board.reaction_target_type_to_string reaction.target_type)
+    reaction.target_id
+    reaction.user_id
+    reaction.emoji
+;;
+
+let board_event_note = function
+  | Keeper_world_observation.Board_reaction_changed reaction ->
+    board_reaction_note reaction
+  | Keeper_world_observation.Board_post_created
+  | Keeper_world_observation.Board_comment_added
+  | Keeper_world_observation.Fusion_completed
+  | Keeper_world_observation.Bg_completed
+  | Keeper_world_observation.External_attention -> ""
+;;
+
 let format_board_event_text
     (event : Keeper_world_observation.pending_board_event) : string =
   let kind = provenance_label event.provenance in
+  let event_label = board_event_kind_label event.event_kind in
+  let event_note = board_event_note event.event_kind in
   let mention_note =
     if event.explicit_mention then
       let targets =
@@ -162,13 +193,15 @@ let format_board_event_text
          | _ -> "")
     else ""
   in
-  Printf.sprintf "- [%s] post_id=%s title=%S author=%s%s%s%s preview: %s"
+  Printf.sprintf "- [%s] event=%s post_id=%s title=%S author=%s%s%s%s%s preview: %s"
     kind
+    event_label
     event.post_id
     (Keeper_types_profile.short_preview ~max_len:80 event.title)
     event.author
     hearth_note
     mention_note
+    event_note
     self_note
     event.preview
 ;;

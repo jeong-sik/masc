@@ -237,6 +237,7 @@ let board_contributor_quality_json
       ("accountability_score", `Float rep.accountability_score);
       ("autonomy_level", `String rep.autonomy_level);
       ("thompson_confidence", `Float rep.thompson_confidence);
+      ("evidence_state", `String rep.evidence_state);
     ]
 
 let board_contributor_quality_lookup ?config () =

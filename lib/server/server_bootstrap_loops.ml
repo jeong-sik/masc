@@ -261,6 +261,15 @@ let start_keeper_loops
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  let recovered_keeper_msg_requests =
+    Keeper_msg_async.recover_lost_disk_records ~base_path
+  in
+  if recovered_keeper_msg_requests > 0
+  then
+    Log.Keeper.warn
+      "keeper_msg_async: recovered %d disk-only non-terminal request record(s) as lost"
+      recovered_keeper_msg_requests;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in

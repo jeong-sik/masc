@@ -367,6 +367,42 @@ let respond_board_context_inference_error request reqd ~status ~message =
   respond_json_value_with_cors ~status request reqd
     (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
 
+let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error msg ->
+      respond_board_context_inference_error request reqd ~status:`Bad_request
+        ~message:("Invalid JSON: " ^ msg)
+  | parsed -> (
+      match parse_board_context_inference_request parsed with
+      | Error message ->
+          respond_board_context_inference_error request reqd ~status:`Bad_request
+            ~message
+      | Ok { post_id; target_keeper } -> (
+          match Board_dispatch.get_post_and_comments ~post_id () with
+          | Error err ->
+              respond_board_context_inference_error request reqd
+                ~status:`Bad_request
+                ~message:(Board_tool.board_error_to_string err)
+          | Ok (post, comments) -> (
+              let config = Mcp_server.workspace_config state in
+              match
+                resolve_board_context_inference_target ~config post target_keeper
+              with
+              | Error (status, message) ->
+                  respond_board_context_inference_error request reqd ~status
+                    ~message
+              | Ok (target_keeper, target_source) -> (
+                  match
+                    dispatch_board_context_inference ~state ~sw ~clock ~request
+                      ~target_keeper ~target_source ~post ~comments
+                  with
+                  | Ok json ->
+                      respond_json_value_with_cors ~status:`Accepted request reqd
+                        json
+                  | Error (status, message) ->
+                      respond_board_context_inference_error request reqd ~status
+                        ~message))))
+
 let respond_board_json reqd json =
   Http.Response.json_value json reqd
 
@@ -601,44 +637,9 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg"
          (fun state _req reqd ->
-         Http.Request.read_body_async reqd (fun body ->
-           try
-             let parsed = Yojson.Safe.from_string body in
-             match parse_board_context_inference_request parsed with
-             | Error message ->
-                 respond_board_context_inference_error request reqd
-                   ~status:`Bad_request ~message
-             | Ok { post_id; target_keeper } -> (
-                 match Board_dispatch.get_post_and_comments ~post_id () with
-                 | Error err ->
-                     respond_board_context_inference_error request reqd
-                       ~status:`Bad_request
-                       ~message:(Board_tool.board_error_to_string err)
-                 | Ok (post, comments) -> (
-                     let config = Mcp_server.workspace_config state in
-                     match
-                       resolve_board_context_inference_target ~config post
-                         target_keeper
-                     with
-                     | Error (status, message) ->
-                         respond_board_context_inference_error request reqd
-                           ~status ~message
-                     | Ok (target_keeper, target_source) -> (
-                         match
-                           dispatch_board_context_inference ~state ~sw ~clock
-                             ~request ~target_keeper ~target_source ~post
-                             ~comments
-                         with
-                         | Ok json ->
-                             respond_json_value_with_cors ~status:`Accepted
-                               request reqd json
-                         | Error (status, message) ->
-                             respond_board_context_inference_error request reqd
-                               ~status ~message))))
-           with Yojson.Json_error msg ->
-             respond_board_context_inference_error request reqd
-               ~status:`Bad_request
-               ~message:("Invalid JSON: " ^ msg)))
+         Http.Request.read_body_async reqd
+           (handle_board_context_inference_request ~state ~sw ~clock ~request
+              reqd)
          request reqd)
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->

@@ -17,6 +17,7 @@ import { route } from '../../router'
 import { votePost, voteComment } from '../../api/board'
 import { ModerationBadge } from './moderation-badge'
 import { ReactionBar } from './reaction-bar'
+import { PostShareActions } from './post-share-actions'
 import { FusionBoardEvidence } from './fusion-evidence'
 import {
   boardActorAvatarKey,
@@ -578,6 +579,9 @@ export function PostDetail({ post }: { post: BoardPost }) {
         <div class="flex flex-col gap-4">
           <div>
             <h1 class="m-0 text-2xl font-semibold leading-tight text-[var(--color-fg-secondary)]">${post.title}</h1>
+            <div class="mt-2">
+              <${PostShareActions} post=${post} />
+            </div>
           </div>
 
           <div class="text-sm text-[var(--color-fg-primary)] leading-loose">

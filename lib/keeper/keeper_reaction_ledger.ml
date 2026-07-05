@@ -154,7 +154,17 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "board_signal kind=%s author=%s title=%s"
       (match bs.kind with
        | Keeper_event_queue.Post_created -> "post_created"
-       | Keeper_event_queue.Comment_added -> "comment_added")
+       | Keeper_event_queue.Comment_added -> "comment_added"
+       | Keeper_event_queue.Reaction_changed reaction ->
+         Printf.sprintf
+           "reaction_changed target=%s:%s user=%s emoji=%s active=%b"
+           (match reaction.target_type with
+            | Keeper_event_queue.Reaction_post -> "post"
+            | Keeper_event_queue.Reaction_comment -> "comment")
+           reaction.target_id
+           reaction.user_id
+           reaction.emoji
+           reaction.reacted)
       bs.author
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"

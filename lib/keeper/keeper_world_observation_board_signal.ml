@@ -14,6 +14,23 @@ type match_result =
 
 type comment_status = [ `Never | `No_new_external | `New_external of int * string * string ]
 
+let board_reaction_target_of_queue = function
+  | Keeper_event_queue.Reaction_post -> Board.Reaction_post
+  | Keeper_event_queue.Reaction_comment -> Board.Reaction_comment
+;;
+
+let board_reaction_change_of_queue
+      (reaction : Keeper_event_queue.board_reaction_change)
+  : Board_dispatch.board_reaction_change
+  =
+  { target_type = board_reaction_target_of_queue reaction.target_type
+  ; target_id = reaction.target_id
+  ; user_id = reaction.user_id
+  ; emoji = reaction.emoji
+  ; reacted = reaction.reacted
+  }
+;;
+
 (* RFC-0020: board signals are carried as a typed [Keeper_event_queue.board_stimulus]
    end-to-end. This total conversion rebuilds the [Board_dispatch.board_signal]
    the downstream matchers expect from the typed payload, taking the board post
@@ -27,7 +44,9 @@ let board_signal_of_board_stimulus
   { Board_dispatch.kind =
       (match bs.kind with
        | Keeper_event_queue.Post_created -> Board_dispatch.Board_post_created
-       | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added)
+       | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added
+       | Keeper_event_queue.Reaction_changed reaction ->
+         Board_dispatch.Board_reaction_changed (board_reaction_change_of_queue reaction))
   ; post_id
   ; author = bs.author
   ; title = bs.title
@@ -186,11 +205,35 @@ type wake_reason =
           match strength from {!stigmergy_match}. *)
   | Thread_reply_after_self_comment
       (** A new external comment arrived on a post the keeper had commented on. *)
+  | Reaction_after_self_activity
+      (** An external reaction landed on a post the keeper authored or a thread
+          the keeper had commented on. *)
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Stigmergy { score } -> "stigmergy: score=" ^ string_of_int score
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
+  | Reaction_after_self_activity -> "reaction_after_self_activity"
+;;
+
+let self_authored_post ~self_ids ~(post_id : string) =
+  match Board_dispatch.get_post ~post_id with
+  | Error _ -> false
+  | Ok post ->
+    Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string post.author)
+;;
+
+let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_signal) =
+  match signal.kind with
+  | Board_dispatch.Board_reaction_changed _ ->
+    (not (Message_scope.is_self_author ~self_ids signal.author))
+    &&
+    (self_authored_post ~self_ids ~post_id:signal.post_id
+     ||
+     match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+     | `Never -> false
+     | `No_new_external | `New_external _ -> true)
+  | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added -> false
 ;;
 
 let wake_reason
@@ -203,15 +246,22 @@ let wake_reason
   if matched.explicit_mention
   then Some Explicit_mention
   else (
-    let stigmergy = stigmergy_match ~meta ~signal in
-    if stigmergy.overall_score > 0
-    then Some (Stigmergy { score = stigmergy.overall_score })
-    else (
-      let self_ids = Message_scope.self_ids meta in
-      match signal.kind with
-      | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-         | `New_external _ -> Some Thread_reply_after_self_comment
-         | `Never | `No_new_external -> None)
-      | Board_dispatch.Board_post_created -> None))
+    let self_ids = Message_scope.self_ids meta in
+    match signal.kind with
+    | Board_dispatch.Board_reaction_changed _ ->
+      if reaction_touches_self_activity ~self_ids ~signal
+      then Some Reaction_after_self_activity
+      else None
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added ->
+      let stigmergy = stigmergy_match ~meta ~signal in
+      if stigmergy.overall_score > 0
+      then Some (Stigmergy { score = stigmergy.overall_score })
+      else (
+        match signal.kind with
+        | Board_dispatch.Board_comment_added ->
+          (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+           | `New_external _ -> Some Thread_reply_after_self_comment
+           | `Never | `No_new_external -> None)
+        | Board_dispatch.Board_post_created
+        | Board_dispatch.Board_reaction_changed _ -> None))
 ;;

@@ -34,6 +34,19 @@ type post_id = string
 type board_stimulus_kind =
   | Post_created
   | Comment_added
+  | Reaction_changed of board_reaction_change
+
+and board_reaction_target_type =
+  | Reaction_post
+  | Reaction_comment
+
+and board_reaction_change = {
+  target_type : board_reaction_target_type;
+  target_id : string;
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+}
 
 type board_stimulus = {
   kind : board_stimulus_kind;

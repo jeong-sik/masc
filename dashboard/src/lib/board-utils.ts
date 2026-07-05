@@ -54,7 +54,7 @@ import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
 import { stripStateBlocks } from '../keeper-message'
 import { clampPct } from './format-number'
-import type { BoardActorIdentity, BoardContributorQuality } from '../types'
+import type { BoardActorIdentity, BoardContributorQuality, BoardPost } from '../types'
 
 /** Strip inline markdown formatting from title text (bold, italic, code). */
 export function stripInlineMarkdown(text: string): string {
@@ -85,6 +85,43 @@ export function dedupeLeadingHeading(title: string, body: string): string {
   return body
 }
 
+export function boardPostHash(postId: string): string {
+  return `#board?post=${encodeURIComponent(postId)}`
+}
+
+export function boardPostPermalink(postId: string, baseHref?: string): string {
+  const hash = boardPostHash(postId)
+  const base = baseHref ?? (typeof window !== 'undefined' ? window.location.href : '')
+  if (!base) return hash
+  try {
+    return new URL(hash, base).toString()
+  } catch {
+    return hash
+  }
+}
+
+function boardPostDisplayTitle(post: Pick<BoardPost, 'id' | 'title'>): string {
+  return stripInlineMarkdown(post.title).trim() || post.id
+}
+
+export function boardPostTrackbackMarkdown(
+  post: Pick<BoardPost, 'id' | 'title'>,
+  baseHref?: string,
+): string {
+  return `[${boardPostDisplayTitle(post)}](${boardPostPermalink(post.id, baseHref)})`
+}
+
+export function boardPostXShareUrl(
+  post: Pick<BoardPost, 'id' | 'title'>,
+  baseHref?: string,
+): string {
+  const params = new URLSearchParams({
+    text: `${boardPostDisplayTitle(post)} - MASC Board`,
+    url: boardPostPermalink(post.id, baseHref),
+  })
+  return `https://twitter.com/intent/tweet?${params.toString()}`
+}
+
 export function boardActorDisplayName(
   authorName: string,
   identity?: BoardActorIdentity | null,
@@ -111,6 +148,37 @@ export function boardActorAvatarKey(
   return identity?.key?.trim() || boardActorDisplayName(authorName, identity)
 }
 
+const GENERIC_ACTOR_SIGIL_KEYS = new Set([
+  'agent',
+  'keeper',
+  'raw_agent',
+  'unknown',
+])
+
+function firstSpecificActorLabel(candidates: Array<string | null | undefined>): string | null {
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim()
+    if (!trimmed) continue
+    if (GENERIC_ACTOR_SIGIL_KEYS.has(trimmed.toLowerCase())) continue
+    return trimmed
+  }
+  return null
+}
+
+export function boardActorSigilLabel(
+  authorName: string,
+  identity?: BoardActorIdentity | null,
+): string {
+  return firstSpecificActorLabel([
+    identity?.display_name,
+    identity?.runtime_agent_name,
+    identity?.id,
+    identity?.raw,
+    identity?.key,
+    authorName,
+  ]) ?? authorName
+}
+
 export function boardActorTitle(
   authorName: string,
   identity?: BoardActorIdentity | null,
@@ -121,6 +189,7 @@ export function boardActorTitle(
 }
 
 export function contributorQualityPercent(quality?: BoardContributorQuality | null): number | null {
+  if (!contributorQualityHasEvidence(quality)) return null
   const score = contributorQualityDisplayScore(quality)
   return score === null ? null : clampPct(Math.round(score * 100))
 }
@@ -171,12 +240,20 @@ function contributorQualityDisplayBand(
   quality?: BoardContributorQuality | null,
 ): BoardContributorQuality['band'] | null {
   if (quality?.band) return quality.band
-  const score = contributorQualityDisplayScore(quality)
-  if (score === null) return null
-  if (score >= 0.85) return 'excellent'
-  if (score >= 0.65) return 'strong'
-  if (score >= 0.35) return 'watch'
-  return 'low'
+  return null
+}
+
+function contributorQualityHasEvidence(quality?: BoardContributorQuality | null): boolean {
+  if (!quality) return false
+  if (quality.band) return true
+  if (quality.score !== undefined && Number.isFinite(quality.score)) return true
+  if ((quality.board_posts ?? 0) > 0) return true
+  if ((quality.board_comments ?? 0) > 0) return true
+  if ((quality.completion_rate ?? 0) > 0) return true
+  if ((quality.response_rate ?? 0) > 0) return true
+  if (quality.accountability_score !== undefined && quality.accountability_score < 1) return true
+  if (quality.thompson_confidence !== undefined && quality.thompson_confidence !== 0.5) return true
+  return quality.autonomy_level !== undefined && quality.autonomy_level !== 'standard'
 }
 
 /** Navigate to keeper detail if author is a keeper, otherwise agent profile. */

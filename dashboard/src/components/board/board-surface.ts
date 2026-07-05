@@ -28,6 +28,7 @@ import { extractMentionTargets, MentionInbox, MentionInboxPanel } from './mentio
 import { PostDetail, CommentThread, CommentForm } from './post-detail'
 import { FusionBoardEvidence } from './fusion-evidence'
 import { ReactionBar } from './reaction-bar'
+import { PostShareActions } from './post-share-actions'
 import { StateBlockMessages } from './state-block-messages'
 import {
   ComposerV2,
@@ -40,8 +41,8 @@ import type { ComposerAttachmentDraft, ComposerV2Mode, ComposerVoiceDraft } from
 import { ensureStateBlockDraft, stateBlockKeys } from '../ops/ops-state'
 import { navigateBoard } from './board-route'
 import {
-  boardActorAvatarKey,
   boardActorDisplayName,
+  boardActorSigilLabel,
   boardActorTitle,
   contributorQualityBadgeClass,
   contributorQualityPercent,
@@ -85,11 +86,13 @@ import {
   refreshBoardFlairs,
   selectedBoardPostId,
   boardFilterMode,
+  boardSortMode,
   boardComposerMode,
+  SORT_MODES,
   postHasStateBlock,
   getPostStateBlock,
 } from './board-state'
-import type { BoardPost, ContentCategory, ParsedStateBlock } from './board-state'
+import type { BoardPost, BoardSortMode, ContentCategory, ParsedStateBlock } from './board-state'
 
 export const BOARD_DETAIL_WIDTH_STORAGE_KEY = 'dashboard:board-detail-width'
 export const BOARD_DETAIL_WIDTH_DEFAULT = 360
@@ -344,12 +347,12 @@ function BoardSummary() {
 }
 
 // ── Author sigil (v2) ──────────────────────────────────────────────
-function BdAuthor({ name, size = 24 }: { name: string; size?: number }) {
-  const isOperator = name.toLowerCase() === 'operator' || name.toLowerCase() === 'dashboard'
+function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
+  const isOperator = label.toLowerCase() === 'operator' || label.toLowerCase() === 'dashboard'
   // Prototype board.jsx:8 renders the operator avatar as the literal "OP"
   // glyph; keepers use a 2-letter monogram (SigilBadge style, fleet.jsx:8).
-  const label = isOperator ? 'OP' : name.slice(0, 2).toUpperCase()
-  return html`<span class=${`bd-sigil ${isOperator ? 'op' : ''}`} style=${{ width: size, height: size }}>${label}</span>`
+  const sigil = isOperator ? 'OP' : label.slice(0, 2).toUpperCase()
+  return html`<span class=${`bd-sigil ${isOperator ? 'op' : ''}`} style=${{ width: size, height: size }}>${sigil}</span>`
 }
 
 // ── State block chip (v2) ──────────────────────────────────────────
@@ -369,7 +372,7 @@ function PostCard({ post }: { post: BoardPost }) {
   const isDeleting = deletingPostId.value === post.id
   const previewBody = dedupeLeadingHeading(post.title, stripStateBlocks(post.body))
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
-  const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
+  const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
@@ -450,7 +453,7 @@ function PostCard({ post }: { post: BoardPost }) {
       onKeyDown=${handlePostKeyDown}
     >
       <div class="bd-post-h">
-        <${BdAuthor} name=${authorAvatarKey} />
+        <${BdAuthor} label=${authorSigilLabel} />
         <a
           class="who"
           href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
@@ -504,6 +507,7 @@ function PostCard({ post }: { post: BoardPost }) {
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
         <span class="replies">답글 ${post.comment_count}</span>
+        <${PostShareActions} post=${post} compact />
         <span class="ml-auto hidden group-hover:inline-flex items-center gap-1">
           <${ActionButton}
             variant="ghost"
@@ -596,12 +600,14 @@ function BdRail({ activeSub, onSub, onMentions }: {
   `
 }
 
-function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuery }: {
+function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuery, sortMode, onSort }: {
   activeFilter: 'all' | 'state' | 'mod'
   onFilter: (filter: 'all' | 'state' | 'mod') => void
   count: number
   contentQuery: string
   onContentQuery: (value: string) => void
+  sortMode: BoardSortMode
+  onSort: (sortMode: BoardSortMode) => void
 }) {
   const activeHearth = boardHearthFilter.value
   // Prototype board.jsx:158 renders the bare hearth label (e.g. "core/scheduler")
@@ -624,6 +630,14 @@ function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuer
         ariaLabel="게시글 본문 필터"
         onInput=${(e: Event) => onContentQuery((e.target as HTMLInputElement).value)}
         class="min-w-40 max-w-64 !px-2 !py-1 !text-xs"
+      />
+      <${Select}
+        value=${sortMode}
+        options=${SORT_MODES.map(mode => ({ value: mode.id, label: mode.label }))}
+        ariaLabel="게시글 정렬"
+        testId="bd-sort-mode"
+        class="!w-auto min-w-32 !px-2 !py-1 !text-xs"
+        onInput=${(value: string) => onSort(value as BoardSortMode)}
       />
       <span class="spacer"></span>
       ${filters.map(f => html`
@@ -716,7 +730,7 @@ function BdThreadDetail({
   }, [post.id])
 
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
-  const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
+  const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
   const evidencePost = detailPostId.value === post.id && detailPost.value ? detailPost.value : post
 
   return html`
@@ -728,11 +742,12 @@ function BdThreadDetail({
       </div>
       <div class="bd-detail-scroll">
         <div class="bd-th">
-          <${BdAuthor} name=${authorAvatarKey} size=${26} />
+          <${BdAuthor} label=${authorSigilLabel} size=${26} />
           <div>
             <div class="bd-th-hd"><span class="who">${authorLabel}</span><span class="ts mono"><${TimeAgo} timestamp=${post.created_at} /></span></div>
             <div class="bd-th-body">
               <div class="text-sm font-semibold mb-1">${stripInlineMarkdown(post.title)}</div>
+              <div class="mb-2"><${PostShareActions} post=${post} /></div>
               <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
               <${FusionBoardEvidence} post=${evidencePost} class="mt-3" />
             </div>
@@ -1377,6 +1392,19 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
         count=${filteredByMode.length}
         contentQuery=${contentQuery}
         onContentQuery=${setContentQuery}
+        sortMode=${boardSortMode.value}
+        onSort=${(sortMode: BoardSortMode) => {
+          if (boardSortMode.value === sortMode) return
+          boardSortMode.value = sortMode
+          categoryVisibleLimits.value = {
+            article: PAGE_SIZE,
+            review: PAGE_SIZE,
+            notice: PAGE_SIZE,
+            system: PAGE_SIZE,
+          }
+          selectedBoardPostId.value = null
+          refreshBoard()
+        }}
       />
       <${BdMobileQueues}
         activeFilter=${boardFilterMode.value}

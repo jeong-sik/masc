@@ -135,28 +135,28 @@ function getLocalStorageItem(key: string): string | null {
 
 // ── Content category classifier tests ─────────────────────────────
 describe('contentCategory', () => {
-  it('classifies tech exploration titles as article', () => {
-    const post = makePost({ id: '1', title: '기술 탐색: GraphRAG', author: 'ani1999', body: 'long content...' })
+  it('classifies direct posts as article without title heuristics', () => {
+    const post = makePost({ id: '1', title: '기술 탐색: GraphRAG', author: 'ani1999', body: 'long content...', post_kind: 'direct' })
     expect(contentCategory(post)).toBe('article')
   })
 
-  it('classifies verdict titles as review', () => {
-    const post = makePost({ id: '2', title: 'Verdict: 7건 일괄 판정', author: 'verdict', body: 'details' })
+  it('classifies explicit category metadata as review', () => {
+    const post = makePost({ id: '2', title: 'ordinary title', author: 'verdict', body: 'details', meta: { category: 'review' } })
     expect(contentCategory(post)).toBe('review')
   })
 
-  it('classifies PR review titles as review', () => {
-    const post = makePost({ id: '3', title: 'PR 리뷰: #7106 refactor', author: 'sojin', body: 'review content' })
-    expect(contentCategory(post)).toBe('review')
+  it('ignores non-canonical category metadata tokens', () => {
+    const post = makePost({ id: '3', title: 'ordinary title', author: 'sojin', body: 'review content', meta: { content_category: 'verdict' }, post_kind: 'direct' })
+    expect(contentCategory(post)).toBe('article')
   })
 
-  it('classifies alert titles as notice', () => {
-    const post = makePost({ id: '4', title: 'PR/Task 불균형 경고', author: 'poe', body: 'alert details' })
-    expect(contentCategory(post)).toBe('notice')
+  it('does not classify flair labels as categories', () => {
+    const post = makePost({ id: '4', title: 'PR/Task 불균형 경고', author: 'poe', body: 'alert details', flair: 'status', post_kind: 'direct' })
+    expect(contentCategory(post)).toBe('article')
   })
 
-  it('classifies status update titles as notice', () => {
-    const post = makePost({ id: '5', title: 'Sprint 상태 업데이트 #3', author: 'poe', body: 'status info' })
+  it('classifies automation fallback as notice', () => {
+    const post = makePost({ id: '5', title: 'Sprint 상태 업데이트 #3', author: 'poe', body: 'status info', post_kind: 'automation' })
     expect(contentCategory(post)).toBe('notice')
   })
 
@@ -165,24 +165,9 @@ describe('contentCategory', () => {
     expect(contentCategory(post)).toBe('system')
   })
 
-  it('falls back to article for long body without title signals', () => {
-    const post = makePost({ id: '7', title: 'Some random title', author: 'keeper', body: 'x'.repeat(400) })
+  it('does not classify issue-triage wording as review without explicit metadata', () => {
+    const post = makePost({ id: '9', title: 'Open Issue 20건 — Assignee 제안', author: 'sojin', body: 'proposals', post_kind: 'direct' })
     expect(contentCategory(post)).toBe('article')
-  })
-
-  it('falls back to notice for short body from non-direct author', () => {
-    const post = makePost({ id: '8', title: 'Short note', author: 'keeper', body: 'brief' })
-    expect(contentCategory(post)).toBe('notice')
-  })
-
-  it('classifies issue triage as review', () => {
-    const post = makePost({ id: '9', title: 'Open Issue 20건 — Assignee 제안', author: 'sojin', body: 'proposals' })
-    expect(contentCategory(post)).toBe('review')
-  })
-
-  it('classifies needs-evidence as review', () => {
-    const post = makePost({ id: '10', title: 'Verdict: #7112 needs-evidence', author: 'verdict', body: 'details' })
-    expect(contentCategory(post)).toBe('review')
   })
 })
 
@@ -564,6 +549,7 @@ describe('BoardSurface Component', () => {
         contributor_quality: {
           accountability_score: 0.72,
           source: 'agent_reputation',
+          board_posts: 1,
         },
       }),
     ]
@@ -571,6 +557,31 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByLabelText(/기여자 품질 72점/)).toHaveTextContent('품질 72')
+  })
+
+  it('hides default contributor quality priors on post cards', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-quality-prior',
+        title: 'Quality prior',
+        body: 'content',
+        author: 'ani1999',
+        contributor_quality: {
+          accountability_score: 1,
+          source: 'agent_reputation',
+          board_posts: 0,
+          board_comments: 0,
+          completion_rate: 0,
+          response_rate: 0,
+          autonomy_level: 'standard',
+          thompson_confidence: 0.5,
+        },
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.queryByText(/품질 100/)).not.toBeInTheDocument()
   })
 
   it('renders a state block panel when the post body contains one', () => {
@@ -642,6 +653,42 @@ describe('BoardSurface Component', () => {
 
     fireEvent.click(screen.getByTestId('bd-filter-state'))
     expect(boardFilterMode.value).toBe('state')
+  })
+
+  it('changes the server-backed board sort mode from the feed head', () => {
+    boardPosts.value = [
+      makePost({ id: 'post-sort', title: 'Sort target', body: 'content', author: 'keeper', post_kind: 'direct' }),
+    ]
+
+    render(h(BoardSurface, null))
+    const sort = screen.getByTestId('bd-sort-mode') as HTMLSelectElement
+
+    expect(sort).toHaveValue('recent')
+    fireEvent.change(sort, { target: { value: 'discussed' } })
+
+    expect(boardSortMode.value).toBe('discussed')
+    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE)
+  })
+
+  it('renders permalink, trackback, context inference, and X share actions for a post', () => {
+    boardPosts.value = [
+      makePost({ id: 'post-share', title: 'Share **this**', body: 'content', author: 'keeper', post_kind: 'direct' }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByTestId('bd-share-post-share')).toBeInTheDocument()
+    expect(screen.getByTestId('bd-share-link-post-share')).toHaveAttribute('aria-label', '게시글 링크 복사: post-share')
+    expect(screen.getByTestId('bd-share-trackback-post-share')).toHaveAttribute('aria-label', '트랙백 링크 복사: post-share')
+    expect(screen.getByTestId('bd-context-infer-post-share')).toHaveAttribute('aria-label', '맥락 추론 요청: post-share')
+
+    const xShare = screen.getByTestId('bd-share-x-post-share') as HTMLAnchorElement
+    expect(xShare).toHaveAttribute('target', '_blank')
+    expect(xShare).toHaveAttribute('rel', expect.stringContaining('noopener'))
+    expect(xShare.href).toContain('https://twitter.com/intent/tweet?')
+    const xUrl = new URL(xShare.href)
+    expect(xUrl.searchParams.get('text')).toBe('Share this - MASC Board')
+    expect(xUrl.searchParams.get('url')).toContain('#board?post=post-share')
   })
 
   it('opens a thread detail side panel when a post is selected', () => {
@@ -1056,5 +1103,30 @@ describe('BoardSurface Component', () => {
     expect(sigil).not.toBeNull()
     expect(sigil?.classList.contains('op')).toBe(false)
     expect(sigil?.textContent).toBe('SA')
+  })
+
+  it('does not collapse every keeper author sigil to KE when identity key is generic', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'kp-generic-key-post',
+        title: 'keeper identity note',
+        body: 'keeper authored content',
+        author: 'keeper',
+        post_kind: 'direct',
+        author_identity: {
+          kind: 'keeper',
+          id: 'albini',
+          key: 'keeper',
+          display_name: 'albini',
+          raw: 'keeper-albini-agent',
+        },
+      }),
+    ]
+
+    const { container } = render(h(BoardSurface, null))
+
+    const sigil = container.querySelector<HTMLElement>('.bd-sigil')
+    expect(sigil).not.toBeNull()
+    expect(sigil?.textContent).toBe('AL')
   })
 })

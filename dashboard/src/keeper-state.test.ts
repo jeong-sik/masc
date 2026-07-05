@@ -372,6 +372,7 @@ describe('thread history merge & persistence', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-rest#8',
           trace_event_count: 3,
+          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       },
@@ -382,7 +383,49 @@ describe('thread history merge & persistence', () => {
       status: 'backend_trace_join',
       turnRef: 'trace-rest#8',
       traceEventCount: 3,
+      deliveryReceipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
+  })
+
+  it('normalizes durable backend lifecycle stream contracts from REST chat history', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from durable lifecycle replay',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#9',
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-rest#9',
+          event_name: 'RUN_FINISHED',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'TEXT_MESSAGE_START',
+            'TEXT_MESSAGE_END',
+            'RUN_FINISHED',
+          ],
+          delivery_receipt: 'server_lifecycle_replay_only',
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toEqual({
+      source: 'backend_stream_lifecycle',
+      status: 'backend_lifecycle_replay',
+      turnRef: 'trace-rest#9',
+      eventName: 'RUN_FINISHED',
+      lifecycleEvents: [
+        'RUN_STARTED',
+        'TEXT_MESSAGE_START',
+        'TEXT_MESSAGE_END',
+        'RUN_FINISHED',
+      ],
+      deliveryReceipt: 'server_lifecycle_replay_only',
+      reason: 'history row records durable server stream lifecycle replay',
     })
   })
 

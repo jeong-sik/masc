@@ -273,6 +273,7 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
     delivery: 'queued',
     streamState: undefined,
     streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      deliveryReceipt: 'no_delivery_receipt',
       reason: 'client-side composer queue item; not yet submitted to keeper runtime',
     }),
     attachments: msg.attachments,

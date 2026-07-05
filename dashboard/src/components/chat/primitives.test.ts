@@ -236,8 +236,49 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe(
       'server_lifecycle_replay_only',
     )
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      'history row records durable server stream lifecycle replay',
+    )
     const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
     expect(surfaceLink?.textContent).toContain('Discord Thread')
+  })
+
+  it('exposes interrupted stream reconciliation as a no-receipt contract gap', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'assistant-interrupted',
+            text: 'partial answer',
+            role: 'assistant',
+            source: 'direct_assistant',
+            delivery: 'interrupted',
+            streamState: null,
+            error: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+            streamContract: {
+              source: 'client_reconciliation',
+              status: 'contract_gap',
+              deliveryReceipt: 'no_delivery_receipt',
+              reason: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="assistant-interrupted"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('interrupted')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('client_reconciliation')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('contract_gap')
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+    )
   })
 
   it('exposes tool-call transcript provenance as rendered attributes', () => {
@@ -273,6 +314,9 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
     expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
     expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      'tool history rows carry arguments, not live stream lifecycle',
+    )
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-tool#3')
     expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
   })

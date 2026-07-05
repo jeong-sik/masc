@@ -453,6 +453,40 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
   })
 
+  it('renders queue card and transcript placeholder with the same FIFO identity', async () => {
+    keeperSending.value = { sangsu: true }
+    enqueueInput('sangsu', 'queued first', undefined, 'queued-click-1')
+    enqueueInput('sangsu', 'queued second', undefined, 'queued-click-2')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const queueCards = [...container.querySelectorAll('[data-chat-queue-item]')] as HTMLElement[]
+    const queuedBubbles = [...container.querySelectorAll('[data-chat-entry-id^="queued-user-"]')] as HTMLElement[]
+
+    expect(queueCards.map(node => node.getAttribute('data-chat-queue-seq'))).toEqual(['1', '2'])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-queue-seq'))).toEqual(['1', '2'])
+    expect(queueCards.map(node => node.getAttribute('data-chat-queue-client-action-id'))).toEqual([
+      'queued-click-1',
+      'queued-click-2',
+    ])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-queue-client-action-id'))).toEqual([
+      'queued-click-1',
+      'queued-click-2',
+    ])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt'))).toEqual([
+      'no_delivery_receipt',
+      'no_delivery_receipt',
+    ])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-stream-contract-reason'))).toEqual([
+      'client-side composer queue item; not yet submitted to keeper runtime',
+      'client-side composer queue item; not yet submitted to keeper runtime',
+    ])
+  })
+
   it('renders queued voice draft display blocks inside the transcript', async () => {
     keeperSending.value = { sangsu: true }
     const voiceBlocks: ChatBlock[] = [

@@ -276,6 +276,8 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
       deliveryReceipt: 'no_delivery_receipt',
       reason: 'client-side composer queue item; not yet submitted to keeper runtime',
     }),
+    queueSeq: msg.sequence,
+    queueClientActionId: msg.clientActionId ?? null,
     attachments: msg.attachments,
     blocks: msg.blocks,
     details: null,
@@ -447,7 +449,12 @@ function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5" data-chat-queue-item=${msg.id}>
+    <div
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5"
+      data-chat-queue-item=${msg.id}
+      data-chat-queue-seq=${msg.sequence}
+      data-chat-queue-client-action-id=${msg.clientActionId ?? undefined}
+    >
       ${editing
         ? html`
             <textarea

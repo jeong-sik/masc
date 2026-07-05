@@ -176,10 +176,12 @@ val board_reactive_wakeup_allowed :
 val paused_meta_allows_board_auto_resume : keeper_meta -> bool
 
 (** Select which keepers wake for a board signal (RFC-0020). Explicit mentions
-    short-circuit and wake unconditionally (returned with [dropped = 0]); other
-    typed reasons compete for [?total_limit] slots in candidate order. [None]
-    reasons are dropped. Returns the selected [(item, reason)] pairs and the
-    number of non-explicit candidates dropped by the cap. *)
+    short-circuit and wake unconditionally (returned with [dropped = 0]);
+    thread-reply followups compete for [?total_limit] slots in candidate order.
+    [None] reasons are dropped. Semantic relatedness is not a deterministic
+    board wake reason; it belongs behind an LLM/Judge attention boundary.
+    Returns the selected [(item, reason)] pairs and the number of non-explicit
+    candidates dropped by the cap. *)
 val select_board_wakeup_candidates :
   ?total_limit:int ->
   ('a * Keeper_world_observation_board_signal.wake_reason option) list ->

@@ -583,6 +583,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       Masc.Keeper_keepalive.stop_keepalive keeper_name;
       cleanup_dir base_dir)
     (fun () ->
+      ensure_default_runtime ();
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in

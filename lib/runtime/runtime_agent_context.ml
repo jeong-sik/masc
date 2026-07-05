@@ -96,6 +96,12 @@ type config =
     (** Token budget for extended thinking, forwarded to OAS
         [Builder.with_thinking_budget]. Only meaningful when
         [enable_thinking = Some true]. *)
+  ; top_p : float option
+    (** Nucleus sampling probability forwarded to OAS [Builder.with_top_p].
+        [None] leaves the provider/model default intact. *)
+  ; top_k : int option
+    (** Top-k sampling limit forwarded to OAS [Builder.with_top_k].
+        [None] leaves the provider/model default intact. *)
   ; min_p : float option
     (** Minimum probability threshold for nucleus sampling, forwarded
         to OAS [Builder.with_min_p]. [None] leaves the provider default;
@@ -180,7 +186,9 @@ let default_config
   ; summarizer = None
   ; execution_idle_timeout_s = None
   ; thinking_budget = None
-  ; min_p = None
+  ; top_p = provider_cfg.top_p
+  ; top_k = provider_cfg.top_k
+  ; min_p = provider_cfg.min_p
   ; on_run_complete = None
   ; disclosure_level = None
   ; disclosure_resolver = None
@@ -355,6 +363,16 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
+    match config.top_p with
+    | Some top_p -> Agent_sdk.Builder.with_top_p top_p builder
+    | None -> builder
+  in
+  let builder =
+    match config.top_k with
+    | Some top_k -> Agent_sdk.Builder.with_top_k top_k builder
+    | None -> builder
+  in
+  let builder =
     match config.min_p with
     | Some min_p -> Agent_sdk.Builder.with_min_p min_p builder
     | None -> builder
@@ -415,6 +433,9 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
       Agent_sdk.Checkpoint.model = config.model_id
     ; system_prompt = Some config.system_prompt
     ; temperature = Some config.temperature
+    ; top_p = config.top_p
+    ; top_k = config.top_k
+    ; min_p = config.min_p
     ; enable_thinking = config.enable_thinking
     ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
@@ -438,6 +459,9 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; max_tokens = Some config.max_tokens
     ; max_turns = max_turns_for_resume
     ; temperature = Some config.temperature
+    ; top_p = config.top_p
+    ; top_k = config.top_k
+    ; min_p = config.min_p
     ; enable_thinking = config.enable_thinking
     ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget

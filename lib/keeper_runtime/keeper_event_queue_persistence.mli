@@ -9,6 +9,56 @@ val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
     with pending/inflight writes so callers cannot observe a split snapshot
     transition. *)
 
+type snapshot_pair =
+  { pending : Keeper_event_queue.t
+  ; inflight : Keeper_event_queue.t
+  }
+
+type snapshot_read_error_kind =
+  | Invalid_path
+  | Read_failed
+  | Parse_failed
+
+type snapshot_read_error =
+  { kind : snapshot_read_error_kind
+  ; path : string option
+  ; message : string
+  }
+
+type snapshot_pair_with_errors =
+  { pending : Keeper_event_queue.t
+  ; inflight : Keeper_event_queue.t
+  ; read_errors : snapshot_read_error list
+  }
+
+type snapshot_discovery =
+  { keeper_names : string list
+  ; read_error : string option
+  }
+
+val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
+
+val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
+(** Discover keeper names that have durable pending or in-flight queue snapshot
+    files under the runtime keeper directory. Missing keeper roots are an empty
+    discovery; unreadable roots or invalid snapshot-bearing keeper directories
+    are surfaced in [read_error] so health callers do not silently report a false
+    empty backlog. *)
+
+val load_snapshot_pair : base_path:string -> keeper_name:string -> snapshot_pair
+(** Restore the pending and in-flight snapshots as separate typed queues under
+    the same lock used by {!load}. Use this for operator health surfaces that
+    must distinguish queued work from leased work without parsing file paths
+    independently. *)
+
+val load_snapshot_pair_with_errors :
+  base_path:string -> keeper_name:string -> snapshot_pair_with_errors
+(** Like {!load_snapshot_pair}, but preserves read/parse/path failures for
+    operator health surfaces. Queue replay semantics remain conservative:
+    failed snapshots contribute [Keeper_event_queue.empty], while
+    [read_errors] records the exact reason so full health cannot silently
+    report a false empty backlog. *)
+
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit
 (** Atomically write the latest queue snapshot. Runtime fibers use a yielding

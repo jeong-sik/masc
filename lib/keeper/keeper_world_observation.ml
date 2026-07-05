@@ -44,6 +44,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
   | Bg_completed
+  | Schedule_due
   | External_attention
 
 type pending_board_event =
@@ -122,6 +123,7 @@ type event_queue_trigger =
   Keeper_world_observation_turn_types.event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Scheduled_automation_stimulus
   | Connector_attention_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
@@ -570,6 +572,38 @@ let pending_board_event_of_bg_job_completion
   }
 ;;
 
+let scheduled_automation_actor = "scheduled_automation"
+
+let pending_board_event_of_scheduled_wake
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (sw : Keeper_event_queue.scheduled_wake)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let title =
+    match sw.title with
+    | Some title -> title
+    | None -> Printf.sprintf "Scheduled keeper wake due (schedule %s)" sw.schedule_id
+  in
+  { event_kind = Schedule_due
+  ; post_id = Keeper_event_queue.schedule_due_post_id sw
+  ; author = scheduled_automation_actor
+  ; title
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len sw.message
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author:scheduled_automation_actor
+  }
+;;
+
 let external_attention_actor_label (item : Keeper_external_attention.item) =
   match item.actor.display_name with
   | Some name when String.trim name <> "" -> name
@@ -638,6 +672,8 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bg_completed c ->
     Some
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
+  | Keeper_event_queue.Schedule_due sw ->
+    Some (pending_board_event_of_scheduled_wake ~meta ~arrived_at:stimulus.arrived_at sw)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
   | Keeper_event_queue.Connector_attention _
@@ -1080,12 +1116,14 @@ let effective_scheduled_autonomous_cooldown
   : int
   =
   (* Noop backoff: consecutive observation-only cycles multiply the base
-     cooldown by 2^min(n, 2), capping at 4x (see [noop_multiplier] below: the
-     shift is [min consecutive_noop_count 2], i.e. 1, 2, 4). This prevents
-     token waste when the keeper repeatedly reads board_list without acting. *)
+     cooldown by [2^shift], where [shift] is a named runtime policy. This
+     prevents token waste when the keeper repeatedly reads board_list without
+     acting, without burying the cap as a local heuristic. *)
+  let noop_backoff_max_shift = Keeper_config.keeper_proactive_noop_backoff_max_shift () in
   let noop_multiplier =
-    if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 2
-    (* 1, 2, 4 *)
+    if consecutive_noop_count <= 0
+    then 1
+    else 1 lsl min consecutive_noop_count noop_backoff_max_shift
   in
   let effective_base = base_cooldown * noop_multiplier in
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
@@ -1096,7 +1134,9 @@ let effective_scheduled_autonomous_cooldown
   then effective_base
   else (
     let decay_periods = (since_last - effective_base) / max 1 effective_base in
-    let capped_periods = min decay_periods 4 in
+    let capped_periods =
+      min decay_periods (Keeper_config.keeper_proactive_idle_decay_max_periods ())
+    in
     let factor = 1.0 /. Float.pow 2.0 (float_of_int capped_periods) in
     max floor (int_of_float (Float.round (float_of_int effective_base *. factor))))
 ;;

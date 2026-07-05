@@ -45,6 +45,9 @@ let valid_keeper_name name =
   in
   (not (String.equal name "")) && String.for_all valid_char name
 
+let snapshot_filename = "event-queue.json"
+let inflight_snapshot_filename = "event-queue-inflight.json"
+
 (* [Fs_compat.mkdir_p] raises (Sys_error / Unix_error) on ENOSPC/EROFS/ENOTDIR
    instead of returning a result, so route it through the same [(unit, string)
    result] channel as [save_file_atomic]. This keeps [save_json_atomic] total:
@@ -71,7 +74,7 @@ let snapshot_path ~base_path ~keeper_name =
     Ok
       (Filename.concat
          (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-         "event-queue.json")
+         snapshot_filename)
   else Error (Printf.sprintf "invalid keeper name for event queue snapshot: %s" keeper_name)
 
 let inflight_path ~base_path ~keeper_name =
@@ -80,8 +83,79 @@ let inflight_path ~base_path ~keeper_name =
     Ok
       (Filename.concat
          (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-         "event-queue-inflight.json")
+         inflight_snapshot_filename)
   else Error (Printf.sprintf "invalid keeper name for event queue inflight: %s" keeper_name)
+
+type dir_state =
+  | Missing
+  | Directory
+  | Not_directory
+
+let dir_state path =
+  try
+    if not (Sys.file_exists path)
+    then Ok Missing
+    else if Sys.is_directory path
+    then Ok Directory
+    else Ok Not_directory
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "failed to inspect directory %s: %s" path (Printexc.to_string exn))
+
+let file_exists_safe path =
+  try Ok (Sys.file_exists path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "failed to inspect file %s: %s" path (Printexc.to_string exn))
+
+type snapshot_discovery =
+  { keeper_names : string list
+  ; read_error : string option
+  }
+
+let discover_keeper_names_with_snapshots ~base_path =
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  match dir_state keepers_dir with
+  | Error msg -> { keeper_names = []; read_error = Some msg }
+  | Ok Missing -> { keeper_names = []; read_error = None }
+  | Ok Not_directory ->
+    { keeper_names = []
+    ; read_error = Some (Printf.sprintf "keepers runtime path is not a directory: %s" keepers_dir)
+    }
+  | Ok Directory ->
+    (match Safe_ops.list_dir_safe keepers_dir with
+     | Error msg -> { keeper_names = []; read_error = Some msg }
+     | Ok entries ->
+       let names, errors =
+         List.fold_left
+           (fun (names, errors) name ->
+              let keeper_dir = Filename.concat keepers_dir name in
+              match dir_state keeper_dir with
+              | Error msg -> names, msg :: errors
+              | Ok Missing | Ok Not_directory -> names, errors
+              | Ok Directory ->
+                let pending_path = Filename.concat keeper_dir snapshot_filename in
+                let inflight_path = Filename.concat keeper_dir inflight_snapshot_filename in
+                (match file_exists_safe pending_path, file_exists_safe inflight_path with
+                 | Error msg, _ | _, Error msg -> names, msg :: errors
+                 | Ok false, Ok false -> names, errors
+                 | Ok true, _ | _, Ok true ->
+                   if valid_keeper_name name
+                   then name :: names, errors
+                   else
+                     ( names
+                     , Printf.sprintf
+                         "invalid keeper name with durable event queue snapshot: %s"
+                         name
+                       :: errors )))
+           ([], [])
+           entries
+       in
+       { keeper_names = List.sort_uniq String.compare names
+       ; read_error =
+           (match List.rev errors with
+            | [] -> None
+            | errors -> Some (String.concat "; " errors))
+       })
 
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
@@ -120,9 +194,32 @@ let remove_stimuli queue stimuli =
     |> List.filter (fun stimulus -> not (remove stimulus))
     |> queue_of_list
 
-let load_from_path ~keeper_name path =
+type snapshot_read_error_kind =
+  | Invalid_path
+  | Read_failed
+  | Parse_failed
+
+type snapshot_read_error =
+  { kind : snapshot_read_error_kind
+  ; path : string option
+  ; message : string
+  }
+
+type snapshot_pair_with_errors =
+  { pending : Keeper_event_queue.t
+  ; inflight : Keeper_event_queue.t
+  ; read_errors : snapshot_read_error list
+  }
+
+let snapshot_read_error_kind_to_string = function
+  | Invalid_path -> "invalid_path"
+  | Read_failed -> "read_failed"
+  | Parse_failed -> "parse_failed"
+;;
+
+let load_from_path_with_errors ~keeper_name path =
   if not (Sys.file_exists path)
-  then Keeper_event_queue.empty
+  then Keeper_event_queue.empty, []
   else (
     match Safe_ops.read_json_file_safe path with
     | Error msg ->
@@ -131,7 +228,8 @@ let load_from_path ~keeper_name path =
         keeper_name
         path
         msg;
-      Keeper_event_queue.empty
+      ( Keeper_event_queue.empty
+      , [ { kind = Read_failed; path = Some path; message = msg } ] )
     | Ok json ->
       (match Keeper_event_queue.queue_of_yojson json with
        | Error msg ->
@@ -140,7 +238,8 @@ let load_from_path ~keeper_name path =
            keeper_name
            path
            msg;
-         Keeper_event_queue.empty
+         ( Keeper_event_queue.empty
+         , [ { kind = Parse_failed; path = Some path; message = msg } ] )
        | Ok queue ->
          let deduped = Keeper_event_queue.dedup_by_identity queue in
          let dropped =
@@ -159,17 +258,66 @@ let load_from_path ~keeper_name path =
              "event_queue_snapshot: restored %s for keeper=%s"
              (Keeper_event_queue.summary deduped)
              keeper_name;
-         deduped))
+         deduped, []))
+;;
 
-let load_unlocked ~base_path ~keeper_name =
+let load_from_path ~keeper_name path =
+  let queue, _read_errors = load_from_path_with_errors ~keeper_name path in
+  queue
+;;
+
+type snapshot_pair =
+  { pending : Keeper_event_queue.t
+  ; inflight : Keeper_event_queue.t
+  }
+
+let empty_snapshot_pair =
+  { pending = Keeper_event_queue.empty; inflight = Keeper_event_queue.empty }
+;;
+
+let empty_snapshot_pair_with_errors =
+  { pending = Keeper_event_queue.empty
+  ; inflight = Keeper_event_queue.empty
+  ; read_errors = []
+  }
+;;
+
+let load_snapshot_pair_unlocked ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
   | Error msg, _ | _, Error msg ->
     Log.Keeper.warn "event_queue_snapshot: %s" msg;
-    Keeper_event_queue.empty
+    empty_snapshot_pair
   | Ok pending_path, Ok inflight_path ->
     let pending = load_from_path ~keeper_name pending_path in
     let inflight = load_from_path ~keeper_name inflight_path in
-    prepend_missing pending (Keeper_event_queue.to_list inflight)
+    { pending; inflight }
+;;
+
+let load_snapshot_pair_with_errors_unlocked ~base_path ~keeper_name =
+  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
+  | Error msg, _ | _, Error msg ->
+    Log.Keeper.warn "event_queue_snapshot: %s" msg;
+    { empty_snapshot_pair_with_errors with
+      read_errors = [ { kind = Invalid_path; path = None; message = msg } ]
+    }
+  | Ok pending_path, Ok inflight_path ->
+    let pending, pending_errors = load_from_path_with_errors ~keeper_name pending_path in
+    let inflight, inflight_errors = load_from_path_with_errors ~keeper_name inflight_path in
+    { pending; inflight; read_errors = pending_errors @ inflight_errors }
+;;
+
+let load_unlocked ~base_path ~keeper_name =
+  let pair = load_snapshot_pair_unlocked ~base_path ~keeper_name in
+  prepend_missing pair.pending (Keeper_event_queue.to_list pair.inflight)
+;;
+
+let load_snapshot_pair ~base_path ~keeper_name =
+  with_write_lock (fun () -> load_snapshot_pair_unlocked ~base_path ~keeper_name)
+;;
+
+let load_snapshot_pair_with_errors ~base_path ~keeper_name =
+  with_write_lock (fun () -> load_snapshot_pair_with_errors_unlocked ~base_path ~keeper_name)
+;;
 
 let load ~base_path ~keeper_name =
   with_write_lock (fun () -> load_unlocked ~base_path ~keeper_name)

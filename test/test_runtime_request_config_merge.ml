@@ -158,6 +158,45 @@ let test_base_json_mode_survives_opinionless_request () =
   check bool "base output_schema None survives request None" true
     (Option.is_none merged.Llm_provider.Provider_config.output_schema)
 
+let test_base_sampling_survives_opinionless_request () =
+  let base =
+    { (base_with_schema ()) with
+      Llm_provider.Provider_config.top_p = Some 0.91
+    ; top_k = Some 42
+    ; min_p = Some 0.07
+    }
+  in
+  let merged = merge ~base (request_without_opinion ()) in
+  check (option (float 0.0001)) "base top_p survives request None" (Some 0.91)
+    merged.Llm_provider.Provider_config.top_p;
+  check (option int) "base top_k survives request None" (Some 42)
+    merged.Llm_provider.Provider_config.top_k;
+  check (option (float 0.0001)) "base min_p survives request None" (Some 0.07)
+    merged.Llm_provider.Provider_config.min_p
+
+let test_request_sampling_overrides_base_sampling () =
+  let base =
+    { (base_with_schema ()) with
+      Llm_provider.Provider_config.top_p = Some 0.91
+    ; top_k = Some 42
+    ; min_p = Some 0.07
+    }
+  in
+  let req =
+    { (request_without_opinion ()) with
+      Llm_provider.Provider_config.top_p = Some 0.12
+    ; top_k = Some 7
+    ; min_p = Some 0.02
+    }
+  in
+  let merged = merge ~base req in
+  check (option (float 0.0001)) "request top_p wins" (Some 0.12)
+    merged.Llm_provider.Provider_config.top_p;
+  check (option int) "request top_k wins" (Some 7)
+    merged.Llm_provider.Provider_config.top_k;
+  check (option (float 0.0001)) "request min_p wins" (Some 0.02)
+    merged.Llm_provider.Provider_config.min_p
+
 (* Mismatched request-side response_format/output_schema pairs must be
    normalized by the merge rather than propagated to the wire.  A request can
    only express a schema opinion through [output_schema] or an explicit
@@ -236,6 +275,10 @@ let () =
             test_both_opinionless_stays_off
         ; test_case "base JsonMode survives opinionless request" `Quick
             test_base_json_mode_survives_opinionless_request
+        ; test_case "base sampling survives opinionless request" `Quick
+            test_base_sampling_survives_opinionless_request
+        ; test_case "request sampling overrides base sampling" `Quick
+            test_request_sampling_overrides_base_sampling
         ] )
     ; ( "response_format/output_schema mismatch normalization"
       , [ test_case "Off + Some schema" `Quick

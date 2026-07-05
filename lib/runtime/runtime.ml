@@ -1104,6 +1104,24 @@ let temperature_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
+let top_p_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.top_p
+  | None -> None
+;;
+
+let top_k_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.top_k
+  | None -> None
+;;
+
+let min_p_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.min_p
+  | None -> None
+;;
+
 let default_preserve_thinking_for_model (_rt : t) : bool option =
   (* OAS owns provider/model capability truth and can preserve reasoning when
      the provider contract requires it. MASC must not turn "request-side

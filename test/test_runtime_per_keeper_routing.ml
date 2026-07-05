@@ -1212,28 +1212,20 @@ let test_runtime_inventory_surfaces_parameter_policy () =
       "no tool replay requirement"
       false
       (policy |> J.member "requires_reasoning_replay_on_tool_call" |> J.to_bool);
-    Alcotest.(check int)
-      "ignored sampling params count"
-      4
-      (policy |> J.member "ignored_sampling_params" |> J.to_list |> List.length);
-    Alcotest.(check (list string))
-      "ignored sampling params"
+    let json_string_list field =
+      policy |> J.member field |> J.to_list |> List.map J.to_string
+    in
+    let expected_ignored_sampling_params =
       [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
-      (policy
-       |> J.member "ignored_sampling_params"
-       |> J.to_list
-       |> List.map J.to_string);
-    Alcotest.(check int)
-      "always ignored sampling params count"
-      4
-      (policy |> J.member "always_ignored_sampling_params" |> J.to_list |> List.length);
+    in
     Alcotest.(check (list string))
-      "always ignored sampling params"
-      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
-      (policy
-       |> J.member "always_ignored_sampling_params"
-       |> J.to_list
-       |> List.map J.to_string))
+      "ignored sampling params surface model-catalog policy"
+      expected_ignored_sampling_params
+      (json_string_list "ignored_sampling_params");
+    Alcotest.(check (list string))
+      "always ignored sampling params surface model-catalog policy"
+      expected_ignored_sampling_params
+      (json_string_list "always_ignored_sampling_params"))
 ;;
 
 let test_runtime_inventory_surfaces_effective_capabilities () =

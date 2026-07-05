@@ -64,12 +64,63 @@ let board_post_payload =
     ]
 ;;
 
+let keeper_wake_payload =
+  `Assoc
+    [ "kind", `String "masc.keeper_wake"
+    ; "schema_version", `Int 1
+    ; ( "body"
+      , `Assoc
+          [ "keeper_name", `String "schedule-keeper"
+          ; "title", `String "Scheduled lane wake"
+          ; "message", `String "Run the scheduled maintenance lane now."
+          ; "urgency", `String "immediate"
+          ] )
+    ]
+;;
+
 let create_pending_board_schedule config =
   match
     Schedule_service.create config ~schedule_id:"board-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:board_post_payload ~risk_class:Schedule_domain.Workspace_write
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let create_pending_keeper_wake_schedule config =
+  match
+    Schedule_service.create config ~schedule_id:"keeper-wake-sched-1"
+      ~requested_at:100.0 ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+      ~payload:keeper_wake_payload ~risk_class:Schedule_domain.Workspace_write
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let create_pending_invalid_keeper_wake_schedule config =
+  let payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; "schema_version", `Int 1
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String "../bad"
+            ; "message", `String "This must not report success."
+            ] )
+      ]
+  in
+  match
+    Schedule_service.create config ~schedule_id:"invalid-keeper-wake-sched"
+      ~requested_at:100.0 ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+      ~payload ~risk_class:Schedule_domain.Workspace_write
       ~source:Schedule_domain.Operator_request ()
   with
   | Ok request -> request
@@ -181,6 +232,92 @@ let test_board_post_consumer_rejects_read_only_risk () =
   check int "no post" 0 (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
+let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
+  with_workspace
+  @@ fun config ->
+  let request = create_pending_keeper_wake_schedule config in
+  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let result = tick_ok config ~now:201.0 in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "dispatch status" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing execution record"
+   | Some execution ->
+     check string "execution status" "succeeded"
+       (Schedule_domain.execution_status_to_string execution.status);
+     (match execution.detail with
+      | Some detail ->
+        let open Yojson.Safe.Util in
+        check string "execution detail kind" "masc.keeper_wake.enqueued"
+          (detail |> member "kind" |> to_string);
+        check string "execution keeper" "schedule-keeper"
+          (detail |> member "keeper_name" |> to_string)
+      | None -> fail "execution detail missing"));
+  let queue =
+    Keeper_registry_event_queue.snapshot
+      ~base_path:config.Workspace_utils.base_path
+      "schedule-keeper"
+  in
+  check int "one keeper event queued" 1 (Keeper_event_queue.length queue);
+  (match Keeper_event_queue.dequeue queue with
+   | None -> fail "expected queued scheduled wake"
+   | Some (stimulus, rest) ->
+     check bool "queue rest empty" true (Keeper_event_queue.is_empty rest);
+     check string "post id" "schedule-due:keeper-wake-sched-1" stimulus.post_id;
+     check string "urgency" "immediate"
+       (Keeper_event_queue.urgency_to_string stimulus.urgency);
+     check (float 0.001) "arrived_at from tick now" 201.0 stimulus.arrived_at;
+     (match stimulus.payload with
+     | Keeper_event_queue.Schedule_due wake ->
+       check string "wake schedule" request.schedule_id wake.schedule_id;
+       check string "wake title" "Scheduled lane wake" (Option.get wake.title);
+       check string "wake message" "Run the scheduled maintenance lane now."
+         wake.message;
+       check string "wake digest"
+         (Schedule_domain.payload_digest request.payload)
+         wake.payload_digest
+      | _ -> fail "expected Schedule_due payload"))
+  ;
+  check int "keeper wake does not create board posts" 0
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+;;
+
+let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
+  with_workspace
+  @@ fun config ->
+  let request = create_pending_invalid_keeper_wake_schedule config in
+  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let result = tick_ok config ~now:201.0 in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "dispatch status" "unsupported"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing"
+   | Some stored ->
+     check string "schedule failed" "failed"
+       (Schedule_domain.schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing unsupported execution"
+   | Some execution ->
+     check string "execution failed" "failed"
+       (Schedule_domain.execution_status_to_string execution.status);
+     check (option string) "execution error"
+       (Some "keeper_name must match [A-Za-z0-9._-]+")
+       execution.error);
+  check int "invalid keeper wake does not enqueue" 0
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot
+          ~base_path:config.Workspace_utils.base_path
+          "../bad"))
+;;
+
 let test_dashboard_schedule_resolve_uses_authenticated_operator () =
   with_workspace
   @@ fun config ->
@@ -218,6 +355,10 @@ let () =
             test_board_post_consumer_creates_post_and_succeeds_schedule
         ; test_case "rejects read-only risk" `Quick
             test_board_post_consumer_rejects_read_only_risk
+        ; test_case "keeper wake enqueues typed stimulus" `Quick
+            test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
+        ; test_case "keeper wake rejects invalid keeper name" `Quick
+            test_keeper_wake_consumer_rejects_invalid_keeper_name
         ; test_case "dashboard resolve uses authenticated operator" `Quick
             test_dashboard_schedule_resolve_uses_authenticated_operator
         ] )

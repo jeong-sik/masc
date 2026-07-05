@@ -207,12 +207,56 @@ let test_waiting_cap_rejects () =
           check "rejection reports the in-flight lane" true
         | Some _ | None -> check "rejection reports the in-flight lane" false)
      | `Ran () -> check "request beyond the cap is rejected" false);
+    let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+    check
+      "snapshot reports the slot was created"
+      snapshot.Keeper_turn_admission.snapshot_slot_created;
+    check
+      "snapshot reports the full waiting queue"
+      (snapshot.Keeper_turn_admission.snapshot_waiting
+       = Keeper_turn_admission.max_waiting_chat_requests);
+    check
+      "snapshot reports waiting cap"
+      (snapshot.Keeper_turn_admission.snapshot_waiting_cap
+       = Keeper_turn_admission.max_waiting_chat_requests);
+    check
+      "snapshot marks the waiting queue full"
+      snapshot.Keeper_turn_admission.snapshot_waiting_full;
+    check
+      "snapshot counts the rejected chat request"
+      (snapshot.Keeper_turn_admission.snapshot_rejected_chat_count = 1);
+    let health =
+      Keeper_turn_admission.fleet_health_json
+        ~base_path
+        ~keeper_names:[ keeper_name ]
+    in
+    let open Yojson.Safe.Util in
+    check "fleet health degrades while the queue is full"
+      (String.equal "degraded" (health |> member "status" |> to_string));
+    check "fleet health exposes full queue count"
+      (health |> member "chat_waiting_full_keeper_count" |> to_int = 1);
+    check "fleet health exposes rejection counter"
+      (health |> member "chat_rejected_total_count" |> to_int = 1);
+    check "fleet health names the full queue reason"
+      (health |> member "status_reasons" |> to_list
+       |> List.map to_string
+       |> List.exists (String.equal "chat_waiting_queue_full"));
     Eio.Promise.resolve set_release ());
   (* The switch only exits after every parked waiter ran; the slot must be
      fully drained. *)
-  match Keeper_turn_admission.For_testing.peek ~base_path ~keeper_name with
-  | Some (None, 0) -> check "queue fully drained after release" true
-  | Some _ | None -> check "queue fully drained after release" false
+  (match Keeper_turn_admission.For_testing.peek ~base_path ~keeper_name with
+   | Some (None, 0) -> check "queue fully drained after release" true
+   | Some _ | None -> check "queue fully drained after release" false);
+  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+  check
+    "snapshot clears waiting count after release"
+    (snapshot.Keeper_turn_admission.snapshot_waiting = 0);
+  check
+    "snapshot clears full flag after release"
+    (not snapshot.Keeper_turn_admission.snapshot_waiting_full);
+  check
+    "snapshot retains rejection counter after release"
+    (snapshot.Keeper_turn_admission.snapshot_rejected_chat_count = 1)
 ;;
 
 let test_exception_releases_slot () =

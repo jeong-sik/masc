@@ -110,6 +110,28 @@ let seed_goal_operator (config : Workspace.config) ~agent_name =
   Auth_credential_base.write_initial_admin config.base_path agent_name
 ;;
 
+let make_keeper_meta ~name ~active_goal_ids =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String ("agent-" ^ name)
+          ; "trace_id", `String ("trace-" ^ name)
+          ; "goal", `String "goal verification wake test"
+          ; ( "active_goal_ids"
+            , `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) )
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
+;;
+
+let write_keeper_meta config meta =
+  match Keeper_meta_store.write_meta config meta with
+  | Ok () -> ()
+  | Error err -> fail ("write_meta failed: " ^ err)
+;;
+
 let get_string_field json field =
   match Yojson.Safe.Util.member field json with
   | `String value -> value
@@ -582,6 +604,8 @@ let test_goal_transition_rejected_verification_retains_evidence () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
+  let keeper_name = "goal-retry-keeper" in
+  write_keeper_meta config (make_keeper_meta ~name:keeper_name ~active_goal_ids:[ goal.id ]);
   create_done_task config ~goal_id:goal.id ~title:"Reject done task";
   let transitioned =
     Tool_workspace.dispatch
@@ -648,6 +672,41 @@ let test_goal_transition_rejected_verification_retains_evidence () =
     "latest request status rejected"
     "rejected"
     (get_string_field latest_request "status");
+  let wake_json =
+    Yojson.Safe.Util.member "goal_verification_failed_wake" rejected_json
+  in
+  check
+    int
+    "one assigned keeper got verification failure wake"
+    1
+    (Yojson.Safe.Util.member "keeper_count" wake_json |> Yojson.Safe.Util.to_int);
+  check
+    (list string)
+    "wake targets assigned keeper"
+    [ keeper_name ]
+    (get_string_list_field wake_json "keeper_names");
+  let queued =
+    Keeper_registry_event_queue.snapshot ~base_path:config.base_path keeper_name
+    |> Keeper_event_queue.to_list
+  in
+  let failure =
+    queued
+    |> List.find_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Goal_verification_failed failure -> Some (stimulus, failure)
+      | _ -> None)
+  in
+  (match failure with
+   | None -> fail "expected Goal_verification_failed stimulus"
+   | Some (stimulus, failure) ->
+     check string "stimulus goal id" goal.id failure.goal_id;
+     check string "stimulus request id" request_id failure.request_id;
+     check string "stimulus rejected by" "agent-alpha" failure.rejected_by;
+     check
+       string
+       "stimulus post id"
+       (Keeper_event_queue.goal_verification_failure_post_id failure)
+       stimulus.post_id);
   let vote =
     match
       latest_request |> Yojson.Safe.Util.member "votes" |> Yojson.Safe.Util.to_list
@@ -1612,6 +1671,46 @@ let test_goal_completion_blocks_open_tasks () =
     (get_string_field error_json "error_code")
 ;;
 
+let test_goal_completion_blocks_unevaluated_metric () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Metric completion"
+        ~metric:"coverage %"
+        ~target_value:"80%"
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Metric done task";
+  let completed =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let error_json = expect_error completed in
+  check
+    string
+    "metric completion blocked"
+    "conflict"
+    (get_string_field error_json "error_code");
+  check
+    bool
+    "error mentions metric evaluation"
+    true
+    (contains_substring (Yojson.Safe.to_string error_json) "has not been evaluated")
+;;
+
 let test_goal_completion_override_allows_empty_goal () =
   with_workspace
   @@ fun config ->
@@ -1936,6 +2035,10 @@ let () =
             "completion blocks open tasks"
             `Quick
             test_goal_completion_blocks_open_tasks
+        ; test_case
+            "completion blocks unevaluated metric"
+            `Quick
+            test_goal_completion_blocks_unevaluated_metric
         ; test_case
             "completion override allows empty goal"
             `Quick

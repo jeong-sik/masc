@@ -840,11 +840,16 @@ let cached_keeper_config_json config name =
   | other -> `OK, other
 ;;
 
-let offline_keeper_composite_json name (m : Keeper_meta_contract.keeper_meta) =
+let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_meta) =
   let now = Time_compat.now () in
   let phase = if m.paused then "paused" else "offline" in
   let reason =
     if m.paused then "paused_without_registry_entry" else "registry_absent"
+  in
+  let secret_projection =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
   in
   `Assoc
     [ "keeper", `String name
@@ -872,6 +877,7 @@ let offline_keeper_composite_json name (m : Keeper_meta_contract.keeper_meta) =
     ; "last_turn_ts", `Float m.runtime.usage.last_turn_ts
     ; "fsm_guard_violations", `Int 0
     ; "fsm_guard_violation_breakdown", `List []
+    ; "secret_projection", secret_projection
     ; ( "runtime_attention"
       , `Assoc
           [ "state", `String phase
@@ -919,7 +925,7 @@ let cached_keeper_composite_json config name =
              | Ok None ->
                ( `Not_found
                , error_json (Printf.sprintf "keeper %S not found" name) )
-             | Ok (Some m) -> `OK, offline_keeper_composite_json name m))
+             | Ok (Some m) -> `OK, offline_keeper_composite_json ~config name m))
       in
       `Assoc
         [ "status", `String (keeper_composite_status_to_string status)

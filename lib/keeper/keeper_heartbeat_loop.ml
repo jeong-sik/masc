@@ -144,9 +144,11 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Board_signal _
       | Keeper_event_queue.Fusion_completed _
       | Keeper_event_queue.Bg_completed _
+      | Keeper_event_queue.Schedule_due _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.No_progress_recovery
-      | Keeper_event_queue.Hitl_resolved _ ->
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Goal_verification_failed _ ->
         None)
     stimuli
 ;;
@@ -880,6 +882,19 @@ let run_heartbeat_loop
           | Keeper_pressure_admission.Admitted -> true
           | Keeper_pressure_admission.Blocked _ -> false
         in
+        let approval_pending =
+          Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta_current.name
+        in
+        let keeper_health_blocker =
+          if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"
+        in
+        let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta_current in
+        let provider_cooldown_remaining_sec =
+          Keeper_world_observation.provider_cooldown_remaining_sec_for_runtime
+            ~keeper_name:meta_current.name
+            ~runtime_id
+        in
+        let provider_cooldown_pending = Option.is_some provider_cooldown_remaining_sec in
         (match turn_admission with
          | Keeper_pressure_admission.Admitted -> ()
          | Keeper_pressure_admission.Blocked block ->
@@ -890,9 +905,38 @@ let run_heartbeat_loop
            Keeper_registry.touch_last_turn_ts
              ~base_path:ctx.config.base_path
              meta_current.name);
+        (match keeper_health_blocker with
+         | None -> ()
+         | Some blocker when admitted_turn && proactive_warmup_elapsed ->
+           record_runtime_backpressure_observation
+             ~base_path:ctx.config.base_path
+             ~keeper_name:meta_current.name
+             ~reason:("keeper_health_" ^ blocker)
+         | Some _ -> ());
+        (match provider_cooldown_remaining_sec with
+         | None -> ()
+         | Some remaining_sec when admitted_turn && proactive_warmup_elapsed ->
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:
+               [ Keeper_world_observation.skip_reason_to_string
+                   (Keeper_world_observation.Provider_cooldown_pending { remaining_sec })
+               ];
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name
+         | Some _ -> ());
         let pending_board_events, meta_after_triage =
           if admitted_turn
-          then collect_keepalive_board_events ~ctx ~meta_current ~proactive_warmup_elapsed
+          then
+            collect_keepalive_board_events
+              ~ctx
+              ~meta_current
+              ~proactive_warmup_elapsed
+              ~approval_pending
+              ~keeper_backpressured:(Option.is_some keeper_health_blocker)
+              ~provider_cooldown_pending
           else [], meta_current
         in
         let t_board_end = Time_compat.now () in

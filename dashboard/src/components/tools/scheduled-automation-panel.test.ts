@@ -732,6 +732,10 @@ describe('ScheduledAutomationPanel', () => {
       render(null, container)
       render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
 
+      const contract = container.querySelector('[data-schedule-durable-signal-contract="payload_support"]')
+      expect(contract?.getAttribute('data-schedule-durable-signal-raw')).toBe('3')
+      expect(contract?.getAttribute('data-schedule-durable-signal-visible')).toBe('1')
+      expect(contract?.getAttribute('data-schedule-durable-signal-hidden')).toBe('2')
       expect(container.querySelector('[data-schedule-signal-id="sig-supported"]')).not.toBeNull()
       expect(container.querySelector('[data-schedule-signal-id="sig-unsupported-missing-row"]')).toBeNull()
       expect(container.querySelector('[data-schedule-signal-id="sig-unknown-missing-row"]')).toBeNull()
@@ -739,6 +743,61 @@ describe('ScheduledAutomationPanel', () => {
       expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported-missing-row"]')).toBeNull()
       expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown-missing-row"]')).toBeNull()
     }
+  })
+
+  it('marks request-derived fallback when all durable runner signals are hidden by payload support', () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported-request',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.smoke',
+        payload_support: 'supported',
+      }),
+    ])
+    auto.payload_support = {
+      supported_kinds: ['keeper.smoke'],
+      unsupported_request_count: 1,
+      unsupported_kinds: [{ kind: 'orphan_auto_release', count: 1 }],
+      unknown_request_count: 1,
+    }
+    auto.signal_source = 'schedule_runner_signals'
+    auto.signal_count = 2
+    auto.signals = [
+      signal({
+        signal_id: 'sig-unsupported-only',
+        schedule_id: 'sched-unsupported-only',
+        payload_kind: 'orphan_auto_release',
+      }),
+      signal({
+        signal_id: 'sig-unknown-only',
+        schedule_id: 'sched-unknown-only',
+      }),
+    ]
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} />`, container)
+
+    const contract = container.querySelector('[data-schedule-durable-signal-contract="payload_support"]')
+    expect(contract?.getAttribute('data-schedule-durable-signal-raw')).toBe('2')
+    expect(contract?.getAttribute('data-schedule-durable-signal-visible')).toBe('0')
+    expect(contract?.getAttribute('data-schedule-durable-signal-hidden')).toBe('2')
+    expect(contract?.textContent).toContain('payload support로 2 durable runner signal 숨김')
+    expect(contract?.textContent).toContain('request rows에서 파생했습니다')
+    expect(container.querySelector('[data-schedule-signal-id="sig-unsupported-only"]')).toBeNull()
+    expect(container.querySelector('[data-schedule-signal-id="sig-unknown-only"]')).toBeNull()
+    expect(container.querySelector('[data-schedule-signal-schedule="sched-supported-request"]')).not.toBeNull()
+
+    render(null, container)
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const v2Contract = container.querySelector('[data-schedule-durable-signal-contract="payload_support"]')
+    expect(v2Contract?.getAttribute('data-schedule-durable-signal-raw')).toBe('2')
+    expect(v2Contract?.getAttribute('data-schedule-durable-signal-visible')).toBe('0')
+    expect(v2Contract?.getAttribute('data-schedule-durable-signal-hidden')).toBe('2')
+    expect(v2Contract?.textContent).toContain('payload support로 2 durable wake signal 숨김')
+    expect(container.querySelector('[data-schedule-signal-id="sig-unsupported-only"]')).toBeNull()
+    expect(container.querySelector('[data-schedule-signal-id="sig-unknown-only"]')).toBeNull()
   })
 
   it('uses explicit ready and terminal status matching', async () => {

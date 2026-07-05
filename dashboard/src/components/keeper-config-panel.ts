@@ -439,6 +439,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function keeperConfigHasField(config: KeeperConfig, path: KeeperConfigFieldPath): boolean {
+  const presentPaths = config.field_presence?.present_paths
+  if (presentPaths) return presentPaths.includes(path)
+
   let current: unknown = config
   for (const segment of path.split('.')) {
     if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, segment)) {

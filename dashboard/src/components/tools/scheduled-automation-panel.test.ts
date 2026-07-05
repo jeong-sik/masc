@@ -611,6 +611,25 @@ describe('ScheduledAutomationPanel', () => {
           urgency: 'immediate',
           post_id: 'schedule-due:sched-keeper-wake',
         },
+        keeper_queue_evidence: {
+          projection_status: 'matched_pending',
+          source: 'durable_event_queue_snapshot',
+          queue: 'keeper_event_queue',
+          stimulus: 'schedule_due',
+          keeper_name: 'schedule-keeper',
+          schedule_id: 'sched-keeper-wake',
+          post_id: 'schedule-due:sched-keeper-wake',
+          pending_count: 1,
+          inflight_count: 0,
+          matched_bucket: 'pending',
+          matched_post_id: 'schedule-due:sched-keeper-wake',
+          matched_schedule_id: 'sched-keeper-wake',
+          matched_payload_kind: 'schedule_due',
+          matched_arrived_at: 201,
+          matched_arrived_at_iso: '2026-06-21T00:03:21Z',
+          matched_age_seconds: 0,
+          read_errors: [],
+        },
       }),
     ])
 
@@ -623,6 +642,12 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-dispatch-receipt-row="stimulus"]')?.textContent).toContain('schedule_due')
     expect(container.querySelector('[data-dispatch-receipt-row="keeper"]')?.textContent).toContain('schedule-keeper')
     expect(container.querySelector('[data-dispatch-receipt-row="post_id"]')?.textContent).toContain('schedule-due:sched-keeper-wake')
+    const queueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_pending"]')
+    expect(queueEvidence).not.toBeNull()
+    expect(queueEvidence?.getAttribute('data-schedule-keeper-queue-evidence-source')).toBe('durable_event_queue_snapshot')
+    expect(container.querySelector('[data-keeper-queue-evidence-row="matched_bucket"]')?.textContent).toContain('pending')
+    expect(container.querySelector('[data-keeper-queue-evidence-row="pending_count"]')?.textContent).toContain('1')
+    expect(container.querySelector('[data-keeper-queue-evidence-row="matched_payload_kind"]')?.textContent).toContain('schedule_due')
 
     render(null, container)
     render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
@@ -640,6 +665,11 @@ describe('ScheduledAutomationPanel', () => {
     expect(v2Receipt?.textContent).toContain('keeper_event_queue')
     expect(v2Receipt?.textContent).toContain('schedule_due')
     expect(v2Receipt?.textContent).toContain('schedule-due:sched-keeper-wake')
+    const v2QueueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_pending"]')
+    expect(v2QueueEvidence).not.toBeNull()
+    expect(v2QueueEvidence?.textContent).toContain('durable_event_queue_snapshot')
+    expect(v2QueueEvidence?.textContent).toContain('matched pending')
+    expect(v2QueueEvidence?.textContent).toContain('schedule_due')
   })
 
   it('filters schedule cards without filtering the wake signal feed', async () => {

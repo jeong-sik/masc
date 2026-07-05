@@ -320,7 +320,28 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
     check string "receipt urgency" "immediate"
       (receipt |> member "urgency" |> to_string);
     check string "receipt post id" "schedule-due:keeper-wake-sched-1"
-      (receipt |> member "post_id" |> to_string)
+      (receipt |> member "post_id" |> to_string);
+    let queue_evidence = row |> member "keeper_queue_evidence" in
+    check string "queue evidence matched" "matched_pending"
+      (queue_evidence |> member "projection_status" |> to_string);
+    check string "queue evidence source" "durable_event_queue_snapshot"
+      (queue_evidence |> member "source" |> to_string);
+    check string "queue evidence keeper" "schedule-keeper"
+      (queue_evidence |> member "keeper_name" |> to_string);
+    check string "queue evidence stimulus" "schedule_due"
+      (queue_evidence |> member "stimulus" |> to_string);
+    check string "queue evidence matched bucket" "pending"
+      (queue_evidence |> member "matched_bucket" |> to_string);
+    check string "queue evidence matched payload" "schedule_due"
+      (queue_evidence |> member "matched_payload_kind" |> to_string);
+    check string "queue evidence matched schedule" request.schedule_id
+      (queue_evidence |> member "matched_schedule_id" |> to_string);
+    check int "queue evidence pending count" 1
+      (queue_evidence |> member "pending_count" |> to_int);
+    check int "queue evidence inflight count" 0
+      (queue_evidence |> member "inflight_count" |> to_int);
+    check int "queue evidence read errors" 0
+      (queue_evidence |> member "read_errors" |> to_list |> List.length)
 ;;
 
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =

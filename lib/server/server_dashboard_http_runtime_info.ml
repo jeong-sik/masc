@@ -2721,6 +2721,115 @@ let schedule_dispatch_receipt_dashboard_json
          ]))
 ;;
 
+let schedule_queue_read_error_dashboard_json
+  (error : Keeper_event_queue_persistence.snapshot_read_error)
+  =
+  `Assoc
+    [ "kind", `String (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string error.kind)
+    ; ( "path"
+      , match error.path with
+        | None -> `Null
+        | Some path -> `String path )
+    ; "message", `String error.message
+    ]
+;;
+
+let schedule_queue_match
+  ~(schedule_id : string)
+  ~(post_id : string)
+  ~(stimulus_label : string)
+  (queue : Keeper_event_queue.t)
+  =
+  queue
+  |> Keeper_event_queue.to_list
+  |> List.find_opt (fun (stimulus : Keeper_event_queue.stimulus) ->
+    String.equal stimulus.post_id post_id
+    && String.equal (Keeper_event_queue.payload_kind_label stimulus.payload) stimulus_label
+    &&
+    match stimulus.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      String.equal wake.schedule_id schedule_id
+    | _ -> false)
+;;
+
+let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimulus) =
+  [ "matched_bucket", `String bucket
+  ; "matched_post_id", `String stimulus.post_id
+  ; "matched_payload_kind", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+  ; "matched_arrived_at", `Float stimulus.arrived_at
+  ; "matched_arrived_at_iso", unix_iso_json stimulus.arrived_at
+  ; ( "matched_schedule_id"
+    , match stimulus.payload with
+      | Keeper_event_queue.Schedule_due wake -> `String wake.schedule_id
+      | _ -> `Null )
+  ; "matched_age_seconds", `Float (Float.max 0.0 (now -. stimulus.arrived_at))
+  ]
+;;
+
+let schedule_keeper_queue_evidence_dashboard_json
+  ~now
+  (config : Workspace.config)
+  (execution : Schedule_domain.execution_record option)
+  =
+  match execution with
+  | None -> `Null
+  | Some execution ->
+    (match execution.Schedule_domain.detail with
+     | None -> `Null
+     | Some detail ->
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Error reason ->
+          `Assoc
+            [ "projection_status", `String "unrecognized_receipt"
+            ; "reason", `String reason
+            ]
+        | Ok Server_schedule_consumers.Board_post_created _ -> `Null
+        | Ok
+            (Server_schedule_consumers.Keeper_wake_enqueued
+              { keeper_name; schedule_id; urgency = _; post_id; queue; stimulus }) ->
+          let snapshot =
+            Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+              ~base_path:config.Workspace_utils.base_path
+              ~keeper_name
+          in
+          let pending_match =
+            schedule_queue_match ~schedule_id ~post_id ~stimulus_label:stimulus snapshot.pending
+          in
+          let inflight_match =
+            schedule_queue_match ~schedule_id ~post_id ~stimulus_label:stimulus snapshot.inflight
+          in
+          let read_errors =
+            List.map schedule_queue_read_error_dashboard_json snapshot.read_errors
+          in
+          let base_fields =
+            [ "source", `String "durable_event_queue_snapshot"
+            ; "queue", `String queue
+            ; "stimulus", `String stimulus
+            ; "keeper_name", `String keeper_name
+            ; "schedule_id", `String schedule_id
+            ; "post_id", `String post_id
+            ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
+            ; "inflight_count", `Int (Keeper_event_queue.length snapshot.inflight)
+            ; "read_errors", `List read_errors
+            ]
+          in
+          (match pending_match, inflight_match, snapshot.read_errors with
+           | Some match_, _, _ ->
+             `Assoc
+               (("projection_status", `String "matched_pending")
+                :: base_fields
+                @ schedule_queue_match_fields ~now "pending" match_)
+           | None, Some match_, _ ->
+             `Assoc
+               (("projection_status", `String "matched_inflight")
+                :: base_fields
+                @ schedule_queue_match_fields ~now "inflight" match_)
+           | None, None, _ :: _ ->
+             `Assoc (("projection_status", `String "read_error") :: base_fields)
+           | None, None, [] ->
+             `Assoc (("projection_status", `String "not_found") :: base_fields))))
+;;
+
 let schedule_signal_projection_limit = 20
 
 let schedule_signal_payload_kind_json (signal : Schedule_runner.wake_signal) =
@@ -2751,6 +2860,7 @@ let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
 
 let schedule_request_dashboard_json
   ~now
+  ~config
   ~state
   ?last_execution
   (request : Schedule_domain.schedule_request)
@@ -2823,6 +2933,7 @@ let schedule_request_dashboard_json
         | None -> `Null
         | Some execution -> execution_record_dashboard_json execution )
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
+    ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_execution
     ]
 ;;
 
@@ -2932,7 +3043,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                   Schedule_store.last_execution_for_schedule state
                     ~schedule_id:request.Schedule_domain.schedule_id
                 in
-                schedule_request_dashboard_json ~now ~state ?last_execution request)
+                schedule_request_dashboard_json ~now ~config ~state ?last_execution request)
              request_rows) )
     ]
 ;;

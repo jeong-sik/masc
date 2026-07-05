@@ -336,12 +336,101 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (queue_evidence |> member "matched_payload_kind" |> to_string);
     check string "queue evidence matched schedule" request.schedule_id
       (queue_evidence |> member "matched_schedule_id" |> to_string);
+    check (float 0.001) "queue evidence execution due_at" request.due_at
+      (queue_evidence |> member "execution_due_at" |> to_float);
+    check string "queue evidence execution digest"
+      (Schedule_domain.payload_digest request.payload)
+      (queue_evidence |> member "execution_payload_digest" |> to_string);
+    check (float 0.001) "queue evidence matched due_at" request.due_at
+      (queue_evidence |> member "matched_due_at" |> to_float);
+    check string "queue evidence matched digest"
+      (Schedule_domain.payload_digest request.payload)
+      (queue_evidence |> member "matched_payload_digest" |> to_string);
     check int "queue evidence pending count" 1
       (queue_evidence |> member "pending_count" |> to_int);
     check int "queue evidence inflight count" 0
       (queue_evidence |> member "inflight_count" |> to_int);
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
+;;
+
+let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request = create_pending_keeper_wake_schedule config in
+  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
+  let expected_wake : Keeper_event_queue.scheduled_wake =
+    { schedule_id = request.schedule_id
+    ; due_at = request.due_at
+    ; payload_digest = Schedule_domain.payload_digest request.payload
+    ; title = Some "Scheduled lane wake"
+    ; message = "Run the scheduled maintenance lane now."
+    }
+  in
+  let post_id = Keeper_event_queue.schedule_due_post_id expected_wake in
+  (match Keeper_registry_event_queue.drop_by_post_id ~base_path keeper_name ~post_id with
+   | Error message -> fail ("drop failed: " ^ message)
+   | Ok removed -> check int "removed current occurrence" 1 (List.length removed));
+  let stale_payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; "schema_version", `Int 1
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String keeper_name
+            ; "title", `String "Scheduled lane wake"
+            ; "message", `String "Run a different scheduled occurrence."
+            ; "urgency", `String "immediate"
+            ] )
+      ]
+  in
+  let stale_wake : Keeper_event_queue.scheduled_wake =
+    { schedule_id = request.schedule_id
+    ; due_at = request.due_at +. 60.0
+    ; payload_digest = Schedule_domain.payload_digest stale_payload
+    ; title = Some "Scheduled lane wake"
+    ; message = "Run a different scheduled occurrence."
+    }
+  in
+  let stale_stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.schedule_due_post_id stale_wake
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = request.due_at +. 61.0
+    ; payload = Keeper_event_queue.Schedule_due stale_wake
+    }
+  in
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name stale_stimulus;
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let row =
+    dashboard
+    |> member "requests"
+    |> to_list
+    |> List.find_opt (fun row ->
+      String.equal
+        (row |> member "schedule_id" |> to_string)
+        request.schedule_id)
+  in
+  match row with
+  | None -> fail "keeper wake schedule missing from dashboard projection"
+  | Some row ->
+    let queue_evidence = row |> member "keeper_queue_evidence" in
+    check string "stale occurrence does not match" "not_found"
+      (queue_evidence |> member "projection_status" |> to_string);
+    check (float 0.001) "queue evidence execution due_at" request.due_at
+      (queue_evidence |> member "execution_due_at" |> to_float);
+    check string "queue evidence execution digest"
+      (Schedule_domain.payload_digest request.payload)
+      (queue_evidence |> member "execution_payload_digest" |> to_string);
+    check int "stale occurrence still visible as pending" 1
+      (queue_evidence |> member "pending_count" |> to_int);
+    check int "queue evidence inflight count" 0
+      (queue_evidence |> member "inflight_count" |> to_int)
 ;;
 
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
@@ -415,6 +504,8 @@ let () =
             test_board_post_consumer_rejects_read_only_risk
         ; test_case "keeper wake enqueues typed stimulus" `Quick
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
+        ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
+            test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
         ; test_case "dashboard resolve uses authenticated operator" `Quick

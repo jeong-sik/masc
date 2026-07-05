@@ -2736,6 +2736,8 @@ let schedule_queue_read_error_dashboard_json
 
 let schedule_queue_match
   ~(schedule_id : string)
+  ~(due_at : float)
+  ~(payload_digest : string)
   ~(post_id : string)
   ~(stimulus_label : string)
   (queue : Keeper_event_queue.t)
@@ -2749,19 +2751,38 @@ let schedule_queue_match
     match stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
       String.equal wake.schedule_id schedule_id
+      && Float.equal wake.due_at due_at
+      && String.equal wake.payload_digest payload_digest
     | _ -> false)
 ;;
 
 let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimulus) =
+  let scheduled_wake =
+    match stimulus.payload with
+    | Keeper_event_queue.Schedule_due wake -> Some wake
+    | _ -> None
+  in
   [ "matched_bucket", `String bucket
   ; "matched_post_id", `String stimulus.post_id
   ; "matched_payload_kind", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
   ; "matched_arrived_at", `Float stimulus.arrived_at
   ; "matched_arrived_at_iso", unix_iso_json stimulus.arrived_at
   ; ( "matched_schedule_id"
-    , match stimulus.payload with
-      | Keeper_event_queue.Schedule_due wake -> `String wake.schedule_id
-      | _ -> `Null )
+    , match scheduled_wake with
+      | Some wake -> `String wake.schedule_id
+      | None -> `Null )
+  ; ( "matched_due_at"
+    , match scheduled_wake with
+      | Some wake -> `Float wake.due_at
+      | None -> `Null )
+  ; ( "matched_due_at_iso"
+    , match scheduled_wake with
+      | Some wake -> unix_iso_json wake.due_at
+      | None -> `Null )
+  ; ( "matched_payload_digest"
+    , match scheduled_wake with
+      | Some wake -> `String wake.payload_digest
+      | None -> `Null )
   ; "matched_age_seconds", `Float (Float.max 0.0 (now -. stimulus.arrived_at))
   ]
 ;;
@@ -2787,16 +2808,20 @@ let schedule_keeper_queue_evidence_dashboard_json
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name; schedule_id; urgency = _; post_id; queue; stimulus }) ->
+          let due_at = execution.Schedule_domain.due_at in
+          let payload_digest = execution.Schedule_domain.payload_digest in
           let snapshot =
             Keeper_event_queue_persistence.load_snapshot_pair_with_errors
               ~base_path:config.Workspace_utils.base_path
               ~keeper_name
           in
           let pending_match =
-            schedule_queue_match ~schedule_id ~post_id ~stimulus_label:stimulus snapshot.pending
+            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
+              ~stimulus_label:stimulus snapshot.pending
           in
           let inflight_match =
-            schedule_queue_match ~schedule_id ~post_id ~stimulus_label:stimulus snapshot.inflight
+            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
+              ~stimulus_label:stimulus snapshot.inflight
           in
           let read_errors =
             List.map schedule_queue_read_error_dashboard_json snapshot.read_errors
@@ -2808,6 +2833,9 @@ let schedule_keeper_queue_evidence_dashboard_json
             ; "keeper_name", `String keeper_name
             ; "schedule_id", `String schedule_id
             ; "post_id", `String post_id
+            ; "execution_due_at", `Float due_at
+            ; "execution_due_at_iso", unix_iso_json due_at
+            ; "execution_payload_digest", `String payload_digest
             ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
             ; "inflight_count", `Int (Keeper_event_queue.length snapshot.inflight)
             ; "read_errors", `List read_errors

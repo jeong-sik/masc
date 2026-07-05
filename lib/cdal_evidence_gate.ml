@@ -8,6 +8,7 @@ type decision =
       }
 
 let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
+let no_contract_evidence_ref_required = "handoff_context.evidence_refs"
 
 let hint_evidence_incomplete =
   "Supply task-completion evidence: notes >= 20 chars summarising what \
@@ -85,15 +86,15 @@ let unsatisfied_required_evidence
   =
   match contract with
   | None ->
-          (* task-1815: Layer 2 — reject no-contract completions without
-             evidence_refs. Uses explicit handoff_context.evidence_refs presence,
-             not heuristic classification. Blueprint-compliant. *)
-          let has_refs =
-            match handoff_context with
-            | Some hc -> hc.evidence_refs <> []
-            | None -> false
-          in
-          if has_refs then [] else [rule_id_evidence_incomplete]
+    (* task-1815: Layer 2: reject no-contract completions without
+       evidence_refs. Uses explicit handoff_context.evidence_refs presence,
+       not heuristic classification. Blueprint-compliant. *)
+    let has_refs =
+      match handoff_context with
+      | Some hc -> List.exists (fun ref_ -> String.trim ref_ <> "") hc.evidence_refs
+      | None -> false
+    in
+    if has_refs then [] else [no_contract_evidence_ref_required]
   | Some c ->
     List.filter
       (fun e -> not (evidence_entry_satisfied ~notes ~handoff_context e))
@@ -175,8 +176,16 @@ let evidence_summary_payload
 
 let decide ~task_id ~task_opt ~notes ~handoff_context () =
   match (task_opt : Masc_domain.task option) with
-  | Some t when Option.is_some t.contract ->
-    if evidence_is_substantive ~notes ~handoff_context t.contract
+  | Some t ->
+    let unsatisfied =
+      unsatisfied_required_evidence ~notes ~handoff_context t.contract
+    in
+    let evidence_sufficient =
+      match t.contract with
+      | None -> unsatisfied = []
+      | Some _ -> evidence_is_substantive ~notes ~handoff_context t.contract
+    in
+    if evidence_sufficient
     then begin
       Log.Task.info "cdal_evidence_gate PASS task=%s notes_len=%d handoff_refs=%d"
         task_id (String.length (String.trim notes))
@@ -184,9 +193,6 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
       Pass
     end
     else
-      let unsatisfied =
-        unsatisfied_required_evidence ~notes ~handoff_context t.contract
-      in
       Log.Task.warn "cdal_evidence_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
         task_id (List.length unsatisfied) (String.length (String.trim notes))
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
@@ -198,7 +204,7 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
         ; payload_json =
             `Assoc
               [ "task_id", `String task_id
-              ; "contract_required", `Bool true
+              ; "contract_required", `Bool (Option.is_some t.contract)
               ; ( "required_evidence_unsatisfied"
                 , Json_util.json_string_list unsatisfied )
               ; ( "evidence_summary"

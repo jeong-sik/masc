@@ -17,7 +17,8 @@
 
     | task.contract | evidence | Decision |
     |---------------|----------|----------|
-    | [None] | any | [Pass] (analysis-only task bypass) |
+    | [None] | non-empty handoff_context.evidence_refs | [Pass] |
+    | [None] | missing/empty handoff_context.evidence_refs | [Reject] |
     | [Some _] | all [required_evidence] mentioned AND (substantive notes OR handoff reference) | [Pass] |
     | [Some _] | otherwise | [Reject] with unsatisfied required-evidence list | *)
 

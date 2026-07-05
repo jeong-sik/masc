@@ -901,6 +901,51 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await sendPromise
   })
 
+  it('persists the live assistant draft while the stream is in flight', async () => {
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_draft', status: 'queued' },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_START' })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: '부분 응답' })
+      opts.onEvent({
+        type: 'TOOL_CALL_START',
+        toolCallId: 'tc-draft',
+        toolCallName: 'keeper_board_list',
+      })
+      return new Promise<{ terminal: boolean }>(resolve => {
+        resolveStream = resolve
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', '진행 상황?')
+    await Promise.resolve()
+
+    const [pending] = pendingKeeperChatRequestsForKeeper('echo')
+    expect(pending?.assistantDraft?.text).toBe('부분 응답')
+    expect(pending?.assistantDraft?.delivery).toBe('streaming')
+    expect(pending?.assistantDraft?.streamState).toBe('streaming')
+    expect(pending?.assistantDraft?.traceSteps).toEqual([
+      expect.objectContaining({
+        kind: 'tool',
+        name: 'keeper_board_list',
+        toolCallId: 'tc-draft',
+        status: 'pending',
+      }),
+    ])
+
+    resolveStream({ terminal: true })
+    await sendPromise
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
   it('marks the reply interrupted when the stream ends without a terminal event', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       { type: 'RUN_STARTED' },
@@ -1458,6 +1503,81 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       expect(thread.filter(entry => entry.role === 'user')).toHaveLength(1)
       expect(thread.some(entry => entry.role === 'assistant' && entry.delivery === 'delivered')).toBe(true)
       expect(keeperActionErrors.value.echo).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('restores the partial assistant draft after page reload while the request is still running', async () => {
+    vi.useFakeTimers()
+    try {
+      _resetChatHydrationForTests()
+      _clearPendingKeeperChatRequestsForTests()
+      upsertPendingKeeperChatRequest({
+        requestId: 'kmsg_echo_draft',
+        keeperName: 'echo',
+        message: '진행 상황?',
+        submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+        assistantDraft: {
+          text: '부분 응답',
+          rawText: '부분 응답',
+          delivery: 'streaming',
+          streamState: 'streaming',
+          traceSteps: [
+            { kind: 'think', text: '상태 확인 중' },
+            {
+              kind: 'tool',
+              name: 'keeper_board_list',
+              toolCallId: 'tc-draft',
+              status: 'pending',
+              args: '{"limit":5}',
+            },
+          ],
+        },
+      })
+
+      fetchKeeperChatHistory.mockResolvedValue([
+        { role: 'user', content: '진행 상황?', ts: 1_780_000_000 },
+      ])
+
+      let pollCount = 0
+      fetchQueuedKeeperMessageResult.mockImplementation(() => {
+        pollCount += 1
+        if (pollCount === 1) {
+          return Promise.resolve({ status: 'queued' })
+        }
+        return Promise.resolve({ status: 'done', ok: true, result: { reply: '완료' } })
+      })
+
+      await hydrateKeeperChatHistory('echo')
+      const resumePromise = resumePendingKeeperChatRequests('echo')
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      const pendingAssistant = (keeperThreads.value.echo ?? [])
+        .find(entry => entry.id === 'pending-assistant-kmsg_echo_draft')
+      expect(pendingAssistant).toEqual(expect.objectContaining({
+        role: 'assistant',
+        text: '부분 응답',
+        delivery: 'streaming',
+        streamState: 'streaming',
+      }))
+      expect(pendingAssistant?.traceSteps).toEqual([
+        { kind: 'think', text: '상태 확인 중' },
+        {
+          kind: 'tool',
+          name: 'keeper_board_list',
+          toolCallId: 'tc-draft',
+          status: 'pending',
+          args: '{"limit":5}',
+        },
+      ])
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      await resumePromise
+
+      const thread = keeperThreads.value.echo ?? []
+      expect(thread.some(entry => entry.role === 'assistant' && entry.text === '완료')).toBe(true)
+      expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     } finally {
       vi.useRealTimers()
     }

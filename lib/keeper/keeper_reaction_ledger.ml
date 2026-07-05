@@ -13,6 +13,8 @@ type stimulus_kind =
   | Connector_attention
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL approval resolution wake — unblocks Skip Approval_pending *)
+  | Goal_verification_failed
+      (* Goal verification rejection wake — resumes assigned goal work. *)
 
 type reaction_kind =
   | Turn_started
@@ -34,6 +36,7 @@ let stimulus_kind_to_string = function
   | Schedule_due -> "schedule_due"
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
+  | Goal_verification_failed -> "goal_verification_failed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -49,6 +52,7 @@ let stimulus_kind_of_string = function
   | "schedule_due" -> Some Schedule_due
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
+  | "goal_verification_failed" -> Some Goal_verification_failed
   | _ -> None
 ;;
 
@@ -96,6 +100,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _ -> Schedule_due
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
+  | Keeper_event_queue.Goal_verification_failed _ -> Goal_verification_failed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -189,6 +194,12 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "hitl_resolved approval=%s decision=%s"
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    Printf.sprintf
+      "goal_verification_failed goal_id=%s request_id=%s rejected_by=%s"
+      failure.goal_id
+      failure.request_id
+      failure.rejected_by
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -204,7 +215,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Bg_completed _
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Connector_attention _
-    | Keeper_event_queue.Hitl_resolved _ -> None
+    | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Goal_verification_failed _ -> None
   in
   `Assoc
     (base_fields
@@ -825,7 +837,8 @@ let summarize_rows ~keeper_name ~limit rows =
           강제한다 (catch-all 금지). *)
        | Some
            ( Board_signal | Bootstrap | No_progress_recovery | Fusion_completed
-           | Bg_completed | Schedule_due | Connector_attention | Hitl_resolved )
+           | Bg_completed | Schedule_due | Connector_attention | Hitl_resolved
+           | Goal_verification_failed )
          -> ())
   in
   let note_payload_parse_error row =
@@ -918,8 +931,9 @@ let summarize_rows ~keeper_name ~limit rows =
         match Option.bind (Hashtbl.find_opt stimulus_kind_by_id id) stimulus_kind_of_string with
         | Some No_progress_recovery -> true
         | Some
-            ( Board_signal | Bootstrap | Fusion_completed | Bg_completed | Schedule_due
-            | Connector_attention | Hitl_resolved )
+            ( Board_signal | Bootstrap | Fusion_completed | Bg_completed
+            | Schedule_due | Connector_attention | Hitl_resolved
+            | Goal_verification_failed )
         | None ->
           false)
       pending_stimulus_ids

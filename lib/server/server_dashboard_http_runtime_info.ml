@@ -1658,6 +1658,9 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "max_thinking_budget", Json_util.int_opt_to_json rt.model.max_thinking_budget
           ; "streaming", `Bool rt.model.streaming
           ; "temperature", Json_util.float_opt_to_json rt.model.temperature
+          ; "top_p", Json_util.float_opt_to_json rt.model.top_p
+          ; "top_k", Json_util.int_opt_to_json rt.model.top_k
+          ; "min_p", Json_util.float_opt_to_json rt.model.min_p
           ; "capabilities", runtime_declared_model_capabilities_json rt.model.capabilities
           ; "match_prefixes", Json_util.json_string_list rt.model.match_prefixes
           ] )
@@ -1812,6 +1815,9 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
       , match rt.model.temperature with
         | Some t -> `Float t
         | None -> `Null )
+    ; "top_p", Json_util.float_opt_to_json rt.model.top_p
+    ; "top_k", Json_util.int_opt_to_json rt.model.top_k
+    ; "min_p", Json_util.float_opt_to_json rt.model.min_p
       (* Additive capability projection for dashboard runtime snapshot cards.
          These mirrors are declared model capabilities from runtime.toml only;
          [capabilities_declared=false] below keeps the all-false fallback from

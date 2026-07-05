@@ -87,6 +87,11 @@ type stimulus_payload =
           Wakes the keeper so it re-evaluates immediately instead of stalling
           until an unrelated stimulus, no-progress recovery, or the 30-minute
           approval janitor. Mirrors [Fusion_completed]/[Bg_completed]. *)
+  | Goal_verification_failed of goal_verification_failure
+      (** A goal completion verification was rejected for a goal assigned to
+          this keeper. Wakes the keeper lane so it resumes work on the goal
+          after the goal phase returns to [executing], instead of waiting for
+          unrelated board/task activity. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -158,6 +163,21 @@ and scheduled_wake = {
     preserves a stable audit correlation to the schedule payload without
     duplicating its raw JSON envelope in the keeper queue. *)
 
+and goal_verification_failure = {
+  goal_id : string;
+  request_id : string;
+  goal_title : string;
+  phase : string;
+  metric : string option;
+  target_value : string option;
+  rejected_by : string;
+  note : string option;
+  evidence_refs : string list;
+}
+(** Payload for [Goal_verification_failed]. The queue stores the durable
+    verification result summary needed by the next keeper prompt; [phase] is
+    display-only and produced by the goal phase SSOT at enqueue time. *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
     sink created a board evidence post, otherwise falls back to
@@ -174,6 +194,9 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)
+
+val goal_verification_failure_post_id : goal_verification_failure -> post_id
+(** Dedup/correlation id for [Goal_verification_failed]. *)
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

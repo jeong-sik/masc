@@ -1,14 +1,14 @@
 (** task-1743 — typed "metric unevaluated" state for the goal panel.
 
-    A goal's [metric] is stored but never evaluated: the convergence
-    evaluator (Convergence.check_convergence) has no caller, so the metric
-    is only ever declared. The dashboard attainment projection derives its
-    percentages from linked task completion, not from the metric, yet
-    labels them "metric_target_*" — presenting task progress as a metric
-    result. These tests pin the additive typed [metric_evaluation] field
-    that keeps the two apart: a declared metric is "unevaluated" regardless
-    of how the task-derived attainment looks, and that is distinct from a
-    goal with no metric ("absent"). *)
+    A goal's [metric] is stored but never evaluated: task convergence may be
+    checked, but no metric measurement source turns the declared metric into an
+    observed value. The dashboard attainment projection derives its percentages
+    from linked task completion, not from the metric, yet labels them
+    "metric_target_*" — presenting task progress as a metric result. These
+    tests pin the additive typed [metric_evaluation] field that keeps the two
+    apart: a declared metric is "unevaluated" regardless of how the
+    task-derived attainment looks, and that is distinct from a goal with no
+    metric ("absent"). *)
 
 open Alcotest
 open Masc

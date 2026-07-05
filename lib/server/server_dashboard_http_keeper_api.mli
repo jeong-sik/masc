@@ -112,6 +112,12 @@ val keeper_runtime_trace_json :
   [ `Not_found | `OK ] * Yojson.Safe.t
 (** Runtime manifest + receipt evidence chain for [GET /runtime-trace]. *)
 
+val offline_keeper_composite_json :
+  config:Workspace.config ->
+  string -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Offline/paused composite fallback for keepers missing from the live
+    registry. Exposed so dashboard tests can pin the JSON shape. *)
+
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit

@@ -431,6 +431,53 @@ let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_token))
 
+let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
+  let provider_model_id = "ollama/" ^ model_id in
+  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
+   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
+   | Some entry ->
+     check (option string) (provider_model_id ^ " base") (Some "ollama")
+       entry.base_label;
+     check (option int) (provider_model_id ^ " context") (Some 131072)
+       entry.max_context_tokens;
+     check
+       (option bool)
+       (provider_model_id ^ " audio input")
+       (Some true)
+       entry.supports_audio_input;
+     check
+       (option string)
+       (provider_model_id ^ " thinking token")
+       (Some "<|think|>")
+       entry.thinking_control_token);
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"ollama"
+      ~model_id
+  with
+  | None -> failf "local Gemma4 E2B QAT must resolve via strict Ollama gate path"
+  | Some caps ->
+    check (option int) "Local Gemma4 E2B context" (Some 131072)
+      caps.max_context_tokens;
+    check bool "Local Gemma4 E2B tools" true caps.supports_tools;
+    check bool "Local Gemma4 E2B forced tool_choice disabled" false
+      caps.supports_tool_choice;
+    check bool "Local Gemma4 E2B image input" true caps.supports_image_input;
+    check bool "Local Gemma4 E2B audio input" true caps.supports_audio_input;
+    check bool "Local Gemma4 E2B chat-template token thinking" true
+      (Llm_provider.Capabilities.(
+         caps.thinking_control_format = Chat_template_token));
+    check
+      (option string)
+      "Local Gemma4 E2B thinking token"
+      (Some "<|think|>")
+      (Llm_provider.Capabilities.thinking_control_token_for_provider_model_id
+         ~provider_label:"ollama"
+         ~model_id)
+
 let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->
   let expect_catalog_field ~field_name ~get model_id expected =
@@ -633,6 +680,34 @@ let test_repo_runtime_toml_loads () =
           check bool "Gemma4 forced tool_choice disabled" false
             caps.supports_tool_choice
         | None -> fail "expected Gemma4 capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "ollama.gemma4-e2b-it-qat")
+         runtimes
+     with
+     | None -> fail "expected Gemma4 E2B Ollama runtime in seed"
+     | Some runtime ->
+       check string
+         "Gemma4 E2B model api name"
+         "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+         runtime.model.api_name;
+       check int "Gemma4 E2B context" 131072 runtime.model.max_context;
+       check bool "Gemma4 E2B thinking enabled" true
+         runtime.model.thinking_support;
+       check (option bool) "Gemma4 E2B thinking not preserved" (Some false)
+         runtime.model.preserve_thinking;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "Gemma4 E2B chat-template-token thinking control" true
+            (Runtime_schema.equal_thinking_control_format
+               caps.thinking_control_format
+               Runtime_schema.Chat_template_token);
+          check bool "Gemma4 E2B forced tool_choice disabled" false
+            caps.supports_tool_choice;
+          check bool "Gemma4 E2B image input" true caps.supports_image_input;
+          check bool "Gemma4 E2B audio input" true caps.supports_audio_input
+        | None -> fail "expected Gemma4 E2B capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1897,6 +1972,9 @@ let () =
           test_case
             "repo OAS catalog covers live RunPod RTX A6000 Gemma runtime"
             `Quick test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
+          test_case
+            "repo OAS catalog covers local Gemma4 E2B QAT runtime"
+            `Quick test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat;
           test_case
             "repo OAS catalog preserves typed thinking/replay axes"
             `Quick test_repo_oas_model_catalog_preserve_axes_resolve;

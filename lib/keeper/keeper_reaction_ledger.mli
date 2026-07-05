@@ -16,9 +16,12 @@ type stimulus_kind =
   | No_progress_recovery
   | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (** RFC-0290: generic background job completion wake *)
+  | Schedule_due  (** Scheduled automation due wake for a specific keeper *)
   | Connector_attention
-  | Hitl_resolved  (** HITL approval resolution wake — unblocks [Skip Approval_pending] *)
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
+  | Hitl_resolved  (** HITL approval resolution wake — unblocks [Skip Approval_pending] *)
+  | Goal_verification_failed
+      (** Goal verification rejection wake — resumes assigned goal work. *)
 
 type reaction_kind =
   | Turn_started

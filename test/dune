@@ -352,7 +352,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_persist_poison
-  test_keeper_relevance_check
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -700,7 +699,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_persist_poison
-  test_keeper_relevance_check
   test_actionable_path_action
   test_workspace_routes_keeper
   test_workspace_tree_exclusions

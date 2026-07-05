@@ -1,4 +1,5 @@
 module R = Masc.Keeper_secret_redaction
+module Execute = Masc.Keeper_tool_execute_runtime.For_testing
 
 let with_env key value f =
   let prior = Sys.getenv_opt key in
@@ -124,6 +125,32 @@ let test_json_redaction_preserves_shape () =
   not_contains "sensitive key value hidden" raw "plain-password";
   contains "count preserved" raw {|"count":1|}
 
+let test_execute_output_redaction_uses_keeper_snapshot () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "execute" in
+  let root = secret_root_default ~base ~keeper_name in
+  let stdout_secret = "stdout.secret!" in
+  let stderr_secret = "stderr.secret!" in
+  write_file (Filename.concat (Filename.concat root "env") "STDOUT_TOKEN")
+    stdout_secret;
+  write_file (Filename.concat (Filename.concat root "env") "STDERR_TOKEN")
+    stderr_secret;
+  let stdout, stderr, output =
+    Execute.redact_execute_output
+      ~base_path:base
+      ~keeper_name
+      ~stdout:("out=" ^ stdout_secret)
+      ~stderr:("err=" ^ stderr_secret)
+  in
+  not_contains "stdout exact value hidden" stdout stdout_secret;
+  not_contains "stderr exact value hidden" stderr stderr_secret;
+  not_contains "combined output hides stdout secret" output stdout_secret;
+  not_contains "combined output hides stderr secret" output stderr_secret;
+  contains "stdout marker present" stdout "[REDACTED]";
+  contains "stderr marker present" stderr "[REDACTED]"
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -136,5 +163,7 @@ let () =
             test_snapshot_redacts_base_secret_values;
           Alcotest.test_case "redacts json while preserving shape" `Quick
             test_json_redaction_preserves_shape;
+          Alcotest.test_case "redacts Execute stdout stderr and combined output" `Quick
+            test_execute_output_redaction_uses_keeper_snapshot;
         ] )
     ]

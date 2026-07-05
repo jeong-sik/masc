@@ -6,6 +6,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { dashboardBearerToken } from '../../api/core'
+import { appendIdeScopeParams, type IdeScope, type IdeScopeOptions } from '../../api/ide'
 import { createSseTransport } from '../../transports/sse-transport'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -45,7 +46,9 @@ export interface KeeperCursorStreamState {
 }
 
 export interface KeeperCursorStreamOptions {
+  readonly scope?: IdeScope | null
   readonly repoId?: string | null
+  readonly canonicalUrl?: string | null
   readonly onStatus?: (state: KeeperCursorStreamState) => void
 }
 
@@ -440,7 +443,7 @@ export function connectKeeperCursorStream(
     }
   }
 
-  const transport = createSseTransport(buildKeeperCursorStreamUrl(baseUrl, options.repoId))
+  const transport = createSseTransport(buildKeeperCursorStreamUrl(baseUrl, options))
   const unsubscribe = transport.subscribe((event) => {
     if (event.type === 'open') {
       failedCount = 0
@@ -474,13 +477,19 @@ export function connectKeeperCursorStream(
   }
 }
 
-export function buildKeeperCursorStreamUrl(baseUrl: string, repoId?: string | null): string {
+export function buildKeeperCursorStreamUrl(
+  baseUrl: string,
+  scopeOptions: IdeScopeOptions | string | null = null,
+): string {
   const base = baseUrl.trim().replace(/\/+$/, '')
   const endpoint = `${base}/api/v1/ide/cursors/stream`
   const params = new URLSearchParams()
-  const trimmedRepoId = repoId?.trim()
   const token = dashboardBearerToken()
-  if (trimmedRepoId) params.set('repo_id', trimmedRepoId)
+  if (typeof scopeOptions === 'string' || scopeOptions === null) {
+    appendIdeScopeParams(params, { repoId: scopeOptions })
+  } else {
+    appendIdeScopeParams(params, scopeOptions)
+  }
   if (token) params.set('token', token)
   const query = params.toString()
   return query ? `${endpoint}?${query}` : endpoint

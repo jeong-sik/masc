@@ -249,6 +249,11 @@
   background: var(--color-status-warn);
 }
 
+.chat-block-tstep-status.coverage-gap {
+  border: 1px solid var(--color-status-warn);
+  background: color-mix(in oklab, var(--color-status-warn) 28%, transparent);
+}
+
 .chat-block-tstep-status.unlinked {
   border: 1px solid var(--color-status-warn);
   background: transparent;

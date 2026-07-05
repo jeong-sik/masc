@@ -9,6 +9,8 @@ import {
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
+  keeperRuntimeConfigCanWrite,
+  keeperRuntimeConfigWriteUnsupportedReason,
   type HookSlotEntry,
   type RuntimeDraft,
 } from './keeper-config-panel'
@@ -266,6 +268,42 @@ describe('sandbox coerce helpers', () => {
     expect(coerceNetworkMode(undefined)).toBe('inherit')
   })
 
+})
+
+describe('keeperRuntimeConfigCanWrite', () => {
+  it('allows writes only for a TOML-backed keeper manifest', () => {
+    const base = makeKeeperConfig()
+    expect(keeperRuntimeConfigCanWrite(base)).toBe(true)
+    expect(keeperRuntimeConfigWriteUnsupportedReason(base)).toBeNull()
+  })
+
+  it('rejects persona-backed config even when a path-like value is present', () => {
+    const base = makeKeeperConfig()
+    const c = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: '/tmp/config/keepers/default.toml',
+      },
+    })
+
+    expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
+    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('현재 기본 소스: persona')
+  })
+
+  it('rejects TOML config without a manifest path', () => {
+    const base = makeKeeperConfig()
+    const c = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'toml',
+        default_manifest_path: null,
+      },
+    })
+
+    expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
+    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('기본 매니페스트 경로')
+  })
 })
 
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
@@ -1061,6 +1099,75 @@ describe('KeeperConfigPanel', () => {
     expect(tokenGateInput!.type).toBe('number')
     // Value reflects the loaded config (makeKeeperConfig compaction.token_gate = 24000).
     expect(tokenGateInput!.value).toBe('24000')
+  })
+
+  it('keeps runtime config controls read-only when the keeper is not manifest-backed', async () => {
+    const base = makeKeeperConfig()
+    const personaConfig = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(personaConfig)
+    mocks.setKeeperToolPolicy.mockResolvedValueOnce(personaConfig)
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+    expect(container.querySelector('[data-testid="keeper-runtime-write-unsupported"]')).not.toBeNull()
+    expect(container.textContent).toContain('현재 기본 소스: persona')
+    expect(container.querySelector('select[aria-label="runtime_id"]')).toBeNull()
+    expect(container.querySelector('input[aria-label="컨텍스트 오버라이드"]')).toBeNull()
+    expect(container.textContent).toContain('tier-group.keeper_unified')
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    expect(container.querySelector('select[aria-label="compaction_profile"]')).toBeNull()
+    expect(container.querySelector('input[aria-label="토큰 게이트"]')).toBeNull()
+    expect(container.querySelector('button[aria-label="자동 부팅"]')).toBeNull()
+    expect(container.querySelector('textarea[aria-label="tool_access"]')).not.toBeNull()
+    const denylist = container.querySelector('textarea[aria-label="tool_denylist"]') as HTMLTextAreaElement | null
+    expect(denylist).not.toBeNull()
+    denylist!.value = 'Execute\nDangerTool'
+    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const policySave = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('정책 저장'),
+    )
+    policySave?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
+      tool_access: ['tool_read_file'],
+      deny: ['Execute', 'DangerTool'],
+    })
+
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    expect(container.querySelector('select[aria-label="sandbox_profile"]')).toBeNull()
+    expect(container.querySelector('select[aria-label="network_mode"]')).toBeNull()
+    expect(container.querySelector('textarea[aria-label="allowed_paths"]')).toBeNull()
+    expect(container.querySelector('textarea[aria-label="mention_targets"]')).toBeNull()
+    expect(container.textContent).toContain('allowed_paths')
+    expect(container.textContent).toContain('/tmp/workspace')
+
+    selectKcfTab(container, '목표')
+    await flush()
+    expect(container.querySelector('input[aria-label="goal 검색"]')).toBeNull()
+    expect(container.querySelectorAll('.kcf-goal').length).toBe(0)
+    expect(container.textContent).toContain('goal-runtime')
+    expect(container.textContent).toContain('읽기 전용')
+
+    const runtimeSave = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    expect(runtimeSave).toBeUndefined()
+    expect(mocks.patchKeeperConfig).not.toHaveBeenCalled()
   })
 
   it('saves the tool denylist via set_policy, echoing current tool_access and deduping entries', async () => {

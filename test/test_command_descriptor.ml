@@ -3,6 +3,8 @@
 open Alcotest
 
 module Desc = Command_descriptor
+module Execute_runtime = Masc.Keeper_tool_execute_runtime.For_testing
+module Metrics = Masc.Otel_metric_store
 
 let with_temp_dir f =
   let dir = Filename.temp_file "cmd_desc_test" "" in
@@ -240,13 +242,13 @@ let test_tool_execute_pr_action_metric_labels () =
     ; "risk_class", "R1"
     ]
   in
-  let before = Otel_metric_store.metric_value_or_zero metric ~labels () in
-  Keeper_tool_execute_runtime.For_testing.record_pr_action_metric
+  let before = Metrics.metric_value_or_zero metric ~labels () in
+  Execute_runtime.record_pr_action_metric
     ~keeper_name
     ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
     ~status:(Unix.WEXITED 0)
     ir;
-  let after = Otel_metric_store.metric_value_or_zero metric ~labels () in
+  let after = Metrics.metric_value_or_zero metric ~labels () in
   check bool "success metric increments" true (after >= before +. 1.0);
   let failed_labels =
     [ "keeper", keeper_name
@@ -257,25 +259,25 @@ let test_tool_execute_pr_action_metric_labels () =
     ]
   in
   let failed_before =
-    Otel_metric_store.metric_value_or_zero metric ~labels:failed_labels ()
+    Metrics.metric_value_or_zero metric ~labels:failed_labels ()
   in
-  Keeper_tool_execute_runtime.For_testing.record_pr_action_metric
+  Execute_runtime.record_pr_action_metric
     ~keeper_name
     ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
     ~status:(Unix.WEXITED 1)
     ir;
   let failed_after =
-    Otel_metric_store.metric_value_or_zero metric ~labels:failed_labels ()
+    Metrics.metric_value_or_zero metric ~labels:failed_labels ()
   in
   check bool "failed attempt metric increments" true
     (failed_after >= failed_before +. 1.0);
-  let total_before = Otel_metric_store.metric_total metric in
-  Keeper_tool_execute_runtime.For_testing.record_pr_action_metric
+  let total_before = Metrics.metric_total metric in
+  Execute_runtime.record_pr_action_metric
     ~keeper_name
     ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
     ~status:(Unix.WEXITED 0)
     (parse_ir "git merge feature-branch --squash");
-  let total_after = Otel_metric_store.metric_total metric in
+  let total_after = Metrics.metric_total metric in
   check (float 0.0) "non-gh command does not increment" total_before total_after
 ;;
 

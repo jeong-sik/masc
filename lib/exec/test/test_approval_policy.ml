@@ -16,6 +16,7 @@ let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = [])
   { bin; args; env; cwd; redirects; sandbox }
 
 let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
+let var s = Shell_ir.Var (s, Shell_ir.default_meta)
 
 let default_policy : Approval_policy.t =
   { raw_source = "(test)"; summary = "(test summary)" }
@@ -350,6 +351,41 @@ let test_read_sql_allowed_under_autonomous () =
   | Verdict.Allow t -> assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "psql")
   | _ -> Alcotest.fail "psql -c select should be Allow under autonomous"
 
+let test_gh_irreversible_repo_hosting_ops_denied_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+           ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
+         assert (Exec_program.to_string bin = "gh")
+       | _ -> Alcotest.failf "%s: expected gh irreversible op to be denied" label)
+    [ "gh pr merge", [ "pr"; "merge"; "123"; "--squash" ]
+    ; "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
+    ; "gh api delete", [ "api"; "-X"; "DELETE"; "/repos/owner/repo" ]
+    ]
+
+let test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous () =
+  let s = simple (bin_ok "gh") ~args:[ lit "pr"; lit "merge"; var "PR_NUMBER" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
+    assert (Exec_program.to_string bin = "gh")
+  | _ -> Alcotest.fail "gh pr merge with dynamic PR number should be denied"
+
+let test_gh_reversible_repo_hosting_ops_allowed_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:[ lit "pr"; lit "create"; lit "--title"; lit "T"; lit "--body"; lit "B" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Allow t -> assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+  | _ -> Alcotest.fail "gh pr create should remain allowed under autonomous"
+
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
    common force-delete-untracked form) is destructive and hits the floor.
    Probe finding 2026-06-18: [git clean -fd] was graded as plain audited git
@@ -456,6 +492,9 @@ let () =
   test_destructive_sql_denied_under_autonomous ();
   test_destructive_sql_later_flag_denied_under_autonomous ();
   test_read_sql_allowed_under_autonomous ();
+  test_gh_irreversible_repo_hosting_ops_denied_under_autonomous ();
+  test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous ();
+  test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
   test_reset_hard_floored_under_autonomous ();

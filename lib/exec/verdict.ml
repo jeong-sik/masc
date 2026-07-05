@@ -31,6 +31,7 @@ type deny_reason =
   | Path_escape of Path_scope.t
   | Destructive_git of Git_op.t
   | Destructive_db of Db_op.t
+  | Destructive_repo_hosting_cli of Exec_program.t
   | Catastrophic_program of Exec_program.t
   | Policy_deny of { rule : string }
   | Parse_too_complex of Parsed.reason_too_complex
@@ -77,6 +78,10 @@ let deny_reason_to_string : deny_reason -> string = function
     Format.asprintf "destructive git operation: %a" Git_op.pp g
   | Destructive_db op ->
     Format.asprintf "destructive database operation: %a" Db_op.pp op
+  | Destructive_repo_hosting_cli bin ->
+    Printf.sprintf
+      "destructive repository-hosting CLI operation not permitted: %s"
+      (Exec_program.to_string bin)
   | Catastrophic_program bin ->
     Printf.sprintf "catastrophic program not permitted: %s"
       (Exec_program.to_string bin)

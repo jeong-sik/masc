@@ -441,10 +441,10 @@ and handle_transition ~tool_name ~start_time ctx args =
   let evidence_decision =
     let needs_gate =
       match requested_action with
-      | Masc_domain.Submit_for_verification -> true
+      | Masc_domain.Submit_for_verification
+      | Masc_domain.Done_action -> true
       | Masc_domain.Claim
       | Masc_domain.Start
-      | Masc_domain.Done_action
       | Masc_domain.Cancel
       | Masc_domain.Release
       | Masc_domain.Approve_verification

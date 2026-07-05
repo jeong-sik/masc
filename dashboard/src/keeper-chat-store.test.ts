@@ -126,6 +126,26 @@ describe('keeper-chat-store input queue', () => {
     expect(msg!.attachments![0]!.name).toBe('screenshot.png')
   })
 
+  it('carries display blocks and semantic user blocks through dequeue', () => {
+    enqueueInput(
+      'keeper-q',
+      '[Voice memo 00:03 (12 KB)]\nhello',
+      undefined,
+      'click-voice',
+      [{ t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello' }],
+      [{ type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello' }],
+    )
+
+    const msg = dequeueInput('keeper-q')
+
+    expect(msg!.blocks).toEqual([
+      { t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello' },
+    ])
+    expect(msg!.userBlocks).toEqual([
+      { type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello' },
+    ])
+  })
+
   it('omits the attachments key for plain messages', () => {
     enqueueInput('keeper-q', 'plain')
     const msg = dequeueInput('keeper-q')
@@ -140,6 +160,24 @@ describe('keeper-chat-store input queue', () => {
     expect(hasQueuedInputClientAction('keeper-q', 'click-1')).toBe(false)
     enqueueInput('keeper-q', 'original', undefined, 'click-1')
     expect(getQueueLength('keeper-q')).toBe(2)
+  })
+
+  it('clears stale display and semantic blocks when a queued message is edited', () => {
+    const msg = enqueueInput(
+      'keeper-q',
+      '[Voice memo 00:03 (12 KB)]\nhello',
+      undefined,
+      'click-voice',
+      [{ t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello' }],
+      [{ type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello' }],
+    )
+
+    updateQueuedMessage('keeper-q', msg.id, { content: 'edited text' })
+
+    const edited = dequeueInput('keeper-q')
+    expect(edited!.content).toBe('edited text')
+    expect(edited!.blocks).toBeUndefined()
+    expect(edited!.userBlocks).toBeUndefined()
   })
 })
 

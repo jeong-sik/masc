@@ -1133,66 +1133,46 @@ function isSafeMediaUrl(url: string, dataPrefixes: string[]): boolean {
 }
 
 function ChatVoiceBlock(b: ChatVoiceBlock) {
-  const secs = b.secs ?? 14
-  const [playing, setPlaying] = useState(false)
-  const [prog, setProg] = useState(0)
+  const secs = b.secs
   const safeSrc = b.src && isSafeMediaUrl(b.src, ['data:audio/']) ? b.src : null
-
-  useEffect(() => {
-    if (!playing) return
-    const start = performance.now() - prog * secs * 1000
-    let raf = 0
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - start) / (secs * 1000))
-      setProg(p)
-      if (p >= 1) {
-        setPlaying(false)
-        return
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [playing])
-
-  const toggle = () => {
-    if (prog >= 1) setProg(0)
-    setPlaying((p) => !p)
-  }
-
   const bars = b.wave ?? []
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`
-  const shown = playing || prog > 0 ? prog * secs : secs
 
   return html`
     <div class="chat-block-voice" data-chat-block="voice">
-      <div class="chat-block-voice-row">
-        ${safeSrc
-          ? html`
-              <audio
-                controls
-                preload="none"
-                src=${safeSrc}
-                class="h-8 max-w-[16rem]"
-                aria-label=${b.transcript || '음성 메시지'}
-              />
-            `
-          : html`
-              <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
-                ${playing ? '❙❙' : '▶'}
-              </button>
-            `}
-        <div class="chat-block-voice-wave">
-          ${bars.map((h, i) => html`
-            <span
-              key=${i}
-              class="chat-block-vbar ${(i + 0.5) / bars.length <= prog ? 'on' : ''}"
-              style=${{ height: `${Math.round(5 + h * 21)}px` }}
-            />
-          `)}
-        </div>
-        <span class="chat-block-voice-dur">${fmt(shown)}</span>
-      </div>
+      ${safeSrc || bars.length > 0 || typeof secs === 'number'
+        ? html`
+            <div class="chat-block-voice-row">
+              ${safeSrc
+                ? html`
+                    <audio
+                      controls
+                      preload="none"
+                      src=${safeSrc}
+                      class="h-8 max-w-[16rem]"
+                      aria-label=${b.transcript || '음성 메시지'}
+                    />
+                  `
+                : null}
+              ${bars.length > 0
+                ? html`
+                    <div class="chat-block-voice-wave">
+                      ${bars.map((h, i) => html`
+                        <span
+                          key=${i}
+                          class="chat-block-vbar"
+                          style=${{ height: `${Math.round(5 + h * 21)}px` }}
+                        />
+                      `)}
+                    </div>
+                  `
+                : null}
+              ${typeof secs === 'number'
+                ? html`<span class="chat-block-voice-dur">${fmt(secs)}</span>`
+                : null}
+            </div>
+          `
+        : null}
       ${b.via || b.size
         ? html`
             <div class="chat-block-voice-meta">
@@ -3365,6 +3345,10 @@ export function AttachDraftChip({
   `
 }
 
+export interface ComposerVoiceDraft {
+  transcript: string
+}
+
 export function ChatComposer({
   draft: draftProp,
   placeholder,
@@ -3422,6 +3406,7 @@ export function ChatComposer({
   const [drag, setDrag] = useState(false)
   const [slashIdx, setSlashIdx] = useState(0)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
+  const [voiceDraft, setVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
   const isControlled = typeof draftProp === 'string'
   const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
   const slashMenuKeeperLabel = keeperLabel?.trim() || CHAT_COMPOSER_DEFAULT_KEEPER_LABEL
@@ -3472,12 +3457,15 @@ export function ChatComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // RFC-0236 P1: speak to compose. Transcribed text appends to the draft at a
-  // newline; an empty draft is replaced outright. Send stays manual (no
-  // auto-send) so the operator can correct a transcription before it lands.
+  // RFC-0236 P1: speak to compose. Voice transcription is saved as a visual draft
+  // card (VoiceDraft) matching the mockup and board composers.
   const voice = useVoiceInput({
     onTranscribed: (text) => {
-      setDraft(draft.trim() === '' ? text : `${draft}\n${text}`)
+      if (text) {
+        setVoiceDraft({
+          transcript: text,
+        })
+      }
     },
     onError: (message) => showToast(message, 'error'),
   })
@@ -3488,7 +3476,10 @@ export function ChatComposer({
       return
     }
     const startedAt = Date.now()
-    const tick = () => setVoiceElapsed(Math.round((Date.now() - startedAt) / 1000))
+    const tick = () => {
+      const duration = Math.round((Date.now() - startedAt) / 1000)
+      setVoiceElapsed(duration)
+    }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
@@ -3519,7 +3510,7 @@ export function ChatComposer({
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '전송'
   const isStreamWarning = streaming && elapsed > 60
-  const hasContent = draft.trim() !== '' || attachments.length > 0
+  const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
   const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
@@ -3594,7 +3585,12 @@ export function ChatComposer({
         size: att.size,
       })
     }
-    const text = draft.trim()
+    let text = draft.trim()
+    if (voiceDraft) {
+      const voiceText = voiceDraft.transcript
+      text = text ? `${voiceText}\n\n${text}` : voiceText
+    }
+
     if (text) {
       blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
       userBlocks.push({ type: 'text', text })
@@ -3608,6 +3604,7 @@ export function ChatComposer({
     setDraft('')
     setSlashIdx(0)
     setAttachments([])
+    setVoiceDraft(null)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -3695,7 +3692,7 @@ export function ChatComposer({
                 <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
               </div>
             `}
-        ${attachments.length > 0
+        ${attachments.length > 0 || voiceDraft
           ? html`
               <div class="composer-tray">
                 ${attachments.map((att) => html`
@@ -3705,6 +3702,27 @@ export function ChatComposer({
                     onRemove=${() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
                   />
                 `)}
+                ${voiceDraft
+                  ? html`
+                      <div class="cdraft voice" data-testid="composer-voice-draft">
+                        <span class="cdraft-glyph mic">◌</span>
+                        <div class="cdraft-tx">
+                          <span class="cdraft-tx-k">받아쓰기</span>
+                          <span class="cdraft-tx-v">${voiceDraft.transcript}</span>
+                        </div>
+                        <button
+                          type="button"
+                          class="cdraft-x"
+                          title="음성 제거"
+                          aria-label="Remove voice draft"
+                          onClick=${() => { setVoiceDraft(null) }}
+                          disabled=${disabled}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    `
+                  : null}
               </div>
             `
           : null}

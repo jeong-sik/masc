@@ -21,6 +21,7 @@ import { keeperTurnOutcomeSuppressesReply } from './keeper-message'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
+  ChatBlock,
   KeeperConversationAttachment,
   KeeperConversationDelivery,
   KeeperConversationEntry,
@@ -818,6 +819,7 @@ export async function sendKeeperThreadMessage(
     attachments?: KeeperConversationAttachment[]
     clientActionId?: string
     clientActionIds?: readonly string[]
+    blocks?: ChatBlock[]
     userBlocks?: KeeperUserInputBlock[]
   } = {},
 ): Promise<void> {
@@ -828,6 +830,7 @@ export async function sendKeeperThreadMessage(
     options.userBlocks && options.userBlocks.length > 0
       ? options.userBlocks
       : deriveUserBlocks(prompt, attachments)
+  const blocks = options.blocks && options.blocks.length > 0 ? options.blocks : undefined
   const message = prompt.trim() || fallbackMessageForUserBlocks(userBlocks ?? [])
   if (!keeperName || !message) return
   const sendKeys = keeperThreadMessageSendKeys(keeperName, [
@@ -861,6 +864,7 @@ export async function sendKeeperThreadMessage(
     delivery: 'sending',
     streamState: null,
     attachments,
+    blocks,
     details: null,
   })
   appendThreadEntry(keeperName, {

@@ -210,6 +210,11 @@ let runtime_lens_swimlane_completeness scan lane =
   else if mandatory_present then "mandatory_present"
   else "incomplete"
 
+let runtime_lens_swimlane_rendered_completeness scan lane event_count =
+  if String.equal lane "tool_runtime" && event_count = 0
+  then "not_observed"
+  else runtime_lens_swimlane_completeness scan lane
+
 let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
     ~terminal_status ~synthetic_events =
   let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
@@ -251,7 +256,9 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
       ("label", `String label);
       ("event_count", `Int event_count);
       ("terminal_status", `String terminal_status);
-      ("completeness", `String (runtime_lens_swimlane_completeness scan lane));
+      ( "completeness",
+        `String
+          (runtime_lens_swimlane_rendered_completeness scan lane event_count) );
       ("gap_codes", Json_util.json_string_list gap_codes);
       ( "gap_badge",
         match gap_codes with

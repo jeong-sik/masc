@@ -67,6 +67,21 @@ let test_stored_roundtrip () =
       Alcotest.(check string) "mime" "text/plain" mime
   | O.Inline _ -> Alcotest.fail "expected Stored"
 
+let test_encoded_marker_stays_under_externalization_threshold () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let threshold = Masc.Tool_bridge.default_externalize_threshold_bytes in
+      let payload = String.make (threshold + 1) '"' in
+      let encoded = B.put store ~bytes:payload ~mime:"text/plain" |> O.encode_for_oas in
+      Alcotest.(check bool)
+        "marker stays below default externalization threshold"
+        true
+        (String.length encoded <= threshold);
+      match O.decode_from_oas encoded with
+      | O.Stored { preview; _ } ->
+        Alcotest.(check int) "preview remains documented cap" 200 (String.length preview)
+      | O.Inline _ -> Alcotest.fail "expected Stored")
+
 let test_decode_non_marker () =
   (* Any normal tool output decodes as Inline — backward compat for old
      checkpoints that pre-date the artifact store. *)
@@ -245,6 +260,10 @@ let () =
         [
           Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
+          Alcotest.test_case
+            "encoded marker stays under externalization threshold"
+            `Quick
+            test_encoded_marker_stays_under_externalization_threshold;
           Alcotest.test_case "non-marker = Inline" `Quick
             test_decode_non_marker;
           Alcotest.test_case "malformed = Inline" `Quick

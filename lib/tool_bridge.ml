@@ -100,6 +100,21 @@ let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
           | Eio.Cancel.Cancelled _ as e -> raise e
           | _ -> msg)
 
+let success_result_preserves_full_content tr =
+  match Tool_name.of_string (Tool_result.tool_name tr) with
+  | Some
+      (Tool_name.Masc
+         (Tool_name.Masc.Domain
+            (Tool_name.Domain_tool.Board Tool_name.Board_name.Board_post_get))) ->
+    true
+  | _ -> false
+
+let success_content_for_oas tr =
+  let msg = Tool_result.message tr in
+  if success_result_preserves_full_content tr
+  then msg
+  else maybe_externalize msg
+
 (** {1 Result Conversion} *)
 
 let make_tool_error ?(recoverable = false) ?error_class message
@@ -280,7 +295,7 @@ let oas_descriptor_of_masc_tool name =
 
 let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result =
   if Tool_result.is_success tr
-  then Ok { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr); _meta = None }
+  then Ok { Agent_sdk.Types.content = success_content_for_oas tr; _meta = None }
   else (
     let msg = Tool_result.message tr in
     let json_recoverable, json_error_class =

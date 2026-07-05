@@ -25,6 +25,7 @@ import {
   activeStreamRequestId,
   getStreamController,
   keeperThreads,
+  keeperStreamContract,
   keeperSending,
   keeperStreamStartedAt,
   setRecordValue,
@@ -355,7 +356,7 @@ export function applyKeeperStreamEvent(
       appendAssistantDelta(keeperName, assistantEntryId, payload)
     }
   }
-  const markFinalizingIfLive = (): void => {
+  const markFinalizingIfLive = (eventName: string): void => {
     updateThreadEntry(keeperName, assistantEntryId, entry => {
       if (entry.streamState === null) return entry
       if (entry.delivery !== 'sending' && entry.delivery !== 'streaming') return entry
@@ -363,13 +364,20 @@ export function applyKeeperStreamEvent(
         ...entry,
         streamState: 'finalizing',
         delivery: 'streaming',
+        streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName }),
       }
     })
   }
 
   switch (event.type) {
     case 'RUN_STARTED':
-      setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'sending')
+      setAssistantStreamState(
+        keeperName,
+        assistantEntryId,
+        'opening',
+        'sending',
+        keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
+      )
       return null
     case 'TEXT_MESSAGE_START':
       // Flush any buffered thinking deltas before entering the text phase so a
@@ -377,7 +385,13 @@ export function applyKeeperStreamEvent(
       // 'thinking' after text streaming has begun. Mirrors TEXT_MESSAGE_END and
       // TOOL_CALL_START, which flush at their phase boundaries.
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+      setAssistantStreamState(
+        keeperName,
+        assistantEntryId,
+        'streaming',
+        'streaming',
+        keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TEXT_MESSAGE_START' }),
+      )
       return null
     case 'TEXT_MESSAGE_CONTENT': {
       applyTextDelta(event.delta)
@@ -386,7 +400,7 @@ export function applyKeeperStreamEvent(
     case 'TEXT_MESSAGE_END':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      markFinalizingIfLive()
+      markFinalizingIfLive('TEXT_MESSAGE_END')
       return null
     case 'TOOL_CALL_START': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
@@ -417,6 +431,7 @@ export function applyKeeperStreamEvent(
         timestamp: new Date().toISOString(),
         delivery: 'streaming',
         streamState: 'streaming',
+        streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_START' }),
         details: null,
       })
       return null
@@ -467,6 +482,7 @@ export function applyKeeperStreamEvent(
           ...entry,
           delivery: 'delivered',
           streamState: null,
+          streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
         }))
       }
       return null
@@ -484,7 +500,13 @@ export function applyKeeperStreamEvent(
         if (usage) patch.usage = usage
         if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
+        )
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_DELTA') {
@@ -497,17 +519,23 @@ export function applyKeeperStreamEvent(
         if (usage) patch.usage = usage
         if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        if (stopReason) markFinalizingIfLive()
+        if (stopReason) markFinalizingIfLive('KEEPER_STREAM_MESSAGE_DELTA')
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-        markFinalizingIfLive()
+        markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null
       }
       if (event.name === 'KEEPER_STREAM_PING') {
-        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_PING' }),
+        )
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
@@ -519,7 +547,13 @@ export function applyKeeperStreamEvent(
         if (toolCallId && toolName) {
           rememberOasToolBlockIndex(keeperName, assistantEntryId, toolCallId, oasBlockIndex)
         }
-        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_START' }),
+        )
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
@@ -530,7 +564,13 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           asNumber(value?.index) ?? asNumber(value?.block_index),
         )
-        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_STOP' }),
+        )
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
@@ -548,7 +588,15 @@ export function applyKeeperStreamEvent(
           ? asNumber(value.index) ?? asNumber(value.block_index)
           : undefined
         if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
-        else setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+        else {
+          setAssistantStreamState(
+            keeperName,
+            assistantEntryId,
+            'thinking',
+            'streaming',
+            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_DELTA' }),
+          )
+        }
         return null
       }
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
@@ -569,18 +617,36 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_THINKING_SIGNATURE_DELTA') {
         if (!pendingThinkingDeltas.has(streamEntryKey(keeperName, assistantEntryId))) {
-          setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+          setAssistantStreamState(
+            keeperName,
+            assistantEntryId,
+            'thinking',
+            'streaming',
+            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_SIGNATURE_DELTA' }),
+          )
         }
         return null
       }
       if (event.name === 'KEEPER_MEDIA_DELTA') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MEDIA_DELTA' }),
+        )
         return null
       }
       if (event.name === 'KEEPER_QUEUE_REQUEST') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'queued')
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'opening',
+          'queued',
+          keeperStreamContract('queue_event', 'queue_request_event', { eventName: 'KEEPER_QUEUE_REQUEST' }),
+        )
         return null
       }
       if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {
@@ -598,6 +664,9 @@ export function applyKeeperStreamEvent(
           rawText: rawText || entry.rawText,
           delivery: 'queued',
           streamState: null,
+          streamContract: keeperStreamContract('queue_event', 'queue_request_event', {
+            eventName: 'KEEPER_CONTINUATION_CHECKPOINT',
+          }),
         }))
         return null
       }
@@ -627,6 +696,10 @@ export function applyKeeperStreamEvent(
             delivery: 'cancelled',
             streamState: null,
             error: null,
+            streamContract: keeperStreamContract('queue_event', 'backend_terminal_event', {
+              eventName: 'KEEPER_REQUEST_TERMINAL',
+              requestId: terminalRequestId,
+            }),
           }))
           return null
         }
@@ -642,6 +715,11 @@ export function applyKeeperStreamEvent(
             delivery: 'error',
             streamState: null,
             error: message,
+            streamContract: keeperStreamContract('queue_event', 'backend_terminal_event', {
+              eventName: 'KEEPER_REQUEST_TERMINAL',
+              requestId: terminalRequestId,
+              reason: message,
+            }),
           }))
           return message
         }
@@ -658,6 +736,10 @@ export function applyKeeperStreamEvent(
               delivery,
               streamState: null,
               error: null,
+              streamContract: keeperStreamContract('queue_event', 'backend_terminal_event', {
+                eventName: 'KEEPER_REQUEST_TERMINAL',
+                requestId: terminalRequestId,
+              }),
             }
           })
         }

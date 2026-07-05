@@ -35,6 +35,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  keeperStreamContract,
   setRecordValue,
 } from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'
@@ -66,6 +67,7 @@ import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
 import {
+  toolCallOutputHydrationContract,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
@@ -248,6 +250,9 @@ function liveAssistantPlaceholder(keeperName: string): KeeperConversationEntry {
     timestamp: null,
     delivery: 'streaming',
     streamState: 'streaming',
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      reason: 'UI-only placeholder while active stream entry mounts',
+    }),
     details: null,
     error: null,
   }
@@ -267,6 +272,9 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
     timestamp: queuedTimestampIso(msg.timestamp),
     delivery: 'queued',
     streamState: undefined,
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      reason: 'client-side composer queue item; not yet submitted to keeper runtime',
+    }),
     attachments: msg.attachments,
     blocks: msg.blocks,
     details: null,
@@ -835,6 +843,7 @@ export function KeeperConversationPanel({
               showSourceBadge=${true}
               toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+              toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
               unreadAfterTs=${unreadAfterTs}
               onSeenBottom=${markTranscriptSeen}
               action=${inspectAction}
@@ -971,6 +980,7 @@ export function KeeperConversationPanel({
           groupToolCalls=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+          toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
           unreadAfterTs=${unreadAfterTs}
           onSeenBottom=${markTranscriptSeen}
           action=${inspectAction}
@@ -1090,6 +1100,7 @@ export function KeeperConversationPanel({
             groupToolCalls=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+            toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
             unreadAfterTs=${unreadAfterTs}
             onSeenBottom=${markTranscriptSeen}
             action=${inspectAction}

@@ -90,6 +90,9 @@ import {
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import {
   resetToolCallOutputs,
+  toolCallOutputHydrationContract,
+  toolCallOutputHydrationFailureReason,
+  toolCallOutputHydrationStatus,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
@@ -207,7 +210,40 @@ describe('hydrateKeeperChatHistory', () => {
     const thread = keeperThreads.value.echo ?? []
     expect(thread).toHaveLength(2)
     expect(thread[0]?.delivery).toBe('history')
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'rest_history',
+      status: 'history_without_stream_events',
+    })
     expect(thread[1]?.role).toBe('assistant')
+  })
+
+  it('keeps backend stream contracts when hydrating server history', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_000,
+        turn_ref: 'trace-hydrate#2',
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          turn_ref: 'trace-hydrate#2',
+          trace_event_count: 2,
+          reason: 'turn_ref joined to retained trajectory/internal-history events',
+        },
+      },
+    ])
+
+    await hydrateKeeperChatHistory('echo')
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread[0]?.streamContract).toEqual({
+      source: 'backend_turn_trace',
+      status: 'backend_trace_join',
+      turnRef: 'trace-hydrate#2',
+      traceEventCount: 2,
+      reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
   })
 
   it('fetches only once per keeper per page lifetime', async () => {
@@ -258,6 +294,21 @@ describe('hydrateKeeperChatHistory', () => {
 
     expect(toolCallOutputsCoveredSinceMs('echo')).toBe(Number.POSITIVE_INFINITY)
     expect(toolCallOutputsCoveredThroughMs('echo')).not.toBeNull()
+  })
+
+  it('records tool-output hydration failures with a visible contract reason', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperToolCalls.mockRejectedValueOnce(new Error('HTTP 502'))
+
+    await hydrateKeeperChatHistory('echo')
+
+    expect(toolCallOutputHydrationStatus('echo')).toBe('failed')
+    expect(toolCallOutputHydrationFailureReason('echo')).toBe('HTTP 502')
+    expect(toolCallOutputHydrationContract('echo')).toMatchObject({
+      source: 'tool_calls_endpoint',
+      status: 'failed',
+      failureReason: 'HTTP 502',
+    })
   })
 
   it('allows a retry after a failed fetch', async () => {

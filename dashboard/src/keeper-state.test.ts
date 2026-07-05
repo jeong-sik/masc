@@ -359,6 +359,53 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.turnRef).toBe('trace-rest#7')
   })
 
+  it('prefers backend stream contracts from REST chat history', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from retained trace',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#8',
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          turn_ref: 'trace-rest#8',
+          trace_event_count: 3,
+          reason: 'turn_ref joined to retained trajectory/internal-history events',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toEqual({
+      source: 'backend_turn_trace',
+      status: 'backend_trace_join',
+      turnRef: 'trace-rest#8',
+      traceEventCount: 3,
+      reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
+  })
+
+  it('falls back explicitly when REST chat history carries an unknown stream contract', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply',
+        ts: 1_780_000_001,
+        stream_contract: {
+          source: 'future_backend_source',
+          status: 'future_status',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toMatchObject({
+      source: 'rest_history',
+      status: 'history_without_stream_events',
+    })
+  })
+
   it('preserves object payloads in persisted tool trace blocks', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

@@ -92,6 +92,11 @@ import {
   sendKeeperThreadMessage,
 } from '../keeper-actions'
 import { _resetChatStoreForTests, enqueueInput, getQueuedMessages, getQueueLength } from '../keeper-chat-store'
+import {
+  markToolCallOutputsHydrationFailed,
+  markToolCallOutputsHydrating,
+  resetToolCallOutputs,
+} from '../tool-call-output-store'
 import { shellAuthSummary } from '../store'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry, KeeperUserInputBlock } from '../types'
 import {
@@ -186,6 +191,7 @@ describe('KeeperConversationPanel', () => {
     render(null, container)
     container.remove()
     _resetChatStoreForTests()
+    resetToolCallOutputs()
     vi.unstubAllGlobals()
   })
 
@@ -485,6 +491,97 @@ describe('KeeperConversationPanel', () => {
       'client-side composer queue item; not yet submitted to keeper runtime',
       'client-side composer queue item; not yet submitted to keeper runtime',
     ])
+  })
+
+  it('wires the live tool-output hydration contract store into the transcript', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'tool-tc-live-hydration',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'keeper_context_status',
+          text: '{}',
+          rawText: '{}',
+          timestamp: '2026-03-24T00:00:01.000Z',
+          turnRef: 'trace-live-hydration#1',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'assistant-live-hydration',
+          role: 'assistant',
+          source: 'direct_assistant',
+          label: 'sangsu',
+          text: '도구 출력을 확인했습니다.',
+          rawText: '도구 출력을 확인했습니다.',
+          timestamp: '2026-03-24T00:00:02.000Z',
+          turnRef: 'trace-live-hydration#1',
+          delivery: 'history',
+          streamState: null,
+          streamContract: {
+            source: 'sse_event',
+            status: 'backend_terminal_event',
+            eventName: 'RUN_FINISHED',
+          },
+          traceSteps: [
+            {
+              kind: 'tool',
+              name: 'keeper_context_status',
+              toolCallId: 'tc-live-hydration',
+              ts: '2026-03-24T00:00:01.000Z',
+            },
+          ],
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const traceSelector = '[data-chat-work-trace][data-chat-tool-output-hydration-source="tool_calls_endpoint"]'
+    await waitFor(() => {
+      const trace = container.querySelector(traceSelector)
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('idle')
+    })
+
+    const initialStep = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-live-hydration"]',
+    ) as HTMLElement
+    expect(initialStep.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(initialStep.getAttribute('data-chat-trace-output-coverage')).toBe('not-hydrated')
+
+    markToolCallOutputsHydrating('sangsu')
+    markToolCallOutputsHydrationFailed('sangsu', 'HTTP 502')
+
+    await waitFor(() => {
+      const trace = container.querySelector(traceSelector)
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 502')
+
+      const step = container.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-live-hydration"]',
+      ) as HTMLElement
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+      expect(container.textContent).toContain('출력 hydration 실패 1')
+    })
+
+    const failedStep = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-live-hydration"]',
+    ) as HTMLElement
+    fireEvent.click(failedStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+
+    await waitFor(() => {
+      expect(failedStep.textContent).toContain('출력 hydration 실패 — HTTP 502')
+    })
   })
 
   it('renders queued voice draft display blocks inside the transcript', async () => {

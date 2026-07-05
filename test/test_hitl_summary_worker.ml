@@ -151,7 +151,12 @@ let test_parse_summary_failure () =
     ; telemetry = None
     }
   in
-  match H.For_testing.summary_of_response ~generated_at:1234567890.0 response with
+  match
+    H.For_testing.summary_of_response
+      ~generated_at:1234567890.0
+      ~mode:H.For_testing.Native_structured
+      response
+  with
   | Ok _ -> fail "expected summary_of_response to return Error"
   | Error reason -> check bool "error reason non-empty" true (String.length reason > 0)
 ;;
@@ -182,7 +187,12 @@ let test_parse_summary_rejects_unknown_risk_delta () =
     ; telemetry = None
     }
   in
-  match H.For_testing.summary_of_response ~generated_at:1234567890.0 response with
+  match
+    H.For_testing.summary_of_response
+      ~generated_at:1234567890.0
+      ~mode:H.For_testing.Native_structured
+      response
+  with
   | Ok _ -> fail "expected unknown risk delta to fail parsing"
   | Error reason ->
     check bool "error names estimated_risk_delta" true
@@ -335,7 +345,7 @@ let test_provider_config_for_summary_caps_tokens_and_temperature () =
       ~response_format:Llm_provider.Types.JsonMode
       ()
   in
-  let cfg = H.For_testing.provider_config_for_summary provider_cfg in
+  let cfg, mode = H.For_testing.provider_config_for_summary provider_cfg in
   check bool "max_tokens capped to policy" true
     (match cfg.max_tokens with
      | Some n -> n <= Keeper_config.hitl_summary_max_tokens ()
@@ -344,7 +354,61 @@ let test_provider_config_for_summary_caps_tokens_and_temperature () =
     (Some (Keeper_config.hitl_summary_temperature ())) cfg.temperature;
   check bool "tool_choice cleared" true (Option.is_none cfg.tool_choice);
   check bool "disable_parallel_tool_use true" true cfg.disable_parallel_tool_use;
-  check bool "output_schema set" true (Option.is_some cfg.output_schema)
+  (* An undeclared OpenAI-compatible endpoint (http://localhost, no catalog row)
+     cannot serve a native json_schema request, so the worker degrades to the
+     plain-text path: no [output_schema] is attached and the mode is plain. *)
+  check bool "mode is plain for undeclared endpoint" true (mode = H.For_testing.Plain_json_text);
+  check bool "output_schema absent on plain path" true (Option.is_none cfg.output_schema)
+;;
+
+(* ── Graceful-degradation tests ─────────────────── *)
+
+let test_extract_json_object_variants () =
+  let ok label input expected_summary =
+    match H.For_testing.extract_json_object input with
+    | Ok (`Assoc _ as json) ->
+      check string label expected_summary
+        (Yojson.Safe.Util.(member "context_summary" json |> to_string))
+    | Ok other -> failf "%s: expected object, got %s" label (Yojson.Safe.to_string other)
+    | Error e -> failf "%s: expected Ok, got Error %s" label e
+  in
+  ok "bare json" {|{"context_summary":"bare"}|} "bare";
+  ok "fenced json"
+    "```json\n{\"context_summary\":\"fenced\"}\n```" "fenced";
+  ok "prose-wrapped json"
+    "Here is the result:\n{\"context_summary\":\"wrapped\"}\nThanks!" "wrapped";
+  (match H.For_testing.extract_json_object "no json here at all" with
+   | Error _ -> ()
+   | Ok _ -> fail "expected Error for text with no JSON object")
+;;
+
+let test_summary_of_response_plain_json_text_parses_prose_wrapped () =
+  (* Plain path: a model without native structured output returns JSON embedded
+     in prose. [summary_of_response ~mode:Plain_json_text] must still parse it. *)
+  let text =
+    "Sure, here is the judgment:\n"
+    ^ Yojson.Safe.to_string valid_summary_json
+    ^ "\nLet me know if you need more."
+  in
+  let response : Agent_sdk.Types.api_response =
+    { id = "run-plain"
+    ; model = "test-model"
+    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; content = [ Agent_sdk.Types.Text text ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  match
+    H.For_testing.summary_of_response
+      ~generated_at:1234567890.0
+      ~mode:H.For_testing.Plain_json_text
+      response
+  with
+  | Ok summary ->
+    check string "context_summary parsed" "A tool request is pending." summary.context_summary;
+    check int "suggested_options length" 1 (List.length summary.suggested_options)
+  | Error e -> failf "expected plain-path parse to succeed, got %s" e
 ;;
 
 (* ── Runner ───────────────────────────────────── *)
@@ -373,6 +437,12 @@ let () =
             test_build_context_bundle_with_real_workspace
         ; test_case "provider_config_for_summary caps tokens and temperature" `Quick
             test_provider_config_for_summary_caps_tokens_and_temperature
+        ] )
+    ; ( "graceful_degradation"
+      , [ test_case "extract_json_object handles bare/fenced/prose/invalid" `Quick
+            test_extract_json_object_variants
+        ; test_case "summary_of_response plain path parses prose-wrapped JSON" `Quick
+            test_summary_of_response_plain_json_text_parses_prose_wrapped
         ] )
     ]
 ;;

@@ -13,6 +13,13 @@ val spawn
   -> unit
 
 module For_testing : sig
+  (** How the judge is asked to return the summary. [Native_structured] uses
+      provider-native json_schema; [Plain_json_text] is the degradation path for
+      endpoints OAS cannot serve native structured output for. *)
+  type summary_mode =
+    | Native_structured
+    | Plain_json_text
+
   val build_context_bundle
     : entry:Keeper_approval_queue_rules_types.pending_approval -> Yojson.Safe.t
 
@@ -24,11 +31,19 @@ module For_testing : sig
 
   val summary_of_response
     :  generated_at:float
+    -> mode:summary_mode
     -> Agent_sdk.Types.api_response
     -> (Keeper_approval_queue_rules_types.hitl_context_summary, string) result
 
+  (** Returns the clamped config plus the chosen output mode: [Native_structured]
+      when {!Llm_provider.Provider_config.validate_output_schema_request} accepts
+      a json_schema request for this endpoint, else [Plain_json_text]. *)
   val provider_config_for_summary
-    : Llm_provider.Provider_config.t -> Llm_provider.Provider_config.t
+    :  Llm_provider.Provider_config.t
+    -> Llm_provider.Provider_config.t * summary_mode
+
+  (** Best-effort single-JSON-object extraction from model text (plain path). *)
+  val extract_json_object : string -> (Yojson.Safe.t, string) result
 
   val summary_version : int
 end

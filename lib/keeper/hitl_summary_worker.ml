@@ -29,7 +29,10 @@ let () =
     ~help:
       "Total HITL context-summary worker outcomes classified by [outcome]. \
        Labels: [outcome] (ok_summary | parse_error | provider_error | timeout | \
-       no_provider_config | no_net | slot_unavailable | crashed), [risk_level]."
+       no_provider_config | no_net | slot_unavailable | crashed | \
+       degraded_plain_json), [risk_level]. [degraded_plain_json] is emitted \
+       alongside the terminal outcome when the judge endpoint could not serve \
+       native structured output and the plain-text JSON path was used."
     ()
 ;;
 
@@ -239,14 +242,48 @@ let build_context_bundle ~(entry : pending_approval) : Yojson.Safe.t =
 
 let message role text = Agent_sdk.Types.text_message role text
 
-let messages_for_summary ~context_bundle =
-  [ message Agent_sdk.Types.System system_prompt
-  ; message Agent_sdk.Types.User (Yojson.Safe.to_string context_bundle)
-  ]
+(** How the judge model is asked to return the summary.
+
+    [Native_structured] uses provider-native json_schema structured output.
+    [Plain_json_text] is the graceful-degradation path for judge endpoints that
+    cannot serve a native json_schema request — GLM exposes json_object only,
+    and raw OpenAI-compatible endpoints (e.g. mimo, runpod proxies) are not
+    declared in the OAS catalog. In that mode we prompt for a bare JSON object
+    and parse the model's visible text best-effort; a parse failure is surfaced
+    as [Summary_failed] by the caller, never silently dropped. *)
+type summary_mode =
+  | Native_structured
+  | Plain_json_text
+
+(** Appended on the [Plain_json_text] path so a model without native structured
+    output still returns a parseable object. The schema is the SSOT for both
+    paths (native applies it as [response_format]; here it is inlined). *)
+let plain_json_instruction =
+  Printf.sprintf
+    "Return ONLY a single JSON object with no markdown fences and no prose. It \
+     must conform to this JSON Schema:\n%s"
+    (Yojson.Safe.to_string Keeper_structured_output_schema.hitl_context_summary_schema)
 ;;
 
-(** Cap cost and sampling for the summary LLM call. Mirrors the guard in
-    [keeper_memory_llm_summary.provider_for_summary]. *)
+let messages_for_summary ~mode ~context_bundle =
+  let base =
+    [ message Agent_sdk.Types.System system_prompt
+    ; message Agent_sdk.Types.User (Yojson.Safe.to_string context_bundle)
+    ]
+  in
+  match mode with
+  | Native_structured -> base
+  | Plain_json_text -> base @ [ message Agent_sdk.Types.User plain_json_instruction ]
+;;
+
+(** Cap cost and sampling for the summary LLM call (mirrors the guard in
+    [keeper_memory_llm_summary.provider_for_summary]) and decide the output mode.
+
+    We ask OAS whether this judge endpoint can serve a native json_schema request
+    ([validate_output_schema_request]) rather than string-matching the eventual
+    provider error. If it cannot, we return the un-schema'd config plus
+    [Plain_json_text] so the evaluator still produces a judgment for every
+    keeper's model fleet instead of failing outright. *)
 let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
   let summary_max_tokens = Keeper_config.hitl_summary_max_tokens () in
   let max_tokens =
@@ -258,22 +295,30 @@ let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) 
       Some summary_max_tokens
     | None -> Some summary_max_tokens
   in
-  { provider_cfg with
-    max_tokens
-  ; temperature = Some (Keeper_config.hitl_summary_temperature ())
-  ; tool_choice = None
-  ; disable_parallel_tool_use = true
-  }
-  |> Keeper_structured_output_schema.apply_hitl_summary_schema_to_config
+  let clamped =
+    { provider_cfg with
+      max_tokens
+    ; temperature = Some (Keeper_config.hitl_summary_temperature ())
+    ; tool_choice = None
+    ; disable_parallel_tool_use = true
+    }
+  in
+  let structured =
+    Keeper_structured_output_schema.apply_hitl_summary_schema_to_config clamped
+  in
+  match Llm_provider.Provider_config.validate_output_schema_request structured with
+  | Ok () -> structured, Native_structured
+  | Error _ -> clamped, Plain_json_text
 ;;
 
 let call_summary_llm ~sw ~net ~provider_config ~context_bundle () =
-  let config = provider_config_for_summary provider_config in
-  let messages = messages_for_summary ~context_bundle in
+  let config, mode = provider_config_for_summary provider_config in
+  let messages = messages_for_summary ~mode ~context_bundle in
   Keeper_llm_bridge.run_with_timeout_and_fallback
     ~timeout_s:(Keeper_config.hitl_summary_timeout_sec ())
     (fun () ->
        Llm_provider.Complete.complete ~sw ~net ~config ~messages ()
+       |> Result.map (fun response -> response, mode)
        |> Result.map_error (fun http_err ->
             Agent_sdk.Error.Internal (Provider_http_error.to_message http_err)))
 ;;
@@ -321,18 +366,52 @@ let parse_summary ~generated_at ~model_run_id json =
   }
 ;;
 
-let summary_of_response ~generated_at (response : Agent_sdk.Types.api_response) =
-  match
-    Agent_sdk_response.structured_json_of_response
-      ~schema_name:"hitl_context_summary"
-      response
-  with
-  | Ok json ->
-    (try Ok (parse_summary ~generated_at ~model_run_id:response.id json) with
-     | exn ->
-       Error (Printf.sprintf "HITL summary parse failed: %s" (Printexc.to_string exn)))
-  | Error detail ->
-    Error (Printf.sprintf "HITL summary structured response parse failed: %s" detail)
+(** Best-effort extraction of a single JSON object from a model's visible text,
+    used only on the [Plain_json_text] degradation path. Tries the trimmed text
+    as-is, then the first ['{'] .. last ['}'] span (which also covers a fenced
+    ```json block, since the braces sit inside the fence). Returns [Error]
+    rather than a partial object so the caller surfaces [Summary_failed] instead
+    of silently accepting non-conforming output. *)
+let extract_json_object (text : string) : (Yojson.Safe.t, string) result =
+  let try_parse s =
+    match Yojson.Safe.from_string (String.trim s) with
+    | `Assoc _ as json -> Some json
+    | _ -> None
+    | exception _ -> None
+  in
+  let brace_span () =
+    match String.index_opt text '{', String.rindex_opt text '}' with
+    | Some i, Some j when j > i -> Some (String.sub text i (j - i + 1))
+    | _ -> None
+  in
+  match try_parse text with
+  | Some json -> Ok json
+  | None ->
+    (match Option.bind (brace_span ()) try_parse with
+     | Some json -> Ok json
+     | None -> Error "HITL summary: no JSON object found in model response text")
+;;
+
+let summary_of_response ~generated_at ~mode (response : Agent_sdk.Types.api_response) =
+  let parse_json json =
+    try Ok (parse_summary ~generated_at ~model_run_id:response.id json) with
+    | exn ->
+      Error (Printf.sprintf "HITL summary parse failed: %s" (Printexc.to_string exn))
+  in
+  match mode with
+  | Native_structured ->
+    (match
+       Agent_sdk_response.structured_json_of_response
+         ~schema_name:"hitl_context_summary"
+         response
+     with
+     | Ok json -> parse_json json
+     | Error detail ->
+       Error (Printf.sprintf "HITL summary structured response parse failed: %s" detail))
+  | Plain_json_text ->
+    (match extract_json_object (Agent_sdk_response.text_of_response response) with
+     | Ok json -> parse_json json
+     | Error detail -> Error detail)
 ;;
 
 (* ── Spawn ──────────────────────────────────────── *)
@@ -354,8 +433,15 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
             on_failure ~reason:"HITL summary worker: Eio net unavailable" ~retryable:true
           | Some net ->
             (match call_summary_llm ~sw ~net ~provider_config ~context_bundle () with
-             | Ok response ->
-               (match summary_of_response ~generated_at response with
+             | Ok (response, mode) ->
+               (* Record the degradation itself (not just its outcome) so
+                  operators can see when the judge fleet lacks native structured
+                  output, rather than it being invisible behind ok/parse_error. *)
+               (match mode with
+                | Plain_json_text ->
+                  record_outcome ~risk_level:entry.risk_level "degraded_plain_json"
+                | Native_structured -> ());
+               (match summary_of_response ~generated_at ~mode response with
                 | Ok summary ->
                   record_outcome ~risk_level:entry.risk_level "ok_summary";
                   on_summary summary
@@ -380,10 +466,15 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
 ;;
 
 module For_testing = struct
+  type nonrec summary_mode = summary_mode =
+    | Native_structured
+    | Plain_json_text
+
   let build_context_bundle = build_context_bundle
   let parse_summary = parse_summary
   let summary_of_response = summary_of_response
   let provider_config_for_summary = provider_config_for_summary
+  let extract_json_object = extract_json_object
   let summary_version = summary_version
 end
 ;;

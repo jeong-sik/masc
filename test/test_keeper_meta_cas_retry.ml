@@ -218,6 +218,10 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
     let operator_pause =
       { stale_turn_view with
         paused = true;
+        latched_reason =
+          Some
+            (Keeper_latched_reason.Operator_paused
+               { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive });
         auto_resume_after_sec = None;
         runtime = { stale_turn_view.runtime with last_blocker = None };
         updated_at = Keeper_meta_contract.now_iso ();

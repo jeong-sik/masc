@@ -452,7 +452,7 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     expect(keeperDetailPageSource).toContain('kw-detail-content')
     expect(keeperDetailPageSource).toContain('kw-detail-full-head')
     expect(keeperDetailPageSource).toContain("await import('./keeper-config-panel')")
-    expect(keeperDetailPageSource).toContain('<${LazyKeeperConfigPanel} keeperName=${keeperName} onClose=${onClose} />')
+    expect(keeperDetailPageSource).toContain('<${LazyKeeperConfigPanel} key=${keeperName} keeperName=${keeperName} onClose=${onClose} />')
     expect(keeperDetailPageSource).toContain('panel now owns the full .kcf-overlay modal shell')
     expect(keeperDetailBodySource).toContain('kw-detail-body')
     expect(keeperDetailShellSource).toContain('kw-detail-section-rail')

@@ -106,6 +106,20 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('script')).toBeNull()
   })
 
+  it('renders sanitized HTML blocks without unsafe attributes', () => {
+    const container = document.createElement('div')
+    render(h(MarkdownContent, {
+      text: '<div class="idea-card" onclick="alert(1)"><span data-x="bad">HTML idea</span></div>',
+    }), container)
+
+    const div = container.querySelector('.idea-card') as HTMLDivElement | null
+    const span = container.querySelector('span') as HTMLSpanElement | null
+    expect(div).not.toBeNull()
+    expect(div?.textContent).toContain('HTML idea')
+    expect(div?.getAttribute('onclick')).toBeNull()
+    expect(span?.getAttribute('data-x')).toBeNull()
+  })
+
   it('renders think block as details', () => {
     const container = document.createElement('div')
     render(h(MarkdownContent, { text: '<think>hidden thought</think>' }), container)

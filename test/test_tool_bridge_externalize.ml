@@ -110,6 +110,20 @@ let test_to_oas_typed_small_inlined () =
       Alcotest.(check bool) "no marker" false (O.is_marker content)
   | Error _ -> Alcotest.fail "expected Ok"
 
+let test_board_post_get_preserves_full_content () =
+  Unix.putenv "MASC_TOOL_EXTERNALIZE" "1";
+  Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "100";
+  let payload = String.make 5_000 'b' in
+  let result =
+    B.to_oas_typed_result (tool_ok ~tool_name:"masc_board_post_get" payload)
+  in
+  Unix.putenv "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" "";
+  match result with
+  | Ok { content; _ } ->
+    Alcotest.(check string) "board post get full content" payload content;
+    Alcotest.(check bool) "not a blob marker" false (O.is_marker content)
+  | Error _ -> Alcotest.fail "expected Ok"
+
 let test_to_oas_typed_error_inlined () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   match B.to_oas_typed_result (tool_error ~tool_name:"test" "fail") with
@@ -234,6 +248,8 @@ let () =
       ( "to_oas_typed_result",
         [
           Alcotest.test_case "small inlined" `Quick test_to_oas_typed_small_inlined;
+          Alcotest.test_case "board post get preserves full content" `Quick
+            test_board_post_get_preserves_full_content;
           Alcotest.test_case "error inlined" `Quick test_to_oas_typed_error_inlined;
           Alcotest.test_case "error recoverable from JSON" `Quick
             test_to_oas_typed_error_uses_json_recoverable_flag;

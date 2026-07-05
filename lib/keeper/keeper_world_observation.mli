@@ -40,7 +40,24 @@ val provenance_of :
 val should_quarantine : observation_provenance -> bool
 
 (** Structured board activity delivered to keepers without routing heuristics. *)
+type board_reaction_event = {
+  target_type : Board_types.reaction_target_type;
+  target_id : string;
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+}
+
+type pending_board_event_kind =
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed of board_reaction_event
+  | Fusion_completed
+  | Bg_completed
+  | External_attention
+
 type pending_board_event = {
+  event_kind : pending_board_event_kind;
   post_id : string;
   author : string;
   title : string;

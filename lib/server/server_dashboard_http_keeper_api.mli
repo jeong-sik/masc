@@ -16,6 +16,7 @@ val keeper_api_prefix : string
 
 val keeper_suffix_tools : string
 val keeper_suffix_config : string
+val keeper_suffix_secrets : string
 val keeper_suffix_boot : string
 val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
@@ -144,6 +145,11 @@ val handle_keeper_config_post :
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /config] (TOML edits). *)
+
+val handle_keeper_secrets_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /secrets] (redacted env-secret projection edits). *)
 
 val handle_keeper_lifecycle_post :
   ?body_str:string ->

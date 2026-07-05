@@ -591,7 +591,7 @@ function KeeperConfigOverlay({
   // buttons are rendered by the panel itself.)
   return html`
     <${Suspense} fallback=${html`<div class="kcf-overlay" data-testid="kw-config-overlay"><div class="kcf v2-monitoring-surface">설정 로딩…</div></div>`}>
-      <${LazyKeeperConfigPanel} keeperName=${keeperName} onClose=${onClose} />
+      <${LazyKeeperConfigPanel} key=${keeperName} keeperName=${keeperName} onClose=${onClose} />
     <//>
   `
 }

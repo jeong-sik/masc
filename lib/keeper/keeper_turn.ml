@@ -1412,3 +1412,19 @@ let handle_keeper_msg ?on_text_delta ?on_event ?event_bus ctx args : tool_result
              name
              waiting
              in_flight_text)
+
+let handle_keeper_msg_if_free ?on_text_delta ?on_event ?event_bus ctx args =
+  let event_bus =
+    match event_bus with
+    | Some _ -> event_bus
+    | None -> Keeper_event_bus.get ()
+  in
+  let name = get_string args "name" "" in
+  if not (validate_name name) then
+    `Ran (run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args)
+  else
+    Keeper_turn_admission.run_chat_if_free
+      ~base_path:ctx.config.base_path
+      ~keeper_name:name
+      (fun () ->
+        run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args)

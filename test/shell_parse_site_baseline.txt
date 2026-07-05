@@ -21,7 +21,7 @@ lib/keeper/keeper_alerting.ml:333  # argv_keeper
 lib/keeper/keeper_alerting.ml:383  # argv_keeper
 lib/keeper/keeper_alerting.ml:477  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:224  # argv_keeper
-lib/keeper/keeper_sandbox_control.ml:446  # argv_keeper
+lib/keeper/keeper_sandbox_control.ml:477  # argv_keeper
 lib/keeper/keeper_sandbox_docker.ml:196  # argv_keeper
 lib/keeper/keeper_sandbox_docker.ml:589  # argv_keeper
 lib/keeper/keeper_sandbox_read_backend.ml:184  # argv_keeper
@@ -39,7 +39,7 @@ lib/notify.ml:26  # argv_subsystem
 lib/notify.ml:45  # argv_subsystem
 lib/playground_repo_readiness.ml:23  # argv_subsystem
 lib/playground_repo_readiness.ml:400  # argv_subsystem
-lib/repo_manager/repo_git.ml:41  # argv_workspace
+lib/repo_manager/repo_git.ml:53  # argv_workspace
 lib/server/server_dashboard_http_runtime_info.ml:270  # argv_dispatch
 lib/server/server_dashboard_http_runtime_info.ml:368  # argv_dispatch
 lib/server/server_routes_http_routes_sidecar.ml:672  # argv_dispatch

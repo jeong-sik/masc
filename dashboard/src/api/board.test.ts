@@ -10,7 +10,9 @@ import {
   fetchBoardKarmaLedger,
   fetchBoardPost,
   fetchBoardReactions,
+  normalizeBoardContextInferenceSubmission,
   normalizeBoardKarmaLedger,
+  requestBoardContextInference,
   sanitizeBoardTitle,
   toggleReaction,
   voteComment,
@@ -1237,5 +1239,84 @@ describe('board reactions', () => {
       last_ok: true,
       sample_count: 1,
     })
+  })
+})
+
+describe('board context inference', () => {
+  it('normalizes queued keeper submissions', () => {
+    expect(normalizeBoardContextInferenceSubmission({
+      ok: true,
+      request_id: 'kmsg-1',
+      keeper_name: 'luna',
+      post_id: 'post-1',
+      status: 'queued',
+      target_source: 'explicit_target',
+      message: 'queued',
+    })).toEqual({
+      ok: true,
+      requestId: 'kmsg-1',
+      keeperName: 'luna',
+      postId: 'post-1',
+      status: 'queued',
+      targetSource: 'explicit_target',
+      message: 'queued',
+    })
+  })
+
+  it('rejects malformed context inference submissions', () => {
+    expect(normalizeBoardContextInferenceSubmission({ ok: true, keeper_name: 'luna' })).toBeNull()
+    expect(normalizeBoardContextInferenceSubmission({ ok: false })).toBeNull()
+  })
+
+  it('requests board context inference with an explicit target keeper', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        request_id: 'kmsg-ctx',
+        keeper_name: 'luna',
+        post_id: 'post-1',
+        status: 'queued',
+        target_source: 'explicit_target',
+      }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await requestBoardContextInference(' post-1 ', ' luna ')
+
+    expect(result).toMatchObject({
+      requestId: 'kmsg-ctx',
+      keeperName: 'luna',
+      postId: 'post-1',
+      status: 'queued',
+      targetSource: 'explicit_target',
+    })
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/board/context-inference')
+    expect(JSON.parse(String(init.body))).toEqual({
+      post_id: 'post-1',
+      target_keeper: 'luna',
+    })
+  })
+
+  it('fails when the server returns a malformed context inference response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        keeper_name: 'luna',
+        post_id: 'post-1',
+        status: 'queued',
+      }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(requestBoardContextInference('post-1')).rejects.toThrow(
+      'Malformed board context inference response',
+    )
   })
 })

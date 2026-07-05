@@ -97,7 +97,7 @@ import { _resetKeeperStreamBuffersForTests } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperToolReply } from './api/keeper'
 import type { ToolCallEntry } from './api/dashboard'
-import type { KeeperConversationAttachment, KeeperStatusDetail } from './types'
+import type { ChatBlock, KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
   fetchKeeperToolCalls.mockReset()
@@ -386,6 +386,20 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const firstError = await firstSend
     expect(firstError).toBeInstanceOf(Error)
     expect(firstError.name).toBe('AbortError')
+  })
+
+  it('preserves supplied display blocks on the optimistic user entry', async () => {
+    const blocks: ChatBlock[] = [
+      { t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello voice' },
+      { t: 'p', html: '[Voice memo 00:03 (12 KB)]<br />hello voice' },
+    ]
+    streamKeeperMessage.mockResolvedValue({ terminal: true })
+
+    await sendKeeperThreadMessage('echo', '[Voice memo 00:03 (12 KB)]\nhello voice', { blocks })
+
+    const userEntry = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'user')
+    expect(userEntry?.blocks).toEqual(blocks)
+    expect(userEntry?.delivery).toBe('delivered')
   })
 
   it('dedupes repeated firing of the same client action id while in flight', async () => {

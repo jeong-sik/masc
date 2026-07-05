@@ -141,6 +141,9 @@ let test_sandbox_write_joins_with_worktree_read () =
 
 let test_unregistered_path_lands_in_base_unresolved () =
   with_temp_base_dir (fun base_dir ->
+    (match Repo_store.save_all ~base_path:base_dir [] with
+     | Ok () -> ()
+     | Error msg -> failf "save_all: %s" msg);
     let elsewhere = Filename.concat base_dir "elsewhere/foo.ml" in
     let partition, original =
       Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write

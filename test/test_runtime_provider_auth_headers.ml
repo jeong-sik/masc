@@ -389,12 +389,12 @@ streaming = true
 let incompatible_messages_http_toml =
   {|
 [runtime]
-default = "openai.model"
+default = "deepseek.model"
 
-[providers.openai]
-display-name = "OpenAI over wrong protocol"
+[providers.deepseek]
+display-name = "DeepSeek over wrong protocol"
 protocol = "messages-http"
-endpoint = "https://api.openai.example/v1/messages"
+endpoint = "https://api.deepseek.com/v1/messages"
 
 [models.model]
 api-name = "model"
@@ -402,7 +402,7 @@ max-context = 8192
 tools-support = true
 streaming = true
 
-[openai.model]
+[deepseek.model]
 |}
 
 let test_runtime_adapter_rejects_unregistered_messages_http () =
@@ -456,8 +456,8 @@ let test_runtime_adapter_rejects_incompatible_messages_http_kind () =
             bool
             "error names provider"
             true
-            (String_util.contains_substring msg "openai"))
-     | bindings -> failf "expected one OpenAI binding, got %d" (List.length bindings))
+            (String_util.contains_substring msg "deepseek"))
+     | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings))
 
 let deepseek_runtime_toml =
   {|

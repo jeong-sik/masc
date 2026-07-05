@@ -1203,6 +1203,53 @@ let test_board_sse_reaction_changed () =
   | Some _ -> Alcotest.fail "expected reaction_changed SSE event"
   | None -> Alcotest.fail "expected board SSE event"
 
+let test_board_signal_reaction_changed_resolves_comment_parent () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"reaction-author"
+        ~title:"Reaction parent title"
+        ~content:"reaction parent content @keeper-alpha"
+        ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"comment-author"
+        ~content:"comment target" ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok comment -> comment
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let seen = ref None in
+  Board_dispatch.set_board_signal_hook (fun signal -> seen := Some signal);
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+       ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  match !seen with
+  | Some signal ->
+    (match signal.Board_dispatch.kind with
+     | Board_dispatch.Board_reaction_changed
+         { target_type; target_id; user_id; emoji; reacted } ->
+      Alcotest.(check string) "parent post id" post_id signal.Board_dispatch.post_id;
+      Alcotest.(check string) "signal author is reactor" "reactor" signal.author;
+      Alcotest.(check string) "target type" "comment"
+        (Board.reaction_target_type_to_string target_type);
+      Alcotest.(check string) "target id" comment_id target_id;
+      Alcotest.(check string) "user" "reactor" user_id;
+      Alcotest.(check string) "emoji" "👏" emoji;
+      Alcotest.(check bool) "reacted" true reacted;
+      Alcotest.(check string) "parent title" "Reaction parent title" signal.title;
+      Alcotest.(check string) "parent content" "reaction parent content @keeper-alpha" signal.content
+     | _ -> Alcotest.fail "expected reaction_changed board signal")
+  | None -> Alcotest.fail "expected reaction_changed board signal"
+
 let test_reaction_rejects_unsupported_emoji () =
   match
     Board_dispatch.create_post ~author:"reaction-author"
@@ -1774,6 +1821,8 @@ let () =
         (with_eio test_reaction_summary_batch);
       Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
+      Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick
+        (with_eio test_board_signal_reaction_changed_resolves_comment_parent);
       Alcotest.test_case "unsupported emoji rejected" `Quick
         (with_eio test_reaction_rejects_unsupported_emoji);
     ];

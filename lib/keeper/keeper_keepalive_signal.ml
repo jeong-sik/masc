@@ -352,6 +352,30 @@ let board_wakeup_dedup_key ~post_id ~author ~title ~content =
     "cfp:" ^ Digest.to_hex (Digest.string (author ^ "\x00" ^ normalized)))
 ;;
 
+let board_signal_wakeup_dedup_key (signal : Board_dispatch.board_signal) =
+  let base =
+    board_wakeup_dedup_key
+      ~post_id:signal.post_id
+      ~author:signal.author
+      ~title:signal.title
+      ~content:signal.content
+  in
+  match signal.kind with
+  | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added -> base
+  | Board_dispatch.Board_reaction_changed reaction ->
+    let reaction_key =
+      String.concat
+        "\x00"
+        [ Board.reaction_target_type_to_string reaction.target_type
+        ; reaction.target_id
+        ; reaction.user_id
+        ; reaction.emoji
+        ; string_of_bool reaction.reacted
+        ]
+    in
+    base ^ ":reaction:" ^ Digest.to_hex (Digest.string reaction_key)
+;;
+
 let board_reactive_wakeup_allowed
       ~base_path
       ~keeper_name
@@ -360,12 +384,7 @@ let board_reactive_wakeup_allowed
   Keeper_registry.board_wakeup_allowed
     ~base_path
     keeper_name
-    ~dedup_key:
-      (board_wakeup_dedup_key
-         ~post_id:signal.post_id
-         ~author:signal.author
-         ~title:signal.title
-         ~content:signal.content)
+    ~dedup_key:(board_signal_wakeup_dedup_key signal)
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
@@ -408,7 +427,10 @@ let select_board_wakeup_candidates
     |> List.filter_map (fun (item, reason) ->
       match reason with
       | Some Board_wake.Explicit_mention -> Some (item, Board_wake.Explicit_mention)
-      | Some (Board_wake.Stigmergy _ | Board_wake.Thread_reply_after_self_comment)
+      | Some
+          ( Board_wake.Stigmergy _
+          | Board_wake.Thread_reply_after_self_comment
+          | Board_wake.Reaction_after_self_activity )
       | None -> None)
   in
   match explicit with
@@ -430,6 +452,23 @@ let select_board_wakeup_candidates
    here it only picks urgency (explicit mentions are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
+let queue_reaction_target_of_board = function
+  | Board.Reaction_post -> Keeper_event_queue.Reaction_post
+  | Board.Reaction_comment -> Keeper_event_queue.Reaction_comment
+;;
+
+let queue_reaction_change_of_board
+      (reaction : Board_dispatch.board_reaction_change)
+  : Keeper_event_queue.board_reaction_change
+  =
+  { target_type = queue_reaction_target_of_board reaction.target_type
+  ; target_id = reaction.target_id
+  ; user_id = reaction.user_id
+  ; emoji = reaction.emoji
+  ; reacted = reaction.reacted
+  }
+;;
+
 let board_signal_stimulus
       ~(reason : Board_wake.wake_reason)
       (signal : Board_dispatch.board_signal)
@@ -439,7 +478,9 @@ let board_signal_stimulus
       { kind =
           (match signal.kind with
            | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added)
+           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
+           | Board_dispatch.Board_reaction_changed reaction ->
+             Keeper_event_queue.Reaction_changed (queue_reaction_change_of_board reaction))
       ; author = signal.author
       ; title = signal.title
       ; content = signal.content
@@ -451,7 +492,9 @@ let board_signal_stimulus
   ; urgency =
       (match reason with
        | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
-       | Board_wake.Stigmergy _ | Board_wake.Thread_reply_after_self_comment ->
+       | Board_wake.Stigmergy _
+       | Board_wake.Thread_reply_after_self_comment
+       | Board_wake.Reaction_after_self_activity ->
          Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
   ; payload
@@ -533,6 +576,7 @@ let wakeup_relevant_keeper_for_board_signal
     match signal.kind with
     | Board_dispatch.Board_post_created -> "post_created"
     | Board_dispatch.Board_comment_added -> "comment_added"
+    | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   in
   (* Yield meter: scanning all running keepers' meta files is CPU-bound
      when many keepers share a domain.  Yield every ~1000 iterations. *)

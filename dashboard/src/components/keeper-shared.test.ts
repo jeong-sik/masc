@@ -76,7 +76,7 @@ import {
 } from '../keeper-actions'
 import { _resetChatStoreForTests, enqueueInput, getQueuedMessages, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
-import type { KeeperConversationEntry } from '../types'
+import type { ChatBlock, KeeperConversationEntry } from '../types'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -434,6 +434,32 @@ describe('KeeperConversationPanel', () => {
 
     expect(container.textContent).toContain('queued transcript draft')
     expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
+  })
+
+  it('renders queued voice draft display blocks inside the transcript', async () => {
+    keeperSending.value = { sangsu: true }
+    const voiceBlocks: ChatBlock[] = [
+      { t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello voice' },
+      { t: 'p', html: '[Voice memo 00:03 (12 KB)]<br />hello voice' },
+    ]
+    enqueueInput(
+      'sangsu',
+      '[Voice memo 00:03 (12 KB)]\nhello voice',
+      undefined,
+      'queued-voice-1',
+      voiceBlocks,
+      [{ type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello voice' }],
+    )
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
+    expect(container.textContent).toContain('hello voice')
   })
 
   it('renders queued drafts with invalid timestamps without throwing', async () => {

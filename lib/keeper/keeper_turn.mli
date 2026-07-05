@@ -144,5 +144,17 @@ val handle_keeper_msg :
     async wrappers should pass an explicit value captured before submitting the
     background turn. *)
 
+val handle_keeper_msg_if_free :
+  ?on_text_delta:(string -> unit) ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?event_bus:Agent_sdk.Event_bus.t ->
+  _ Keeper_types_profile.context ->
+  Yojson.Safe.t ->
+  [ `Ran of tool_result | `Busy of Keeper_turn_admission.rejection ]
+(** Non-blocking chat entrypoint for direct dashboard streaming. It runs the
+    same admitted turn body as [handle_keeper_msg] only when the keeper slot is
+    immediately available; otherwise it returns [`Busy] without parking behind
+    an in-flight turn. *)
+
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

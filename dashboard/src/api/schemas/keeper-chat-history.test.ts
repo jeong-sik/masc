@@ -94,6 +94,7 @@ describe('safeParseKeeperChatHistoryMessage', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-1780648779957-00000#4071',
           trace_event_count: 2,
+          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       }),
@@ -103,7 +104,43 @@ describe('safeParseKeeperChatHistoryMessage', () => {
       status: 'backend_trace_join',
       turn_ref: 'trace-1780648779957-00000#4071',
       trace_event_count: 2,
+      delivery_receipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
+  })
+
+  it('passes durable backend lifecycle stream contracts through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-1780648779957-00000#4071',
+          event_name: 'RUN_FINISHED',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'TEXT_MESSAGE_START',
+            'TEXT_MESSAGE_END',
+            'RUN_FINISHED',
+          ],
+          delivery_receipt: 'server_lifecycle_replay_only',
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      }),
+    )
+    expect(out?.stream_contract).toEqual({
+      source: 'backend_stream_lifecycle',
+      status: 'backend_lifecycle_replay',
+      turn_ref: 'trace-1780648779957-00000#4071',
+      event_name: 'RUN_FINISHED',
+      lifecycle_events: [
+        'RUN_STARTED',
+        'TEXT_MESSAGE_START',
+        'TEXT_MESSAGE_END',
+        'RUN_FINISHED',
+      ],
+      delivery_receipt: 'server_lifecycle_replay_only',
+      reason: 'history row records durable server stream lifecycle replay',
     })
   })
 

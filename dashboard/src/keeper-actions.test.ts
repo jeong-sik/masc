@@ -229,6 +229,7 @@ describe('hydrateKeeperChatHistory', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-hydrate#2',
           trace_event_count: 2,
+          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       },
@@ -242,6 +243,7 @@ describe('hydrateKeeperChatHistory', () => {
       status: 'backend_trace_join',
       turnRef: 'trace-hydrate#2',
       traceEventCount: 2,
+      deliveryReceipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
     })
   })
@@ -1010,6 +1012,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(reply?.delivery).toBe('interrupted')
     expect(reply?.text).toContain('부분 응답')
     expect(reply?.error).toContain('끊겼습니다')
+    expect(reply?.streamContract?.deliveryReceipt).toBe('no_delivery_receipt')
     expect(keeperActionErrors.value.echo).toContain('끊겼습니다')
   })
 
@@ -1027,6 +1030,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
     expect(reply?.delivery).toBe('delivered')
     expect(reply?.text).toContain('완료된 응답')
+    expect(reply?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
     // Regression guard: the per-message force refresh re-rendered the
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()

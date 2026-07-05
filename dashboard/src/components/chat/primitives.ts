@@ -1095,10 +1095,43 @@ function ChatIssueBlock({ repo, number, title, status, url, meta }: ChatIssueBlo
   `
 }
 
-function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string; dims?: string; src?: string; svg?: string; ph?: string; via?: string; size?: string }) {
+function ChatAttachBlock({
+  name,
+  dims,
+  src,
+  svg,
+  ph,
+  via,
+  size,
+  id,
+  kind,
+  mimeType,
+  sizeBytes,
+}: {
+  name: string
+  dims?: string
+  src?: string
+  svg?: string
+  ph?: string
+  via?: string
+  size?: string
+  id?: string
+  kind?: string
+  mimeType?: string
+  sizeBytes?: number
+}) {
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
   return html`
-    <figure class="chat-block-attach" data-chat-block="attach">
+    <figure
+      class="chat-block-attach"
+      data-chat-block="attach"
+      data-chat-multimodal-source="server_block"
+      data-chat-multimodal-kind=${kind || undefined}
+      data-chat-multimodal-attachment-id=${id || undefined}
+      data-chat-multimodal-mime=${mimeType || undefined}
+      data-chat-multimodal-size-bytes=${sizeBytes ?? undefined}
+      data-chat-attach-via=${via || undefined}
+    >
       <div class="chat-block-attach-hd">
         <span>◫</span>
         <span class="chat-block-attach-name">${name}</span>
@@ -1286,7 +1319,15 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   `
 }
 
-function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; streaming?: boolean }) {
+function ChatTraceStep({
+  step,
+  streaming = false,
+  orderIndex,
+}: {
+  step: ChatTraceStep
+  streaming?: boolean
+  orderIndex?: number
+}) {
   const [open, setOpen] = useState(false)
   const sourceBadge = traceSourceBadge(step)
 
@@ -1299,6 +1340,8 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
       <div
         class="chat-block-tstep think"
         data-chat-trace-step="think"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
         data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
         data-chat-trace-ts=${step.ts ?? undefined}
@@ -1347,6 +1390,8 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
       <div
         class="chat-block-tstep reason ${open ? 'exp' : ''}"
         data-chat-trace-step="reason"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
         data-chat-trace-ts=${step.ts ?? undefined}
       >
@@ -1372,6 +1417,8 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
     <div
       class="chat-block-tstep tool ${open ? 'exp' : ''}"
       data-chat-trace-step="tool"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind="tool"
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${step.toolCallId?.trim() || undefined}
       data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
@@ -1773,7 +1820,7 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'chart': return html`<${ChatChartBlock} title=${block.title} series=${block.series} labels=${block.labels} xLabel=${block.xLabel} yMax=${block.yMax} />`
     case 'suggestions': return html`<${ChatSuggestionsBlock} items=${block.items} />`
     case 'issue': return html`<${ChatIssueBlock} repo=${block.repo} number=${block.number} title=${block.title} status=${block.status} url=${block.url} meta=${block.meta} />`
-    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
+    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} id=${block.id} kind=${block.kind} mimeType=${block.mimeType} sizeBytes=${block.sizeBytes} />`
     case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} src=${block.src} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
@@ -1822,11 +1869,17 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
   const canDownload = isSafeAttachmentHref(attachment)
   const meta = attachmentMeta(attachment)
   const isImage = isRenderableImageAttachment(attachment)
+  const multimodalKind = userInputMediaKindForAttachment(attachment)
 
   return html`
     <div
       class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-chat-attachment-card=${attachment.id}
+      data-chat-multimodal-source="persisted_attachment"
+      data-chat-multimodal-kind=${multimodalKind}
+      data-chat-multimodal-attachment-id=${attachment.id}
+      data-chat-multimodal-mime=${attachment.mimeType}
+      data-chat-multimodal-size-bytes=${attachment.size}
     >
       ${isImage
         ? html`
@@ -2101,6 +2154,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const timestamp = timeLabel(entry.timestamp)
   const sourceBadge = showSourceBadge ? sourceBadgeInfo(entry) : null
   const attachments = entry.attachments ?? []
+  const attachBlocks = effectiveBlocks.filter((block): block is Extract<ChatBlock, { t: 'attach' }> => block.t === 'attach')
+  const persistedAttachmentKinds = attachments.map(userInputMediaKindForAttachment)
+  const serverAttachKinds = attachBlocks
+    .map(block => block.kind?.trim())
+    .filter((value): value is string => Boolean(value))
+  const multimodalKinds = Array.from(new Set([...persistedAttachmentKinds, ...serverAttachKinds]))
+  const multimodalSources = [
+    attachments.length > 0 ? 'persisted_attachment' : null,
+    attachBlocks.length > 0 ? 'server_block' : null,
+  ].filter((value): value is string => value !== null)
   const surfaceInfo = surfaceLink(entry.surface)
 
   return html`
@@ -2123,8 +2186,14 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
       data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
+      data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-attachment-count=${attachments.length}
+      data-chat-server-attach-block-count=${attachBlocks.length}
+      data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
+      data-chat-multimodal-kinds=${multimodalKinds.length > 0 ? multimodalKinds.join(',') : undefined}
     >
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
@@ -2496,6 +2565,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
       data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
+      data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
     >
@@ -2630,6 +2701,8 @@ function ToolTraceStep({
   coverageState = 'not-applicable',
   hydrationFailureReason = null,
   traceStep,
+  orderIndex,
+  orderKind = 'tool',
 }: {
   entry: KeeperConversationEntry | null
   output: ToolCallEntry | null
@@ -2637,6 +2710,8 @@ function ToolTraceStep({
   coverageState?: ToolOutputCoverageState
   hydrationFailureReason?: string | null
   traceStep?: ChatTraceToolStep
+  orderIndex?: number
+  orderKind?: 'tool' | 'tool-entry'
 }) {
   const [open, setOpen] = useState(false)
   const name = traceStep?.name || entry?.label || 'tool'
@@ -2675,6 +2750,8 @@ function ToolTraceStep({
     <div
       class="chat-block-tstep tool ${open ? 'exp' : ''}"
       data-chat-trace-step="tool"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind=${orderKind}
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${callId ?? undefined}
       data-chat-trace-oas-block-index=${traceStep?.oasBlockIndex ?? undefined}
@@ -2810,7 +2887,13 @@ function chatResponsePreview(entry: KeeperConversationEntry): string {
   return text.length > 96 ? `${text.slice(0, 96)}…` : text
 }
 
-function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
+function ChatResponseTraceStep({
+  entry,
+  orderIndex,
+}: {
+  entry: KeeperConversationEntry
+  orderIndex?: number
+}) {
   const sourceBadge: TraceSourceBadgeInfo = {
     label: 'reply',
     title: 'source: assistant reply entry',
@@ -2820,6 +2903,8 @@ function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
     <div
       class="chat-block-tstep chat"
       data-chat-trace-step="chat"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind="chat"
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-entry-id=${entry.id}
       data-chat-trace-source=${entry.source}
@@ -2829,6 +2914,8 @@ function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-trace-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
       data-chat-trace-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-trace-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
+      data-chat-trace-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-trace-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
     >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
@@ -2883,6 +2970,12 @@ function ToolTraceCard({
   const ordered = assistant
     ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
     : interleaveTraceAndTools(traceSteps, steps)
+  const orderSignature = ordered.map((item) => {
+    if (item.kind === 'trace') return `trace:${item.step.kind}`
+    if (item.kind === 'tool') return `tool:${toolTraceCallId(item.entry, item.step) ?? item.step.name}`
+    if (item.kind === 'tool-entry') return `tool-entry:${toolTraceCallId(item.entry) ?? item.entry.id}`
+    return `chat:${item.entry.id}`
+  }).join('|')
   const orderedToolSteps = ordered.filter(isToolOrderItem)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
   const failN = orderedToolSteps.filter(
@@ -2926,11 +3019,14 @@ function ToolTraceCard({
       data-chat-turn-stream-contract-request-id=${assistant?.streamContract?.requestId ?? undefined}
       data-chat-turn-stream-contract-turn-ref=${assistant?.streamContract?.turnRef ?? undefined}
       data-chat-turn-stream-contract-trace-events=${assistant?.streamContract?.traceEventCount ?? undefined}
+      data-chat-turn-stream-contract-lifecycle-events=${assistant?.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-turn-stream-contract-delivery-receipt=${assistant?.streamContract?.deliveryReceipt ?? undefined}
       data-chat-tool-output-hydration-source=${toolOutputHydrationContract?.source ?? undefined}
       data-chat-tool-output-hydration-status=${toolOutputHydrationContract?.status ?? 'not-requested'}
       data-chat-tool-output-hydration-failure=${toolOutputHydrationContract?.failureReason ?? undefined}
       data-chat-tool-output-covered-since=${toolOutputsCoveredSinceMs ?? undefined}
       data-chat-tool-output-covered-through=${toolOutputsCoveredThroughMs ?? undefined}
+      data-chat-turn-order-signature=${orderSignature || undefined}
     >
       <button
         type="button"
@@ -2963,6 +3059,7 @@ function ToolTraceCard({
                   ? html`<${ChatTraceStep}
                       key=${`trace-${index}`}
                       step=${item.step}
+                      orderIndex=${index}
                       streaming=${assistant !== null && !turnComplete}
                     />`
                   : item.kind === 'tool'
@@ -2975,6 +3072,8 @@ function ToolTraceCard({
                           coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
+                          orderIndex=${index}
+                          orderKind="tool"
                         />`
                       })()
                     : item.kind === 'tool-entry'
@@ -2985,8 +3084,10 @@ function ToolTraceCard({
                           canMarkMissing=${canMarkMissingForEntry(item.entry)}
                           coverageState=${coverageStateForEntry(item.entry)}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
+                          orderIndex=${index}
+                          orderKind="tool-entry"
                         />`
-                    : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} />`)}
+                    : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} orderIndex=${index} />`)}
             </div>
           `
         : null}

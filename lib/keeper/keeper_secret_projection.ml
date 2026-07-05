@@ -539,44 +539,56 @@ let validate_env_entry_target path =
   | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
 ;;
 
+let reject_base_keeper_scope_mutation ~keeper_name ~scope =
+  if String.equal keeper_name "base" && scope = Keeper_secret
+  then Error "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+  else Ok ()
+;;
+
 let set_env_entry ~base_path ~keeper_name ~scope ~name ~value =
-  let name = String.trim name in
-  if not (valid_env_name name)
-  then Error (Printf.sprintf "invalid keeper secret env name: %s" name)
-  else
-    let value = strip_one_final_newline value in
-    match validate_env_value ~path:name value with
-    | Error _ as err -> err
-    | Ok value ->
-      let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
-      let env_root = Filename.concat info.root "env" in
-      (match ensure_secret_directory ~label:"root" info.root with
-       | Error _ as err -> err
-       | Ok () ->
-         (match ensure_secret_directory ~label:"env" env_root with
-          | Error _ as err -> err
-          | Ok () ->
-            let path = Filename.concat env_root name in
-            (match validate_env_entry_target path with
-             | Error _ as err -> err
-             | Ok () ->
-               (match Fs_compat.save_file_atomic path value with
-                | Error _ as err -> err
-                | Ok () ->
-                  (try
-                     Unix.chmod path 0o600;
-                     Ok ()
-                   with
-                   | Unix.Unix_error (err, fn, arg) ->
-                     Error (unix_error_message err fn arg))))))
+  match reject_base_keeper_scope_mutation ~keeper_name ~scope with
+  | Error _ as err -> err
+  | Ok () ->
+    let name = String.trim name in
+    if not (valid_env_name name)
+    then Error (Printf.sprintf "invalid keeper secret env name: %s" name)
+    else
+      let value = strip_one_final_newline value in
+      match validate_env_value ~path:name value with
+      | Error _ as err -> err
+      | Ok value ->
+        let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+        let env_root = Filename.concat info.root "env" in
+        (match ensure_secret_directory ~label:"root" info.root with
+         | Error _ as err -> err
+         | Ok () ->
+           (match ensure_secret_directory ~label:"env" env_root with
+            | Error _ as err -> err
+            | Ok () ->
+              let path = Filename.concat env_root name in
+              (match validate_env_entry_target path with
+               | Error _ as err -> err
+               | Ok () ->
+                 (match Fs_compat.save_file_atomic path value with
+                  | Error _ as err -> err
+                  | Ok () ->
+                    (try
+                       Unix.chmod path 0o600;
+                       Ok ()
+                     with
+                     | Unix.Unix_error (err, fn, arg) ->
+                       Error (unix_error_message err fn arg))))))
 ;;
 
 let delete_env_entry ~base_path ~keeper_name ~scope ~name =
-  let name = String.trim name in
-  if not (valid_env_name name)
-  then Error (Printf.sprintf "invalid keeper secret env name: %s" name)
-  else
-    let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+  match reject_base_keeper_scope_mutation ~keeper_name ~scope with
+  | Error _ as err -> err
+  | Ok () ->
+    let name = String.trim name in
+    if not (valid_env_name name)
+    then Error (Printf.sprintf "invalid keeper secret env name: %s" name)
+    else
+      let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
     if not (path_exists info.root)
     then Ok ()
     else
@@ -713,49 +725,55 @@ let validate_file_entry_target path =
 ;;
 
 let set_file_entry ~base_path ~keeper_name ~scope ~container_path ~value =
-  if contains_char value '\000'
-  then Error "keeper secret file value must not contain NUL"
-  else
+  match reject_base_keeper_scope_mutation ~keeper_name ~scope with
+  | Error _ as err -> err
+  | Ok () ->
+    if contains_char value '\000'
+    then Error "keeper secret file value must not contain NUL"
+    else
+      match file_rel_components_of_container_path container_path with
+      | Error _ as err -> err
+      | Ok components ->
+        let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+        let files_root = Filename.concat info.root "files" in
+        let parent_components = parent_components components in
+        (match ensure_secret_directory ~label:"root" info.root with
+         | Error _ as err -> err
+         | Ok () ->
+           (match ensure_secret_directory ~label:"files" files_root with
+            | Error _ as err -> err
+            | Ok () ->
+              (match
+                 ensure_secret_directory_chain
+                   ~label:"files"
+                   files_root
+                   parent_components
+               with
+               | Error _ as err -> err
+               | Ok () ->
+                 let path = path_of_components files_root components in
+                 (match validate_file_entry_target path with
+                  | Error _ as err -> err
+                  | Ok () ->
+                    (match Fs_compat.save_file_atomic path value with
+                     | Error _ as err -> err
+                     | Ok () ->
+                       (try
+                          Unix.chmod path 0o600;
+                          Ok ()
+                        with
+                        | Unix.Unix_error (err, fn, arg) ->
+                          Error (unix_error_message err fn arg)))))))
+;;
+
+let delete_file_entry ~base_path ~keeper_name ~scope ~container_path =
+  match reject_base_keeper_scope_mutation ~keeper_name ~scope with
+  | Error _ as err -> err
+  | Ok () ->
     match file_rel_components_of_container_path container_path with
     | Error _ as err -> err
     | Ok components ->
       let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
-      let files_root = Filename.concat info.root "files" in
-      let parent_components = parent_components components in
-      (match ensure_secret_directory ~label:"root" info.root with
-       | Error _ as err -> err
-       | Ok () ->
-         (match ensure_secret_directory ~label:"files" files_root with
-          | Error _ as err -> err
-          | Ok () ->
-            (match
-               ensure_secret_directory_chain
-                 ~label:"files"
-                 files_root
-                 parent_components
-             with
-             | Error _ as err -> err
-             | Ok () ->
-               let path = path_of_components files_root components in
-               (match validate_file_entry_target path with
-                | Error _ as err -> err
-                | Ok () ->
-                  (match Fs_compat.save_file_atomic path value with
-                   | Error _ as err -> err
-                   | Ok () ->
-                     (try
-                        Unix.chmod path 0o600;
-                        Ok ()
-                      with
-                      | Unix.Unix_error (err, fn, arg) ->
-                        Error (unix_error_message err fn arg)))))))
-;;
-
-let delete_file_entry ~base_path ~keeper_name ~scope ~container_path =
-  match file_rel_components_of_container_path container_path with
-  | Error _ as err -> err
-  | Ok components ->
-    let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
     let files_root = Filename.concat info.root "files" in
     let parent_components = parent_components components in
     (match existing_secret_directory ~label:"root" info.root with
@@ -850,7 +868,11 @@ let cleanup_files paths =
   List.iter
     (fun path ->
        try if Sys.file_exists path then Sys.remove path with
-       | Sys_error _ | Unix.Unix_error _ -> ())
+       | Sys_error msg ->
+         Log.Keeper.warn "Failed to remove projected secret file during cleanup: %s (Sys_error: %s)" path msg
+       | Unix.Unix_error (err, fn, arg) ->
+         let msg = unix_error_message err fn arg in
+         Log.Keeper.warn "Failed to remove projected secret file during cleanup: %s (Unix_error: %s)" path msg)
     paths
 ;;
 

@@ -876,6 +876,80 @@ let test_env_value_leading_hash_rejects () =
       (contains_substring err "docker --env-file")
 ;;
 
+let test_base_keeper_scope_mutation_rejected () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  (match
+     Keeper_secret_projection.set_env_entry
+       ~base_path:base
+       ~keeper_name:"base"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~name:"GH_TOKEN"
+       ~value:"secret"
+   with
+   | Ok () -> Alcotest.fail "expected keeper-scope set_env_entry mutation on base to be rejected"
+   | Error msg ->
+     Alcotest.(check string)
+       "rejection message"
+       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       msg);
+
+  (match
+     Keeper_secret_projection.delete_env_entry
+       ~base_path:base
+       ~keeper_name:"base"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~name:"GH_TOKEN"
+   with
+   | Ok () -> Alcotest.fail "expected keeper-scope delete_env_entry mutation on base to be rejected"
+   | Error msg ->
+     Alcotest.(check string)
+       "rejection message"
+       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       msg);
+
+  (match
+     Keeper_secret_projection.set_file_entry
+       ~base_path:base
+       ~keeper_name:"base"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~container_path:"/home/keeper/.ssh/id_ed25519"
+       ~value:"secret"
+   with
+   | Ok () -> Alcotest.fail "expected keeper-scope set_file_entry mutation on base to be rejected"
+   | Error msg ->
+     Alcotest.(check string)
+       "rejection message"
+       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       msg);
+
+  (match
+     Keeper_secret_projection.delete_file_entry
+       ~base_path:base
+       ~keeper_name:"base"
+       ~scope:Keeper_secret_projection.Keeper_secret
+       ~container_path:"/home/keeper/.ssh/id_ed25519"
+   with
+   | Ok () -> Alcotest.fail "expected keeper-scope delete_file_entry mutation on base to be rejected"
+   | Error msg ->
+     Alcotest.(check string)
+       "rejection message"
+       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       msg);
+
+  (match
+     Keeper_secret_projection.set_env_entry
+       ~base_path:base
+       ~keeper_name:"base"
+       ~scope:Keeper_secret_projection.Shared_secret
+       ~name:"GH_TOKEN"
+       ~value:"secret"
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.failf "shared-scope set_env_entry on base should be allowed: %s" msg)
+;;
+
 let () =
   Alcotest.run
     "keeper secret projection"
@@ -917,6 +991,8 @@ let () =
             test_set_file_entry_rejects_invalid_inputs
         ; Alcotest.test_case "env value leading hash rejects" `Quick
             test_env_value_leading_hash_rejects
+        ; Alcotest.test_case "base keeper scope mutation is rejected" `Quick
+            test_base_keeper_scope_mutation_rejected
         ] )
     ]
 ;;

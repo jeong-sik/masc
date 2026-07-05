@@ -77,6 +77,7 @@ import {
   pendingKeeperChatRequestsForKeeper,
   removePendingKeeperChatRequest,
   type PendingKeeperChatRequest,
+  updatePendingKeeperChatAssistantDraft,
   upsertPendingKeeperChatRequest,
 } from './keeper-chat-pending'
 
@@ -457,6 +458,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
   const existing = keeperThreads.value[request.keeperName] ?? []
   const userId = pendingUserEntryId(request.requestId)
   const assistantId = pendingAssistantEntryId(request.requestId)
+  const assistantDraft = request.assistantDraft
   if (!existing.some(entry => entry.id === userId)) {
     appendThreadEntry(request.keeperName, {
       id: userId,
@@ -482,20 +484,34 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       role: 'assistant',
       source: 'direct_assistant',
       label: request.keeperName,
-      text: '',
-      rawText: '',
-      timestamp: null,
-      delivery: 'queued',
-      streamState: 'opening',
+      text: assistantDraft?.text ?? '',
+      rawText: assistantDraft?.rawText ?? '',
+      timestamp: assistantDraft?.timestamp ?? null,
+      delivery: assistantDraft?.delivery ?? 'queued',
+      streamState: assistantDraft ? assistantDraft.streamState : 'opening',
       streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
         requestId: request.requestId,
         deliveryReceipt: 'no_delivery_receipt',
         reason: 'awaiting queued request poll result',
       }),
+      traceSteps: assistantDraft?.traceSteps,
+      error: assistantDraft?.error ?? null,
       details: null,
     })
   }
   return assistantId
+}
+
+function persistPendingAssistantDraft(
+  keeperName: string,
+  requestId: string | null,
+  assistantEntryId: string,
+): void {
+  if (!requestId) return
+  const entry = (keeperThreads.value[keeperName] ?? [])
+    .find(candidate => candidate.id === assistantEntryId) ?? null
+  if (!entry) return
+  updatePendingKeeperChatAssistantDraft(requestId, entry)
 }
 
 let localIdCounter = 0
@@ -985,6 +1001,7 @@ export async function sendKeeperThreadMessage(
         if (error) {
           throw new Error(error)
         }
+        persistPendingAssistantDraft(keeperName, requestId, assistantId)
         if (event.type === 'TOOL_CALL_END') {
           toolCallEnded = true
           void hydrateKeeperToolOutputs(keeperName)

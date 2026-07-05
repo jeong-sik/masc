@@ -25,6 +25,7 @@ import {
   activeStreamRequestId,
   getStreamController,
   keeperClientObservedSseStreamContract,
+  keeperThreads,
   keeperSending,
   keeperStreamStartedAt,
   setRecordValue,
@@ -32,6 +33,7 @@ import {
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
+import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
@@ -75,6 +77,15 @@ function fullPendingThinkingText(pending: PendingThinkingState): string {
   return pending.chunks.join('')
 }
 
+function persistActiveAssistantDraft(keeperName: string, assistantEntryId: string): void {
+  const requestId = activeStreamRequestId(keeperName)
+  if (!requestId) return
+  const entry = (keeperThreads.value[keeperName] ?? [])
+    .find(candidate => candidate.id === assistantEntryId) ?? null
+  if (!entry) return
+  updatePendingKeeperChatAssistantDraft(requestId, entry)
+}
+
 function flushPendingThinkingDeltas(
   keeperName: string,
   assistantEntryId: string,
@@ -91,12 +102,14 @@ function flushPendingThinkingDeltas(
     setAssistantThinkingSnapshot(keeperName, assistantEntryId, pending.preview, {
       oasBlockIndex: pending.oasBlockIndex,
     })
+    persistActiveAssistantDraft(keeperName, assistantEntryId)
     return
   }
   pendingThinkingDeltas.delete(key)
   setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
     oasBlockIndex: pending.oasBlockIndex,
   })
+  persistActiveAssistantDraft(keeperName, assistantEntryId)
 }
 
 function dropPendingThinkingDeltas(keeperName: string, assistantEntryId: string): void {

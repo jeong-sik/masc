@@ -28,6 +28,12 @@ module For_testing : sig
     status:Unix.process_status ->
     Masc_exec.Shell_ir.t ->
     unit
+  val redact_execute_output :
+    base_path:string ->
+    keeper_name:string ->
+    stdout:string ->
+    stderr:string ->
+    string * string * string
   val dispatch_error_deterministic_retry_fields :
     Keeper_tool_execute_shell_ir.dispatch_error -> (string * Yojson.Safe.t) list
 end

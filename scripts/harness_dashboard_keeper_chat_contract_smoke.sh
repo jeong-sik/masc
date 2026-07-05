@@ -100,8 +100,16 @@ const keeper = process.env.KEEPER_NAME;
 const chatPath = path.join(basePath, '.masc', 'keeper_chat', `${keeper}.jsonl`);
 const metaPath = path.join(basePath, '.masc', 'keepers', `${keeper}.json`);
 const turnRef = 'trace-chat-contract-smoke#7';
+const errorTurnRef = 'trace-chat-contract-smoke#8';
 
 const rows = [
+  {
+    id: 'smoke-legacy-user',
+    role: 'user',
+    content: 'legacy row without turn ref',
+    ts: 1783299999.999,
+    source: 'dashboard',
+  },
   {
     id: 'smoke-user',
     role: 'user',
@@ -132,6 +140,19 @@ const rows = [
       'TEXT_MESSAGE_START',
       'TEXT_MESSAGE_END',
       'RUN_FINISHED',
+    ],
+  },
+  {
+    id: 'smoke-error-assistant',
+    role: 'assistant',
+    content: 'Keeper request failed: Timeout after 630.0s',
+    ts: 1783300000.004,
+    source: 'dashboard',
+    kind: 'transport_failure',
+    turn_ref: errorTurnRef,
+    stream_lifecycle: [
+      'RUN_STARTED',
+      'RUN_ERROR',
     ],
   },
 ];
@@ -219,9 +240,12 @@ function requireContract(row, id) {
   if (!Array.isArray(rows)) throw new Error('history response is not an array');
 
   const byId = new Map(rows.map(row => [row.id, row]));
+  const legacyContract = requireContract(byId.get('smoke-legacy-user'), 'smoke-legacy-user');
   const userContract = requireContract(byId.get('smoke-user'), 'smoke-user');
   const toolContract = requireContract(byId.get('smoke-tool'), 'smoke-tool');
   const assistantContract = requireContract(byId.get('smoke-assistant'), 'smoke-assistant');
+  const errorRow = byId.get('smoke-error-assistant');
+  const errorContract = requireContract(errorRow, 'smoke-error-assistant');
 
   record('assistant row replays durable server lifecycle first', assistantContract.source === 'backend_stream_lifecycle' && assistantContract.status === 'backend_lifecycle_replay', assistantContract);
   record('assistant row labels replay as server-only receipt', assistantContract.delivery_receipt === 'server_lifecycle_replay_only', assistantContract);
@@ -238,6 +262,30 @@ function requireContract(row, id) {
   );
   record('user row has no client delivery receipt', userContract.delivery_receipt === 'no_delivery_receipt', userContract);
   record('tool row has no client delivery receipt', toolContract.delivery_receipt === 'no_delivery_receipt', toolContract);
+  record(
+    'legacy row without turn_ref is explicit no-receipt history gap',
+    legacyContract.source === 'keeper_chat_store'
+      && legacyContract.status === 'history_without_turn_ref'
+      && legacyContract.delivery_receipt === 'no_delivery_receipt',
+    legacyContract,
+  );
+  record('error assistant keeps typed transport-failure row kind', errorRow?.kind === 'transport_failure', errorRow);
+  record(
+    'error assistant row replays RUN_ERROR as server-only receipt',
+    errorContract.source === 'backend_stream_lifecycle'
+      && errorContract.status === 'backend_lifecycle_replay'
+      && errorContract.event_name === 'RUN_ERROR'
+      && errorContract.delivery_receipt === 'server_lifecycle_replay_only',
+    errorContract,
+  );
+  record(
+    'error assistant row preserves closed error lifecycle sequence',
+    JSON.stringify(errorContract.lifecycle_events) === JSON.stringify([
+      'RUN_STARTED',
+      'RUN_ERROR',
+    ]),
+    errorContract,
+  );
   record(
     'server history never claims dashboard client-observed SSE delivery',
     rows.every(row => row.stream_contract?.delivery_receipt !== 'client_observed_sse_event'),

@@ -456,6 +456,44 @@ let test_hook_and_cursor_share_blank_path_fallback () =
     | _ -> fail "expected one tool event and one cursor")
 ;;
 
+let test_hook_and_cursor_share_nested_arguments_path () =
+  with_temp_dir (fun base_dir ->
+    let input =
+      `Assoc
+        [ ( "arguments"
+          , `Assoc [ "file_path", `String "lib/from-arguments.ml" ] )
+        ; "line", `Int 9
+        ; "focus_mode", `String "editing"
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
+      ~tool_name:"fs_edit"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-9"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:50.0
+      ~output_text:"edited"
+      ~input;
+    let events = Ide_bridge.list_events ~base_path:base_dir () in
+    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
+    match events, cursors with
+    | event :: _, [ cursor ] ->
+      check
+        string
+        "tool event nested arguments path"
+        "lib/from-arguments.ml"
+        (json_string "file_path" event);
+      check
+        string
+        "cursor nested arguments path"
+        "lib/from-arguments.ml"
+        (json_string "file_path" cursor)
+    | _ -> fail "expected one tool event and one cursor")
+;;
+
 let test_hook_no_file_path () =
   with_temp_dir (fun base_dir ->
     let input = `Assoc [ "command", `String "ls" ] in
@@ -1138,6 +1176,10 @@ let () =
             "tool event and cursor share blank path fallback"
             `Quick
             test_hook_and_cursor_share_blank_path_fallback
+        ; test_case
+            "tool event and cursor share nested arguments path"
+            `Quick
+            test_hook_and_cursor_share_nested_arguments_path
         ; test_case "no file_path (execute)" `Quick test_hook_no_file_path
         ; test_case "summary truncation" `Quick test_hook_summary_truncation
         ; test_case "typed_outcome mapping" `Quick test_hook_typed_outcome_mapping

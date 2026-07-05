@@ -10,6 +10,9 @@ import type {
   KeeperConversationEntry,
   KeeperConversationRole,
   KeeperConversationSource,
+  KeeperConversationStreamContract,
+  KeeperConversationStreamContractSource,
+  KeeperConversationStreamContractStatus,
   KeeperConversationStreamState,
   KeeperConversationDelivery,
   KeeperDiagnostic,
@@ -215,6 +218,24 @@ function withoutUndefined<const T extends Record<string, unknown>>(record: T): T
     if (value !== undefined) next[key] = value
   }
   return next as T
+}
+
+export function keeperStreamContract(
+  source: KeeperConversationStreamContractSource,
+  status: KeeperConversationStreamContractStatus,
+  opts: {
+    eventName?: string | null
+    requestId?: string | null
+    reason?: string | null
+  } = {},
+): KeeperConversationStreamContract {
+  return withoutUndefined({
+    source,
+    status,
+    eventName: opts.eventName ?? undefined,
+    requestId: opts.requestId ?? undefined,
+    reason: opts.reason ?? undefined,
+  })
 }
 
 function normalizeTableCell(raw: unknown): ChatTableCellValue | null {
@@ -755,6 +776,9 @@ function normalizeHistoryEntry(
     turnRef,
     delivery,
     streamState: null,
+    streamContract: keeperStreamContract('rest_history', 'history_without_stream_events', {
+      reason: 'history rows do not carry stream lifecycle events',
+    }),
     details: null,
     surface,
     audio,
@@ -846,11 +870,13 @@ export function setAssistantStreamState(
   entryId: string,
   streamState: KeeperConversationStreamState,
   delivery: KeeperConversationDelivery,
+  streamContract?: KeeperConversationStreamContract,
 ): void {
   updateThreadEntry(name, entryId, entry => ({
     ...entry,
     streamState,
     delivery,
+    streamContract: streamContract ?? entry.streamContract,
   }))
 }
 
@@ -861,6 +887,9 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
     text: formatKeeperVisibleReply(`${entry.rawText ?? entry.text}${delta}`),
     streamState: 'streaming',
     delivery: 'streaming',
+    streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
+      eventName: 'TEXT_MESSAGE_CONTENT',
+    }),
   }))
 }
 
@@ -916,6 +945,9 @@ function writeAssistantThinkingText(
       traceSteps,
       streamState: 'thinking',
       delivery: 'streaming',
+      streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
+        eventName: 'KEEPER_THINKING_DELTA',
+      }),
     }
   })
 }
@@ -1293,6 +1325,9 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     timestamp: toIsoTimestamp(message.ts),
     delivery: 'history',
     streamState: null,
+    streamContract: keeperStreamContract('rest_history', 'history_without_stream_events', {
+      reason: 'tool history rows carry arguments, not live stream lifecycle',
+    }),
     details: null,
     surface: message.surface ?? null,
     // Tool rows share the same untrusted REST boundary; reject malformed

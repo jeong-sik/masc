@@ -24,7 +24,9 @@ import {
 } from './config/constants'
 import { DASHBOARD_PUSH_SLICES } from './dashboard-slices'
 import {
+  _resetDashboardWsCounterForTests,
   dashboardWsConnected,
+  dashboardWsEventCount60s,
   dashboardWsLastError,
   dashboardWsLastPingAt,
   dashboardWsLastPongAt,
@@ -221,6 +223,7 @@ afterEach(() => {
   dashboardWsLastPongLatencyMs.value = null
   dashboardWsLastSeq.value = 0
   dashboardWsReady.value = false
+  _resetDashboardWsCounterForTests()
   clearStoredToken()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -1035,6 +1038,7 @@ describe('dashboard websocket route subscriptions', () => {
     })
     expect(ack).not.toHaveProperty('id')
     expect(dashboardWsLastSeq.value).toBe(42)
+    expect(dashboardWsEventCount60s.value).toBe(0)
   })
 
   it('hydrates payload-only dashboard deltas without acking', async () => {
@@ -1068,6 +1072,7 @@ describe('dashboard websocket route subscriptions', () => {
     })
 
     expect(dashboardWsLastSeq.value).toBe(1)
+    expect(dashboardWsEventCount60s.value).toBe(1)
     expect(socket.sent).toHaveLength(sentBeforeDelta)
     expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
       'execution',

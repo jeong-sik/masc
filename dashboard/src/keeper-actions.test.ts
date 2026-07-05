@@ -1202,6 +1202,18 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['user', '진행 상황?', 'delivered'],
       ['assistant', 'polling으로 복구됨', 'delivered'],
     ])
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
+    expect(thread[1]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
   })
 
   it('reconciles a stream network failure when the server history has the completed reply', async () => {
@@ -1250,6 +1262,18 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['user', '어디까지 했어?', 'delivered'],
       ['assistant', '여기까지 했습니다.', 'delivered'],
     ])
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
+    expect(thread[1]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
 
@@ -1438,6 +1462,18 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['user', '어디까지 했어?', 'error'],
       ['assistant', '', 'error'],
     ])
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'contract_gap',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
+    expect(thread[1]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'contract_gap',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
     expect(keeperActionErrors.value.echo).toContain('서버 재시작')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
   })
@@ -1503,7 +1539,16 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
       // During the first sleep the assistant should still be queued.
       await vi.advanceTimersByTimeAsync(1_000)
-      expect((keeperThreads.value.echo ?? []).some(entry => entry.role === 'assistant' && entry.delivery === 'queued')).toBe(true)
+      const queuedAssistant = (keeperThreads.value.echo ?? []).find(
+        entry => entry.role === 'assistant' && entry.delivery === 'queued',
+      )
+      expect(queuedAssistant).not.toBeUndefined()
+      expect(queuedAssistant?.streamContract).toMatchObject({
+        source: 'pending_request_store',
+        status: 'client_placeholder',
+        requestId: 'kmsg_echo_1',
+        deliveryReceipt: 'no_delivery_receipt',
+      })
 
       // Let the resume loop finish.
       await vi.advanceTimersByTimeAsync(2_000)

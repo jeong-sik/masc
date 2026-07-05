@@ -9,6 +9,7 @@ import {
   logEntryToSysRow,
   logRowStatus,
   normalizeSettingsSection,
+  settingsControlInventory,
 } from './settings-surface'
 import type {
   ConfigEntry,
@@ -491,7 +492,14 @@ describe('SettingsSurface', () => {
     render(html`<${SettingsSurface} />`, container)
 
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
-      .toContain('theme/density live')
+      .toContain('browser-local shell state')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+    expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
+      .toContain('browser shell only')
+    expect(container.querySelector('[data-control-id="settings-theme-density"]')?.getAttribute('data-control-kind'))
+      .toBe('browser-local')
+    expect(container.querySelector('[data-control-id="settings-display-locale"]')?.getAttribute('data-control-kind'))
+      .toBe('unsupported')
     expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
       .toContain('spacious')
 
@@ -727,6 +735,10 @@ describe('SettingsSurface', () => {
       expect(container.textContent).toContain('70%')
       expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
       expect(container.querySelector('[data-testid="notify-routing-readonly"]')?.textContent).toContain('no writer')
+      expect(container.querySelector('[data-control-id="settings-notify-thresholds"]')?.getAttribute('data-control-kind'))
+        .toBe('live-read')
+      expect(container.querySelector('[data-control-id="settings-notify-routing"]')?.getAttribute('data-control-kind'))
+        .toBe('unsupported')
     })
 
     expect(container.querySelector('[data-testid="notify-local-summary"]')).toBeNull()
@@ -1166,6 +1178,10 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
+      expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
+        .toContain('PATCH /api/v1/runtime/routing')
+      expect(container.querySelector('[data-control-id="runtime-routing-lanes"]')?.getAttribute('data-control-kind'))
+        .toBe('live-write')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
         .toContain('수동 reroute')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
@@ -1487,6 +1503,26 @@ describe('SettingsSurface shell route', () => {
 })
 
 describe('settings read-surface helpers', () => {
+  it('settingsControlInventory classifies browser-local and unsupported controls explicitly', () => {
+    const displayKinds = settingsControlInventory('display').map(item => [item.id, item.kind])
+    expect(displayKinds).toContainEqual(['settings-theme-density', 'browser-local'])
+    expect(displayKinds).toContainEqual(['settings-display-locale', 'unsupported'])
+
+    const notifyKinds = settingsControlInventory('notify').map(item => [item.id, item.kind])
+    expect(notifyKinds).toContainEqual(['settings-notify-thresholds', 'live-read'])
+    expect(notifyKinds).toContainEqual(['settings-notify-routing', 'unsupported'])
+  })
+
+  it('settingsControlInventory records runtime routing writers as live-backed actions', () => {
+    const routing = settingsControlInventory('routing')
+    expect(routing.map(item => item.id)).toEqual([
+      'runtime-routing-lanes',
+      'runtime-media-failover',
+    ])
+    expect(routing.every(item => item.kind === 'live-write')).toBe(true)
+    expect(routing.map(item => item.action).join('\n')).toContain('/api/v1/runtime/routing')
+  })
+
   it('mcpExposedToolNames keeps only public_mcp tools, sorted', () => {
     const names = mcpExposedToolNames([
       makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),

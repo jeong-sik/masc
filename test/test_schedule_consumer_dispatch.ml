@@ -48,6 +48,34 @@ let automated id : Schedule_domain.actor =
   { id; kind = Schedule_domain.Automated_actor; display_name = None }
 ;;
 
+let keeper_meta_for_name keeper_name =
+  match
+    Keeper_meta_json_parse.meta_of_json
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String keeper_name
+        ; "trace_id", `String ("trace-" ^ keeper_name)
+        ; "last_model_used", `String "llama:auto"
+        ; "tool_access", `List []
+        ])
+  with
+  | Ok meta -> meta
+  | Error msg -> fail ("keeper meta parse failed: " ^ msg)
+;;
+
+let dashboard_schedule_row_exn dashboard ~schedule_id =
+  let open Yojson.Safe.Util in
+  match
+    dashboard
+    |> member "requests"
+    |> to_list
+    |> List.find_opt (fun row ->
+      String.equal (row |> member "schedule_id" |> to_string) schedule_id)
+  with
+  | Some row -> row
+  | None -> fail ("schedule missing from dashboard projection: " ^ schedule_id)
+;;
+
 let board_post_payload =
   `Assoc
     [ "kind", `String "masc.board_post"
@@ -292,18 +320,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
-  let row =
-    dashboard
-    |> member "requests"
-    |> to_list
-    |> List.find_opt (fun row ->
-      String.equal
-        (row |> member "schedule_id" |> to_string)
-        request.schedule_id)
-  in
-  match row with
-  | None -> fail "keeper wake schedule missing from dashboard projection"
-  | Some row ->
+  let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
     let receipt = row |> member "dispatch_receipt" in
     check string "receipt recognized" "recognized"
       (receipt |> member "projection_status" |> to_string);
@@ -438,6 +455,77 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
       (queue_evidence |> member "inflight_count" |> to_int)
 ;;
 
+let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let meta = keeper_meta_for_name keeper_name in
+  let (_entry : Keeper_registry.registry_entry) =
+    Keeper_registry.register ~base_path:config.Workspace_utils.base_path keeper_name meta
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.unregister ~base_path:config.Workspace_utils.base_path keeper_name)
+    (fun () ->
+      let request = create_pending_keeper_wake_schedule config in
+      ignore (approve_schedule config request : Schedule_domain.schedule_request);
+      let result = tick_ok config ~now:201.0 in
+      check int "one dispatch" 1 (List.length result.dispatches);
+      check string "dispatch status" "succeeded"
+        (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+      let pending_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let open Yojson.Safe.Util in
+      let pending_evidence = pending_row |> member "keeper_queue_evidence" in
+      check string "pending evidence matched" "matched_pending"
+        (pending_evidence |> member "projection_status" |> to_string);
+      check string "pending matched bucket" "pending"
+        (pending_evidence |> member "matched_bucket" |> to_string);
+      check int "pending count before lease" 1
+        (pending_evidence |> member "pending_count" |> to_int);
+      check int "inflight count before lease" 0
+        (pending_evidence |> member "inflight_count" |> to_int);
+      let leased =
+        match
+          Keeper_registry_event_queue.dequeue
+            ~base_path:config.Workspace_utils.base_path
+            keeper_name
+        with
+        | Some stimulus -> stimulus
+        | None -> fail "registered keeper should lease the scheduled wake"
+      in
+      check string "leased post id" "schedule-due:keeper-wake-sched-1" leased.post_id;
+      (match leased.payload with
+       | Keeper_event_queue.Schedule_due wake ->
+         check string "leased schedule id" request.schedule_id wake.schedule_id
+       | _ -> fail "registered keeper leased a non-schedule payload");
+      let inflight_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let inflight_evidence = inflight_row |> member "keeper_queue_evidence" in
+      check string "inflight evidence matched" "matched_inflight"
+        (inflight_evidence |> member "projection_status" |> to_string);
+      check string "inflight source" "durable_event_queue_snapshot"
+        (inflight_evidence |> member "source" |> to_string);
+      check string "inflight matched bucket" "inflight"
+        (inflight_evidence |> member "matched_bucket" |> to_string);
+      check string "inflight matched payload" "schedule_due"
+        (inflight_evidence |> member "matched_payload_kind" |> to_string);
+      check string "inflight matched schedule" request.schedule_id
+        (inflight_evidence |> member "matched_schedule_id" |> to_string);
+      check int "pending count after lease" 0
+        (inflight_evidence |> member "pending_count" |> to_int);
+      check int "inflight count after lease" 1
+        (inflight_evidence |> member "inflight_count" |> to_int);
+      Keeper_registry_event_queue.ack_consumed
+        ~base_path:config.Workspace_utils.base_path
+        keeper_name
+        [ leased ])
+;;
+
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
   with_workspace
   @@ fun config ->
@@ -511,6 +599,8 @@ let () =
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
+        ; test_case "keeper wake dashboard tracks runtime inflight lease" `Quick
+            test_keeper_wake_dashboard_tracks_runtime_inflight_lease
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
         ; test_case "dashboard resolve uses authenticated operator" `Quick

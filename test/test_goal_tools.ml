@@ -1612,6 +1612,46 @@ let test_goal_completion_blocks_open_tasks () =
     (get_string_field error_json "error_code")
 ;;
 
+let test_goal_completion_blocks_unevaluated_metric () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Metric completion"
+        ~metric:"coverage %"
+        ~target_value:"80%"
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Metric done task";
+  let completed =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let error_json = expect_error completed in
+  check
+    string
+    "metric completion blocked"
+    "conflict"
+    (get_string_field error_json "error_code");
+  check
+    bool
+    "error mentions metric evaluation"
+    true
+    (contains_substring (Yojson.Safe.to_string error_json) "has not been evaluated")
+;;
+
 let test_goal_completion_override_allows_empty_goal () =
   with_workspace
   @@ fun config ->
@@ -1936,6 +1976,10 @@ let () =
             "completion blocks open tasks"
             `Quick
             test_goal_completion_blocks_open_tasks
+        ; test_case
+            "completion blocks unevaluated metric"
+            `Quick
+            test_goal_completion_blocks_unevaluated_metric
         ; test_case
             "completion override allows empty goal"
             `Quick

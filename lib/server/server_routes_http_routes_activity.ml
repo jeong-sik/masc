@@ -639,7 +639,7 @@ let add_routes ~sw ~clock router =
          (fun state _req reqd ->
          Http.Request.read_body_async reqd
            (handle_board_context_inference_request ~state ~sw ~clock ~request
-              reqd)
+              reqd))
          request reqd)
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->

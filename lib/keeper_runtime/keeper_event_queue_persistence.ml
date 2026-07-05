@@ -322,6 +322,199 @@ let load_snapshot_pair_with_errors ~base_path ~keeper_name =
 let load ~base_path ~keeper_name =
   with_write_lock (fun () -> load_unlocked ~base_path ~keeper_name)
 
+let queue_oldest_arrived_at queue =
+  queue
+  |> Keeper_event_queue.to_list
+  |> List.fold_left
+       (fun acc (stimulus : Keeper_event_queue.stimulus) ->
+          match acc with
+          | None -> Some stimulus.arrived_at
+          | Some ts -> Some (Float.min ts stimulus.arrived_at))
+       None
+
+let min_float_opt left right =
+  match left, right with
+  | None, None -> None
+  | Some value, None | None, Some value -> Some value
+  | Some a, Some b -> Some (Float.min a b)
+
+let json_of_float_opt = function
+  | None -> `Null
+  | Some value -> `Float value
+
+let age_seconds_json ~now = function
+  | None -> `Null
+  | Some ts -> `Float (Float.max 0.0 (now -. ts))
+
+let read_queue_for_summary ~keeper_name path =
+  if not (Sys.file_exists path)
+  then Ok Keeper_event_queue.empty
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Error msg -> Error (Printf.sprintf "%s: %s" path msg)
+    | Ok json ->
+      (match Keeper_event_queue.queue_of_yojson json with
+       | Ok queue -> Ok queue
+       | Error msg ->
+         Error
+           (Printf.sprintf
+              "%s: failed to parse keeper=%s event queue: %s"
+              path
+              keeper_name
+              msg))
+
+type queue_summary = {
+  queue : Keeper_event_queue.t;
+  read_error : string option;
+}
+
+let queue_summary ~keeper_name path =
+  match read_queue_for_summary ~keeper_name path with
+  | Ok queue -> { queue; read_error = None }
+  | Error msg -> { queue = Keeper_event_queue.empty; read_error = Some msg }
+
+type keeper_queue_summary = {
+  keeper_name : string;
+  pending_count : int;
+  inflight_count : int;
+  pending_oldest_arrived_at : float option;
+  inflight_oldest_arrived_at : float option;
+  read_errors : string list;
+}
+
+let keeper_total_count summary = summary.pending_count + summary.inflight_count
+
+let keeper_oldest_arrived_at summary =
+  min_float_opt summary.pending_oldest_arrived_at summary.inflight_oldest_arrived_at
+
+let keeper_queue_summary ~base_path ~keeper_name =
+  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
+  | Error msg, _ | _, Error msg ->
+    { keeper_name
+    ; pending_count = 0
+    ; inflight_count = 0
+    ; pending_oldest_arrived_at = None
+    ; inflight_oldest_arrived_at = None
+    ; read_errors = [ msg ]
+    }
+  | Ok pending_path, Ok inflight_path ->
+    let pending = queue_summary ~keeper_name pending_path in
+    let inflight = queue_summary ~keeper_name inflight_path in
+    { keeper_name
+    ; pending_count = Keeper_event_queue.length pending.queue
+    ; inflight_count = Keeper_event_queue.length inflight.queue
+    ; pending_oldest_arrived_at = queue_oldest_arrived_at pending.queue
+    ; inflight_oldest_arrived_at = queue_oldest_arrived_at inflight.queue
+    ; read_errors =
+        List.filter_map (fun value -> value) [ pending.read_error; inflight.read_error ]
+    }
+
+let keeper_queue_summary_json ~now summary =
+  let oldest_arrived_at = keeper_oldest_arrived_at summary in
+  `Assoc
+    [ "keeper_name", `String summary.keeper_name
+    ; "pending_count", `Int summary.pending_count
+    ; "inflight_count", `Int summary.inflight_count
+    ; "total_count", `Int (keeper_total_count summary)
+    ; "oldest_arrived_at_unix", json_of_float_opt oldest_arrived_at
+    ; "oldest_age_seconds", age_seconds_json ~now oldest_arrived_at
+    ; "pending_oldest_arrived_at_unix", json_of_float_opt summary.pending_oldest_arrived_at
+    ; "pending_oldest_age_seconds", age_seconds_json ~now summary.pending_oldest_arrived_at
+    ; "inflight_oldest_arrived_at_unix", json_of_float_opt summary.inflight_oldest_arrived_at
+    ; "inflight_oldest_age_seconds", age_seconds_json ~now summary.inflight_oldest_arrived_at
+    ; "read_errors", `List (List.map (fun msg -> `String msg) summary.read_errors)
+    ]
+
+type queue_kind =
+  | Pending
+  | Inflight
+
+let queue_count_by_keeper_json ~now kind summary =
+  let field, count, oldest_arrived_at =
+    match kind with
+    | Pending -> "pending_count", summary.pending_count, summary.pending_oldest_arrived_at
+    | Inflight -> "inflight_count", summary.inflight_count, summary.inflight_oldest_arrived_at
+  in
+  `Assoc
+    [ "keeper_name", `String summary.keeper_name
+    ; field, `Int count
+    ; "oldest_age_seconds", age_seconds_json ~now oldest_arrived_at
+    ]
+
+let sorted_keeper_dir_names keepers_dir =
+  Sys.readdir keepers_dir
+  |> Array.to_list
+  |> List.filter (fun name ->
+       let path = Filename.concat keepers_dir name in
+       valid_keeper_name name && Sys.file_exists path && Sys.is_directory path)
+  |> List.sort String.compare
+
+let fleet_summary_json ~now ~base_path =
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let keeper_names, scan_errors =
+    if not (Sys.file_exists keepers_dir)
+    then [], []
+    else if not (Sys.is_directory keepers_dir)
+    then [], [ Printf.sprintf "keepers runtime path is not a directory: %s" keepers_dir ]
+    else
+      try sorted_keeper_dir_names keepers_dir, [] with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        [], [ Printf.sprintf "failed to list keepers runtime dir %s: %s" keepers_dir (Printexc.to_string exn) ]
+  in
+  let keepers =
+    List.map (fun keeper_name -> keeper_queue_summary ~base_path ~keeper_name) keeper_names
+  in
+  let pending_count =
+    List.fold_left (fun acc summary -> acc + summary.pending_count) 0 keepers
+  in
+  let inflight_count =
+    List.fold_left (fun acc summary -> acc + summary.inflight_count) 0 keepers
+  in
+  let oldest_arrived_at =
+    List.fold_left
+      (fun acc summary -> min_float_opt acc (keeper_oldest_arrived_at summary))
+      None
+      keepers
+  in
+  let read_errors =
+    scan_errors @ List.concat (List.map (fun summary -> summary.read_errors) keepers)
+  in
+  let read_error_count = List.length read_errors in
+  let keepers_with_pending =
+    keepers |> List.filter (fun summary -> summary.pending_count > 0)
+  in
+  let keepers_with_inflight =
+    keepers |> List.filter (fun summary -> summary.inflight_count > 0)
+  in
+  `Assoc
+    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
+    ; "status", `String (if read_error_count = 0 then "ok" else "degraded")
+    ; "operator_action_required", `Bool (read_error_count > 0)
+    ; "base_path", `String base_path
+    ; "keepers_runtime_dir", `String keepers_dir
+    ; "keeper_count", `Int (List.length keeper_names)
+    ; "keeper_names", `List (List.map (fun name -> `String name) keeper_names)
+    ; "pending_count", `Int pending_count
+    ; "inflight_count", `Int inflight_count
+    ; "total_count", `Int (pending_count + inflight_count)
+    ; "oldest_arrived_at_unix", json_of_float_opt oldest_arrived_at
+    ; "oldest_age_seconds", age_seconds_json ~now oldest_arrived_at
+    ; "pending_by_keeper",
+      `List
+        (List.map
+           (queue_count_by_keeper_json ~now Pending)
+           keepers_with_pending)
+    ; "inflight_by_keeper",
+      `List
+        (List.map
+           (queue_count_by_keeper_json ~now Inflight)
+           keepers_with_inflight)
+    ; "read_error_count", `Int read_error_count
+    ; "read_errors", `List (List.map (fun msg -> `String msg) read_errors)
+    ; "keepers", `List (List.map (keeper_queue_summary_json ~now) keepers)
+    ]
+
 let persist_to_path_result ~keeper_name path queue =
   match save_json_atomic path (Keeper_event_queue.queue_to_yojson queue) with
   | Ok () -> Ok ()

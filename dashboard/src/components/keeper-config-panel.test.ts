@@ -9,6 +9,8 @@ import {
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
+  KCF_TAB_IDS,
+  keeperConfigControlInventory,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
   type HookSlotEntry,
@@ -303,6 +305,70 @@ describe('keeperRuntimeConfigCanWrite', () => {
 
     expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
     expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('기본 매니페스트 경로')
+  })
+})
+
+describe('keeperConfigControlInventory', () => {
+  function findItem(tab: (typeof KCF_TAB_IDS)[number], c: KeeperConfig, id: string) {
+    const item = keeperConfigControlInventory(tab, c).find((entry) => entry.id === id)
+    if (!item) throw new Error(`inventory item missing: ${id}`)
+    return item
+  }
+
+  it('backs every tab with at least one uniquely identified row', () => {
+    const c = makeKeeperConfig()
+    const ids = new Set<string>()
+    for (const tab of KCF_TAB_IDS) {
+      const rows = keeperConfigControlInventory(tab, c)
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) {
+        expect(row.tab).toBe(tab)
+        expect(ids.has(row.id)).toBe(false)
+        ids.add(row.id)
+      }
+    }
+  })
+
+  it('classifies runtime-backed controls from the manifest writer guard', () => {
+    const toml = makeKeeperConfig()
+    const base = makeKeeperConfig()
+    const persona = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+
+    const runtimeWrite = findItem('runtime', toml, 'kcf-runtime-assignment')
+    expect(runtimeWrite.kind).toBe('live-write')
+    expect(runtimeWrite.action).toContain('PATCH /api/v1/keepers/:name/config runtime_id')
+
+    const runtimeUnsupported = findItem('runtime', persona, 'kcf-runtime-assignment')
+    expect(runtimeUnsupported.kind).toBe('unsupported')
+    expect(runtimeUnsupported.action).toContain('현재 기본 소스: persona')
+  })
+
+  it('keeps separate API writers live even when runtime manifest writes are unsupported', () => {
+    const base = makeKeeperConfig()
+    const persona = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+
+    expect(findItem('policy', persona, 'kcf-policy-continuity').kind).toBe('unsupported')
+    expect(findItem('policy', persona, 'kcf-policy-tool-policy').kind).toBe('live-write')
+    expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
+  })
+
+  it('marks hooks as read-only global state plus browser-local filtering, not a fake editor', () => {
+    const c = makeKeeperConfig()
+    expect(findItem('hooks', c, 'kcf-hooks-slots').kind).toBe('live-read')
+    expect(findItem('hooks', c, 'kcf-hooks-filter').kind).toBe('browser-local')
+    expect(findItem('hooks', c, 'kcf-hooks-editing').kind).toBe('unsupported')
   })
 })
 
@@ -1119,6 +1185,10 @@ describe('KeeperConfigPanel', () => {
 
     selectKcfTab(container, '런타임')
     await flush()
+    expect(container.querySelector('[data-testid="keeper-config-control-ledger"]')?.textContent)
+      .toContain('Control backing')
+    expect(container.querySelector('[data-control-id="kcf-runtime-assignment"]')?.getAttribute('data-control-kind'))
+      .toBe('unsupported')
     expect(container.querySelector('[data-testid="keeper-runtime-write-unsupported"]')).not.toBeNull()
     expect(container.textContent).toContain('현재 기본 소스: persona')
     expect(container.querySelector('select[aria-label="runtime_id"]')).toBeNull()

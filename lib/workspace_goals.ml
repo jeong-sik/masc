@@ -400,17 +400,39 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
-let validate_goal_completion_ready config ~goal_id ~override_note =
+let goal_completion_override_present = function
+  | Some note -> not (String.equal (String.trim note) "")
+  | None -> false
+;;
+
+let task_progress_of_linked_task ~goal_id (task : Masc_domain.task)
+  : Convergence.task_progress
+  =
+  { goal_id = Some goal_id
+  ; is_terminal = Masc_domain.task_status_is_terminal task.task_status
+  ; is_completed = Masc_domain.task_status_is_done task.task_status
+  }
+;;
+
+let validate_goal_completion_ready config ~(goal : Goal_store.goal) ~override_note =
   match override_note with
-  | Some note when not (String.equal (String.trim note) "") -> Ok ()
+  | _ when goal_completion_override_present override_note -> Ok ()
   | _ ->
+    (match goal.metric with
+     | Some metric when not (String.equal (String.trim metric) "") ->
+       Error
+         (Printf.sprintf
+            "goal completion blocked: metric %S has not been evaluated; provide \
+             override_note to force"
+            metric)
+     | Some _ | None ->
     let index =
       Workspace_goal_index.build_goal_task_index_for_config
         config
         (Workspace_query.get_tasks_safe config)
     in
     let linked_tasks =
-      Workspace_goal_index.tasks_for_goal index ~goal_id
+      Workspace_goal_index.tasks_for_goal index ~goal_id:goal.id
     in
     let open_count =
       linked_tasks
@@ -424,27 +446,44 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
         Masc_domain.task_status_is_done task.task_status)
       |> List.length
     in
-    if
-      match linked_tasks with
-      | [] -> true
-      | _ -> false
+    if linked_tasks = []
     then
       Error
         "goal completion requires at least one linked task; provide override_note to \
          force"
-    else if open_count > 0
-    then
-      Error
-        (Printf.sprintf
-           "goal completion blocked: %d linked task(s) are still open; provide \
-            override_note to force"
-           open_count)
-    else if done_count = 0
-    then
-      Error
-        "goal completion blocked: linked tasks are terminal but none are done; provide \
-         override_note to force"
-    else Ok ()
+    else
+      let task_progress =
+        List.map (task_progress_of_linked_task ~goal_id:goal.id) linked_tasks
+      in
+      match
+        Convergence.check_convergence
+          ~goal_id:goal.id
+          ~tasks:task_progress
+          (* Completion readiness is a point-in-time gate; it does not own the
+             cross-turn stagnation counter, so it supplies the neutral current
+             no-progress count. *)
+          ~iterations_without_progress:0
+          ()
+      with
+      | Some (Convergence.AllSubTasksDone _) | Some (Convergence.MetricMet _) ->
+        Ok ()
+      | Some (Convergence.StagnationDetected _) | None ->
+        if open_count > 0
+        then
+          Error
+            (Printf.sprintf
+               "goal completion blocked: %d linked task(s) are still open; provide \
+                override_note to force"
+               open_count)
+        else if done_count = 0
+        then
+          Error
+            "goal completion blocked: linked tasks are terminal but none are done; \
+             provide override_note to force"
+        else
+          Error
+            "goal completion blocked: linked tasks have not converged; provide \
+             override_note to force")
 ;;
 
 let parse_optional_string_list args field =
@@ -643,7 +682,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
       | Some goal ->
         (match
            if action = Goal_phase.Request_complete
-           then validate_goal_completion_ready ctx.config ~goal_id ~override_note
+           then validate_goal_completion_ready ctx.config ~goal ~override_note
            else Ok ()
          with
          | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg

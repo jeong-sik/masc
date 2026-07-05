@@ -147,7 +147,8 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Schedule_due _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.No_progress_recovery
-      | Keeper_event_queue.Hitl_resolved _ ->
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Goal_verification_failed _ ->
         None)
     stimuli
 ;;

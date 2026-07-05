@@ -66,4 +66,23 @@ describe('IdeMemoryPanel', () => {
     expect(String(url)).toContain('repo_id=masc')
     expect(String(url)).toContain('limit=50')
   })
+
+  it('includes canonical URL scope without repo_id when fetching memory', async () => {
+    render(h(IdeMemoryPanel, {
+      keeperName: 'sangsu',
+      scope: {
+        kind: 'canonical_url',
+        canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+      },
+    }), container)
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalled()
+    })
+    const [url] = vi.mocked(globalThis.fetch).mock.calls[0]!
+    expect(String(url)).toContain('/api/v1/ide/memory?')
+    expect(String(url)).toContain('keeper_id=sangsu')
+    expect(String(url)).toContain('canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git')
+    expect(String(url)).not.toContain('repo_id=')
+  })
 })

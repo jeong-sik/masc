@@ -1013,6 +1013,9 @@ api-name = "qwen36-35b-a3b-mtp"
 max-context = 128000
 tools-support = true
 thinking-support = true
+top-p = 0.91
+top-k = 42
+min-p = 0.07
 streaming = true
 
 [models.thinkexplicitoff]
@@ -1351,6 +1354,18 @@ let test_runtime_inventory_surfaces_request_config () =
       "request max context"
       128000
       (request |> J.member "max_context" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "request top_p"
+      0.91
+      (request |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "request top_k"
+      42
+      (request |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "request min_p"
+      0.07
+      (request |> J.member "min_p" |> J.to_float);
     Alcotest.(check string)
       "response format kind"
       "off"
@@ -1391,6 +1406,18 @@ let test_runtime_inventory_surfaces_declared_spec () =
     let provider = spec |> J.member "provider" in
     let model = spec |> J.member "model" in
     let binding = spec |> J.member "binding" in
+    Alcotest.(check (float 0.0001))
+      "snapshot top_p"
+      0.91
+      (thinkdefault |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "snapshot top_k"
+      42
+      (thinkdefault |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "snapshot min_p"
+      0.07
+      (thinkdefault |> J.member "min_p" |> J.to_float);
     Alcotest.(check string)
       "declared spec source"
       "runtime.toml"
@@ -1434,6 +1461,18 @@ let test_runtime_inventory_surfaces_declared_spec () =
       "declared thinking support"
       true
       (model |> J.member "thinking_support" |> J.to_bool);
+    Alcotest.(check (float 0.0001))
+      "declared top_p"
+      0.91
+      (model |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "declared top_k"
+      42
+      (model |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "declared min_p"
+      0.07
+      (model |> J.member "min_p" |> J.to_float);
     (match model |> J.member "capabilities" with
      | `Null -> ()
      | _ -> Alcotest.fail "absent model capabilities must remain null");

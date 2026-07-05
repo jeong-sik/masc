@@ -323,6 +323,42 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.timestamp).toBeTruthy()
   })
 
+  it('preserves REST chat history provenance instead of re-inferring it away', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        source: 'world_state_prompt',
+        content: 'state snapshot',
+        ts: 1_780_000_000,
+        surface: { kind: 'dashboard', session_id: 'sess-1' },
+      },
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from channel context',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#7',
+        surface: {
+          kind: 'discord',
+          guild_id: 'guild-1',
+          channel_id: 'channel-1',
+          thread_id: 'thread-1',
+        },
+      },
+    ])
+
+    expect(entries[0]?.source).toBe('world_state_prompt')
+    expect(entries[0]?.surface).toEqual({ kind: 'dashboard', session_id: 'sess-1' })
+    expect(entries[1]?.source).toBe('direct_assistant')
+    expect(entries[1]?.surface).toEqual({
+      kind: 'discord',
+      guild_id: 'guild-1',
+      channel_id: 'channel-1',
+      thread_id: 'thread-1',
+    })
+    expect(entries[1]?.turnRef).toBe('trace-rest#7')
+  })
+
   it('preserves object payloads in persisted tool trace blocks', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

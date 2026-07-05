@@ -263,7 +263,53 @@ let () =
         assert (decision = Hitl_approved);
         assert (String.equal s.post_id "hitl-approval:appr-9")
       | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
-   | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
+  | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
+
+  (* Goal_verification_failed survives the codec round-trip: the goal-loop wake
+     must remain replayable from the durable per-keeper queue. *)
+  let goal_failure =
+    { goal_id = "goal-1"
+    ; request_id = "gvr-1"
+    ; goal_title = "Ship retry"
+    ; phase = "executing"
+    ; metric = Some "tests"
+    ; target_value = Some "pass"
+    ; rejected_by = "agent-alpha"
+    ; note = Some "receipt did not prove completion"
+    ; evidence_refs = [ "receipt:agent-alpha:turn-7" ]
+    }
+  in
+  assert (
+    String.equal
+      (goal_verification_failure_post_id goal_failure)
+      "goal-verification-failed:goal-1:gvr-1");
+  assert (
+    String.equal
+      (payload_kind_label (Goal_verification_failed goal_failure))
+      "goal_verification_failed");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = goal_verification_failure_post_id goal_failure
+          ; urgency = Immediate
+          ; arrived_at = 6.0
+          ; payload = Goal_verification_failed goal_failure
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Goal_verification_failed failure ->
+        assert (String.equal failure.goal_id "goal-1");
+        assert (String.equal failure.request_id "gvr-1");
+        assert (String.equal failure.rejected_by "agent-alpha");
+        assert (failure.metric = Some "tests");
+        assert (failure.target_value = Some "pass");
+        assert (failure.evidence_refs = [ "receipt:agent-alpha:turn-7" ])
+      | _ ->
+        Alcotest.fail
+          "Goal_verification_failed codec round-trip changed payload shape")
+   | Error msg ->
+     Alcotest.fail ("Goal_verification_failed stimulus round-trip failed: " ^ msg));
 
   (* --- queue operations preserved --- *)
   let board_stim =

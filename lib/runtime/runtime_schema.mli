@@ -121,6 +121,9 @@ type model_spec =
   ; max_thinking_budget : int option
   ; streaming : bool
   ; temperature : float option
+  ; top_p : float option
+  ; top_k : int option
+  ; min_p : float option
   ; capabilities : model_capabilities option
   ; match_prefixes : string list
   }

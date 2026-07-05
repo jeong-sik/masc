@@ -24,6 +24,11 @@ let int_field name json =
   | Some (`Int value) -> value
   | _ -> Alcotest.failf "expected int field %S" name
 
+let bool_field name json =
+  match json_field name json with
+  | Some (`Bool value) -> value
+  | _ -> Alcotest.failf "expected bool field %S" name
+
 let float_field name json =
   match json_field name json with
   | Some (`Float value) -> value
@@ -47,6 +52,10 @@ let keeper_summary name json =
   with
   | Some item -> item
   | None -> Alcotest.failf "expected keeper summary for %S" name
+
+let write_file path contents =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
 
 let () =
   let open Keeper_event_queue in
@@ -539,6 +548,42 @@ let () =
         "inflight keeper oldest age"
         25.0
         (float_field "oldest_age_seconds" inflight_summary));
+
+  (* --- durable fleet summary: corrupt queue snapshots must not look green. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary-corrupt" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-corrupt-summary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        (empty |> fun q -> enqueue q board_stim);
+      write_file (snapshot_path ~base_path ~keeper_name) "{not-json";
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+      in
+      Alcotest.(check string)
+        "corrupt summary status"
+        "degraded"
+        (string_field "status" json);
+      Alcotest.(check bool)
+        "corrupt summary requires operator action"
+        true
+        (bool_field "operator_action_required" json);
+      Alcotest.(check int)
+        "corrupt summary read error count"
+        1
+        (int_field "read_error_count" json);
+      let summary = keeper_summary keeper_name json in
+      Alcotest.(check int)
+        "corrupt keeper pending count fails closed"
+        0
+        (int_field "pending_count" summary);
+      Alcotest.(check int)
+        "corrupt keeper read errors"
+        1
+        (List.length (list_field "read_errors" summary)));
 
   let meta_for_keeper keeper_name trace_id =
     match

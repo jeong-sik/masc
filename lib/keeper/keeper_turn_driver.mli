@@ -233,6 +233,8 @@ module For_testing : sig
     attempt_inference_policy
 
   val attempt_runtime_candidates :
+    ?allow_accept_no_progress_retry:
+      (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

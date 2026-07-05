@@ -41,6 +41,7 @@ const PURIFY_CONFIG = {
     'href', 'title', 'target', 'rel', 'src', 'alt', 'class',
     'align',
   ],
+  ALLOW_DATA_ATTR: false,
 }
 
 function sanitize(raw: string): string {

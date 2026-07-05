@@ -1,10 +1,24 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
+const runtimeCatalogRefs = vi.hoisted(() => ({
+  fetchRuntimeProviders: vi.fn(),
+}))
+
+vi.mock('../api/dashboard', async () => {
+  const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
+  return {
+    ...actual,
+    fetchRuntimeProviders: runtimeCatalogRefs.fetchRuntimeProviders,
+  }
+})
+
+import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
+import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 import {
   AllowlistPreview,
   BudgetSourceBadge,
@@ -23,9 +37,92 @@ import {
   resolveKeeperToolPolicy,
 } from './keeper-detail-source'
 
+beforeEach(() => {
+  resetRuntimeCatalog()
+  runtimeCatalogRefs.fetchRuntimeProviders.mockReset()
+  runtimeCatalogRefs.fetchRuntimeProviders.mockResolvedValue({ providers: [] })
+})
+
 afterEach(() => {
   cleanup()
+  resetRuntimeCatalog()
 })
+
+function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnapshot {
+  const [providerId, modelId] = runtimeId.split('.', 2)
+  return {
+    provider: runtimeId,
+    runtime_id: runtimeId,
+    provider_id: providerId,
+    provider_display_name: 'Runtime Provider',
+    model_id: modelId,
+    model_api_name: 'model-api',
+    capabilities_declared: true,
+    supports_multimodal_inputs: true,
+    supports_image_input: true,
+    supports_audio_input: true,
+    source: 'runtime.toml',
+    models: ['model-api'],
+    effective_capabilities: {
+      source: 'oas-provider-config-model',
+      accepted_reasoning_efforts: null,
+      thinking_control_format: 'responses.reasoning',
+      supports_multimodal_inputs: true,
+      supports_image_input: true,
+      supports_audio_input: true,
+      supports_video_input: false,
+      ignored_sampling_parameters: ['temperature'],
+      supported_models: ['model-api'],
+    },
+    parameter_policy: {
+      reasoning_toggle_wire: 'responses.reasoning',
+      reasoning_replay_policy: 'preserve',
+      requires_reasoning_replay_on_tool_call: true,
+      ignored_sampling_params: ['top_k'],
+      always_ignored_sampling_params: ['min_p'],
+    },
+    request_config: {
+      source: 'runtime.toml',
+      provider_kind: 'cloud',
+      request_path_targets_responses_api: true,
+    },
+    declared_spec: {
+      source: 'runtime.toml',
+      provider: {
+        id: providerId,
+        display_name: 'Runtime Provider',
+        protocol: 'openai-compatible-http',
+        api_format: 'responses',
+        transport: 'http',
+        auth_kind: 'env:RUNTIME_API_KEY',
+        is_non_interactive: true,
+        behavior_capabilities: {
+          identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+        },
+      },
+      model: {
+        id: modelId,
+        api_name: 'model-api',
+        match_prefixes: ['model-'],
+        capabilities: {
+          source: 'runtime.toml',
+          thinking_control_format: 'responses.reasoning',
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+        },
+      },
+      binding: {
+        provider_id: providerId,
+        model_id: modelId,
+        is_default: false,
+        max_concurrent: 4,
+        keep_alive: '10m',
+      },
+    },
+  }
+}
 
 describe('resolveKeeperToolPolicy', () => {
   it('uses keeper config as the authoritative policy source', () => {
@@ -706,6 +803,8 @@ describe('RuntimeLensSection', () => {
     render(h(RuntimeLensSection, { trace: runtimeTraceFixture() }))
 
     expect(screen.getByTestId('runtime-lens')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-lens-catalog-spec')).toHaveTextContent('no runtime id observed')
+    expect(runtimeCatalogRefs.fetchRuntimeProviders).not.toHaveBeenCalled()
     expect(screen.getByText('keeper / agent turn')).toBeInTheDocument()
     expect(screen.getByText('7 / 3')).toBeInTheDocument()
     expect(screen.getByText('trace id')).toBeInTheDocument()
@@ -741,6 +840,40 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
+  })
+
+  it('renders catalog-backed runtime spec for the observed live runtime id', async () => {
+    const trace = runtimeTraceFixture()
+    trace.runtime_lens.axes.config_drift = {
+      ...trace.runtime_lens.axes.config_drift,
+      present: true,
+      status: 'override',
+      has_live_override: true,
+      runtime_override: true,
+      override_fields: ['runtime_id'],
+      default_runtime_id: 'provider.default',
+      live_runtime_id: 'provider.model',
+    }
+    runtimeCatalogRefs.fetchRuntimeProviders.mockResolvedValueOnce({
+      providers: [runtimeProviderFixture('provider.model')],
+    })
+
+    render(h(RuntimeLensSection, { trace }))
+
+    await waitFor(() => expect(screen.getByTestId('runtime-lens-catalog-spec')).toHaveTextContent('runtime catalog spec'))
+    const catalog = screen.getByTestId('runtime-lens-catalog-spec')
+    expect(catalog).toHaveTextContent('runtime catalog spec')
+    expect(catalog).toHaveTextContent('provider.model')
+    expect(catalog).toHaveTextContent('Runtime Provider')
+    expect(catalog).toHaveTextContent('model-api')
+    expect(catalog).toHaveTextContent('source:oas-provider-config-model')
+    expect(catalog).toHaveTextContent('input:multimodal,image,audio')
+    expect(catalog).toHaveTextContent('wire:responses.reasoning')
+    expect(catalog).toHaveTextContent('tool-call-replay:required')
+    expect(catalog).toHaveTextContent('responses-api')
+    expect(catalog).toHaveTextContent('declared')
+    expect(catalog).toHaveTextContent('api:responses')
+    expect(catalog).toHaveTextContent('concurrency:4')
   })
 
   it('renders an empty state while runtime trace is unavailable', () => {
@@ -892,14 +1025,32 @@ describe('RuntimeLensSection', () => {
       projection: {
         status: 'ready',
         configured: true,
-        root: '/Users/dancer/me/.masc/secrets/sangsu',
+        root: '/mock/workspace/.masc/secrets/sangsu',
         source: 'workspace_masc_secrets',
+        effective_roots: [
+          {
+            root: '/mock/workspace/.masc/secrets/base',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 0,
+          },
+          {
+            root: '/mock/workspace/.masc/secrets/sangsu',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 1,
+          },
+        ],
         env_count: 1,
         file_count: 1,
         env_names: ['GH_TOKEN'],
         file_mounts: [
           {
-            host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+            host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
             container_path: '/home/keeper/.ssh/id_ed25519',
           },
         ],
@@ -912,9 +1063,154 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByTestId('keeper-secret-projection')).toBeInTheDocument()
     expect(screen.getByText('ready')).toBeInTheDocument()
     expect(screen.getByText('1 env · 1 files')).toBeInTheDocument()
+    expect(screen.getByText('shared -> keeper')).toBeInTheDocument()
+    expect(screen.getAllByText('shared').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('keeper').length).toBeGreaterThan(0)
+    expect(screen.getByText('/mock/workspace/.masc/secrets/base')).toBeInTheDocument()
     expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()
+  })
+
+  it('sets secret env values without rendering the submitted value', async () => {
+    const nextProjection = {
+      status: 'ready',
+      configured: true,
+      root: '/mock/workspace/.masc/secrets/sangsu',
+      source: 'workspace_masc_secrets',
+      effective_roots: [
+        {
+          root: '/mock/workspace/.masc/secrets/base',
+          source: 'workspace_masc_secrets',
+          status: 'absent',
+          configured: false,
+          env_count: 0,
+          file_count: 0,
+        },
+        {
+          root: '/mock/workspace/.masc/secrets/sangsu',
+          source: 'workspace_masc_secrets',
+          status: 'ready',
+          configured: true,
+          env_count: 1,
+          file_count: 0,
+        },
+      ],
+      env_count: 1,
+      file_count: 0,
+      env_names: ['ANTHROPIC_API_KEY'],
+      file_mounts: [],
+      values_validated: true,
+      error: null,
+      next_action: 'none',
+    }
+    const setSecretEnv = vi.fn().mockResolvedValue(nextProjection)
+
+    render(h(KeeperSecretProjectionPanel, {
+      keeperName: 'sangsu',
+      projection: {
+        ...nextProjection,
+        status: 'empty',
+        env_count: 0,
+        env_names: [],
+        next_action: 'add entries under env/ and/or files/',
+      },
+      setSecretEnv,
+    }))
+
+    fireEvent.input(screen.getByTestId('keeper-secret-env-name'), {
+      target: { value: 'ANTHROPIC_API_KEY' },
+    })
+    fireEvent.input(screen.getByTestId('keeper-secret-value'), {
+      target: { value: 'ghs_new_secret' },
+    })
+    fireEvent.submit(screen.getByTestId('keeper-secret-projection-form'))
+
+    await waitFor(() => {
+      expect(setSecretEnv).toHaveBeenCalledWith('sangsu', {
+        scope: 'keeper',
+        name: 'ANTHROPIC_API_KEY',
+        value: 'ghs_new_secret',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('ghs_new_secret')).toBeNull()
+    })
+    expect(screen.getByText('ANTHROPIC_API_KEY saved to keeper')).toBeInTheDocument()
+    expect(screen.queryByText('ghs_new_secret')).toBeNull()
+  })
+
+  it('sets secret file values without rendering the submitted value', async () => {
+    const nextProjection = {
+      status: 'ready',
+      configured: true,
+      root: '/mock/workspace/.masc/secrets/sangsu',
+      source: 'workspace_masc_secrets',
+      effective_roots: [
+        {
+          root: '/mock/workspace/.masc/secrets/base',
+          source: 'workspace_masc_secrets',
+          status: 'absent',
+          configured: false,
+          env_count: 0,
+          file_count: 0,
+        },
+        {
+          root: '/mock/workspace/.masc/secrets/sangsu',
+          source: 'workspace_masc_secrets',
+          status: 'ready',
+          configured: true,
+          env_count: 0,
+          file_count: 1,
+        },
+      ],
+      env_count: 0,
+      file_count: 1,
+      env_names: [],
+      file_mounts: [
+        {
+          host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+          container_path: '/home/keeper/.ssh/id_ed25519',
+        },
+      ],
+      values_validated: true,
+      error: null,
+      next_action: 'none',
+    }
+    const setSecretFile = vi.fn().mockResolvedValue(nextProjection)
+
+    render(h(KeeperSecretProjectionPanel, {
+      keeperName: 'sangsu',
+      projection: {
+        ...nextProjection,
+        status: 'empty',
+        file_count: 0,
+        file_mounts: [],
+        next_action: 'add entries under env/ and/or files/',
+      },
+      setSecretFile,
+    }))
+
+    fireEvent.input(screen.getByTestId('keeper-secret-file-path'), {
+      target: { value: '/home/keeper/.ssh/id_ed25519' },
+    })
+    fireEvent.input(screen.getByLabelText('Secret file value'), {
+      target: { value: 'PRIVATE\nKEY\nCONTENT' },
+    })
+    fireEvent.submit(screen.getByTestId('keeper-secret-file-form'))
+
+    await waitFor(() => {
+      expect(setSecretFile).toHaveBeenCalledWith('sangsu', {
+        scope: 'keeper',
+        path: '/home/keeper/.ssh/id_ed25519',
+        value: 'PRIVATE\nKEY\nCONTENT',
+      })
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue('PRIVATE\nKEY\nCONTENT')).toBeNull()
+    })
+    expect(screen.getByText('/home/keeper/.ssh/id_ed25519 saved to keeper')).toBeInTheDocument()
+    expect(screen.queryByText('PRIVATE\nKEY\nCONTENT')).toBeNull()
   })
 })
 

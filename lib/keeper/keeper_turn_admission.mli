@@ -84,6 +84,18 @@ val run_serialized
     only by the caller's turn budget — do not call this from within an
     admitted turn of the same keeper. *)
 
+val run_chat_if_free
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> [ `Ran of 'a | `Busy of rejection ]
+(** Run [f] holding the chat lane only if the keeper slot can be acquired
+    immediately. Unlike [run_serialized], this never parks the caller behind an
+    in-flight turn. Dashboard direct-stream callers use this to preserve live
+    streaming for idle keepers while atomically routing busy keepers to the
+    durable chat queue. Existing parked chat waiters have priority: when
+    [chat_waiting] is true this returns [`Busy] without attempting the lock. *)
+
 val in_flight
   :  base_path:string
   -> keeper_name:string

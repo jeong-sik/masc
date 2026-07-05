@@ -709,6 +709,136 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
          with Yojson.Json_error e ->
            respond_error reqd (Printf.sprintf "invalid json: %s" e))
 
+let secret_projection_response_json config name =
+  `Assoc
+    [ "ok", `Bool true
+    ; ( "secret_projection"
+      , Keeper_secret_projection.dashboard_status_json
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:name )
+    ]
+;;
+
+let invalidate_keeper_secret_projection_caches config name =
+  Dashboard_cache.invalidate (keeper_composite_cache_key config name);
+  Dashboard_cache.invalidate_prefix
+    (Printf.sprintf "dashboard:fleet-composite:%s" config.Workspace.base_path)
+;;
+
+let required_secret_string_field json name =
+  match Json_util.assoc_member_opt name json with
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (name ^ " must be a string")
+  | None -> Error (name ^ " required")
+;;
+
+let required_secret_trimmed_string_field json name =
+  match required_secret_string_field json name with
+  | Error _ as err -> err
+  | Ok value ->
+    let trimmed = String.trim value in
+    if String.equal trimmed "" then Error (name ^ " must not be empty") else Ok trimmed
+;;
+
+let secret_scope_field json =
+  match required_secret_trimmed_string_field json "scope" with
+  | Error _ as err -> err
+  | Ok value ->
+    (match Keeper_secret_projection.secret_scope_of_string value with
+     | Some scope -> Ok scope
+     | None -> Error "scope must be shared or keeper")
+;;
+
+let handle_keeper_secrets_post state req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_post req_path keeper_suffix_secrets in
+  if String.length name = 0
+  then respond_error reqd "keeper name is required"
+  else
+    let config = Mcp_server.workspace_config state in
+    match Keeper_meta_store.read_meta config name with
+    | Error msg -> respond_error ~status:`Not_found reqd msg
+    | Ok None ->
+      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+    | Ok (Some _) ->
+      (try
+         let args = Yojson.Safe.from_string body_str in
+         match args with
+         | `Assoc _ ->
+           let action_result = required_secret_trimmed_string_field args "action" in
+           let result =
+             match action_result with
+             | Error _ as err -> err
+             | Ok "set_env" ->
+               (match
+                  ( secret_scope_field args
+                  , required_secret_trimmed_string_field args "name"
+                  , required_secret_string_field args "value" )
+                with
+                | Ok scope, Ok env_name, Ok value ->
+                  Keeper_secret_projection.set_env_entry
+                    ~base_path:config.Workspace.base_path
+                    ~keeper_name:name
+                    ~scope
+                    ~name:env_name
+                    ~value
+                | Error msg, _, _ | _, Error msg, _ | _, _, Error msg -> Error msg)
+             | Ok "delete_env" ->
+               (match
+                  ( secret_scope_field args
+                  , required_secret_trimmed_string_field args "name" )
+                with
+                | Ok scope, Ok env_name ->
+                  Keeper_secret_projection.delete_env_entry
+                    ~base_path:config.Workspace.base_path
+                    ~keeper_name:name
+                    ~scope
+                    ~name:env_name
+                | Error msg, _ | _, Error msg -> Error msg)
+             | Ok "set_file" ->
+               (match
+                  ( secret_scope_field args
+                  , required_secret_trimmed_string_field args "path"
+                  , required_secret_string_field args "value" )
+                with
+                | Ok scope, Ok container_path, Ok value ->
+                  Keeper_secret_projection.set_file_entry
+                    ~base_path:config.Workspace.base_path
+                    ~keeper_name:name
+                    ~scope
+                    ~container_path
+                    ~value
+                | Error msg, _, _ | _, Error msg, _ | _, _, Error msg -> Error msg)
+             | Ok "delete_file" ->
+               (match
+                  ( secret_scope_field args
+                  , required_secret_trimmed_string_field args "path" )
+                with
+                | Ok scope, Ok container_path ->
+                  Keeper_secret_projection.delete_file_entry
+                    ~base_path:config.Workspace.base_path
+                    ~keeper_name:name
+                    ~scope
+                    ~container_path
+                | Error msg, _ | _, Error msg -> Error msg)
+             | Ok action ->
+               Error
+                 (Printf.sprintf
+                    "unsupported keeper secret action: %s"
+                    action)
+           in
+           (match result with
+            | Error msg -> respond_error reqd msg
+            | Ok () ->
+              invalidate_keeper_secret_projection_caches config name;
+              Http.Response.json_value ~compress:true ~request:req
+                (secret_projection_response_json config name)
+                reqd)
+         | _ -> respond_error reqd "request body must be a JSON object"
+       with
+       | Yojson.Json_error e ->
+         respond_error reqd (Printf.sprintf "invalid json: %s" e))
+
 let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
 

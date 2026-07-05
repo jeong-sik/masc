@@ -20,7 +20,7 @@ let message missing_models =
 let test_missing_catalog_report_names_runtime_and_model () =
   let msg = message [ missing_model () ] in
   check bool "runtime/model label" true
-    (contains msg "custom.uncatalogued (model=uncatalogued)");
+    (contains msg "custom.uncatalogued (provider_label=openai_compat, model=uncatalogued)");
   check bool "count" true (contains msg "1 runtime model(s)");
   check bool "catalog filename" true (contains msg "oas-models.toml")
 ;;
@@ -33,8 +33,10 @@ let test_missing_catalog_report_joins_multiple_models () =
       ]
   in
   check bool "count" true (contains msg "2 runtime model(s)");
-  check bool "alpha label" true (contains msg "custom.alpha (model=alpha)");
-  check bool "beta label" true (contains msg "custom.beta (model=beta)")
+  check bool "alpha label" true
+    (contains msg "custom.alpha (provider_label=openai_compat, model=alpha)");
+  check bool "beta label" true
+    (contains msg "custom.beta (provider_label=openai_compat, model=beta)")
 ;;
 
 let () =

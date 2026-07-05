@@ -36,6 +36,15 @@ val valid_sort_order_strings : string list
 type board_signal_kind =
   | Board_post_created
   | Board_comment_added
+  | Board_reaction_changed of board_reaction_change
+
+and board_reaction_change = {
+  target_type : Board.reaction_target_type;
+  target_id : string;
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+}
 
 type board_signal = {
   kind : board_signal_kind;
@@ -80,8 +89,8 @@ type board_sse_event =
     }
 
 val set_board_signal_hook : (board_signal -> unit) -> unit
-(** Replace the in-process hook invoked from {!create_post} and
-    {!add_comment}. *)
+(** Replace the in-process hook invoked from {!create_post}, {!add_comment},
+    and {!toggle_reaction}. *)
 
 val set_board_sse_hook : (board_sse_event -> unit) -> unit
 (** Replace the in-process SSE hook invoked from every mutating

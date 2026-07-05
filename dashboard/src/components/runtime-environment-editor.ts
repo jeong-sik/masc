@@ -1,5 +1,18 @@
 import { html } from 'htm/preact'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../lib/runtime-catalog-resource'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+  runtimeCatalogSnapshotFacts,
+} from '../lib/runtime-provider-summary'
 import {
   isRuntimeTomlNonMaterializableProtocol,
   isReservedRuntimeTomlId,
@@ -182,6 +195,68 @@ function capChip(on: boolean, label: string) {
   return html`<span class="rt-cap ${on ? 'on' : ''}">${on ? '✓' : '·'} ${label}</span>`
 }
 
+interface RuntimeCatalogBindingRow {
+  readonly key: string
+  readonly label: string
+  readonly value: string | null
+}
+
+interface RuntimeCatalogBindingResolvedRow extends RuntimeCatalogBindingRow {
+  readonly value: string
+}
+
+function runtimeCatalogBindingRows(entry: DashboardRuntimeProviderSnapshot): ReadonlyArray<RuntimeCatalogBindingRow> {
+  return [
+    { key: 'runtime', label: 'runtime catalog', value: entry.runtime_id ?? entry.provider },
+    { key: 'provider', label: 'provider', value: entry.provider_display_name ?? entry.provider_id ?? entry.provider },
+    { key: 'model', label: 'model', value: entry.model_api_name ?? entry.model_id ?? null },
+    { key: 'snapshot', label: 'snapshot', value: runtimeCatalogSnapshotFacts(entry) },
+    { key: 'effective', label: 'effective', value: runtimeCatalogEffectiveCapabilities(entry) },
+    { key: 'request', label: 'request', value: runtimeCatalogRequestConfig(entry) },
+    { key: 'declared', label: 'declared', value: runtimeCatalogDeclaredSpec(entry) },
+    { key: 'policy', label: 'policy', value: runtimeCatalogParameterPolicy(entry) },
+  ]
+}
+
+function RuntimeBindingCatalogSpec({ runtimeId }: { runtimeId: string }) {
+  const state = runtimeCatalogState.value
+  if (state.status === 'idle' || state.status === 'loading') {
+    return html`
+      <div class="rt-bind-catalog mono" data-testid=${`runtime-binding-${runtimeId}-catalog-spec`}>
+        <span class="rt-bind-catalog-state">runtime catalog loading: ${runtimeId}</span>
+      </div>
+    `
+  }
+  if (state.status === 'error') {
+    return html`
+      <div class="rt-bind-catalog mono" data-testid=${`runtime-binding-${runtimeId}-catalog-spec`}>
+        <span class="rt-bind-catalog-state">runtime catalog error for ${runtimeId}: ${state.message}</span>
+      </div>
+    `
+  }
+  const entry = findRuntimeCatalogEntry(state.data, runtimeId)
+  if (!entry) {
+    return html`
+      <div class="rt-bind-catalog mono" data-testid=${`runtime-binding-${runtimeId}-catalog-spec`}>
+        <span class="rt-bind-catalog-state">runtime catalog missing exact entry: ${runtimeId}</span>
+      </div>
+    `
+  }
+  const rows = runtimeCatalogBindingRows(entry).filter((row): row is RuntimeCatalogBindingResolvedRow =>
+    typeof row.value === 'string' && row.value.trim() !== '',
+  )
+  return html`
+    <div class="rt-bind-catalog mono" data-testid=${`runtime-binding-${runtimeId}-catalog-spec`}>
+      ${rows.map(row => html`
+        <div class="rt-bind-catalog-row" data-testid=${`runtime-binding-${runtimeId}-catalog-${row.key}`}>
+          <span class="rt-bind-catalog-k">${row.label}</span>
+          <span class="rt-bind-catalog-v">${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 // keeper.status -> StatusDot tone (bg). Mirrors copilot-dock's run/idle/bad
 // split; tone classes are the existing --color-status-* tokens.
 function keeperDotTone(status: string): string {
@@ -241,6 +316,12 @@ export function RuntimeEnvironmentEditor({
     const query = modelQuery.toLowerCase()
     return model.id.toLowerCase().includes(query) || model.apiName.toLowerCase().includes(query)
   })
+
+  useEffect(() => {
+    if (section === 'bindings' && runtimeIds.length > 0) {
+      loadRuntimeCatalog()
+    }
+  }, [section, runtimeIds.length])
 
   function updateDefault(runtimeId: string) {
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
@@ -1009,6 +1090,7 @@ export function RuntimeEnvironmentEditor({
                       ? html` · $${binding.priceInput}/$${binding.priceOutput ?? '—'} per M`
                       : null}
                   </div>
+                  <${RuntimeBindingCatalogSpec} runtimeId=${binding.id} />
                 </div>
                 <div class="rt-bind-fields">
                   <label class="rt-mini">

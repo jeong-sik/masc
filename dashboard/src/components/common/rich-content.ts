@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Markdown } from './markdown'
 import { fetchLinkPreviews, type LinkPreview } from '../../api/link-previews'
-import { prepareRichContent } from './rich-content-utils'
+import { prepareRichContent, type RichMediaEmbed } from './rich-content-utils'
 
 function previewCard(preview: LinkPreview) {
   const href = preview.canonical_url || preview.url
@@ -49,6 +49,43 @@ function previewCard(preview: LinkPreview) {
   `
 }
 
+function mediaEmbed(embed: RichMediaEmbed) {
+  if (embed.kind === 'video') {
+    return html`
+      <video
+        key=${embed.url}
+        src=${embed.url}
+        controls
+        preload="metadata"
+        class="block w-full max-h-[480px] rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-black"
+      />
+    `
+  }
+  if (embed.kind === 'audio') {
+    return html`
+      <audio
+        key=${embed.url}
+        src=${embed.url}
+        controls
+        preload="metadata"
+        class="block w-full"
+      />
+    `
+  }
+  return html`
+    <iframe
+      key=${embed.url}
+      src=${embed.url}
+      title=${embed.title}
+      loading="lazy"
+      referrerpolicy="strict-origin-when-cross-origin"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      allowfullscreen
+      class="block aspect-video w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]"
+    />
+  `
+}
+
 export function RichContent({
   text,
   class: className,
@@ -84,6 +121,9 @@ export function RichContent({
   return html`
     <div class=${wrapperClass}>
       <${Markdown} text=${prepared.markdownText} />
+      ${prepared.mediaEmbeds.length > 0
+        ? html`<div class="grid gap-2">${prepared.mediaEmbeds.map(embed => mediaEmbed(embed))}</div>`
+        : null}
       ${cards.length > 0
         ? html`<div class="grid gap-2">${cards.map(card => previewCard(card))}</div>`
         : null}

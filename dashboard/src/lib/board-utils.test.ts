@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
+  boardActorSigilLabel,
+  boardPostHash,
+  boardPostPermalink,
+  boardPostTrackbackMarkdown,
+  boardPostXShareUrl,
   contributorQualityBandLabel,
+  contributorQualityBadgeClass,
   contributorQualityPercent,
   dedupeLeadingHeading,
   stripInlineMarkdown,
@@ -79,16 +85,86 @@ describe('dedupeLeadingHeading', () => {
   })
 })
 
+describe('board post sharing helpers', () => {
+  it('builds the canonical board hash route for a post', () => {
+    expect(boardPostHash('post 1')).toBe('#board?post=post%201')
+  })
+
+  it('builds an absolute permalink from the current dashboard URL', () => {
+    expect(boardPostPermalink(
+      'p-1',
+      'http://localhost:5179/dashboard/#board',
+    )).toBe('http://localhost:5179/dashboard/#board?post=p-1')
+  })
+
+  it('builds markdown trackback text with stripped title markdown', () => {
+    expect(boardPostTrackbackMarkdown(
+      { id: 'p-1', title: '**Idea** post' },
+      'http://localhost:5179/dashboard/#board',
+    )).toBe('[Idea post](http://localhost:5179/dashboard/#board?post=p-1)')
+  })
+
+  it('builds an X share intent URL with the board permalink', () => {
+    const url = new URL(boardPostXShareUrl(
+      { id: 'p-1', title: 'Share me' },
+      'http://localhost:5179/dashboard/#board',
+    ))
+
+    expect(url.origin).toBe('https://twitter.com')
+    expect(url.pathname).toBe('/intent/tweet')
+    expect(url.searchParams.get('text')).toBe('Share me - MASC Board')
+    expect(url.searchParams.get('url')).toBe('http://localhost:5179/dashboard/#board?post=p-1')
+  })
+})
+
 describe('contributor quality helpers', () => {
-  it('uses accountability_score when legacy score is absent', () => {
+  it('uses accountability_score when legacy score is absent and evidence exists', () => {
     const quality = {
       source: 'agent_reputation',
       completion_rate: 0.8,
       response_rate: 0.6,
+      board_posts: 1,
       accountability_score: 0.9,
     }
 
     expect(contributorQualityPercent(quality)).toBe(90)
-    expect(contributorQualityBandLabel(quality)).toBe('우수')
+    expect(contributorQualityBandLabel(quality)).toBe('품질')
+    expect(contributorQualityBadgeClass(quality)).toContain('color-bg-muted')
+  })
+
+  it('does not render default reputation priors as a numeric quality score', () => {
+    expect(contributorQualityPercent({
+      source: 'agent_reputation',
+      completion_rate: 0,
+      response_rate: 0,
+      board_posts: 0,
+      board_comments: 0,
+      accountability_score: 1,
+      autonomy_level: 'standard',
+      thompson_confidence: 0.5,
+    })).toBeNull()
+  })
+
+  it('uses backend-supplied quality band without inventing thresholds', () => {
+    const quality = {
+      accountability_score: 0.4,
+      board_comments: 2,
+      band: 'strong' as const,
+    }
+    expect(contributorQualityPercent(quality)).toBe(40)
+    expect(contributorQualityBandLabel(quality)).toBe('강함')
+    expect(contributorQualityBadgeClass(quality)).toContain('ok-10')
+  })
+})
+
+describe('boardActorSigilLabel', () => {
+  it('prefers the specific display name over a generic keeper key', () => {
+    expect(boardActorSigilLabel('keeper', {
+      kind: 'keeper',
+      id: 'sangsu',
+      key: 'keeper',
+      display_name: 'sangsu',
+      raw: 'keeper-sangsu-agent',
+    })).toBe('sangsu')
   })
 })

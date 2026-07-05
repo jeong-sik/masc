@@ -209,11 +209,21 @@ const KeeperSecretFileMountSchema = object({
   container_path: string(),
 })
 
+const KeeperSecretRootSchema = object({
+  root: string(),
+  source: string(),
+  status: string(),
+  configured: boolean(),
+  env_count: number(),
+  file_count: number(),
+})
+
 const KeeperSecretProjectionSchema = object({
   status: string(),
   configured: boolean(),
   root: string(),
   source: string(),
+  effective_roots: fallback(array(KeeperSecretRootSchema), []),
   env_count: number(),
   file_count: number(),
   env_names: fallback(array(string()), []),
@@ -317,6 +327,10 @@ export class CompositeSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {
     super('composite', issues)
   }
+}
+
+export function parseKeeperSecretProjection(data: unknown): KeeperSecretProjection {
+  return parseOrThrow(CompositeSchemaDriftError, KeeperSecretProjectionSchema, data)
 }
 
 export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnapshot {

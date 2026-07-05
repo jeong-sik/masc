@@ -387,6 +387,9 @@ val add_comment
     [created_at] ascending. *)
 val get_comments : store -> post_id:string -> (comment list, board_error) Result.t
 
+(** Returns one comment by id. *)
+val get_comment : store -> comment_id:string -> (comment, board_error) Result.t
+
 (** Returns up to [limit] (default 1000) most recent
     comments across every post.  Used by the profile
     aggregator. *)

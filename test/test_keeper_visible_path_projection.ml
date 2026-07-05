@@ -97,6 +97,29 @@ let parse_ok raw =
 let parse_string key raw = parse raw |> Json.member key |> Json.to_string_option
 
 let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
+  let repo_path =
+    Filename.concat
+      (Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+      (Filename.concat "repos" repo_id)
+  in
+  let repo : Repo_manager_types.repository =
+    { id = repo_id
+    ; name = repo_id
+    ; url = Printf.sprintf "https://example.invalid/%s.git" repo_id
+    ; local_path = repo_path
+    ; aliases = []
+    ; default_branch = "main"
+    ; keepers = []
+    ; status = Repo_manager_types.Active
+    ; auto_sync = false
+    ; sync_interval = 0
+    ; created_at = Int64.zero
+    ; updated_at = Int64.zero
+    }
+  in
+  (match Repo_store.save_all ~base_path:config.Workspace.base_path [ repo ] with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail ("failed to seed repository catalog: " ^ e));
   let mapping : Repo_manager_types.keeper_repo_mapping =
     (Repo_manager_types.make_keeper_repo_mapping ~keeper_id:meta.name
        ~repository_ids:[ repo_id ])

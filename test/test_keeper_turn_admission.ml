@@ -34,6 +34,43 @@ let test_free_slot_admits () =
   | `Ran _ | `Rejected _ -> check "run_serialized admits on a free slot" false
 ;;
 
+let test_chat_if_free_never_parks () =
+  reset ();
+  Printf.printf "Test 1b: run_chat_if_free runs only on an immediately free slot\n%!";
+  (match Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> "ok") with
+   | `Ran "ok" -> check "run_chat_if_free admits on a free slot" true
+   | `Ran _ | `Busy _ -> check "run_chat_if_free admits on a free slot" false);
+  Eio.Switch.run (fun sw ->
+    let started, set_started = Eio.Promise.create () in
+    let release, set_release = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      ignore
+        (Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
+           Eio.Promise.resolve set_started ();
+           Eio.Promise.await release)));
+    Eio.Promise.await started;
+    (match Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ()) with
+     | `Busy { Keeper_turn_admission.in_flight = Some { lane = Chat; _ }; waiting = 0 } ->
+       check "run_chat_if_free reports busy in-flight chat without parking" true
+     | `Busy _ ->
+       check "run_chat_if_free reports busy in-flight chat without parking" false
+     | `Ran () -> check "run_chat_if_free must not run while slot is held" false);
+    let parked_ran = ref false in
+    Eio.Fiber.fork ~sw (fun () ->
+      ignore
+        (Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
+           parked_ran := true)));
+    check
+      "parked waiter is observable before if-free attempt"
+      (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name);
+    (match Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ()) with
+     | `Busy { Keeper_turn_admission.waiting; _ } ->
+       check "run_chat_if_free yields to an already parked chat" (waiting > 0)
+     | `Ran () -> check "run_chat_if_free must not overtake a parked chat" false);
+    check "parked chat did not run before holder release" (not !parked_ran);
+    Eio.Promise.resolve set_release ())
+;;
+
 let test_autonomous_skips_in_flight_chat () =
   reset ();
   Printf.printf "Test 2: autonomous lane skips while a chat turn is in flight\n%!";
@@ -315,6 +352,7 @@ let test_idle_loop_yields_to_parked_chat () =
 let () =
   Eio_main.run @@ fun _env ->
   test_free_slot_admits ();
+  test_chat_if_free_never_parks ();
   test_autonomous_skips_in_flight_chat ();
   test_chat_turns_serialize ();
   test_distinct_keepers_do_not_block_each_other ();

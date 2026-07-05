@@ -1,3 +1,4 @@
 # Approved lib/keeper module basenames that intentionally omit the keeper_
 # prefix. Format: <module-basename> | <reason>.
+hitl_summary_worker | Approval-queue HITL context summarizer kept under its plan name while the keeper namespace transition is staged.
 surface_ref | Shared typed surface vocabulary used by keeper lanes, external attention, and gate recording.

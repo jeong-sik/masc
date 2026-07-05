@@ -125,6 +125,20 @@ let run_serialized ~base_path ~keeper_name f =
     run_locked slot ~lane:Chat f)
 ;;
 
+let rejection_snapshot slot =
+  let waiting = waiting_count slot in
+  { waiting; in_flight = peek_info slot }
+;;
+
+let run_chat_if_free ~base_path ~keeper_name f =
+  let slot = slot_for ~base_path ~keeper_name in
+  if waiting_count slot > 0
+  then `Busy (rejection_snapshot slot)
+  else if Eio.Mutex.try_lock slot.turn_mu
+  then run_locked slot ~lane:Chat f
+  else `Busy (rejection_snapshot slot)
+;;
+
 let in_flight ~base_path ~keeper_name =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with

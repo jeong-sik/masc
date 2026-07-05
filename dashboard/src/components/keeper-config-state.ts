@@ -41,7 +41,12 @@ export async function loadKeeperConfig(
 ): Promise<void> {
   const force = options?.force === true
   if (!force && configKeeperName.value === name && configState.value.status === 'loaded') return
-  if (configKeeperName.value !== name || force) {
+  if (configKeeperName.value !== name) {
+    configResource.reset()
+    for (const handler of resetHandlers) {
+      handler()
+    }
+  } else if (force) {
     configResource.reset()
   }
   configKeeperName.value = name

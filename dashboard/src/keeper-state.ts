@@ -10,6 +10,9 @@ import type {
   KeeperConversationEntry,
   KeeperConversationRole,
   KeeperConversationSource,
+  KeeperConversationStreamContract,
+  KeeperConversationStreamContractSource,
+  KeeperConversationStreamContractStatus,
   KeeperConversationStreamState,
   KeeperConversationDelivery,
   KeeperDiagnostic,
@@ -215,6 +218,94 @@ function withoutUndefined<const T extends Record<string, unknown>>(record: T): T
     if (value !== undefined) next[key] = value
   }
   return next as T
+}
+
+export function keeperStreamContract(
+  source: KeeperConversationStreamContractSource,
+  status: KeeperConversationStreamContractStatus,
+  opts: {
+    eventName?: string | null
+    requestId?: string | null
+    turnRef?: string | null
+    traceEventCount?: number | null
+    reason?: string | null
+  } = {},
+): KeeperConversationStreamContract {
+  return withoutUndefined({
+    source,
+    status,
+    eventName: opts.eventName ?? undefined,
+    requestId: opts.requestId ?? undefined,
+    turnRef: opts.turnRef ?? undefined,
+    traceEventCount: opts.traceEventCount ?? undefined,
+    reason: opts.reason ?? undefined,
+  })
+}
+
+function normalizeStreamContractSource(value: unknown): KeeperConversationStreamContractSource | null {
+  switch (asString(value)?.trim()) {
+    case 'keeper_chat_store':
+      return 'keeper_chat_store'
+    case 'backend_turn_trace':
+      return 'backend_turn_trace'
+    case 'rest_history':
+      return 'rest_history'
+    case 'sse_event':
+      return 'sse_event'
+    case 'queue_event':
+      return 'queue_event'
+    case 'queue_poll':
+      return 'queue_poll'
+    case 'pending_request_store':
+      return 'pending_request_store'
+    case 'client_local_send':
+      return 'client_local_send'
+    case 'client_reconciliation':
+      return 'client_reconciliation'
+    default:
+      return null
+  }
+}
+
+function normalizeStreamContractStatus(value: unknown): KeeperConversationStreamContractStatus | null {
+  switch (asString(value)?.trim()) {
+    case 'backend_stream_event':
+      return 'backend_stream_event'
+    case 'backend_terminal_event':
+      return 'backend_terminal_event'
+    case 'backend_trace_join':
+      return 'backend_trace_join'
+    case 'history_without_turn_ref':
+      return 'history_without_turn_ref'
+    case 'history_without_stream_events':
+      return 'history_without_stream_events'
+    case 'queue_request_event':
+      return 'queue_request_event'
+    case 'queue_poll_result':
+      return 'queue_poll_result'
+    case 'client_placeholder':
+      return 'client_placeholder'
+    case 'client_reconciled_history':
+      return 'client_reconciled_history'
+    case 'contract_gap':
+      return 'contract_gap'
+    default:
+      return null
+  }
+}
+
+function normalizeStreamContract(raw: unknown): KeeperConversationStreamContract | null {
+  if (!isRecord(raw)) return null
+  const source = normalizeStreamContractSource(raw.source)
+  const status = normalizeStreamContractStatus(raw.status)
+  if (source === null || status === null) return null
+  return keeperStreamContract(source, status, {
+    eventName: asString(raw.event_name) ?? asString(raw.eventName) ?? null,
+    requestId: asString(raw.request_id) ?? asString(raw.requestId) ?? null,
+    turnRef: asString(raw.turn_ref) ?? asString(raw.turnRef) ?? null,
+    traceEventCount: asNumber(raw.trace_event_count) ?? asNumber(raw.traceEventCount) ?? null,
+    reason: asString(raw.reason) ?? null,
+  })
 }
 
 function normalizeTableCell(raw: unknown): ChatTableCellValue | null {
@@ -740,6 +831,10 @@ function normalizeHistoryEntry(
     ?? ((role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)
       : undefined)
+  const streamContract = normalizeStreamContract(raw.stream_contract)
+    ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
+      reason: 'history rows do not carry stream lifecycle events',
+    })
   return {
     // R3: key off the producer-assigned server id when present so the
     // render key is stable across history-page merges (the former
@@ -755,6 +850,7 @@ function normalizeHistoryEntry(
     turnRef,
     delivery,
     streamState: null,
+    streamContract,
     details: null,
     surface,
     audio,
@@ -846,11 +942,13 @@ export function setAssistantStreamState(
   entryId: string,
   streamState: KeeperConversationStreamState,
   delivery: KeeperConversationDelivery,
+  streamContract?: KeeperConversationStreamContract,
 ): void {
   updateThreadEntry(name, entryId, entry => ({
     ...entry,
     streamState,
     delivery,
+    streamContract: streamContract ?? entry.streamContract,
   }))
 }
 
@@ -861,6 +959,9 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
     text: formatKeeperVisibleReply(`${entry.rawText ?? entry.text}${delta}`),
     streamState: 'streaming',
     delivery: 'streaming',
+    streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
+      eventName: 'TEXT_MESSAGE_CONTENT',
+    }),
   }))
 }
 
@@ -916,6 +1017,9 @@ function writeAssistantThinkingText(
       traceSteps,
       streamState: 'thinking',
       delivery: 'streaming',
+      streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
+        eventName: 'KEEPER_THINKING_DELTA',
+      }),
     }
   })
 }
@@ -1271,7 +1375,8 @@ interface RestChatHistoryMessage {
   kind?: string
   // RFC-0235 P3: backend-parsed rich chat blocks. When present the dashboard
   // prefers them over its local parser.
-  blocks?: ChatBlock[]
+  blocks?: unknown
+  stream_contract?: unknown
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -1293,6 +1398,9 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     timestamp: toIsoTimestamp(message.ts),
     delivery: 'history',
     streamState: null,
+    streamContract: normalizeStreamContract(message.stream_contract) ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
+      reason: 'tool history rows carry arguments, not live stream lifecycle',
+    }),
     details: null,
     surface: message.surface ?? null,
     // Tool rows share the same untrusted REST boundary; reject malformed
@@ -1330,6 +1438,7 @@ export function chatHistoryEntriesFromRest(
         kind: message.kind,
         blocks: message.blocks,
         turn_ref: message.turn_ref,
+        stream_contract: message.stream_contract,
       },
       keeperName,
       previousSource,

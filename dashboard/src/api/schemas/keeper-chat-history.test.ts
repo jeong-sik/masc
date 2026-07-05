@@ -86,6 +86,35 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.turn_ref).toBe('trace-1780648779957-00000#4071')
   })
 
+  it('passes the backend stream contract read model through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          turn_ref: 'trace-1780648779957-00000#4071',
+          trace_event_count: 2,
+          reason: 'turn_ref joined to retained trajectory/internal-history events',
+        },
+      }),
+    )
+    expect(out?.stream_contract).toEqual({
+      source: 'backend_turn_trace',
+      status: 'backend_trace_join',
+      turn_ref: 'trace-1780648779957-00000#4071',
+      trace_event_count: 2,
+      reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
+  })
+
+  it('returns null when stream_contract has the wrong shape', () => {
+    expect(
+      safeParseKeeperChatHistoryMessage(
+        validMessage({ stream_contract: { source: 'backend_turn_trace' } }),
+      ),
+    ).toBeNull()
+  })
+
   it('leaves turn_ref undefined on legacy rows without dropping the message', () => {
     const out = safeParseKeeperChatHistoryMessage(validMessage())
     expect(out).not.toBeNull()
@@ -200,6 +229,14 @@ describe('safeParseKeeperChatHistoryMessage', () => {
           { t: 'attach', name: 'clip.mp4', src: 'https://cdn.example/clip.mp4', kind: 'video' },
           { t: 'image', src: 'https://cdn.example/x.png', cap: 'screen' },
           { t: 'link', url: 'https://example.com', title: 'Example' },
+          {
+            t: 'trace',
+            trace: [
+              { kind: 'think', text: 'checking', ts: '2026-07-05T00:00:00Z' },
+              { kind: 'tool', name: 'keeper_tasks_list', tool_call_id: 'tc-1', status: 'ok', args: {}, result: { ok: true } },
+            ],
+          },
+          { t: 'thinking', content: '', redacted: true },
         ],
       }),
     )
@@ -211,6 +248,14 @@ describe('safeParseKeeperChatHistoryMessage', () => {
       { t: 'attach', name: 'clip.mp4', src: 'https://cdn.example/clip.mp4', kind: 'video' },
       { t: 'image', src: 'https://cdn.example/x.png', cap: 'screen' },
       { t: 'link', url: 'https://example.com', title: 'Example' },
+      {
+        t: 'trace',
+        trace: [
+          { kind: 'think', text: 'checking', ts: '2026-07-05T00:00:00Z' },
+          { kind: 'tool', name: 'keeper_tasks_list', tool_call_id: 'tc-1', status: 'ok', args: {}, result: { ok: true } },
+        ],
+      },
+      { t: 'thinking', content: '', redacted: true },
     ])
   })
 

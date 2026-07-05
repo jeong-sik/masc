@@ -897,6 +897,39 @@ export type KeeperConversationStreamState =
   | 'finalizing'
   | null
 
+export type KeeperConversationStreamContractSource =
+  | 'keeper_chat_store'
+  | 'backend_turn_trace'
+  | 'rest_history'
+  | 'sse_event'
+  | 'queue_event'
+  | 'queue_poll'
+  | 'pending_request_store'
+  | 'client_local_send'
+  | 'client_reconciliation'
+
+export type KeeperConversationStreamContractStatus =
+  | 'backend_stream_event'
+  | 'backend_terminal_event'
+  | 'backend_trace_join'
+  | 'history_without_turn_ref'
+  | 'history_without_stream_events'
+  | 'queue_request_event'
+  | 'queue_poll_result'
+  | 'client_placeholder'
+  | 'client_reconciled_history'
+  | 'contract_gap'
+
+export interface KeeperConversationStreamContract {
+  source: KeeperConversationStreamContractSource
+  status: KeeperConversationStreamContractStatus
+  eventName?: string | null
+  requestId?: string | null
+  turnRef?: string | null
+  traceEventCount?: number | null
+  reason?: string | null
+}
+
 export interface SurfaceRef {
   kind: 'dashboard' | 'discord' | 'slack' | 'github' | 'webhook' | 'agent' | 'gate' | string
   session_id?: string
@@ -928,6 +961,7 @@ export interface KeeperConversationEntry {
   turnRef?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  streamContract?: KeeperConversationStreamContract | null
   attachments?: KeeperConversationAttachment[]
   blocks?: ChatBlock[]
   traceSteps?: ChatTraceStep[]

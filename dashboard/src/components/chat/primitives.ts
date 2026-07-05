@@ -26,6 +26,7 @@ import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperC
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
 import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById } from '../../tool-call-output-store'
+import type { ToolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
@@ -2116,6 +2117,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-source=${entry.source}
       data-chat-delivery-state=${entry.delivery}
       data-chat-stream-state=${entry.streamState ?? 'complete'}
+      data-chat-stream-contract-source=${entry.streamContract?.source ?? 'unspecified'}
+      data-chat-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
+      data-chat-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
+      data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
+      data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
     >
@@ -2483,6 +2490,12 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-source=${entry.source}
       data-chat-delivery-state=${entry.delivery}
       data-chat-stream-state=${entry.streamState ?? 'complete'}
+      data-chat-stream-contract-source=${entry.streamContract?.source ?? 'unspecified'}
+      data-chat-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
+      data-chat-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
+      data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
+      data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
     >
@@ -2548,13 +2561,14 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
-type ToolTraceDisplayStatus = 'pending' | 'missing' | 'coverage-gap' | 'unlinked' | 'ok' | 'bad'
-type ToolOutputCoverageState = 'not-hydrated' | 'covered' | 'coverage-gap' | 'not-applicable'
+type ToolTraceDisplayStatus = 'pending' | 'missing' | 'coverage-gap' | 'hydration-failed' | 'unlinked' | 'ok' | 'bad'
+type ToolOutputCoverageState = 'not-hydrated' | 'hydrating' | 'hydration-failed' | 'covered' | 'coverage-gap' | 'not-applicable'
 
 const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
   pending: '출력 대기 중',
   missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
   'coverage-gap': '출력 tail 범위 밖 — 결과 누락 여부를 확정할 수 없음',
+  'hydration-failed': '출력 hydration 실패 — 결과 누락 여부를 확정할 수 없음',
   unlinked: '도구 호출 ID 없음 — 출력 조인 불가',
   ok: '성공',
   bad: '실패',
@@ -2572,8 +2586,10 @@ function toolOutputCoverageState(
   entry: KeeperConversationEntry,
   coveredSinceMs: number | null | undefined,
   coveredThroughMs: number | null | undefined,
+  hydrationStatus: ToolCallOutputHydrationContract['status'] | null | undefined,
 ): ToolOutputCoverageState {
-  if (coveredThroughMs == null) return 'not-hydrated'
+  if (hydrationStatus === 'failed') return 'hydration-failed'
+  if (coveredThroughMs == null) return hydrationStatus === 'hydrating' ? 'hydrating' : 'not-hydrated'
   const timestampMs = entry.timestamp ? Date.parse(entry.timestamp) : NaN
   if (!Number.isFinite(timestampMs)) return 'coverage-gap'
   if (coveredSinceMs != null && timestampMs < coveredSinceMs) return 'coverage-gap'
@@ -2612,12 +2628,14 @@ function ToolTraceStep({
   output,
   canMarkMissing = false,
   coverageState = 'not-applicable',
+  hydrationFailureReason = null,
   traceStep,
 }: {
   entry: KeeperConversationEntry | null
   output: ToolCallEntry | null
   canMarkMissing?: boolean
   coverageState?: ToolOutputCoverageState
+  hydrationFailureReason?: string | null
   traceStep?: ChatTraceToolStep
 }) {
   const [open, setOpen] = useState(false)
@@ -2627,18 +2645,22 @@ function ToolTraceStep({
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   const unlinkedTraceTool = isUnlinkedTraceTool(entry, traceStep)
   const sourceBadge = toolTraceSourceBadge(entry, traceStep)
-  const status: ToolTraceDisplayStatus =
-    unlinkedTraceTool
-      ? 'unlinked'
-      : output === null
-      ? traceStep?.status === 'err'
-        ? 'bad'
-        : traceStep?.status === 'ok'
-          ? 'ok'
-          : (coverageState === 'coverage-gap' ? 'coverage-gap' : canMarkMissing ? 'missing' : 'pending')
-      : output.success === false || output.semantic_success === false
-        ? 'bad'
-        : 'ok'
+  let status: ToolTraceDisplayStatus
+  if (unlinkedTraceTool) {
+    status = 'unlinked'
+  } else if (output !== null) {
+    status = output.success === false || output.semantic_success === false ? 'bad' : 'ok'
+  } else if (traceStep?.status === 'err') {
+    status = 'bad'
+  } else if (traceStep?.status === 'ok') {
+    status = 'ok'
+  } else if (coverageState === 'hydration-failed') {
+    status = 'hydration-failed'
+  } else if (coverageState === 'coverage-gap') {
+    status = 'coverage-gap'
+  } else {
+    status = canMarkMissing ? 'missing' : 'pending'
+  }
   const durLabel =
     output?.duration_ms != null && output.duration_ms > 0
       ? formatMsCompact(output.duration_ms)
@@ -2698,7 +2720,9 @@ function ToolTraceStep({
                     ? unlinkedTraceTool
                       ? null
                       : html`<div class="chat-block-tool-label">${
-                          coverageState === 'coverage-gap'
+                          coverageState === 'hydration-failed'
+                            ? `출력 hydration 실패${hydrationFailureReason ? ` — ${hydrationFailureReason}` : ''}`
+                            : coverageState === 'coverage-gap'
                             ? '출력 tail 범위 밖 — 이 도구 시점을 덮는 결과 hydration이 아직 없음'
                             : canMarkMissing
                               ? '결과 없음 — 출력이 도착하지 않음'
@@ -2800,6 +2824,11 @@ function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-trace-entry-id=${entry.id}
       data-chat-trace-source=${entry.source}
       data-chat-trace-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-trace-stream-contract-source=${entry.streamContract?.source ?? 'unspecified'}
+      data-chat-trace-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
+      data-chat-trace-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
+      data-chat-trace-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-trace-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
     >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
@@ -2821,6 +2850,7 @@ function ToolTraceCard({
   turnComplete = false,
   toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
+  toolOutputHydrationContract = null,
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
@@ -2828,6 +2858,7 @@ function ToolTraceCard({
   turnComplete?: boolean
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
+  toolOutputHydrationContract?: ToolCallOutputHydrationContract | null
 }) {
   const liveTurn = assistant !== null && !turnComplete
   const userToggledRef = useRef(false)
@@ -2841,7 +2872,12 @@ function ToolTraceCard({
   }
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const coverageStateForEntry = (entry: KeeperConversationEntry): ToolOutputCoverageState =>
-    toolOutputCoverageState(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
+    toolOutputCoverageState(
+      entry,
+      toolOutputsCoveredSinceMs,
+      toolOutputsCoveredThroughMs,
+      toolOutputHydrationContract?.status ?? null,
+    )
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
     turnComplete && coverageStateForEntry(entry) === 'covered'
   const ordered = assistant
@@ -2862,6 +2898,9 @@ function ToolTraceCard({
   const coverageGapN = orderedToolSteps.filter(
     (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'coverage-gap',
   ).length
+  const hydrationFailedN = orderedToolSteps.filter(
+    (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
+  ).length
   const unlinkedN = orderedToolSteps.filter(
     (s) => s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
   ).length
@@ -2881,6 +2920,15 @@ function ToolTraceCard({
       data-chat-tool-trace
       data-chat-turn-stream-state=${assistant ? (assistant.streamState ?? 'complete') : undefined}
       data-chat-turn-complete=${turnComplete ? 'true' : 'false'}
+      data-chat-turn-stream-contract-source=${assistant?.streamContract?.source ?? undefined}
+      data-chat-turn-stream-contract-status=${assistant?.streamContract?.status ?? undefined}
+      data-chat-turn-stream-contract-event=${assistant?.streamContract?.eventName ?? undefined}
+      data-chat-turn-stream-contract-request-id=${assistant?.streamContract?.requestId ?? undefined}
+      data-chat-turn-stream-contract-turn-ref=${assistant?.streamContract?.turnRef ?? undefined}
+      data-chat-turn-stream-contract-trace-events=${assistant?.streamContract?.traceEventCount ?? undefined}
+      data-chat-tool-output-hydration-source=${toolOutputHydrationContract?.source ?? undefined}
+      data-chat-tool-output-hydration-status=${toolOutputHydrationContract?.status ?? 'not-requested'}
+      data-chat-tool-output-hydration-failure=${toolOutputHydrationContract?.failureReason ?? undefined}
       data-chat-tool-output-covered-since=${toolOutputsCoveredSinceMs ?? undefined}
       data-chat-tool-output-covered-through=${toolOutputsCoveredThroughMs ?? undefined}
     >
@@ -2901,6 +2949,7 @@ function ToolTraceCard({
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
           ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
           ${coverageGapN > 0 ? html`<span class="text-[var(--color-status-warn)]">출력 범위 밖 ${coverageGapN}</span>` : null}
+          ${hydrationFailedN > 0 ? html`<span class="text-[var(--color-status-warn)]">출력 hydration 실패 ${hydrationFailedN}</span>` : null}
           ${unlinkedN > 0 ? html`<span class="text-[var(--color-status-warn)]">조인 불가 ${unlinkedN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
         </span>
@@ -2924,6 +2973,7 @@ function ToolTraceCard({
                           output=${item.output}
                           canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
                           coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
+                          hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
                         />`
                       })()
@@ -2934,6 +2984,7 @@ function ToolTraceCard({
                           output=${item.output}
                           canMarkMissing=${canMarkMissingForEntry(item.entry)}
                           coverageState=${coverageStateForEntry(item.entry)}
+                          hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                         />`
                     : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} />`)}
             </div>
@@ -2958,6 +3009,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   showSourceBadge,
   toolOutputsCoveredSinceMs,
   toolOutputsCoveredThroughMs,
+  toolOutputHydrationContract,
   action,
 }: {
   tools: KeeperConversationEntry[]
@@ -2967,6 +3019,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   showSourceBadge: boolean
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
+  toolOutputHydrationContract: ToolCallOutputHydrationContract | null
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
@@ -2982,6 +3035,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
         turnComplete=${turnComplete}
         toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
       />
       <${ChatMessageBubble}
         entry=${assistant}
@@ -3000,6 +3054,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   && prev.showSourceBadge === next.showSourceBadge
   && prev.toolOutputsCoveredSinceMs === next.toolOutputsCoveredSinceMs
   && prev.toolOutputsCoveredThroughMs === next.toolOutputsCoveredThroughMs
+  && prev.toolOutputHydrationContract === next.toolOutputHydrationContract
   && prev.action === next.action
 )
 
@@ -3125,12 +3180,13 @@ function renderChatTranscriptBody(opts: {
   showSourceBadge: boolean
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
+  toolOutputHydrationContract: ToolCallOutputHydrationContract | null
   // Since-last-seen cursor (unix seconds) for the unread divider; null on every
   // non-keeper chat surface so those transcripts render unchanged.
   unreadAfterTs: number | null
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, unreadAfterTs, action } = opts
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract, unreadAfterTs, action } = opts
   const units = buildChatRenderUnits(entries, groupToolCalls)
   const unreadAnchorKey = unreadDividerAnchorKey(
     units.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
@@ -3157,7 +3213,13 @@ function renderChatTranscriptBody(opts: {
       out.push(html`<div class="kw-daydiv kw-unreaddiv" key="unread-divider">${UNREAD_DIVIDER_LABEL}</div>`)
     }
     if (unit.kind === 'toolGroup') {
-      out.push(html`<${ToolTraceCard} key=${unit.id} tools=${unit.entries} />`)
+      out.push(html`<${ToolTraceCard}
+        key=${unit.id}
+        tools=${unit.entries}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
+      />`)
     } else if (unit.kind === 'turnBundle') {
       out.push(html`<${TurnWorkBundle}
         key=${unit.id}
@@ -3168,6 +3230,7 @@ function renderChatTranscriptBody(opts: {
         showSourceBadge=${showSourceBadge}
         toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
         action=${action}
       />`)
     } else if (unit.entry.role === 'tool') {
@@ -3207,6 +3270,7 @@ export function ChatTranscript({
   showSourceBadge = false,
   toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
+  toolOutputHydrationContract = null,
   unreadAfterTs = null,
   onSeenBottom,
   action,
@@ -3225,6 +3289,7 @@ export function ChatTranscript({
   showSourceBadge?: boolean
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
+  toolOutputHydrationContract?: ToolCallOutputHydrationContract | null
   // Since-last-seen cursor (unix seconds) driving the unread divider. Null on
   // non-keeper surfaces -> no divider.
   unreadAfterTs?: number | null
@@ -3247,7 +3312,7 @@ export function ChatTranscript({
   )
   const toolOutputSignature = useMemo(
     () => {
-      const coverageSig = `${toolOutputsCoveredSinceMs ?? ''}:${toolOutputsCoveredThroughMs ?? ''}`
+      const coverageSig = `${toolOutputsCoveredSinceMs ?? ''}:${toolOutputsCoveredThroughMs ?? ''}:${toolOutputHydrationContract?.status ?? ''}:${toolOutputHydrationContract?.failureReason ?? ''}`
       return entries
         .filter(entry => entry.role === 'tool')
         .map((entry) => {
@@ -3258,7 +3323,7 @@ export function ChatTranscript({
         })
         .join('|')
     },
-    [entries, toolCallOutputsById.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs],
+    [entries, toolCallOutputsById.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract],
   )
 
   const scrollToBottom = () => {
@@ -3346,6 +3411,7 @@ export function ChatTranscript({
               showSourceBadge,
               toolOutputsCoveredSinceMs,
               toolOutputsCoveredThroughMs,
+              toolOutputHydrationContract,
               unreadAfterTs,
               action,
             })}

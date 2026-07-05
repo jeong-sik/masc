@@ -252,6 +252,7 @@ describe('ChatTranscript', () => {
             streamContract: {
               source: 'rest_history',
               status: 'history_without_stream_events',
+              deliveryReceipt: 'no_delivery_receipt',
               reason: 'tool history rows carry arguments, not live stream lifecycle',
             },
           }),
@@ -271,6 +272,7 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
     expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
     expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-tool#3')
     expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
   })

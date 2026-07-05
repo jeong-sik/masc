@@ -113,6 +113,24 @@ let public_fs_edit_call ~public ~config ~(meta : Keeper_meta_contract.keeper_met
 let seed_single_playground_repo ~config ~(meta : Keeper_meta_contract.keeper_meta) playground =
   let repo = Filename.concat playground "repos/masc" in
   ensure_dir (Filename.concat repo ".git");
+  let repository : Repo_manager_types.repository =
+    { id = "masc"
+    ; name = "masc"
+    ; url = "https://example.invalid/masc.git"
+    ; local_path = repo
+    ; aliases = []
+    ; default_branch = "main"
+    ; keepers = []
+    ; status = Repo_manager_types.Active
+    ; auto_sync = false
+    ; sync_interval = 0
+    ; created_at = Int64.zero
+    ; updated_at = Int64.zero
+    }
+  in
+  (match Repo_store.save_all ~base_path:config.Workspace.base_path [ repository ] with
+   | Ok () -> ()
+   | Error msg -> Alcotest.failf "seed repository catalog: %s" msg);
   let mapping : Repo_manager_types.keeper_repo_mapping =
     (Repo_manager_types.make_keeper_repo_mapping ~keeper_id:meta.name
        ~repository_ids:[ "masc" ])

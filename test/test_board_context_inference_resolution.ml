@@ -77,6 +77,12 @@ let make_post ~id ~author =
     origin = None;
   }
 
+let check_bad_request label expected = function
+  | Error (`Bad_request msg) -> check string label expected msg
+  | Error (`Internal_server_error msg) ->
+    fail (Printf.sprintf "expected Bad_request, got Internal_server_error: %s" msg)
+  | Ok _ -> fail "expected Bad_request error"
+
 let test_parse_request () =
   (* 1. Valid payload *)
   let json = `Assoc [("post_id", `String "post-123"); ("target_keeper", `String "sangsu")] in
@@ -117,10 +123,11 @@ let test_target_resolution_explicit_registered () =
 let test_target_resolution_explicit_unregistered () =
   with_workspace (fun config ->
     let post = make_post ~id:"post-1" ~author:"operator" in
-    match Server_routes_http_routes_activity.resolve_board_context_inference_target ~config post (Some "chulsoo") with
-    | Error (`Bad_request msg) ->
-      check string "error message" "target_keeper \"chulsoo\" is not a registered keeper" msg
-    | _ -> fail "expected Bad_request error")
+    Server_routes_http_routes_activity.resolve_board_context_inference_target
+      ~config post (Some "chulsoo")
+    |> check_bad_request
+         "error message"
+         "target_keeper \"chulsoo\" is not a registered keeper")
 
 let test_target_resolution_implicit_registered_author () =
   with_workspace (fun config ->
@@ -141,10 +148,11 @@ let test_target_resolution_implicit_unregistered_author () =
   with_workspace (fun config ->
     (* Post author is "operator", which is not a registered keeper *)
     let post = make_post ~id:"post-1" ~author:"operator" in
-    match Server_routes_http_routes_activity.resolve_board_context_inference_target ~config post None with
-    | Error (`Bad_request msg) ->
-      check string "error message" "target_keeper is required because board post author \"operator\" is not a registered keeper" msg
-    | _ -> fail "expected Bad_request error")
+    Server_routes_http_routes_activity.resolve_board_context_inference_target
+      ~config post None
+    |> check_bad_request
+         "error message"
+         "target_keeper is required because board post author \"operator\" is not a registered keeper")
 
 let () =
   run "Server board context inference resolution"

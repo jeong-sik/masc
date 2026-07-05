@@ -430,33 +430,49 @@ let test_board_wakeup_selection_drops_none_reasons () =
       [
         "a", Some KWOBS.Thread_reply_after_self_comment;
         "b", None;
-        "c", Some (KWOBS.Stigmergy { score = 10 });
+        "c", None;
       ]
   in
-  (* [None] reasons (no relevance match) are dropped; real reasons survive in
-     candidate order and the stigmergy score is carried end-to-end. *)
+  (* [None] reasons (no deterministic address) are dropped; structural
+     followup reasons survive in candidate order. *)
   check (list (pair string string)) "None dropped, real reasons kept"
-    [ "a", "thread_reply_after_self_comment"; "c", "stigmergy: score=10" ]
+    [ "a", "thread_reply_after_self_comment" ]
     (labeled selected);
   check int "no cap drops under total limit" 0 dropped
 
-let test_board_wakeup_selection_caps_total_non_explicit () =
+let test_board_wakeup_selection_caps_thread_followups () =
   let selected, dropped =
     KKS.select_board_wakeup_candidates
       ~total_limit:2
       [
-        "a", Some (KWOBS.Stigmergy { score = 5 });
+        "a", Some KWOBS.Thread_reply_after_self_comment;
         "b", Some KWOBS.Thread_reply_after_self_comment;
-        "c", Some (KWOBS.Stigmergy { score = 5 });
+        "c", Some KWOBS.Thread_reply_after_self_comment;
         "d", Some KWOBS.Thread_reply_after_self_comment;
       ]
   in
-  (* Non-explicit reasons compete for [total_limit] slots in candidate order;
-     the overflow is dropped. *)
+  (* Thread followups compete for [total_limit] slots in candidate order; the
+     overflow is dropped. *)
   check (list (pair string string)) "first two non-explicit kept in order"
-    [ "a", "stigmergy: score=5"; "b", "thread_reply_after_self_comment" ]
+    [ "a", "thread_reply_after_self_comment"; "b", "thread_reply_after_self_comment" ]
     (labeled selected);
   check int "overflow dropped" 2 dropped
+
+let test_board_goal_keyword_overlap_is_not_wake_reason () =
+  let meta = make_board_resume_meta "keyword-overlap" in
+  let signal : Board_dispatch.board_signal =
+    { kind = Board_dispatch.Board_post_created
+    ; post_id = "post-keyword-overlap"
+    ; author = "external-author"
+    ; title = "test"
+    ; content = "this test overlaps the keeper goal but does not address it"
+    ; hearth = None
+    ; updated_at = Some 123.0
+    }
+  in
+  check (option string) "goal keyword overlap no longer wakes" None
+    (Option.map KWOBS.wake_reason_label
+       (KWOBS.wake_reason ~continuity_summary:"" ~meta ~signal))
 
 let test_after_wake_idle_woken_continues () =
   let next = Unix.gettimeofday () +. 60.0 in
@@ -612,8 +628,10 @@ let () =
         `Quick test_board_wakeup_selection_keeps_explicit_mentions;
       test_case "None reasons are dropped, real reasons kept"
         `Quick test_board_wakeup_selection_drops_none_reasons;
-      test_case "total non-explicit fanout is capped"
-        `Quick test_board_wakeup_selection_caps_total_non_explicit;
+      test_case "thread followup fanout is capped"
+        `Quick test_board_wakeup_selection_caps_thread_followups;
+      test_case "goal keyword overlap is not a wake reason"
+        `Quick test_board_goal_keyword_overlap_is_not_wake_reason;
       test_case "operator pauses are not board-auto-resumed"
         `Quick test_board_auto_resume_rejects_operator_pause;
       test_case "auto-paused keepers can be board-auto-resumed"

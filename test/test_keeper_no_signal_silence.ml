@@ -238,6 +238,20 @@ let test_no_progress_event_queue_trigger_runs_warm_keeper () =
   check bool "reason includes no-progress stimulus" true
     (has_run_reason WO.No_progress_recovery_stimulus_pending d)
 
+let test_scheduled_event_queue_trigger_runs_warm_keeper () =
+  let meta = warm_meta () in
+  let d =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:no_provider_cooldown
+      ~reactive_wake:false
+      ~event_queue_triggers:[ WO.Scheduled_automation_stimulus ]
+      ~meta
+      no_signal_obs
+  in
+  check bool "scheduled event queue trigger runs" true d.should_run;
+  check bool "reason includes scheduled automation due" true
+    (has_run_reason WO.Scheduled_automation_due d)
+
 (* RFC-0303 Phase 2 stimulus-gate: a warm keeper whose [min_interval] HAS
    elapsed but that has NO opportunity (no signal, no claimed task, no backlog)
    now stays silent. Before Phase 2, [min_interval_elapsed] drove a blind
@@ -343,6 +357,10 @@ let () =
             "no-progress event queue trigger runs warm keeper"
             `Quick
             test_no_progress_event_queue_trigger_runs_warm_keeper
+        ; test_case
+            "scheduled event queue trigger runs warm keeper"
+            `Quick
+            test_scheduled_event_queue_trigger_runs_warm_keeper
         ; test_case
             "elapsed min_interval + no opportunity stays silent (RFC-0303 P2)"
             `Quick

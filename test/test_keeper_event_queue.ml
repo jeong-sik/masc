@@ -138,6 +138,40 @@ let () =
          })
       "bg-run:bg-2");
 
+  (* Scheduled wake is a non-board stimulus with a stable schedule-derived
+     post id and a codec round-trip for restart replay. *)
+  let scheduled_wake =
+    { schedule_id = "sched-1"
+    ; due_at = 200.0
+    ; payload_digest = "digest-1"
+    ; title = Some "Scheduled lane wake"
+    ; message = "Run the scheduled maintenance lane now."
+    }
+  in
+  let schedule_payload () = Schedule_due scheduled_wake in
+  assert (not (is_board_signal (schedule_payload ())));
+  assert (String.equal (payload_kind_label (schedule_payload ())) "schedule_due");
+  assert (String.equal (schedule_due_post_id scheduled_wake) "schedule-due:sched-1");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = schedule_due_post_id scheduled_wake
+          ; urgency = Immediate
+          ; arrived_at = 5.0
+          ; payload = Schedule_due scheduled_wake
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Schedule_due wake ->
+        assert (String.equal wake.schedule_id "sched-1");
+        assert (Float.equal wake.due_at 200.0);
+        assert (String.equal wake.payload_digest "digest-1");
+        assert (wake.title = Some "Scheduled lane wake");
+        assert (String.equal wake.message "Run the scheduled maintenance lane now.")
+      | _ -> Alcotest.fail "Schedule_due codec round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("Schedule_due stimulus round-trip failed: " ^ msg));
+
   (* RFC-0290: Bg_completed survives the stimulus codec round-trip, preserving
      the outcome variant ([Bg_failed]) and empty board post id. *)
   (match
@@ -275,12 +309,21 @@ let () =
                }
          }
   in
+  let queue_for_snapshot =
+    enqueue
+      queue_for_snapshot
+      { post_id = "sp1"
+      ; urgency = Normal
+      ; arrived_at = 3.5
+      ; payload = Schedule_due scheduled_wake
+      }
+  in
   let restored =
     match queue_of_yojson (queue_to_yojson queue_for_snapshot) with
     | Ok queue -> queue
     | Error msg -> Alcotest.fail ("queue snapshot round-trip failed: " ^ msg)
   in
-  assert (length restored = 4);
+  assert (length restored = 5);
   let first, restored =
     match dequeue restored with
     | Some item -> item
@@ -316,6 +359,18 @@ let () =
       && (not ok)
       && String.equal resolved_answer "denied"
       && String.equal board_post_id ""
+    | _ -> false);
+  let fifth, restored =
+    match dequeue restored with
+    | Some item -> item
+    | None -> Alcotest.fail "snapshot restore should preserve fifth item"
+  in
+  assert (String.equal fifth.post_id "sp1");
+  assert (
+    match fifth.payload with
+    | Schedule_due wake ->
+      String.equal wake.schedule_id scheduled_wake.schedule_id
+      && String.equal wake.message scheduled_wake.message
     | _ -> false);
   assert (is_empty restored);
   (match queue_of_yojson (`Assoc [ "schema", `String "wrong"; "items", `List [] ]) with

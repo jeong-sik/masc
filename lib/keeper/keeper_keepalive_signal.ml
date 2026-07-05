@@ -414,11 +414,12 @@ let take = List.take
 
 (* RFC-0020: select which keepers wake for a board signal from typed
    [Board_wake.wake_reason] candidates. Explicit mentions short-circuit and
-   wake unconditionally; every other reason competes for [total_limit] slots
-   in candidate order. [None] reasons are dropped (the relevance pipeline
-   found nothing for that keeper). The prior generic ["board_activity"]
-   throttle bucket is gone: the producer never emitted it, so it never fired —
-   typing the carrier made that dead branch unrepresentable. *)
+   wake unconditionally; thread-reply/reaction followups compete for [total_limit] slots
+   in candidate order. [None] reasons are dropped (the structural reactive
+   pipeline found no deterministic address for that keeper). Semantic
+   relatedness is intentionally not a wake reason here: it must enter through an
+   LLM/Judge attention boundary, not goal-keyword matching in the board publish
+   hook. *)
 let select_board_wakeup_candidates
     ?(total_limit = board_reactive_wakeup_max)
     candidates =
@@ -428,8 +429,7 @@ let select_board_wakeup_candidates
       match reason with
       | Some Board_wake.Explicit_mention -> Some (item, Board_wake.Explicit_mention)
       | Some
-          ( Board_wake.Stigmergy _
-          | Board_wake.Thread_reply_after_self_comment
+          ( Board_wake.Thread_reply_after_self_comment
           | Board_wake.Reaction_after_self_activity )
       | None -> None)
   in
@@ -492,7 +492,6 @@ let board_signal_stimulus
   ; urgency =
       (match reason with
        | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
-       | Board_wake.Stigmergy _
        | Board_wake.Thread_reply_after_self_comment
        | Board_wake.Reaction_after_self_activity ->
          Keeper_event_queue.Normal)
@@ -594,12 +593,12 @@ let wakeup_relevant_keeper_for_board_signal
               ~signal
           in
           (* Visibility for the REPO_WAKE_UP audit finding: a [None]
-             wake_reason means the running keeper had no explicit_mention
-             match, scope feed disabled, and (for comments) no external
-             reply after a self-comment. Without this counter, operators
-             cannot distinguish between a board post that legitimately
-             had no addressee and one that was silently dropped by a
-             keeper whose mention_targets configuration is too narrow. *)
+             wake_reason means the running keeper had no explicit mention
+             match and (for comments) no external reply after its own comment.
+             Without this counter, operators cannot distinguish between a
+             board post that legitimately had no deterministic addressee and
+             one that was silently dropped by a keeper whose mention_targets
+             configuration is too narrow. *)
           (match wake_reason, entry.phase with
            | None, Keeper_state_machine.Running ->
              Otel_metric_store.inc_counter

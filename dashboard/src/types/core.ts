@@ -971,6 +971,8 @@ export interface KeeperConversationEntry {
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   streamContract?: KeeperConversationStreamContract | null
+  queueSeq?: number | null
+  queueClientActionId?: string | null
   attachments?: KeeperConversationAttachment[]
   blocks?: ChatBlock[]
   traceSteps?: ChatTraceStep[]

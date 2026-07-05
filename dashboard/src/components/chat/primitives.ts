@@ -2188,6 +2188,9 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
       data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
+      data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
+      data-chat-queue-seq=${entry.queueSeq ?? undefined}
+      data-chat-queue-client-action-id=${entry.queueClientActionId ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-attachment-count=${attachments.length}
@@ -2567,6 +2570,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
       data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
+      data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
     >

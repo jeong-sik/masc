@@ -192,7 +192,7 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs);
       Pass
     end
-    else
+    else begin
       Log.Task.warn "cdal_evidence_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
         task_id (List.length unsatisfied) (String.length (String.trim notes))
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
@@ -211,6 +211,7 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
                 , evidence_summary_payload ~notes ~handoff_context )
               ]
         }
+    end
   | _ ->
     (* Analysis-only task bypass: a task with no contract has nothing to
        verify, so the gate must not block keeper_task_done. *)

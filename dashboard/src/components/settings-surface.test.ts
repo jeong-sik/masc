@@ -21,6 +21,7 @@ import type {
   RuntimeDefaultsResponse,
 } from '../api/dashboard'
 import { DashboardMain } from './dashboard-shell'
+import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
 import { connected } from '../sse'
 import { tweaksDensity } from './tweaks-panel'
@@ -1503,6 +1504,19 @@ describe('SettingsSurface shell route', () => {
 })
 
 describe('settings read-surface helpers', () => {
+  it('settingsControlInventory covers every settings route section with unique ids', () => {
+    const items = SETTINGS_ROUTE_SECTION_IDS.flatMap(section => settingsControlInventory(section))
+    const ids = new Set<string>()
+
+    for (const section of SETTINGS_ROUTE_SECTION_IDS) {
+      expect(settingsControlInventory(section).length).toBeGreaterThan(0)
+    }
+    for (const item of items) {
+      expect(ids.has(item.id)).toBe(false)
+      ids.add(item.id)
+    }
+  })
+
   it('settingsControlInventory classifies browser-local and unsupported controls explicitly', () => {
     const displayKinds = settingsControlInventory('display').map(item => [item.id, item.kind])
     expect(displayKinds).toContainEqual(['settings-theme-density', 'browser-local'])

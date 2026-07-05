@@ -1145,7 +1145,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const runtimeCanEdit = runtimeWriteUnsupportedReason === null
 
   // Initialize runtime draft if not yet set
-  if (!runtimeDraft.value) {
+  if (!runtimeDraft.value && c.name === keeperName) {
     runtimeDraft.value = initRuntimeDraftFromConfig(c)
   }
   const rd = runtimeDraft.value

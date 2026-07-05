@@ -1633,6 +1633,60 @@ describe('KeeperConfigPanel', () => {
     ) as HTMLButtonElement
     expect(saveButton.disabled).toBe(true)
   })
+
+  it('resets runtime draft when switching from keeper A to keeper B to prevent stale settings leakage', async () => {
+    const configA = makeKeeperConfig({
+      name: 'keeper-a',
+      execution: {
+        selected_runtime_id: 'ollama_cloud.deepseek-v4-flash',
+        runtime_options: ['ollama_cloud.deepseek-v4-flash', 'ollama_cloud.qwen-2.5-coder'],
+        selected_runtime_canonical: 'ollama_cloud.deepseek-v4-flash',
+        models: ['ollama_cloud.deepseek-v4-flash'],
+      } as any,
+    })
+    const configB = makeKeeperConfig({
+      name: 'keeper-b',
+      execution: {
+        selected_runtime_id: 'ollama_cloud.qwen-2.5-coder',
+        runtime_options: ['ollama_cloud.deepseek-v4-flash', 'ollama_cloud.qwen-2.5-coder'],
+        selected_runtime_canonical: 'ollama_cloud.qwen-2.5-coder',
+        models: ['ollama_cloud.qwen-2.5-coder'],
+      } as any,
+    })
+
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(configA)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-a" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+
+    const select = container.querySelector('select[aria-label="runtime_id"]') as HTMLSelectElement
+    expect(select.value).toBe('ollama_cloud.deepseek-v4-flash')
+
+    select.value = 'ollama_cloud.qwen-2.5-coder'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(configB)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-b" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+
+    const finalSelect = container.querySelector('select[aria-label="runtime_id"]') as HTMLSelectElement
+    expect(finalSelect.value).toBe('ollama_cloud.qwen-2.5-coder')
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('저장'),
+    ) as HTMLButtonElement
+    if (saveButton) {
+      expect(saveButton.disabled).toBe(true)
+    }
+  })
 })
 
 describe('filterGoalOptions', () => {

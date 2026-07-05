@@ -47,6 +47,13 @@ let optional_keeper_wake_urgency_field name fields =
   | Some _ -> Error ("expected string field: " ^ name)
 ;;
 
+let keeper_name_field name fields =
+  let* value = string_field name fields in
+  if Schedule_supported_kinds.valid_keeper_wake_target_name value
+  then Ok value
+  else Error (Schedule_supported_kinds.keeper_wake_target_name_error ~field:name)
+;;
+
 let keeper_queue_urgency_of_schedule_urgency = function
   | Schedule_supported_kinds.Keeper_wake_immediate -> Keeper_event_queue.Immediate
   | Schedule_supported_kinds.Keeper_wake_normal -> Keeper_event_queue.Normal
@@ -109,7 +116,7 @@ let accepts_keeper_wake (request : Schedule_domain.schedule_request) payload =
   else if not (Schedule_domain.is_side_effecting request.risk_class) then
     Error "masc.keeper_wake requires a side-effecting risk_class"
   else
-    let* _keeper_name = string_field "keeper_name" payload.body in
+    let* _keeper_name = keeper_name_field "keeper_name" payload.body in
     let* _message = string_field "message" payload.body in
     let* _title = optional_string_field "title" payload.body in
     let* _urgency = optional_keeper_wake_urgency_field "urgency" payload.body in
@@ -176,7 +183,7 @@ let dispatch_board_post request payload =
 ;;
 
 let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request) payload =
-  let* keeper_name = string_field "keeper_name" payload.body in
+  let* keeper_name = keeper_name_field "keeper_name" payload.body in
   let* message = string_field "message" payload.body in
   let* title = optional_string_field "title" payload.body in
   let* urgency = optional_keeper_wake_urgency_field "urgency" payload.body in

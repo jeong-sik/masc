@@ -104,6 +104,30 @@ let create_pending_keeper_wake_schedule config =
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
+let create_pending_invalid_keeper_wake_schedule config =
+  let payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; "schema_version", `Int 1
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String "../bad"
+            ; "message", `String "This must not report success."
+            ] )
+      ]
+  in
+  match
+    Schedule_service.create config ~schedule_id:"invalid-keeper-wake-sched"
+      ~requested_at:100.0 ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+      ~payload ~risk_class:Schedule_domain.Workspace_write
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
 let approve_schedule config (request : Schedule_domain.schedule_request) =
   match
     Schedule_service.approve config ~schedule_id:request.Schedule_domain.schedule_id
@@ -262,6 +286,38 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
+let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
+  with_workspace
+  @@ fun config ->
+  let request = create_pending_invalid_keeper_wake_schedule config in
+  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let result = tick_ok config ~now:201.0 in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "dispatch status" "unsupported"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing"
+   | Some stored ->
+     check string "schedule failed" "failed"
+       (Schedule_domain.schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing unsupported execution"
+   | Some execution ->
+     check string "execution failed" "failed"
+       (Schedule_domain.execution_status_to_string execution.status);
+     check (option string) "execution error"
+       (Some "keeper_name must match [A-Za-z0-9._-]+")
+       execution.error);
+  check int "invalid keeper wake does not enqueue" 0
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot
+          ~base_path:config.Workspace_utils.base_path
+          "../bad"))
+;;
+
 let test_dashboard_schedule_resolve_uses_authenticated_operator () =
   with_workspace
   @@ fun config ->
@@ -301,6 +357,8 @@ let () =
             test_board_post_consumer_rejects_read_only_risk
         ; test_case "keeper wake enqueues typed stimulus" `Quick
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
+        ; test_case "keeper wake rejects invalid keeper name" `Quick
+            test_keeper_wake_consumer_rejects_invalid_keeper_name
         ; test_case "dashboard resolve uses authenticated operator" `Quick
             test_dashboard_schedule_resolve_uses_authenticated_operator
         ] )

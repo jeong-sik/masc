@@ -60,3 +60,13 @@ let keeper_wake_urgency_of_string value =
   | Some spec -> Ok spec.value
   | None -> Error (Printf.sprintf "unknown urgency: %s" value)
 ;;
+
+let keeper_wake_target_name_pattern = Safe_identifier.portable_name_pattern
+
+let valid_keeper_wake_target_name =
+  Safe_identifier.is_portable_name
+;;
+
+let keeper_wake_target_name_error ~field =
+  Safe_identifier.portable_name_error ~field
+;;

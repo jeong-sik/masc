@@ -423,6 +423,46 @@ let test_dispatch_create_rejects_keeper_wake_invalid_urgency () =
   check int "no schedule persisted" 0 (List.length state.schedules)
 ;;
 
+let test_dispatch_create_rejects_keeper_wake_invalid_target_name () =
+  with_config
+  @@ fun config ->
+  let invalid_body =
+    `Assoc
+      [ "keeper_name", `String "../bad"
+      ; "message", `String "Run the scheduled maintenance lane now."
+      ]
+  in
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-keeper-wake-invalid-name"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "payload_kind", `String "masc.keeper_wake"
+      ; "payload_body", invalid_body
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects invalid keeper wake target name" false
+       (Tool_result.is_success result);
+     check (option string) "failure class" (Some "workflow_rejection")
+       (Option.map Tool_result.tool_failure_class_to_string
+          (Tool_result.failure_class result));
+     check string "message"
+       (Schedule_supported_kinds.keeper_wake_target_name_error
+          ~field:"masc.keeper_wake payload body.keeper_name")
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
 let test_dispatch_create_rejects_negative_board_ttl () =
   with_config
   @@ fun config ->
@@ -962,6 +1002,8 @@ let () =
             test_dispatch_create_keeper_wake_payload
         ; test_case "dispatch create rejects invalid keeper wake urgency" `Quick
             test_dispatch_create_rejects_keeper_wake_invalid_urgency
+        ; test_case "dispatch create rejects invalid keeper wake target name" `Quick
+            test_dispatch_create_rejects_keeper_wake_invalid_target_name
         ; test_case "dispatch create rejects negative board ttl" `Quick
             test_dispatch_create_rejects_negative_board_ttl
         ; test_case "dispatch create rejects payload mixed with board fields" `Quick

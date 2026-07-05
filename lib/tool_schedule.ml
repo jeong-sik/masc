@@ -265,6 +265,11 @@ let validate_keeper_wake_body body =
   match assoc_string_opt "keeper_name" body, assoc_string_opt "message" body with
   | None, _ -> Error "masc.keeper_wake payload requires non-empty body.keeper_name"
   | _, None -> Error "masc.keeper_wake payload requires non-empty body.message"
+  | Some keeper_name, Some _
+    when not (Schedule_supported_kinds.valid_keeper_wake_target_name keeper_name) ->
+    Error
+      (Schedule_supported_kinds.keeper_wake_target_name_error
+         ~field:"masc.keeper_wake payload body.keeper_name")
   | Some _, Some _ ->
     (match assoc_string_opt "urgency" body with
      | None -> Ok ()

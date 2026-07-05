@@ -40,3 +40,12 @@ val keeper_wake_urgency_of_string : string -> (keeper_wake_urgency, string) resu
 (** Neutral wire enum for [masc.keeper_wake] urgency. Tool-side validation uses
     this schedule-owned contract; keeper-side consumers map it to
     [Keeper_event_queue.urgency] at the boundary. *)
+
+val keeper_wake_target_name_pattern : string
+(** Accepted name grammar for [masc.keeper_wake] body targets. *)
+
+val valid_keeper_wake_target_name : string -> bool
+(** [true] when a [masc.keeper_wake] body target name is valid. *)
+
+val keeper_wake_target_name_error : field:string -> string
+(** Canonical field-level validation message for target name failures. *)

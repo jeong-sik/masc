@@ -86,6 +86,58 @@ const KCF_TABS: readonly (readonly [KcfTabId, string, string])[] = [
   ['health', '상태·진단', '◉'],
 ]
 
+export const KCF_TAB_IDS: readonly KcfTabId[] = KCF_TABS.map(([id]) => id)
+
+type KeeperConfigControlKind = 'live-read' | 'live-write' | 'browser-local' | 'unsupported'
+
+type PrimitiveConfigField = string | number | boolean | null | undefined
+type ConfigFieldIsLeaf<T> =
+  NonNullable<T> extends PrimitiveConfigField ? true
+    : NonNullable<T> extends readonly unknown[] ? true
+      : NonNullable<T> extends (...args: readonly never[]) => unknown ? true
+        : string extends keyof NonNullable<T> ? true
+          : false
+type ConfigFieldPath<T> = {
+  [K in keyof T & string]: ConfigFieldIsLeaf<T[K]> extends true
+    ? K
+    : K | `${K}.${ConfigFieldPath<NonNullable<T[K]>>}`
+}[keyof T & string]
+
+export type KeeperConfigFieldPath = ConfigFieldPath<KeeperConfig>
+
+export type KeeperConfigControlEndpoint =
+  | '/api/v1/keepers/:name/config'
+  | '/api/v1/keepers/:name/directive'
+  | '/api/v1/keepers/:name/tools'
+  | '/api/v1/dashboard/goals'
+  | '/api/v1/dashboard/tools'
+  | '/api/v1/providers'
+
+export type KeeperConfigBrowserStateKey =
+  | 'promptPreviewTab'
+  | 'goalSearchQuery'
+  | 'hookFilterQuery'
+
+export type KeeperConfigControlEvidence =
+  | { readonly kind: 'keeper-config-field'; readonly path: KeeperConfigFieldPath }
+  | { readonly kind: 'api'; readonly method: 'GET' | 'PATCH' | 'POST'; readonly endpoint: KeeperConfigControlEndpoint; readonly operation?: string }
+  | { readonly kind: 'browser-state'; readonly key: KeeperConfigBrowserStateKey }
+  | { readonly kind: 'unsupported'; readonly reason: string }
+
+export type KeeperConfigControlContractStatus =
+  | { readonly kind: 'ok'; readonly missingConfigFields: readonly [] }
+  | { readonly kind: 'missing-config-field'; readonly missingConfigFields: readonly KeeperConfigFieldPath[] }
+
+export type KeeperConfigControlInventoryItem = {
+  readonly id: string
+  readonly tab: KcfTabId
+  readonly label: string
+  readonly kind: KeeperConfigControlKind
+  readonly source: string
+  readonly action: string
+  readonly contracts: readonly KeeperConfigControlEvidence[]
+}
+
 const kcfTab = signal<KcfTabId>('identity')
 
 // ── State ────────────────────────────────────────────────
@@ -341,6 +393,442 @@ export function keeperRuntimeConfigWriteUnsupportedReason(c: KeeperConfig): stri
 
 export function keeperRuntimeConfigCanWrite(c: KeeperConfig): boolean {
   return keeperRuntimeConfigWriteUnsupportedReason(c) === null
+}
+
+function keeperConfigManifestSource(c: KeeperConfig): string {
+  const kind = c.sources.default_source_kind ?? 'unknown'
+  const manifest = c.sources.default_manifest_path?.trim()
+  return manifest ? `${kind}:${manifest}` : `${kind}:manifest path unavailable`
+}
+
+const KEEPER_CONFIG_API = '/api/v1/keepers/:name/config'
+const KEEPER_DIRECTIVE_API = '/api/v1/keepers/:name/directive'
+const KEEPER_TOOLS_API = '/api/v1/keepers/:name/tools'
+const DASHBOARD_GOALS_API = '/api/v1/dashboard/goals'
+const DASHBOARD_TOOLS_API = '/api/v1/dashboard/tools'
+const RUNTIME_PROVIDERS_API = '/api/v1/providers'
+
+function configField(path: KeeperConfigFieldPath): KeeperConfigControlEvidence {
+  return { kind: 'keeper-config-field', path }
+}
+
+function configFields(paths: readonly KeeperConfigFieldPath[]): KeeperConfigControlEvidence[] {
+  return paths.map(configField)
+}
+
+function apiContract(
+  method: 'GET' | 'PATCH' | 'POST',
+  endpoint: KeeperConfigControlEndpoint,
+  operation?: string,
+): KeeperConfigControlEvidence {
+  return operation
+    ? { kind: 'api', method, endpoint, operation }
+    : { kind: 'api', method, endpoint }
+}
+
+function browserState(key: KeeperConfigBrowserStateKey): KeeperConfigControlEvidence {
+  return { kind: 'browser-state', key }
+}
+
+function unsupportedContract(reason: string): KeeperConfigControlEvidence {
+  return { kind: 'unsupported', reason }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function keeperConfigHasField(config: KeeperConfig, path: KeeperConfigFieldPath): boolean {
+  let current: unknown = config
+  for (const segment of path.split('.')) {
+    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      return false
+    }
+    current = current[segment]
+  }
+  return true
+}
+
+export function keeperConfigControlContractStatus(
+  contracts: readonly KeeperConfigControlEvidence[],
+  config: KeeperConfig,
+): KeeperConfigControlContractStatus {
+  const missingConfigFields = contracts
+    .filter((contract): contract is Extract<KeeperConfigControlEvidence, { kind: 'keeper-config-field' }> => contract.kind === 'keeper-config-field')
+    .map(contract => contract.path)
+    .filter(path => !keeperConfigHasField(config, path))
+
+  if (missingConfigFields.length === 0) return { kind: 'ok', missingConfigFields: [] }
+  return { kind: 'missing-config-field', missingConfigFields }
+}
+
+function configReadContracts(paths: readonly KeeperConfigFieldPath[]): KeeperConfigControlEvidence[] {
+  return [apiContract('GET', KEEPER_CONFIG_API), ...configFields(paths)]
+}
+
+function keeperRuntimeWriteContracts(
+  c: KeeperConfig,
+  writeOperation: string,
+  paths: readonly KeeperConfigFieldPath[],
+): KeeperConfigControlEvidence[] {
+  const readContracts = configReadContracts(paths)
+  const reason = keeperRuntimeConfigWriteUnsupportedReason(c)
+  if (reason) {
+    return [...readContracts, unsupportedContract(reason)]
+  }
+  return [...readContracts, apiContract('PATCH', KEEPER_CONFIG_API, writeOperation)]
+}
+
+function keeperRuntimeControlKind(c: KeeperConfig): KeeperConfigControlKind {
+  return keeperRuntimeConfigCanWrite(c) ? 'live-write' : 'unsupported'
+}
+
+function keeperRuntimeControlAction(c: KeeperConfig, writeAction: string): string {
+  const reason = keeperRuntimeConfigWriteUnsupportedReason(c)
+  return reason ?? writeAction
+}
+
+function keeperRuntimeControlItem(
+  c: KeeperConfig,
+  tab: KcfTabId,
+  id: string,
+  label: string,
+  source: string,
+  writeAction: string,
+  writeOperation: string,
+  paths: readonly KeeperConfigFieldPath[],
+): KeeperConfigControlInventoryItem {
+  return {
+    id,
+    tab,
+    label,
+    kind: keeperRuntimeControlKind(c),
+    source,
+    action: keeperRuntimeControlAction(c, writeAction),
+    contracts: keeperRuntimeWriteContracts(c, writeOperation, paths),
+  }
+}
+
+export function keeperConfigControlInventory(
+  tab: KcfTabId,
+  c: KeeperConfig,
+): readonly KeeperConfigControlInventoryItem[] {
+  const manifestSource = keeperConfigManifestSource(c)
+  const configApiSource = 'GET /api/v1/keepers/:name/config'
+  switch (tab) {
+    case 'identity':
+      return [
+        {
+          id: 'kcf-identity-provenance',
+          tab,
+          label: 'Keeper provenance',
+          kind: 'live-read',
+          source: `${configApiSource} sources.*`,
+          action: 'read-only source and precedence projection',
+          contracts: configReadContracts([
+            'sources.live_meta_path',
+            'sources.default_manifest_path',
+            'sources.default_source_kind',
+            'sources.precedence',
+            'sources.has_live_override',
+            'sources.override_fields',
+          ]),
+        },
+        {
+          id: 'kcf-identity-tool-access',
+          tab,
+          label: 'Tool access summary',
+          kind: 'live-read',
+          source: `${configApiSource} tools.*`,
+          action: 'read-only tool access summary',
+          contracts: configReadContracts([
+            'tools.tool_access',
+            'tools.resolved_allowlist',
+            'tools.tool_denylist',
+            'tools.active_masc_tool_count',
+            'tools.active_keeper_tool_count',
+            'tools.total_active',
+          ]),
+        },
+      ]
+    case 'prompt':
+      return [
+        {
+          id: 'kcf-prompt-goal-instructions',
+          tab,
+          label: 'Goal and instructions',
+          kind: 'live-write',
+          source: `${configApiSource} prompt.goal/prompt.instructions + sources.override_fields`,
+          action: 'PATCH /api/v1/keepers/:name/config goal/instructions',
+          contracts: [
+            ...configReadContracts(['prompt.goal', 'prompt.instructions', 'sources.override_fields']),
+            apiContract('PATCH', KEEPER_CONFIG_API, 'goal/instructions'),
+          ],
+        },
+        {
+          id: 'kcf-prompt-assembly',
+          tab,
+          label: 'Prompt assembly trace',
+          kind: 'live-read',
+          source: `${configApiSource} prompt.system_prompt_blocks + workspace.active_goals`,
+          action: 'read-only assembled layer trace',
+          contracts: configReadContracts(['prompt.system_prompt_blocks', 'workspace.active_goals']),
+        },
+        {
+          id: 'kcf-prompt-preview-tabs',
+          tab,
+          label: 'Prompt preview mode',
+          kind: 'browser-local',
+          source: 'promptPreviewTab signal',
+          action: 'switch visible prompt preview only',
+          contracts: [browserState('promptPreviewTab')],
+        },
+      ]
+    case 'runtime':
+      return [
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-runtime-assignment',
+          'Runtime assignment',
+          `${configApiSource} execution.selected_runtime_id + ${manifestSource}`,
+          'PATCH /api/v1/keepers/:name/config runtime_id',
+          'runtime_id',
+          [
+            'execution.selected_runtime_id',
+            'sources.default_manifest_path',
+            'sources.default_source_kind',
+          ],
+        ),
+        {
+          id: 'kcf-runtime-catalog',
+          tab,
+          label: 'Runtime catalog diagnostics',
+          kind: 'live-read',
+          source: 'GET /api/v1/providers',
+          action: 'read-only selected runtime diagnostics',
+          contracts: [apiContract('GET', RUNTIME_PROVIDERS_API)],
+        },
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-runtime-context-override',
+          'Context override',
+          `${configApiSource} max_context_override + limits.max_context_override_tokens`,
+          'PATCH /api/v1/keepers/:name/config max_context_override',
+          'max_context_override',
+          ['max_context_override', 'limits.min_context_override_tokens', 'limits.max_context_override_tokens'],
+        ),
+      ]
+    case 'policy':
+      return [
+        {
+          id: 'kcf-policy-verify',
+          tab,
+          label: 'Verify gate',
+          kind: 'live-read',
+          source: `${configApiSource} execution.verify`,
+          action: 'read-only execution policy projection',
+          contracts: configReadContracts(['execution.verify']),
+        },
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-policy-continuity',
+          'Compaction, proactive, handoff',
+          `${configApiSource} compaction.* + proactive.* + handoff.* + autoboot_enabled`,
+          'PATCH /api/v1/keepers/:name/config continuity/autoboot fields',
+          'continuity/autoboot fields',
+          [
+            'autoboot_enabled',
+            'compaction.profile',
+            'compaction.ratio_gate',
+            'compaction.message_gate',
+            'compaction.token_gate',
+            'compaction.cooldown_sec',
+            'proactive.enabled',
+            'proactive.idle_sec',
+            'proactive.cooldown_sec',
+            'handoff.auto',
+            'handoff.threshold',
+            'handoff.cooldown_sec',
+          ],
+        ),
+        {
+          id: 'kcf-policy-tool-policy',
+          tab,
+          label: 'Tool policy',
+          kind: 'live-write',
+          source: `${configApiSource} tools.* + GET /api/v1/dashboard/tools`,
+          action: 'set_policy tool_access/tool_denylist',
+          contracts: [
+            ...configReadContracts(['tools.tool_access', 'tools.tool_denylist', 'tools.resolved_allowlist']),
+            apiContract('GET', DASHBOARD_TOOLS_API),
+            apiContract('POST', KEEPER_TOOLS_API, 'set_policy'),
+          ],
+        },
+      ]
+    case 'access':
+      return [
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-access-sandbox',
+          'Sandbox, network, allowed paths',
+          `${configApiSource} sandbox_profile/network_mode/allowed_paths + ${manifestSource}`,
+          'PATCH /api/v1/keepers/:name/config sandbox/network/path fields',
+          'sandbox/network/path fields',
+          [
+            'sandbox_profile',
+            'network_mode',
+            'allowed_paths',
+            'sources.default_manifest_path',
+            'sources.default_source_kind',
+          ],
+        ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-access-mentions',
+          'Mention targets',
+          `${configApiSource} workspace.mention_targets + ${manifestSource}`,
+          'PATCH /api/v1/keepers/:name/config mention_targets',
+          'mention_targets',
+          [
+            'workspace.mention_targets',
+            'sources.default_manifest_path',
+            'sources.default_source_kind',
+          ],
+        ),
+        {
+          id: 'kcf-access-effective-scope',
+          tab,
+          label: 'Effective scope',
+          kind: 'live-read',
+          source: `${configApiSource} effective_allowed_paths + workspace.bound_workspace_ids`,
+          action: 'read-only computed access projection',
+          contracts: configReadContracts(['effective_allowed_paths', 'workspace.bound_workspace_ids']),
+        },
+      ]
+    case 'goals':
+      return [
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-goals-active-bindings',
+          'Active goal bindings',
+          `${configApiSource} workspace.active_goal_ids + GET /api/v1/dashboard/goals`,
+          'PATCH /api/v1/keepers/:name/config active_goal_ids',
+          'active_goal_ids',
+          [
+            'active_goal_ids',
+            'workspace.active_goal_ids',
+            'workspace.active_goals',
+            'workspace.active_goal_count',
+            'workspace.missing_active_goal_ids',
+            'sources.default_manifest_path',
+            'sources.default_source_kind',
+          ],
+        ),
+        {
+          id: 'kcf-goals-catalog-filter',
+          tab,
+          label: 'Goal catalog filter',
+          kind: 'browser-local',
+          source: 'loaded goal tree + goalSearchQuery signal',
+          action: 'client-side title/id filter only',
+          contracts: [apiContract('GET', DASHBOARD_GOALS_API), browserState('goalSearchQuery')],
+        },
+      ]
+    case 'hooks':
+      return [
+        {
+          id: 'kcf-hooks-slots',
+          tab,
+          label: 'Hook slots',
+          kind: 'live-read',
+          source: `${configApiSource} hooks.slots/hooks.deny_list/hooks.cost_budget`,
+          action: 'read-only global runtime architecture projection',
+          contracts: configReadContracts(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget']),
+        },
+        {
+          id: 'kcf-hooks-filter',
+          tab,
+          label: 'Hook slot filter',
+          kind: 'browser-local',
+          source: 'hookFilterQuery signal',
+          action: 'client-side slot/source/tag filter only',
+          contracts: [browserState('hookFilterQuery')],
+        },
+        {
+          id: 'kcf-hooks-editing',
+          tab,
+          label: 'Keeper-scoped hook editing',
+          kind: 'unsupported',
+          source: 'no keeper-scoped hook writer exposed',
+          action: 'render read-only global architecture',
+          contracts: [unsupportedContract('no keeper-scoped hook writer exposed')],
+        },
+      ]
+    case 'health':
+      return [
+        {
+          id: 'kcf-health-runtime-state',
+          tab,
+          label: 'Runtime state and trust',
+          kind: 'live-read',
+          source: `${configApiSource} runtime.* + runtime_trust`,
+          action: 'read-only liveness and trust diagnostics',
+          contracts: configReadContracts([
+            'runtime.paused',
+            'runtime.registered',
+            'runtime.keepalive_running',
+            'runtime.registry_state',
+            'runtime.fiber_health',
+            'runtime.runtime_blocker_class',
+            'runtime.runtime_blocker_summary',
+            'runtime.runtime_blocker_continue_gate',
+            'runtime_trust',
+          ]),
+        },
+        {
+          id: 'kcf-health-directives',
+          tab,
+          label: 'Lifecycle directives',
+          kind: 'live-write',
+          source: 'keeper lifecycle API + runtime.paused/registered/keepalive_running',
+          action: 'pause/resume/wakeup keeper lifecycle API',
+          contracts: [
+            ...configReadContracts(['runtime.paused', 'runtime.registered', 'runtime.keepalive_running']),
+            apiContract('POST', KEEPER_DIRECTIVE_API, 'pause/resume/wakeup'),
+          ],
+        },
+        {
+          id: 'kcf-health-metrics',
+          tab,
+          label: 'Runtime metrics',
+          kind: 'live-read',
+          source: `${configApiSource} metrics.*`,
+          action: 'read-only counters and last turn telemetry',
+          contracts: configReadContracts([
+            'metrics.generation',
+            'metrics.total_turns',
+            'metrics.total_input_tokens',
+            'metrics.total_output_tokens',
+            'metrics.total_tokens',
+            'metrics.total_cost_usd',
+            'metrics.last_model_used',
+            'metrics.last_input_tokens',
+            'metrics.last_output_tokens',
+            'metrics.last_total_tokens',
+            'metrics.last_latency_ms',
+            'metrics.last_total_tokens_per_sec',
+            'metrics.last_output_tokens_per_sec',
+            'metrics.compaction_count',
+          ]),
+        },
+      ]
+  }
 }
 
 export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
@@ -599,6 +1087,106 @@ function KcfFacts({ rows }: { rows: readonly KcfFactRow[] }) {
         </div>
       `)}
     </div>
+  `
+}
+
+function keeperConfigControlKindLabel(kind: KeeperConfigControlKind): string {
+  if (kind === 'live-write') return 'live write'
+  if (kind === 'live-read') return 'live read'
+  if (kind === 'browser-local') return 'browser local'
+  return 'unsupported'
+}
+
+function keeperConfigControlEvidenceLabel(evidence: KeeperConfigControlEvidence): string {
+  if (evidence.kind === 'keeper-config-field') return `config:${evidence.path}`
+  if (evidence.kind === 'browser-state') return `local:${evidence.key}`
+  if (evidence.kind === 'unsupported') return `unsupported:${evidence.reason}`
+  return evidence.operation
+    ? `${evidence.method} ${evidence.endpoint}#${evidence.operation}`
+    : `${evidence.method} ${evidence.endpoint}`
+}
+
+function keeperConfigControlEvidenceLabels(
+  contracts: readonly KeeperConfigControlEvidence[],
+): string {
+  return contracts.map(keeperConfigControlEvidenceLabel).join(' | ')
+}
+
+function keeperConfigControlEndpointShortLabel(endpoint: KeeperConfigControlEndpoint): string {
+  if (endpoint === KEEPER_CONFIG_API) return 'config'
+  if (endpoint === KEEPER_DIRECTIVE_API) return 'directive'
+  if (endpoint === KEEPER_TOOLS_API) return 'tools'
+  if (endpoint === DASHBOARD_GOALS_API) return 'goals'
+  if (endpoint === DASHBOARD_TOOLS_API) return 'tool catalog'
+  return 'providers'
+}
+
+function keeperConfigControlEvidenceSummary(
+  contracts: readonly KeeperConfigControlEvidence[],
+  contractStatus: KeeperConfigControlContractStatus = { kind: 'ok', missingConfigFields: [] },
+): string {
+  const apiLabels = contracts
+    .filter((contract): contract is Extract<KeeperConfigControlEvidence, { kind: 'api' }> => contract.kind === 'api')
+    .map(contract => {
+      const endpoint = keeperConfigControlEndpointShortLabel(contract.endpoint)
+      return contract.operation
+        ? `${contract.method} ${endpoint}#${contract.operation}`
+        : `${contract.method} ${endpoint}`
+    })
+  const fieldCount = contracts.filter(contract => contract.kind === 'keeper-config-field').length
+  const localLabels = contracts
+    .filter((contract): contract is Extract<KeeperConfigControlEvidence, { kind: 'browser-state' }> => contract.kind === 'browser-state')
+    .map(contract => `local:${contract.key}`)
+  const unsupported = contracts.some(contract => contract.kind === 'unsupported')
+  return [
+    ...apiLabels,
+    fieldCount > 0 ? `${fieldCount} config field${fieldCount === 1 ? '' : 's'}` : null,
+    ...localLabels,
+    unsupported ? 'unsupported reason' : null,
+    contractStatus.kind === 'missing-config-field'
+      ? `missing ${contractStatus.missingConfigFields.length} config field${contractStatus.missingConfigFields.length === 1 ? '' : 's'}`
+      : null,
+  ].filter((part): part is string => part !== null).join(' · ')
+}
+
+function KeeperConfigControlLedger({ tab, config }: { tab: KcfTabId; config: KeeperConfig }) {
+  const items = keeperConfigControlInventory(tab, config)
+  if (items.length === 0) return null
+  return html`
+    <section class="kcf-control-ledger" data-testid="keeper-config-control-ledger">
+      <div class="kcf-control-ledger-h">
+        <span>Control backing</span>
+        <span class="mono" data-testid="keeper-config-control-ledger-count">${items.length}</span>
+      </div>
+      <div class="kcf-control-ledger-grid">
+        ${items.map(item => {
+          const contractStatus = keeperConfigControlContractStatus(item.contracts, config)
+          const missingConfigFields = contractStatus.missingConfigFields.join(' | ')
+          return html`
+          <div
+            key=${item.id}
+            class=${`kcf-control-ledger-row ${item.kind} ${contractStatus.kind}`}
+            data-testid="keeper-config-control-ledger-row"
+            data-control-id=${item.id}
+            data-control-kind=${item.kind}
+            data-control-contract-status=${contractStatus.kind}
+            data-control-contracts=${keeperConfigControlEvidenceLabels(item.contracts)}
+            data-control-missing-config-fields=${missingConfigFields}
+          >
+            <span class="kcf-control-kind">${keeperConfigControlKindLabel(item.kind)}</span>
+            <span class="kcf-control-label">${item.label}</span>
+            <span class="kcf-control-source mono" title=${item.source}>${item.source}</span>
+            <span class="kcf-control-action" title=${item.action}>${item.action}</span>
+            <span
+              class="kcf-control-contracts mono"
+              title=${keeperConfigControlEvidenceLabels(item.contracts)}
+            >
+              ${keeperConfigControlEvidenceSummary(item.contracts, contractStatus)}
+            </span>
+          </div>
+        `})}
+      </div>
+    </section>
   `
 }
 
@@ -940,9 +1528,9 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix, dirty
 }) {
   const [invalid, setInvalid] = useState(false)
   return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
+    <div class="kcf-inline-row flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
-      <div class="flex items-center gap-2">
+      <div class="kcf-inline-control flex items-center gap-2">
         <input type="number"
           aria-label=${label}
           class="w-24 text-right bg-card/60 text-text-strong text-sm font-semibold border ${invalid ? 'border-[var(--color-status-err)]' : 'border-card-border'} rounded-[var(--r-1)] py-1.5 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
@@ -977,11 +1565,11 @@ export function InlineSelectRow({
   dirty?: boolean
 }) {
   return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3 v2-monitoring-row">
+    <div class="kcf-inline-row flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <select
         aria-label=${label}
-        class="text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
+        class="kcf-inline-control text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
         value=${value}
         onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
@@ -2004,6 +2592,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           </nav>
 
           <div class="kcf-main v2-monitoring-panel">
+            <${KeeperConfigControlLedger} tab=${activeTab} config=${c} />
             ${tabContent[activeTab]}
           </div>
         </div>

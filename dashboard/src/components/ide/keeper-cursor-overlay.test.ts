@@ -116,6 +116,17 @@ describe('getKeeperColor', () => {
     )
   })
 
+  it('builds cursor stream URLs with canonical URL scope', () => {
+    expect(buildKeeperCursorStreamUrl('', {
+      scope: {
+        kind: 'canonical_url',
+        canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+      },
+    })).toBe(
+      '/api/v1/ide/cursors/stream?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git',
+    )
+  })
+
   it('reports a degraded cursor stream when EventSource is unavailable', () => {
     vi.stubGlobal('EventSource', undefined)
     const onStatus = vi.fn()

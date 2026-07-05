@@ -276,6 +276,22 @@ function selectDurableWakeSignals(
     .sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
 }
 
+function durableWakeSignalContract(automation: DashboardScheduledAutomation): {
+  rawCount: number
+  visibleCount: number
+  hiddenByPayloadSupport: number
+  visibleSignals: DashboardScheduledAutomationSignal[]
+} {
+  const visibleSignals = selectDurableWakeSignals(automation)
+  const rawCount = automation.signals?.length ?? 0
+  return {
+    rawCount,
+    visibleCount: visibleSignals.length,
+    hiddenByPayloadSupport: Math.max(0, rawCount - visibleSignals.length),
+    visibleSignals,
+  }
+}
+
 export function selectWakeSignals(
   automation: DashboardScheduledAutomation | null | undefined,
 ): WakeSignal[] {
@@ -1434,8 +1450,8 @@ function SchedulePrototypeSurface({
   const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
   const filtered = rows.filter(request => schTabMatches(tabDef, request))
   // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
-  const durableSignals = selectDurableWakeSignals(automation)
-  const rawDurableSignalCount = automation.signals?.length ?? 0
+  const durableSignalContract = durableWakeSignalContract(automation)
+  const durableSignals = durableSignalContract.visibleSignals
   const selected = selectedScheduleId
     ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
@@ -1480,10 +1496,22 @@ function SchedulePrototypeSurface({
             </div>
           `}
 
-      <section class="sch-signals">
+      <section
+        class="sch-signals"
+        data-schedule-durable-signal-contract="payload_support"
+        data-schedule-durable-signal-raw=${durableSignalContract.rawCount}
+        data-schedule-durable-signal-visible=${durableSignalContract.visibleCount}
+        data-schedule-durable-signal-hidden=${durableSignalContract.hiddenByPayloadSupport}
+      >
         <div class="ov-card-h"><h3>wake signal 피드 · schedule_runner.tick</h3></div>
         ${durableSignals.length === 0
-          ? html`<div class="sch-empty" data-stub="no durable runner signals">${rawDurableSignalCount > 0 ? '표시 가능한 durable wake signal 없음' : 'durable wake signal 없음'}</div>`
+          ? html`
+              <div class="sch-empty" data-stub="no durable runner signals">
+                ${durableSignalContract.hiddenByPayloadSupport > 0
+                  ? `payload support로 ${durableSignalContract.hiddenByPayloadSupport.toLocaleString()} durable wake signal 숨김`
+                  : 'durable wake signal 없음'}
+              </div>
+            `
           : html`
               <div class="sch-sig-list">
                 ${durableSignals.map(signal => {
@@ -1700,8 +1728,9 @@ export function ScheduledAutomationPanel({
   const wakeRows = rows
     .filter(canProjectUpcomingWake)
     .sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
-  const durableSignals = selectDurableWakeSignals(automation)
-  const rawDurableSignalCount = automation.signals?.length ?? 0
+  const durableSignalContract = durableWakeSignalContract(automation)
+  const durableSignals = durableSignalContract.visibleSignals
+  const rawDurableSignalCount = durableSignalContract.rawCount
   const hasDurableSignals = durableSignals.length > 0
   const selectedRequest =
     rows.find(request => request.schedule_id === selectedScheduleId)
@@ -1837,15 +1866,22 @@ export function ScheduledAutomationPanel({
               </div>
               <aside class="grid content-start gap-2">
                 <${ScheduleDetailPanel} request=${selectedRequest} onResolved=${onResolved} />
-                <div>
+                <div
+                  data-schedule-durable-signal-contract="payload_support"
+                  data-schedule-durable-signal-raw=${durableSignalContract.rawCount}
+                  data-schedule-durable-signal-visible=${durableSignalContract.visibleCount}
+                  data-schedule-durable-signal-hidden=${durableSignalContract.hiddenByPayloadSupport}
+                >
                   <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
                     ${hasDurableSignals ? 'durable wake signal feed' : 'request-derived wake signal feed'}
                   </div>
                   <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
                     ${hasDurableSignals
                       ? `출처 ${automation.signal_source ?? 'schedule_runner_signals'} · ${durableSignals.length.toLocaleString()} / ${(automation.signal_count ?? durableSignals.length).toLocaleString()} signals 표시`
-                      : rawDurableSignalCount > 0
-                        ? '표시 가능한 durable runner signal이 없어 request rows에서 파생했습니다.'
+                      : durableSignalContract.hiddenByPayloadSupport > 0
+                        ? `payload support로 ${durableSignalContract.hiddenByPayloadSupport.toLocaleString()} durable runner signal 숨김 · request rows에서 파생했습니다.`
+                        : rawDurableSignalCount > 0
+                          ? '표시 가능한 durable runner signal이 없어 request rows에서 파생했습니다.'
                         : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
                   </div>
                 </div>

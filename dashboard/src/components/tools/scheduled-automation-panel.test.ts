@@ -670,6 +670,39 @@ describe('ScheduledAutomationPanel', () => {
     expect(v2QueueEvidence?.textContent).toContain('durable_event_queue_snapshot')
     expect(v2QueueEvidence?.textContent).toContain('matched pending')
     expect(v2QueueEvidence?.textContent).toContain('schedule_due')
+
+    const wakeRequest = auto.requests[0]!
+    const inflightAuto = automation([
+      {
+        ...wakeRequest,
+        schedule_id: 'sched-keeper-wake',
+        keeper_queue_evidence: {
+          ...wakeRequest.keeper_queue_evidence!,
+          projection_status: 'matched_inflight',
+          pending_count: 0,
+          inflight_count: 1,
+          matched_bucket: 'inflight',
+        },
+      },
+    ])
+
+    render(null, container)
+    render(html`<${ScheduledAutomationPanel} automation=${inflightAuto} variant="v2" />`, container)
+
+    const inflightDoneFilter = container.querySelector('[data-schedule-filter="done"]') as HTMLButtonElement
+    inflightDoneFilter.click()
+    await Promise.resolve()
+
+    const openInflightDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
+    openInflightDetail.click()
+    await Promise.resolve()
+
+    const inflightQueueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_inflight"]')
+    expect(inflightQueueEvidence).not.toBeNull()
+    expect(inflightQueueEvidence?.textContent).toContain('matched inflight')
+    expect(inflightQueueEvidence?.textContent).toContain('inflight_count')
+    expect(inflightQueueEvidence?.textContent).toContain('1')
+    expect(inflightQueueEvidence?.textContent).toContain('inflight')
   })
 
   it('filters schedule cards without filtering the wake signal feed', async () => {

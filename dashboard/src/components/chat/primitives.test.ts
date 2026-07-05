@@ -191,6 +191,13 @@ describe('ChatTranscript', () => {
             text: 'channel reply',
             rawText: 'channel reply',
             turnRef: 'trace-ui#9',
+            streamContract: {
+              source: 'backend_turn_trace',
+              status: 'backend_trace_join',
+              turnRef: 'trace-ui#9',
+              traceEventCount: 2,
+              reason: 'turn_ref joined to retained trajectory/internal-history events',
+            },
             surface: {
               kind: 'discord',
               guild_id: 'guild-1',
@@ -212,6 +219,10 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-surface-kind')).toBe('discord')
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-ui#9')
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('backend_turn_trace')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('backend_trace_join')
+    expect(bubble.getAttribute('data-chat-stream-contract-turn-ref')).toBe('trace-ui#9')
+    expect(bubble.getAttribute('data-chat-stream-contract-trace-events')).toBe('2')
     const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
     expect(surfaceLink?.textContent).toContain('Discord Thread')
   })
@@ -225,6 +236,11 @@ describe('ChatTranscript', () => {
             label: 'keeper_context_status',
             turnRef: 'trace-tool#3',
             delivery: 'history',
+            streamContract: {
+              source: 'rest_history',
+              status: 'history_without_stream_events',
+              reason: 'tool history rows carry arguments, not live stream lifecycle',
+            },
           }),
         ]}
         emptyText="empty"
@@ -240,6 +256,8 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-source')).toBe('tool_result')
     expect(bubble.getAttribute('data-chat-delivery-state')).toBe('history')
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-tool#3')
     expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
   })
@@ -2452,6 +2470,60 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('not-hydrated')
     expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+
+  it('marks settled unjoined tool steps as hydration-failed when the output surface failed', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-hydration-failed', label: 'keeper_context_status', turnRef: 'trace-f#1' }),
+          entry({
+            id: 'a-hydration-failed',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-f#1',
+            streamState: null,
+            streamContract: {
+              source: 'sse_event',
+              status: 'backend_terminal_event',
+              eventName: 'RUN_FINISHED',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputHydrationContract=${{
+          source: 'tool_calls_endpoint',
+          status: 'failed',
+          failureReason: 'HTTP 502',
+          startedAtMs: 1_000,
+          completedAtMs: 1_500,
+          coveredSinceMs: null,
+          coveredThroughMs: null,
+        }}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const trace = bundle?.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-source')).toBe('tool_calls_endpoint')
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 502')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-source')).toBe('sse_event')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-status')).toBe('backend_terminal_event')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
+    expect(step?.querySelector('.chat-block-tstep-status.hydration-failed')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+    expect(bundle?.textContent).toContain('출력 hydration 실패 1')
+
+    ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+    expect(step?.textContent).toContain('출력 hydration 실패 — HTTP 502')
   })
 
   it('marks a settled unjoined tool step as coverage-gap when only older output hydration completed', () => {

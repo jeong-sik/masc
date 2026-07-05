@@ -676,7 +676,11 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
       ~allow_accept_no_progress_retry:(fun ~runtime_id ~attempt error ->
-        gate_calls := (runtime_id, attempt, Agent_sdk.Error.to_string error) :: !gate_calls;
+        gate_calls
+        := ( runtime_id,
+             attempt,
+             Driver.For_testing.accept_no_progress_should_try_next error )
+           :: !gate_calls;
         false)
       ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
@@ -705,13 +709,13 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
     [ "primary.test_model" ]
     !attempts;
   (match List.rev !gate_calls with
-   | [ (runtime_id, attempt, error_text) ] ->
+   | [ (runtime_id, attempt, should_try_next) ] ->
      Alcotest.(check string) "gate runtime" "primary.test_model" runtime_id;
      Alcotest.(check int) "gate attempt" 0 attempt;
      Alcotest.(check bool)
        "gate sees no-progress error"
        true
-       (contains ~needle:"no_usable_progress" error_text)
+       should_try_next
    | calls ->
      Alcotest.failf "expected one no-progress gate call, got %d"
        (List.length calls));

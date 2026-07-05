@@ -1344,6 +1344,8 @@ let () = test "handle_transition_done_default_contract_accepts_default_evidence_
           ( "notes",
             `String
               "completion_notes: contract harness completed the live workflow. \
+               Task scope satisfied: Default contract Done task - Mirrors \
+               contract harness task completion. \
                reviewable_evidence_ref: contract-harness transcript." );
         ])
   in

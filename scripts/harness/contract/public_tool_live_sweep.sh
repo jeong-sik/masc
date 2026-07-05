@@ -326,7 +326,7 @@ r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_n
 expect_ok "masc_agent_timeline" "$r_agent_timeline"
 
 next_step "masc_transition done"
-done_notes="completion_notes: Public MCP tool live sweep completed all requested tool calls and verified each response before task completion. reviewable_evidence_ref: contract-harness public_tool_live_sweep live MCP transcript."
+done_notes="completion_notes: Public MCP tool live sweep completed all requested tool calls and verified each response before task completion. Task scope satisfied: Public Tool Sweep Task - live public surface verification. reviewable_evidence_ref: contract-harness public_tool_live_sweep live MCP transcript."
 r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes}')")"
 expect_ok "masc_transition done" "$r_done"
 CLEANUP_TASK_FINALIZED=1

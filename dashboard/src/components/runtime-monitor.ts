@@ -11,7 +11,6 @@ import {
   type DashboardRuntimeProviderProbe,
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
-  type DashboardRuntimeReasoningStreamingFormat,
 } from '../api/dashboard'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
@@ -27,6 +26,13 @@ import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
 import { errorToString, MISSING_DATA_DASH } from '../lib/format-string'
 import { formatTimeHms } from '../lib/format-time'
+import {
+  runtimeCatalogDeclaredSpec as runtimeDeclaredSpecText,
+  runtimeCatalogEffectiveCapabilities as runtimeEffectiveCapabilitiesText,
+  runtimeCatalogParameterPolicy as runtimeParameterPolicyText,
+  runtimeCatalogRequestConfig as runtimeRequestConfigText,
+  runtimeCatalogSnapshotFacts as runtimeSnapshotFactsText,
+} from '../lib/runtime-provider-summary'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -163,23 +169,6 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   return provider.discovery?.healthy === false ? 'degraded' : 'unknown'
 }
 
-function runtimeParameterPolicyText(provider: DashboardRuntimeProviderSnapshot): string | null {
-  const policy = provider.parameter_policy
-  if (!policy) return null
-  const parts = [
-    policy.reasoning_toggle_wire ? `wire ${policy.reasoning_toggle_wire}` : null,
-    policy.reasoning_replay_policy ? `replay ${policy.reasoning_replay_policy}` : null,
-    policy.requires_reasoning_replay_on_tool_call ? 'tool-call replay required' : null,
-    policy.ignored_sampling_params.length > 0
-      ? `ignored ${policy.ignored_sampling_params.join(',')}`
-      : null,
-    policy.always_ignored_sampling_params.length > 0
-      ? `always ignored ${policy.always_ignored_sampling_params.join(',')}`
-      : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
-}
-
 function runtimeRequestToolChoiceText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const choice = provider.request_config?.tool_choice
   if (!choice?.kind) return null
@@ -224,11 +213,6 @@ function stringArrayText(values: readonly string[] | null | undefined): string |
   return values && values.length > 0 ? values.join(',') : null
 }
 
-function boolStateText(value: boolean | null | undefined, label: string): string | null {
-  if (typeof value !== 'boolean') return null
-  return `${label} ${value ? 'on' : 'off'}`
-}
-
 function detailRow(
   axis: string,
   label: string,
@@ -244,63 +228,6 @@ function runtimeRequestPathText(provider: DashboardRuntimeProviderSnapshot): str
   if (!request) return null
   if (request.request_path_targets_responses_api) return 'responses-api'
   return request.request_path ?? null
-}
-
-function runtimeRequestConfigText(provider: DashboardRuntimeProviderSnapshot): string | null {
-  const request = provider.request_config
-  if (!request) return null
-  const sampling = [
-    typeof request.temperature === 'number' ? `temp ${request.temperature}` : null,
-    typeof request.top_p === 'number' ? `top_p ${request.top_p}` : null,
-    typeof request.top_k === 'number' ? `top_k ${request.top_k}` : null,
-    typeof request.min_p === 'number' ? `min_p ${request.min_p}` : null,
-  ].filter((value): value is string => Boolean(value))
-  const toolChoice = runtimeRequestToolChoiceText(provider)
-  const format = runtimeRequestFormatText(provider)
-  let requestPath: string | null = null
-  if (request.request_path_targets_responses_api) {
-    requestPath = 'responses-api'
-  } else if (request.request_path) {
-    requestPath = `path ${request.request_path}`
-  }
-  const parts = [
-    request.provider_kind ? `kind ${request.provider_kind}` : null,
-    request.source ? `source ${request.source}` : null,
-    requestPath,
-    typeof request.max_tokens === 'number' ? `out ${formatNumber(request.max_tokens)}` : null,
-    typeof request.max_context === 'number' ? `ctx ${formatNumber(request.max_context)}` : null,
-    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
-    request.has_system_prompt ? 'system prompt' : null,
-    typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
-    typeof request.preserve_thinking === 'boolean' ? `preserve ${request.preserve_thinking ? 'on' : 'off'}` : null,
-    typeof request.clear_thinking === 'boolean' ? `clear ${request.clear_thinking ? 'on' : 'off'}` : null,
-    typeof request.thinking_budget === 'number' ? `budget ${formatNumber(request.thinking_budget)}` : null,
-    request.resolved_reasoning_effort ? `effort ${request.resolved_reasoning_effort}` : null,
-    request.glm_clear_thinking ? 'glm clear' : null,
-    request.glm_replay_reasoning ? 'glm replay' : null,
-    typeof request.tool_stream === 'boolean' ? `tool stream ${request.tool_stream ? 'on' : 'off'}` : null,
-    toolChoice ? `tool ${toolChoice}` : null,
-    request.disable_parallel_tool_use ? 'parallel off' : null,
-    format ? `format ${format}` : null,
-    request.has_output_schema ? 'output schema' : null,
-    request.cache_system_prompt ? 'cache system' : null,
-    typeof request.supports_tool_choice_override === 'boolean'
-      ? `tool override ${request.supports_tool_choice_override ? 'on' : 'off'}`
-      : null,
-    typeof request.supports_structured_output_override === 'boolean'
-      ? `schema override ${request.supports_structured_output_override ? 'on' : 'off'}`
-      : null,
-    request.has_model_capabilities_override ? 'cap override' : null,
-    typeof request.seed === 'number' ? `seed ${request.seed}` : null,
-    typeof request.internal_model_rotation_count === 'number'
-      ? `rotation ${request.internal_model_rotation_count}`
-      : null,
-    typeof request.num_ctx === 'number' ? `num_ctx ${formatNumber(request.num_ctx)}` : null,
-    request.keep_alive ? `keep ${request.keep_alive}` : null,
-    request.has_previous_response_id ? 'previous response' : null,
-    typeof request.connect_timeout_s === 'number' ? `connect ${request.connect_timeout_s}s` : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
 }
 
 function runtimeSnapshotModelCount(provider: DashboardRuntimeProviderSnapshot): number | null {
@@ -321,64 +248,6 @@ function runtimeProviderAuthText(
 ): string {
   if (probe) return runtimeProbeAuthLabel(probe)
   return provider.auth_kind ?? MISSING_DATA_DASH
-}
-
-function runtimeSnapshotPromptCache(provider: DashboardRuntimeProviderSnapshot): string | null {
-  if (provider.supports_prompt_caching !== true) return null
-  return `prompt-cache${typeof provider.prompt_cache_alignment === 'number' ? `@${provider.prompt_cache_alignment}` : ''}`
-}
-
-function runtimeSnapshotFactsText(provider: DashboardRuntimeProviderSnapshot): string | null {
-  const modelCount = runtimeSnapshotModelCount(provider)
-  const note = provider.note?.trim()
-  const formats = [
-    provider.supports_response_format_json ? 'json' : null,
-    provider.supports_structured_output ? 'schema' : null,
-  ].filter((value): value is string => Boolean(value))
-  const sampling = [
-    provider.supports_top_k ? 'top_k' : null,
-    provider.supports_min_p ? 'min_p' : null,
-    provider.supports_seed ? 'seed' : null,
-  ].filter((value): value is string => Boolean(value))
-  const controls = [
-    provider.supports_tool_choice ? 'tool-choice' : null,
-    provider.supports_required_tool_choice ? 'required' : null,
-    provider.supports_named_tool_choice ? 'named' : null,
-    provider.supports_parallel_tool_calls ? 'parallel' : null,
-    provider.supports_extended_thinking ? 'extended-thinking' : null,
-    provider.supports_native_streaming ? 'native-stream' : null,
-    provider.supports_system_prompt ? 'system-prompt' : null,
-    provider.supports_caching ? 'cache' : null,
-    runtimeSnapshotPromptCache(provider),
-    provider.supports_seed_with_images ? 'seed+images' : null,
-    provider.emits_usage_tokens ? 'usage' : null,
-    provider.supports_computer_use ? 'computer-use' : null,
-    provider.supports_code_execution ? 'code-exec' : null,
-  ].filter((value): value is string => Boolean(value))
-  return textList([
-    provider.source ? `source ${provider.source}` : null,
-    provider.protocol ? `protocol ${provider.protocol}` : null,
-    typeof modelCount === 'number' ? `models ${formatNumber(modelCount)}` : null,
-    typeof provider.max_context === 'number' ? `ctx ${formatNumber(provider.max_context)}` : null,
-    typeof provider.max_output_tokens === 'number' ? `out ${formatNumber(provider.max_output_tokens)}` : null,
-    typeof provider.temperature === 'number' ? `model-temp ${provider.temperature}` : null,
-    typeof provider.capabilities_declared === 'boolean'
-      ? `caps ${provider.capabilities_declared ? 'declared' : 'missing'}`
-      : null,
-    formats.length > 0 ? `format ${formats.join(',')}` : null,
-    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
-    boolStateText(provider.tools_support, 'tools'),
-    boolStateText(provider.thinking_support, 'thinking'),
-    boolStateText(provider.streaming, 'streaming'),
-    boolStateText(provider.supports_multimodal_inputs, 'multimodal'),
-    boolStateText(provider.supports_image_input, 'image'),
-    boolStateText(provider.supports_audio_input, 'audio'),
-    boolStateText(provider.supports_video_input, 'video'),
-    boolStateText(provider.supports_reasoning_budget, 'reasoning-budget'),
-    provider.thinking_control_format ? `thinking-control ${provider.thinking_control_format}` : null,
-    controls.length > 0 ? `controls ${controls.join(',')}` : null,
-    note ? `note ${note}` : null,
-  ])
 }
 
 function runtimeProviderBehaviorText(provider: DashboardRuntimeProviderSnapshot): string | null {
@@ -453,13 +322,6 @@ function runtimeEffectiveReasoningText(provider: DashboardRuntimeProviderSnapsho
       ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
       : null,
   ])
-}
-
-function runtimeReasoningStreamingFormatText(
-  format: DashboardRuntimeReasoningStreamingFormat | null | undefined,
-): string | null {
-  if (!format?.kind) return null
-  return format.field ? `${format.kind}:${format.field}` : format.kind
 }
 
 function runtimeEffectiveInputText(provider: DashboardRuntimeProviderSnapshot): string | null {
@@ -648,190 +510,6 @@ function runtimeParameterDetailRows(
     detailRow('effective', 'ignored sampling', effectiveIgnoredSampling),
     detailRow('effective', 'supported models', stringArrayText(caps?.supported_models)),
   ].filter((row): row is RuntimeParameterDetailRow => row !== null)
-}
-
-function runtimeDeclaredSpecText(provider: DashboardRuntimeProviderSnapshot): string | null {
-  const spec = provider.declared_spec
-  if (!spec) return null
-  const declaredCaps = spec.model?.capabilities
-  const declaredSampling = [
-    declaredCaps?.supports_top_k ? 'top_k' : null,
-    declaredCaps?.supports_min_p ? 'min_p' : null,
-    declaredCaps?.supports_seed ? 'seed' : null,
-  ].filter((value): value is string => Boolean(value))
-  const declaredFormats = [
-    declaredCaps?.supports_response_format_json ? 'json' : null,
-    declaredCaps?.supports_structured_output ? 'schema' : null,
-  ].filter((value): value is string => Boolean(value))
-  const declaredInputs = [
-    declaredCaps?.supports_multimodal_inputs ? 'multimodal' : null,
-    declaredCaps?.supports_image_input ? 'image' : null,
-    declaredCaps?.supports_audio_input ? 'audio' : null,
-    declaredCaps?.supports_video_input ? 'video' : null,
-  ].filter((value): value is string => Boolean(value))
-  const providerBehavior = spec.provider?.behavior_capabilities
-  const providerBehaviorParts = providerBehavior
-    ? [
-        providerBehavior.supports_inline_tools ? 'inline-tools' : null,
-        providerBehavior.requires_per_keeper_bridging_for_bound_actor_tools ? 'keeper-bridge' : null,
-        providerBehavior.argv_prompt_preflight ? 'argv-preflight' : null,
-        providerBehavior.uses_anthropic_caching ? 'anthropic-cache' : null,
-        typeof providerBehavior.max_turns_per_attempt === 'number'
-          ? `max-turns ${providerBehavior.max_turns_per_attempt}`
-          : null,
-        providerBehavior.tolerates_bound_actor_fallback ? 'bound-fallback' : null,
-        providerBehavior.identity_runtime_mcp_header_keys.length > 0
-          ? `mcp headers ${providerBehavior.identity_runtime_mcp_header_keys.join(',')}`
-          : null,
-      ].filter((value): value is string => Boolean(value))
-    : []
-  const declaredModelControls = [
-    declaredCaps?.supports_tool_choice ? 'tool-choice' : null,
-    declaredCaps?.supports_required_tool_choice ? 'required' : null,
-    declaredCaps?.supports_named_tool_choice ? 'named' : null,
-    declaredCaps?.supports_parallel_tool_calls ? 'parallel' : null,
-    declaredCaps?.supports_extended_thinking ? 'extended-thinking' : null,
-    declaredCaps?.supports_reasoning_budget ? 'reasoning-budget' : null,
-    declaredCaps?.supports_native_streaming ? 'native-stream' : null,
-    declaredCaps?.supports_system_prompt ? 'system-prompt' : null,
-    declaredCaps?.supports_caching ? 'cache' : null,
-    declaredCaps?.supports_prompt_caching
-      ? `prompt-cache${typeof declaredCaps.prompt_cache_alignment === 'number' ? `@${declaredCaps.prompt_cache_alignment}` : ''}`
-      : null,
-    declaredCaps?.supports_seed_with_images ? 'seed+images' : null,
-    declaredCaps?.emits_usage_tokens ? 'usage' : null,
-    declaredCaps?.supports_computer_use ? 'computer-use' : null,
-    declaredCaps?.supports_code_execution ? 'code-exec' : null,
-  ].filter((value): value is string => Boolean(value))
-  let declaredThinking: string | null = null
-  if (typeof spec.model?.thinking_support === 'boolean') {
-    declaredThinking = spec.model.thinking_support ? 'think on' : 'think off'
-  }
-  const providerParts = [
-    spec.provider?.api_format ? `api ${spec.provider.api_format}` : null,
-    spec.provider?.protocol ? `protocol ${spec.provider.protocol}` : null,
-    spec.provider?.transport ? `transport ${spec.provider.transport}` : null,
-    spec.provider?.auth_kind ? `auth ${spec.provider.auth_kind}` : null,
-    spec.provider?.is_non_interactive ? 'non-interactive' : null,
-    typeof spec.provider?.custom_header_count === 'number'
-      ? `headers ${spec.provider.custom_header_count}`
-      : null,
-    typeof spec.provider?.connect_timeout_s === 'number'
-      ? `connect ${spec.provider.connect_timeout_s}s`
-      : null,
-    providerBehaviorParts.length > 0 ? `behavior ${providerBehaviorParts.join(',')}` : null,
-  ].filter((value): value is string => Boolean(value))
-  const modelParts = [
-    spec.model?.api_name ? `model ${spec.model.api_name}` : null,
-    typeof spec.model?.max_context === 'number' ? `ctx ${formatNumber(spec.model.max_context)}` : null,
-    typeof spec.model?.temperature === 'number' ? `temp ${spec.model.temperature}` : null,
-    typeof spec.model?.tools_support === 'boolean' ? `tools ${spec.model.tools_support ? 'on' : 'off'}` : null,
-    typeof spec.model?.streaming === 'boolean' ? `stream ${spec.model.streaming ? 'on' : 'off'}` : null,
-    declaredThinking,
-    typeof spec.model?.preserve_thinking === 'boolean'
-      ? `preserve ${spec.model.preserve_thinking ? 'on' : 'off'}`
-      : null,
-    typeof spec.model?.max_thinking_budget === 'number'
-      ? `budget ${formatNumber(spec.model.max_thinking_budget)}`
-      : null,
-    declaredCaps?.thinking_control_format ? `wire ${declaredCaps.thinking_control_format}` : null,
-    typeof declaredCaps?.max_output_tokens === 'number'
-      ? `out ${formatNumber(declaredCaps.max_output_tokens)}`
-      : null,
-    declaredFormats.length > 0 ? `format ${declaredFormats.join(',')}` : null,
-    declaredSampling.length > 0 ? `sampling ${declaredSampling.join(',')}` : null,
-    declaredInputs.length > 0 ? `input ${declaredInputs.join(',')}` : null,
-    declaredModelControls.length > 0 ? `controls ${declaredModelControls.join(',')}` : null,
-    spec.model?.match_prefixes.length ? `match ${spec.model.match_prefixes.join(',')}` : null,
-  ].filter((value): value is string => Boolean(value))
-  const bindingParts = [
-    spec.binding?.is_default ? 'default' : null,
-    typeof spec.binding?.max_concurrent === 'number' ? `concurrency ${spec.binding.max_concurrent}` : null,
-    typeof spec.binding?.price_input === 'number' ? `price-in ${spec.binding.price_input}` : null,
-    typeof spec.binding?.price_output === 'number' ? `price-out ${spec.binding.price_output}` : null,
-    spec.binding?.keep_alive ? `keep ${spec.binding.keep_alive}` : null,
-    typeof spec.binding?.num_ctx === 'number' ? `num_ctx ${formatNumber(spec.binding.num_ctx)}` : null,
-  ].filter((value): value is string => Boolean(value))
-  const parts = [
-    providerParts.length > 0 ? providerParts.join(',') : null,
-    modelParts.length > 0 ? modelParts.join(',') : null,
-    bindingParts.length > 0 ? bindingParts.join(',') : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
-}
-
-function runtimeEffectiveCapabilitiesText(provider: DashboardRuntimeProviderSnapshot): string | null {
-  const caps = provider.effective_capabilities
-  if (!caps) return null
-  const sampling = [
-    caps.supports_top_k ? 'top_k' : null,
-    caps.supports_min_p ? 'min_p' : null,
-    caps.supports_seed ? 'seed' : null,
-  ].filter((value): value is string => Boolean(value))
-  const ignoredSampling = caps.ignored_sampling_parameters.join(',')
-  const modalities = [
-    caps.supports_multimodal_inputs ? 'multimodal' : null,
-    caps.supports_image_input ? 'image' : null,
-    caps.supports_audio_input ? 'audio' : null,
-    caps.supports_video_input ? 'video' : null,
-  ].filter((value): value is string => Boolean(value))
-  const context = typeof caps.max_context_tokens === 'number'
-    ? `ctx ${formatNumber(caps.max_context_tokens)}`
-    : null
-  const output = typeof caps.max_output_tokens === 'number'
-    ? `out ${formatNumber(caps.max_output_tokens)}`
-    : null
-  const tools = caps.supports_tool_choice
-    ? `tool_choice${[
-      caps.supports_required_tool_choice ? 'required' : null,
-      caps.supports_named_tool_choice ? 'named' : null,
-      caps.supports_parallel_tool_calls ? 'parallel' : null,
-    ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
-    : null
-  const formats = [
-    caps.supports_response_format_json ? 'json' : null,
-    caps.supports_structured_output ? 'schema' : null,
-  ].filter((value): value is string => Boolean(value))
-  const reasoningStream = runtimeReasoningStreamingFormatText(caps.reasoning_streaming_format)
-  const parts = [
-    caps.source ? `source ${caps.source}` : null,
-    context,
-    output,
-    caps.supports_tools ? 'tools' : null,
-    tools,
-    caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
-    caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
-    formats.length > 0 ? `format ${formats.join(',')}` : null,
-    sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
-    ignoredSampling ? `ignored ${ignoredSampling}` : null,
-    modalities.length > 0 ? `input ${modalities.join(',')}` : null,
-    caps.modality_priority ? `modality ${caps.modality_priority}` : null,
-    caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
-    caps.supports_reasoning ? 'reasoning' : null,
-    caps.supports_extended_thinking ? 'extended' : null,
-    caps.supports_reasoning_budget ? 'budget' : null,
-    caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
-      ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
-      : null,
-    caps.thinking_control_format ? `wire ${caps.thinking_control_format}` : null,
-    caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
-    caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
-    reasoningStream ? `reasoning-stream ${reasoningStream}` : null,
-    caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
-    caps.task ? `task ${caps.task}` : null,
-    caps.supports_native_streaming ? 'native-stream' : null,
-    caps.supports_system_prompt ? 'system-prompt' : null,
-    caps.supports_prompt_caching
-      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
-      : null,
-    caps.supports_caching ? 'cache' : null,
-    caps.supports_seed_with_images ? 'seed+images' : null,
-    caps.supports_computer_use ? 'computer-use' : null,
-    caps.supports_code_execution ? 'code-exec' : null,
-    caps.emits_usage_tokens ? 'usage' : null,
-    caps.supported_models && caps.supported_models.length > 0 ? `models ${caps.supported_models.length}` : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
 }
 
 function providerProbeKey(probe: DashboardRuntimeProviderProbe): string | null {

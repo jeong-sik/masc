@@ -83,6 +83,7 @@ type dispatch_receipt =
       ; post_id : string
       ; queue : string
       ; stimulus : string
+      ; stimulus_id : string option
       }
 
 let dispatch_receipt_of_detail = function
@@ -102,7 +103,10 @@ let dispatch_receipt_of_detail = function
       let* post_id = string_field "post_id" fields in
       let* queue = string_field "queue" fields in
       let* stimulus = string_field "stimulus" fields in
-      Ok (Keeper_wake_enqueued { keeper_name; schedule_id; urgency; post_id; queue; stimulus })
+      let* stimulus_id = optional_string_field "stimulus_id" fields in
+      Ok
+        (Keeper_wake_enqueued
+           { keeper_name; schedule_id; urgency; post_id; queue; stimulus; stimulus_id })
     else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
   | _ -> Error "schedule dispatch receipt detail must be an object"
 ;;
@@ -115,11 +119,13 @@ let dispatch_receipt_to_yojson = function
       ; "author", `String author
       ; "hearth", (match hearth with None -> `Null | Some hearth -> `String hearth)
       ]
-  | Keeper_wake_enqueued { keeper_name; schedule_id; urgency; post_id; queue; stimulus } ->
+  | Keeper_wake_enqueued
+      { keeper_name; schedule_id; urgency; post_id; queue; stimulus; stimulus_id } ->
     `Assoc
       [ "kind", `String keeper_wake_enqueued_kind
       ; "queue", `String queue
       ; "stimulus", `String stimulus
+      ; "stimulus_id", (match stimulus_id with None -> `Null | Some value -> `String value)
       ; "keeper_name", `String keeper_name
       ; "schedule_id", `String schedule_id
       ; "urgency", `String urgency
@@ -242,6 +248,19 @@ let dispatch_board_post request payload =
         ])
 ;;
 
+let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
+  try
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "failed to persist keeper reaction ledger stimulus: %s"
+         (Printexc.to_string exn))
+;;
+
 let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request) payload =
   let* keeper_name = keeper_name_field "keeper_name" payload.body in
   let* message = string_field "message" payload.body in
@@ -269,15 +288,23 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     ; payload = Keeper_event_queue.Schedule_due wake
     }
   in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   Keeper_registry_event_queue.enqueue
     ~base_path:config.Workspace_utils.base_path
     keeper_name
     stimulus;
+  let* () =
+    record_keeper_wake_stimulus
+      ~base_path:config.Workspace_utils.base_path
+      ~keeper_name
+      stimulus
+  in
   Ok
     (`Assoc
       [ "kind", `String keeper_wake_enqueued_kind
       ; "queue", `String keeper_event_queue_label
       ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+      ; "stimulus_id", `String stimulus_id
       ; "keeper_name", `String keeper_name
       ; "schedule_id", `String request.schedule_id
       ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)

@@ -487,6 +487,25 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (pending_evidence |> member "pending_count" |> to_int);
       check int "inflight count before lease" 0
         (pending_evidence |> member "inflight_count" |> to_int);
+      let pending_receipt = pending_row |> member "dispatch_receipt" in
+      let stimulus_id = pending_receipt |> member "stimulus_id" |> to_string in
+      check bool "dispatch receipt includes stimulus id" true
+        (String.starts_with ~prefix:"stimulus:" stimulus_id);
+      let pending_reaction_evidence =
+        pending_row |> member "keeper_reaction_evidence"
+      in
+      check string "reaction evidence sees queued stimulus" "matched_stimulus"
+        (pending_reaction_evidence |> member "projection_status" |> to_string);
+      check string "reaction evidence source" "keeper_reaction_ledger"
+        (pending_reaction_evidence |> member "source" |> to_string);
+      check string "reaction evidence stimulus id" stimulus_id
+        (pending_reaction_evidence |> member "stimulus_id" |> to_string);
+      check bool "reaction evidence stimulus seen" true
+        (pending_reaction_evidence |> member "stimulus_seen" |> to_bool);
+      check bool "reaction evidence turn not started yet" false
+        (pending_reaction_evidence |> member "turn_started_seen" |> to_bool);
+      check int "one matched ledger row before turn" 1
+        (pending_reaction_evidence |> member "matched_record_count" |> to_int);
       let leased =
         match
           Keeper_registry_event_queue.dequeue
@@ -520,6 +539,22 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (inflight_evidence |> member "pending_count" |> to_int);
       check int "inflight count after lease" 1
         (inflight_evidence |> member "inflight_count" |> to_int);
+      Keeper_reaction_ledger.record_event_queue_reaction
+        ~base_path:config.Workspace_utils.base_path
+        ~keeper_name
+        ~reaction_kind:Keeper_reaction_ledger.Turn_started
+        leased;
+      let reacted_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let reaction_evidence = reacted_row |> member "keeper_reaction_evidence" in
+      check string "reaction evidence matched turn" "matched_turn_started"
+        (reaction_evidence |> member "projection_status" |> to_string);
+      check bool "reaction evidence turn started" true
+        (reaction_evidence |> member "turn_started_seen" |> to_bool);
+      check int "two matched ledger rows after turn" 2
+        (reaction_evidence |> member "matched_record_count" |> to_int);
       Keeper_registry_event_queue.ack_consumed
         ~base_path:config.Workspace_utils.base_path
         keeper_name

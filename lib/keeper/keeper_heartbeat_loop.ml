@@ -49,6 +49,10 @@ let record_recovery_stimulus_turn_started =
   Stimulus_intake.record_recovery_stimulus_turn_started
 ;;
 
+let record_event_queue_stimulus_turn_started =
+  Stimulus_intake.record_event_queue_stimulus_turn_started
+;;
+
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
@@ -150,6 +154,23 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Goal_verification_failed _ ->
         None)
+    stimuli
+;;
+
+let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
+  List.iter
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+       match stimulus.payload with
+       | Keeper_event_queue.Schedule_due _ ->
+         record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Bg_completed _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.No_progress_recovery
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Goal_verification_failed _ -> ())
     stimuli
 ;;
 
@@ -406,6 +427,10 @@ let run_keepalive_unified_turn
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
              consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
+          record_schedule_due_turn_started_reactions
+            ~ctx
+            ~keeper_name:meta_after_triage.name
+            !consumed_stimuli;
           let event_bus = Keeper_event_bus.get () in
           let meta_after_cycle =
             run_keeper_cycle

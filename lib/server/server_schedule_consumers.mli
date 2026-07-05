@@ -13,6 +13,7 @@ type dispatch_receipt =
       ; post_id : string
       ; queue : string
       ; stimulus : string
+      ; stimulus_id : string option
       }
 
 val dispatch_receipt_of_detail :

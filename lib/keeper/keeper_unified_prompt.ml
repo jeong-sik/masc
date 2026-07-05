@@ -144,14 +144,30 @@ let board_event_kind_label = function
   | Keeper_world_observation.External_attention -> "external_attention"
 ;;
 
+let quote_prompt_field value =
+  let buf = Buffer.create (String.length value + 2) in
+  Buffer.add_char buf '"';
+  String.iter
+    (function
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c -> Buffer.add_char buf c)
+    value;
+  Buffer.add_char buf '"';
+  Buffer.contents buf
+;;
+
 let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
   Printf.sprintf
-    " reaction=%s target=%s:%s user=%s emoji=%S"
+    " reaction=%s target=%s:%s user=%s emoji=%s"
     (if reaction.reacted then "added" else "removed")
     (Board.reaction_target_type_to_string reaction.target_type)
     reaction.target_id
     reaction.user_id
-    reaction.emoji
+    (quote_prompt_field reaction.emoji)
 ;;
 
 let board_event_note = function

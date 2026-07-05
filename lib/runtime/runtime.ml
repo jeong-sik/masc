@@ -596,7 +596,7 @@ let missing_reference_error
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
      are referenced by routing config: %s. %s Add catalog rows to \
      oas-models.toml or remove those routing references; MASC will not erase \
-     explicit runtime intent into default fallback."
+     explicit runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)
     default_fallback_explanation

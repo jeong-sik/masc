@@ -1033,6 +1033,83 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-schedule-signal-id="sig-unknown-only"]')).toBeNull()
   })
 
+  it('renders explicit live supported non-terminal evidence absence', () => {
+    const auto = payloadSupportAutomation()
+    auto.live_supported_non_terminal_evidence = {
+      schema: 'masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1',
+      source: 'schedule_store',
+      projection_status: 'no_supported_payload_rows',
+      criteria: 'payload_support=supported && execution_readiness not in {terminal,expired}',
+      reason: 'current live schedule_store has no rows with a supported payload kind',
+      request_count: 3,
+      supported_request_count: 0,
+      supported_non_terminal_count: 0,
+      supported_live_count: 0,
+      supported_terminal_or_expired_count: 0,
+      unsupported_request_count: 2,
+      unknown_request_count: 1,
+      terminal_or_expired_count: 2,
+      matched_schedule_ids: [],
+      matched_schedule_id_limit: 8,
+    }
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      const evidence = container.querySelector('[data-schedule-live-supported-evidence="no_supported_payload_rows"]')
+      expect(evidence).not.toBeNull()
+      expect(evidence?.getAttribute('data-schedule-live-supported-count')).toBe('0')
+      expect(evidence?.getAttribute('data-schedule-live-supported-source')).toBe('schedule_store')
+      expect(evidence?.textContent).toContain('no supported payload rows')
+      expect(evidence?.textContent).toContain('payload_support=supported')
+      expect(evidence?.textContent).toContain('unsupported/unknown')
+      expect(evidence?.textContent).toContain('3')
+    }
+  })
+
+  it('renders matched live supported non-terminal evidence and opens matched rows', async () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported-live',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'masc.keeper_wake',
+        payload_support: 'supported',
+      }),
+    ])
+    auto.live_supported_non_terminal_evidence = {
+      schema: 'masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1',
+      source: 'schedule_store',
+      projection_status: 'matched_supported_non_terminal',
+      criteria: 'payload_support=supported && execution_readiness not in {terminal,expired}',
+      reason: 'live schedule_store contains supported rows whose readiness is not terminal or expired',
+      request_count: 1,
+      supported_request_count: 1,
+      supported_non_terminal_count: 1,
+      supported_live_count: 1,
+      supported_terminal_or_expired_count: 0,
+      unsupported_request_count: 0,
+      unknown_request_count: 0,
+      terminal_or_expired_count: 0,
+      matched_schedule_ids: ['sched-supported-live'],
+      matched_schedule_id_limit: 8,
+    }
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const evidence = container.querySelector('[data-schedule-live-supported-evidence="matched_supported_non_terminal"]')
+    expect(evidence).not.toBeNull()
+    expect(evidence?.getAttribute('data-schedule-live-supported-count')).toBe('1')
+    expect(evidence?.textContent).toContain('matched supported non-terminal')
+    const open = container.querySelector('[data-schedule-live-supported-open="sched-supported-live"]') as HTMLButtonElement
+    expect(open).not.toBeNull()
+    open.click()
+    await Promise.resolve()
+    expect(container.querySelector('[data-schedule-detail-panel="sched-supported-live"]')).not.toBeNull()
+  })
+
   it('uses explicit ready and terminal status matching', async () => {
     const automation = sampleAutomation()
     automation.requests = [

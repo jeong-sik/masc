@@ -9,6 +9,7 @@ import {
   type DashboardScheduledAutomationKeeperReactionEvidence,
   type DashboardScheduledAutomationKeeperQueueEvidence,
   type DashboardScheduledAutomationExecution,
+  type DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   type DashboardScheduledAutomationRequest,
   type DashboardScheduledAutomationSignal,
 } from '../../api'
@@ -1357,6 +1358,105 @@ function SchPayloadSupportBanner({
   `
 }
 
+type LiveSupportedEvidenceStatus =
+  DashboardScheduledAutomationLiveSupportedNonTerminalEvidence['projection_status']
+
+function liveSupportedEvidenceLabel(status: LiveSupportedEvidenceStatus): string {
+  switch (status) {
+    case 'matched_supported_non_terminal':
+      return 'matched supported non-terminal'
+    case 'no_supported_payload_rows':
+      return 'no supported payload rows'
+    case 'no_supported_non_terminal':
+      return 'no supported non-terminal'
+    default:
+      return assertNever(status)
+  }
+}
+
+function liveSupportedEvidenceBannerClass(status: LiveSupportedEvidenceStatus): string {
+  switch (status) {
+    case 'matched_supported_non_terminal':
+      return 'approve'
+    case 'no_supported_payload_rows':
+      return 'payload bad'
+    case 'no_supported_non_terminal':
+      return 'payload warn'
+    default:
+      return assertNever(status)
+  }
+}
+
+function SchLiveSupportedEvidence({
+  evidence,
+  onOpen,
+}: {
+  evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence | null | undefined
+  onOpen: (scheduleId: string) => void
+}) {
+  if (!evidence) return null
+  const matchedIds = evidence.matched_schedule_ids ?? []
+  const status = evidence.projection_status
+  return html`
+    <section
+      class=${`sch-banner ${liveSupportedEvidenceBannerClass(status)}`}
+      data-schedule-live-supported-evidence=${status}
+      data-schedule-live-supported-count=${evidence.supported_live_count ?? 0}
+      data-schedule-live-supported-source=${evidence.source ?? ''}
+    >
+      <span class="sch-banner-ico">${status === 'matched_supported_non_terminal' ? '✓' : '!'}</span>
+      <div class="sch-banner-txt">
+        <div>
+          <b>live supported scheduler evidence</b>
+          <span class="mono"> ${liveSupportedEvidenceLabel(status)}</span>
+        </div>
+        <div class="sch-banner-sub">
+          <span class="mono">${evidence.criteria ?? 'payload_support=supported && non-terminal'}</span>
+        </div>
+        <div class="sch-evidence-counts" aria-label="Live supported scheduler counts">
+          <span class="sch-evidence-count">
+            <span>requests</span>
+            <span class="mono">${(evidence.request_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>supported</span>
+            <span class="mono">${(evidence.supported_request_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>live</span>
+            <span class="mono">${(evidence.supported_live_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>terminal/expired</span>
+            <span class="mono">${(evidence.terminal_or_expired_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>unsupported/unknown</span>
+            <span class="mono">${((evidence.unsupported_request_count ?? 0) + (evidence.unknown_request_count ?? 0)).toLocaleString()}</span>
+          </span>
+        </div>
+        ${evidence.reason
+          ? html`<div class="sch-banner-sub">${evidence.reason}</div>`
+          : null}
+        ${matchedIds.length > 0
+          ? html`
+              <div class="sch-payload-rows" aria-label="Live supported schedule ids">
+                ${matchedIds.map(scheduleId => html`
+                  <button
+                    type="button"
+                    class="sch-payload-row mono"
+                    data-schedule-live-supported-open=${scheduleId}
+                    onClick=${() => { onOpen(scheduleId) }}
+                  >${scheduleId}</button>
+                `)}
+              </div>
+            `
+          : null}
+      </div>
+    </section>
+  `
+}
+
 // Card rail tone class. SCHED_STATUS specs only ever yield warn/info/ok/bad/dim
 // for statuses; .sch-card.st-volt is not defined, so clamp anything else to dim.
 const CARD_RAIL_TONES: ReadonlySet<string> = new Set(['ok', 'warn', 'bad', 'info', 'dim'])
@@ -1728,6 +1828,10 @@ function SchedulePrototypeSurface({
         summary=${payloadSummary}
         onOpen=${setSelectedScheduleId}
       />
+      <${SchLiveSupportedEvidence}
+        evidence=${automation.live_supported_non_terminal_evidence ?? null}
+        onOpen=${setSelectedScheduleId}
+      />
 
       <div class="sch-tabs" role="tablist" aria-label="예약 필터">
         ${SCH_TABS.map(definition => {
@@ -2078,6 +2182,11 @@ export function ScheduledAutomationPanel({
             </div>
           `
         : null}
+
+      <${SchLiveSupportedEvidence}
+        evidence=${automation.live_supported_non_terminal_evidence ?? null}
+        onOpen=${setSelectedScheduleId}
+      />
 
       <div class="flex flex-wrap gap-2">
         ${nonzeroCounts.length > 0

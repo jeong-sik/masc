@@ -95,6 +95,12 @@ type config = {
       (** Token budget for extended thinking, forwarded to OAS
           [Builder.with_thinking_budget]. Only meaningful when
           [enable_thinking = Some true]. *)
+  top_p : float option;
+      (** Nucleus sampling probability forwarded to OAS [Builder.with_top_p].
+          [None] leaves the provider/model default intact. *)
+  top_k : int option;
+      (** Top-k sampling limit forwarded to OAS [Builder.with_top_k].
+          [None] leaves the provider/model default intact. *)
   min_p : float option;
       (** Minimum probability threshold for nucleus sampling, forwarded
           to OAS [Builder.with_min_p]. [None] leaves the provider default
@@ -107,7 +113,7 @@ type config = {
   tool_selector : Agent_sdk.Tool_selector.strategy option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
-(** Per-worker configuration.  57 fields — concrete record because
+(** Per-worker configuration.  59 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

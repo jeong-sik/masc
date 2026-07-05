@@ -291,6 +291,19 @@ val temperature_of_runtime_id : string -> float option
     set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
     for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
 
+val top_p_of_runtime_id : string -> float option
+(** Request [top_p] from the materialized OAS provider config for runtime [id],
+    or [None] when the runtime is not configured or no explicit value is
+    declared.  This projects the Provider_config SSOT used for dispatch. *)
+
+val top_k_of_runtime_id : string -> int option
+(** Request [top_k] from the materialized OAS provider config for runtime [id],
+    or [None] when absent. *)
+
+val min_p_of_runtime_id : string -> float option
+(** Request [min_p] from the materialized OAS provider config for runtime [id],
+    or [None] when absent. *)
+
 val preserve_thinking_of_runtime_id : string -> bool option
 (** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
     uninitialized cache, or no explicit TOML field.

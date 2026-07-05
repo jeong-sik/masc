@@ -69,6 +69,7 @@ type t =
   | KeepaliveSignalFailures
   | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
+  | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
   | ToolsOasFailures
   | ToolsOasDeterministicFailures

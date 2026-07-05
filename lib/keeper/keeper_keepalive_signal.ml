@@ -506,6 +506,46 @@ let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_ent
   | _ -> false
 ;;
 
+let record_board_attention_candidate
+      ~(config : Workspace.config)
+      ~(signal_kind_label : string)
+      ~(meta : keeper_meta)
+      (signal : Board_dispatch.board_signal)
+  =
+  let candidate =
+    Keeper_board_attention_candidate.of_board_signal
+      ~keeper_name:meta.name
+      ~recorded_at:(Time_compat.now ())
+      signal
+  in
+  match Keeper_board_attention_candidate.record ~base_path:config.base_path candidate with
+  | `Recorded ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+      ~labels:
+        [ ("keeper", meta.name)
+        ; ("kind", signal_kind_label)
+        ; ( "attention_authority"
+          , Keeper_board_attention_candidate.attention_authority_to_string
+              candidate.attention_authority )
+        ; ( "wake_authority"
+          , Keeper_board_attention_candidate.wake_authority_to_string
+              candidate.wake_authority )
+        ]
+      ()
+  | `Duplicate _ -> ()
+  | `Error err ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string KeepaliveSignalFailures)
+      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
+      ();
+    Log.Keeper.warn
+      "board attention candidate record failed: keeper=%s post=%s error=%s"
+      meta.name
+      signal.post_id
+      err
+;;
+
 let paused_meta_allows_board_auto_resume (meta : keeper_meta) =
   meta.paused
   && Option.is_some
@@ -607,7 +647,8 @@ let wakeup_relevant_keeper_for_board_signal
                  ("keeper", meta.name);
                  ("kind", signal_kind_label);
                ]
-               ()
+               ();
+             record_board_attention_candidate ~config ~signal_kind_label ~meta signal
            | None, _ | Some _, _ -> ());
           (match entry.phase, wake_reason with
            | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention

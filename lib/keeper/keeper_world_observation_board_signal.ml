@@ -223,6 +223,8 @@ let self_authored_post ~self_ids ~(post_id : string) =
     Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string post.author)
 ;;
 
+(* TEL-OK: pure wake predicate; board persistence and keeper wake execution own
+   telemetry at their action boundaries. *)
 let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_signal) =
   match signal.kind with
   | Board_dispatch.Board_reaction_changed _ ->

@@ -1414,10 +1414,14 @@ let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
            "expected routing-reference config error, got missing catalog report: %s"
            (Runtime.strict_init_error_to_string (Runtime.Missing_catalog_models report))
        | Error (Runtime.Runtime_config_error msg) ->
-         check bool "diagnostic names default route" true
-           (String_util.contains_substring msg "[runtime].default");
+         check bool "diagnostic names librarian route" true
+           (String_util.contains_substring msg "[runtime].librarian");
          check bool "diagnostic names keeper assignment" true
            (String_util.contains_substring msg "[runtime.assignments].keeper_a");
+         check bool "diagnostic names media failover" true
+           (String_util.contains_substring msg "[runtime].media_failover");
+         check bool "diagnostic names lane candidates" true
+           (String_util.contains_substring msg "[runtime.lanes].candidates.safe");
          check bool "diagnostic rejects fallback erasure" true
            (String_util.contains_substring msg "default fallback"))
 
@@ -1557,7 +1561,7 @@ let test_server_degraded_init_rejects_uncatalogued_default () =
          check bool "error names missing default runtime" true
            (String_util.contains_substring msg "ollama.missing");
          check bool "error rejects alternate default routing" true
-           (String_util.contains_substring msg "different default runtime"))
+           (String_util.contains_substring msg "default fallback"))
 
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->

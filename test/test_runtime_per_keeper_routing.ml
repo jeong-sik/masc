@@ -1203,7 +1203,7 @@ let test_runtime_inventory_surfaces_parameter_policy () =
       (policy |> J.member "reasoning_toggle_wire" |> J.to_string);
     Alcotest.(check string)
       "reasoning replay policy"
-      "no_replay"
+      "preserve_always"
       (policy |> J.member "reasoning_replay_policy" |> J.to_string);
     Alcotest.(check bool)
       "no tool replay requirement"

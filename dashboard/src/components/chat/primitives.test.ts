@@ -192,11 +192,17 @@ describe('ChatTranscript', () => {
             rawText: 'channel reply',
             turnRef: 'trace-ui#9',
             streamContract: {
-              source: 'backend_turn_trace',
-              status: 'backend_trace_join',
+              source: 'backend_stream_lifecycle',
+              status: 'backend_lifecycle_replay',
               turnRef: 'trace-ui#9',
-              traceEventCount: 2,
-              reason: 'turn_ref joined to retained trajectory/internal-history events',
+              eventName: 'RUN_FINISHED',
+              lifecycleEvents: [
+                'RUN_STARTED',
+                'TEXT_MESSAGE_START',
+                'TEXT_MESSAGE_END',
+                'RUN_FINISHED',
+              ],
+              reason: 'history row records durable server stream lifecycle replay',
             },
             surface: {
               kind: 'discord',
@@ -219,10 +225,13 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-surface-kind')).toBe('discord')
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-ui#9')
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
-    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('backend_turn_trace')
-    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('backend_trace_join')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
     expect(bubble.getAttribute('data-chat-stream-contract-turn-ref')).toBe('trace-ui#9')
-    expect(bubble.getAttribute('data-chat-stream-contract-trace-events')).toBe('2')
+    expect(bubble.getAttribute('data-chat-stream-contract-event')).toBe('RUN_FINISHED')
+    expect(bubble.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe(
+      'RUN_STARTED,TEXT_MESSAGE_START,TEXT_MESSAGE_END,RUN_FINISHED',
+    )
     const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
     expect(surfaceLink?.textContent).toContain('Discord Thread')
   })

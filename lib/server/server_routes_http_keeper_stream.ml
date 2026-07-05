@@ -970,6 +970,20 @@ let process_single_turn ~connector_user_line_recorded_upstream
     (Run_started { run_id; thread_id });
   Keeper_chat_events.publish events
     (Text_message_start { message_id; role = Assistant });
+  let completed_stream_lifecycle =
+    [ Keeper_chat_store.Run_started
+    ; Keeper_chat_store.Text_message_start
+    ; Keeper_chat_store.Text_message_end
+    ; Keeper_chat_store.Run_finished
+    ]
+  in
+  let errored_stream_lifecycle =
+    [ Keeper_chat_store.Run_started
+    ; Keeper_chat_store.Text_message_start
+    ; Keeper_chat_store.Text_message_end
+    ; Keeper_chat_store.Run_error
+    ]
+  in
   let args = args_of_request payload in
   (* Stream model text deltas live with per-delta redaction — the same
      treatment ThinkingDelta and Tool_call_args already get in
@@ -1086,6 +1100,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
          ~keeper_name:payload.name
          ~content:(persisted_error_reply err)
          ~surface:chat_surface
+         ~stream_lifecycle:errored_stream_lifecycle
          ()
      else
        Keeper_chat_store.append_turn
@@ -1097,6 +1112,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
          ~speaker:chat_speaker
          ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
          ~assistant_content:(persisted_error_reply err)
+         ~stream_lifecycle:errored_stream_lifecycle
          ());
     Keeper_chat_broadcast.chat_appended
       ~keeper_name:payload.name ~source:chat_source
@@ -1222,6 +1238,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
                        ~surface:chat_surface
                        ?blocks
                        ?turn_ref
+                       ~stream_lifecycle:completed_stream_lifecycle
                        ()
                    else
                      Keeper_chat_store.append_turn
@@ -1234,6 +1251,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
                        ~assistant_content
                        ?blocks
                        ?turn_ref
+                       ~stream_lifecycle:completed_stream_lifecycle
                        ()
                  in
                  let broadcast_chat_appended ?content () =

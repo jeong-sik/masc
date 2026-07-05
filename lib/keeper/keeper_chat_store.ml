@@ -116,6 +116,28 @@ module Row_kind = struct
     | (Utterance | Transport_failure), _ -> false
 end
 
+type stream_lifecycle_event =
+  | Run_started
+  | Text_message_start
+  | Text_message_end
+  | Run_finished
+  | Run_error
+
+let stream_lifecycle_event_to_label = function
+  | Run_started -> "RUN_STARTED"
+  | Text_message_start -> "TEXT_MESSAGE_START"
+  | Text_message_end -> "TEXT_MESSAGE_END"
+  | Run_finished -> "RUN_FINISHED"
+  | Run_error -> "RUN_ERROR"
+
+let stream_lifecycle_event_of_label = function
+  | "RUN_STARTED" -> Some Run_started
+  | "TEXT_MESSAGE_START" -> Some Text_message_start
+  | "TEXT_MESSAGE_END" -> Some Text_message_end
+  | "RUN_FINISHED" -> Some Run_finished
+  | "RUN_ERROR" -> Some Run_error
+  | _ -> None
+
 type speaker_authority =
   | Owner
   | External
@@ -195,6 +217,11 @@ type chat_message = {
          inbound user lines (no turn yet) and rows written before §7.  A
          malformed persisted value is reported as a persistence read drop
          and reads as [None]; the row stays valid. *)
+  stream_lifecycle : stream_lifecycle_event list option;
+      (* K1f: closed list of server lifecycle events for the direct chat
+         stream response represented by this row. [None] means pre-K1f row or
+         no lifecycle proof. Malformed persisted values are reported and read
+         as [None], keeping the row valid. *)
 }
 
 let redaction_for ~base_dir ~keeper_name =
@@ -421,6 +448,38 @@ let blocks_fields = function
   | Some blocks -> [ ("blocks", Keeper_chat_blocks.blocks_to_yojson blocks) ]
 ;;
 
+let stream_lifecycle_fields = function
+  | None | Some [] -> []
+  | Some events ->
+      [
+        ( "stream_lifecycle",
+          `List
+            (List.map
+               (fun event -> `String (stream_lifecycle_event_to_label event))
+               events) );
+      ]
+
+let parse_stream_lifecycle ~path json =
+  let invalid detail =
+    report_persistence_read_drop
+      ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+      ~path ~detail;
+    None
+  in
+  let rec parse_items acc = function
+    | [] -> Some (List.rev acc)
+    | `String label :: rest -> (
+        match stream_lifecycle_event_of_label label with
+        | Some event -> parse_items (event :: acc) rest
+        | None ->
+            invalid (Printf.sprintf "unknown stream_lifecycle event %S" label))
+    | _ :: _ -> invalid "stream_lifecycle contains non-string event"
+  in
+  match json with
+  | `List [] -> None
+  | `List items -> parse_items [] items
+  | _ -> invalid "stream_lifecycle field is not a list"
+
 (* R3: producer-assigned message id.  [encode_line] is the sole writer, so
    minting here makes it impossible to persist a row without an id.  The
    process-monotonic counter disambiguates the user/tool/assistant rows of
@@ -450,7 +509,8 @@ let legacy_message_id ~ts ~content =
 
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
-    ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref ()
+    ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
+    ?stream_lifecycle ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -529,6 +589,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     @ audio_fields audio
     @ blocks_fields blocks
     @ opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
+    @ stream_lifecycle_fields stream_lifecycle
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
@@ -555,6 +616,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ?(assistant_kind = Row_kind.Utterance)
     ?blocks
     ?turn_ref
+    ?stream_lifecycle
     ~(assistant_content : string)
     () =
   try
@@ -597,7 +659,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     in
     let asst_line =
       encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
-        ?conversation_id ~kind:assistant_kind ?blocks ?turn_ref ()
+        ?conversation_id ~kind:assistant_kind ?blocks ?turn_ref
+        ?stream_lifecycle ()
     in
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
@@ -621,8 +684,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
 let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref () : (unit, string) result
-    =
+    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () :
+    (unit, string) result =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -632,7 +695,8 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ?blocks ?turn_ref ()
+      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
+        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
     in
     Fs_compat.append_file path (line ^ "\n");
     Ok ()
@@ -651,10 +715,10 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
    failure is already counted + logged inside the [_result] variant). New callers
    that must surface the failure call [append_assistant_message_result] directly. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref () =
+    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () =
   ignore
     (append_assistant_message_result ~base_dir ~keeper_name ~content ?surface
-       ?conversation_id ?audio ?blocks ?turn_ref ()
+       ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
       : (unit, string) result)
 
 (* RFC-0226: inbound user line recorded at delivery time, before (and
@@ -891,6 +955,12 @@ let parse_line ~file_path (line : string) : chat_message option =
                 ~detail:(Printf.sprintf "invalid turn_ref %S" s);
               None)
     in
+    let stream_lifecycle =
+      match Json_util.assoc_member_opt "stream_lifecycle" json with
+      | None -> None
+      | Some stream_lifecycle_json ->
+          parse_stream_lifecycle ~path:file_path stream_lifecycle_json
+    in
     if role_label = "" || content = "" then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
@@ -923,7 +993,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           Some
             { id; role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id; speaker;
-              audio; blocks; mentions; kind; turn_ref }
+              audio; blocks; mentions; kind; turn_ref; stream_lifecycle }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -1139,6 +1209,11 @@ let blocks_fields_of_list = function
   | blocks -> [ ("blocks", Keeper_chat_blocks.blocks_to_yojson blocks) ]
 ;;
 
+let rec last_opt = function
+  | [] -> None
+  | [ x ] -> Some x
+  | _ :: rest -> last_opt rest
+
 let chat_stream_contract_json ~trace_lookup_available ~trace_block
     (m : chat_message) =
   let field key value = (key, value) in
@@ -1146,39 +1221,52 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
   let base_fields =
     opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string m.turn_ref)
   in
-  match m.turn_ref with
-  | None ->
+  match m.stream_lifecycle with
+  | Some (_ :: _ as events) ->
+      let labels = List.map stream_lifecycle_event_to_label events in
       `Assoc
-        ([ string_field "source" "keeper_chat_store"
-         ; string_field "status" "history_without_turn_ref"
+        ([ string_field "source" "backend_stream_lifecycle"
+         ; string_field "status" "backend_lifecycle_replay"
          ; string_field "reason"
-             "history row has no persisted turn_ref; no causal stream join is possible"
+             "history row records durable server stream lifecycle replay"
+         ; field "lifecycle_events"
+             (`List (List.map (fun label -> `String label) labels))
          ]
+        @ opt_string_field "event_name" (last_opt labels)
         @ base_fields)
-  | Some _ -> (
-      match trace_block with
-      | Some (Keeper_chat_blocks.Trace { trace }) when trace <> [] ->
-          `Assoc
-            ([ string_field "source" "backend_turn_trace"
-             ; string_field "status" "backend_trace_join"
-             ; string_field "reason"
-                 "turn_ref joined to retained trajectory/internal-history events"
-             ; field "trace_event_count" (`Int (List.length trace))
-             ]
-            @ base_fields)
-      | Some _ | None ->
-          let reason =
-            if trace_lookup_available then
-              "turn_ref persisted but no retained trajectory/internal-history events were available"
-            else
-              "history route served without trace enrichment"
-          in
+  | None | Some [] -> (
+      match m.turn_ref with
+      | None ->
           `Assoc
             ([ string_field "source" "keeper_chat_store"
-             ; string_field "status" "history_without_stream_events"
-             ; string_field "reason" reason
+             ; string_field "status" "history_without_turn_ref"
+             ; string_field "reason"
+                 "history row has no persisted turn_ref; no causal stream join is possible"
              ]
-            @ base_fields))
+            @ base_fields)
+      | Some _ -> (
+          match trace_block with
+          | Some (Keeper_chat_blocks.Trace { trace }) when trace <> [] ->
+              `Assoc
+                ([ string_field "source" "backend_turn_trace"
+                 ; string_field "status" "backend_trace_join"
+                 ; string_field "reason"
+                     "turn_ref joined to retained trajectory/internal-history events"
+                 ; field "trace_event_count" (`Int (List.length trace))
+                 ]
+                @ base_fields)
+          | Some _ | None ->
+              let reason =
+                if trace_lookup_available then
+                  "turn_ref persisted but no retained trajectory/internal-history events were available"
+                else "history route served without trace enrichment"
+              in
+              `Assoc
+                ([ string_field "source" "keeper_chat_store"
+                 ; string_field "status" "history_without_stream_events"
+                 ; string_field "reason" reason
+                 ]
+                @ base_fields)))
 
 let to_json_array ?base_dir ?trace_block_by_turn_ref
     (messages : chat_message list) : Yojson.Safe.t =

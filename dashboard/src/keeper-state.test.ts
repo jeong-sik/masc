@@ -386,6 +386,45 @@ describe('thread history merge & persistence', () => {
     })
   })
 
+  it('normalizes durable backend lifecycle stream contracts from REST chat history', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from durable lifecycle replay',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#9',
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-rest#9',
+          event_name: 'RUN_FINISHED',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'TEXT_MESSAGE_START',
+            'TEXT_MESSAGE_END',
+            'RUN_FINISHED',
+          ],
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toEqual({
+      source: 'backend_stream_lifecycle',
+      status: 'backend_lifecycle_replay',
+      turnRef: 'trace-rest#9',
+      eventName: 'RUN_FINISHED',
+      lifecycleEvents: [
+        'RUN_STARTED',
+        'TEXT_MESSAGE_START',
+        'TEXT_MESSAGE_END',
+        'RUN_FINISHED',
+      ],
+      reason: 'history row records durable server stream lifecycle replay',
+    })
+  })
+
   it('falls back explicitly when REST chat history carries an unknown stream contract', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

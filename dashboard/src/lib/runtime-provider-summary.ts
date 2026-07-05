@@ -45,6 +45,7 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
   ])
   const parts = nonEmptyParts([
     item.source ? `source:${item.source}` : null,
+    item.protocol ? `protocol:${item.protocol}` : null,
     typeof modelCount === 'number' ? `models:${modelCount}` : null,
     typeof item.max_context === 'number' ? `ctx:${item.max_context}` : null,
     typeof item.max_output_tokens === 'number' ? `out:${item.max_output_tokens}` : null,
@@ -54,6 +55,9 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
       : null,
     formats.length > 0 ? `format:${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
+    typeof item.tools_support === 'boolean' ? `tools:${item.tools_support ? 'on' : 'off'}` : null,
+    typeof item.thinking_support === 'boolean' ? `thinking:${item.thinking_support ? 'on' : 'off'}` : null,
+    typeof item.streaming === 'boolean' ? `streaming:${item.streaming ? 'on' : 'off'}` : null,
     typeof item.supports_multimodal_inputs === 'boolean'
       ? `multimodal:${item.supports_multimodal_inputs ? 'on' : 'off'}`
       : null,
@@ -63,6 +67,7 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
     typeof item.supports_reasoning_budget === 'boolean'
       ? `reasoning-budget:${item.supports_reasoning_budget ? 'on' : 'off'}`
       : null,
+    item.thinking_control_format ? `thinking-control:${item.thinking_control_format}` : null,
     controls.length > 0 ? `controls:${controls.join(',')}` : null,
     note ? `note:${note}` : null,
   ])

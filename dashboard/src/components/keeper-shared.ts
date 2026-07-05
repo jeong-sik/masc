@@ -268,6 +268,7 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
     delivery: 'queued',
     streamState: undefined,
     attachments: msg.attachments,
+    blocks: msg.blocks,
     details: null,
     error: null,
   }
@@ -318,6 +319,11 @@ function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[
       data: b.data ?? b.src ?? '',
       dims: b.dims,
     }))
+}
+
+function blocksToDisplayBlocks(blocks: ChatBlock[]): ChatBlock[] | undefined {
+  const displayBlocks = blocks.filter((block) => block.t !== 'attach')
+  return displayBlocks.length > 0 ? displayBlocks : undefined
 }
 
 // ── Diagnostic chip ──────────────────────────────────────
@@ -684,7 +690,9 @@ export function KeeperConversationPanel({
         try {
           await sendKeeperThreadMessage(keeperName, content, {
             attachments,
+            blocks: queued.blocks,
             clientActionId: queued.clientActionId,
+            userBlocks: queued.userBlocks,
           })
           markInputSent(keeperName)
           bumpQueue()
@@ -714,6 +722,7 @@ export function KeeperConversationPanel({
     }
     if (!keeperName || (!prompt && blocks.length === 0)) return
     const attachments = blocksToAttachments(blocks)
+    const displayBlocks = blocksToDisplayBlocks(blocks)
     if (keeperSending.value[keeperName]) {
       if (
         isKeeperThreadMessageSendInFlight(keeperName, clientActionId)
@@ -726,12 +735,19 @@ export function KeeperConversationPanel({
         prompt,
         attachments.length > 0 ? attachments : undefined,
         clientActionId,
+        displayBlocks,
+        userBlocks,
       )
       bumpQueue()
       return
     }
     try {
-      await sendKeeperThreadMessage(keeperName, prompt, { attachments, clientActionId, userBlocks })
+      await sendKeeperThreadMessage(keeperName, prompt, {
+        attachments,
+        blocks: displayBlocks,
+        clientActionId,
+        userBlocks,
+      })
     } catch (err) {
       if (isAbortError(err)) return
       const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`

@@ -329,6 +329,54 @@ describe('keeperConfigControlInventory', () => {
     }
   })
 
+  it('ties every ledger row to structured field, api, local-state, or unsupported contracts', () => {
+    const c = makeKeeperConfig()
+    for (const tab of KCF_TAB_IDS) {
+      for (const row of keeperConfigControlInventory(tab, c)) {
+        expect(row.contracts.length, row.id).toBeGreaterThan(0)
+        const contractKinds = row.contracts.map(contract => contract.kind)
+        if (row.kind === 'browser-local') {
+          expect(contractKinds, row.id).toContain('browser-state')
+          expect(contractKinds, row.id).not.toContain('keeper-config-field')
+        } else if (row.kind === 'unsupported') {
+          expect(contractKinds, row.id).toContain('unsupported')
+        } else {
+          expect(
+            contractKinds.includes('api') || contractKinds.includes('keeper-config-field'),
+            row.id,
+          ).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('records exact api contracts for controls that are easy to drift from their source text', () => {
+    const c = makeKeeperConfig()
+
+    expect(findItem('runtime', c, 'kcf-runtime-catalog').contracts).toContainEqual({
+      kind: 'api',
+      method: 'GET',
+      endpoint: '/api/v1/providers',
+    })
+    expect(findItem('policy', c, 'kcf-policy-tool-policy').contracts).toContainEqual({
+      kind: 'api',
+      method: 'POST',
+      endpoint: '/api/v1/keepers/:name/tools',
+      operation: 'set_policy',
+    })
+    expect(findItem('goals', c, 'kcf-goals-catalog-filter').contracts).toContainEqual({
+      kind: 'api',
+      method: 'GET',
+      endpoint: '/api/v1/dashboard/goals',
+    })
+    expect(findItem('health', c, 'kcf-health-directives').contracts).toContainEqual({
+      kind: 'api',
+      method: 'POST',
+      endpoint: '/api/v1/keepers/:name/directive',
+      operation: 'pause/resume/wakeup',
+    })
+  })
+
   it('classifies runtime-backed controls from the manifest writer guard', () => {
     const toml = makeKeeperConfig()
     const base = makeKeeperConfig()
@@ -343,10 +391,24 @@ describe('keeperConfigControlInventory', () => {
     const runtimeWrite = findItem('runtime', toml, 'kcf-runtime-assignment')
     expect(runtimeWrite.kind).toBe('live-write')
     expect(runtimeWrite.action).toContain('PATCH /api/v1/keepers/:name/config runtime_id')
+    expect(runtimeWrite.contracts).toContainEqual({
+      kind: 'keeper-config-field',
+      path: 'execution.selected_runtime_id',
+    })
+    expect(runtimeWrite.contracts).toContainEqual({
+      kind: 'api',
+      method: 'PATCH',
+      endpoint: '/api/v1/keepers/:name/config',
+      operation: 'runtime_id',
+    })
 
     const runtimeUnsupported = findItem('runtime', persona, 'kcf-runtime-assignment')
     expect(runtimeUnsupported.kind).toBe('unsupported')
     expect(runtimeUnsupported.action).toContain('현재 기본 소스: persona')
+    expect(runtimeUnsupported.contracts).toContainEqual({
+      kind: 'unsupported',
+      reason: expect.stringContaining('현재 기본 소스: persona'),
+    })
   })
 
   it('keeps separate API writers live even when runtime manifest writes are unsupported', () => {

@@ -89,7 +89,7 @@
   border-top: 1px solid var(--border-soft);
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(88px, 0.7fr) minmax(140px, 1fr) minmax(180px, 1.25fr) minmax(180px, 1.25fr);
+  grid-template-columns: minmax(88px, 0.65fr) minmax(130px, 0.9fr) minmax(160px, 1fr) minmax(160px, 1fr) minmax(180px, 1.15fr);
   min-width: 0;
   padding: 9px 10px;
 }
@@ -125,7 +125,8 @@
   min-width: 0;
 }
 .kcf-control-source,
-.kcf-control-action {
+.kcf-control-action,
+.kcf-control-contracts {
   color: var(--text-dim);
   font-size: var(--fs-11);
   line-height: 1.4;

@@ -58,3 +58,10 @@ val drop_by_post_id :
 (** Remove matching stimuli from pending and in-flight snapshots under one
     persistence lock, returning the exact removed stimuli for ledger
     acknowledgement. *)
+
+val fleet_summary_json : now:float -> base_path:string -> Yojson.Safe.t
+(** Diagnostic fleet summary of durable pending and in-flight queue snapshots.
+    This is read-only and does not mutate or de-duplicate files. Parse/read
+    failures are surfaced in the JSON instead of being collapsed to an empty
+    queue, so health probes cannot report a false green while durable queue
+    state is unreadable. *)

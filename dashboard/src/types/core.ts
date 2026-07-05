@@ -898,6 +898,8 @@ export type KeeperConversationStreamState =
   | null
 
 export type KeeperConversationStreamContractSource =
+  | 'keeper_chat_store'
+  | 'backend_turn_trace'
   | 'rest_history'
   | 'sse_event'
   | 'queue_event'
@@ -909,6 +911,8 @@ export type KeeperConversationStreamContractSource =
 export type KeeperConversationStreamContractStatus =
   | 'backend_stream_event'
   | 'backend_terminal_event'
+  | 'backend_trace_join'
+  | 'history_without_turn_ref'
   | 'history_without_stream_events'
   | 'queue_request_event'
   | 'queue_poll_result'
@@ -921,6 +925,8 @@ export interface KeeperConversationStreamContract {
   status: KeeperConversationStreamContractStatus
   eventName?: string | null
   requestId?: string | null
+  turnRef?: string | null
+  traceEventCount?: number | null
   reason?: string | null
 }
 

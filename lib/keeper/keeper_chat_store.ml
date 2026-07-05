@@ -1119,17 +1119,19 @@ let audio_fields_with_expired ~base_dir audio =
       in
       [ ("audio", `Assoc (audio_to_json { a with expired })) ]
 
-let blocks_with_trace ~trace_block_by_turn_ref (m : chat_message) =
+let trace_block_for_turn ~trace_block_by_turn_ref (m : chat_message) =
+  match m.turn_ref, trace_block_by_turn_ref with
+  | Some turn_ref, Some trace_block_by_turn_ref -> trace_block_by_turn_ref turn_ref
+  | None, _ | Some _, None -> None
+
+let blocks_with_trace_block ~trace_block (m : chat_message) =
   let base =
     match m.blocks with
     | Some blocks -> blocks
     | None -> []
   in
-  match m.role, m.turn_ref, trace_block_by_turn_ref with
-  | Role.Assistant, Some turn_ref, Some trace_block_by_turn_ref -> (
-      match trace_block_by_turn_ref turn_ref with
-      | Some trace_block -> base @ [ trace_block ]
-      | None -> base)
+  match m.role, trace_block with
+  | Role.Assistant, Some trace_block -> base @ [ trace_block ]
   | _ -> base
 
 let blocks_fields_of_list = function
@@ -1137,11 +1139,53 @@ let blocks_fields_of_list = function
   | blocks -> [ ("blocks", Keeper_chat_blocks.blocks_to_yojson blocks) ]
 ;;
 
+let chat_stream_contract_json ~trace_lookup_available ~trace_block
+    (m : chat_message) =
+  let field key value = (key, value) in
+  let string_field key value = field key (`String value) in
+  let base_fields =
+    opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string m.turn_ref)
+  in
+  match m.turn_ref with
+  | None ->
+      `Assoc
+        ([ string_field "source" "keeper_chat_store"
+         ; string_field "status" "history_without_turn_ref"
+         ; string_field "reason"
+             "history row has no persisted turn_ref; no causal stream join is possible"
+         ]
+        @ base_fields)
+  | Some _ -> (
+      match trace_block with
+      | Some (Keeper_chat_blocks.Trace { trace }) when trace <> [] ->
+          `Assoc
+            ([ string_field "source" "backend_turn_trace"
+             ; string_field "status" "backend_trace_join"
+             ; string_field "reason"
+                 "turn_ref joined to retained trajectory/internal-history events"
+             ; field "trace_event_count" (`Int (List.length trace))
+             ]
+            @ base_fields)
+      | Some _ | None ->
+          let reason =
+            if trace_lookup_available then
+              "turn_ref persisted but no retained trajectory/internal-history events were available"
+            else
+              "history route served without trace enrichment"
+          in
+          `Assoc
+            ([ string_field "source" "keeper_chat_store"
+             ; string_field "status" "history_without_stream_events"
+             ; string_field "reason" reason
+             ]
+            @ base_fields))
+
 let to_json_array ?base_dir ?trace_block_by_turn_ref
     (messages : chat_message list) : Yojson.Safe.t =
   `List
     (List.map
        (fun m ->
+         let trace_block = trace_block_for_turn ~trace_block_by_turn_ref m in
          `Assoc
            ([ ("id", `String m.id);
               ("role", `String (Role.to_label m.role));
@@ -1186,7 +1230,12 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                      ) atts in
                      [("attachments", `List att_json)])
               @ audio_fields_with_expired ~base_dir m.audio
-              @ blocks_fields_of_list (blocks_with_trace ~trace_block_by_turn_ref m)
+              @ [ ("stream_contract",
+                    chat_stream_contract_json
+                      ~trace_lookup_available:(Option.is_some trace_block_by_turn_ref)
+                      ~trace_block m )
+                ]
+              @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
               @ opt_string_field "turn_ref"
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)))
        messages)

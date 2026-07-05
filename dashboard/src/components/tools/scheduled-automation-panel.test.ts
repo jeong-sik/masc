@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationRequest,
+  DashboardScheduledAutomationSignal,
 } from '../../api'
 
 const mocks = vi.hoisted(() => ({
@@ -53,6 +54,21 @@ function automation(
     },
     fsm: { state: 'idle', active_count: requests.length, terminal_count: 0 },
     requests,
+  }
+}
+
+function signal(
+  overrides: Partial<DashboardScheduledAutomationSignal> & { signal_id: string; schedule_id: string },
+): DashboardScheduledAutomationSignal {
+  const { signal_id, schedule_id, ...rest } = overrides
+  return {
+    signal_id,
+    kind: 'schedule.due_candidate',
+    schedule_id,
+    emitted_at_iso: '2026-06-21T00:00:00Z',
+    due_at_iso: '2026-06-21T00:10:00Z',
+    risk_class: 'read_only',
+    ...rest,
   }
 }
 
@@ -208,6 +224,36 @@ describe('selectWakeSignals', () => {
     expect(signals[0]?.readiness).toBe('blocked_approval')
   })
 
+  it('excludes payload-blocked rows from upcoming wake signals', () => {
+    const signals = selectWakeSignals(
+      automation([
+        request({
+          schedule_id: 's-supported',
+          next_due_at: 100,
+          execution_readiness: 'scheduled',
+          payload_kind: 'keeper.smoke',
+          payload_support: 'supported',
+        }),
+        request({
+          schedule_id: 's-unsupported',
+          next_due_at: 200,
+          execution_readiness: 'scheduled',
+          payload_kind: 'orphan_auto_release',
+          payload_support: 'unsupported',
+        }),
+        request({
+          schedule_id: 's-unknown',
+          next_due_at: 300,
+          execution_readiness: 'scheduled',
+          payload_kind: 'keeper.future',
+          payload_support: 'unknown',
+        }),
+      ]),
+    )
+
+    expect(signals.map(s => s.id)).toEqual(['s-supported'])
+  })
+
   it('uses the recurrence label as kind when payload_kind is absent', () => {
     const signals = selectWakeSignals(
       automation([
@@ -344,6 +390,12 @@ function sampleAutomation(): DashboardScheduledAutomation {
       blocked_approval: 1,
       due_execution_ready: 1,
       expired_effective: 0,
+    },
+    payload_support: {
+      supported_kinds: ['keeper.review', 'keeper.smoke'],
+      unsupported_request_count: 0,
+      unsupported_kinds: [],
+      unknown_request_count: 0,
     },
     fsm: {
       state: 'blocked_approval',
@@ -531,6 +583,162 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-schedule-id="sched-keeper-review"]')).not.toBeNull()
     expect(container.querySelector('[data-schedule-id="sched-run-smoke"]')).toBeNull()
     expect(container.textContent).toContain('sched-run-smoke')
+  })
+
+  it('keeps payload-blocked rows out of every request-derived wake feed', () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.smoke',
+        payload_support: 'supported',
+      }),
+      request({
+        schedule_id: 'sched-unsupported',
+        next_due_at: 200,
+        next_due_at_iso: '2026-06-21T00:20:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'orphan_auto_release',
+        payload_support: 'unsupported',
+      }),
+      request({
+        schedule_id: 'sched-unknown',
+        next_due_at: 300,
+        next_due_at_iso: '2026-06-21T00:30:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.future',
+        payload_support: 'unknown',
+      }),
+    ])
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} />`, container)
+
+    expect(container.querySelector('[data-schedule-id="sched-unsupported"]')).not.toBeNull()
+    const wakeSignalFeed = container.querySelector('[data-testid="sch-signals"]')
+    expect(wakeSignalFeed?.textContent).toContain('sched-supported')
+    expect(wakeSignalFeed?.textContent).not.toContain('sched-unsupported')
+    expect(wakeSignalFeed?.textContent).not.toContain('sched-unknown')
+    expect(container.querySelector('[data-schedule-signal-schedule="sched-supported"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported"]')).toBeNull()
+    expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown"]')).toBeNull()
+  })
+
+  it('keeps payload-blocked rows out of every durable wake signal feed', () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.smoke',
+        payload_support: 'supported',
+      }),
+      request({
+        schedule_id: 'sched-unsupported',
+        next_due_at: 200,
+        next_due_at_iso: '2026-06-21T00:20:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'orphan_auto_release',
+        payload_support: 'unsupported',
+      }),
+      request({
+        schedule_id: 'sched-unknown',
+        next_due_at: 300,
+        next_due_at_iso: '2026-06-21T00:30:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.future',
+        payload_support: 'unknown',
+      }),
+    ])
+    auto.signal_source = 'schedule_runner_signals'
+    auto.signal_count = 3
+    auto.signals = [
+      signal({
+        signal_id: 'sig-supported',
+        schedule_id: 'sched-supported',
+        payload_kind: 'keeper.smoke',
+      }),
+      signal({
+        signal_id: 'sig-unsupported',
+        schedule_id: 'sched-unsupported',
+        payload_kind: 'orphan_auto_release',
+      }),
+      signal({
+        signal_id: 'sig-unknown',
+        schedule_id: 'sched-unknown',
+        payload_kind: 'keeper.future',
+      }),
+    ]
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      if (variant === 'v2') {
+        expect(container.querySelector('[data-schedule-payload-support-row="sched-unsupported"]')).not.toBeNull()
+        expect(container.querySelector('[data-schedule-payload-support-row="sched-unknown"]')).not.toBeNull()
+      } else {
+        expect(container.querySelector('[data-schedule-id="sched-unsupported"]')).not.toBeNull()
+        expect(container.querySelector('[data-schedule-id="sched-unknown"]')).not.toBeNull()
+      }
+      expect(container.querySelector('[data-schedule-signal-id="sig-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unsupported"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unknown"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown"]')).toBeNull()
+    }
+  })
+
+  it('keeps unsupported durable wake signals hidden when the request row is absent', () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.smoke',
+        payload_support: 'supported',
+      }),
+    ])
+    auto.payload_support = {
+      supported_kinds: ['keeper.smoke'],
+      unsupported_request_count: 1,
+      unsupported_kinds: [{ kind: 'orphan_auto_release', count: 1 }],
+      unknown_request_count: 1,
+    }
+    auto.signal_source = 'schedule_runner_signals'
+    auto.signal_count = 3
+    auto.signals = [
+      signal({
+        signal_id: 'sig-supported',
+        schedule_id: 'sched-supported',
+        payload_kind: 'keeper.smoke',
+      }),
+      signal({
+        signal_id: 'sig-unsupported-missing-row',
+        schedule_id: 'sched-unsupported-missing-row',
+        payload_kind: 'orphan_auto_release',
+      }),
+      signal({
+        signal_id: 'sig-unknown-missing-row',
+        schedule_id: 'sched-unknown-missing-row',
+      }),
+    ]
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      expect(container.querySelector('[data-schedule-signal-id="sig-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unsupported-missing-row"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unknown-missing-row"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported-missing-row"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown-missing-row"]')).toBeNull()
+    }
   })
 
   it('uses explicit ready and terminal status matching', async () => {
@@ -760,5 +968,44 @@ describe('ScheduleAside', () => {
     const pendingButton = aside?.querySelector('[data-schedule-aside-open="pending-1"]') as HTMLElement
     pendingButton.click()
     expect(onOpen).toHaveBeenCalledWith('pending-1')
+  })
+
+  it('does not classify payload-blocked rows as actionable aside work', () => {
+    const onOpen = vi.fn()
+    const requests: DashboardScheduledAutomationRequest[] = [
+      request({ schedule_id: 'due-ok', status: 'due', payload_summary: 'supported due work' }),
+      request({
+        schedule_id: 'due-unsupported',
+        status: 'due',
+        payload_support: 'unsupported',
+        payload_kind: 'orphan_auto_release',
+        payload_summary: 'unsupported due work',
+      }),
+      request({
+        schedule_id: 'pending-unknown',
+        status: 'pending_approval',
+        payload_support: 'unknown',
+        payload_kind: 'keeper.future',
+        payload_summary: 'unknown pending work',
+      }),
+    ]
+
+    render(
+      html`<${ScheduleAside}
+        requests=${requests}
+        sum=${{ scheduled: 0, dueRunning: 1, pending: 1, total: 3 }}
+        onOpen=${onOpen}
+      />`,
+      container,
+    )
+
+    const todoText = Array.from(container.querySelectorAll('.wka-todo'))
+      .map(element => element.textContent ?? '')
+      .join('\n')
+    expect(todoText).toContain('supported due work')
+    expect(todoText).not.toContain('unsupported due work')
+    expect(todoText).not.toContain('unknown pending work')
+    expect(container.textContent).toContain('unsupported · orphan_auto_release')
+    expect(container.textContent).toContain('unknown · keeper.future')
   })
 })

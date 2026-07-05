@@ -1095,10 +1095,43 @@ function ChatIssueBlock({ repo, number, title, status, url, meta }: ChatIssueBlo
   `
 }
 
-function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string; dims?: string; src?: string; svg?: string; ph?: string; via?: string; size?: string }) {
+function ChatAttachBlock({
+  name,
+  dims,
+  src,
+  svg,
+  ph,
+  via,
+  size,
+  id,
+  kind,
+  mimeType,
+  sizeBytes,
+}: {
+  name: string
+  dims?: string
+  src?: string
+  svg?: string
+  ph?: string
+  via?: string
+  size?: string
+  id?: string
+  kind?: string
+  mimeType?: string
+  sizeBytes?: number
+}) {
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
   return html`
-    <figure class="chat-block-attach" data-chat-block="attach">
+    <figure
+      class="chat-block-attach"
+      data-chat-block="attach"
+      data-chat-multimodal-source="server_block"
+      data-chat-multimodal-kind=${kind || undefined}
+      data-chat-multimodal-attachment-id=${id || undefined}
+      data-chat-multimodal-mime=${mimeType || undefined}
+      data-chat-multimodal-size-bytes=${sizeBytes ?? undefined}
+      data-chat-attach-via=${via || undefined}
+    >
       <div class="chat-block-attach-hd">
         <span>◫</span>
         <span class="chat-block-attach-name">${name}</span>
@@ -1773,7 +1806,7 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'chart': return html`<${ChatChartBlock} title=${block.title} series=${block.series} labels=${block.labels} xLabel=${block.xLabel} yMax=${block.yMax} />`
     case 'suggestions': return html`<${ChatSuggestionsBlock} items=${block.items} />`
     case 'issue': return html`<${ChatIssueBlock} repo=${block.repo} number=${block.number} title=${block.title} status=${block.status} url=${block.url} meta=${block.meta} />`
-    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
+    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} id=${block.id} kind=${block.kind} mimeType=${block.mimeType} sizeBytes=${block.sizeBytes} />`
     case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} src=${block.src} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
@@ -1822,11 +1855,17 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
   const canDownload = isSafeAttachmentHref(attachment)
   const meta = attachmentMeta(attachment)
   const isImage = isRenderableImageAttachment(attachment)
+  const multimodalKind = userInputMediaKindForAttachment(attachment)
 
   return html`
     <div
       class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-chat-attachment-card=${attachment.id}
+      data-chat-multimodal-source="persisted_attachment"
+      data-chat-multimodal-kind=${multimodalKind}
+      data-chat-multimodal-attachment-id=${attachment.id}
+      data-chat-multimodal-mime=${attachment.mimeType}
+      data-chat-multimodal-size-bytes=${attachment.size}
     >
       ${isImage
         ? html`
@@ -2101,6 +2140,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const timestamp = timeLabel(entry.timestamp)
   const sourceBadge = showSourceBadge ? sourceBadgeInfo(entry) : null
   const attachments = entry.attachments ?? []
+  const attachBlocks = effectiveBlocks.filter((block): block is Extract<ChatBlock, { t: 'attach' }> => block.t === 'attach')
+  const persistedAttachmentKinds = attachments.map(userInputMediaKindForAttachment)
+  const serverAttachKinds = attachBlocks
+    .map(block => block.kind?.trim())
+    .filter((value): value is string => Boolean(value))
+  const multimodalKinds = Array.from(new Set([...persistedAttachmentKinds, ...serverAttachKinds]))
+  const multimodalSources = [
+    attachments.length > 0 ? 'persisted_attachment' : null,
+    attachBlocks.length > 0 ? 'server_block' : null,
+  ].filter((value): value is string => value !== null)
   const surfaceInfo = surfaceLink(entry.surface)
 
   return html`
@@ -2127,6 +2176,10 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-attachment-count=${attachments.length}
+      data-chat-server-attach-block-count=${attachBlocks.length}
+      data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
+      data-chat-multimodal-kinds=${multimodalKinds.length > 0 ? multimodalKinds.join(',') : undefined}
     >
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>

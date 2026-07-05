@@ -665,6 +665,19 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('img[alt="screenshot.png"]')).not.toBeNull()
     expect(container.textContent).toContain('log.txt')
     expect(container.textContent).not.toContain('상세 보기')
+    const bubble = container.querySelector('[data-chat-entry-id="u1"]')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('2')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('persisted_attachment')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image,document')
+    const imageCard = container.querySelector('[data-chat-attachment-card="att-1"]')
+    expect(imageCard?.getAttribute('data-chat-multimodal-source')).toBe('persisted_attachment')
+    expect(imageCard?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(imageCard?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(imageCard?.getAttribute('data-chat-multimodal-size-bytes')).toBe('1024')
+    const fileCard = container.querySelector('[data-chat-attachment-card="att-2"]')
+    expect(fileCard?.getAttribute('data-chat-multimodal-kind')).toBe('document')
+    expect(fileCard?.getAttribute('data-chat-multimodal-mime')).toBe('text/plain')
   })
 
   it('does not show streaming ellipsis before elapsed time starts', () => {
@@ -1303,11 +1316,15 @@ describe('Keeper v2 chat blocks', () => {
             blocks: [
               {
                 t: 'attach',
+                id: 'srv-att-1',
                 name: 'screen.png',
+                kind: 'image',
                 dims: '100×100',
                 src: 'https://example.com/screen.png',
                 via: 'vision',
                 size: '12 KB',
+                mimeType: 'image/png',
+                sizeBytes: 12_288,
               },
             ],
           }),
@@ -1319,9 +1336,20 @@ describe('Keeper v2 chat blocks', () => {
 
     const blocks = container.querySelector('[data-chat-blocks]')
     const attach = container.querySelector('[data-chat-block="attach"]')
+    const bubble = container.querySelector('[data-chat-entry-id="u-rich"]')
     expect(blocks).not.toBeNull()
     expect(attach?.textContent).toContain('screen.png')
     expect(attach?.querySelector('img')?.getAttribute('src')).toBe('https://example.com/screen.png')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('1')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('server_block')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(attach?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-attachment-id')).toBe('srv-att-1')
+    expect(attach?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(attach?.getAttribute('data-chat-multimodal-size-bytes')).toBe('12288')
+    expect(attach?.getAttribute('data-chat-attach-via')).toBe('vision')
   })
 
   it('blocks unsafe attach image src and falls back to placeholder', () => {
@@ -1337,6 +1365,8 @@ describe('Keeper v2 chat blocks', () => {
     ])
 
     expect(container.querySelector('[data-chat-block="attach"] img')).toBeNull()
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-kind')).toBeNull()
     expect(container.textContent).toContain('unsafe URL')
   })
 

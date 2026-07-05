@@ -124,6 +124,10 @@ export type KeeperConfigControlEvidence =
   | { readonly kind: 'browser-state'; readonly key: KeeperConfigBrowserStateKey }
   | { readonly kind: 'unsupported'; readonly reason: string }
 
+export type KeeperConfigControlContractStatus =
+  | { readonly kind: 'ok'; readonly missingConfigFields: readonly [] }
+  | { readonly kind: 'missing-config-field'; readonly missingConfigFields: readonly KeeperConfigFieldPath[] }
+
 export type KeeperConfigControlInventoryItem = {
   readonly id: string
   readonly tab: KcfTabId
@@ -428,6 +432,34 @@ function browserState(key: KeeperConfigBrowserStateKey): KeeperConfigControlEvid
 
 function unsupportedContract(reason: string): KeeperConfigControlEvidence {
   return { kind: 'unsupported', reason }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function keeperConfigHasField(config: KeeperConfig, path: KeeperConfigFieldPath): boolean {
+  let current: unknown = config
+  for (const segment of path.split('.')) {
+    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      return false
+    }
+    current = current[segment]
+  }
+  return true
+}
+
+export function keeperConfigControlContractStatus(
+  contracts: readonly KeeperConfigControlEvidence[],
+  config: KeeperConfig,
+): KeeperConfigControlContractStatus {
+  const missingConfigFields = contracts
+    .filter((contract): contract is Extract<KeeperConfigControlEvidence, { kind: 'keeper-config-field' }> => contract.kind === 'keeper-config-field')
+    .map(contract => contract.path)
+    .filter(path => !keeperConfigHasField(config, path))
+
+  if (missingConfigFields.length === 0) return { kind: 'ok', missingConfigFields: [] }
+  return { kind: 'missing-config-field', missingConfigFields }
 }
 
 function configReadContracts(paths: readonly KeeperConfigFieldPath[]): KeeperConfigControlEvidence[] {
@@ -1091,6 +1123,7 @@ function keeperConfigControlEndpointShortLabel(endpoint: KeeperConfigControlEndp
 
 function keeperConfigControlEvidenceSummary(
   contracts: readonly KeeperConfigControlEvidence[],
+  contractStatus: KeeperConfigControlContractStatus = { kind: 'ok', missingConfigFields: [] },
 ): string {
   const apiLabels = contracts
     .filter((contract): contract is Extract<KeeperConfigControlEvidence, { kind: 'api' }> => contract.kind === 'api')
@@ -1110,6 +1143,9 @@ function keeperConfigControlEvidenceSummary(
     fieldCount > 0 ? `${fieldCount} config field${fieldCount === 1 ? '' : 's'}` : null,
     ...localLabels,
     unsupported ? 'unsupported reason' : null,
+    contractStatus.kind === 'missing-config-field'
+      ? `missing ${contractStatus.missingConfigFields.length} config field${contractStatus.missingConfigFields.length === 1 ? '' : 's'}`
+      : null,
   ].filter((part): part is string => part !== null).join(' · ')
 }
 
@@ -1123,14 +1159,19 @@ function KeeperConfigControlLedger({ tab, config }: { tab: KcfTabId; config: Kee
         <span class="mono" data-testid="keeper-config-control-ledger-count">${items.length}</span>
       </div>
       <div class="kcf-control-ledger-grid">
-        ${items.map(item => html`
+        ${items.map(item => {
+          const contractStatus = keeperConfigControlContractStatus(item.contracts, config)
+          const missingConfigFields = contractStatus.missingConfigFields.join(' | ')
+          return html`
           <div
             key=${item.id}
-            class=${`kcf-control-ledger-row ${item.kind}`}
+            class=${`kcf-control-ledger-row ${item.kind} ${contractStatus.kind}`}
             data-testid="keeper-config-control-ledger-row"
             data-control-id=${item.id}
             data-control-kind=${item.kind}
+            data-control-contract-status=${contractStatus.kind}
             data-control-contracts=${keeperConfigControlEvidenceLabels(item.contracts)}
+            data-control-missing-config-fields=${missingConfigFields}
           >
             <span class="kcf-control-kind">${keeperConfigControlKindLabel(item.kind)}</span>
             <span class="kcf-control-label">${item.label}</span>
@@ -1140,10 +1181,10 @@ function KeeperConfigControlLedger({ tab, config }: { tab: KcfTabId; config: Kee
               class="kcf-control-contracts mono"
               title=${keeperConfigControlEvidenceLabels(item.contracts)}
             >
-              ${keeperConfigControlEvidenceSummary(item.contracts)}
+              ${keeperConfigControlEvidenceSummary(item.contracts, contractStatus)}
             </span>
           </div>
-        `)}
+        `})}
       </div>
     </section>
   `

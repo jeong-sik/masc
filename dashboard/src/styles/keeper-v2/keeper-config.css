@@ -119,6 +119,9 @@
   border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
   color: var(--status-fail);
 }
+.kcf-control-ledger-row.missing-config-field .kcf-control-contracts {
+  color: var(--status-warn);
+}
 .kcf-control-label {
   color: var(--text-primary);
   font-size: var(--fs-12);

@@ -10,6 +10,7 @@ import {
   hookSlotDetails,
   initRuntimeDraftFromConfig,
   KCF_TAB_IDS,
+  keeperConfigControlContractStatus,
   keeperConfigControlInventory,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
@@ -409,6 +410,19 @@ describe('keeperConfigControlInventory', () => {
       kind: 'unsupported',
       reason: expect.stringContaining('현재 기본 소스: persona'),
     })
+  })
+
+  it('reports missing optional config fields without treating present nulls as absent', () => {
+    const c = makeKeeperConfig({ hooks: undefined })
+
+    const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
+    const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
+    expect(hookStatus.kind).toBe('missing-config-field')
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget'])
+
+    const contextOverride = findItem('runtime', c, 'kcf-runtime-context-override')
+    const contextStatus = keeperConfigControlContractStatus(contextOverride.contracts, c)
+    expect(contextStatus.kind).toBe('ok')
   })
 
   it('keeps separate API writers live even when runtime manifest writes are unsupported', () => {
@@ -1300,6 +1314,28 @@ describe('KeeperConfigPanel', () => {
     )
     expect(runtimeSave).toBeUndefined()
     expect(mocks.patchKeeperConfig).not.toHaveBeenCalled()
+  })
+
+  it('surfaces missing config-field contracts in the rendered ledger', async () => {
+    const noHooksConfig = makeKeeperConfig({ hooks: undefined })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(noHooksConfig)
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '훅')
+    await flush()
+
+    const hookRow = container.querySelector('[data-control-id="kcf-hooks-slots"]')
+    expect(hookRow?.getAttribute('data-control-contract-status')).toBe('missing-config-field')
+    expect(hookRow?.getAttribute('data-control-missing-config-fields'))
+      .toBe('hooks.slots | hooks.deny_list | hooks.cost_budget')
+    expect(hookRow?.textContent).toContain('missing 3 config fields')
+
+    const hookFilter = container.querySelector('[data-control-id="kcf-hooks-filter"]')
+    expect(hookFilter?.getAttribute('data-control-contract-status')).toBe('ok')
+    expect(hookFilter?.getAttribute('data-control-missing-config-fields')).toBe('')
   })
 
   it('saves the tool denylist via set_policy, echoing current tool_access and deduping entries', async () => {

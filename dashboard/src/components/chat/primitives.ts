@@ -2121,6 +2121,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
       data-chat-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
       data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
+      data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
     >
@@ -2492,6 +2494,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
       data-chat-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
       data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
+      data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
     >
@@ -2823,6 +2827,8 @@ function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-trace-stream-contract-source=${entry.streamContract?.source ?? 'unspecified'}
       data-chat-trace-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
       data-chat-trace-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
+      data-chat-trace-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-trace-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
     >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
@@ -2918,6 +2924,8 @@ function ToolTraceCard({
       data-chat-turn-stream-contract-status=${assistant?.streamContract?.status ?? undefined}
       data-chat-turn-stream-contract-event=${assistant?.streamContract?.eventName ?? undefined}
       data-chat-turn-stream-contract-request-id=${assistant?.streamContract?.requestId ?? undefined}
+      data-chat-turn-stream-contract-turn-ref=${assistant?.streamContract?.turnRef ?? undefined}
+      data-chat-turn-stream-contract-trace-events=${assistant?.streamContract?.traceEventCount ?? undefined}
       data-chat-tool-output-hydration-source=${toolOutputHydrationContract?.source ?? undefined}
       data-chat-tool-output-hydration-status=${toolOutputHydrationContract?.status ?? 'not-requested'}
       data-chat-tool-output-hydration-failure=${toolOutputHydrationContract?.failureReason ?? undefined}

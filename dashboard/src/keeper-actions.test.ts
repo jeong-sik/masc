@@ -217,6 +217,35 @@ describe('hydrateKeeperChatHistory', () => {
     expect(thread[1]?.role).toBe('assistant')
   })
 
+  it('keeps backend stream contracts when hydrating server history', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_000,
+        turn_ref: 'trace-hydrate#2',
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          turn_ref: 'trace-hydrate#2',
+          trace_event_count: 2,
+          reason: 'turn_ref joined to retained trajectory/internal-history events',
+        },
+      },
+    ])
+
+    await hydrateKeeperChatHistory('echo')
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread[0]?.streamContract).toEqual({
+      source: 'backend_turn_trace',
+      status: 'backend_trace_join',
+      turnRef: 'trace-hydrate#2',
+      traceEventCount: 2,
+      reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
+  })
+
   it('fetches only once per keeper per page lifetime', async () => {
     fetchKeeperChatHistory.mockResolvedValue([])
 

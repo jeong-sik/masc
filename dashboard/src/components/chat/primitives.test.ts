@@ -192,9 +192,11 @@ describe('ChatTranscript', () => {
             rawText: 'channel reply',
             turnRef: 'trace-ui#9',
             streamContract: {
-              source: 'rest_history',
-              status: 'history_without_stream_events',
-              reason: 'history rows do not carry stream lifecycle events',
+              source: 'backend_turn_trace',
+              status: 'backend_trace_join',
+              turnRef: 'trace-ui#9',
+              traceEventCount: 2,
+              reason: 'turn_ref joined to retained trajectory/internal-history events',
             },
             surface: {
               kind: 'discord',
@@ -217,8 +219,10 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-surface-kind')).toBe('discord')
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-ui#9')
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
-    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
-    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('backend_turn_trace')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('backend_trace_join')
+    expect(bubble.getAttribute('data-chat-stream-contract-turn-ref')).toBe('trace-ui#9')
+    expect(bubble.getAttribute('data-chat-stream-contract-trace-events')).toBe('2')
     const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
     expect(surfaceLink?.textContent).toContain('Discord Thread')
   })

@@ -146,12 +146,12 @@ let board_event_kind_label = function
 
 let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
   Printf.sprintf
-    " reaction=%s target=%s:%s user=%s emoji=%S"
+    " reaction=%s target=%s:%s user=%s emoji=%s"
     (if reaction.reacted then "added" else "removed")
     (Board.reaction_target_type_to_string reaction.target_type)
     reaction.target_id
     reaction.user_id
-    reaction.emoji
+    (Yojson.Safe.to_string (`String reaction.emoji))
 ;;
 
 let board_event_note = function

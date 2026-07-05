@@ -2017,6 +2017,12 @@ let () = test "transition_done_completes_after_llm_review_and_clears_planning_cu
           ("task_id", `String "task-001");
           ("action", `String "done");
           ("notes", `String "Task scope satisfied: Transition done. Implemented the transport parity checks and verified the result. commit:abc123");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "Task scope satisfied: Transition done");
+                ("evidence_refs", `List [ `String "commit:abc123" ]);
+              ] );
         ])
   in
   assert (Tool_result.is_success done_result);

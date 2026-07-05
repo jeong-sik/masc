@@ -2115,6 +2115,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-role=${entry.role}
       data-chat-source=${entry.source}
       data-chat-delivery-state=${entry.delivery}
+      data-chat-stream-state=${entry.streamState ?? 'complete'}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
     >
@@ -2481,6 +2482,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-role=${entry.role}
       data-chat-source=${entry.source}
       data-chat-delivery-state=${entry.delivery}
+      data-chat-stream-state=${entry.streamState ?? 'complete'}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
     >
@@ -2546,11 +2548,13 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
-type ToolTraceDisplayStatus = 'pending' | 'missing' | 'unlinked' | 'ok' | 'bad'
+type ToolTraceDisplayStatus = 'pending' | 'missing' | 'coverage-gap' | 'unlinked' | 'ok' | 'bad'
+type ToolOutputCoverageState = 'not-hydrated' | 'covered' | 'coverage-gap' | 'not-applicable'
 
 const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
   pending: '출력 대기 중',
   missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
+  'coverage-gap': '출력 tail 범위 밖 — 결과 누락 여부를 확정할 수 없음',
   unlinked: '도구 호출 ID 없음 — 출력 조인 불가',
   ok: '성공',
   bad: '실패',
@@ -2564,16 +2568,17 @@ function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean
   return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing'
 }
 
-function isToolOutputCoveredByHydration(
+function toolOutputCoverageState(
   entry: KeeperConversationEntry,
   coveredSinceMs: number | null | undefined,
   coveredThroughMs: number | null | undefined,
-): boolean {
-  if (coveredThroughMs == null) return false
+): ToolOutputCoverageState {
+  if (coveredThroughMs == null) return 'not-hydrated'
   const timestampMs = entry.timestamp ? Date.parse(entry.timestamp) : NaN
-  return Number.isFinite(timestampMs)
-    && (coveredSinceMs == null || timestampMs >= coveredSinceMs)
-    && timestampMs <= coveredThroughMs
+  if (!Number.isFinite(timestampMs)) return 'coverage-gap'
+  if (coveredSinceMs != null && timestampMs < coveredSinceMs) return 'coverage-gap'
+  if (timestampMs > coveredThroughMs) return 'coverage-gap'
+  return 'covered'
 }
 
 function toolTraceCallId(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): string | null {
@@ -2606,11 +2611,13 @@ function ToolTraceStep({
   entry,
   output,
   canMarkMissing = false,
+  coverageState = 'not-applicable',
   traceStep,
 }: {
   entry: KeeperConversationEntry | null
   output: ToolCallEntry | null
   canMarkMissing?: boolean
+  coverageState?: ToolOutputCoverageState
   traceStep?: ChatTraceToolStep
 }) {
   const [open, setOpen] = useState(false)
@@ -2628,7 +2635,7 @@ function ToolTraceStep({
         ? 'bad'
         : traceStep?.status === 'ok'
           ? 'ok'
-          : (canMarkMissing ? 'missing' : 'pending')
+          : (coverageState === 'coverage-gap' ? 'coverage-gap' : canMarkMissing ? 'missing' : 'pending')
       : output.success === false || output.semantic_success === false
         ? 'bad'
         : 'ok'
@@ -2652,6 +2659,7 @@ function ToolTraceStep({
       data-chat-trace-entry-id=${entry?.id ?? undefined}
       data-chat-trace-link-state=${unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
       data-chat-trace-output-state=${status}
+      data-chat-trace-output-coverage=${coverageState}
     >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
@@ -2689,7 +2697,13 @@ function ToolTraceStep({
                   : output === null
                     ? unlinkedTraceTool
                       ? null
-                      : html`<div class="chat-block-tool-label">${canMarkMissing ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
+                      : html`<div class="chat-block-tool-label">${
+                          coverageState === 'coverage-gap'
+                            ? '출력 tail 범위 밖 — 이 도구 시점을 덮는 결과 hydration이 아직 없음'
+                            : canMarkMissing
+                              ? '결과 없음 — 출력이 도착하지 않음'
+                              : '출력 대기 중…'
+                        }</div>`
                     : null}
               </div>
             `
@@ -2826,8 +2840,10 @@ function ToolTraceCard({
     setOpen((o) => !o)
   }
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
+  const coverageStateForEntry = (entry: KeeperConversationEntry): ToolOutputCoverageState =>
+    toolOutputCoverageState(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
-    turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
+    turnComplete && coverageStateForEntry(entry) === 'covered'
   const ordered = assistant
     ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
     : interleaveTraceAndTools(traceSteps, steps)
@@ -2843,6 +2859,9 @@ function ToolTraceCard({
   const missingN = orderedToolSteps.filter(
     (s) => s.output === null && s.entry !== null && canMarkMissingForEntry(s.entry),
   ).length
+  const coverageGapN = orderedToolSteps.filter(
+    (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'coverage-gap',
+  ).length
   const unlinkedN = orderedToolSteps.filter(
     (s) => s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
   ).length
@@ -2855,7 +2874,16 @@ function ToolTraceCard({
   const stepN = ordered.length
 
   return html`
-    <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace" data-chat-work-trace data-chat-tool-trace>
+    <div
+      class="chat-block-trace ${open ? 'open' : ''}"
+      data-chat-block="trace"
+      data-chat-work-trace
+      data-chat-tool-trace
+      data-chat-turn-stream-state=${assistant ? (assistant.streamState ?? 'complete') : undefined}
+      data-chat-turn-complete=${turnComplete ? 'true' : 'false'}
+      data-chat-tool-output-covered-since=${toolOutputsCoveredSinceMs ?? undefined}
+      data-chat-tool-output-covered-through=${toolOutputsCoveredThroughMs ?? undefined}
+    >
       <button
         type="button"
         class="chat-block-trace-hd"
@@ -2872,6 +2900,7 @@ function ToolTraceCard({
           ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
           ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
+          ${coverageGapN > 0 ? html`<span class="text-[var(--color-status-warn)]">출력 범위 밖 ${coverageGapN}</span>` : null}
           ${unlinkedN > 0 ? html`<span class="text-[var(--color-status-warn)]">조인 불가 ${unlinkedN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
         </span>
@@ -2894,6 +2923,7 @@ function ToolTraceCard({
                           entry=${item.entry}
                           output=${item.output}
                           canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
+                          coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
                           traceStep=${item.step}
                         />`
                       })()
@@ -2903,6 +2933,7 @@ function ToolTraceCard({
                           entry=${item.entry}
                           output=${item.output}
                           canMarkMissing=${canMarkMissingForEntry(item.entry)}
+                          coverageState=${coverageStateForEntry(item.entry)}
                         />`
                     : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} />`)}
             </div>

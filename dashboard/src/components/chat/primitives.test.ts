@@ -211,6 +211,7 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-source')).toBe('direct_assistant')
     expect(bubble.getAttribute('data-chat-surface-kind')).toBe('discord')
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-ui#9')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
     const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
     expect(surfaceLink?.textContent).toContain('Discord Thread')
   })
@@ -238,6 +239,7 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-role')).toBe('tool')
     expect(bubble.getAttribute('data-chat-source')).toBe('tool_result')
     expect(bubble.getAttribute('data-chat-delivery-state')).toBe('history')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
     expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-tool#3')
     expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
   })
@@ -2201,6 +2203,8 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     const traceToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
     expect(trace).not.toBeNull()
     expect(traceToggle).not.toBeNull()
+    expect(trace?.getAttribute('data-chat-turn-stream-state')).toBe('streaming')
+    expect(trace?.getAttribute('data-chat-turn-complete')).toBe('false')
     expect(traceToggle?.getAttribute('aria-expanded')).toBe('false')
     expect(trace?.textContent).toContain('턴 타임라인')
     expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
@@ -2261,6 +2265,9 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
       const settledToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
       expect(settledToggle?.getAttribute('aria-expanded')).toBe('true')
     })
+    const settledTrace = container.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(settledTrace?.getAttribute('data-chat-turn-stream-state')).toBe('complete')
+    expect(settledTrace?.getAttribute('data-chat-turn-complete')).toBe('true')
     expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain(thinking)
     expect(container.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('완료된 응답')
   })
@@ -2405,10 +2412,15 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     expect(bundle).not.toBeNull()
+    const trace = bundle?.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe(`${Date.parse('2026-03-24T00:00:00.000Z')}`)
+    expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(`${Date.parse('2026-03-24T00:00:01.000Z')}`)
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
     // Settled turn + never-joined output is a real gap, not an indefinite pending.
     expect(step?.querySelector('.chat-block-tstep-status.missing')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('missing')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
     // The gap is surfaced in the card header so silent failures are visible.
     expect(bundle?.textContent).toContain('결과 누락 1')
   })
@@ -2437,10 +2449,12 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('not-hydrated')
     expect(bundle?.textContent).not.toContain('결과 누락')
   })
 
-  it('keeps a settled unjoined tool step pending when only older output hydration completed', () => {
+  it('marks a settled unjoined tool step as coverage-gap when only older output hydration completed', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -2468,12 +2482,16 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('coverage-gap')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
     expect(bundle?.textContent).not.toContain('결과 누락')
+    expect(bundle?.textContent).toContain('출력 범위 밖 1')
   })
 
-  it('keeps a settled unjoined tool step pending when it predates the hydrated tool-output tail', () => {
+  it('marks a settled unjoined tool step as coverage-gap when it predates the hydrated tool-output tail', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -2502,9 +2520,13 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('coverage-gap')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
     expect(bundle?.textContent).not.toContain('결과 누락')
+    expect(bundle?.textContent).toContain('출력 범위 밖 1')
   })
 
   it('keeps an unjoined tool step pending while the owning turn is still streaming', () => {

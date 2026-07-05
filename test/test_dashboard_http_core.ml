@@ -1173,6 +1173,54 @@ let test_dashboard_fleet_composite_envelope_is_cached () =
     "second fleet-composite poll hits cache (identical generated_at)"
     true (gen1 = gen2)
 
+let test_offline_keeper_composite_exposes_secret_projection () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let keeper_name = "offline-secret-keeper" in
+  let sentinel = "ghs_offline_secret_projection_regression" in
+  (match
+     Masc.Keeper_secret_projection.set_env_entry
+       ~base_path:config.base_path
+       ~keeper_name
+       ~scope:Masc.Keeper_secret_projection.Shared_secret
+       ~name:"GH_TOKEN"
+       ~value:sentinel
+   with
+   | Ok () -> ()
+   | Error err -> Alcotest.failf "set shared secret failed: %s" err);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String keeper_name
+           ; "agent_name", `String keeper_name
+           ; "trace_id", `String "offline-secret-trace"
+           ])
+    with
+    | Ok meta -> { meta with Masc.Keeper_meta_contract.paused = true }
+    | Error err -> Alcotest.failf "meta fixture failed: %s" err
+  in
+  let json =
+    Server_dashboard_http_keeper_api.offline_keeper_composite_json
+      ~config
+      keeper_name
+      meta
+  in
+  let open Yojson.Safe.Util in
+  let projection = json |> member "secret_projection" in
+  Alcotest.(check string)
+    "offline composite includes ready secret projection"
+    "ready"
+    (projection |> member "status" |> to_string);
+  Alcotest.(check (list string))
+    "offline composite reports projected env names"
+    [ "GH_TOKEN" ]
+    (projection |> member "env_names" |> to_list |> List.map to_string);
+  Alcotest.(check bool)
+    "offline composite redacts secret values"
+    false
+    (contains_substring (Yojson.Safe.to_string json) sentinel)
+
 let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1612,6 +1660,8 @@ let () =
             test_telemetry_n_default_is_bounded;
           test_case "fleet-composite envelope is cached across polls" `Quick
             test_dashboard_fleet_composite_envelope_is_cached;
+          test_case "offline keeper composite exposes secret projection" `Quick
+            test_offline_keeper_composite_exposes_secret_projection;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick

@@ -58,6 +58,33 @@ let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
 
+let check_list_has_string label expected json =
+  check bool label true
+    (json
+     |> to_list
+     |> List.exists (fun item -> String.equal expected (to_string item)))
+;;
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+;;
+
+let event_queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
+;;
+
 let latest_row rows =
   match List.rev rows with
   | row :: _ -> row
@@ -769,6 +796,319 @@ let test_summary_links_passive_only_attention_to_pending_recovery () =
     (recovery_keeper |> member "pending_no_progress_recovery_count" |> to_int)
 ;;
 
+let test_fleet_summary_surfaces_durable_event_queue_backlog () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "durable-backlog-keeper" in
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (board_stimulus ~post_id:"post-live-backlog" ());
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (no_progress_recovery_stimulus ~keeper_name ());
+  Keeper_event_queue_persistence.record_inflight
+    ~base_path
+    ~keeper_name
+    [ fusion_completed_stimulus () ];
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string "durable queue backlog degrades fleet summary" "degraded" "status" fleet;
+  check_list_has_string
+    "durable queue stale reason is explicit"
+    "durable_event_queue_stale"
+    (fleet |> member "status_reasons");
+  check bool "durable queue backlog requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "ledger pending rows stay independent" 0
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "durable queue backlog counted" 3
+    (fleet |> member "durable_event_queue_count" |> to_int);
+  check int "durable queue pending backlog counted" 2
+    (fleet |> member "durable_event_queue_pending_count" |> to_int);
+  check int "durable queue inflight backlog counted" 1
+    (fleet |> member "durable_event_queue_inflight_count" |> to_int);
+  check (float 0.001) "default durable queue stale threshold preserves prior behavior"
+    0.0
+    (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
+  check int "durable queue stale backlog counted" 3
+    (fleet |> member "durable_event_queue_stale_count" |> to_int);
+  check int "durable queue stale keeper counted" 1
+    (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
+  let keeper_queue =
+    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_queue;
+  check int "keeper durable queue backlog counted" 3
+    (keeper_queue |> member "durable_event_queue_count" |> to_int);
+  check int "keeper durable queue pending backlog counted" 2
+    (keeper_queue |> member "durable_event_queue_pending_count" |> to_int);
+  check int "keeper durable queue inflight backlog counted" 1
+    (keeper_queue |> member "durable_event_queue_inflight_count" |> to_int);
+  check int "keeper immediate durable queue backlog counted" 2
+    (keeper_queue |> member "immediate_count" |> to_int);
+  check bool "keeper durable queue is stale by default" true
+    (keeper_queue |> member "stale" |> to_bool);
+  check int "stale keeper list mirrors stale backlog" 1
+    (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length);
+  let payload_counts =
+    fleet |> member "durable_event_queue_payload_counts" |> to_list
+  in
+  check bool "board_signal durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal (json |> member "payload_kind" |> to_string) "board_signal"
+         && json |> member "count" |> to_int = 1)
+       payload_counts);
+  check bool "no_progress_recovery durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal
+           (json |> member "payload_kind" |> to_string)
+           "no_progress_recovery"
+         && json |> member "count" |> to_int = 1)
+       payload_counts);
+  check bool "inflight fusion_completed durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal (json |> member "payload_kind" |> to_string) "fusion_completed"
+         && json |> member "count" |> to_int = 1)
+       payload_counts)
+;;
+
+let test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "durable-only-keeper" in
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (board_stimulus ~post_id:"post-durable-only" ());
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable-only queue degrades fleet summary"
+    "degraded"
+    "status"
+    fleet;
+  check int "durable-only keeper is included in fleet count" 1
+    (fleet |> member "keeper_count" |> to_int);
+  check_list_has_string
+    "durable-only keeper name is discovered"
+    keeper_name
+    (fleet |> member "keeper_names");
+  check int "durable-only discovery counted" 1
+    (fleet |> member "durable_event_queue_discovered_keeper_count" |> to_int);
+  check_list_has_string
+    "durable-only discovery names keeper"
+    keeper_name
+    (fleet |> member "durable_event_queue_discovered_keeper_names");
+  check bool "durable-only discovery has no read error" true
+    (match fleet |> member "durable_event_queue_discovery_error" with
+     | `Null -> true
+     | _ -> false);
+  check int "durable-only queue backlog counted" 1
+    (fleet |> member "durable_event_queue_count" |> to_int);
+  let keeper_queue =
+    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable-only queue keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_queue;
+  check int "durable-only keeper queue backlog counted" 1
+    (keeper_queue |> member "durable_event_queue_count" |> to_int)
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
+  with_temp_base @@ fun base_path ->
+  let invalid_keeper_name = "invalid keeper name" in
+  let invalid_keeper_dir =
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base ~base_path)
+      invalid_keeper_name
+  in
+  mkdir_p invalid_keeper_dir;
+  write_file
+    (Filename.concat invalid_keeper_dir "event-queue.json")
+    (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue discovery error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue discovery error reason is explicit"
+    "durable_event_queue_discovery_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue discovery error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue discovery error counted" 1
+    (fleet |> member "durable_event_queue_discovery_error_count" |> to_int);
+  check bool "durable queue discovery error message is surfaced" true
+    (match fleet |> member "durable_event_queue_discovery_error" with
+     | `String value -> not (String.equal value "")
+     | _ -> false);
+  check int "invalid durable queue keeper is not accepted as a keeper" 0
+    (fleet |> member "keeper_count" |> to_int)
+;;
+
+let test_fleet_summary_allows_nonstale_durable_event_queue_backlog () =
+  if Sys.getenv_opt "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" <> None then
+    skip ()
+  else
+  Fun.protect
+    ~finally:(fun () -> Config_boot_overrides.reset_for_tests ())
+    (fun () ->
+       Config_boot_overrides.reset_for_tests ();
+       Config_boot_overrides.set "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" "1000000000000.0";
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "fresh-durable-backlog-keeper" in
+       Keeper_registry_event_queue.enqueue
+         ~base_path
+         keeper_name
+         (board_stimulus ~post_id:"post-fresh-backlog" ());
+       let fleet =
+         Keeper_reaction_ledger.fleet_summary_json
+           ~base_path
+           ~keeper_names:[ keeper_name ]
+           ~limit_per_keeper:10
+       in
+       check_member_string
+         "fresh durable backlog remains visible but not degraded"
+         "ok"
+         "status"
+         fleet;
+       check bool "fresh durable backlog does not require operator action" false
+         (fleet |> member "operator_action_required" |> to_bool);
+       check int "fresh durable queue backlog counted" 1
+         (fleet |> member "durable_event_queue_count" |> to_int);
+       check int "fresh durable queue stale count stays zero" 0
+         (fleet |> member "durable_event_queue_stale_count" |> to_int);
+       check int "fresh durable queue stale keeper count stays zero" 0
+         (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
+       check (float 0.001) "durable stale threshold comes from boot override"
+         1000000000000.0
+         (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
+       let keeper_queue =
+         fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+       in
+       check bool "fresh durable queue is not stale" false
+         (keeper_queue |> member "stale" |> to_bool);
+       check int "fresh durable stale keeper list is empty" 0
+         (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length))
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_read_error () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "broken-durable-queue-keeper" in
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path "{not-json";
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue read error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue read error reason is explicit"
+    "durable_event_queue_read_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue read error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue read error counted" 1
+    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
+  let keeper_error =
+    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue read error keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_error;
+  check int "keeper durable queue read error counted" 1
+    (keeper_error |> member "read_error_count" |> to_int);
+  let read_error =
+    keeper_error |> member "read_errors" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue read error kind"
+    "read_failed"
+    "kind"
+    read_error;
+  check_member_string "durable queue read error path" path "path" read_error
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "parse-broken-durable-queue-keeper" in
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path {|{"schema":"keeper.event_queue.v1","items":{}}|};
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue parse error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue parse error reason is explicit"
+    "durable_event_queue_read_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue parse error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue parse error counted" 1
+    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
+  let keeper_error =
+    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue parse error keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_error;
+  check int "keeper durable queue parse error counted" 1
+    (keeper_error |> member "read_error_count" |> to_int);
+  let read_error =
+    keeper_error |> member "read_errors" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue parse error kind"
+    "parse_failed"
+    "kind"
+    read_error;
+  check_member_string "durable queue parse error path" path "path" read_error
+;;
+
 let test_unknown_reaction_degrades_summary () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "unknown-reaction-keeper" in
@@ -842,6 +1182,7 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.No_progress_recovery
     ; Keeper_reaction_ledger.Fusion_completed
     ; Keeper_reaction_ledger.Bg_completed
+    ; Keeper_reaction_ledger.Schedule_due
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
@@ -937,6 +1278,30 @@ let () =
             "summary links passive-only attention to pending recovery"
             `Quick
             test_summary_links_passive_only_attention_to_pending_recovery
+        ; test_case
+            "fleet summary surfaces durable event queue backlog"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_backlog
+        ; test_case
+            "fleet summary discovers durable event queue backlog without meta name"
+            `Quick
+            test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name
+        ; test_case
+            "fleet summary surfaces durable event queue discovery errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_discovery_error
+        ; test_case
+            "fleet summary separates fresh durable event queue backlog from stale"
+            `Quick
+            test_fleet_summary_allows_nonstale_durable_event_queue_backlog
+        ; test_case
+            "fleet summary surfaces durable event queue read errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_read_error
+        ; test_case
+            "fleet summary surfaces durable event queue parse errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_parse_error
         ; test_case
             "unknown reaction degrades summary"
             `Quick

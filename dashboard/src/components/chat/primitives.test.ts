@@ -2167,6 +2167,60 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(chat.getAttribute('data-chat-trace-turn-ref')).toBe('trace-prov#7')
   })
 
+  it('exposes structural turn order without timestamp sorting', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-t-order',
+            label: 'keeper_context_status',
+            text: '{"ok":true}',
+            timestamp: '2026-03-24T00:00:01.000Z',
+            turnRef: 'trace-order#1',
+          }),
+          entry({
+            id: 'assistant-order',
+            text: '완료했습니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            timestamp: '2026-03-24T00:00:00.000Z',
+            turnRef: 'trace-order#1',
+            traceSteps: [
+              { kind: 'think', text: 'first structural thought', ts: '2026-03-24T00:00:04.000Z' },
+              {
+                kind: 'tool',
+                name: 'keeper_context_status',
+                toolCallId: 't-order',
+                status: 'ok',
+                ts: '2026-03-24T00:00:02.000Z',
+              },
+              { kind: 'think', text: 'second structural thought', ts: '2026-03-24T00:00:03.000Z' },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-work-trace]') as HTMLElement
+    expect(trace.getAttribute('data-chat-turn-order-signature')).toBe(
+      'trace:think|tool:t-order|trace:think|chat:assistant-order',
+    )
+
+    const ordered = [...trace.querySelectorAll('[data-chat-turn-order-index]')] as HTMLElement[]
+    expect(ordered).toHaveLength(4)
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-index'))).toEqual(['0', '1', '2', '3'])
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-kind'))).toEqual(['trace', 'tool', 'trace', 'chat'])
+
+    const tool = ordered[1] as HTMLElement
+    expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('t-order')
+    expect(tool.getAttribute('data-chat-trace-entry-id')).toBe('tool-t-order')
+    expect(tool.getAttribute('data-chat-trace-link-state')).toBe('joined')
+  })
+
   it('renders thinking text as sanitized markdown with newlines preserved', async () => {
     render(
       html`<${ChatTranscript}

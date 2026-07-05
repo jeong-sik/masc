@@ -1319,7 +1319,15 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   `
 }
 
-function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; streaming?: boolean }) {
+function ChatTraceStep({
+  step,
+  streaming = false,
+  orderIndex,
+}: {
+  step: ChatTraceStep
+  streaming?: boolean
+  orderIndex?: number
+}) {
   const [open, setOpen] = useState(false)
   const sourceBadge = traceSourceBadge(step)
 
@@ -1332,6 +1340,8 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
       <div
         class="chat-block-tstep think"
         data-chat-trace-step="think"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
         data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
         data-chat-trace-ts=${step.ts ?? undefined}
@@ -1380,6 +1390,8 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
       <div
         class="chat-block-tstep reason ${open ? 'exp' : ''}"
         data-chat-trace-step="reason"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
         data-chat-trace-ts=${step.ts ?? undefined}
       >
@@ -1405,6 +1417,8 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
     <div
       class="chat-block-tstep tool ${open ? 'exp' : ''}"
       data-chat-trace-step="tool"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind="tool"
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${step.toolCallId?.trim() || undefined}
       data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
@@ -2687,6 +2701,8 @@ function ToolTraceStep({
   coverageState = 'not-applicable',
   hydrationFailureReason = null,
   traceStep,
+  orderIndex,
+  orderKind = 'tool',
 }: {
   entry: KeeperConversationEntry | null
   output: ToolCallEntry | null
@@ -2694,6 +2710,8 @@ function ToolTraceStep({
   coverageState?: ToolOutputCoverageState
   hydrationFailureReason?: string | null
   traceStep?: ChatTraceToolStep
+  orderIndex?: number
+  orderKind?: 'tool' | 'tool-entry'
 }) {
   const [open, setOpen] = useState(false)
   const name = traceStep?.name || entry?.label || 'tool'
@@ -2732,6 +2750,8 @@ function ToolTraceStep({
     <div
       class="chat-block-tstep tool ${open ? 'exp' : ''}"
       data-chat-trace-step="tool"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind=${orderKind}
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${callId ?? undefined}
       data-chat-trace-oas-block-index=${traceStep?.oasBlockIndex ?? undefined}
@@ -2867,7 +2887,13 @@ function chatResponsePreview(entry: KeeperConversationEntry): string {
   return text.length > 96 ? `${text.slice(0, 96)}…` : text
 }
 
-function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
+function ChatResponseTraceStep({
+  entry,
+  orderIndex,
+}: {
+  entry: KeeperConversationEntry
+  orderIndex?: number
+}) {
   const sourceBadge: TraceSourceBadgeInfo = {
     label: 'reply',
     title: 'source: assistant reply entry',
@@ -2877,6 +2903,8 @@ function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
     <div
       class="chat-block-tstep chat"
       data-chat-trace-step="chat"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind="chat"
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-entry-id=${entry.id}
       data-chat-trace-source=${entry.source}
@@ -2942,6 +2970,12 @@ function ToolTraceCard({
   const ordered = assistant
     ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
     : interleaveTraceAndTools(traceSteps, steps)
+  const orderSignature = ordered.map((item) => {
+    if (item.kind === 'trace') return `trace:${item.step.kind}`
+    if (item.kind === 'tool') return `tool:${toolTraceCallId(item.entry, item.step) ?? item.step.name}`
+    if (item.kind === 'tool-entry') return `tool-entry:${toolTraceCallId(item.entry) ?? item.entry.id}`
+    return `chat:${item.entry.id}`
+  }).join('|')
   const orderedToolSteps = ordered.filter(isToolOrderItem)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
   const failN = orderedToolSteps.filter(
@@ -2992,6 +3026,7 @@ function ToolTraceCard({
       data-chat-tool-output-hydration-failure=${toolOutputHydrationContract?.failureReason ?? undefined}
       data-chat-tool-output-covered-since=${toolOutputsCoveredSinceMs ?? undefined}
       data-chat-tool-output-covered-through=${toolOutputsCoveredThroughMs ?? undefined}
+      data-chat-turn-order-signature=${orderSignature || undefined}
     >
       <button
         type="button"
@@ -3024,6 +3059,7 @@ function ToolTraceCard({
                   ? html`<${ChatTraceStep}
                       key=${`trace-${index}`}
                       step=${item.step}
+                      orderIndex=${index}
                       streaming=${assistant !== null && !turnComplete}
                     />`
                   : item.kind === 'tool'
@@ -3036,6 +3072,8 @@ function ToolTraceCard({
                           coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
+                          orderIndex=${index}
+                          orderKind="tool"
                         />`
                       })()
                     : item.kind === 'tool-entry'
@@ -3046,8 +3084,10 @@ function ToolTraceCard({
                           canMarkMissing=${canMarkMissingForEntry(item.entry)}
                           coverageState=${coverageStateForEntry(item.entry)}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
+                          orderIndex=${index}
+                          orderKind="tool-entry"
                         />`
-                    : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} />`)}
+                    : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} orderIndex=${index} />`)}
             </div>
           `
         : null}

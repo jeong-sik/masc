@@ -296,4 +296,179 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(joinedStep.textContent).not.toContain('출력 tail 범위 밖')
     })
   })
+
+  it('keeps simultaneous live panel hydration isolated by keeper', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    fetchKeeperChatHistory.mockImplementation(async (keeperName: string) => {
+      if (keeperName === 'alpha') {
+        return [
+          {
+            id: 'tool-history-alpha-scope',
+            role: 'tool',
+            content: '{}',
+            ts: 1_783_267_221,
+            tool_call_id: 'tc-alpha-scope',
+            tool_call_name: 'keeper_context_status',
+            source: 'dashboard',
+            turn_ref: 'trace-alpha-scope#1',
+          },
+          {
+            id: 'assistant-history-alpha-scope',
+            role: 'assistant',
+            content: 'alpha 도구 출력 조인이 완료되었습니다.',
+            ts: 1_783_267_222,
+            source: 'dashboard',
+            turn_ref: 'trace-alpha-scope#1',
+            stream_contract: {
+              source: 'sse_event',
+              status: 'backend_terminal_event',
+              event_name: 'RUN_FINISHED',
+              delivery_receipt: 'client_observed_sse_event',
+            },
+          },
+        ]
+      }
+      if (keeperName === 'beta') {
+        return [
+          {
+            id: 'tool-history-beta-scope',
+            role: 'tool',
+            content: '{}',
+            ts: 1_783_267_231,
+            tool_call_id: 'tc-beta-scope',
+            tool_call_name: 'keeper_context_status',
+            source: 'dashboard',
+            turn_ref: 'trace-beta-scope#1',
+          },
+          {
+            id: 'assistant-history-beta-scope',
+            role: 'assistant',
+            content: 'beta 도구 출력은 아직 조인되지 않았습니다.',
+            ts: 1_783_267_232,
+            source: 'dashboard',
+            turn_ref: 'trace-beta-scope#1',
+            stream_contract: {
+              source: 'sse_event',
+              status: 'backend_terminal_event',
+              event_name: 'RUN_FINISHED',
+              delivery_receipt: 'client_observed_sse_event',
+            },
+          },
+        ]
+      }
+      throw new Error(`unexpected keeper ${keeperName}`)
+    })
+    fetchKeeperToolCalls.mockImplementation(async (keeperName?: string) => {
+      if (keeperName === 'alpha') {
+        return {
+          entries: [
+            {
+              ts: 1_783_267_221,
+              keeper: 'alpha',
+              tool: 'keeper_context_status',
+              input: {},
+              output: 'alpha output joined from tool_calls_endpoint',
+              success: true,
+              duration_ms: 31,
+              tool_use_id: 'tc-alpha-scope',
+            },
+          ],
+        }
+      }
+      if (keeperName === 'beta') {
+        throw new Error('HTTP 503 beta')
+      }
+      throw new Error(`unexpected keeper ${keeperName}`)
+    })
+
+    render(
+      html`
+        <div>
+          <section data-testid="alpha-panel">
+            <${KeeperConversationPanel} keeperName="alpha" placeholder="alpha message" layout="workspace" />
+          </section>
+          <section data-testid="beta-panel">
+            <${KeeperConversationPanel} keeperName="beta" placeholder="beta message" layout="workspace" />
+          </section>
+        </div>
+      `,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('alpha')
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('beta')
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('alpha', 200)
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('beta', 200)
+    })
+    await waitFor(() => {
+      expect(toolCallOutputHydrationStatus('alpha')).toBe('hydrated')
+      expect(toolCallOutputHydrationFailureReason('alpha')).toBeNull()
+      expect(toolCallOutputHydrationStatus('beta')).toBe('failed')
+      expect(toolCallOutputHydrationFailureReason('beta')).toBe('HTTP 503 beta')
+      expect(lookupToolCallOutput('tool-tc-alpha-scope')?.output).toBe(
+        'alpha output joined from tool_calls_endpoint',
+      )
+      expect(lookupToolCallOutput('tool-tc-beta-scope')).toBeNull()
+    })
+
+    const alphaPanel = container.querySelector('[data-testid="alpha-panel"]') as HTMLElement
+    const betaPanel = container.querySelector('[data-testid="beta-panel"]') as HTMLElement
+    const alphaCoveredThrough = toolCallOutputsCoveredThroughMs('alpha')
+
+    await waitFor(() => {
+      const alphaTrace = alphaPanel.querySelector('[data-chat-work-trace]')
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('hydrated')
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-hydration-failure')).toBeNull()
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-covered-since')).toBe('1783267221000')
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-covered-through')).toBe(String(alphaCoveredThrough))
+      expect(alphaTrace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      const betaTrace = betaPanel.querySelector('[data-chat-work-trace]')
+      expect(betaTrace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+      expect(betaTrace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 503 beta')
+      expect(betaTrace?.getAttribute('data-chat-tool-output-covered-since')).toBeNull()
+      expect(betaTrace?.getAttribute('data-chat-tool-output-covered-through')).toBeNull()
+      expect(betaTrace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      const alphaStep = alphaPanel.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-alpha-scope"]',
+      ) as HTMLElement
+      expect(alphaStep.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(alphaStep.getAttribute('data-chat-trace-output-state')).toBe('ok')
+      expect(alphaStep.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
+      expect(alphaStep.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
+
+      const betaStep = betaPanel.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-beta-scope"]',
+      ) as HTMLElement
+      expect(betaStep.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(betaStep.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      expect(betaStep.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+      expect(betaStep.querySelector('.chat-block-tstep-status.hydration-failed')).not.toBeNull()
+      expect(betaStep.querySelector('.chat-block-tstep-status.ok')).toBeNull()
+      expect(betaPanel.textContent).toContain('출력 hydration 실패 1')
+      expect(betaPanel.textContent).not.toContain('alpha output joined from tool_calls_endpoint')
+    })
+
+    const alphaStep = alphaPanel.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-alpha-scope"]',
+    ) as HTMLElement
+    const betaStep = betaPanel.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-beta-scope"]',
+    ) as HTMLElement
+
+    fireEvent.click(alphaStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+    fireEvent.click(betaStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+
+    await waitFor(() => {
+      expect(alphaStep.textContent).toContain('alpha output joined from tool_calls_endpoint')
+      expect(alphaStep.textContent).not.toContain('HTTP 503 beta')
+      expect(betaStep.textContent).toContain('출력 hydration 실패 — HTTP 503 beta')
+      expect(betaStep.textContent).not.toContain('alpha output joined from tool_calls_endpoint')
+      expect(betaStep.textContent).not.toContain('result')
+    })
+
+    consoleWarn.mockRestore()
+  })
 })

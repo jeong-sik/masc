@@ -27,6 +27,9 @@ vi.mock('../keeper-actions', () => ({
 
 vi.mock('../keeper-state', async () => {
   const { signal } = await import('@preact/signals')
+  const withoutUndefined = (record: Record<string, unknown>): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined))
+
   return {
     keeperActionErrors: signal({}),
     keeperHydrating: signal({}),
@@ -37,6 +40,20 @@ vi.mock('../keeper-state', async () => {
     keeperStreamStartedAt: signal({}),
     keeperStreamLastEventAt: signal({}),
     keeperThreads: signal({}),
+    keeperStreamContract: (source: string, status: string, opts: Record<string, unknown> = {}) => withoutUndefined({
+      source,
+      status,
+      eventName: opts.eventName ?? undefined,
+      requestId: opts.requestId ?? undefined,
+      turnRef: opts.turnRef ?? undefined,
+      traceEventCount: opts.traceEventCount ?? undefined,
+      lifecycleEvents: opts.lifecycleEvents ?? undefined,
+      deliveryReceipt: opts.deliveryReceipt ?? undefined,
+      reason: opts.reason ?? undefined,
+    }),
+    setRecordValue: (state: { value: Record<string, unknown> }, key: string, value: unknown) => {
+      state.value = { ...state.value, [key]: value }
+    },
     isDefaultVisibleConversationEntry: vi.fn((entry: { role?: string; source?: string }) =>
       entry.role === 'tool'
         || ((entry.role === 'user' || entry.role === 'assistant')
@@ -76,7 +93,7 @@ import {
 } from '../keeper-actions'
 import { _resetChatStoreForTests, enqueueInput, getQueuedMessages, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
-import type { ChatBlock, KeeperConversationEntry } from '../types'
+import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry, KeeperUserInputBlock } from '../types'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -460,6 +477,58 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
     expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
     expect(container.textContent).toContain('hello voice')
+  })
+
+  it('keeps queued attachment drafts visible with multimodal provenance and no delivery receipt', async () => {
+    keeperSending.value = { sangsu: true }
+    const attachments: KeeperConversationAttachment[] = [
+      {
+        id: 'queued-att',
+        type: 'image',
+        name: 'queued.png',
+        size: 1024,
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,iVBORw0KGgo=',
+      },
+    ]
+    const displayBlocks: ChatBlock[] = [
+      {
+        t: 'attach',
+        id: 'queued-att',
+        name: 'queued.png',
+        kind: 'image',
+        src: 'data:image/png;base64,iVBORw0KGgo=',
+        mimeType: 'image/png',
+        sizeBytes: 1024,
+      },
+    ]
+    const userBlocks: KeeperUserInputBlock[] = [
+      {
+        type: 'image',
+        attachmentId: 'queued-att',
+        name: 'queued.png',
+        mimeType: 'image/png',
+        size: 1024,
+      },
+    ]
+    enqueueInput('sangsu', '', attachments, 'queued-attachment-1', displayBlocks, userBlocks)
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const bubble = container.querySelector('[data-chat-entry-id^="queued-user-"]') as HTMLElement
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('queued')
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(bubble.getAttribute('data-chat-attachment-count')).toBe('1')
+    expect(bubble.getAttribute('data-chat-server-attach-block-count')).toBe('1')
+    expect(bubble.getAttribute('data-chat-multimodal-sources')).toBe('persisted_attachment,server_block')
+    expect(bubble.getAttribute('data-chat-multimodal-kinds')).toBe('image')
+    expect(bubble.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
+    expect(bubble.querySelector('[data-chat-attachment-card="queued-att"]')).not.toBeNull()
+    expect(bubble.querySelector('[data-chat-block="attach"][data-chat-multimodal-source="server_block"]')).not.toBeNull()
   })
 
   it('renders queued drafts with invalid timestamps without throwing', async () => {

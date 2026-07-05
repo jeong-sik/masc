@@ -150,6 +150,34 @@ let runtime_base_path_opt () =
   | Some state -> Some (Mcp_server.workspace_config state).base_path
   | None -> None
 
+let keeper_event_queue_health_json () =
+  match runtime_base_path_opt () with
+  | None ->
+    `Assoc
+      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "pending_count", `Int 0
+      ; "inflight_count", `Int 0
+      ; "total_count", `Int 0
+      ; "oldest_arrived_at_unix", `Null
+      ; "oldest_age_seconds", `Null
+      ; "pending_by_keeper", `List []
+      ; "inflight_by_keeper", `List []
+      ; "read_error_count", `Int 0
+      ; "read_errors", `List []
+      ; "keepers", `List []
+      ]
+  | Some base_path ->
+    let now =
+      Unix.gettimeofday ()
+      (* NDT-OK: full health samples wall-clock at the HTTP boundary to report
+         durable queue ages; queue parsing below stays deterministic. *)
+    in
+    Keeper_event_queue_persistence.fleet_summary_json ~now ~base_path
+
 let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan
     ?(include_reaction_ledger = true)

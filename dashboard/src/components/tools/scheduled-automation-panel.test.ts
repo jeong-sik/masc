@@ -748,6 +748,62 @@ describe('ScheduledAutomationPanel', () => {
     expect(turnReactionEvidence?.textContent).toContain('matched turn started')
     expect(turnReactionEvidence?.textContent).toContain('turn_started')
     expect(turnReactionEvidence?.textContent).toContain('true')
+
+    const ackedAuto = automation([
+      {
+        ...wakeRequest,
+        schedule_id: 'sched-keeper-wake',
+        keeper_queue_evidence: {
+          ...wakeRequest.keeper_queue_evidence!,
+          projection_status: 'not_found',
+          pending_count: 0,
+          inflight_count: 0,
+          matched_bucket: undefined,
+          matched_post_id: undefined,
+          matched_schedule_id: undefined,
+          matched_payload_kind: undefined,
+          matched_arrived_at: undefined,
+          matched_arrived_at_iso: undefined,
+          matched_age_seconds: undefined,
+        },
+        keeper_reaction_evidence: {
+          ...wakeRequest.keeper_reaction_evidence!,
+          projection_status: 'matched_consumed_ack',
+          turn_started_seen: true,
+          event_queue_ack_seen: true,
+          matched_record_count: 3,
+          turn_started_recorded_at: 202,
+          turn_started_recorded_at_iso: '2026-06-21T00:03:22Z',
+          event_queue_ack_recorded_at: 203,
+          event_queue_ack_recorded_at_iso: '2026-06-21T00:03:23Z',
+          latest_recorded_at: 203,
+          latest_recorded_at_iso: '2026-06-21T00:03:23Z',
+        },
+      },
+    ])
+
+    render(null, container)
+    render(html`<${ScheduledAutomationPanel} automation=${ackedAuto} variant="v2" />`, container)
+
+    const ackDoneFilter = container.querySelector('[data-schedule-filter="done"]') as HTMLButtonElement
+    ackDoneFilter.click()
+    await Promise.resolve()
+
+    const openAckDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
+    openAckDetail.click()
+    await Promise.resolve()
+
+    const ackQueueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="not_found"]')
+    expect(ackQueueEvidence).not.toBeNull()
+    expect(ackQueueEvidence?.textContent).toContain('not found')
+    expect(ackQueueEvidence?.textContent).toContain('pending_count')
+    expect(ackQueueEvidence?.textContent).toContain('0')
+    const ackReactionEvidence = container.querySelector('[data-schedule-keeper-reaction-evidence="matched_consumed_ack"]')
+    expect(ackReactionEvidence).not.toBeNull()
+    expect(ackReactionEvidence?.textContent).toContain('matched consumed ack')
+    expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_seen')
+    expect(ackReactionEvidence?.textContent).toContain('true')
+    expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_recorded_at')
   })
 
   it('filters schedule cards without filtering the wake signal feed', async () => {

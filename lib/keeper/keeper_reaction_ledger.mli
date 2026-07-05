@@ -25,6 +25,7 @@ type stimulus_kind =
 
 type reaction_kind =
   | Turn_started
+  | Event_queue_ack
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -68,8 +69,10 @@ type event_queue_reaction_evidence =
   ; stimulus_id : string
   ; stimulus_seen : bool
   ; turn_started_seen : bool
+  ; event_queue_ack_seen : bool
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
+  ; event_queue_ack_recorded_at : float option
   ; latest_recorded_at : float option
   ; matched_record_count : int
   }

@@ -69,9 +69,12 @@ import {
   keeperThreads,
 } from '../keeper-state'
 import {
+  lookupToolCallOutput,
   resetToolCallOutputs,
   toolCallOutputHydrationFailureReason,
   toolCallOutputHydrationStatus,
+  toolCallOutputsCoveredSinceMs,
+  toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
 import { _clearPendingKeeperChatRequestsForTests } from '../keeper-chat-pending'
 import { _resetChatStoreForTests } from '../keeper-chat-store'
@@ -190,5 +193,107 @@ describe('KeeperConversationPanel hydration wiring', () => {
     })
 
     consoleWarn.mockRestore()
+  })
+
+  it('joins successful tool-call endpoint output into the live transcript DOM', async () => {
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      {
+        id: 'tool-history-api-success',
+        role: 'tool',
+        content: '{}',
+        ts: 1_783_267_211,
+        tool_call_id: 'tc-api-success',
+        tool_call_name: 'keeper_context_status',
+        source: 'dashboard',
+        turn_ref: 'trace-api-success#1',
+      },
+      {
+        id: 'assistant-history-api-success',
+        role: 'assistant',
+        content: '도구 출력 조인이 완료되었습니다.',
+        ts: 1_783_267_212,
+        source: 'dashboard',
+        turn_ref: 'trace-api-success#1',
+        stream_contract: {
+          source: 'sse_event',
+          status: 'backend_terminal_event',
+          event_name: 'RUN_FINISHED',
+          delivery_receipt: 'client_observed_sse_event',
+        },
+      },
+    ])
+    fetchKeeperToolCalls.mockResolvedValueOnce({
+      entries: [
+        {
+          ts: 1_783_267_211,
+          keeper: 'sangsu',
+          tool: 'keeper_context_status',
+          input: {},
+          output: 'context status joined from tool_calls_endpoint',
+          success: true,
+          duration_ms: 42,
+          tool_use_id: 'tc-api-success',
+        },
+      ],
+    })
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('sangsu', 200)
+    })
+    await waitFor(() => {
+      expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
+      expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
+      expect(lookupToolCallOutput('tool-tc-api-success')?.output).toBe(
+        'context status joined from tool_calls_endpoint',
+      )
+      expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_211_000)
+      expect(toolCallOutputsCoveredThroughMs('sangsu')).not.toBeNull()
+    })
+
+    const coveredThrough = toolCallOutputsCoveredThroughMs('sangsu')
+    const traceSelector =
+      '[data-chat-work-trace][data-chat-tool-output-hydration-source="tool_calls_endpoint"]'
+    await waitFor(() => {
+      const trace = container.querySelector(traceSelector)
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('hydrated')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBeNull()
+      expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe('1783267211000')
+      expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(String(coveredThrough))
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-source')).toBe('sse_event')
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      const step = container.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-api-success"]',
+      ) as HTMLElement
+      expect(step.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
+      expect(step.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.hydration-failed')).toBeNull()
+      expect(container.textContent).not.toContain('결과 누락 1')
+      expect(container.textContent).not.toContain('출력 범위 밖 1')
+      expect(container.textContent).not.toContain('출력 hydration 실패 1')
+    })
+
+    const joinedStep = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-api-success"]',
+    ) as HTMLElement
+    fireEvent.click(joinedStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+
+    await waitFor(() => {
+      expect(joinedStep.textContent).toContain('result')
+      expect(joinedStep.textContent).toContain('context status joined from tool_calls_endpoint')
+      expect(joinedStep.textContent).not.toContain('출력 대기 중')
+      expect(joinedStep.textContent).not.toContain('결과 없음')
+      expect(joinedStep.textContent).not.toContain('출력 hydration 실패')
+      expect(joinedStep.textContent).not.toContain('출력 tail 범위 밖')
+    })
   })
 })

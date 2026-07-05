@@ -268,12 +268,12 @@ let resolve_board_context_inference_target ~config (post : Board.post) target_ke
     | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, source)
     | Ok None ->
         Error
-          ( `Bad_request,
-            Printf.sprintf "target_keeper %S is not a registered keeper" requested )
+          (`Bad_request
+            (Printf.sprintf "target_keeper %S is not a registered keeper" requested))
     | Error msg ->
         Error
-          ( `Internal_server_error,
-            Printf.sprintf "failed to read keeper metadata for %S: %s" requested msg )
+          (`Internal_server_error
+            (Printf.sprintf "failed to read keeper metadata for %S: %s" requested msg))
   in
   match target_keeper with
   | Some requested -> resolve Explicit_target requested
@@ -283,14 +283,14 @@ let resolve_board_context_inference_target ~config (post : Board.post) target_ke
        | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, Post_author)
        | Ok None ->
            Error
-             ( `Bad_request,
-               Printf.sprintf
-                 "target_keeper is required because board post author %S is not a registered keeper"
-                 author )
+             (`Bad_request
+               (Printf.sprintf
+                  "target_keeper is required because board post author %S is not a registered keeper"
+                  author))
        | Error msg ->
            Error
-             ( `Internal_server_error,
-               Printf.sprintf "failed to read keeper metadata for board author %S: %s" author msg ))
+             (`Internal_server_error
+               (Printf.sprintf "failed to read keeper metadata for board author %S: %s" author msg)))
 
 let non_empty_json_string_member field json =
   match json_assoc_member field json with
@@ -351,7 +351,7 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
       ]
   in
   match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-  | None -> Error (`Internal_server_error, "masc_keeper_msg tool is unavailable")
+  | None -> Error (`Internal_server_error "masc_keeper_msg tool is unavailable")
   | Some result ->
       if Tool_result.is_success result
       then
@@ -360,8 +360,8 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
              (Tool_result.data result)
          with
          | Ok json -> Ok json
-         | Error msg -> Error (`Internal_server_error, msg))
-      else Error (`Bad_request, Tool_result.message result)
+         | Error msg -> Error (`Internal_server_error msg))
+      else Error (`Bad_request (Tool_result.message result))
 
 let respond_board_context_inference_error request reqd ~status ~message =
   respond_json_value_with_cors ~status request reqd
@@ -388,9 +388,12 @@ let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body 
               match
                 resolve_board_context_inference_target ~config post target_keeper
               with
-              | Error (status, message) ->
-                  respond_board_context_inference_error request reqd ~status
-                    ~message
+              | Error (`Bad_request message) ->
+                  respond_board_context_inference_error request reqd
+                    ~status:`Bad_request ~message
+              | Error (`Internal_server_error message) ->
+                  respond_board_context_inference_error request reqd
+                    ~status:`Internal_server_error ~message
               | Ok (target_keeper, target_source) -> (
                   match
                     dispatch_board_context_inference ~state ~sw ~clock ~request
@@ -399,9 +402,12 @@ let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body 
                   | Ok json ->
                       respond_json_value_with_cors ~status:`Accepted request reqd
                         json
-                  | Error (status, message) ->
-                      respond_board_context_inference_error request reqd ~status
-                        ~message))))
+                  | Error (`Bad_request message) ->
+                      respond_board_context_inference_error request reqd
+                        ~status:`Bad_request ~message
+                  | Error (`Internal_server_error message) ->
+                      respond_board_context_inference_error request reqd
+                        ~status:`Internal_server_error ~message))))
 
 let respond_board_json reqd json =
   Http.Response.json_value json reqd

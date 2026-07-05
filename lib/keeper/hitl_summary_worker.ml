@@ -255,6 +255,25 @@ type summary_mode =
   | Native_structured
   | Plain_json_text
 
+type summary_llm_error =
+  { mode : summary_mode
+  ; error : Agent_sdk.Error.sdk_error
+  }
+
+let plain_mode_degradation_outcomes = function
+  | Plain_json_text -> [ "degraded_plain_json" ]
+  | Native_structured -> []
+;;
+
+let summary_llm_error_outcomes ~mode error =
+  let terminal =
+    match error with
+    | Agent_sdk.Error.Api (Timeout _) -> "timeout"
+    | _ -> "provider_error"
+  in
+  plain_mode_degradation_outcomes mode @ [ terminal ]
+;;
+
 (** Appended on the [Plain_json_text] path so a model without native structured
     output still returns a parseable object. The schema is the SSOT for both
     paths (native applies it as [response_format]; here it is inlined). *)
@@ -314,13 +333,16 @@ let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) 
 let call_summary_llm ~sw ~net ~provider_config ~context_bundle () =
   let config, mode = provider_config_for_summary provider_config in
   let messages = messages_for_summary ~mode ~context_bundle in
-  Keeper_llm_bridge.run_with_timeout_and_fallback
-    ~timeout_s:(Keeper_config.hitl_summary_timeout_sec ())
-    (fun () ->
-       Llm_provider.Complete.complete ~sw ~net ~config ~messages ()
-       |> Result.map (fun response -> response, mode)
-       |> Result.map_error (fun http_err ->
-            Agent_sdk.Error.Internal (Provider_http_error.to_message http_err)))
+  match
+    Keeper_llm_bridge.run_with_timeout_and_fallback
+      ~timeout_s:(Keeper_config.hitl_summary_timeout_sec ())
+      (fun () ->
+         Llm_provider.Complete.complete ~sw ~net ~config ~messages ()
+         |> Result.map_error (fun http_err ->
+              Agent_sdk.Error.Internal (Provider_http_error.to_message http_err)))
+  with
+  | Ok response -> Ok (response, mode)
+  | Error error -> Error { mode; error }
 ;;
 
 (* ── Parsing ────────────────────────────────────── *)
@@ -448,12 +470,16 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
                 | Error reason ->
                   record_outcome ~risk_level:entry.risk_level "parse_error";
                   on_failure ~reason ~retryable:true)
-             | Error (Agent_sdk.Error.Api (Timeout _)) ->
-               record_outcome ~risk_level:entry.risk_level "timeout";
+             | Error { mode; error = (Agent_sdk.Error.Api (Timeout _) as error) } ->
+               List.iter
+                 (record_outcome ~risk_level:entry.risk_level)
+                 (summary_llm_error_outcomes ~mode error);
                on_failure ~reason:"HITL summary LLM call timed out" ~retryable:true
-             | Error err ->
-               record_outcome ~risk_level:entry.risk_level "provider_error";
-               on_failure ~reason:(Agent_sdk.Error.to_string err) ~retryable:true))
+             | Error { mode; error } ->
+               List.iter
+                 (record_outcome ~risk_level:entry.risk_level)
+                 (summary_llm_error_outcomes ~mode error);
+               on_failure ~reason:(Agent_sdk.Error.to_string error) ~retryable:true))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -475,6 +501,7 @@ module For_testing = struct
   let summary_of_response = summary_of_response
   let provider_config_for_summary = provider_config_for_summary
   let extract_json_object = extract_json_object
+  let summary_llm_error_outcomes = summary_llm_error_outcomes
   let summary_version = summary_version
 end
 ;;

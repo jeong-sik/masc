@@ -411,6 +411,32 @@ let test_summary_of_response_plain_json_text_parses_prose_wrapped () =
   | Error e -> failf "expected plain-path parse to succeed, got %s" e
 ;;
 
+let test_plain_mode_error_outcomes_record_degradation () =
+  let provider_error = Agent_sdk.Error.Internal "synthetic provider failure" in
+  let timeout_error =
+    Agent_sdk.Error.Api
+      (Agent_sdk.Retry.Timeout { message = "synthetic timeout"; phase = None })
+  in
+  check (list string)
+    "plain provider error includes degradation then terminal outcome"
+    [ "degraded_plain_json"; "provider_error" ]
+    (H.For_testing.summary_llm_error_outcomes
+       ~mode:H.For_testing.Plain_json_text
+       provider_error);
+  check (list string)
+    "plain timeout includes degradation then terminal outcome"
+    [ "degraded_plain_json"; "timeout" ]
+    (H.For_testing.summary_llm_error_outcomes
+       ~mode:H.For_testing.Plain_json_text
+       timeout_error);
+  check (list string)
+    "native provider error emits terminal outcome only"
+    [ "provider_error" ]
+    (H.For_testing.summary_llm_error_outcomes
+       ~mode:H.For_testing.Native_structured
+       provider_error)
+;;
+
 (* ── Runner ───────────────────────────────────── *)
 
 let () =
@@ -443,6 +469,8 @@ let () =
             test_extract_json_object_variants
         ; test_case "summary_of_response plain path parses prose-wrapped JSON" `Quick
             test_summary_of_response_plain_json_text_parses_prose_wrapped
+        ; test_case "plain-mode errors keep degradation observable" `Quick
+            test_plain_mode_error_outcomes_record_degradation
         ] )
     ]
 ;;

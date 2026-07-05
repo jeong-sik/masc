@@ -45,5 +45,14 @@ module For_testing : sig
   (** Best-effort single-JSON-object extraction from model text (plain path). *)
   val extract_json_object : string -> (Yojson.Safe.t, string) result
 
+  (** Metric outcomes emitted when the LLM call fails after [summary_mode] has
+      been selected. Plain-mode failures include [degraded_plain_json] before
+      the terminal failure outcome so degradation is observable even without a
+      model response. *)
+  val summary_llm_error_outcomes
+    :  mode:summary_mode
+    -> Agent_sdk.Error.sdk_error
+    -> string list
+
   val summary_version : int
 end

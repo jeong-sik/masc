@@ -133,7 +133,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     showToast.mockClear()
     replayOasRuntimeTelemetry.mockClear()
     replayOasRuntimeTelemetry.mockResolvedValue(undefined)
-    refreshActiveKeeperChatHistory.mockClear()
+    refreshActiveKeeperChatHistory.mockReset()
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
@@ -218,6 +218,32 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     vi.clearAllTimers()
     cleanup()
+  })
+
+  it('surfaces active keeper chat reconnect refresh boundary failures without stopping recovery', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    refreshActiveKeeperChatHistory.mockImplementationOnce(() => {
+      throw new Error('keeper chat reconnect refresh exploded')
+    })
+    const { sseStore, sse } = await loadSseStore()
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.connected.value = true
+    sse.lastDisconnectedAt.value = Date.now() - 1_000
+    sse.reconnectCount.value += 1
+    await flushAsyncWork()
+
+    expect(refreshActiveKeeperChatHistory).toHaveBeenCalledWith({ force: true })
+    expect(consoleWarn).toHaveBeenCalledWith(
+      '[SSE] reconnect keeper chat re-hydration unavailable',
+      'keeper chat reconnect refresh exploded',
+    )
+    expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
+    expect(requestNamespaceTruthNow).toHaveBeenCalledTimes(1)
+
+    vi.clearAllTimers()
+    cleanup()
+    consoleWarn.mockRestore()
   })
 
   it('routes an approval:pending SSE event to the governance refresh (HITL badge contract)', async () => {

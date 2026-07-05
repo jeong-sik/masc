@@ -469,6 +469,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       streamState: null,
       streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
         requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
         reason: 'restored pending queued request from browser storage',
       }),
       attachments: request.attachments,
@@ -488,6 +489,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       streamState: 'opening',
       streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
         requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
         reason: 'awaiting queued request poll result',
       }),
       details: null,
@@ -590,6 +592,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         error: errorMessage,
         streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
           requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
           reason: errorMessage,
         }),
       })
@@ -611,6 +614,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         error: errorMessage,
         streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
           requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
           reason: errorMessage,
         }),
       })
@@ -627,6 +631,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
           requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
@@ -639,6 +644,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
           requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
@@ -654,6 +660,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       error: message,
       streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
         requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
         reason: message,
       }),
     })
@@ -666,6 +673,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       error: message,
       streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
         requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
         reason: message,
       }),
     })

@@ -5,9 +5,14 @@ import '../styles/keeper-workspace.css'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { ChatTranscript } from '../components/chat/primitives'
-import { chatHistoryEntriesFromRest } from '../keeper-state'
+import {
+  chatHistoryEntriesFromRest,
+  keeperClientObservedSseStreamContract,
+  keeperStreamContract,
+} from '../keeper-state'
+import type { KeeperConversationEntry } from '../types'
 
-export const replayEntries = chatHistoryEntriesFromRest('sangsu', [
+const historyReplayEntries = chatHistoryEntriesFromRest('sangsu', [
   {
     id: 'smoke-user',
     role: 'user',
@@ -56,10 +61,79 @@ export const replayEntries = chatHistoryEntriesFromRest('sangsu', [
   },
 ])
 
+const queueAndFinalizationEntries: KeeperConversationEntry[] = [
+  {
+    id: 'smoke-queued-assistant',
+    role: 'assistant',
+    source: 'direct_assistant',
+    label: 'sangsu',
+    text: '',
+    rawText: '',
+    timestamp: null,
+    delivery: 'queued',
+    streamState: 'opening',
+    streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
+      requestId: 'req-chat-contract-smoke-1',
+      deliveryReceipt: 'no_delivery_receipt',
+      reason: 'awaiting queued request poll result',
+    }),
+    details: null,
+  },
+  {
+    id: 'smoke-queue-result-assistant',
+    role: 'assistant',
+    source: 'direct_assistant',
+    label: 'sangsu',
+    text: 'queued request finished through dashboard polling',
+    rawText: 'queued request finished through dashboard polling',
+    timestamp: '2026-07-05T14:14:03.000Z',
+    delivery: 'delivered',
+    streamState: null,
+    streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
+      requestId: 'req-chat-contract-smoke-1',
+      deliveryReceipt: 'no_delivery_receipt',
+      reason: 'terminal queued poll result observed by dashboard polling, not SSE delivery',
+    }),
+    details: null,
+  },
+  {
+    id: 'smoke-live-final-assistant',
+    role: 'assistant',
+    source: 'direct_assistant',
+    label: 'sangsu',
+    text: 'live stream finished with a client-observed terminal event',
+    rawText: 'live stream finished with a client-observed terminal event',
+    timestamp: '2026-07-05T14:14:04.000Z',
+    delivery: 'delivered',
+    streamState: null,
+    streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+      eventName: 'RUN_FINISHED',
+      reason: 'live stream terminal event observed by dashboard SSE client',
+    }),
+    details: null,
+  },
+]
+
+export const replayEntries = [
+  ...historyReplayEntries,
+  ...queueAndFinalizationEntries,
+]
+
 export const clientObservedCount = replayEntries.filter(
   entry => entry.streamContract?.deliveryReceipt === 'client_observed_sse_event',
 ).length
-export const fixtureStatus = replayEntries.length === 3 && clientObservedCount === 0 ? 'ok' : 'invalid'
+export const noDeliveryReceiptCount = replayEntries.filter(
+  entry => entry.streamContract?.deliveryReceipt === 'no_delivery_receipt',
+).length
+export const serverReplayOnlyCount = replayEntries.filter(
+  entry => entry.streamContract?.deliveryReceipt === 'server_lifecycle_replay_only',
+).length
+export const fixtureStatus = replayEntries.length === 6
+  && clientObservedCount === 1
+  && noDeliveryReceiptCount === 4
+  && serverReplayOnlyCount === 1
+  ? 'ok'
+  : 'invalid'
 
 export function ReplayContractFixture() {
   return html`
@@ -71,6 +145,8 @@ export function ReplayContractFixture() {
       data-replay-contract-fixture-status=${fixtureStatus}
       data-replay-contract-fixture-row-count=${replayEntries.length}
       data-replay-contract-fixture-client-observed-count=${clientObservedCount}
+      data-replay-contract-fixture-no-delivery-count=${noDeliveryReceiptCount}
+      data-replay-contract-fixture-server-replay-count=${serverReplayOnlyCount}
     >
       <section class="mx-auto max-w-[760px]">
         <header class="mb-5">

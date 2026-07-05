@@ -1323,6 +1323,8 @@ export function chatHistoryEntriesFromRest(
         role: message.role,
         content: message.content,
         ts_unix: message.ts,
+        source: message.source,
+        surface: message.surface,
         audio: message.audio,
         attachments: message.attachments,
         kind: message.kind,

@@ -2091,6 +2091,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
           : 'max-w-[90%] gap-3 rounded-[var(--r-5)] px-4 py-3'
       }`}
       data-chat-variant=${variant}
+      data-chat-entry-id=${entry.id}
+      data-chat-role=${entry.role}
+      data-chat-source=${entry.source}
+      data-chat-delivery-state=${entry.delivery}
+      data-chat-surface-kind=${entry.surface?.kind ?? undefined}
+      data-chat-turn-ref=${entry.turnRef ?? undefined}
     >
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>

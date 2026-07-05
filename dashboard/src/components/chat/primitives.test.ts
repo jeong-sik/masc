@@ -179,6 +179,42 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-blocks]')).toBeNull()
   })
 
+  it('exposes entry provenance as rendered attributes and surface links', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'discord-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'channel reply',
+            rawText: 'channel reply',
+            turnRef: 'trace-ui#9',
+            surface: {
+              kind: 'discord',
+              guild_id: 'guild-1',
+              channel_id: 'channel-1',
+              thread_id: 'thread-1',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="discord-1"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-source')).toBe('direct_assistant')
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('discord')
+    expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-ui#9')
+    const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
+    expect(surfaceLink?.textContent).toContain('Discord Thread')
+  })
+
   it('marks a failed tool call with the error status glyph', () => {
     recordToolCallOutputs([
       toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),

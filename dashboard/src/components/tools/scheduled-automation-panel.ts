@@ -247,12 +247,32 @@ function payloadBlockedScheduleIds(
   return blockedIds
 }
 
+function supportedPayloadKindSet(
+  automation: DashboardScheduledAutomation,
+): ReadonlySet<string> | null {
+  const kinds = automation.payload_support?.supported_kinds
+  if (!kinds) return null
+  return new Set(kinds.map(kind => kind.trim()).filter(Boolean))
+}
+
+function durableSignalPayloadBlocksWake(
+  signal: DashboardScheduledAutomationSignal,
+  supportedKinds: ReadonlySet<string> | null,
+): boolean {
+  if (!supportedKinds) return false
+  const kind = signal.payload_kind?.trim()
+  return !kind || !supportedKinds.has(kind)
+}
+
 function selectDurableWakeSignals(
   automation: DashboardScheduledAutomation,
 ): DashboardScheduledAutomationSignal[] {
   const blockedIds = payloadBlockedScheduleIds(automation.requests ?? [])
+  const supportedKinds = supportedPayloadKindSet(automation)
   return [...(automation.signals ?? [])]
-    .filter(signal => !blockedIds.has(signal.schedule_id))
+    .filter(signal =>
+      !blockedIds.has(signal.schedule_id)
+      && !durableSignalPayloadBlocksWake(signal, supportedKinds))
     .sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
 }
 

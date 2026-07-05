@@ -391,6 +391,12 @@ function sampleAutomation(): DashboardScheduledAutomation {
       due_execution_ready: 1,
       expired_effective: 0,
     },
+    payload_support: {
+      supported_kinds: ['keeper.review', 'keeper.smoke'],
+      unsupported_request_count: 0,
+      unsupported_kinds: [],
+      unknown_request_count: 0,
+    },
     fsm: {
       state: 'blocked_approval',
       active_count: 2,
@@ -683,6 +689,55 @@ describe('ScheduledAutomationPanel', () => {
       expect(container.querySelector('[data-schedule-signal-schedule="sched-supported"]')).not.toBeNull()
       expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported"]')).toBeNull()
       expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown"]')).toBeNull()
+    }
+  })
+
+  it('keeps unsupported durable wake signals hidden when the request row is absent', () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.smoke',
+        payload_support: 'supported',
+      }),
+    ])
+    auto.payload_support = {
+      supported_kinds: ['keeper.smoke'],
+      unsupported_request_count: 1,
+      unsupported_kinds: [{ kind: 'orphan_auto_release', count: 1 }],
+      unknown_request_count: 1,
+    }
+    auto.signal_source = 'schedule_runner_signals'
+    auto.signal_count = 3
+    auto.signals = [
+      signal({
+        signal_id: 'sig-supported',
+        schedule_id: 'sched-supported',
+        payload_kind: 'keeper.smoke',
+      }),
+      signal({
+        signal_id: 'sig-unsupported-missing-row',
+        schedule_id: 'sched-unsupported-missing-row',
+        payload_kind: 'orphan_auto_release',
+      }),
+      signal({
+        signal_id: 'sig-unknown-missing-row',
+        schedule_id: 'sched-unknown-missing-row',
+      }),
+    ]
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      expect(container.querySelector('[data-schedule-signal-id="sig-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unsupported-missing-row"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-id="sig-unknown-missing-row"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-supported"]')).not.toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unsupported-missing-row"]')).toBeNull()
+      expect(container.querySelector('[data-schedule-signal-schedule="sched-unknown-missing-row"]')).toBeNull()
     }
   })
 

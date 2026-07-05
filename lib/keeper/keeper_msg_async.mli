@@ -72,6 +72,13 @@ val submit
     returned as [Lost] and the terminal lost state is persisted. *)
 val poll : ?base_path:string -> string -> load_result
 
+(** Mark persisted non-terminal request records that have no live in-memory
+    worker as [Lost], returning the number of records transitioned. This is
+    intended for server startup/recovery sweeps: current-process workers remain
+    protected by the in-memory pending table, while disk-only [Queued]/[Running]
+    records from a previous process stop looking indefinitely active. *)
+val recover_lost_disk_records : base_path:string -> int
+
 (** [cancel ?base_path request_id] aborts a running async keeper_msg request.
     Returns [true] if it was successfully cancelled, [false] if not found
     or already finished. *)
@@ -97,6 +104,7 @@ module For_testing : sig
   val record_path : base_path:string -> request_id:string -> string option
   val load_record : base_path:string -> request_id:string -> load_result
   val gc_stale_disk : base_path:string -> int
+  val recover_lost_disk_records : base_path:string -> int
   val active_switch_count : unit -> int
   val effective_timeout_sec : ?timeout_sec:float -> unit -> float
 end

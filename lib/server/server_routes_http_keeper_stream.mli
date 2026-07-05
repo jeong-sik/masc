@@ -205,6 +205,12 @@ module For_testing : sig
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
   val modalities_for_request : keeper_chat_stream_request -> string list
+  val keeper_chat_stream_headers : string -> Httpun.Headers.t
+  val defer_dashboard_payload_if_busy :
+    base_path:string ->
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    keeper_chat_stream_request ->
+    [ `Not_busy | `Queued of int ]
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val direct_reply_terminal_error :
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option

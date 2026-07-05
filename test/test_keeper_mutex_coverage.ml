@@ -254,6 +254,52 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
     Alcotest.fail "expected persisted request"
 ;;
 
+let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-async-recover-sweep-" in
+  let promise, _resolver = Eio.Promise.create () in
+  let request_id =
+    Keeper_msg_async.submit
+      ~sw
+      ~base_path
+      ~keeper_name:"sweep"
+      ~f:(fun () ->
+        Eio.Promise.await promise;
+        tr_ok "{}")
+      ()
+  in
+  ignore (wait_for_running request_id : Keeper_msg_async.entry);
+  Alcotest.(check int)
+    "live in-memory worker is not recovered as lost"
+    0
+    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path);
+  (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+   | Keeper_msg_async.Found { Keeper_msg_async.status = Running; _ } -> ()
+   | Keeper_msg_async.Found entry ->
+     Alcotest.failf
+       "expected live request to remain running, got %s"
+       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+   | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+     Alcotest.fail "expected persisted running request");
+  Keeper_msg_async.For_testing.forget request_id;
+  Alcotest.(check int)
+    "disk-only in-flight request is recovered as lost"
+    1
+    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path);
+  match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+  | Keeper_msg_async.Found { Keeper_msg_async.status = Lost { reason }; _ } ->
+    Alcotest.(check bool) "lost reason retained" true (String.length reason > 0)
+  | Keeper_msg_async.Found entry ->
+    Alcotest.failf
+      "expected recovered lost request, got %s"
+      (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+    Alcotest.fail "expected persisted lost request"
+;;
+
 let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
   with_eio_env
   @@ fun _env ->
@@ -690,6 +736,10 @@ let () =
             "recover in-flight request as lost"
             `Quick
             test_keeper_msg_async_marks_recovered_inflight_lost
+        ; test_case
+            "recovery sweep marks only disk-only in-flight lost"
+            `Quick
+            test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost
         ; test_case
             "cancelled worker is terminal cancelled"
             `Quick

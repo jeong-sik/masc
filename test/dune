@@ -905,6 +905,7 @@
 (tests
  (names
   test_keeper_busy_connector_deferred
+  test_keeper_busy_dashboard_deferred
   test_keeper_chat_consumer_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
@@ -1101,6 +1102,7 @@
   test_board_moderation)
  (modules
   test_keeper_busy_connector_deferred
+  test_keeper_busy_dashboard_deferred
   test_keeper_chat_consumer_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params

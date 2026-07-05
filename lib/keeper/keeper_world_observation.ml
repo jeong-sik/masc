@@ -46,6 +46,7 @@ type pending_board_event_kind =
   | Bg_completed
   | Schedule_due
   | External_attention
+  | Goal_verification_failed
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -653,6 +654,69 @@ let pending_board_event_of_external_attention
   }
 ;;
 
+let goal_verification_failure_author =
+  Tool_name.Goal_name.to_string Tool_name.Goal_name.Goal_verify
+;;
+
+let goal_verification_failure_preview
+      (failure : Keeper_event_queue.goal_verification_failure)
+  =
+  let metric_line =
+    match failure.metric, failure.target_value with
+    | Some metric, Some target ->
+      Printf.sprintf " metric=%s target=%s" metric target
+    | Some metric, None -> Printf.sprintf " metric=%s" metric
+    | None, Some target -> Printf.sprintf " target=%s" target
+    | None, None -> ""
+  in
+  let note_line =
+    match failure.note with
+    | Some note when String.trim note <> "" -> " note=" ^ note
+    | Some _ | None -> ""
+  in
+  let evidence_line =
+    match failure.evidence_refs with
+    | [] -> ""
+    | refs -> " evidence_refs=" ^ String.concat "," refs
+  in
+  Printf.sprintf
+    "Goal verification rejected by %s; goal returned to phase=%s.%s%s%s"
+    failure.rejected_by
+    failure.phase
+    metric_line
+    note_line
+    evidence_line
+;;
+
+let pending_board_event_of_goal_verification_failure
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (failure : Keeper_event_queue.goal_verification_failure)
+  : pending_board_event
+  =
+  let author = goal_verification_failure_author in
+  let self_ids = self_ids meta in
+  { event_kind = Goal_verification_failed
+  ; post_id = Keeper_event_queue.goal_verification_failure_post_id failure
+  ; author
+  ; title = Printf.sprintf "Goal verification failed: %s" failure.goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (goal_verification_failure_preview failure)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some failure.rejected_by
+  ; latest_external_preview = failure.note
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -674,6 +738,12 @@ let pending_board_event_of_stimulus
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
   | Keeper_event_queue.Schedule_due sw ->
     Some (pending_board_event_of_scheduled_wake ~meta ~arrived_at:stimulus.arrived_at sw)
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    Some
+      (pending_board_event_of_goal_verification_failure
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         failure)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
   | Keeper_event_queue.Connector_attention _

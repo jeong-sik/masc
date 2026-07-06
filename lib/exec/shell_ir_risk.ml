@@ -365,10 +365,17 @@ let classify_write_detail (words : string list) : risk_class option =
 let repo_hosting_cli_irreversible_ops =
   [
     ("pr", [ "merge"; "ready" ]);
-    ("repo", [ "create"; "delete"; "archive"; "transfer"; "rename"; "fork" ]);
-    ( "discussion",
-      [ "create"; "comment"; "edit"; "delete"; "close"; "reopen"; "lock";
-        "unlock"; "answer"; "unanswer" ] );
+    (* RFC-0309 W4/G-9: repo create/fork are factually REVERSIBLE (a created or
+       forked repo can be deleted), so they move to the reversible table below.
+       Only the genuinely irreversible repo ops stay here. This restores the
+       risk axis to state a fact; the "keeper may not create repos
+       unsupervised" decision now lives on the capability axis
+       ([Gh_capability_policy]) as [Requires_approval], superseding #23362's
+       policy-as-risk encoding. *)
+    ("repo", [ "delete"; "archive"; "transfer"; "rename" ]);
+    (* Only [delete] is irreversible; create/comment/edit/close/reopen/lock/
+       unlock/answer/unanswer are reversible discussion mutations (W4/G-9). *)
+    ("discussion", [ "delete" ]);
     ("release", [ "delete" ]);
     ("secret", [ "delete"; "remove" ]);
     ("ssh-key", [ "delete" ]);
@@ -392,8 +399,18 @@ let repo_hosting_cli_reversible_mutations =
     ("run", [ "cancel"; "rerun"; "watch" ]);
     ("cache", [ "delete" ]);
     ("gist", [ "create"; "edit"; "clone"; "rename" ]);
+    (* RFC-0309 W4/G-9: create/fork are reversible remote mutations. The
+       capability axis ([Gh_capability_policy]) routes create/fork/edit/sync to
+       [Requires_approval] because they touch a durable remote surface; the
+       risk axis only states they are reversible (R1). *)
     ("repo",
-     [ "clone"; "edit"; "sync"; "set-default" ]);
+     [ "clone"; "create"; "fork"; "edit"; "sync"; "set-default" ]);
+    (* RFC-0309 W4/G-9: reversible discussion mutations (delete stays R2 in the
+       irreversible table). The capability axis routes these to
+       [Requires_approval] via the Discussion durable-remote family. *)
+    ("discussion",
+     [ "create"; "comment"; "edit"; "close"; "reopen"; "lock"; "unlock";
+       "answer"; "unanswer" ]);
     ("project",
      [ "create"; "edit"; "close"; "copy"; "link"; "unlink"; "field-create";
        "field-delete"; "item-add"; "item-archive"; "item-delete"; "item-edit" ]);
@@ -452,12 +469,13 @@ let repo_hosting_graphql_r2_fragments =
   [ "deletepullrequest"; "deleteissue"; "deletebranch"; "deleteref";
     "deleteproject"; "deletebranchprotectionrule";
     "removeouterfromorganization"; "transferrepository";
-    "archiverepository"; "createrepository"; "clonetemplaterepository";
-    "creatediscussion"; "adddiscussioncomment"; "adddiscussionpollvote";
-    "closediscussion"; "deletediscussion"; "deletediscussioncomment";
-    "markdiscussioncommentasanswer"; "reopendiscussion";
-    "unmarkdiscussioncommentasanswer"; "updatediscussion";
-    "updatediscussioncomment";
+    "archiverepository";
+    (* RFC-0309 W4/G-9: only irreversible discussion graphql mutations stay R2.
+       createDiscussion/addDiscussionComment/closeDiscussion/updateDiscussion/
+       etc. are reversible and are gated by the capability axis, not the risk
+       floor (they were added to R2 by #23362's policy-as-risk encoding).
+       createRepository/cloneTemplateRepository are likewise reversible. *)
+    "deletediscussion"; "deletediscussioncomment";
     (* Forward-looking verb prefixes for mutations GitHub may introduce.
        Over-block here is acceptable — under-block (silent miss) is not. *)
     "purgerepository" ]

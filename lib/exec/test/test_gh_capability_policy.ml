@@ -71,18 +71,22 @@ let test_current_dispositions () =
   check "pr comment" (verb ~sub:"pr" ~act:"comment" ()) Pol.Allowed;
   check "issue create" (verb ~sub:"issue" ~act:"create" ()) Pol.Allowed;
   check "release create" (verb ~sub:"release" ~act:"create" ()) Pol.Allowed;
-  (* irreversible (also risk-floored): Denied *)
+  (* genuinely irreversible (also risk-floored): Denied *)
   check "pr merge" (verb ~sub:"pr" ~act:"merge" ()) Pol.Denied;
   check "repo delete" (verb ~sub:"repo" ~act:"delete" ()) Pol.Denied;
   check "discussion delete" (verb ~sub:"discussion" ~act:"delete" ()) Pol.Denied;
-  (* W4 target divergence: repo-create / discussion-create are Denied TODAY
-     because #23362 keeps them in the irreversible risk table. W4/G-9 moves
-     them to R1, at which point (durable-remote + R1) -> Requires_approval.
-     Pinned as Denied here so the W4 table change produces a visible delta. *)
-  check "repo create (W4->requires_approval)" (verb ~sub:"repo" ~act:"create" ())
-    Pol.Denied;
-  check "discussion create (W4->requires_approval)"
-    (verb ~sub:"discussion" ~act:"create" ()) Pol.Denied;
+  (* W4/G-9 ENABLED: repo-create / discussion-create are now R1 (reversible) +
+     durable-remote -> Requires_approval. Was Denied under #23362; the risk axis
+     no longer lies about reversibility and the capability axis carries the
+     decision. This is the active-keeper enablement. *)
+  check "repo create -> Requires_approval" (verb ~sub:"repo" ~act:"create" ())
+    Pol.Requires_approval;
+  check "repo fork -> Requires_approval" (verb ~sub:"repo" ~act:"fork" ())
+    Pol.Requires_approval;
+  check "discussion create -> Requires_approval"
+    (verb ~sub:"discussion" ~act:"create" ()) Pol.Requires_approval;
+  check "discussion comment -> Requires_approval"
+    (verb ~sub:"discussion" ~act:"comment" ()) Pol.Requires_approval;
   (* durable-remote R1 mutation -> Requires_approval *)
   check "repo edit" (verb ~sub:"repo" ~act:"edit" ()) Pol.Requires_approval;
   check "repo sync" (verb ~sub:"repo" ~act:"sync" ()) Pol.Requires_approval;

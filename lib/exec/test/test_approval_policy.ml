@@ -363,16 +363,16 @@ let test_gh_irreversible_repo_hosting_ops_denied_under_autonomous () =
        | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
          assert (Exec_program.to_string bin = "gh")
        | _ -> Alcotest.failf "%s: expected gh irreversible op to be denied" label)
+    (* W4/G-9: repo create/fork, discussion create, and graphql create* moved
+       to R1 (reversible) — they are no longer Deny; they Ask via the capability
+       axis (asserted in [test_gh_durable_remote_asks_under_autonomous]). Only
+       the genuinely irreversible ops remain Deny here. *)
     [ "gh pr merge", [ "pr"; "merge"; "123"; "--squash" ]
-    ; "gh repo create", [ "repo"; "create"; "owner/new-repo" ]
-    ; "gh repo fork", [ "repo"; "fork"; "owner/repo" ]
     ; "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
-    ; "gh discussion create", [ "discussion"; "create"; "--title"; "T" ]
+    ; "gh discussion delete", [ "discussion"; "delete"; "42" ]
     ; "gh api delete", [ "api"; "-X"; "DELETE"; "/repos/owner/repo" ]
-    ; "gh graphql createRepository"
-      , [ "api"; "graphql"; "-f"; "query=mutation{createRepository}" ]
-    ; "gh graphql createDiscussion"
-      , [ "api"; "graphql"; "-f"; "query=mutation{createDiscussion}" ]
+    ; "gh graphql deleteDiscussion"
+      , [ "api"; "graphql"; "-f"; "query=mutation{deleteDiscussion}" ]
     ]
 
 let test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous () =
@@ -479,35 +479,19 @@ let test_gh_durable_remote_asks_under_autonomous () =
        | _ ->
          Alcotest.failf "%s: durable-remote gh op must Ask under autonomous"
            label)
-    (* R1 durable-remote mutations that exist TODAY (repo reversible table).
-       discussion mutations and repo create/fork are R2 under #23362, so they
-       Deny (not Ask) until W4/G-9 moves them to R1 — asserted separately in
-       [test_gh_r2_durable_remote_denies_pending_w4]. *)
-    [ "gh repo edit", [ "repo"; "edit"; "--description"; "d" ]
+    (* W4/G-9 ENABLED: repo create/fork and discussion mutations moved R2->R1,
+       so they now take the capability Ask path (durable-remote R1) instead of
+       the floor Deny path — the active-keeper enablement. Plus the R1
+       durable-remote ops that already existed (repo edit/sync/set-default) and
+       unknown gh. *)
+    [ "gh repo create", [ "repo"; "create"; "o/new" ]
+    ; "gh repo fork", [ "repo"; "fork"; "o/r" ]
+    ; "gh discussion create", [ "discussion"; "create"; "--title"; "T" ]
+    ; "gh discussion comment", [ "discussion"; "comment"; "42"; "--body"; "B" ]
+    ; "gh repo edit", [ "repo"; "edit"; "--description"; "d" ]
     ; "gh repo sync", [ "repo"; "sync" ]
     ; "gh repo set-default", [ "repo"; "set-default"; "o/r" ]
     ; "gh frobnicate (unknown -> Requires_approval)", [ "frobnicate"; "now" ]
-    ]
-
-(* #23362 keeps discussion mutations and repo create/fork at R2, so the
-   capability disposition is [Denied] and they take the floor Deny path, NOT
-   the W3 Ask path. Pinned here so W4/G-9 (R2 -> R1) produces a visible delta:
-   these flip from Deny to Ask. *)
-let test_gh_r2_durable_remote_denies_pending_w4 () =
-  List.iter
-    (fun (label, args) ->
-       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
-       let caps = Capability_check.of_simple s in
-       match
-         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
-           ~caps ~simple:s
-       with
-       | Verdict.Deny { reason = Destructive_repo_hosting_cli _; _ } -> ()
-       | _ ->
-         Alcotest.failf "%s: R2 durable-remote must Deny under autonomous (W4 -> Ask)"
-           label)
-    [ "gh discussion comment", [ "discussion"; "comment"; "42"; "--body"; "B" ]
-    ; "gh repo create", [ "repo"; "create"; "o/new" ]
     ]
 
 (* Regression guard: the W3 capability layer is ADDITIVE. Reads and local /
@@ -538,6 +522,48 @@ let test_non_gh_unaffected_by_capability_layer () =
   match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
   | Verdict.Allow _ -> ()
   | _ -> Alcotest.fail "ls should stay Allow under autonomous"
+
+(* Issue #23390 regression: a leading value-taking global flag ([gh --repo o/r
+   pr merge]) must not slip the destructive op past the floor. gh (Cobra)
+   accepts flags before the subcommand and consumes their values, so the
+   word-list classifier's position-based subcommand slot is wrong; the typed
+   lowering locates the real subcommand. *)
+let test_gh_leading_flag_destructive_floored_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
+         assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf "%s: leading-flag destructive op must be floored" label)
+    [ "gh --repo o/r pr merge", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
+    ; "gh --repo o/r pr ready", [ "--repo"; "o/r"; "pr"; "ready"; "123" ]
+    ; "gh --repo o/r repo delete"
+      , [ "--repo"; "o/r"; "repo"; "delete"; "o/r"; "--yes" ]
+    ]
+
+(* Control: a leading global flag on a READ must NOT be over-blocked — the fix
+   restores correct subcommand location without flooring reads. *)
+let test_gh_leading_flag_read_not_floored_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_repo_hosting_cli _; _ } ->
+         Alcotest.failf "%s: leading-flag read must not be floored" label
+       | _ -> ())
+    [ "gh --repo o/r pr view", [ "--repo"; "o/r"; "pr"; "view"; "123" ]
+    ; "gh --repo o/r pr list", [ "--repo"; "o/r"; "pr"; "list" ]
+    ]
 
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
    common force-delete-untracked form) is destructive and hits the floor.
@@ -652,9 +678,10 @@ let () =
   test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_gh_durable_remote_asks_under_autonomous ();
-  test_gh_r2_durable_remote_denies_pending_w4 ();
   test_gh_reads_and_local_still_allowed_under_autonomous ();
   test_non_gh_unaffected_by_capability_layer ();
+  test_gh_leading_flag_destructive_floored_under_autonomous ();
+  test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
   test_reset_hard_floored_under_autonomous ();

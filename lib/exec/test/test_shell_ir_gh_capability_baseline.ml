@@ -122,30 +122,31 @@ let corpus : (string * string * expectation) list =
      Stable Shell_ir_risk.R2_Irreversible);
     ("discussion-delete", "gh discussion delete 42",
      Stable Shell_ir_risk.R2_Irreversible);
-    (* --- Defect 1: policy encoded as risk (PR #23362) ---------------- *)
+    (* --- W4/G-9 FIXED: #23362's policy-as-risk closed. These reversible ops
+       now classify R1; the "keeper may not do this unsupervised" decision moved
+       to the capability axis ([Gh_capability_policy] -> Requires_approval).
+       Was [Defect_policy_as_risk R2]; now [Stable R1]. --------------------- *)
     ("repo-create", "gh repo create owner/new-repo",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("repo-fork", "gh repo fork owner/repo",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("discussion-create", "gh discussion create --title T --body B",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("discussion-comment", "gh discussion comment 42 --body B",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("discussion-edit", "gh discussion edit 42 --body B",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
-    (* close/reopen are a reversible round-trip pair; both sit in the
-       irreversible table. *)
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("discussion-close", "gh discussion close 42",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("graphql-createRepository",
      "gh api graphql -f 'query=mutation{createRepository}'",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("graphql-createDiscussion",
      "gh api graphql -f 'query=mutation{createDiscussion}'",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("graphql-addDiscussionComment",
      "gh api graphql -f 'query=mutation{addDiscussionComment}'",
-     Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     (* --- W1: wholly-unrecognized gh area -> fail-closed typed opinion.
        Composed risk is now R2 (was R0). Observability only: the approval
        floor still reads these as R0 (see test_word_list_surface). --------- *)
@@ -204,12 +205,11 @@ let test_typed_path_verb_opinion () =
   check "gh pr view 123" Shell_ir_risk.R0_Read;
   check "gh pr create --title T" Shell_ir_risk.R1_Reversible_mutation;
   check "gh pr merge 123" Shell_ir_risk.R2_Irreversible;
-  (* repo/create sits in the irreversible table post-#23362; W1 reads the
-     same tables, so the typed opinion is R2 here too. W2 moves it to R1
-     once the capability-policy axis can carry the "disabled" decision. *)
-  check "gh repo create owner/new-repo" Shell_ir_risk.R2_Irreversible;
+  (* W4/G-9: repo create is reversible (R1); the capability axis carries the
+     "requires approval" decision. Was R2 under #23362. *)
+  check "gh repo create owner/new-repo" Shell_ir_risk.R1_Reversible_mutation;
   check "gh repo delete owner/repo" Shell_ir_risk.R2_Irreversible;
-  check "gh discussion comment 42 --body B" Shell_ir_risk.R2_Irreversible;
+  check "gh discussion comment 42 --body B" Shell_ir_risk.R1_Reversible_mutation;
   (* api: typed opinion stays R0; the word-list floor owns -X/graphql risk. *)
   check "gh api repos/owner/repo -X DELETE" Shell_ir_risk.R0_Read;
   (* wholly-unrecognized area: fail-closed typed opinion. *)
@@ -227,7 +227,9 @@ let test_word_list_surface () =
   in
   check [ "gh"; "frobnicate"; "now" ] Shell_ir_risk.R0_Read;
   check [ "gh"; "repo"; "upsert-magic"; "owner/repo" ] Shell_ir_risk.R0_Read;
-  check [ "gh"; "discussion"; "close"; "42" ] Shell_ir_risk.R2_Irreversible
+  (* W4/G-9: discussion close is reversible (R1); discussion delete stays R2. *)
+  check [ "gh"; "discussion"; "close"; "42" ] Shell_ir_risk.R1_Reversible_mutation;
+  check [ "gh"; "discussion"; "delete"; "42" ] Shell_ir_risk.R2_Irreversible
 ;;
 
 (* Ledger ratchet: exact distribution over the corpus. A slice that fixes
@@ -257,14 +259,14 @@ let test_ledger () =
     (List.length corpus) r0 r1 r2 dp policy_as_risk unknown_permissive
     fail_closed_opinion;
   Alcotest.(check int) "corpus size" 32 (List.length corpus);
-  (* W1 delta vs W0 baseline: 3 wholly-unknown gh areas moved R0->R2 as a
-     fail-closed typed opinion (R0 10->7, R2 17->20), leaving 1 residual
-     unknown-permissive (known-family unknown-action, deferred to W3). *)
+  (* W4/G-9 delta vs W1: the 9 policy-as-risk cases moved R2->R1 (repo
+     create/fork, discussion create/comment/edit/close, graphql create x3), so
+     R1 5->14, R2 20->11, and policy_as_risk 9->0 — the #23362 defect is closed. *)
   Alcotest.(check int) "R0 count" 7 r0;
-  Alcotest.(check int) "R1 count" 5 r1;
-  Alcotest.(check int) "R2 count" 20 r2;
+  Alcotest.(check int) "R1 count" 14 r1;
+  Alcotest.(check int) "R2 count" 11 r2;
   Alcotest.(check int) "Destructive count" 0 dp;
-  Alcotest.(check int) "defect: policy-as-risk" 9 policy_as_risk;
+  Alcotest.(check int) "defect: policy-as-risk (CLOSED by W4)" 0 policy_as_risk;
   Alcotest.(check int) "defect: unknown-permissive (residual)" 1
     unknown_permissive;
   Alcotest.(check int) "W1: fail-closed opinion" 3 fail_closed_opinion

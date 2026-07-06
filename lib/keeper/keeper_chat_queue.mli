@@ -90,6 +90,11 @@ val remove_matching :
 (** [length keeper_name] returns the number of queued messages. *)
 val length : keeper_name:string -> int
 
+(** [snapshot keeper_name] returns the queued messages in FIFO order without
+    mutating the queue. Intended for diagnostic projections that need source
+    metadata; consumers must still use {!dequeue_batch} for delivery. *)
+val snapshot : keeper_name:string -> queued_message list
+
 (** [clear keeper_name] empties the queue. *)
 val clear : keeper_name:string -> unit
 

@@ -497,11 +497,8 @@ let handle_cancel ~tool_name ~start_time ctx args =
       actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator
     in
     let* reason = required_string args "reason" in
-    let cancelled_by : Schedule_domain.actor =
-      { id = cancelled_by_id; kind = cancelled_by_kind; display_name = None }
-    in
     let* request =
-      Schedule_service.cancel ctx.config ~schedule_id ~cancelled_by ~reason
+      Schedule_service.cancel ctx.config ~schedule_id
       |> Result.map_error Schedule_service.service_error_to_string
     in
     Ok (request, cancelled_by_id, cancelled_by_kind, reason)

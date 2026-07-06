@@ -2419,11 +2419,26 @@ let schedule_payload_kind_supported kind =
   List.exists (String.equal kind) schedule_supported_payload_kinds
 ;;
 
-let schedule_payload_support_status (request : Schedule_domain.schedule_request) =
+type schedule_payload_support =
+  | Supported
+  | Unsupported
+  | Unknown
+
+let schedule_payload_support (request : Schedule_domain.schedule_request) =
   match Schedule_payload_projection.kind request with
-  | Some kind when schedule_payload_kind_supported kind -> "supported"
-  | Some _ -> "unsupported"
-  | None -> "unknown"
+  | Some kind when schedule_payload_kind_supported kind -> Supported
+  | Some _ -> Unsupported
+  | None -> Unknown
+;;
+
+let schedule_payload_support_to_string = function
+  | Supported -> "supported"
+  | Unsupported -> "unsupported"
+  | Unknown -> "unknown"
+;;
+
+let schedule_payload_support_status request =
+  schedule_payload_support request |> schedule_payload_support_to_string
 ;;
 
 let schedule_payload_support_json schedules =
@@ -2478,6 +2493,18 @@ let schedule_effectively_expired ~now (request : Schedule_domain.schedule_reques
 
 let schedule_request_effectively_active ~now request =
   schedule_request_active request && not (schedule_effectively_expired ~now request)
+;;
+
+let schedule_readiness_counts_as_live_supported = function
+  | Schedule_projection.Blocked_approval
+  | Schedule_projection.Awaiting_approval
+  | Schedule_projection.Due_pending_refresh
+  | Schedule_projection.Ready
+  | Schedule_projection.Approved
+  | Schedule_projection.Scheduled
+  | Schedule_projection.Running ->
+    true
+  | Schedule_projection.Expired | Schedule_projection.Terminal -> false
 ;;
 
 let schedule_effectively_due ~now (request : Schedule_domain.schedule_request) =
@@ -2924,7 +2951,9 @@ let schedule_keeper_reaction_evidence_dashboard_json
                  ~stimulus_id
              in
              let projection_status =
-               if evidence.turn_started_seen
+               if evidence.event_queue_ack_seen
+               then "matched_consumed_ack"
+               else if evidence.turn_started_seen
                then "matched_turn_started"
                else if evidence.stimulus_seen
                then "matched_stimulus"
@@ -2936,6 +2965,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                 @ [ "stimulus_id", `String stimulus_id
                   ; "stimulus_seen", `Bool evidence.stimulus_seen
                   ; "turn_started_seen", `Bool evidence.turn_started_seen
+                  ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
                   ; "matched_record_count", `Int evidence.matched_record_count
                   ; ( "stimulus_recorded_at"
                     , match evidence.stimulus_recorded_at with
@@ -2949,6 +2979,12 @@ let schedule_keeper_reaction_evidence_dashboard_json
                       | Some ts -> `Float ts )
                   ; ( "turn_started_recorded_at_iso"
                     , unix_iso_option_json evidence.turn_started_recorded_at )
+                  ; ( "event_queue_ack_recorded_at"
+                    , match evidence.event_queue_ack_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "event_queue_ack_recorded_at_iso"
+                    , unix_iso_option_json evidence.event_queue_ack_recorded_at )
                   ; ( "latest_recorded_at"
                     , match evidence.latest_recorded_at with
                       | None -> `Null
@@ -3067,6 +3103,127 @@ let schedule_request_dashboard_json
     ]
 ;;
 
+let live_supported_evidence_ids_limit = 8
+
+let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
+  let
+    ( supported_request_count
+    , supported_non_terminal_count
+    , supported_live_count
+    , supported_terminal_or_expired_count
+    , unsupported_request_count
+    , unknown_request_count
+    , terminal_or_expired_count
+    , matched_ids )
+    =
+    List.fold_left
+      (fun
+        ( supported_count
+        , supported_non_terminal
+        , supported_live
+        , supported_terminal_or_expired
+        , unsupported_count
+        , unknown_count
+        , terminal_or_expired
+        , ids )
+        (request : Schedule_domain.schedule_request)
+       ->
+         let readiness = schedule_execution_readiness ~now state request in
+         let live_readiness =
+           schedule_readiness_counts_as_live_supported readiness
+         in
+         let terminal_or_expired_row = not live_readiness in
+         let terminal_or_expired =
+           if terminal_or_expired_row then terminal_or_expired + 1 else terminal_or_expired
+         in
+         match schedule_payload_support request with
+         | Supported ->
+           let non_terminal = not (Schedule_domain.is_terminal request.status) in
+           let supported_non_terminal =
+             if non_terminal then supported_non_terminal + 1 else supported_non_terminal
+           in
+           if live_readiness
+           then (
+             let ids =
+               if List.length ids < live_supported_evidence_ids_limit
+               then request.schedule_id :: ids
+               else ids
+             in
+             ( supported_count + 1
+             , supported_non_terminal
+             , supported_live + 1
+             , supported_terminal_or_expired
+             , unsupported_count
+             , unknown_count
+             , terminal_or_expired
+             , ids ))
+           else
+             ( supported_count + 1
+             , supported_non_terminal
+             , supported_live
+             , supported_terminal_or_expired + 1
+             , unsupported_count
+             , unknown_count
+             , terminal_or_expired
+             , ids )
+         | Unsupported ->
+           ( supported_count
+           , supported_non_terminal
+           , supported_live
+           , supported_terminal_or_expired
+           , unsupported_count + 1
+           , unknown_count
+           , terminal_or_expired
+           , ids )
+         | Unknown ->
+           ( supported_count
+           , supported_non_terminal
+           , supported_live
+           , supported_terminal_or_expired
+           , unsupported_count
+           , unknown_count + 1
+           , terminal_or_expired
+           , ids ))
+      (0, 0, 0, 0, 0, 0, 0, [])
+      schedules
+  in
+  let request_count = List.length schedules in
+  let projection_status =
+    if supported_live_count > 0
+    then "matched_supported_non_terminal"
+    else if supported_request_count = 0 && request_count > 0
+    then "no_supported_payload_rows"
+    else "no_supported_non_terminal"
+  in
+  let reason =
+    if supported_live_count > 0
+    then "live schedule_store contains supported rows whose readiness is not terminal or expired"
+    else if supported_request_count = 0 && request_count > 0
+    then "current live schedule_store has no rows with a supported payload kind"
+    else "supported rows are currently terminal or effectively expired"
+  in
+  `Assoc
+    [ "schema", `String "masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1"
+    ; "source", `String "schedule_store"
+    ; "projection_status", `String projection_status
+    ; ( "criteria"
+      , `String
+          "payload_support=supported && execution_readiness not in {terminal,expired}" )
+    ; "reason", `String reason
+    ; "request_count", `Int request_count
+    ; "supported_request_count", `Int supported_request_count
+    ; "supported_non_terminal_count", `Int supported_non_terminal_count
+    ; "supported_live_count", `Int supported_live_count
+    ; "supported_terminal_or_expired_count", `Int supported_terminal_or_expired_count
+    ; "unsupported_request_count", `Int unsupported_request_count
+    ; "unknown_request_count", `Int unknown_request_count
+    ; "terminal_or_expired_count", `Int terminal_or_expired_count
+    ; ( "matched_schedule_ids"
+      , `List (List.map (fun schedule_id -> `String schedule_id) (List.rev matched_ids)) )
+    ; "matched_schedule_id_limit", `Int live_supported_evidence_ids_limit
+    ]
+;;
+
 let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
   (* NDT-OK: dashboard read-model freshness clock; it derives display-only
      effective-due state and never mutates the schedule store or runs work. *)
@@ -3158,6 +3315,8 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
           ; "unknown_payload_kind", `Int unknown_payload_kind_count
           ] )
     ; "payload_support", payload_support
+    ; ( "live_supported_non_terminal_evidence"
+      , schedule_live_supported_non_terminal_evidence_json ~now ~state schedules )
     ; ( "fsm"
       , `Assoc
           [ "state", `String (schedule_fsm_state ~now state schedules)

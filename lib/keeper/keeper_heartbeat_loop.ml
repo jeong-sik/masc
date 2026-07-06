@@ -53,6 +53,10 @@ let record_event_queue_stimulus_turn_started =
   Stimulus_intake.record_event_queue_stimulus_turn_started
 ;;
 
+let record_event_queue_stimulus_ack =
+  Stimulus_intake.record_event_queue_stimulus_ack
+;;
+
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
@@ -163,6 +167,23 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        match stimulus.payload with
        | Keeper_event_queue.Schedule_due _ ->
          record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Bg_completed _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.No_progress_recovery
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Goal_verification_failed _ -> ())
+    stimuli
+;;
+
+let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
+  List.iter
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+       match stimulus.payload with
+       | Keeper_event_queue.Schedule_due _ ->
+         record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus
        | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Fusion_completed _
        | Keeper_event_queue.Bg_completed _
@@ -454,10 +475,27 @@ let run_keepalive_unified_turn
       then
         if !consumed_stimuli_turn_completed
         then (
-          Keeper_registry_event_queue.ack_consumed
-            ~base_path:ctx.config.base_path
-            meta_after_triage.name
-            !consumed_stimuli;
+          (match
+             Keeper_registry_event_queue.ack_consumed_result
+               ~base_path:ctx.config.base_path
+               meta_after_triage.name
+               !consumed_stimuli
+           with
+           | Ok () ->
+             record_schedule_due_event_queue_ack_reactions
+               ~ctx
+               ~keeper_name:meta_after_triage.name
+               !consumed_stimuli
+           | Error msg ->
+             Log.Keeper.warn
+               "registry: ack_consumed failed name=%s: %s"
+               meta_after_triage.name
+               msg);
+          (*
+             Connector post-turn handling preserves the existing behavior:
+             it is an external-attention lifecycle update, while
+             [event_queue_ack] evidence above is emitted only after durable
+             event-queue acknowledgement succeeds. *)
           mark_connector_attention_ignored_after_turn
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name

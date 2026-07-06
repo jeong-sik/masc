@@ -95,6 +95,7 @@ export interface DashboardScheduledAutomationDispatchReceipt {
 
 export interface DashboardScheduledAutomationKeeperReactionEvidence {
   projection_status:
+    | 'matched_consumed_ack'
     | 'matched_turn_started'
     | 'matched_stimulus'
     | 'not_found'
@@ -110,11 +111,14 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   reaction_kind?: string
   stimulus_seen?: boolean
   turn_started_seen?: boolean
+  event_queue_ack_seen?: boolean
   matched_record_count?: number
   stimulus_recorded_at?: number | null
   stimulus_recorded_at_iso?: string | null
   turn_started_recorded_at?: number | null
   turn_started_recorded_at_iso?: string | null
+  event_queue_ack_recorded_at?: number | null
+  event_queue_ack_recorded_at_iso?: string | null
   latest_recorded_at?: number | null
   latest_recorded_at_iso?: string | null
   reason?: string
@@ -227,6 +231,27 @@ export interface DashboardScheduledAutomationPayloadSupport {
   unknown_request_count?: number
 }
 
+export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
+  schema?: string
+  source?: string
+  projection_status:
+    | 'matched_supported_non_terminal'
+    | 'no_supported_payload_rows'
+    | 'no_supported_non_terminal'
+  criteria?: string
+  reason?: string
+  request_count?: number
+  supported_request_count?: number
+  supported_non_terminal_count?: number
+  supported_live_count?: number
+  supported_terminal_or_expired_count?: number
+  unsupported_request_count?: number
+  unknown_request_count?: number
+  terminal_or_expired_count?: number
+  matched_schedule_ids?: string[]
+  matched_schedule_id_limit?: number
+}
+
 export interface DashboardScheduledAutomation {
   schema?: string
   source?: string
@@ -241,6 +266,7 @@ export interface DashboardScheduledAutomation {
   counts: Record<string, number>
   derived_counts?: Record<string, number>
   payload_support?: DashboardScheduledAutomationPayloadSupport
+  live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
   fsm: DashboardScheduledAutomationFsm
   requests: DashboardScheduledAutomationRequest[]
 }

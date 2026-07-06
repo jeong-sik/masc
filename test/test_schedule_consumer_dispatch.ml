@@ -119,6 +119,14 @@ let keeper_wake_payload =
     ]
 ;;
 
+let unsupported_payload =
+  `Assoc
+    [ "kind", `String "legacy.unsupported_scheduler_payload"
+    ; "schema_version", `Int 1
+    ; "body", `Assoc [ "message", `String "This payload is not in the schedule consumer catalog." ]
+    ]
+;;
+
 let create_pending_board_schedule config =
   match
     Schedule_service.create config ~schedule_id:"board-sched-1"
@@ -138,6 +146,19 @@ let create_pending_keeper_wake_schedule config =
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:keeper_wake_payload ~risk_class:Schedule_domain.Workspace_write
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let create_pending_unsupported_schedule config =
+  match
+    Schedule_service.create config ~schedule_id:"unsupported-live-sched"
+      ~requested_at:100.0 ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+      ~payload:unsupported_payload ~risk_class:Schedule_domain.Read_only
       ~source:Schedule_domain.Operator_request ()
   with
   | Ok request -> request
@@ -470,6 +491,54 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
       (queue_evidence |> member "inflight_count" |> to_int)
 ;;
 
+let test_dashboard_live_supported_non_terminal_evidence_matches_supported_request () =
+  with_workspace
+  @@ fun config ->
+  let request = create_pending_keeper_wake_schedule config in
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
+  check string "live supported evidence matched" "matched_supported_non_terminal"
+    (evidence |> member "projection_status" |> to_string);
+  check string "live supported evidence source" "schedule_store"
+    (evidence |> member "source" |> to_string);
+  check int "one supported request" 1
+    (evidence |> member "supported_request_count" |> to_int);
+  check int "one supported non-terminal request" 1
+    (evidence |> member "supported_non_terminal_count" |> to_int);
+  check int "one supported live request" 1
+    (evidence |> member "supported_live_count" |> to_int);
+  check int "no unsupported requests" 0
+    (evidence |> member "unsupported_request_count" |> to_int);
+  check (list string) "matched schedule ids" [ request.schedule_id ]
+    (evidence |> member "matched_schedule_ids" |> to_list |> List.map to_string)
+;;
+
+let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported_payloads
+      ()
+  =
+  with_workspace
+  @@ fun config ->
+  ignore (create_pending_unsupported_schedule config : Schedule_domain.schedule_request);
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
+  check string "live supported evidence absent" "no_supported_payload_rows"
+    (evidence |> member "projection_status" |> to_string);
+  check int "no supported requests" 0
+    (evidence |> member "supported_request_count" |> to_int);
+  check int "no supported live requests" 0
+    (evidence |> member "supported_live_count" |> to_int);
+  check int "one unsupported request" 1
+    (evidence |> member "unsupported_request_count" |> to_int);
+  check int "no matched schedule ids" 0
+    (evidence |> member "matched_schedule_ids" |> to_list |> List.length)
+;;
+
 let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
   with_workspace
   @@ fun config ->
@@ -570,10 +639,37 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (reaction_evidence |> member "turn_started_seen" |> to_bool);
       check int "two matched ledger rows after turn" 2
         (reaction_evidence |> member "matched_record_count" |> to_int);
-      Keeper_registry_event_queue.ack_consumed
+      (match
+         Keeper_registry_event_queue.ack_consumed_result
+           ~base_path:config.Workspace_utils.base_path
+           keeper_name
+           [ leased ]
+       with
+       | Ok () -> ()
+       | Error msg -> fail ("scheduled wake ack failed: " ^ msg));
+      Keeper_reaction_ledger.record_event_queue_reaction
         ~base_path:config.Workspace_utils.base_path
-        keeper_name
-        [ leased ])
+        ~keeper_name
+        ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+        leased;
+      let acked_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let acked_queue_evidence = acked_row |> member "keeper_queue_evidence" in
+      check string "acked queue evidence drained" "not_found"
+        (acked_queue_evidence |> member "projection_status" |> to_string);
+      check int "pending count after ack" 0
+        (acked_queue_evidence |> member "pending_count" |> to_int);
+      check int "inflight count after ack" 0
+        (acked_queue_evidence |> member "inflight_count" |> to_int);
+      let acked_reaction_evidence = acked_row |> member "keeper_reaction_evidence" in
+      check string "reaction evidence matched ack" "matched_consumed_ack"
+        (acked_reaction_evidence |> member "projection_status" |> to_string);
+      check bool "reaction evidence event queue acked" true
+        (acked_reaction_evidence |> member "event_queue_ack_seen" |> to_bool);
+      check int "three matched ledger rows after ack" 3
+        (acked_reaction_evidence |> member "matched_record_count" |> to_int))
 ;;
 
 let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =
@@ -695,6 +791,12 @@ let () =
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
+        ; test_case "dashboard live supported non-terminal evidence matches supported request"
+            `Quick
+            test_dashboard_live_supported_non_terminal_evidence_matches_supported_request
+        ; test_case "dashboard live supported non-terminal evidence reports absent supported payloads"
+            `Quick
+            test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported_payloads
         ; test_case "keeper wake dashboard tracks runtime inflight lease" `Quick
             test_keeper_wake_dashboard_tracks_runtime_inflight_lease
         ; test_case "keeper wake ledger failure keeps dispatch success visible" `Quick

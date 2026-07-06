@@ -748,6 +748,62 @@ describe('ScheduledAutomationPanel', () => {
     expect(turnReactionEvidence?.textContent).toContain('matched turn started')
     expect(turnReactionEvidence?.textContent).toContain('turn_started')
     expect(turnReactionEvidence?.textContent).toContain('true')
+
+    const ackedAuto = automation([
+      {
+        ...wakeRequest,
+        schedule_id: 'sched-keeper-wake',
+        keeper_queue_evidence: {
+          ...wakeRequest.keeper_queue_evidence!,
+          projection_status: 'not_found',
+          pending_count: 0,
+          inflight_count: 0,
+          matched_bucket: undefined,
+          matched_post_id: undefined,
+          matched_schedule_id: undefined,
+          matched_payload_kind: undefined,
+          matched_arrived_at: undefined,
+          matched_arrived_at_iso: undefined,
+          matched_age_seconds: undefined,
+        },
+        keeper_reaction_evidence: {
+          ...wakeRequest.keeper_reaction_evidence!,
+          projection_status: 'matched_consumed_ack',
+          turn_started_seen: true,
+          event_queue_ack_seen: true,
+          matched_record_count: 3,
+          turn_started_recorded_at: 202,
+          turn_started_recorded_at_iso: '2026-06-21T00:03:22Z',
+          event_queue_ack_recorded_at: 203,
+          event_queue_ack_recorded_at_iso: '2026-06-21T00:03:23Z',
+          latest_recorded_at: 203,
+          latest_recorded_at_iso: '2026-06-21T00:03:23Z',
+        },
+      },
+    ])
+
+    render(null, container)
+    render(html`<${ScheduledAutomationPanel} automation=${ackedAuto} variant="v2" />`, container)
+
+    const ackDoneFilter = container.querySelector('[data-schedule-filter="done"]') as HTMLButtonElement
+    ackDoneFilter.click()
+    await Promise.resolve()
+
+    const openAckDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
+    openAckDetail.click()
+    await Promise.resolve()
+
+    const ackQueueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="not_found"]')
+    expect(ackQueueEvidence).not.toBeNull()
+    expect(ackQueueEvidence?.textContent).toContain('not found')
+    expect(ackQueueEvidence?.textContent).toContain('pending_count')
+    expect(ackQueueEvidence?.textContent).toContain('0')
+    const ackReactionEvidence = container.querySelector('[data-schedule-keeper-reaction-evidence="matched_consumed_ack"]')
+    expect(ackReactionEvidence).not.toBeNull()
+    expect(ackReactionEvidence?.textContent).toContain('matched consumed ack')
+    expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_seen')
+    expect(ackReactionEvidence?.textContent).toContain('true')
+    expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_recorded_at')
   })
 
   it('filters schedule cards without filtering the wake signal feed', async () => {
@@ -975,6 +1031,83 @@ describe('ScheduledAutomationPanel', () => {
     expect(v2Contract?.textContent).toContain('payload support로 2 durable wake signal 숨김')
     expect(container.querySelector('[data-schedule-signal-id="sig-unsupported-only"]')).toBeNull()
     expect(container.querySelector('[data-schedule-signal-id="sig-unknown-only"]')).toBeNull()
+  })
+
+  it('renders explicit live supported non-terminal evidence absence', () => {
+    const auto = payloadSupportAutomation()
+    auto.live_supported_non_terminal_evidence = {
+      schema: 'masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1',
+      source: 'schedule_store',
+      projection_status: 'no_supported_payload_rows',
+      criteria: 'payload_support=supported && execution_readiness not in {terminal,expired}',
+      reason: 'current live schedule_store has no rows with a supported payload kind',
+      request_count: 3,
+      supported_request_count: 0,
+      supported_non_terminal_count: 0,
+      supported_live_count: 0,
+      supported_terminal_or_expired_count: 0,
+      unsupported_request_count: 2,
+      unknown_request_count: 1,
+      terminal_or_expired_count: 2,
+      matched_schedule_ids: [],
+      matched_schedule_id_limit: 8,
+    }
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      const evidence = container.querySelector('[data-schedule-live-supported-evidence="no_supported_payload_rows"]')
+      expect(evidence).not.toBeNull()
+      expect(evidence?.getAttribute('data-schedule-live-supported-count')).toBe('0')
+      expect(evidence?.getAttribute('data-schedule-live-supported-source')).toBe('schedule_store')
+      expect(evidence?.textContent).toContain('no supported payload rows')
+      expect(evidence?.textContent).toContain('payload_support=supported')
+      expect(evidence?.textContent).toContain('unsupported/unknown')
+      expect(evidence?.textContent).toContain('3')
+    }
+  })
+
+  it('renders matched live supported non-terminal evidence and opens matched rows', async () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-supported-live',
+        next_due_at: 100,
+        next_due_at_iso: '2026-06-21T00:10:00Z',
+        execution_readiness: 'scheduled',
+        payload_kind: 'masc.keeper_wake',
+        payload_support: 'supported',
+      }),
+    ])
+    auto.live_supported_non_terminal_evidence = {
+      schema: 'masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1',
+      source: 'schedule_store',
+      projection_status: 'matched_supported_non_terminal',
+      criteria: 'payload_support=supported && execution_readiness not in {terminal,expired}',
+      reason: 'live schedule_store contains supported rows whose readiness is not terminal or expired',
+      request_count: 1,
+      supported_request_count: 1,
+      supported_non_terminal_count: 1,
+      supported_live_count: 1,
+      supported_terminal_or_expired_count: 0,
+      unsupported_request_count: 0,
+      unknown_request_count: 0,
+      terminal_or_expired_count: 0,
+      matched_schedule_ids: ['sched-supported-live'],
+      matched_schedule_id_limit: 8,
+    }
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const evidence = container.querySelector('[data-schedule-live-supported-evidence="matched_supported_non_terminal"]')
+    expect(evidence).not.toBeNull()
+    expect(evidence?.getAttribute('data-schedule-live-supported-count')).toBe('1')
+    expect(evidence?.textContent).toContain('matched supported non-terminal')
+    const open = container.querySelector('[data-schedule-live-supported-open="sched-supported-live"]') as HTMLButtonElement
+    expect(open).not.toBeNull()
+    open.click()
+    await Promise.resolve()
+    expect(container.querySelector('[data-schedule-detail-panel="sched-supported-live"]')).not.toBeNull()
   })
 
   it('uses explicit ready and terminal status matching', async () => {

@@ -19,7 +19,10 @@ let cases : case list = [
   { label = "baseline-pr-list";          input = "pr list --state open";          expected = E_R0 };
   { label = "baseline-pr-create";        input = "pr create --title T";            expected = E_R1 };
   { label = "baseline-pr-merge";         input = "pr merge 123";                   expected = E_R2 };
+  { label = "baseline-repo-create";      input = "repo create owner/new-repo";      expected = E_R2 };
+  { label = "baseline-repo-fork";        input = "repo fork owner/repo";            expected = E_R2 };
   { label = "baseline-repo-delete";      input = "repo delete o/r --yes";          expected = E_R2 };
+  { label = "baseline-discussion-create";input = "discussion create --title T";     expected = E_R2 };
 
   { label = "flag-no-space-XDELETE";     input = "api -XDELETE /repos/o/r";        expected = E_R2 };
   { label = "flag-equals-method";        input = "api --method=DELETE /repos/o/r"; expected = E_R2 };
@@ -32,6 +35,8 @@ let cases : case list = [
 
   { label = "graphql-deletePR";          input = "api graphql -f query=mutation{deletePullRequest}"; expected = E_R2 };
   { label = "graphql-purgeRepository";   input = "api graphql -f query=mutation{purgeRepository}";   expected = E_R2 };
+  { label = "graphql-createRepository";  input = "api graphql -f query=mutation{createRepository}";  expected = E_R2 };
+  { label = "graphql-createDiscussion";  input = "api graphql -f query=mutation{createDiscussion}";  expected = E_R2 };
 
   { label = "double-spaces-merge";       input = "pr  merge  123";                 expected = E_R2 };
   { label = "case-upper-cmd";            input = "PR LIST";                        expected = E_R0 };

@@ -498,10 +498,10 @@ let pp fmt = function
   | W (Go { subcommand; verbose; race; rest }) ->
     Format.fprintf fmt "Go(sub=%s, v=%b, race=%b, rest=%a)" subcommand verbose race
       (Format.pp_print_list Format.pp_print_string) rest
-  | W (Gh { subcommand; action; draft; squash; delete_branch; body; title; rest }) ->
+  | W (Gh { subcommand; action; draft; squash; delete_branch; body; title; search; state; rest }) ->
     Format.fprintf
       fmt
-      "Gh(sub=%s, action=%a, draft=%b, squash=%b, del_br=%b, body=%a, title=%a, rest=%a)"
+      "Gh(sub=%s, action=%a, draft=%b, squash=%b, del_br=%b, body=%a, title=%a, search=%a, state=%a, rest=%a)"
       subcommand
       (Format.pp_print_option Format.pp_print_string)
       action
@@ -512,6 +512,10 @@ let pp fmt = function
       body
       (Format.pp_print_option Format.pp_print_string)
       title
+      (Format.pp_print_option Format.pp_print_string)
+      search
+      (Format.pp_print_option Format.pp_print_string)
+      state
       (Format.pp_print_list Format.pp_print_string)
       rest
   | W (Chmod { mode; path; recursive }) ->

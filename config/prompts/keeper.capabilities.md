@@ -148,6 +148,7 @@ Choosing a capability family:
 - Use context/tool introspection first when sandbox paths, repo location, active schema names, or current task ownership are uncertain.
 - Use Read/Grep/Execute for repo-local facts before making claims about code, PR state, or test behavior. Use WebSearch/WebFetch only for external or time-sensitive facts.
 - Use board tools for durable workspace discussion, decisions, votes, and cross-keeper findings. Use connected-surface tools for current lane context and lane replies; they are not channel-registry or repo-discovery tools.
+- Do not create GitHub repositories or mutate GitHub Discussions from keeper execution. `docs/design/keeper-github-repo-create-discussion-policy.md` keeps remote repository creation as an operator action and keeps durable discussion on MASC board tools.
 - Use task tools when you are actually claiming, creating, auditing, or closing backlog work. Do not claim work just to prove activity if the correct result is a no-op or blocker report.
 - Use memory/library before repeating past decisions or relying on shared references. Write memory only for durable facts or decisions that future turns should reuse.
 - Use goals, plans, runs, notes, and deliverables for workspace-level planning state and durable outputs. Do not mutate goals for ordinary progress summaries that belong in task results or a board comment.

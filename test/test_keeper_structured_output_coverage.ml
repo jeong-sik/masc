@@ -183,6 +183,26 @@ let expected_all_direct_completion_files =
     (expected_structured_completion_files @ expected_unstructured_completion_exemptions)
 ;;
 
+let structured_output_contract_call_count rel =
+  Ast_grep.count_calls
+    ~module_path:rel
+    ~callee:"Keeper_structured_output_schema.apply_to_provider_config"
+  + Ast_grep.count_calls
+      ~module_path:rel
+      ~callee:"Keeper_structured_output_schema.apply_hitl_summary_schema_to_config"
+  + Ast_grep.count_calls
+      ~module_path:rel
+      ~callee:"Keeper_structured_output_schema.apply_schema_or_prompt_tier"
+;;
+
+let check_structured_output_contract rel =
+  check
+    int
+    (rel ^ " applies structured-output schema")
+    1
+    (structured_output_contract_call_count rel)
+;;
+
 let test_all_direct_completions_are_classified () =
   check
     (list string)
@@ -207,38 +227,12 @@ let test_keeper_direct_completions_are_enumerated () =
     (keeper_direct_completion_files ())
 ;;
 
-let structured_output_schema_application_count rel =
-  Ast_grep.count_calls
-    ~module_path:rel
-    ~callee:"Keeper_structured_output_schema.apply_to_provider_config"
-  + Ast_grep.count_calls
-      ~module_path:rel
-      ~callee:"Keeper_structured_output_schema.apply_schema_or_prompt_tier"
-  + Ast_grep.count_calls
-      ~module_path:rel
-      ~callee:"Keeper_structured_output_schema.apply_hitl_summary_schema_to_config"
-;;
-
 let test_keeper_direct_completions_request_structured_output () =
-  List.iter
-    (fun rel ->
-       check
-         int
-         (rel ^ " applies structured-output schema")
-         1
-         (structured_output_schema_application_count rel))
-    expected_structured_completion_files
+  List.iter check_structured_output_contract expected_structured_completion_files
 ;;
 
 let test_agent_run_json_judges_request_structured_output rels =
-  List.iter
-    (fun rel ->
-       check
-         int
-         (rel ^ " applies structured-output schema")
-         1
-         (structured_output_schema_application_count rel))
-    rels
+  List.iter check_structured_output_contract rels
 ;;
 
 let test_dashboard_agent_run_json_judges_request_structured_output () =

@@ -42,10 +42,10 @@ type capabilities =
 [@@deriving show, eq]
 
 (** [providers.<id>] — connection + behavior. The deleted
-    [runtime_provider]'s [log]/[healthcheck] sub-records are dropped from v1:
-    no live Runtime consumer reads them, and the TOML parser parses-and-ignores
-    those sub-tables (RFC-0206 §3). [headers] is retained for per-provider HTTP
-    header injection. *)
+    [runtime_provider]'s [log] sub-record is still ignored. [healthcheck.path]
+    is retained as provider-owned metadata for install/setup probes; runtime
+    startup does not use it for admission. [headers] is retained for
+    per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
 
 type provider =
@@ -57,6 +57,7 @@ type provider =
   ; is_non_interactive : bool
   ; credentials : credential option
   ; capabilities : capabilities option
+  ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
     (** Per-provider override for the OAS connect + initial-response-headers
@@ -198,6 +199,7 @@ type binding =
   { provider_id : string
   ; model_id : string
   ; is_default : bool
+  ; wizard_default : bool
   ; max_concurrent : int option
   ; price_input : float option
   ; price_output : float option

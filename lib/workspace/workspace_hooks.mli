@@ -74,6 +74,11 @@ val operator_pending_confirm_upsert_fn :
    (unit, string) result)
     Atomic.t
 
+val operator_pending_confirm_read_result_fn :
+  (Workspace_utils_backend_setup.config ->
+   (operator_pending_confirm_request list, string) result)
+    Atomic.t
+
 val operator_pending_confirm_remove_fn :
   (Workspace_utils_backend_setup.config -> string -> (unit, string) result) Atomic.t
 

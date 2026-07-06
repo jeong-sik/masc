@@ -388,7 +388,7 @@ let background_task_rows keeper_name =
 
 let pending_confirm_rows keeper_names pending_confirms =
   pending_confirms
-  |> List.filter_map (fun (entry : Operator_pending_confirm.pending_confirm) ->
+  |> List.filter_map (fun (entry : Workspace_hooks.operator_pending_confirm_request) ->
     match entry.target_id with
     | Some keeper_name when List.exists (String.equal keeper_name) keeper_names ->
       Some
@@ -482,7 +482,7 @@ let schedule_rows_or_error config ~keeper_names =
 ;;
 
 let pending_confirms_or_error_rows config =
-  match Operator_pending_confirm.read_pending_confirms_result config with
+  match (Atomic.get Workspace_hooks.operator_pending_confirm_read_result_fn) config with
   | Ok pending_confirms -> pending_confirms, []
   | Error err ->
     ( []
@@ -537,7 +537,7 @@ let source_counts rows =
 let global_pending_confirm_count keeper_names pending_confirms =
   pending_confirms
   |> List.fold_left
-       (fun count (entry : Operator_pending_confirm.pending_confirm) ->
+       (fun count (entry : Workspace_hooks.operator_pending_confirm_request) ->
           match entry.target_id with
           | Some keeper_name when List.exists (String.equal keeper_name) keeper_names -> count
           | None | Some _ -> count + 1)

@@ -17,12 +17,8 @@ let with_config f =
     f (Workspace.default_config path))
 ;;
 
-let write_text path content =
-  Fs_compat.mkdir_p (Filename.dirname path);
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
+let corrupt_schedule_store config =
+  Workspace_core.write_text config (Schedule_store.schedules_path config) "{not-json"
 ;;
 
 let payload =
@@ -378,7 +374,7 @@ let test_dispatch_list_surfaces_payload_support_summary () =
 let test_dispatch_list_reports_schedule_store_read_error () =
   with_config
   @@ fun config ->
-  write_text (Schedule_store.schedules_path config) "{not-json";
+  corrupt_schedule_store config;
   match
     Tool_schedule.dispatch (schedule_ctx config)
       ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
@@ -399,7 +395,7 @@ let test_dispatch_list_reports_schedule_store_read_error () =
 let test_dispatch_get_reports_schedule_store_read_error () =
   with_config
   @@ fun config ->
-  write_text (Schedule_store.schedules_path config) "{not-json";
+  corrupt_schedule_store config;
   match
     Tool_schedule.dispatch (schedule_ctx config)
       ~name:(schedule_tool_name Tool_schemas_schedule.Get_request)
@@ -1467,7 +1463,7 @@ let test_dashboard_projection_surfaces_schedule_runner_signal_decode_errors () =
 let test_dashboard_projection_reports_schedule_store_read_error () =
   with_config
   @@ fun config ->
-  write_text (Schedule_store.schedules_path config) "{not-json";
+  corrupt_schedule_store config;
   let json =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in
@@ -1491,7 +1487,7 @@ let test_dashboard_projection_reports_schedule_store_read_error () =
 let test_keeper_observation_reports_schedule_store_read_error () =
   with_config
   @@ fun config ->
-  write_text (Schedule_store.schedules_path config) "{not-json";
+  corrupt_schedule_store config;
   let observation =
     Keeper_world_observation.read_scheduled_automation_observation
       ~keeper_name:None

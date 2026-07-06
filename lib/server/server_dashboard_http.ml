@@ -22,12 +22,16 @@ let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
         (`Assoc [ "ok", `Bool false; "error", `String error ])
         inner_reqd
     | Ok repos ->
-      let repo_list = List.map Repo_manager_types.repository_to_yojson repos in
+      let repo_list =
+        List.map
+          (Server_routes_http_routes_repositories.repository_json ~base_path)
+          repos
+      in
       let snapshot =
         `Assoc
           [ "ok", `Bool true
           ; "timestamp", `Float (Eio.Time.now clock)
-          ; "repository_count", `Int (List.length repo_list)
+          ; "repository_count", `Int (List.length repos)
           ; "repositories", `List repo_list
           ]
       in

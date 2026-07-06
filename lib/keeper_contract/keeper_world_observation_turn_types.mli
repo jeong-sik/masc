@@ -7,6 +7,7 @@ type keeper_cycle_channel =
 type event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Scheduled_automation_stimulus
   | Connector_attention_stimulus
       (** RFC-connector-ambient-attention-wake P1: ambient connector message
           recorded as external attention; edge-triggered, carries an event_id

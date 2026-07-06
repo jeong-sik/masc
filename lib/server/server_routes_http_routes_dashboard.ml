@@ -1579,6 +1579,13 @@ let add_routes ~sw ~clock router =
                  Keeper_api.handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str
                )
              ) request reqd
+       | Keeper_api.Keeper_post_secrets ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_secrets_post state req reqd body_str
+               )
+             ) request reqd
        | Keeper_api.Keeper_post_boot ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
@@ -1619,6 +1626,13 @@ let add_routes ~sw ~clock router =
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_directive_post
                    ~sw ~clock state agent_name req reqd body_str
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_catchup_judge ->
+           with_tool_auth ~tool_name:"masc_fusion"
+             (fun state req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_catchup_judge_post state req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_unknown ->

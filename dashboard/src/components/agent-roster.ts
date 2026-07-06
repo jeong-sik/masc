@@ -57,6 +57,7 @@ import {
 } from '../runtime-counts'
 import {
   keeperActivityDisplay,
+  keeperDisplayRuntime,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
   keeperWorkPreview,
@@ -319,7 +320,7 @@ const FLEET_CTX_HOT_PCT = 85
 
 type FleetVital = { k: string; v: string }
 
-// Build the aside `런타임` vitals grid from real keeper runtime fields only.
+// Build the aside `런타임` vitals grid from shared keeper runtime display only.
 // Fields with no live source (e.g. tps) are omitted rather than fabricated —
 // the audit (P1-6) flags `tps` as having no roster-model source.
 function fleetRuntimeVitals(
@@ -329,14 +330,8 @@ function fleetRuntimeVitals(
   if (!keeper) return []
   const vitals: FleetVital[] = []
 
-  // Full model id, no prefix truncation: in a multi-provider fleet a stripped
-  // `claude-` prefix collides with other providers' model names (audit P1-5).
-  const model = (keeper.active_model ?? keeper.model ?? keeper.last_model_used ?? '')
-    .trim()
-  if (model) vitals.push({ k: 'model', v: model })
-
-  const runtime = (keeper.runtime_canonical ?? keeper.selected_runtime_canonical ?? '').trim()
-  if (runtime) vitals.push({ k: 'runtime', v: runtime })
+  const runtime = keeperDisplayRuntime(keeper)
+  if (runtime) vitals.push({ k: 'runtime', v: runtime.value })
 
   if (typeof keeper.keeper_age_s === 'number' && Number.isFinite(keeper.keeper_age_s)) {
     vitals.push({ k: 'uptime', v: formatDuration(keeper.keeper_age_s) })
@@ -550,7 +545,6 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
     capabilities: linkedAgent?.capabilities,
     emoji: source.emoji,
     koreanName: source.koreanName,
-    model: source.model,
     traits: source.traits,
     activityLevel: source.activityLevel,
     primaryValue: source.primaryValue,

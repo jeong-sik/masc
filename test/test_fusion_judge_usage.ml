@@ -47,7 +47,7 @@ let with_empty_oas_model_catalog f =
   Fun.protect
     ~finally:(fun () -> restore_model_catalog previous)
     (fun () ->
-       Llm_provider.Model_catalog.set_global [];
+       Llm_provider.Model_catalog.set_global Llm_provider.Model_catalog.empty;
        f ())
 
 let provider_cfg ~kind ~model_id ~base_url =

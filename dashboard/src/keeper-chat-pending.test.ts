@@ -39,4 +39,51 @@ describe('keeper chat pending request storage', () => {
       'kmsg_echo_2',
     ])
   })
+
+  it('preserves the in-flight assistant draft for page reload recovery', () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: 'status?',
+      submittedAt: 1_780_000_000,
+      assistantDraft: {
+        text: '부분 응답',
+        rawText: '부분 응답',
+        delivery: 'streaming',
+        streamState: 'thinking',
+        traceSteps: [
+          { kind: 'think', text: '상태 확인 중' },
+          {
+            kind: 'tool',
+            name: 'keeper_board_list',
+            toolCallId: 'tc-1',
+            status: 'pending',
+            args: '{"limit":5}',
+          },
+        ],
+      },
+    })
+
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([
+      expect.objectContaining({
+        requestId: 'kmsg_echo_1',
+        assistantDraft: expect.objectContaining({
+          text: '부분 응답',
+          rawText: '부분 응답',
+          delivery: 'streaming',
+          streamState: 'thinking',
+          traceSteps: [
+            { kind: 'think', text: '상태 확인 중' },
+            {
+              kind: 'tool',
+              name: 'keeper_board_list',
+              toolCallId: 'tc-1',
+              status: 'pending',
+              args: '{"limit":5}',
+            },
+          ],
+        }),
+      }),
+    ])
+  })
 })

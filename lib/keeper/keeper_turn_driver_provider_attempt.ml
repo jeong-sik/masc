@@ -156,10 +156,96 @@ let scoped_provider_key ~keeper_name provider_key =
   if String.equal keeper_name "" then provider_key
   else keeper_name ^ "@" ^ provider_key
 
-let record_candidate_health_success ~keeper_name candidate ~latency_ms =
+let scoped_health_keys ~keeper_name candidate =
   Runtime_candidate.health_keys candidate
+  |> List.map (scoped_provider_key ~keeper_name)
+
+let credential_pool_health_keys ~keeper_name candidate =
+  Runtime_candidate.health_keys candidate
+  |> List.concat_map (fun provider_key ->
+    let scoped_key = scoped_provider_key ~keeper_name provider_key in
+    if String.equal scoped_key provider_key
+    then [ provider_key ]
+    else [ scoped_key; provider_key ])
+  |> List.sort_uniq String.compare
+
+type provider_cooldown_block =
+  { blocked_provider_keys : string list
+  ; cooldown_remaining_sec : int
+  }
+
+let cooldown_remaining_sec_of_info info =
+  match info.Keeper_binding_health.cooldown_expires_at with
+  | None -> 0
+  | Some expires_at ->
+    int_of_float (Float.max 0.0 (Float.ceil (expires_at -. Time_compat.now ())))
+
+let provider_cooldown_block ~keeper_name candidate =
+  let provider_keys = Runtime_candidate.health_keys candidate in
+  let blocking_info_for_key provider_key =
+    let scoped_key = scoped_provider_key ~keeper_name provider_key in
+    let keys =
+      if String.equal scoped_key provider_key
+      then [ provider_key ]
+      else [ scoped_key; provider_key ]
+    in
+    keys
+    |> List.filter_map (fun provider_key ->
+      Keeper_binding_health.provider_info
+        Keeper_binding_health.global
+        ~provider_key
+      |> Option.map (fun info -> (provider_key, info)))
+    |> List.find_opt (fun (_, info) -> info.Keeper_binding_health.in_cooldown)
+  in
+  match provider_keys with
+  | [] -> None
+  | _ ->
+    let provider_infos =
+      provider_keys
+      |> List.filter_map blocking_info_for_key
+    in
+    if List.length provider_infos <> List.length provider_keys
+    then None
+    else
+      let cooldown_remaining_sec =
+        provider_infos
+        |> List.map (fun (_, info) -> cooldown_remaining_sec_of_info info)
+        |> function
+        | [] -> 0
+        | first :: rest -> List.fold_left min first rest
+      in
+      let blocked_provider_keys = List.map fst provider_infos in
+      Some { blocked_provider_keys; cooldown_remaining_sec }
+
+let provider_cooldown_block_decision block =
+  `Assoc
+    [ "blocker", `String "provider_cooldown"
+    ; "provider_attempt_started", `Bool false
+    ; ( "blocked_provider_keys"
+      , `List (List.map (fun key -> `String key) block.blocked_provider_keys) )
+    ; "cooldown_remaining_sec", `Int block.cooldown_remaining_sec
+    ; "retry_after_source", `String "provider_health_cooldown"
+    ]
+
+let provider_cooldown_block_error ~runtime_id block =
+  let retry_after =
+    if block.cooldown_remaining_sec > 0
+    then
+      Keeper_internal_error.Synthetic_default
+        (float_of_int block.cooldown_remaining_sec)
+    else Keeper_internal_error.No_retry_hint
+  in
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Capacity_backpressure
+       { runtime_id
+       ; source = Keeper_internal_error.Provider_capacity
+       ; detail = "provider health cooldown active before dispatch"
+       ; retry_after
+       })
+
+let record_candidate_health_success ~keeper_name candidate ~latency_ms =
+  scoped_health_keys ~keeper_name candidate
   |> List.iter (fun provider_key ->
-    let provider_key = scoped_provider_key ~keeper_name provider_key in
     Keeper_binding_health.record_success
       Keeper_binding_health.global
       ~provider_key
@@ -168,9 +254,8 @@ let record_candidate_health_success ~keeper_name candidate ~latency_ms =
 
 let record_candidate_health_rejected ~keeper_name candidate ~reason =
   let error_kind = health_error_kind "accept_rejected" in
-  Runtime_candidate.health_keys candidate
+  scoped_health_keys ~keeper_name candidate
   |> List.iter (fun provider_key ->
-    let provider_key = scoped_provider_key ~keeper_name provider_key in
     Keeper_binding_health.record_rejected
       Keeper_binding_health.global
       ~provider_key
@@ -393,9 +478,8 @@ let record_candidate_health_error ~keeper_name candidate sdk_err =
   if sdk_error_is_hard_quota sdk_err
   then (
     let error_kind = health_error_kind "hard_quota" in
-    health_keys
+    credential_pool_health_keys ~keeper_name candidate
     |> List.iter (fun provider_key ->
-      let provider_key = scoped_provider_key ~keeper_name provider_key in
       Keeper_binding_health.record_hard_quota
         Keeper_binding_health.global
         ~provider_key
@@ -430,9 +514,8 @@ let record_candidate_health_error ~keeper_name candidate sdk_err =
     match sdk_error_soft_rate_limited sdk_err with
     | Some retry_after_s ->
       let error_kind = health_error_kind "soft_rate_limited" in
-      health_keys
+      credential_pool_health_keys ~keeper_name candidate
       |> List.iter (fun provider_key ->
-        let provider_key = scoped_provider_key ~keeper_name provider_key in
         Keeper_binding_health.record_soft_rate_limited
           Keeper_binding_health.global
           ~provider_key

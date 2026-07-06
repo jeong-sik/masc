@@ -52,7 +52,39 @@ describe('RuntimeMonitor', () => {
           is_default_runtime: true,
           max_context: 200000,
           tools_support: true,
+          thinking_support: true,
           streaming: true,
+          temperature: 0.7,
+          top_p: 0.91,
+          top_k: 42,
+          min_p: 0.07,
+          capabilities_declared: true,
+          max_output_tokens: 65536,
+          supports_tool_choice: true,
+          supports_required_tool_choice: true,
+          supports_named_tool_choice: true,
+          supports_parallel_tool_calls: true,
+          supports_extended_thinking: true,
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+          supports_reasoning_budget: true,
+          thinking_control_format: 'reasoning-effort',
+          supports_response_format_json: true,
+          supports_structured_output: true,
+          supports_native_streaming: true,
+          supports_system_prompt: true,
+          supports_caching: true,
+          supports_prompt_caching: true,
+          prompt_cache_alignment: 1024,
+          supports_top_k: true,
+          supports_min_p: true,
+          supports_seed: true,
+          supports_seed_with_images: true,
+          emits_usage_tokens: true,
+          supports_computer_use: true,
+          supports_code_execution: true,
           model_count: 1,
           models: ['Qwen/Qwen3-32B'],
           parameter_policy: {
@@ -138,6 +170,7 @@ describe('RuntimeMonitor', () => {
             supports_min_p: true,
             supports_seed: true,
             supports_seed_with_images: true,
+            ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
             supports_computer_use: true,
             supports_code_execution: true,
             emits_usage_tokens: true,
@@ -176,6 +209,9 @@ describe('RuntimeMonitor', () => {
               max_thinking_budget: 32768,
               streaming: true,
               temperature: 0.65,
+              top_p: 0.91,
+              top_k: 42,
+              min_p: 0.07,
               capabilities: {
                 source: 'runtime.toml',
                 max_output_tokens: 65536,
@@ -220,9 +256,10 @@ describe('RuntimeMonitor', () => {
           },
           source: 'runtime.toml',
           endpoint_url: 'https://example.invalid/v1',
-          note: null,
+          note: 'verified by runtime discovery',
           discovery: {
             healthy: true,
+            discovered_model: 'Qwen/Qwen3-32B',
             ctx_size: 200000,
             total_slots: 4,
             busy_slots: 1,
@@ -326,29 +363,94 @@ describe('RuntimeMonitor', () => {
       'runtime parameter facts',
     )
 
-    expect(container.textContent).toContain('params · wire chat_template_kwargs')
-    expect(container.textContent).toContain('request · kind openai_compat')
-    expect(container.textContent).toContain('preserve off')
-    expect(container.textContent).toContain('glm replay')
-    expect(container.textContent).toContain('tool stream on')
-    expect(container.textContent).toContain('schema override off')
-    expect(container.textContent).toContain('rotation 2')
-    expect(container.textContent).toContain('declared · api chat-completions')
-    expect(container.textContent).toContain('auth env:RUNPOD_API_KEY')
-    expect(container.textContent).toContain('behavior inline-tools,keeper-bridge,argv-preflight,anthropic-cache')
+    expect(container.textContent).toContain('params · wire:chat_template_kwargs')
     expect(container.textContent).toContain(
-      'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      'request · kind:openai_compat · source:oas-provider-config · path:/chat/completions',
     )
-    expect(container.textContent).toContain('price-in 0.1')
-    expect(container.textContent).toContain('effective · out 65,536')
+    expect(container.textContent).toContain('system-prompt')
+    expect(container.textContent).toContain('preserve:off')
+    expect(container.textContent).toContain('glm:replay')
+    expect(container.textContent).toContain('tool-stream:on')
+    expect(container.textContent).toContain('schema-override:off')
+    expect(container.textContent).toContain('rotation:2')
+    expect(container.textContent).toContain('declared · api:chat-completions')
+    expect(container.textContent).toContain('auth:env:RUNPOD_API_KEY')
+    expect(container.textContent).toContain('snapshot · source:runtime.toml')
+    expect(container.textContent).toContain('protocol:openai-http')
+    expect(container.textContent).toContain('model-temp:0.7')
+    expect(container.textContent).toContain('model-top_p:0.91')
+    expect(container.textContent).toContain('model-top_k:42')
+    expect(container.textContent).toContain('model-min_p:0.07')
+    expect(container.textContent).toContain('caps:declared')
+    expect(container.textContent).toContain('format:json,schema')
+    expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
+    expect(container.textContent).toContain('sampling:top_k,min_p,seed')
+    expect(container.textContent).toContain('tools:on · thinking:on · streaming:on')
+    expect(container.textContent).toContain('multimodal:on · image:on · audio:on · video:off')
+    expect(container.textContent).toContain('reasoning-budget:on')
+    expect(container.textContent).toContain('thinking-control:reasoning-effort')
+    expect(container.textContent).toContain(
+      'controls:tool-choice,required,named,parallel,extended-thinking,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+    )
+    expect(container.textContent).toContain('note:verified by runtime discovery')
+    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge,argv-preflight,anthropic-cache')
+    expect(container.textContent).toContain(
+      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+    )
+    expect(container.textContent).toContain('price-in:0.1')
+    expect(container.textContent).toContain('effective · source:oas-provider-config-model · ctx:131072 · out:65536')
+    expect(container.textContent).toContain('source:oas-provider-config-model · ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
     expect(container.textContent).toContain('runtime-mcp-tools')
-    expect(container.textContent).toContain('reasoning-stream delta-reasoning-field')
-    expect(container.textContent).toContain('modality visual-first')
-    expect(container.textContent).toContain('tool-content null')
-    expect(container.textContent).toContain('preserve chat-template-kwargs-preserve-thinking')
-    expect(container.textContent).toContain('task transcription')
+    expect(container.textContent).toContain('reasoning · extended-thinking · reasoning-budget · effort:low,medium,high')
+    expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
+    expect(container.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
+    expect(container.textContent).toContain('input:multimodal,image,audio')
+    expect(container.textContent).toContain('modality:visual-first')
+    expect(container.textContent).toContain('tool-content:null')
+    expect(container.textContent).toContain('wire:chat-template-kwargs · preserve:chat-template-kwargs-preserve-thinking')
+    expect(container.textContent).toContain('preserve:chat-template-kwargs-preserve-thinking')
+    expect(container.textContent).toContain('task:transcription · native-stream')
     expect(container.textContent).toContain('seed+images')
     expect(container.textContent).toContain('code-exec')
+    expect(container.textContent).toContain('discovered · Qwen/Qwen3-32B')
+    expect(container.textContent).toContain('idle · 3')
+  })
+
+  it('falls back to provider snapshot model count and auth kind when live probe rows are absent', async () => {
+    apiMocks.fetchDashboardRuntimeProbe.mockResolvedValueOnce({
+      generated_at: '2026-06-06T02:47:31Z',
+      refreshed_at_unix: 1780714051,
+      cache_ttl_sec: 30,
+      cache_age_sec: 0,
+      cache_hit: false,
+      probe: {
+        source: 'runtime.toml',
+        status: 'reachable',
+        checked_at: '2026-06-06T02:47:31Z',
+        probe_ok: true,
+        summary: {
+          runtimes: 1,
+          probed: 0,
+          reachable: 0,
+          failed: 0,
+          skipped: 1,
+          default_runtime_id: 'runpod_mtp.qwen',
+        },
+        providers: [],
+        errors: [],
+      },
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime snapshot fallback facts',
+    )
+
+    expect(container.textContent).toContain('models · 1')
+    expect(container.textContent).toContain('auth · env:RUNPOD_API_KEY')
+    expect(container.textContent).toContain('snapshot · source:runtime.toml')
   })
 
   it('renders parameter facts as structured request declared and effective rows', async () => {
@@ -388,5 +490,143 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('null')
     expect(container.textContent).toContain('effective · task')
     expect(container.textContent).toContain('transcription')
+    expect(container.textContent).toContain('effective · controls')
+    expect(container.textContent).toContain('native-stream,system-prompt,cache')
+    expect(container.textContent).toContain('effective · ignored sampling')
+    expect(container.textContent).toContain('temperature,top_p,presence_penalty,frequency_penalty')
+  })
+
+  it('shows per-turn cache read/write tokens in recent model entries', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce({
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 1,
+      total_error_entries: 0,
+      latency_buckets: [],
+      models: [
+        {
+          model_id: 'runtime_lane_cache',
+          provider: null,
+          entry_count: 1,
+          success_count: 1,
+          error_count: 0,
+          avg_tok_per_sec: 20,
+          p50_tok_per_sec: 20,
+          p95_tok_per_sec: 20,
+          avg_latency_ms: 500,
+          p95_latency_ms: 500,
+          total_input_tokens: 256,
+          total_output_tokens: 64,
+          total_cache_read_tokens: 128,
+          total_cache_creation_tokens: 16,
+          total_cost_usd: 0.01,
+          avg_tool_calls_per_turn: 0,
+          total_tool_calls: 0,
+          top_tools: [],
+          recent_entries: [
+            {
+              ts_unix: 1780714051,
+              outcome: 'success',
+              stop_reason: 'stop',
+              turn_lane: 'text_only',
+              input_tokens: 256,
+              output_tokens: 64,
+              cache_read_tokens: 128,
+              cache_creation_tokens: 16,
+              latency_ms: 500,
+              cost_usd: 0.01,
+              tools_count: 0,
+              usage_reported: true,
+              telemetry_reported: true,
+            },
+          ],
+          buckets: [],
+        },
+      ],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime_lane_cache') ?? false,
+      'runtime model metric card',
+    )
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find((el) => el.textContent?.includes('recent 1 turns'))
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await waitFor(
+      () => container.textContent?.includes('cache r/w') ?? false,
+      'recent entry cache column',
+    )
+    expect(container.textContent).toContain('128/16')
+  })
+
+  it('shows one missing-data reason when recent cache tokens are absent', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce({
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 1,
+      total_error_entries: 0,
+      latency_buckets: [],
+      models: [
+        {
+          model_id: 'runtime_lane_missing_cache',
+          provider: null,
+          entry_count: 1,
+          success_count: 1,
+          error_count: 0,
+          total_input_tokens: null,
+          total_output_tokens: null,
+          total_cache_read_tokens: null,
+          total_cache_creation_tokens: null,
+          total_cost_usd: null,
+          avg_tool_calls_per_turn: 0,
+          total_tool_calls: 0,
+          coverage_status: 'none',
+          primary_coverage_reason: 'missing_usage_and_inference',
+          top_tools: [],
+          recent_entries: [
+            {
+              ts_unix: 1780714051,
+              outcome: 'success',
+              stop_reason: 'stop',
+              turn_lane: 'text_only',
+              input_tokens: null,
+              output_tokens: null,
+              cache_read_tokens: null,
+              cache_creation_tokens: null,
+              latency_ms: null,
+              cost_usd: null,
+              tools_count: 0,
+              usage_reported: false,
+              telemetry_reported: true,
+              coverage_reason: 'missing_usage_and_inference',
+              coverage_stage: 'oas',
+            },
+          ],
+          buckets: [],
+        },
+      ],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime_lane_missing_cache') ?? false,
+      'runtime model metric card',
+    )
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find((el) => el.textContent?.includes('recent 1 turns'))
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await waitFor(
+      () => container.textContent?.includes('cache r/w') ?? false,
+      'recent entry cache column',
+    )
+    expect(container.textContent).toContain('no-usage')
+    expect(container.textContent).not.toContain('no-usage/no-usage')
   })
 })

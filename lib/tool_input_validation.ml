@@ -243,9 +243,83 @@ let normalize_execute_args_envelope ?schema ~name args =
   | _ -> args
 ;;
 
+let schema_type_includes schema expected =
+  match Json_util.assoc_member_opt "type" schema with
+  | Some (`String actual) -> String.equal actual expected
+  | Some (`List values) ->
+    List.exists
+      (function
+        | `String actual -> String.equal actual expected
+        | _ -> false)
+      values
+  | _ -> false
+;;
+
+let schema_expects_array schema =
+  schema_type_includes schema "array"
+  || Option.is_some (Json_util.assoc_member_opt "items" schema)
+;;
+
+let schema_expects_object schema =
+  schema_type_includes schema "object"
+  || Option.is_some (Json_util.assoc_member_opt "properties" schema)
+  || Option.is_some (Json_util.assoc_member_opt "additionalProperties" schema)
+;;
+
+let schema_accepts_composite_value schema = function
+  | `List _ -> schema_expects_array schema
+  | `Assoc _ -> schema_expects_object schema
+  | _ -> false
+;;
+
+let schema_property_schema schema key =
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc properties) -> List.assoc_opt key properties
+  | _ -> None
+;;
+
+let schema_items_schema schema =
+  Json_util.assoc_member_opt "items" schema
+;;
+
+let rec normalize_schema_json_string_composites ~schema value =
+  match value with
+  | `String raw when schema_expects_array schema || schema_expects_object schema ->
+    (match
+       try Some (Yojson.Safe.from_string raw) with
+       | Yojson.Json_error _ -> None
+     with
+     | Some parsed when schema_accepts_composite_value schema parsed ->
+       normalize_schema_json_string_composites ~schema parsed
+     | _ -> value)
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, field_value) ->
+            match schema_property_schema schema key with
+            | None -> key, field_value
+            | Some field_schema ->
+              key, normalize_schema_json_string_composites ~schema:field_schema field_value)
+         fields)
+  | `List values ->
+    (match schema_items_schema schema with
+     | None -> value
+     | Some item_schema ->
+       `List
+         (List.map
+            (fun item -> normalize_schema_json_string_composites ~schema:item_schema item)
+            values))
+  | _ -> value
+;;
+
 let prepare_args ?schema ~name args =
   let args = strip_internal_marker_args args in
   let args = normalize_execute_args_envelope ?schema ~name args in
+  let args =
+    match schema with
+    | None -> args
+    | Some schema -> normalize_schema_json_string_composites ~schema args
+  in
   normalize_blank_optional_enum_args ?schema args
 ;;
 

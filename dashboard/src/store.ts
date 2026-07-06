@@ -330,6 +330,7 @@ export const fusionBoardPosts = signal<BoardPost[]>([])
 export const fusionBoardLoading = signal(false)
 export const fusionRuns = signal<FusionRunRecord[]>([])
 export const fusionRunsLoading = signal(false)
+export const fusionRunsError = signal<string | null>(null)
 
 // --- OAS monitoring state ---
 
@@ -1346,12 +1347,14 @@ export async function refreshFusionBoard(): Promise<void> {
 // event self-heals on the next fetch.
 export async function refreshFusionRuns(): Promise<void> {
   fusionRunsLoading.value = true
+  fusionRunsError.value = null
   try {
     const { fetchFusionRuns } = await import('./api/dashboard-fusion')
     const data = await fetchFusionRuns()
     fusionRuns.value = data.runs
   } catch (err) {
     console.warn('[Fusion] runs fetch error:', err)
+    fusionRunsError.value = errorMessageOr(err, 'Fusion run registry load failed')
   } finally {
     fusionRunsLoading.value = false
   }

@@ -111,6 +111,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
+  test_keeper_memory_os_sanity_sweep
   test_keeper_user_model
   test_keeper_recall_outcome_eval
   test_keeper_memory_os_consolidation
@@ -194,6 +195,8 @@
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
+  test_keeper_board_attention_candidate
+  test_keeper_repo_claim_hitl
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -366,9 +369,9 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_keeper_behavior_trace
   test_keeper_wire_capture
-  test_board_rest_routes)
+  test_board_rest_routes
+  test_board_context_inference_resolution)
  (modules
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
@@ -456,6 +459,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
+  test_keeper_memory_os_sanity_sweep
   test_keeper_user_model
   test_keeper_recall_outcome_eval
   test_keeper_memory_os_consolidation
@@ -539,6 +543,8 @@
   test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_waiting_inventory
+  test_keeper_board_attention_candidate
+  test_keeper_repo_claim_hitl
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -716,9 +722,9 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_keeper_behavior_trace
   test_keeper_wire_capture
-  test_board_rest_routes)
+  test_board_rest_routes
+  test_board_context_inference_resolution)
  (libraries masc_test_deps multimodal bigstringaf))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
@@ -907,6 +913,7 @@
 (tests
  (names
   test_keeper_busy_connector_deferred
+  test_keeper_busy_dashboard_deferred
   test_keeper_chat_consumer_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
@@ -1077,6 +1084,7 @@
   test_http_protocol_detect
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_stale_claim_release
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
@@ -1102,6 +1110,7 @@
   test_board_moderation)
  (modules
   test_keeper_busy_connector_deferred
+  test_keeper_busy_dashboard_deferred
   test_keeper_chat_consumer_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
@@ -1271,6 +1280,7 @@
   test_http_protocol_detect
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_stale_claim_release
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract

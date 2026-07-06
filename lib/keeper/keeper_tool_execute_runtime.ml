@@ -308,12 +308,53 @@ let dispatch_error_deterministic_retry_fields error =
   | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
   | None -> []
 
+let pr_action_status_label = function
+  | Unix.WEXITED 0 -> "success"
+  | Unix.WEXITED _ -> "exit_nonzero"
+  | Unix.WSIGNALED _ -> "signaled"
+  | Unix.WSTOPPED _ -> "stopped"
+;;
+
+let record_pr_action_metric ~keeper_name ~risk_class ~status ir =
+  Command_descriptor.pr_action_events_of_ir ir
+  |> List.iter (fun (event : Command_descriptor.pr_action_event) ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ToolExecutePrActionTotal)
+      ~labels:
+        [ "keeper", keeper_name
+        ; "surface", Command_descriptor.pr_action_surface_to_string event.surface
+        ; "action", Command_descriptor.pr_action_to_string event.action
+        ; "status", pr_action_status_label status
+        ; "risk_class", Masc_exec.Shell_ir_risk.string_of_risk_class risk_class
+        ]
+      ())
+;;
+
+let execute_secret_redaction ~base_path ~keeper_name =
+  Keeper_secret_redaction.snapshot ~base_path ~keeper_name
+
+let redact_execute_text redaction text =
+  Keeper_secret_redaction.redact_text redaction text
+
+let redact_execute_output redaction ~stdout ~stderr =
+  let stdout = redact_execute_text redaction stdout in
+  let stderr = redact_execute_text redaction stderr in
+  let output =
+    if String.equal stderr "" then stdout else stdout ^ stderr
+  in
+  stdout, stderr, output
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let path_probe_json ~cwd path = path_probe_json ~cwd (path_probe ~cwd path)
   let repo_root_public_prefix_from_cwd = repo_root_public_prefix_from_cwd
   let repo_cwd_relative_rewrite = repo_cwd_relative_rewrite
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
+  let record_pr_action_metric = record_pr_action_metric
+  let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
+    let redaction = execute_secret_redaction ~base_path ~keeper_name in
+    redact_execute_output redaction ~stdout ~stderr
+
   let dispatch_error_deterministic_retry_fields =
     dispatch_error_deterministic_retry_fields
 end
@@ -445,6 +486,9 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
+  let output_redaction =
+    execute_secret_redaction ~base_path:config.base_path ~keeper_name:meta.name
+  in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~config
@@ -755,6 +799,12 @@ let handle_tool_execute_typed
                 "execute stream start callback failed keeper=%s: %s"
                 meta.name
                 (Printexc.to_string exn));
+          let stdout_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
+          let stderr_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
           let on_output_chunk chunk =
             if stream_dispatch
             then (
@@ -762,6 +812,15 @@ let handle_tool_execute_typed
                 match chunk with
                 | `Stdout s -> `Stdout, s
                 | `Stderr s -> `Stderr, s
+              in
+              let data =
+                match stream with
+                | `Stdout ->
+                  Keeper_secret_redaction.redact_stream_chunk
+                    output_redaction stdout_redact_state data
+                | `Stderr ->
+                  Keeper_secret_redaction.redact_stream_chunk
+                    output_redaction stderr_redact_state data
               in
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
@@ -869,6 +928,12 @@ let handle_tool_execute_typed
                of live traffic observable. An offline scan of typed_hit=true
                / total gives the real exercise rate of the typed model vs the
                Generic escape hatch. *)
+            let risk_class = Masc_exec.Shell_ir_risk.risk_class envelope in
+            record_pr_action_metric
+              ~keeper_name:meta.name
+              ~risk_class
+              ~status:result.status
+              ir;
             let effects = Masc_exec.Exec_effect.extract ir in
             let effects_str = Format.asprintf "%a" Masc_exec.Exec_effect.pp_set effects in
             Log.Keeper.info
@@ -877,16 +942,14 @@ let handle_tool_execute_typed
               (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
               (Keeper_sandbox_exec_failure.status_label result.status)
               elapsed_ms
-              (Masc_exec.Shell_ir_risk.string_of_risk_class
-                 (Masc_exec.Shell_ir_risk.risk_class envelope))
+              (Masc_exec.Shell_ir_risk.string_of_risk_class risk_class)
               (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir)
               effects_str;
             Otel_spans.add_attrs
               ~attrs:[
                 ( "shell_ir.risk_class"
                 , `String
-                    (Masc_exec.Shell_ir_risk.string_of_risk_class
-                       (Masc_exec.Shell_ir_risk.risk_class envelope)) )
+                    (Masc_exec.Shell_ir_risk.string_of_risk_class risk_class) )
               ; ( "shell_ir.typed_hit"
                 , `Bool (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir) )
               ; "shell_ir.effects", `String effects_str
@@ -903,16 +966,38 @@ let handle_tool_execute_typed
                    ]
                    ())
               effects;
-            let output =
-              if String.equal result.stderr ""
-              then result.stdout
-              else result.stdout ^ result.stderr
+            let stdout, stderr, output =
+              redact_execute_output output_redaction
+                ~stdout:result.stdout
+                ~stderr:result.stderr
             in
             let status_json =
               Keeper_alerting_path.process_status_to_json result.status
             in
             if stream_dispatch
             then (
+              let flush_remaining stream state =
+                let remaining =
+                  Keeper_secret_redaction.redact_stream_finish
+                    output_redaction state
+                in
+                if not (String.equal remaining "")
+                then (
+                  try
+                    Keeper_keepalive_signal.record_execute_stream_chunk
+                      ~keeper_name:meta.name
+                      ~stream
+                      remaining
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                    Log.Dashboard.warn
+                      "execute stream flush callback failed keeper=%s: %s"
+                      meta.name
+                      (Printexc.to_string exn))
+              in
+              flush_remaining `Stdout stdout_redact_state;
+              flush_remaining `Stderr stderr_redact_state;
               try
                 Keeper_keepalive_signal.record_execute_stream_end
                   ~keeper_name:meta.name
@@ -929,8 +1014,8 @@ let handle_tool_execute_typed
                Keeper_keepalive_signal.record_execute_output
                  ~keeper_name:meta.name
                  ~task_id
-                 ~stdout:result.stdout
-                 ~stderr:result.stderr
+                 ~stdout
+                 ~stderr
                  ~status:status_json
                  ~streamed:stream_dispatch
              with
@@ -941,7 +1026,7 @@ let handle_tool_execute_typed
                  meta.name
                  (Printexc.to_string exn));
             let failure_error_fields =
-              match result.status, String.trim result.stderr with
+              match result.status, String.trim stderr with
               | Unix.WEXITED 0, _ | _, "" -> []
               | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
             in
@@ -949,7 +1034,7 @@ let handle_tool_execute_typed
               Masc_exec.Shell_ir_diagnostics.glob_literal_failure_fields
                 ~ir
                 ~status:result.status
-                ~stderr:result.stderr
+                ~stderr
             in
             let classification = Exec_core.classify_command_of_ir ir in
             (* Only include command_descriptor on success — errors already carry

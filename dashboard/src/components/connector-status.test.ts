@@ -197,6 +197,9 @@ async function loadComponentWithApi(api: {
   }))
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
+    connected: { value: true },
+    reconnectCount: { value: 0 },
+    lastDisconnectedAt: { value: 0 },
   }))
   vi.doMock('./common/toast', () => ({
     showToast: api.showToast ?? vi.fn(),

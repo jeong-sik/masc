@@ -248,6 +248,7 @@ let all_entries =
       ~meets_main_gate:true
       ~rationale:"Dedicated keeper roster, conversation, and context workspace."
       ~route_hash:"#keepers"
+      ~fixture_harness:"./scripts/harness_dashboard_keeper_chat_contract_smoke.sh"
       ~live_spotcheck:"/api/v1/keepers/composite"
       ~tool_name:"masc_operator_snapshot"
       ()

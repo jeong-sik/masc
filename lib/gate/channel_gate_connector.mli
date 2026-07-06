@@ -64,13 +64,15 @@ end
 
 val register : (module S) -> unit
 (** Register a connector.  Replaces any existing connector with the
-    same [connector_id].  Call at server startup. *)
+    same [connector_id].  Call at server startup.
+    Registry mutation is serialized internally. *)
 
 val find : string -> (module S) option
-(** [find name] returns the connector registered under [name], if any. *)
+(** [find name] returns the connector registered under [name], if any.
+    Registry lookup is serialized internally. *)
 
 val all : unit -> (module S) list
-(** All registered connectors, in unspecified order. *)
+(** Snapshot of all registered connectors, in unspecified order. *)
 
 val connectors_json : ?gate_status_json:Yojson.Safe.t -> ?audit_limit:int -> unit -> Yojson.Safe.t
 (** Aggregate descriptor for all registered connectors.

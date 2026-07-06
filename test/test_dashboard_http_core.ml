@@ -200,6 +200,15 @@ let request target =
 let request_with_headers target headers =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
 
+let test_keeper_post_route_classifies_catchup_judge () =
+  let path = "/api/v1/keepers/idealist/catchup-judge" in
+  check bool "catchup judge route kind" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_catchup_judge);
+  check string "keeper name extracted" "idealist"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
+       Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
+
 let with_test_env f =
   let dir = test_dir () in
 	Fun.protect
@@ -790,6 +799,38 @@ let test_dashboard_proof_route_registered_in_http_routers () =
     (contains_substring http1 "\"/api/v1/dashboard/proof\"");
   check bool "HTTP/2 dashboard proof route registered" true
     (contains_substring h2 "\"/api/v1/dashboard/proof\"")
+
+let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    (* [Client_registry_eio] lives in the wrapped [masc] library; this file does
+       not [open Masc] (it uses qualified [Masc.X] access), so the module must be
+       qualified. [Server_dashboard_http]/[Ide_paths] resolve bare because they
+       come from the unwrapped [masc.server] library. *)
+    ~finally:Masc.Client_registry_eio.reset_for_testing
+    (fun () ->
+      Masc.Client_registry_eio.reset_for_testing ();
+      let json = Server_dashboard_http.dashboard_ide_snapshot_json ~config in
+      let partition = Ide_paths.Legacy_default in
+      let open Yojson.Safe.Util in
+      check string "partition kind" (Ide_paths.partition_kind partition)
+        (json |> member "partition_kind" |> to_string);
+      check bool "partition is orphan" (Ide_paths.partition_is_orphan partition)
+        (json |> member "partition_orphan" |> to_bool);
+      check int "events count metadata" 0
+        (json |> member "events_count" |> to_int);
+      check int "cursors count metadata" 0
+        (json |> member "cursors_count" |> to_int);
+      check int "annotations count metadata" 0
+        (json |> member "annotations_count" |> to_int);
+      check int "regions count metadata" 0
+        (json |> member "regions_count" |> to_int);
+      check int "active keepers count metadata" 0
+        (json |> member "active_keepers_count" |> to_int);
+      check int "events nested count remains" 0
+        (json |> member "events" |> member "count" |> to_int);
+      check int "presence nested count remains" 0
+        (json |> member "presence" |> member "count" |> to_int))
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -1384,6 +1425,160 @@ let test_composite_tool_call_output_parse_failure_is_typed () =
   | Server_dashboard_http_composite_claims.Tool_call_output_json _ ->
       fail "missing output must not be parsed JSON"
 
+let test_offline_keeper_composite_exposes_secret_projection () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let keeper_name = "offline-secret-keeper" in
+  let sentinel = "ghs_offline_secret_projection_regression" in
+  (match
+     Masc.Keeper_secret_projection.set_env_entry
+       ~base_path:config.base_path
+       ~keeper_name
+       ~scope:Masc.Keeper_secret_projection.Shared_secret
+       ~name:"GH_TOKEN"
+       ~value:sentinel
+   with
+   | Ok () -> ()
+   | Error err -> Alcotest.failf "set shared secret failed: %s" err);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String keeper_name
+           ; "agent_name", `String keeper_name
+           ; "trace_id", `String "offline-secret-trace"
+           ])
+    with
+    | Ok meta -> { meta with Masc.Keeper_meta_contract.paused = true }
+    | Error err -> Alcotest.failf "meta fixture failed: %s" err
+  in
+  let json =
+    Server_dashboard_http_keeper_api.offline_keeper_composite_json
+      ~config
+      keeper_name
+      meta
+  in
+  let open Yojson.Safe.Util in
+  let projection = json |> member "secret_projection" in
+  Alcotest.(check string)
+    "offline composite includes ready secret projection"
+    "ready"
+    (projection |> member "status" |> to_string);
+  Alcotest.(check (list string))
+    "offline composite reports projected env names"
+    [ "GH_TOKEN" ]
+    (projection |> member "env_names" |> to_list |> List.map to_string);
+  Alcotest.(check bool)
+    "offline composite redacts secret values"
+    false
+    (contains_substring (Yojson.Safe.to_string json) sentinel)
+
+let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
+  let runtime_attempt_fields =
+    match last_runtime_attempt_provider with
+    | None -> []
+    | Some provider_id ->
+      [ ( "last_runtime_attempt"
+        , `Assoc
+            [ "provider_id", `String provider_id
+            ; "http_status", `Int 200
+            ; "outcome", `Assoc [ "kind", `String "success" ]
+            ; "timestamp", `Float 1_720_000_000.0
+            ] )
+      ]
+  in
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         ([ "name", `String name
+          ; "agent_name", `String (name ^ "-agent")
+          ; "trace_id", `String ("trace-" ^ name)
+          ]
+          @ runtime_attempt_fields))
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.failf "state diagram meta fixture failed: %s" err
+
+let test_state_diagram_runtime_projection_redacts_live_runtime_evidence () =
+  let raw_provider = "openai:gpt-5-secret" in
+  let projection =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_projection
+      (Some
+         (keeper_state_diagram_meta
+            ~last_runtime_attempt_provider:raw_provider
+            "state-diagram-runtime"))
+  in
+  Alcotest.(check (list string))
+    "runtime model labels are public redaction labels"
+    [ "runtime" ]
+    projection.runtime_models;
+  Alcotest.(check (option string))
+    "last provider result is redacted to the public runtime label"
+    (Some "runtime")
+    projection.last_provider_result;
+  Alcotest.(check string)
+    "runtime model source records keeper meta provenance"
+    "keeper_meta.runtime.last_runtime_attempt"
+    projection.runtime_models_source;
+  Alcotest.(check string)
+    "last provider source records keeper meta provenance"
+    "keeper_meta.runtime.last_runtime_attempt"
+    projection.last_provider_result_source;
+  let json =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_projection_json
+      projection
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check bool)
+    "projection JSON does not leak raw provider id"
+    false
+    (contains_substring json raw_provider);
+  let mermaid =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_fsm_mermaid
+      projection
+  in
+  Alcotest.(check bool)
+    "runtime FSM contains the redacted runtime node"
+    true
+    (contains_substring mermaid {|state "runtime" as P0|});
+  Alcotest.(check bool)
+    "runtime FSM no longer renders fake candidate node"
+    false
+    (contains_substring mermaid "candidate");
+  Alcotest.(check bool)
+    "runtime FSM does not leak raw provider id"
+    false
+    (contains_substring mermaid raw_provider)
+
+let test_state_diagram_runtime_projection_missing_meta_stays_empty () =
+  let projection =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_projection None
+  in
+  Alcotest.(check (list string))
+    "missing meta exposes no runtime model labels"
+    []
+    projection.runtime_models;
+  Alcotest.(check (option string))
+    "missing meta has no last provider result"
+    None
+    projection.last_provider_result;
+  Alcotest.(check string)
+    "missing meta source is explicit"
+    "missing_keeper_meta"
+    projection.runtime_models_source;
+  let mermaid =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_fsm_mermaid
+      projection
+  in
+  Alcotest.(check bool)
+    "missing meta FSM reports zero models"
+    true
+    (contains_substring mermaid "Models: 0");
+  Alcotest.(check bool)
+    "missing meta FSM has no fake candidate node"
+    false
+    (contains_substring mermaid "candidate")
+
 let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1903,6 +2098,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_verification_index;
           test_case "proof route registered in HTTP routers" `Quick
             test_dashboard_proof_route_registered_in_http_routers;
+          test_case "IDE snapshot exposes legacy partition metadata" `Quick
+            test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata;
           test_case "bootstrap omits eager goal tree" `Quick
             test_dashboard_bootstrap_omits_eager_goal_tree;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
@@ -1971,6 +2168,14 @@ let () =
             test_dashboard_fleet_composite_envelope_is_cached;
           test_case "composite claim output parse failure is typed" `Quick
             test_composite_tool_call_output_parse_failure_is_typed;
+          test_case "offline keeper composite exposes secret projection" `Quick
+            test_offline_keeper_composite_exposes_secret_projection;
+          test_case "state diagram runtime projection redacts live evidence" `Quick
+            test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
+          test_case "state diagram runtime projection stays empty without meta" `Quick
+            test_state_diagram_runtime_projection_missing_meta_stays_empty;
+          test_case "keeper catch-up judge route is classified" `Quick
+            test_keeper_post_route_classifies_catchup_judge;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick

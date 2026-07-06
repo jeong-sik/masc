@@ -56,6 +56,100 @@ let json_time_iso_opt = function
   | None -> `Null
 ;;
 
+type state_diagram_runtime_projection =
+  { runtime_models : string list
+  ; last_provider_result : string option
+  ; runtime_models_source : string
+  ; last_provider_result_source : string
+  ; effective_runtime_reason : string option
+  }
+
+let public_runtime_model_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+;;
+
+let state_diagram_runtime_projection
+    (meta : Keeper_meta_contract.keeper_meta option)
+  =
+  match meta with
+  | None ->
+    { runtime_models = []
+    ; last_provider_result = None
+    ; runtime_models_source = "missing_keeper_meta"
+    ; last_provider_result_source = "missing_keeper_meta"
+    ; effective_runtime_reason = None
+    }
+  | Some m ->
+    let last_runtime_attempt =
+      match m.runtime.last_runtime_attempt with
+      | Some attempt
+        when String.trim attempt.Keeper_meta_contract.provider_id <> "" ->
+        Some attempt
+      | Some _ | None -> None
+    in
+    let runtime_projection_evidence, runtime_projection_source =
+      try
+        let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
+        let has_evidence =
+          Provider_runtime_projection.default_execution_model_strings runtime_id
+          |> List.exists (fun label -> String.trim label <> "")
+        in
+        ( has_evidence
+        , if has_evidence
+          then "provider_runtime_projection.default_execution_model_strings"
+          else "provider_runtime_projection.empty" )
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | _ -> false, "provider_runtime_projection.unavailable"
+    in
+    let runtime_model_evidence =
+      Option.is_some last_runtime_attempt || runtime_projection_evidence
+    in
+    let runtime_models =
+      if runtime_model_evidence then [ public_runtime_model_label ] else []
+    in
+    let last_provider_result, last_provider_result_source =
+      match last_runtime_attempt, runtime_models with
+      | Some _, _ :: _ ->
+        Some public_runtime_model_label, "keeper_meta.runtime.last_runtime_attempt"
+      | Some _, [] ->
+        None, "keeper_meta.runtime.last_runtime_attempt_without_model_evidence"
+      | None, _ -> None, "missing_keeper_meta.runtime.last_runtime_attempt"
+    in
+    { runtime_models
+    ; last_provider_result
+    ; runtime_models_source =
+        (match last_runtime_attempt with
+         | Some _ -> "keeper_meta.runtime.last_runtime_attempt"
+         | None -> runtime_projection_source)
+    ; last_provider_result_source
+    ; effective_runtime_reason =
+        (if runtime_model_evidence then Some "keeper_meta.runtime_evidence" else None)
+    }
+;;
+
+let state_diagram_runtime_projection_json
+    (projection : state_diagram_runtime_projection)
+  =
+  `Assoc
+    [ "runtime_models", Json_util.json_string_list projection.runtime_models
+    ; "last_provider_result", Json_util.string_opt_to_json projection.last_provider_result
+    ; "runtime_models_source", `String projection.runtime_models_source
+    ; "last_provider_result_source", `String projection.last_provider_result_source
+    ]
+;;
+
+let state_diagram_runtime_fsm_mermaid
+    (projection : state_diagram_runtime_projection)
+  =
+  Keeper_decision_audit.runtime_fsm_to_mermaid
+    ~provider_health:[]
+    ?effective_runtime_reason:projection.effective_runtime_reason
+    ~models:projection.runtime_models
+    ~last_provider_result:projection.last_provider_result
+    ()
+;;
+
 let memory_os_fact_is_current ~now (fact : Keeper_memory_os_types.fact) =
   match fact.valid_until with
   | None -> true
@@ -1042,11 +1136,16 @@ let cached_keeper_config_json config name =
   | other -> `OK, other
 ;;
 
-let offline_keeper_composite_json name (m : Keeper_meta_contract.keeper_meta) =
+let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_meta) =
   let now = Time_compat.now () in
   let phase = if m.paused then "paused" else "offline" in
   let reason =
     if m.paused then "paused_without_registry_entry" else "registry_absent"
+  in
+  let secret_projection =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
   in
   `Assoc
     [ "keeper", `String name
@@ -1074,6 +1173,7 @@ let offline_keeper_composite_json name (m : Keeper_meta_contract.keeper_meta) =
     ; "last_turn_ts", `Float m.runtime.usage.last_turn_ts
     ; "fsm_guard_violations", `Int 0
     ; "fsm_guard_violation_breakdown", `List []
+    ; "secret_projection", secret_projection
     ; ( "runtime_attention"
       , `Assoc
           [ "state", `String phase
@@ -1121,7 +1221,7 @@ let cached_keeper_composite_json config name =
              | Ok None ->
                ( `Not_found
                , error_json (Printf.sprintf "keeper %S not found" name) )
-             | Ok (Some m) -> `OK, offline_keeper_composite_json name m))
+             | Ok (Some m) -> `OK, offline_keeper_composite_json ~config name m))
       in
       `Assoc
         [ "status", `String (keeper_composite_status_to_string status)
@@ -1965,21 +2065,15 @@ let handle_keeper_get_subroutes state req request reqd =
           ~thompson_beta:stats.beta
           ()
       in
-      let runtime_fsm_mermaid =
-        match meta with
-        | Ok (Some m) ->
-          let models = [ "candidate" ] in
-          let provider_health = [] in
-          Keeper_decision_audit.runtime_fsm_to_mermaid
-            ~provider_health
-            ~effective_runtime_reason:"runtime"
-            ~models ~last_provider_result:None ()
-        | _ ->
-          Keeper_decision_audit.runtime_fsm_to_mermaid
-            ~models:[] ~last_provider_result:None ()
+      let runtime_projection =
+        state_diagram_runtime_projection
+          (match meta with
+           | Ok meta -> meta
+           | Error _ -> None)
       in
-      let runtime_models = [] in
-      let last_provider = `Null in
+      let runtime_fsm_mermaid =
+        state_diagram_runtime_fsm_mermaid runtime_projection
+      in
       (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
          summary). Each kind reports used / cap so the dashboard tier
          panel can render saturation without re-reading the memory file.
@@ -2041,20 +2135,27 @@ let handle_keeper_get_subroutes state req request reqd =
           `String (Buffer.contents b)
         | _ -> `Null
       in
-      let json = `Assoc [
-        "keeper", `String name;
-        "current_phase", `String phase_str;
-        "mermaid", `String mermaid;
-        "decision_pipeline_mermaid", `String decision_pipeline_mermaid;
-        "runtime_fsm_mermaid", `String runtime_fsm_mermaid;
-        "compaction_submachine_mermaid", compaction_submachine_mermaid;
-        "thompson_alpha", `Float stats.alpha;
-        "thompson_beta", `Float stats.beta;
-        "runtime_models", `List (List.map (fun s -> `String s) runtime_models);
-        "last_provider_result", last_provider;
-        "memory_kind_usage", memory_kind_usage;
-        "memory_kind_usage_error_class", memory_kind_usage_error_class_json;
-      ] in
+      let runtime_projection_fields =
+        match state_diagram_runtime_projection_json runtime_projection with
+        | `Assoc fields -> fields
+        | _ -> []
+      in
+      let json =
+        `Assoc
+          ([ "keeper", `String name
+           ; "current_phase", `String phase_str
+           ; "mermaid", `String mermaid
+           ; "decision_pipeline_mermaid", `String decision_pipeline_mermaid
+           ; "runtime_fsm_mermaid", `String runtime_fsm_mermaid
+           ; "compaction_submachine_mermaid", compaction_submachine_mermaid
+           ; "thompson_alpha", `Float stats.alpha
+           ; "thompson_beta", `Float stats.beta
+           ]
+           @ runtime_projection_fields
+           @ [ "memory_kind_usage", memory_kind_usage
+             ; "memory_kind_usage_error_class", memory_kind_usage_error_class_json
+             ])
+      in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if req_path = prefix ^ "composite" then
     (* LT-16a: fleet-wide composite snapshot. Enumerates every

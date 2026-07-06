@@ -306,14 +306,32 @@ describe('parseKeeperCompositeSnapshot', () => {
       secret_projection: {
         status: 'ready',
         configured: true,
-        root: '/Users/dancer/me/.masc/secrets/sangsu',
+        root: '/mock/workspace/.masc/secrets/sangsu',
         source: 'workspace_masc_secrets',
+        effective_roots: [
+          {
+            root: '/mock/workspace/.masc/secrets/base',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 0,
+          },
+          {
+            root: '/mock/workspace/.masc/secrets/sangsu',
+            source: 'workspace_masc_secrets',
+            status: 'ready',
+            configured: true,
+            env_count: 1,
+            file_count: 1,
+          },
+        ],
         env_count: 1,
         file_count: 1,
         env_names: ['GH_TOKEN'],
         file_mounts: [
           {
-            host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+            host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
             container_path: '/home/keeper/.ssh/id_ed25519',
           },
         ],
@@ -324,6 +342,10 @@ describe('parseKeeperCompositeSnapshot', () => {
     })
 
     expect(result.secret_projection?.status).toBe('ready')
+    expect(result.secret_projection?.effective_roots.map(root => root.root)).toEqual([
+      '/mock/workspace/.masc/secrets/base',
+      '/mock/workspace/.masc/secrets/sangsu',
+    ])
     expect(result.secret_projection?.env_names).toEqual(['GH_TOKEN'])
     expect(JSON.stringify(result.secret_projection)).not.toContain('ghs_')
   })

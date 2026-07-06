@@ -2118,6 +2118,70 @@ describe('fetchKeeperConfig', () => {
     expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
+    expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
+    expect(result.field_presence?.present_paths).toContain('tools.tool_access')
+    expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')
+  })
+
+  it('tracks raw keeper config field presence before defaults are normalized', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          prompt: {
+            goal: 'raw goal only',
+          },
+          metrics: {},
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.prompt.goal).toBe('raw goal only')
+    expect(result.prompt.instructions).toBe('')
+    expect(result.metrics.last_model_used).toBe('')
+    expect(result.field_presence?.present_paths).toContain('prompt.goal')
+    expect(result.field_presence?.present_paths).toContain('metrics')
+    expect(result.field_presence?.present_paths).not.toContain('prompt.instructions')
+    expect(result.field_presence?.present_paths).not.toContain('metrics.last_model_used')
+  })
+
+  it('preserves backend keeper config field-presence proof when supplied', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          field_presence: {
+            schema: 'keeper.config.field_presence.v1',
+            producer: 'dashboard_http_keeper_snapshot',
+            present_paths: ['name', 'prompt', 'prompt.goal'],
+          },
+          prompt: {
+            goal: 'server proof',
+            instructions: 'present but intentionally absent from proof',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.field_presence).toEqual({
+      schema: 'keeper.config.field_presence.v1',
+      producer: 'dashboard_http_keeper_snapshot',
+      present_paths: ['name', 'prompt', 'prompt.goal'],
+    })
   })
 
   it('normalizes default per-provider timeout mode without legacy label', async () => {
@@ -2463,6 +2527,31 @@ describe('fetchRuntimeProviders', () => {
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
             temperature: 0.65,
+            top_p: 0.91,
+            top_k: 42,
+            min_p: 0.07,
+            max_output_tokens: 65536,
+            supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
+            supports_parallel_tool_calls: true,
+            supports_extended_thinking: true,
+            supports_response_format_json: true,
+            supports_structured_output: true,
+            supports_native_streaming: true,
+            supports_system_prompt: true,
+            supports_caching: true,
+            supports_prompt_caching: true,
+            prompt_cache_alignment: 1024,
+            supports_top_k: true,
+            supports_min_p: true,
+            supports_seed: true,
+            supports_seed_with_images: true,
+            emits_usage_tokens: true,
+            supports_computer_use: false,
+            supports_code_execution: true,
+            supports_audio_input: true,
+            supports_video_input: false,
             parameter_policy: {
               reasoning_toggle_wire: 'chat_template_kwargs',
               reasoning_replay_policy: 'preserve_always',
@@ -2551,6 +2640,7 @@ describe('fetchRuntimeProviders', () => {
               supports_min_p: true,
               supports_seed: true,
               supports_seed_with_images: false,
+              ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
               supports_computer_use: false,
               supports_code_execution: false,
               emits_usage_tokens: true,
@@ -2589,6 +2679,9 @@ describe('fetchRuntimeProviders', () => {
                 max_thinking_budget: 32768,
                 streaming: true,
                 temperature: 0.65,
+                top_p: 0.91,
+                top_k: 42,
+                min_p: 0.07,
                 capabilities: {
                   source: 'runtime.toml',
                   max_output_tokens: 65536,
@@ -2634,6 +2727,7 @@ describe('fetchRuntimeProviders', () => {
             source: 'runtime.toml',
             discovery: {
               healthy: true,
+              discovered_model: 'Qwen/Qwen3-32B',
               ctx_size: 200000,
             },
           },
@@ -2662,6 +2756,41 @@ describe('fetchRuntimeProviders', () => {
             { keeper: 'routingtest', runtime_id: 'openai.gpt', matches_default: false },
           ],
         },
+        startup_degradation: {
+          schema: 'masc.runtime_startup_degradation.v1',
+          status: 'degraded',
+          degraded: true,
+          operator_action_required: true,
+          terminal_reason: 'missing_oas_catalog_models',
+          message: 'runtime catalog degraded boot',
+          config_path: '/tmp/masc-test/runtime.toml',
+          configured_default_runtime_id: 'runpod_mtp.qwen',
+          effective_default_runtime_id: 'runpod_mtp.qwen',
+          missing_catalog_model_count: 1,
+          missing_catalog_models: [
+            {
+              runtime_id: 'mimo.mimo-v2.5-pro',
+              provider_id: 'mimo',
+              provider_label: 'openai_compat',
+              model_id: 'mimo-v2.5-pro',
+            },
+          ],
+          disabled_runtime_ids: ['mimo.mimo-v2.5-pro'],
+          dropped_assignments: [
+            { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
+          ],
+          dropped_routes: [
+            { route_name: 'runtime.librarian', runtime_id: 'mimo.mimo-v2.5-pro' },
+          ],
+          dropped_media_failover: ['mimo.mimo-v2.5-pro'],
+          dropped_lane_candidates: [
+            { lane_id: 'coding', runtime_ids: ['mimo.mimo-v2.5-pro'] },
+          ],
+          dropped_lanes: [
+            { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
+          ],
+          next_action: 'Add the listed provider/model rows to oas-models.toml.',
+        },
         config_path: '/tmp/masc-test/runtime.toml',
       }), {
         status: 200,
@@ -2681,6 +2810,29 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[0]?.top_p).toBe(0.91)
+    expect(result.providers[0]?.top_k).toBe(42)
+    expect(result.providers[0]?.min_p).toBe(0.07)
+    expect(result.providers[0]?.max_output_tokens).toBe(65536)
+    expect(result.providers[0]?.supports_tool_choice).toBe(true)
+    expect(result.providers[0]?.supports_required_tool_choice).toBe(true)
+    expect(result.providers[0]?.supports_named_tool_choice).toBe(true)
+    expect(result.providers[0]?.supports_parallel_tool_calls).toBe(true)
+    expect(result.providers[0]?.supports_extended_thinking).toBe(true)
+    expect(result.providers[0]?.supports_response_format_json).toBe(true)
+    expect(result.providers[0]?.supports_structured_output).toBe(true)
+    expect(result.providers[0]?.supports_native_streaming).toBe(true)
+    expect(result.providers[0]?.supports_system_prompt).toBe(true)
+    expect(result.providers[0]?.supports_prompt_caching).toBe(true)
+    expect(result.providers[0]?.prompt_cache_alignment).toBe(1024)
+    expect(result.providers[0]?.supports_top_k).toBe(true)
+    expect(result.providers[0]?.supports_min_p).toBe(true)
+    expect(result.providers[0]?.supports_seed).toBe(true)
+    expect(result.providers[0]?.supports_seed_with_images).toBe(true)
+    expect(result.providers[0]?.emits_usage_tokens).toBe(true)
+    expect(result.providers[0]?.supports_code_execution).toBe(true)
+    expect(result.providers[0]?.supports_audio_input).toBe(true)
+    expect(result.providers[0]?.supports_video_input).toBe(false)
     expect(result.providers[0]?.parameter_policy?.reasoning_toggle_wire).toBe('chat_template_kwargs')
     expect(result.providers[0]?.parameter_policy?.reasoning_replay_policy).toBe('preserve_always')
     expect(result.providers[0]?.parameter_policy?.ignored_sampling_params).toEqual(['temperature', 'top_p'])
@@ -2699,6 +2851,12 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.effective_capabilities?.reasoning_streaming_format?.field).toBe('reasoning_content')
     expect(result.providers[0]?.effective_capabilities?.modality_priority).toBe('visual-first')
     expect(result.providers[0]?.effective_capabilities?.supports_top_k).toBe(true)
+    expect(result.providers[0]?.effective_capabilities?.ignored_sampling_parameters).toEqual([
+      'temperature',
+      'top_p',
+      'presence_penalty',
+      'frequency_penalty',
+    ])
     expect(result.providers[0]?.declared_spec?.source).toBe('runtime.toml')
     expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')
     expect(
@@ -2710,13 +2868,25 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_system_prompt).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_seed_with_images).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_code_execution).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.top_p).toBe(0.91)
+    expect(result.providers[0]?.declared_spec?.model?.top_k).toBe(42)
+    expect(result.providers[0]?.declared_spec?.model?.min_p).toBe(0.07)
     expect(result.providers[0]?.declared_spec?.binding?.max_concurrent).toBe(4)
     expect(result.providers[1]?.temperature).toBeNull()
+    expect(result.providers[0]?.discovery?.discovered_model).toBe('Qwen/Qwen3-32B')
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
     expect(result.assignment_governance?.status).toBe('degraded')
     expect(result.assignment_governance?.assignment_count).toBe(2)
     expect(result.assignment_governance?.assigned_runtimes).toEqual(['openai.gpt'])
     expect(result.assignment_governance?.assignments[0]?.keeper).toBe('budgettest')
+    expect(result.startup_degradation?.status).toBe('degraded')
+    expect(result.startup_degradation?.terminal_reason).toBe('missing_oas_catalog_models')
+    expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
+    expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
+    expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
+    expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.librarian')
+    expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 })
 
@@ -2753,6 +2923,8 @@ describe('fetchRuntimeModelMetrics', () => {
               turn_lane: 'text_only',
               input_tokens: null,
               output_tokens: null,
+              cache_read_tokens: null,
+              cache_creation_tokens: null,
               latency_ms: null,
               cost_usd: null,
               tools_count: 0,
@@ -2808,6 +2980,8 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.recent_entries?.[0]?.stop_reason).toBe('turn_budget_exhausted(3/3)')
     expect(metric.recent_entries?.[0]?.turn_lane).toBe('text_only')
     expect(metric.recent_entries?.[0]?.input_tokens).toBeNull()
+    expect(metric.recent_entries?.[0]?.cache_read_tokens).toBeNull()
+    expect(metric.recent_entries?.[0]?.cache_creation_tokens).toBeNull()
     expect(metric.recent_entries?.[0]?.latency_ms).toBeNull()
     expect(metric.recent_entries?.[0]?.usage_reported).toBe(false)
     expect(metric.recent_entries?.[0]?.telemetry_reported).toBe(false)
@@ -2851,6 +3025,34 @@ describe('fetchKeeperCostMetrics', () => {
 
     expect(result.keepers[0]?.model_breakdown).toEqual([
       { model: 'runtime', cost_usd: 0.5 },
+    ])
+  })
+
+  it('marks missing model breakdown labels as unknown instead of fabricating runtime', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        keepers: [
+          {
+            keeper_name: 'keeper-alpha',
+            total_cost_usd: 0.5,
+            sample_count: 2,
+            model_breakdown: [
+              { cost_usd: 0.2 },
+              { model: ' ', cost_usd: 0.3 },
+            ],
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers[0]?.model_breakdown).toEqual([
+      { model: 'unknown_model', cost_usd: 0.5 },
     ])
   })
 })
@@ -2977,6 +3179,31 @@ describe('fetchCostLatency', () => {
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])
     expect(result.matrix.models).toEqual(['runtime_lane_7'])
+  })
+
+  it('marks unlabeled cost-matrix lanes as unknown instead of synthetic runtime lanes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        perAgent: [],
+        matrix: {
+          providers: [],
+          models: [],
+          grid: [[0.01, 0.02]],
+        },
+        latencyBuckets: [],
+        total_cost_usd: 0.03,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCostLatency(60)
+
+    expect(result.matrix.providers).toEqual(['unknown_provider'])
+    expect(result.matrix.models).toEqual(['unknown_model_1', 'unknown_model_2'])
+    expect(result.matrix.grid).toEqual([[0.01, 0.02]])
   })
 })
 

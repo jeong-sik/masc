@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
@@ -35,6 +35,8 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  keeperStreamContract,
+  setRecordValue,
 } from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
@@ -65,6 +67,7 @@ import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
 import {
+  toolCallOutputHydrationContract,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
@@ -247,6 +250,9 @@ function liveAssistantPlaceholder(keeperName: string): KeeperConversationEntry {
     timestamp: null,
     delivery: 'streaming',
     streamState: 'streaming',
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      reason: 'UI-only placeholder while active stream entry mounts',
+    }),
     details: null,
     error: null,
   }
@@ -266,7 +272,14 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
     timestamp: queuedTimestampIso(msg.timestamp),
     delivery: 'queued',
     streamState: undefined,
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      deliveryReceipt: 'no_delivery_receipt',
+      reason: 'client-side composer queue item; not yet submitted to keeper runtime',
+    }),
+    queueSeq: msg.sequence,
+    queueClientActionId: msg.clientActionId ?? null,
     attachments: msg.attachments,
+    blocks: msg.blocks,
     details: null,
     error: null,
   }
@@ -317,6 +330,11 @@ function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[
       data: b.data ?? b.src ?? '',
       dims: b.dims,
     }))
+}
+
+function blocksToDisplayBlocks(blocks: ChatBlock[]): ChatBlock[] | undefined {
+  const displayBlocks = blocks.filter((block) => block.t !== 'attach')
+  return displayBlocks.length > 0 ? displayBlocks : undefined
 }
 
 // ── Diagnostic chip ──────────────────────────────────────
@@ -431,7 +449,12 @@ function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5" data-chat-queue-item=${msg.id}>
+    <div
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5"
+      data-chat-queue-item=${msg.id}
+      data-chat-queue-seq=${msg.sequence}
+      data-chat-queue-client-action-id=${msg.clientActionId ?? undefined}
+    >
       ${editing
         ? html`
             <textarea
@@ -522,6 +545,7 @@ export function KeeperConversationPanel({
   // the signal graph (keeper-chat-store), so re-renders must be forced.
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion(v => v + 1)
+  const isDrainingRef = useRef(false)
 
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
@@ -614,6 +638,23 @@ export function KeeperConversationPanel({
       : '아직 표시할 대화가 없습니다. 내부 메시지는 토글로 볼 수 있습니다.'
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
+  const renderError = (extraClass = 'mt-2') => {
+    if (!error) return null
+    return html`
+      <div class="${extraClass} flex items-start justify-between gap-2 rounded border border-[var(--err-border)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel" role="alert">
+        <span class="flex-1">${error}</span>
+        <button
+          type="button"
+          aria-label="에러 메시지 닫기"
+          class="shrink-0 text-[var(--bad-light)] opacity-70 hover:opacity-100 transition-opacity ml-1 cursor-pointer font-bold select-none"
+          title="에러 메시지 닫기"
+          onClick=${() => setRecordValue(keeperActionErrors, keeperName, null)}
+        >
+          ✕
+        </button>
+      </div>
+    `
+  }
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const composerDisabled = !keeperName || chatAccess.blocked
 
@@ -624,6 +665,13 @@ export function KeeperConversationPanel({
     if (!sending) return
     const id = setInterval(() => setStallTick(t => t + 1), 1000)
     return () => clearInterval(id)
+  }, [sending, keeperName])
+
+  // Reactively drain the queued inputs when the keeper finishes sending
+  useEffect(() => {
+    if (!sending && keeperName) {
+      void drainQueue()
+    }
   }, [sending, keeperName])
 
   const streamStartedAt = keeperStreamStartedAt.value[keeperName] ?? null
@@ -639,38 +687,46 @@ export function KeeperConversationPanel({
   }
 
   const drainQueue = async () => {
-    for (;;) {
-      const queued = dequeueInput(keeperName)
-      if (!queued) return
-      bumpQueue()
-
-      const content = queued.content.trim()
-      const attachments = queued.attachments && queued.attachments.length > 0 ? queued.attachments : undefined
-      if (!content && !attachments) {
-        markInputSent(keeperName)
+    if (isDrainingRef.current) return
+    isDrainingRef.current = true
+    try {
+      for (;;) {
+        const queued = dequeueInput(keeperName)
+        if (!queued) return
         bumpQueue()
-        continue
-      }
 
-      try {
-        await sendKeeperThreadMessage(keeperName, content, {
-          attachments,
-          clientActionId: queued.clientActionId,
-        })
-        markInputSent(keeperName)
-        bumpQueue()
-      } catch (err) {
-        if (isAbortError(err)) {
+        const content = queued.content.trim()
+        const attachments = queued.attachments && queued.attachments.length > 0 ? queued.attachments : undefined
+        if (!content && !attachments) {
           markInputSent(keeperName)
           bumpQueue()
+          continue
+        }
+
+        try {
+          await sendKeeperThreadMessage(keeperName, content, {
+            attachments,
+            blocks: queued.blocks,
+            clientActionId: queued.clientActionId,
+            userBlocks: queued.userBlocks,
+          })
+          markInputSent(keeperName)
+          bumpQueue()
+        } catch (err) {
+          if (isAbortError(err)) {
+            markInputSent(keeperName)
+            bumpQueue()
+            return
+          }
+          requeueInputFront(keeperName, queued)
+          bumpQueue()
+          const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
+          showToast(message, 'error')
           return
         }
-        requeueInputFront(keeperName, queued)
-        bumpQueue()
-        const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
-        showToast(message, 'error')
-        return
       }
+    } finally {
+      isDrainingRef.current = false
     }
   }
 
@@ -682,6 +738,7 @@ export function KeeperConversationPanel({
     }
     if (!keeperName || (!prompt && blocks.length === 0)) return
     const attachments = blocksToAttachments(blocks)
+    const displayBlocks = blocksToDisplayBlocks(blocks)
     if (keeperSending.value[keeperName]) {
       if (
         isKeeperThreadMessageSendInFlight(keeperName, clientActionId)
@@ -694,12 +751,19 @@ export function KeeperConversationPanel({
         prompt,
         attachments.length > 0 ? attachments : undefined,
         clientActionId,
+        displayBlocks,
+        userBlocks,
       )
       bumpQueue()
       return
     }
     try {
-      await sendKeeperThreadMessage(keeperName, prompt, { attachments, clientActionId, userBlocks })
+      await sendKeeperThreadMessage(keeperName, prompt, {
+        attachments,
+        blocks: displayBlocks,
+        clientActionId,
+        userBlocks,
+      })
     } catch (err) {
       if (isAbortError(err)) return
       const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
@@ -787,6 +851,7 @@ export function KeeperConversationPanel({
               showSourceBadge=${true}
               toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+              toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
               unreadAfterTs=${unreadAfterTs}
               onSeenBottom=${markTranscriptSeen}
               action=${inspectAction}
@@ -842,7 +907,7 @@ export function KeeperConversationPanel({
               onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
               layout="primary"
             />
-            ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
+            ${renderError()}
           </div>
         </div>
       </div>
@@ -923,6 +988,7 @@ export function KeeperConversationPanel({
           groupToolCalls=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+          toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
           unreadAfterTs=${unreadAfterTs}
           onSeenBottom=${markTranscriptSeen}
           action=${inspectAction}
@@ -967,7 +1033,7 @@ export function KeeperConversationPanel({
           />
         </div>
 
-        ${error ? html`<div class="shrink-0 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
+        ${renderError('shrink-0')}
       </div>
     `
   }
@@ -1042,6 +1108,7 @@ export function KeeperConversationPanel({
             groupToolCalls=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+            toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
             unreadAfterTs=${unreadAfterTs}
             onSeenBottom=${markTranscriptSeen}
             action=${inspectAction}
@@ -1087,7 +1154,7 @@ export function KeeperConversationPanel({
         </div>
       </div>
 
-      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
+      ${renderError()}
     </div>
   `
 }

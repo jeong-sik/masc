@@ -333,12 +333,47 @@ type missing_catalog_report =
   ; missing_models : missing_catalog_model list
   }
 
+type dropped_runtime_assignment =
+  { keeper_name : string
+  ; runtime_id : string
+  }
+
+type dropped_runtime_route =
+  { route_name : string
+  ; runtime_id : string
+  }
+
+type dropped_runtime_lane =
+  { lane_id : string
+  ; runtime_ids : string list
+  }
+
+type startup_degradation =
+  { report : missing_catalog_report
+  ; configured_default_runtime_id : string
+  ; effective_default_runtime_id : string
+  ; disabled_runtime_ids : string list
+  ; dropped_assignments : dropped_runtime_assignment list
+  ; dropped_routes : dropped_runtime_route list
+  ; dropped_media_failover : string list
+  ; dropped_lane_candidates : dropped_runtime_lane list
+  ; dropped_lanes : dropped_runtime_lane list
+  }
+
+type init_default_outcome =
+  | Initialized
+  | Initialized_degraded of startup_degradation
+
 type strict_init_error =
   | Runtime_config_error of string
   | Missing_catalog_models of missing_catalog_report
 
 let missing_catalog_model_label (missing : missing_catalog_model) =
-  Printf.sprintf "%s (model=%s)" missing.runtime_id missing.model_id
+  Printf.sprintf
+    "%s (provider_label=%s, model=%s)"
+    missing.runtime_id
+    missing.provider_label
+    missing.model_id
 ;;
 
 let missing_catalog_report_to_string (report : missing_catalog_report) =
@@ -354,6 +389,94 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
 let strict_init_error_to_string = function
   | Runtime_config_error msg -> msg
   | Missing_catalog_models report -> missing_catalog_report_to_string report
+;;
+
+let startup_degradation_to_string (degradation : startup_degradation) =
+  Printf.sprintf
+    "runtime catalog degraded boot: disabled %d uncatalogued runtime(s); \
+     configured default %S -> effective default %S; operator must add catalog \
+     rows for: %s"
+    (List.length degradation.disabled_runtime_ids)
+    degradation.configured_default_runtime_id
+    degradation.effective_default_runtime_id
+    (String.concat ", "
+       (List.map missing_catalog_model_label degradation.report.missing_models))
+;;
+
+let dropped_assignment_to_yojson (entry : dropped_runtime_assignment) =
+  `Assoc
+    [ "keeper_name", `String entry.keeper_name
+    ; "runtime_id", `String entry.runtime_id
+    ]
+;;
+
+let dropped_route_to_yojson (entry : dropped_runtime_route) =
+  `Assoc [ "route_name", `String entry.route_name; "runtime_id", `String entry.runtime_id ]
+;;
+
+let dropped_lane_to_yojson (entry : dropped_runtime_lane) =
+  `Assoc
+    [ "lane_id", `String entry.lane_id
+    ; "runtime_ids", `List (List.map (fun id -> `String id) entry.runtime_ids)
+    ]
+;;
+
+let missing_catalog_model_to_yojson (entry : missing_catalog_model) =
+  `Assoc
+    [ "runtime_id", `String entry.runtime_id
+    ; "provider_id", `String entry.provider_id
+    ; "provider_label", `String entry.provider_label
+    ; "model_id", `String entry.model_id
+    ]
+;;
+
+let startup_degradation_to_yojson = function
+  | None ->
+    `Assoc
+      [ "schema", `String "masc.runtime_startup_degradation.v1"
+      ; "status", `String "ok"
+      ; "degraded", `Bool false
+      ; "operator_action_required", `Bool false
+      ; "terminal_reason", `String "none"
+      ; "missing_catalog_model_count", `Int 0
+      ; "disabled_runtime_ids", `List []
+      ]
+  | Some degradation ->
+    `Assoc
+      [ "schema", `String "masc.runtime_startup_degradation.v1"
+      ; "status", `String "degraded"
+      ; "degraded", `Bool true
+      ; "operator_action_required", `Bool true
+      ; "terminal_reason", `String "missing_oas_catalog_models"
+      ; "message", `String (startup_degradation_to_string degradation)
+      ; "config_path", `String degradation.report.config_path
+      ; "configured_default_runtime_id"
+        , `String degradation.configured_default_runtime_id
+      ; "effective_default_runtime_id", `String degradation.effective_default_runtime_id
+      ; "missing_catalog_model_count", `Int (List.length degradation.report.missing_models)
+      ; ( "missing_catalog_models"
+        , `List (List.map missing_catalog_model_to_yojson degradation.report.missing_models)
+        )
+      ; ( "disabled_runtime_ids"
+        , `List (List.map (fun id -> `String id) degradation.disabled_runtime_ids)
+        )
+      ; ( "dropped_assignments"
+        , `List (List.map dropped_assignment_to_yojson degradation.dropped_assignments)
+        )
+      ; "dropped_routes", `List (List.map dropped_route_to_yojson degradation.dropped_routes)
+      ; ( "dropped_media_failover"
+        , `List (List.map (fun id -> `String id) degradation.dropped_media_failover)
+        )
+      ; ( "dropped_lane_candidates"
+        , `List (List.map dropped_lane_to_yojson degradation.dropped_lane_candidates)
+        )
+      ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
+      ; ( "next_action"
+        , `String
+            "Add the listed provider/model rows to oas-models.toml or remove \
+             those runtime.toml bindings; uncatalogued runtimes are disabled \
+             for this process." )
+      ]
 ;;
 
 let capabilities_for_runtime (rt : t) =
@@ -401,6 +524,239 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
   match missing_models with
   | [] -> None
   | first :: rest -> Some { config_path; missing_models = first :: rest }
+;;
+
+let runtime_missing_from_report (report : missing_catalog_report) runtime_id =
+  List.exists
+    (fun (missing : missing_catalog_model) -> String.equal missing.runtime_id runtime_id)
+    report.missing_models
+;;
+
+let runtime_default_route_name = "[runtime].default"
+
+let dropped_assignment_label (entry : dropped_runtime_assignment) =
+  Printf.sprintf "[runtime.assignments].%s=%S" entry.keeper_name entry.runtime_id
+;;
+
+let dropped_route_label (entry : dropped_runtime_route) =
+  Printf.sprintf "%s=%S" entry.route_name entry.runtime_id
+;;
+
+let dropped_lane_label (prefix : string) (entry : dropped_runtime_lane) =
+  Printf.sprintf
+    "%s.%s=[%s]"
+    prefix
+    entry.lane_id
+    (String.concat ", " (List.map (Printf.sprintf "%S") entry.runtime_ids))
+;;
+
+let missing_reference_error
+    ~(config_path : string)
+    ~(configured_default_runtime_id : string)
+    ~(default_drop : dropped_runtime_route option)
+    ~(dropped_assignments : dropped_runtime_assignment list)
+    ~(dropped_routes : dropped_runtime_route list)
+    ~(dropped_media_failover : string list)
+    ~(dropped_lane_candidates : dropped_runtime_lane list)
+    ~(dropped_lanes : dropped_runtime_lane list)
+  =
+  let references =
+    List.concat
+      [ List.map dropped_assignment_label dropped_assignments
+      ; List.map dropped_route_label dropped_routes
+      ; (match dropped_media_failover with
+         | [] -> []
+         | runtime_ids ->
+           [ Printf.sprintf
+               "[runtime].media_failover=[%s]"
+               (String.concat ", " (List.map (Printf.sprintf "%S") runtime_ids))
+           ])
+      ; List.map
+          (dropped_lane_label "[runtime.lanes].candidates")
+          dropped_lane_candidates
+      ; List.map (dropped_lane_label "[runtime.lanes].dropped") dropped_lanes
+      ]
+  in
+  let default_fallback_explanation =
+    match default_drop with
+    | Some _ ->
+      Printf.sprintf
+        "Configured %s=%S is absent from the OAS capability catalog; degraded \
+         boot will not select a different default runtime."
+        runtime_default_route_name
+        configured_default_runtime_id
+    | None ->
+      Printf.sprintf
+        "Configured %s=%S remains catalog-known, but degraded boot would erase \
+         the missing references above into that default fallback."
+        runtime_default_route_name
+        configured_default_runtime_id
+  in
+  Printf.sprintf
+    "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
+     are referenced by routing config: %s. %s Add catalog rows to \
+     oas-models.toml or remove those routing references; MASC will not erase \
+     explicit runtime intent into [runtime].default fallback."
+    config_path
+    (String.concat "; " references)
+    default_fallback_explanation
+;;
+
+let degrade_loaded_for_missing_catalog
+    ( (runtimes, configured_default, assignments, librarian_id, structured_judge_id,
+       cross_verifier_id, media_failover, lanes) :
+      t list
+      * t
+      * (string * string) list
+      * string option
+      * string option
+      * string option
+      * string list
+      * Runtime_lane.t list )
+    (report : missing_catalog_report)
+  : ( ( t list
+        * t
+        * (string * string) list
+        * string option
+        * string option
+        * string option
+        * string list
+        * Runtime_lane.t list )
+      * startup_degradation
+    , string )
+    result
+  =
+  let is_missing = runtime_missing_from_report report in
+  let active_runtimes = List.filter (fun (rt : t) -> not (is_missing rt.id)) runtimes in
+  let disabled_runtime_ids =
+    report.missing_models
+    |> List.map (fun (missing : missing_catalog_model) -> missing.runtime_id)
+    |> List.sort_uniq String.compare
+  in
+  let kept_assignments, dropped_assignments =
+    List.fold_right
+      (fun (keeper_name, runtime_id) (kept, dropped) ->
+         if is_missing runtime_id
+         then kept, { keeper_name; runtime_id } :: dropped
+         else (keeper_name, runtime_id) :: kept, dropped)
+      assignments
+      ([], [])
+  in
+  let default_drop =
+    if is_missing configured_default.id
+    then Some { route_name = runtime_default_route_name; runtime_id = configured_default.id }
+    else None
+  in
+  let drop_route route_name = function
+    | None -> None, None
+    | Some runtime_id when is_missing runtime_id -> None, Some { route_name; runtime_id }
+    | Some _ as value -> value, None
+  in
+  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
+  let structured_judge_id, structured_judge_drop =
+    drop_route "[runtime].structured_judge" structured_judge_id
+  in
+  let cross_verifier_id, cross_verifier_drop =
+    drop_route "[runtime].cross_verifier" cross_verifier_id
+  in
+  let dropped_routes =
+    [ default_drop; librarian_drop; structured_judge_drop; cross_verifier_drop ]
+    |> List.filter_map Fun.id
+  in
+  let kept_media_failover, dropped_media_failover =
+    List.fold_right
+      (fun runtime_id (kept, dropped) ->
+         if is_missing runtime_id
+         then kept, runtime_id :: dropped
+         else runtime_id :: kept, dropped)
+      media_failover
+      ([], [])
+  in
+  let kept_lanes, dropped_lane_candidates, dropped_lanes =
+    List.fold_right
+      (fun (lane : Runtime_lane.t) (kept, dropped_candidates, dropped_lanes) ->
+         let kept_candidates, dropped_candidates_for_lane =
+           List.fold_right
+             (fun runtime_id (kept_ids, dropped_ids) ->
+                if is_missing runtime_id
+                then kept_ids, runtime_id :: dropped_ids
+                else runtime_id :: kept_ids, dropped_ids)
+             (Runtime_lane.ordered_candidates lane)
+             ([], [])
+         in
+         let dropped_candidates =
+           match dropped_candidates_for_lane with
+           | [] -> dropped_candidates
+           | runtime_ids ->
+             { lane_id = Runtime_lane.id lane; runtime_ids } :: dropped_candidates
+         in
+         match kept_candidates with
+         | [] ->
+           ( kept
+           , dropped_candidates
+           , { lane_id = Runtime_lane.id lane
+             ; runtime_ids = Runtime_lane.ordered_candidates lane
+             }
+             :: dropped_lanes )
+         | _ ->
+           ( Runtime_lane.make
+               ~id:(Runtime_lane.id lane)
+               ~strategy:(Runtime_lane.strategy lane)
+               kept_candidates
+             :: kept
+           , dropped_candidates
+           , dropped_lanes ))
+      lanes
+      ([], [], [])
+  in
+  let has_routing_references =
+    (not (List.is_empty dropped_assignments))
+    || (not (List.is_empty dropped_routes))
+    || (not (List.is_empty dropped_media_failover))
+    || (not (List.is_empty dropped_lane_candidates))
+    || not (List.is_empty dropped_lanes)
+  in
+  match active_runtimes with
+  | [] ->
+    Error
+      (Printf.sprintf
+         "%s: all configured runtime models are absent from the OAS capability \
+          catalog; cannot degrade without dispatching through provider_default"
+         report.config_path)
+  | _ when has_routing_references ->
+    Error
+      (missing_reference_error
+         ~config_path:report.config_path
+         ~configured_default_runtime_id:configured_default.id
+         ~default_drop
+         ~dropped_assignments
+         ~dropped_routes
+         ~dropped_media_failover
+         ~dropped_lane_candidates
+         ~dropped_lanes)
+  | _ ->
+    let degradation =
+      { report
+      ; configured_default_runtime_id = configured_default.id
+      ; effective_default_runtime_id = configured_default.id
+      ; disabled_runtime_ids
+      ; dropped_assignments
+      ; dropped_routes
+      ; dropped_media_failover
+      ; dropped_lane_candidates
+      ; dropped_lanes
+      }
+    in
+    Ok
+      ( ( active_runtimes
+        , configured_default
+        , kept_assignments
+        , librarian_id
+        , structured_judge_id
+        , cross_verifier_id
+        , kept_media_failover
+        , kept_lanes )
+      , degradation )
 ;;
 
 let materialize_config ~(config_path : string) (cfg : config)
@@ -461,7 +817,8 @@ let materialize_config ~(config_path : string) (cfg : config)
   in
   (* The OAS catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
-     Production startup applies the stricter gate via [init_default_strict]. *)
+     Startup callers choose fail-closed [init_default_strict] or server-visible
+     degraded boot [init_default_degraded_report]. *)
   Ok
     ( runtimes
     , rt
@@ -511,6 +868,7 @@ type loaded_state =
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
   ; config_path : string option
+  ; startup_degradation : startup_degradation option
   }
 
 let empty_loaded_state =
@@ -523,6 +881,7 @@ let empty_loaded_state =
   ; media_failover = []
   ; lanes = []
   ; config_path = None
+  ; startup_degradation = None
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
@@ -530,6 +889,7 @@ let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded
+    ?startup_degradation
     ~config_path
     ( runtimes
     , rt
@@ -549,6 +909,7 @@ let set_loaded
     ; media_failover
     ; lanes
     ; config_path = Some config_path
+    ; startup_degradation
     }
 
 let init_default ~config_path =
@@ -556,11 +917,11 @@ let init_default ~config_path =
   set_loaded ~config_path loaded;
   Ok ()
 
-(* Startup entry point: [load_list] (RFC-0206 routing validation) PLUS the OAS
-   capability-catalog gate. Production callers (server boot, fusion run) use this
-   so an operator runtime.toml whose model is absent from the catalog is rejected
-   before boot — the gate that load_list intentionally no longer applies, kept out
-   of load_list so unit tests stay catalog-independent. *)
+(* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
+   PLUS the OAS capability-catalog gate. Strict callers use this so an operator
+   runtime.toml whose model is absent from the catalog is rejected before boot —
+   the gate that load_list intentionally no longer applies, kept out of load_list
+   so unit tests stay catalog-independent. *)
 let init_default_strict_report ~config_path =
   match load_list ~config_path with
   | Error msg -> Error (Runtime_config_error msg)
@@ -575,6 +936,21 @@ let init_default_strict ~config_path =
   init_default_strict_report ~config_path
   |> Result.map_error strict_init_error_to_string
 
+let init_default_degraded_report ~config_path =
+  match load_list ~config_path with
+  | Error msg -> Error (Runtime_config_error msg)
+  | Ok ((runtimes, _, _, _, _, _, _, _) as loaded) ->
+    (match missing_runtime_model_capabilities ~config_path runtimes with
+     | None ->
+       set_loaded ~config_path loaded;
+       Ok Initialized
+     | Some report ->
+       (match degrade_loaded_for_missing_catalog loaded report with
+        | Error msg -> Error (Runtime_config_error msg)
+        | Ok (degraded_loaded, degradation) ->
+          set_loaded ~startup_degradation:degradation ~config_path degraded_loaded;
+          Ok (Initialized_degraded degradation)))
+
 let runtime_state () = Atomic.get loaded_state_ref
 
 module For_testing = struct
@@ -587,6 +963,8 @@ end
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
+let startup_degradation () = (runtime_state ()).startup_degradation
+let startup_degraded () = Option.is_some (startup_degradation ())
 
 let default_runtime_id_or_fail () =
   match (runtime_state ()).default_runtime with
@@ -723,6 +1101,24 @@ let thinking_support_of_runtime_id (id : string) : bool option =
 let temperature_of_runtime_id (id : string) : float option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.temperature
+  | None -> None
+;;
+
+let top_p_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.top_p
+  | None -> None
+;;
+
+let top_k_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.top_k
+  | None -> None
+;;
+
+let min_p_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.provider_config.min_p
   | None -> None
 ;;
 

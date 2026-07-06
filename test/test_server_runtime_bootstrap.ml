@@ -48,6 +48,7 @@ let read_file path =
 
 let repo_runtime_toml = "# repo runtime seed\n"
 let local_runtime_toml = "# local runtime seed\n"
+let repo_model_catalog_toml = "[[models]]\nid_prefix = \"repo-runtime\"\n"
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -117,6 +118,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
+  write_file (Filename.concat root "oas-models.toml") repo_model_catalog_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "tool_policy.toml")
     "[groups.base]\ntools = [\"keeper_time_now\"]\n";
@@ -125,8 +127,16 @@ let make_config_root root =
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
-let model_catalog_resolution_source_label resolution =
+let model_catalog_resolution_source_label
+    (resolution : Server_runtime_bootstrap.model_catalog_env_resolution)
+  =
   Server_runtime_bootstrap.model_catalog_env_source_to_string
+    resolution.Server_runtime_bootstrap.source
+
+let capability_manifest_resolution_source_label
+    (resolution : Server_runtime_bootstrap.capability_manifest_env_resolution)
+  =
+  Server_runtime_bootstrap.capability_manifest_env_source_to_string
     resolution.Server_runtime_bootstrap.source
 
 let test_model_catalog_resolution_prefers_explicit_env () =
@@ -170,9 +180,163 @@ let test_model_catalog_resolution_prefers_explicit_env () =
       "MASC_MODEL_CATALOG"
       (model_catalog_resolution_source_label resolution);
     Alcotest.(check string)
-      "path"
-      "/explicit/masc-models.toml"
-      resolution.Server_runtime_bootstrap.path
+	      "path"
+	      "/explicit/masc-models.toml"
+	      resolution.Server_runtime_bootstrap.path
+
+let test_capability_manifest_resolution_prefers_explicit_env () =
+  let env = function
+    | "OAS_CAPABILITY_MANIFEST" -> Some "/explicit/capability-manifest.json"
+    | _ -> None
+  in
+  with_temp_dir "capability-manifest-bootstrap-explicit" (fun dir ->
+    match
+      Server_runtime_bootstrap.resolve_oas_capability_manifest_path
+        ~env
+        ~config_root:dir
+        ()
+    with
+    | None -> Alcotest.fail "expected explicit OAS_CAPABILITY_MANIFEST resolution"
+    | Some resolution ->
+      Alcotest.(check string)
+        "source"
+        "OAS_CAPABILITY_MANIFEST"
+        (capability_manifest_resolution_source_label resolution);
+      Alcotest.(check string)
+        "path"
+        "/explicit/capability-manifest.json"
+        resolution.Server_runtime_bootstrap.path)
+
+let test_capability_manifest_configuration_uses_config_root_file () =
+  with_temp_dir "capability-manifest-bootstrap-config-root" (fun config_root ->
+    let manifest = Filename.concat config_root "capability-manifest.json" in
+    write_file manifest {|{"schema_version":1,"models":[]}|};
+    let putenv_calls = ref [] in
+    let clear_calls = ref 0 in
+    let load_calls = ref [] in
+    let set_calls = ref 0 in
+    let env _ = None in
+    let result =
+      Server_runtime_bootstrap.configure_oas_capability_manifest_env
+        ~env
+        ~config_root
+        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
+        ~clear_manifest:(fun () -> incr clear_calls)
+        ~load_manifest:(fun path ->
+          load_calls := path :: !load_calls;
+          Some [])
+        ~set_manifest:(fun (_ : Llm_provider.Capability_manifest.t) -> incr set_calls)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected config-root capability manifest resolution"
+     | Some resolution ->
+       Alcotest.(check string)
+         "source"
+         "config-root:capability-manifest.json"
+         (capability_manifest_resolution_source_label resolution);
+       Alcotest.(check string)
+         "path"
+         (canonical_path manifest)
+         (canonical_path resolution.Server_runtime_bootstrap.path));
+    Alcotest.(check (list (pair string string)))
+      "putenv"
+      [ "OAS_CAPABILITY_MANIFEST", manifest ]
+      (List.rev !putenv_calls);
+    Alcotest.(check int) "clear manifest cache" 1 !clear_calls;
+    Alcotest.(check (list string)) "load manifest" [ manifest ] (List.rev !load_calls);
+    Alcotest.(check int) "set manifest override" 1 !set_calls)
+
+let test_model_catalog_configuration_installs_resolved_catalog () =
+  with_temp_dir "model-catalog-bootstrap-install" (fun dir ->
+    let repo = Filename.concat dir "repo" in
+    let cwd = Filename.concat dir "base" in
+    let bin = Filename.concat repo "_build/default/bin/main_eio.exe" in
+    let catalog = Filename.concat repo "oas-models.toml" in
+    mkdir_p (Filename.dirname bin);
+    mkdir_p cwd;
+    write_file bin "";
+    write_file catalog "[[models]]\nid_prefix = \"example\"\n";
+    let putenv_calls = ref [] in
+    let clear_calls = ref 0 in
+    let load_calls = ref [] in
+    let set_calls = ref 0 in
+    let result =
+      Server_runtime_bootstrap.configure_oas_model_catalog_env
+        ~env:(fun _ -> None)
+        ~cwd
+        ~argv0:bin
+        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
+        ~clear_catalog:(fun () -> incr clear_calls)
+        ~load_catalog:(fun path ->
+          load_calls := path :: !load_calls;
+          Some Llm_provider.Model_catalog.empty)
+        ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected executable-parent model catalog resolution"
+     | Some resolution ->
+       Alcotest.(check string)
+         "source"
+         "argv0-parent:oas-models.toml"
+         (model_catalog_resolution_source_label resolution);
+       Alcotest.(check string)
+         "path"
+         (canonical_path catalog)
+         (canonical_path resolution.Server_runtime_bootstrap.path));
+    Alcotest.(check (list (pair string string)))
+      "putenv"
+      [ "OAS_MODEL_CATALOG", catalog ]
+      (List.rev !putenv_calls);
+    Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
+    Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
+    Alcotest.(check int) "set catalog override" 1 !set_calls)
+
+let test_model_catalog_configuration_prefers_config_root_catalog () =
+  with_temp_dir "model-catalog-bootstrap-config-root" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let outside = Filename.concat dir "outside" in
+    let catalog = Filename.concat config_root "oas-models.toml" in
+    mkdir_p config_root;
+    mkdir_p outside;
+    write_file catalog "[[models]]\nid_prefix = \"config-root-runtime\"\n";
+    let putenv_calls = ref [] in
+    let clear_calls = ref 0 in
+    let load_calls = ref [] in
+    let set_calls = ref 0 in
+    let result =
+      Server_runtime_bootstrap.configure_oas_model_catalog_env
+        ~env:(fun _ -> None)
+        ~config_root
+        ~cwd:outside
+        ~argv0:(Filename.concat outside "main_eio.exe")
+        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
+        ~clear_catalog:(fun () -> incr clear_calls)
+        ~load_catalog:(fun path ->
+          load_calls := path :: !load_calls;
+          Some Llm_provider.Model_catalog.empty)
+        ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected config-root model catalog resolution"
+     | Some resolution ->
+       Alcotest.(check string)
+         "source"
+         "config-root:oas-models.toml"
+         (model_catalog_resolution_source_label resolution);
+       Alcotest.(check string)
+         "path"
+         (canonical_path catalog)
+         (canonical_path resolution.Server_runtime_bootstrap.path));
+    Alcotest.(check (list (pair string string)))
+      "putenv"
+      [ "OAS_MODEL_CATALOG", catalog ]
+      (List.rev !putenv_calls);
+    Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
+    Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
+    Alcotest.(check int) "set catalog override" 1 !set_calls)
 
 let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path () =
   with_temp_dir "model-catalog-bootstrap" (fun dir ->
@@ -248,7 +412,7 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
         ~argv0:(Filename.concat dir "main_eio.exe")
         ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
         ~preload_agent_sdk_catalog:(fun () -> incr preload_calls)
-        ~agent_sdk_catalog:(fun () -> Some [])
+        ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
         ()
     in
     Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);
@@ -747,6 +911,8 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
         (read_file (Filename.concat config_root "runtime.toml"));
       Alcotest.(check bool) "tool policy not copied (deleted module)" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
+      Alcotest.(check string) "model catalog copied" repo_model_catalog_toml
+        (read_file (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
@@ -755,7 +921,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
-let test_bootstrap_base_path_config_root_backfills_missing_prompts_only () =
+let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -781,6 +947,8 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_only () =
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
       Alcotest.(check string) "backfilled prompt content" "prompt"
         (read_file (Filename.concat config_root "prompts/keeper.unified.system.md"));
+      Alcotest.(check string) "model catalog backfilled" repo_model_catalog_toml
+        (read_file (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "versioned persona not resurrected" false
         (Sys.file_exists (Filename.concat config_root "personas/example.txt"));
       Alcotest.(check bool) "tool policy not backfilled" false
@@ -1372,9 +1540,188 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (reaction_ledger |> member "status" |> to_string);
           Alcotest.(check int) "health reaction ledger pending stimuli" 1
             (reaction_ledger |> member "pending_stimulus_count" |> to_int);
+          Alcotest.(check bool) "health reaction ledger names pending reason" true
+            (reaction_ledger |> member "status_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists (String.equal "reaction_ledger_pending_stimulus"));
+          Alcotest.(check bool)
+            "top-level health preserves reaction ledger reason"
+            true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_reaction_ledger:reaction_ledger_pending_stimulus"));
           Alcotest.(check bool) "health reaction ledger asks for operator action"
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_surfaces_keeper_turn_admission_pressure () =
+  with_temp_dir "health-turn-admission-pressure" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Keeper_turn_admission.For_testing.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_turn_admission.For_testing.reset ();
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let keeper_name = "example" in
+        Eio.Switch.run (fun sw ->
+          let started, set_started = Eio.Promise.create () in
+          let release, set_release = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw (fun () ->
+            ignore
+              (Keeper_turn_admission.run_serialized
+                 ~base_path:dir
+                 ~keeper_name
+                 (fun () ->
+                   Eio.Promise.resolve set_started ();
+                   Eio.Promise.await release)));
+          Eio.Promise.await started;
+          for _ = 1 to Keeper_turn_admission.max_waiting_chat_requests do
+            Eio.Fiber.fork ~sw (fun () ->
+              ignore
+                (Keeper_turn_admission.run_serialized
+                   ~base_path:dir
+                   ~keeper_name
+                   (fun () -> ())))
+          done;
+          (match
+             Keeper_turn_admission.run_serialized
+               ~base_path:dir
+               ~keeper_name
+               (fun () -> ())
+           with
+           | `Rejected _ -> ()
+           | `Ran () ->
+             Alcotest.fail "chat request beyond the waiting cap was not rejected");
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let admission = json |> member "keeper_turn_admission" in
+          Alcotest.(check string) "turn admission health degraded"
+            "degraded"
+            (admission |> member "status" |> to_string);
+          Alcotest.(check int) "turn admission health full queue count"
+            1
+            (admission |> member "chat_waiting_full_keeper_count" |> to_int);
+          Alcotest.(check int) "turn admission health rejection count"
+            1
+            (admission |> member "chat_rejected_total_count" |> to_int);
+          Alcotest.(check bool) "turn admission health reason surfaced"
+            true
+            (admission |> member "status_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists (String.equal "chat_waiting_queue_full"));
+          Alcotest.(check bool)
+            "top-level health preserves turn admission reason"
+            true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_turn_admission:chat_waiting_queue_full"));
+          let runtime_resolution =
+            `Assoc
+              (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
+          in
+          let runtime_admission =
+            runtime_resolution |> member "keeper_turn_admission"
+          in
+          Alcotest.(check int)
+            "runtime resolution exposes turn admission full queue count"
+            1
+            (runtime_admission |> member "chat_waiting_full_keeper_count"
+             |> to_int);
+          Alcotest.(check int)
+            "runtime resolution exposes turn admission rejection count"
+            1
+            (runtime_admission |> member "chat_rejected_total_count" |> to_int);
+          let light_runtime_resolution =
+            `Assoc
+              (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
+          in
+          let light_runtime_admission =
+            light_runtime_resolution |> member "keeper_turn_admission"
+          in
+          Alcotest.(check int)
+            "light runtime resolution exposes turn admission full queue count"
+            1
+            (light_runtime_admission |> member "chat_waiting_full_keeper_count"
+             |> to_int);
+          Eio.Promise.resolve set_release ())))
+
+let test_health_json_surfaces_board_event_collection_failure () =
+  with_temp_dir "health-board-event-collection-failure" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Keeper_heartbeat_loop_board_events.For_testing.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_heartbeat_loop_board_events.For_testing.reset ();
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let keeper_name = "example" in
+        Keeper_heartbeat_loop_board_events.For_testing.record_collection_failure
+          ~base_path:dir
+          ~keeper_name
+          ~message:"board event store unavailable";
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let collection = json |> member "keeper_board_event_collection" in
+        Alcotest.(check string) "board collection health degraded"
+          "degraded"
+          (collection |> member "status" |> to_string);
+        Alcotest.(check int) "board collection failed keeper count"
+          1
+          (collection |> member "failed_keeper_count" |> to_int);
+        Alcotest.(check bool) "board collection failure reason surfaced"
+          true
+          (collection |> member "status_reasons" |> to_list
+           |> List.map to_string
+           |> List.exists (String.equal "board_event_collection_failure"));
+        Alcotest.(check bool)
+          "top-level health preserves board collection failure reason"
+          true
+          (json |> member "operator_action_reasons" |> to_list
+           |> List.map to_string
+           |> List.exists
+                (String.equal
+                   "keeper_board_event_collection:board_event_collection_failure"));
+        let runtime_resolution =
+          `Assoc
+            (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
+        in
+        let runtime_collection =
+          runtime_resolution |> member "keeper_board_event_collection"
+        in
+        Alcotest.(check int)
+          "runtime resolution exposes board collection failed keeper count"
+          1
+          (runtime_collection |> member "failed_keeper_count" |> to_int);
+        let light_runtime_resolution =
+          `Assoc
+            (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
+        in
+        let light_runtime_collection =
+          light_runtime_resolution |> member "keeper_board_event_collection"
+        in
+        Alcotest.(check int)
+          "light runtime resolution exposes board collection failed keeper count"
+          1
+          (light_runtime_collection |> member "failed_keeper_count" |> to_int)))
 
 let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
   with_temp_dir "keeper-identity-drift" (fun dir ->
@@ -2999,7 +3346,45 @@ let test_health_json_reaction_ledger_reports_keeper_name_discovery_failure () =
              |> List.map to_string
              |> List.exists
                   (String.equal
-                     "keeper_fleet_safety:keeper_name_discovery_read_error"))))
+	                     "keeper_fleet_safety:keeper_name_discovery_read_error"))))
+
+let test_health_json_reaction_ledger_unavailable_shape () =
+  let previous_state = !Server_auth.server_state in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    (fun () ->
+       Server_auth.server_state := None;
+       let request = Httpun.Request.create `GET "/health" in
+       let json = Server_routes_http_runtime.make_health_json request in
+       let open Yojson.Safe.Util in
+       let reaction_ledger = json |> member "keeper_reaction_ledger" in
+       Alcotest.(check string) "unavailable reaction ledger status" "unavailable"
+         (reaction_ledger |> member "status" |> to_string);
+       Alcotest.(check int) "unavailable reaction ledger reasons empty" 0
+         (reaction_ledger |> member "status_reasons" |> to_list |> List.length);
+       Alcotest.(check int) "unavailable durable queue count" 0
+         (reaction_ledger |> member "durable_event_queue_count" |> to_int);
+       Alcotest.(check int) "unavailable durable discovery count" 0
+         (reaction_ledger
+          |> member "durable_event_queue_discovered_keeper_count"
+          |> to_int);
+       Alcotest.(check bool) "unavailable durable discovery error null" true
+         (reaction_ledger |> member "durable_event_queue_discovery_error" = `Null);
+       ignore
+         (reaction_ledger
+          |> member "durable_event_queue_stale_after_sec"
+          |> to_float);
+       Alcotest.(check int) "unavailable durable stale count" 0
+         (reaction_ledger |> member "durable_event_queue_stale_count" |> to_int);
+       Alcotest.(check int) "unavailable durable stale keeper count" 0
+         (reaction_ledger
+          |> member "durable_event_queue_stale_keeper_count"
+          |> to_int);
+       Alcotest.(check int) "unavailable durable stale rows empty" 0
+         (reaction_ledger
+          |> member "durable_event_queue_stale_by_keeper"
+	          |> to_list
+	          |> List.length))
 
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
@@ -4412,6 +4797,18 @@ let () =
             "model catalog resolution prefers explicit env"
             `Quick test_model_catalog_resolution_prefers_explicit_env;
           Alcotest.test_case
+            "capability manifest resolution prefers explicit env"
+            `Quick test_capability_manifest_resolution_prefers_explicit_env;
+          Alcotest.test_case
+            "capability manifest configuration uses config root"
+            `Quick test_capability_manifest_configuration_uses_config_root_file;
+          Alcotest.test_case
+            "model catalog configuration installs resolved catalog"
+            `Quick test_model_catalog_configuration_installs_resolved_catalog;
+          Alcotest.test_case
+            "model catalog configuration prefers config-root catalog"
+            `Quick test_model_catalog_configuration_prefers_config_root_catalog;
+          Alcotest.test_case
             "model catalog resolution falls back to executable parent"
             `Quick
             test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path;
@@ -4428,9 +4825,9 @@ let () =
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config backfills missing prompts only"
+            "bootstrap base-path config backfills prompts and catalog"
             `Quick
-            test_bootstrap_base_path_config_root_backfills_missing_prompts_only;
+            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick
@@ -4478,6 +4875,12 @@ let () =
           Alcotest.test_case
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
+          Alcotest.test_case
+            "health json surfaces turn admission pressure"
+            `Quick test_health_json_surfaces_keeper_turn_admission_pressure;
+          Alcotest.test_case
+            "health json surfaces board event collection failure"
+            `Quick test_health_json_surfaces_board_event_collection_failure;
           Alcotest.test_case
             "health json surfaces keeper identity config/meta drift"
             `Quick
@@ -4559,11 +4962,14 @@ let () =
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
-          Alcotest.test_case
-            "health json reaction ledger reports keeper-name discovery failure"
-            `Quick
-            test_health_json_reaction_ledger_reports_keeper_name_discovery_failure;
-          Alcotest.test_case "health json surfaces log ring summary" `Quick
+	          Alcotest.test_case
+	            "health json reaction ledger reports keeper-name discovery failure"
+	            `Quick
+	            test_health_json_reaction_ledger_reports_keeper_name_discovery_failure;
+	          Alcotest.test_case
+	            "health json reaction ledger unavailable shape"
+	            `Quick test_health_json_reaction_ledger_unavailable_shape;
+	          Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case
             "health json surfaces internal mcp auth diagnostics"

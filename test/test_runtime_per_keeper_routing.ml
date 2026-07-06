@@ -180,15 +180,24 @@ tools-support = true
 streaming = true
 
 [models.gpt.capabilities]
+max-output-tokens = 32000
 supports-tool-choice = true
 supports-required-tool-choice = true
 supports-named-tool-choice = true
 supports-parallel-tool-calls = true
 supports-response-format-json = true
 supports-structured-output = true
+supports-audio-input = true
+supports-video-input = true
+supports-native-streaming = true
 supports-system-prompt = true
+supports-prompt-caching = true
+prompt-cache-alignment = 1024
+supports-top-k = true
+supports-min-p = true
 supports-seed = true
 supports-seed-with-images = true
+emits-usage-tokens = true
 supports-code-execution = true
 
 [runpod_mtp.qwen]
@@ -478,6 +487,86 @@ let test_runtime_inventory_surfaces_declared_model_capabilities () =
       "declared named tool choice"
       true
       (caps |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level audio input"
+      true
+      (gpt |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level video input"
+      true
+      (gpt |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check int)
+      "top-level max output tokens"
+      32000
+      (gpt |> J.member "max_output_tokens" |> J.to_int);
+    Alcotest.(check bool)
+      "top-level required tool choice"
+      true
+      (gpt |> J.member "supports_required_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level named tool choice"
+      true
+      (gpt |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level parallel tool calls"
+      true
+      (gpt |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level response format json"
+      true
+      (gpt |> J.member "supports_response_format_json" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level structured output"
+      true
+      (gpt |> J.member "supports_structured_output" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level native streaming"
+      true
+      (gpt |> J.member "supports_native_streaming" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level system prompt"
+      true
+      (gpt |> J.member "supports_system_prompt" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level prompt caching"
+      true
+      (gpt |> J.member "supports_prompt_caching" |> J.to_bool);
+    Alcotest.(check int)
+      "top-level prompt cache alignment"
+      1024
+      (gpt |> J.member "prompt_cache_alignment" |> J.to_int);
+    Alcotest.(check bool)
+      "top-level top_k"
+      true
+      (gpt |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level min_p"
+      true
+      (gpt |> J.member "supports_min_p" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level seed"
+      true
+      (gpt |> J.member "supports_seed" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level seed with images"
+      true
+      (gpt |> J.member "supports_seed_with_images" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level usage tokens"
+      true
+      (gpt |> J.member "emits_usage_tokens" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level code execution"
+      true
+      (gpt |> J.member "supports_code_execution" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared audio input"
+      true
+      (caps |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared video input"
+      true
+      (caps |> J.member "supports_video_input" |> J.to_bool);
     Alcotest.(check bool)
       "declared parallel tool calls"
       true
@@ -924,6 +1013,9 @@ api-name = "qwen36-35b-a3b-mtp"
 max-context = 128000
 tools-support = true
 thinking-support = true
+top-p = 0.91
+top-k = 42
+min-p = 0.07
 streaming = true
 
 [models.thinkexplicitoff]
@@ -989,7 +1081,9 @@ max_output_tokens = 65536
 supports_tools = true
 supports_tool_choice = true
 supports_required_tool_choice = true
+supports_named_tool_choice = true
 supports_parallel_tool_calls = true
+assistant_tool_content_format = "empty_string"
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
@@ -998,14 +1092,23 @@ thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "preserve_always"
 supports_response_format_json = true
 supports_structured_output = true
 modality_priority = "visual_first"
+task = "transcription"
+supports_audio_input = true
+supports_video_input = true
 supports_native_streaming = true
+supports_system_prompt = true
+supports_caching = true
 supports_prompt_caching = true
 supports_top_k = true
 supports_min_p = true
 supports_seed = true
+ignored_sampling_parameters = ["temperature", "top_p", "presence_penalty", "frequency_penalty"]
+supports_computer_use = true
+supports_code_execution = true
 
 [[models]]
 id_prefix = "openai_compat/reasoning-small-out"
@@ -1103,20 +1206,26 @@ let test_runtime_inventory_surfaces_parameter_policy () =
       (policy |> J.member "reasoning_toggle_wire" |> J.to_string);
     Alcotest.(check string)
       "reasoning replay policy"
-      "no_replay"
+      "preserve_always"
       (policy |> J.member "reasoning_replay_policy" |> J.to_string);
     Alcotest.(check bool)
       "no tool replay requirement"
       false
       (policy |> J.member "requires_reasoning_replay_on_tool_call" |> J.to_bool);
-    Alcotest.(check int)
-      "ignored sampling params empty"
-      0
-      (policy |> J.member "ignored_sampling_params" |> J.to_list |> List.length);
-    Alcotest.(check int)
-      "always ignored sampling params empty"
-      0
-      (policy |> J.member "always_ignored_sampling_params" |> J.to_list |> List.length))
+    let json_string_list field =
+      policy |> J.member field |> J.to_list |> List.map J.to_string
+    in
+    let expected_ignored_sampling_params =
+      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
+    in
+    Alcotest.(check (list string))
+      "ignored sampling params surface model-catalog policy"
+      expected_ignored_sampling_params
+      (json_string_list "ignored_sampling_params");
+    Alcotest.(check (list string))
+      "always ignored sampling params surface model-catalog policy"
+      expected_ignored_sampling_params
+      (json_string_list "always_ignored_sampling_params"))
 ;;
 
 let test_runtime_inventory_surfaces_effective_capabilities () =
@@ -1144,6 +1253,14 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       "parallel tool calls"
       true
       (caps |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "named tool choice"
+      true
+      (caps |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check string)
+      "assistant tool content format"
+      "empty-string"
+      (caps |> J.member "assistant_tool_content_format" |> J.to_string);
     Alcotest.(check (list string))
       "accepted reasoning efforts"
       [ "low"; "medium"; "high" ]
@@ -1155,10 +1272,49 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       "reasoning streaming field"
       "reasoning_content"
       (caps |> J.member "reasoning_streaming_format" |> J.member "field" |> J.to_string);
+    Alcotest.(check string)
+      "reasoning replay override"
+      "preserve-always"
+      (caps |> J.member "reasoning_replay_override" |> J.to_string);
+    Alcotest.(check string)
+      "task"
+      "transcription"
+      (caps |> J.member "task" |> J.to_string);
+    Alcotest.(check bool)
+      "audio input"
+      true
+      (caps |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "video input"
+      true
+      (caps |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "system prompt"
+      true
+      (caps |> J.member "supports_system_prompt" |> J.to_bool);
+    Alcotest.(check bool)
+      "caching"
+      true
+      (caps |> J.member "supports_caching" |> J.to_bool);
     Alcotest.(check bool)
       "top_k"
       true
       (caps |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check (list string))
+      "ignored sampling parameters"
+      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
+      (caps
+       |> J.member "ignored_sampling_parameters"
+       |> J.to_list
+       |> List.map J.to_string);
+    Alcotest.(check bool)
+      "computer use"
+      true
+      (caps |> J.member "supports_computer_use" |> J.to_bool);
+    Alcotest.(check bool)
+      "code execution"
+      true
+      (caps |> J.member "supports_code_execution" |> J.to_bool);
     Alcotest.(check string)
       "effective modality priority"
       "visual-first"
@@ -1198,6 +1354,18 @@ let test_runtime_inventory_surfaces_request_config () =
       "request max context"
       128000
       (request |> J.member "max_context" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "request top_p"
+      0.91
+      (request |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "request top_k"
+      42
+      (request |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "request min_p"
+      0.07
+      (request |> J.member "min_p" |> J.to_float);
     Alcotest.(check string)
       "response format kind"
       "off"
@@ -1238,6 +1406,18 @@ let test_runtime_inventory_surfaces_declared_spec () =
     let provider = spec |> J.member "provider" in
     let model = spec |> J.member "model" in
     let binding = spec |> J.member "binding" in
+    Alcotest.(check (float 0.0001))
+      "snapshot top_p"
+      0.91
+      (thinkdefault |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "snapshot top_k"
+      42
+      (thinkdefault |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "snapshot min_p"
+      0.07
+      (thinkdefault |> J.member "min_p" |> J.to_float);
     Alcotest.(check string)
       "declared spec source"
       "runtime.toml"
@@ -1281,6 +1461,18 @@ let test_runtime_inventory_surfaces_declared_spec () =
       "declared thinking support"
       true
       (model |> J.member "thinking_support" |> J.to_bool);
+    Alcotest.(check (float 0.0001))
+      "declared top_p"
+      0.91
+      (model |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "declared top_k"
+      42
+      (model |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "declared min_p"
+      0.07
+      (model |> J.member "min_p" |> J.to_float);
     (match model |> J.member "capabilities" with
      | `Null -> ()
      | _ -> Alcotest.fail "absent model capabilities must remain null");

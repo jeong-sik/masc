@@ -1,4 +1,6 @@
-type known_kind = Board_post
+type known_kind =
+  | Board_post
+  | Keeper_wake
 
 type support_status =
   | Supported
@@ -42,15 +44,18 @@ let trim_nonempty value =
 
 let known_kind_to_string = function
   | Board_post -> Schedule_supported_kinds.board_post
+  | Keeper_wake -> Schedule_supported_kinds.keeper_wake
 ;;
 
 let dispatch_tool_name = function
   | Board_post -> Tool_name.Board_name.(to_string Board_post)
+  | Keeper_wake -> Schedule_supported_kinds.keeper_wake
 ;;
 
-let known_kinds = [ Board_post ]
+let known_kinds = [ Board_post; Keeper_wake ]
 let supported_payload_kinds = List.map known_kind_to_string known_kinds
 let board_post_kind = known_kind_to_string Board_post
+let keeper_wake_kind = known_kind_to_string Keeper_wake
 
 let support_status_to_string = function
   | Supported -> "supported"
@@ -74,6 +79,7 @@ let dispatch_rejection_message = function
 
 let classify_kind = function
   | kind when String.equal kind (known_kind_to_string Board_post) -> Some Board_post
+  | kind when String.equal kind (known_kind_to_string Keeper_wake) -> Some Keeper_wake
   | _ -> None
 ;;
 
@@ -188,6 +194,49 @@ let validate_board_post_for_dispatch request view =
       view
 ;;
 
+let keeper_wake_schema_version_error ~creation schema_version =
+  if schema_version = 1
+  then Ok ()
+  else if creation
+  then Error (keeper_wake_kind ^ " only supports payload_schema_version=1")
+  else Error (keeper_wake_kind ^ " only supports schema_version=1")
+;;
+
+let validate_keeper_wake_body body =
+  match assoc_string "keeper_name" body, assoc_string "message" body with
+  | None, _ -> Error (keeper_wake_kind ^ " payload requires non-empty body.keeper_name")
+  | _, None -> Error (keeper_wake_kind ^ " payload requires non-empty body.message")
+  | Some keeper_name, Some _
+    when not (Schedule_supported_kinds.valid_keeper_wake_target_name keeper_name) ->
+    Error
+      (Schedule_supported_kinds.keeper_wake_target_name_error
+         ~field:(keeper_wake_kind ^ " payload body.keeper_name"))
+  | Some _, Some _ ->
+    (match optional_string_field "urgency" body with
+     | Error msg -> Error msg
+     | Ok None -> Ok ()
+     | Ok (Some raw) ->
+       Schedule_supported_kinds.keeper_wake_urgency_of_string raw
+       |> Result.map (fun _ -> ()))
+;;
+
+let validate_keeper_wake_for_creation ~risk_class view =
+  let* () = keeper_wake_schema_version_error ~creation:true view.schema_version in
+  if not (Schedule_domain.is_side_effecting risk_class)
+  then
+    Error
+      (keeper_wake_kind
+       ^ " requires a side-effecting risk_class such as workspace_write")
+  else validate_keeper_wake_body view.body
+;;
+
+let validate_keeper_wake_for_dispatch request view =
+  let* () = keeper_wake_schema_version_error ~creation:false view.schema_version in
+  if not (Schedule_domain.is_side_effecting request.Schedule_domain.risk_class)
+  then Error (keeper_wake_kind ^ " requires a side-effecting risk_class")
+  else validate_keeper_wake_body view.body
+;;
+
 let validate_request_payload_for_creation_detailed ~payload ~risk_class =
   match payload with
   | `Assoc fields ->
@@ -227,6 +276,36 @@ let validate_request_payload_for_creation_detailed ~payload ~risk_class =
             { raw_kind; schema_version; body }
           |> Result.map_error (fun msg ->
             Creation_invalid_supported_payload (Board_post, msg))
+        | Some Keeper_wake ->
+          let* schema_version =
+            match List.assoc_opt "schema_version" fields with
+            | Some (`Int value) -> Ok value
+            | Some _ ->
+              Error
+                (Creation_invalid_supported_payload
+                   ( Keeper_wake
+                   , keeper_wake_kind ^ " payload.schema_version must be an integer" ))
+            | None ->
+              Error
+                (Creation_invalid_supported_payload
+                   (Keeper_wake, keeper_wake_kind ^ " payload requires schema_version=1"))
+          in
+          let* body =
+            match List.assoc_opt "body" fields with
+            | Some (`Assoc body) -> Ok body
+            | Some _ ->
+              Error
+                (Creation_invalid_supported_payload
+                   (Keeper_wake, keeper_wake_kind ^ " payload.body must be an object"))
+            | None ->
+              Error
+                (Creation_invalid_supported_payload
+                   (Keeper_wake, keeper_wake_kind ^ " payload requires object body"))
+          in
+          validate_keeper_wake_for_creation ~risk_class
+            { raw_kind; schema_version; body }
+          |> Result.map_error (fun msg ->
+            Creation_invalid_supported_payload (Keeper_wake, msg))
         | None when Schedule_domain.is_side_effecting risk_class ->
           Error (Creation_unsupported_side_effecting_kind raw_kind)
         | None -> Ok ())
@@ -251,6 +330,13 @@ let dispatch_view_detailed request =
         Dispatch_invalid_supported_payload (Board_post, msg))
     in
     Ok (Board_post, view)
+  | Some Keeper_wake ->
+    let* () =
+      validate_keeper_wake_for_dispatch request view
+      |> Result.map_error (fun msg ->
+        Dispatch_invalid_supported_payload (Keeper_wake, msg))
+    in
+    Ok (Keeper_wake, view)
   | None -> Error (Dispatch_unsupported_kind view.raw_kind)
 ;;
 
@@ -314,7 +400,7 @@ let dispatch_tool_for_request request =
 
 let known_kind_contract_to_yojson kind =
   match kind with
-  | Board_post ->
+  | Board_post | Keeper_wake ->
     `Assoc
       [ "kind", `String (known_kind_to_string kind)
       ; "schema_versions", `List [ `Int 1 ]
@@ -412,12 +498,26 @@ let board_summary body =
   | None, None -> None
 ;;
 
+let keeper_wake_target body =
+  match assoc_string "keeper_name" body with
+  | Some keeper_name -> Some ("keeper:" ^ keeper_name)
+  | None -> None
+;;
+
+let keeper_wake_summary body =
+  match assoc_string "title" body, assoc_string "message" body with
+  | Some title, _ -> Some (truncate_summary title)
+  | None, Some message -> Some (truncate_summary message)
+  | None, None -> None
+;;
+
 let target_summary_result (request : Schedule_domain.schedule_request) =
   match payload_view request with
   | Error msg -> Error msg
   | Ok view ->
     (match classify_kind view.raw_kind with
      | Some Board_post -> Ok (board_target view.body, board_summary view.body)
+     | Some Keeper_wake -> Ok (keeper_wake_target view.body, keeper_wake_summary view.body)
      | None -> Ok (None, None))
 ;;
 

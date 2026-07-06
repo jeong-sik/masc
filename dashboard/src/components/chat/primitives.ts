@@ -25,7 +25,8 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, C
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById, toolEntryIdFromCallId } from '../../tool-call-output-store'
+import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById } from '../../tool-call-output-store'
+import type { ToolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
@@ -65,6 +66,13 @@ export interface ChatComposerCommand {
 }
 
 type TraceToolStatus = NonNullable<ChatTraceToolStep['status']>
+type TraceSourceBadgeTone = 'stream' | 'tool' | 'reply' | 'warn'
+
+interface TraceSourceBadgeInfo {
+  label: string
+  title: string
+  tone: TraceSourceBadgeTone
+}
 
 const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 'pending'; title: string }> = {
   pending: { className: 'pending', title: '출력 대기 중' },
@@ -76,6 +84,59 @@ export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
 
 function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
+}
+
+function oasBlockBadge(index: number | undefined): string | null {
+  return index === undefined ? null : `OAS #${index}`
+}
+
+function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
+  const oasBlock = step.kind === 'think' || step.kind === 'tool'
+    ? oasBlockBadge(step.oasBlockIndex)
+    : null
+  if (step.kind === 'think') {
+    return {
+      label: oasBlock ?? 'thinking_delta',
+      title: oasBlock
+        ? `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`
+        : 'source: KEEPER_THINKING_DELTA',
+      tone: 'stream',
+    }
+  }
+  if (step.kind === 'reason') {
+    return {
+      label: 'reason_trace',
+      title: 'source: trace.kind=reason',
+      tone: 'stream',
+    }
+  }
+  const callId = step.toolCallId?.trim()
+  if (callId) {
+    return {
+      label: oasBlock ?? 'tool_call_id',
+      title: oasBlock
+        ? `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`
+        : `source: TOOL_CALL_*, tool_call_id=${callId}`,
+      tone: 'tool',
+    }
+  }
+  return {
+    label: 'unlinked_trace',
+    title: 'source: trace.kind=tool without tool_call_id',
+    tone: 'warn',
+  }
+}
+
+function TraceSourceBadge({ info }: { info: TraceSourceBadgeInfo }) {
+  return html`
+    <span
+      class=${`chat-block-source-badge ${info.tone}`}
+      title=${info.title}
+      data-chat-trace-provenance=${info.label}
+    >
+      ${info.label}
+    </span>
+  `
 }
 
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
@@ -264,6 +325,64 @@ const SOURCE_BADGE: Partial<Record<KeeperConversationSource, { label: string; cl
 }
 function sourceBadgeInfo(entry: KeeperConversationEntry): { label: string; cls: string } | null {
   return SOURCE_BADGE[entry.source] ?? null
+}
+
+type StreamContractBadgeInfo = {
+  label: string
+  title: string
+  state: 'contract-gap' | 'no-turn-ref' | 'server-replay'
+}
+
+function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContractBadgeInfo | null {
+  const contract = entry.streamContract
+  if (!contract) return null
+  const title = [
+    `source=${contract.source}`,
+    `status=${contract.status}`,
+    contract.eventName ? `event=${contract.eventName}` : null,
+    contract.deliveryReceipt ? `receipt=${contract.deliveryReceipt}` : null,
+    contract.reason ?? null,
+  ].filter((value): value is string => Boolean(value)).join(' · ')
+  switch (contract.deliveryReceipt) {
+    case 'server_lifecycle_replay_only':
+      return { label: '서버 replay', title, state: 'server-replay' }
+    case 'no_delivery_receipt':
+      switch (contract.status) {
+        case 'history_without_turn_ref':
+          return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
+        case 'contract_gap':
+          return { label: '수신 gap', title, state: 'contract-gap' }
+        default:
+          return null
+      }
+    default:
+      return null
+  }
+}
+
+function streamContractBadgeClass(state: StreamContractBadgeInfo['state']): string {
+  switch (state) {
+    case 'server-replay':
+      return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'contract-gap':
+      return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'no-turn-ref':
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)]'
+  }
+}
+
+function StreamContractBadge({ badge, compact }: { badge: StreamContractBadgeInfo | null; compact: boolean }) {
+  if (!badge) return null
+  const paddingClass = compact ? 'px-2 py-0.5' : 'px-2.5 py-1'
+  return html`
+    <span
+      class=${`inline-flex items-center rounded-[var(--r-0)] border ${paddingClass} text-2xs font-semibold ${streamContractBadgeClass(badge.state)}`}
+      title=${badge.title}
+      data-chat-stream-contract-badge=${badge.state}
+    >
+      ${badge.label}
+    </span>
+  `
 }
 
 // C1: group transcript messages by calendar day for the workspace day divider.
@@ -1034,10 +1153,43 @@ function ChatIssueBlock({ repo, number, title, status, url, meta }: ChatIssueBlo
   `
 }
 
-function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string; dims?: string; src?: string; svg?: string; ph?: string; via?: string; size?: string }) {
+function ChatAttachBlock({
+  name,
+  dims,
+  src,
+  svg,
+  ph,
+  via,
+  size,
+  id,
+  kind,
+  mimeType,
+  sizeBytes,
+}: {
+  name: string
+  dims?: string
+  src?: string
+  svg?: string
+  ph?: string
+  via?: string
+  size?: string
+  id?: string
+  kind?: string
+  mimeType?: string
+  sizeBytes?: number
+}) {
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
   return html`
-    <figure class="chat-block-attach" data-chat-block="attach">
+    <figure
+      class="chat-block-attach"
+      data-chat-block="attach"
+      data-chat-multimodal-source="server_block"
+      data-chat-multimodal-kind=${kind || undefined}
+      data-chat-multimodal-attachment-id=${id || undefined}
+      data-chat-multimodal-mime=${mimeType || undefined}
+      data-chat-multimodal-size-bytes=${sizeBytes ?? undefined}
+      data-chat-attach-via=${via || undefined}
+    >
       <div class="chat-block-attach-hd">
         <span>◫</span>
         <span class="chat-block-attach-name">${name}</span>
@@ -1073,66 +1225,46 @@ function isSafeMediaUrl(url: string, dataPrefixes: string[]): boolean {
 }
 
 function ChatVoiceBlock(b: ChatVoiceBlock) {
-  const secs = b.secs ?? 14
-  const [playing, setPlaying] = useState(false)
-  const [prog, setProg] = useState(0)
+  const secs = b.secs
   const safeSrc = b.src && isSafeMediaUrl(b.src, ['data:audio/']) ? b.src : null
-
-  useEffect(() => {
-    if (!playing) return
-    const start = performance.now() - prog * secs * 1000
-    let raf = 0
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - start) / (secs * 1000))
-      setProg(p)
-      if (p >= 1) {
-        setPlaying(false)
-        return
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [playing])
-
-  const toggle = () => {
-    if (prog >= 1) setProg(0)
-    setPlaying((p) => !p)
-  }
-
   const bars = b.wave ?? []
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`
-  const shown = playing || prog > 0 ? prog * secs : secs
 
   return html`
     <div class="chat-block-voice" data-chat-block="voice">
-      <div class="chat-block-voice-row">
-        ${safeSrc
-          ? html`
-              <audio
-                controls
-                preload="none"
-                src=${safeSrc}
-                class="h-8 max-w-[16rem]"
-                aria-label=${b.transcript || '음성 메시지'}
-              />
-            `
-          : html`
-              <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
-                ${playing ? '❙❙' : '▶'}
-              </button>
-            `}
-        <div class="chat-block-voice-wave">
-          ${bars.map((h, i) => html`
-            <span
-              key=${i}
-              class="chat-block-vbar ${(i + 0.5) / bars.length <= prog ? 'on' : ''}"
-              style=${{ height: `${Math.round(5 + h * 21)}px` }}
-            />
-          `)}
-        </div>
-        <span class="chat-block-voice-dur">${fmt(shown)}</span>
-      </div>
+      ${safeSrc || bars.length > 0 || typeof secs === 'number'
+        ? html`
+            <div class="chat-block-voice-row">
+              ${safeSrc
+                ? html`
+                    <audio
+                      controls
+                      preload="none"
+                      src=${safeSrc}
+                      class="h-8 max-w-[16rem]"
+                      aria-label=${b.transcript || '음성 메시지'}
+                    />
+                  `
+                : null}
+              ${bars.length > 0
+                ? html`
+                    <div class="chat-block-voice-wave">
+                      ${bars.map((h, i) => html`
+                        <span
+                          key=${i}
+                          class="chat-block-vbar"
+                          style=${{ height: `${Math.round(5 + h * 21)}px` }}
+                        />
+                      `)}
+                    </div>
+                  `
+                : null}
+              ${typeof secs === 'number'
+                ? html`<span class="chat-block-voice-dur">${fmt(secs)}</span>`
+                : null}
+            </div>
+          `
+        : null}
       ${b.via || b.size
         ? html`
             <div class="chat-block-voice-meta">
@@ -1245,8 +1377,17 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   `
 }
 
-function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; streaming?: boolean }) {
+function ChatTraceStep({
+  step,
+  streaming = false,
+  orderIndex,
+}: {
+  step: ChatTraceStep
+  streaming?: boolean
+  orderIndex?: number
+}) {
   const [open, setOpen] = useState(false)
+  const sourceBadge = traceSourceBadge(step)
 
   if (step.kind === 'think') {
     const longThinking = !streaming && step.text.length > THINKING_TRACE_PREVIEW_CHARS
@@ -1254,11 +1395,20 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
       ? `${step.text.slice(0, THINKING_TRACE_PREVIEW_CHARS).trimEnd()}\n\n... ${step.text.length - THINKING_TRACE_PREVIEW_CHARS} chars hidden`
       : step.text
     return html`
-      <div class="chat-block-tstep think" data-chat-trace-step="think">
+      <div
+        class="chat-block-tstep think"
+        data-chat-trace-step="think"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
         <span class="chat-block-tnode"></span>
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
             ${longThinking
               ? html`
                   <button
@@ -1295,11 +1445,19 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
   if (step.kind === 'reason') {
     const exp = !!step.detail
     return html`
-      <div class="chat-block-tstep reason ${open ? 'exp' : ''}" data-chat-trace-step="reason">
+      <div
+        class="chat-block-tstep reason ${open ? 'exp' : ''}"
+        data-chat-trace-step="reason"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
         <span class="chat-block-tnode"></span>
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row ${exp ? 'click' : ''}" onClick=${() => { if (exp) setOpen((o) => !o) }}>
             <span class="chat-block-tstep-kind">Reasoning</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
             <span class="chat-block-tstep-text" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.text) }} />
             ${exp ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
           </div>
@@ -1314,11 +1472,23 @@ function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; strea
   const statusUi = traceToolStatusUi(step.status)
 
   return html`
-    <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
+    <div
+      class="chat-block-tstep tool ${open ? 'exp' : ''}"
+      data-chat-trace-step="tool"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind="tool"
+      data-chat-trace-provenance=${sourceBadge.label}
+      data-chat-trace-tool-call-id=${step.toolCallId?.trim() || undefined}
+      data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+      data-chat-trace-link-state=${step.toolCallId?.trim() ? 'trace-only' : 'unlinked'}
+      data-chat-trace-output-state=${step.status ?? 'pending'}
+      data-chat-trace-ts=${step.ts ?? undefined}
+    >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
         <div class="chat-block-tstep-row click" onClick=${() => setOpen((o) => !o)}>
           <span class="chat-block-tstep-kind">Tool</span>
+          <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${step.name}</span>
           <span
             class="chat-block-tstep-status ${statusUi.className}"
@@ -1708,7 +1878,7 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'chart': return html`<${ChatChartBlock} title=${block.title} series=${block.series} labels=${block.labels} xLabel=${block.xLabel} yMax=${block.yMax} />`
     case 'suggestions': return html`<${ChatSuggestionsBlock} items=${block.items} />`
     case 'issue': return html`<${ChatIssueBlock} repo=${block.repo} number=${block.number} title=${block.title} status=${block.status} url=${block.url} meta=${block.meta} />`
-    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
+    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} id=${block.id} kind=${block.kind} mimeType=${block.mimeType} sizeBytes=${block.sizeBytes} />`
     case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} src=${block.src} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
@@ -1757,11 +1927,17 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
   const canDownload = isSafeAttachmentHref(attachment)
   const meta = attachmentMeta(attachment)
   const isImage = isRenderableImageAttachment(attachment)
+  const multimodalKind = userInputMediaKindForAttachment(attachment)
 
   return html`
     <div
       class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-chat-attachment-card=${attachment.id}
+      data-chat-multimodal-source="persisted_attachment"
+      data-chat-multimodal-kind=${multimodalKind}
+      data-chat-multimodal-attachment-id=${attachment.id}
+      data-chat-multimodal-mime=${attachment.mimeType}
+      data-chat-multimodal-size-bytes=${attachment.size}
     >
       ${isImage
         ? html`
@@ -2035,7 +2211,18 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
   const sourceBadge = showSourceBadge ? sourceBadgeInfo(entry) : null
+  const streamContractBadge = streamContractBadgeInfo(entry)
   const attachments = entry.attachments ?? []
+  const attachBlocks = effectiveBlocks.filter((block): block is Extract<ChatBlock, { t: 'attach' }> => block.t === 'attach')
+  const persistedAttachmentKinds = attachments.map(userInputMediaKindForAttachment)
+  const serverAttachKinds = attachBlocks
+    .map(block => block.kind?.trim())
+    .filter((value): value is string => Boolean(value))
+  const multimodalKinds = Array.from(new Set([...persistedAttachmentKinds, ...serverAttachKinds]))
+  const multimodalSources = [
+    attachments.length > 0 ? 'persisted_attachment' : null,
+    attachBlocks.length > 0 ? 'server_block' : null,
+  ].filter((value): value is string => value !== null)
   const surfaceInfo = surfaceLink(entry.surface)
 
   return html`
@@ -2047,6 +2234,29 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
           : 'max-w-[90%] gap-3 rounded-[var(--r-5)] px-4 py-3'
       }`}
       data-chat-variant=${variant}
+      data-chat-entry-id=${entry.id}
+      data-chat-role=${entry.role}
+      data-chat-source=${entry.source}
+      data-chat-delivery-state=${entry.delivery}
+      data-chat-stream-state=${entry.streamState ?? 'complete'}
+      data-chat-stream-contract-source=${entry.streamContract?.source ?? 'unspecified'}
+      data-chat-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
+      data-chat-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
+      data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
+      data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
+      data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
+      data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
+      data-chat-stream-contract-badge-state=${streamContractBadge?.state ?? undefined}
+      data-chat-queue-seq=${entry.queueSeq ?? undefined}
+      data-chat-queue-client-action-id=${entry.queueClientActionId ?? undefined}
+      data-chat-surface-kind=${entry.surface?.kind ?? undefined}
+      data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-attachment-count=${attachments.length}
+      data-chat-server-attach-block-count=${attachBlocks.length}
+      data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
+      data-chat-multimodal-kinds=${multimodalKinds.length > 0 ? multimodalKinds.join(',') : undefined}
     >
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
@@ -2080,6 +2290,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     ${surfaceInfo && surfaceInfo.url !== '#'
                       ? html`
                           <a
@@ -2130,6 +2341,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${StreamContractBadge} badge=${streamContractBadge} compact=${false} />
                     ${surfaceInfo && surfaceInfo.url !== '#'
                       ? html`
                           <a
@@ -2379,6 +2591,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const [expanded, setExpanded] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
   const toolName = entry.label || 'tool'
+  const toolCallId = toolCallIdFromToolEntryId(entry.id)
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
 
@@ -2406,6 +2619,22 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
     <article
       class="chat-bubble tool flex w-full flex-col rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-chat-variant="tool-call"
+      data-chat-entry-id=${entry.id}
+      data-chat-role=${entry.role}
+      data-chat-source=${entry.source}
+      data-chat-delivery-state=${entry.delivery}
+      data-chat-stream-state=${entry.streamState ?? 'complete'}
+      data-chat-stream-contract-source=${entry.streamContract?.source ?? 'unspecified'}
+      data-chat-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
+      data-chat-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
+      data-chat-stream-contract-request-id=${entry.streamContract?.requestId ?? undefined}
+      data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
+      data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
+      data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
+      data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-tool-call-id=${toolCallId ?? undefined}
     >
       <button
         type="button"
@@ -2469,9 +2698,15 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
-const TOOL_STATUS_TITLE: Record<'pending' | 'missing' | 'ok' | 'bad', string> = {
+type ToolTraceDisplayStatus = 'pending' | 'missing' | 'coverage-gap' | 'hydration-failed' | 'unlinked' | 'ok' | 'bad'
+type ToolOutputCoverageState = 'not-hydrated' | 'hydrating' | 'hydration-failed' | 'covered' | 'coverage-gap' | 'not-applicable'
+
+const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
   pending: '출력 대기 중',
   missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
+  'coverage-gap': '출력 tail 범위 밖 — 결과 누락 여부를 확정할 수 없음',
+  'hydration-failed': '출력 hydration 실패 — 결과 누락 여부를 확정할 수 없음',
+  unlinked: '도구 호출 ID 없음 — 출력 조인 불가',
   ok: '성공',
   bad: '실패',
 }
@@ -2484,63 +2719,89 @@ function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean
   return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing'
 }
 
-function isToolOutputCoveredByHydration(
+function toolOutputCoverageState(
   entry: KeeperConversationEntry,
   coveredSinceMs: number | null | undefined,
   coveredThroughMs: number | null | undefined,
-): boolean {
-  if (coveredThroughMs == null) return false
+  hydrationStatus: ToolCallOutputHydrationContract['status'] | null | undefined,
+): ToolOutputCoverageState {
+  if (hydrationStatus === 'failed') return 'hydration-failed'
+  if (coveredThroughMs == null) return hydrationStatus === 'hydrating' ? 'hydrating' : 'not-hydrated'
   const timestampMs = entry.timestamp ? Date.parse(entry.timestamp) : NaN
-  return Number.isFinite(timestampMs)
-    && (coveredSinceMs == null || timestampMs >= coveredSinceMs)
-    && timestampMs <= coveredThroughMs
+  if (!Number.isFinite(timestampMs)) return 'coverage-gap'
+  if (coveredSinceMs != null && timestampMs < coveredSinceMs) return 'coverage-gap'
+  if (timestampMs > coveredThroughMs) return 'coverage-gap'
+  return 'covered'
 }
 
-// One step of a grouped tool-trace card: a single tool call rendered from REAL
-// data only. Name + input args come from the chat entry; status, duration and
-// result are joined from the tool-call output store. A null output is "pending"
-// until the owning turn and output hydration have both settled; after that, a
-// still-null output is "missing" (unknown outcome).
-function toolEntryFromTraceStep(step: ChatTraceToolStep): KeeperConversationEntry {
-  return {
-    id: step.toolCallId ? toolEntryIdFromCallId(step.toolCallId) : `trace-tool-${step.name}-${step.ts ?? 'unknown'}`,
-    role: 'tool',
-    source: 'tool_result',
-    label: step.name,
-    text: step.args ?? '',
-    rawText: step.args ?? '',
-    timestamp: step.ts ?? null,
-    delivery: step.status === 'err' ? 'error' : step.status === 'ok' ? 'delivered' : 'streaming',
-    streamState: step.status === 'pending' || step.status === undefined ? 'streaming' : null,
-    details: null,
-  }
+function toolTraceCallId(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): string | null {
+  const traceCallId = traceStep?.toolCallId?.trim()
+  if (traceCallId) return traceCallId
+  return entry ? toolCallIdFromToolEntryId(entry.id) : null
+}
+
+function toolTraceSourceBadge(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): TraceSourceBadgeInfo {
+  if (traceStep) return traceSourceBadge(traceStep)
+  const callId = entry ? toolCallIdFromToolEntryId(entry.id) : null
+  return callId
+    ? {
+        label: 'tool_call_id',
+        title: `source: tool transcript row, tool_call_id=${callId}`,
+        tone: 'tool',
+      }
+    : {
+        label: 'unlinked_row',
+        title: 'source: tool transcript row without tool_call_id',
+        tone: 'warn',
+      }
+}
+
+function isUnlinkedTraceTool(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): boolean {
+  return traceStep !== undefined && toolTraceCallId(entry, traceStep) === null
 }
 
 function ToolTraceStep({
   entry,
   output,
   canMarkMissing = false,
+  coverageState = 'not-applicable',
+  hydrationFailureReason = null,
   traceStep,
+  orderIndex,
+  orderKind = 'tool',
 }: {
-  entry: KeeperConversationEntry
+  entry: KeeperConversationEntry | null
   output: ToolCallEntry | null
   canMarkMissing?: boolean
+  coverageState?: ToolOutputCoverageState
+  hydrationFailureReason?: string | null
   traceStep?: ChatTraceToolStep
+  orderIndex?: number
+  orderKind?: 'tool' | 'tool-entry'
 }) {
   const [open, setOpen] = useState(false)
-  const name = traceStep?.name || entry.label || 'tool'
-  const displayArgs = prettyJsonish(entry.text || traceStep?.args || '')
+  const name = traceStep?.name || entry?.label || 'tool'
+  const callId = toolTraceCallId(entry, traceStep)
+  const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
-  const status: 'pending' | 'missing' | 'ok' | 'bad' =
-    output === null
-      ? traceStep?.status === 'err'
-        ? 'bad'
-        : traceStep?.status === 'ok'
-          ? 'ok'
-          : (canMarkMissing ? 'missing' : 'pending')
-      : output.success === false || output.semantic_success === false
-        ? 'bad'
-        : 'ok'
+  const unlinkedTraceTool = isUnlinkedTraceTool(entry, traceStep)
+  const sourceBadge = toolTraceSourceBadge(entry, traceStep)
+  let status: ToolTraceDisplayStatus
+  if (unlinkedTraceTool) {
+    status = 'unlinked'
+  } else if (output !== null) {
+    status = output.success === false || output.semantic_success === false ? 'bad' : 'ok'
+  } else if (traceStep?.status === 'err') {
+    status = 'bad'
+  } else if (traceStep?.status === 'ok') {
+    status = 'ok'
+  } else if (coverageState === 'hydration-failed') {
+    status = 'hydration-failed'
+  } else if (coverageState === 'coverage-gap') {
+    status = 'coverage-gap'
+  } else {
+    status = canMarkMissing ? 'missing' : 'pending'
+  }
   const durLabel =
     output?.duration_ms != null && output.duration_ms > 0
       ? formatMsCompact(output.duration_ms)
@@ -2549,10 +2810,22 @@ function ToolTraceStep({
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
   // call (so the operator can open it and see "출력 대기 중…").
-  const hasBody = !isEmptyArgs || hasResult || output === null
+  const hasBody = unlinkedTraceTool || !isEmptyArgs || hasResult || output === null
 
   return html`
-    <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
+    <div
+      class="chat-block-tstep tool ${open ? 'exp' : ''}"
+      data-chat-trace-step="tool"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind=${orderKind}
+      data-chat-trace-provenance=${sourceBadge.label}
+      data-chat-trace-tool-call-id=${callId ?? undefined}
+      data-chat-trace-oas-block-index=${traceStep?.oasBlockIndex ?? undefined}
+      data-chat-trace-entry-id=${entry?.id ?? undefined}
+      data-chat-trace-link-state=${unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
+      data-chat-trace-output-state=${status}
+      data-chat-trace-output-coverage=${coverageState}
+    >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
         <div
@@ -2560,6 +2833,7 @@ function ToolTraceStep({
           onClick=${() => { if (hasBody) setOpen((o) => !o) }}
         >
           <span class="chat-block-tstep-kind">Tool</span>
+          <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${name}</span>
           <span
             class="chat-block-tstep-status ${status}"
@@ -2571,8 +2845,10 @@ function ToolTraceStep({
         </div>
         ${open && hasBody
           ? html`
-              <div class="chat-block-tool-body">
-                ${isEmptyArgs
+            <div class="chat-block-tool-body">
+                ${unlinkedTraceTool
+                  ? html`<div class="chat-block-tool-label">도구 호출 ID 없음 — 출력 조인 불가</div>`
+                  : isEmptyArgs
                   ? html`<div class="chat-block-tool-label">입력 없음</div>`
                   : html`
                       <div class="chat-block-tool-label">args</div>
@@ -2584,7 +2860,17 @@ function ToolTraceStep({
                       <pre class="m-0 max-h-64 overflow-y-auto whitespace-pre-wrap break-all text-2xs">${resultView.text}</pre>
                     `
                   : output === null
-                    ? html`<div class="chat-block-tool-label">${canMarkMissing ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
+                    ? unlinkedTraceTool
+                      ? null
+                      : html`<div class="chat-block-tool-label">${
+                          coverageState === 'hydration-failed'
+                            ? `출력 hydration 실패${hydrationFailureReason ? ` — ${hydrationFailureReason}` : ''}`
+                            : coverageState === 'coverage-gap'
+                            ? '출력 tail 범위 밖 — 이 도구 시점을 덮는 결과 hydration이 아직 없음'
+                            : canMarkMissing
+                              ? '결과 없음 — 출력이 도착하지 않음'
+                              : '출력 대기 중…'
+                        }</div>`
                     : null}
               </div>
             `
@@ -2667,13 +2953,41 @@ function chatResponsePreview(entry: KeeperConversationEntry): string {
   return text.length > 96 ? `${text.slice(0, 96)}…` : text
 }
 
-function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
+function ChatResponseTraceStep({
+  entry,
+  orderIndex,
+}: {
+  entry: KeeperConversationEntry
+  orderIndex?: number
+}) {
+  const sourceBadge: TraceSourceBadgeInfo = {
+    label: 'reply',
+    title: 'source: assistant reply entry',
+    tone: 'reply',
+  }
   return html`
-    <div class="chat-block-tstep chat" data-chat-trace-step="chat">
+    <div
+      class="chat-block-tstep chat"
+      data-chat-trace-step="chat"
+      data-chat-turn-order-index=${orderIndex ?? undefined}
+      data-chat-turn-order-kind="chat"
+      data-chat-trace-provenance=${sourceBadge.label}
+      data-chat-trace-entry-id=${entry.id}
+      data-chat-trace-source=${entry.source}
+      data-chat-trace-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-trace-stream-contract-source=${entry.streamContract?.source ?? 'unspecified'}
+      data-chat-trace-stream-contract-status=${entry.streamContract?.status ?? 'unspecified'}
+      data-chat-trace-stream-contract-event=${entry.streamContract?.eventName ?? undefined}
+      data-chat-trace-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
+      data-chat-trace-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
+      data-chat-trace-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-trace-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
+    >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
         <div class="chat-block-tstep-row">
           <span class="chat-block-tstep-kind">Chat</span>
+          <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">응답</span>
           <span class="chat-block-tstep-text">${chatResponsePreview(entry)}</span>
         </div>
@@ -2689,6 +3003,7 @@ function ToolTraceCard({
   turnComplete = false,
   toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
+  toolOutputHydrationContract = null,
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
@@ -2696,6 +3011,7 @@ function ToolTraceCard({
   turnComplete?: boolean
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
+  toolOutputHydrationContract?: ToolCallOutputHydrationContract | null
 }) {
   const liveTurn = assistant !== null && !turnComplete
   const userToggledRef = useRef(false)
@@ -2708,11 +3024,24 @@ function ToolTraceCard({
     setOpen((o) => !o)
   }
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
+  const coverageStateForEntry = (entry: KeeperConversationEntry): ToolOutputCoverageState =>
+    toolOutputCoverageState(
+      entry,
+      toolOutputsCoveredSinceMs,
+      toolOutputsCoveredThroughMs,
+      toolOutputHydrationContract?.status ?? null,
+    )
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
-    turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
+    turnComplete && coverageStateForEntry(entry) === 'covered'
   const ordered = assistant
     ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
     : interleaveTraceAndTools(traceSteps, steps)
+  const orderSignature = ordered.map((item) => {
+    if (item.kind === 'trace') return `trace:${item.step.kind}`
+    if (item.kind === 'tool') return `tool:${toolTraceCallId(item.entry, item.step) ?? item.step.name}`
+    if (item.kind === 'tool-entry') return `tool-entry:${toolTraceCallId(item.entry) ?? item.entry.id}`
+    return `chat:${item.entry.id}`
+  }).join('|')
   const orderedToolSteps = ordered.filter(isToolOrderItem)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
   const failN = orderedToolSteps.filter(
@@ -2725,6 +3054,15 @@ function ToolTraceCard({
   const missingN = orderedToolSteps.filter(
     (s) => s.output === null && s.entry !== null && canMarkMissingForEntry(s.entry),
   ).length
+  const coverageGapN = orderedToolSteps.filter(
+    (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'coverage-gap',
+  ).length
+  const hydrationFailedN = orderedToolSteps.filter(
+    (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
+  ).length
+  const unlinkedN = orderedToolSteps.filter(
+    (s) => s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
+  ).length
   const totalMs = orderedToolSteps.reduce(
     (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),
     0,
@@ -2734,7 +3072,28 @@ function ToolTraceCard({
   const stepN = ordered.length
 
   return html`
-    <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace" data-chat-work-trace data-chat-tool-trace>
+    <div
+      class="chat-block-trace ${open ? 'open' : ''}"
+      data-chat-block="trace"
+      data-chat-work-trace
+      data-chat-tool-trace
+      data-chat-turn-stream-state=${assistant ? (assistant.streamState ?? 'complete') : undefined}
+      data-chat-turn-complete=${turnComplete ? 'true' : 'false'}
+      data-chat-turn-stream-contract-source=${assistant?.streamContract?.source ?? undefined}
+      data-chat-turn-stream-contract-status=${assistant?.streamContract?.status ?? undefined}
+      data-chat-turn-stream-contract-event=${assistant?.streamContract?.eventName ?? undefined}
+      data-chat-turn-stream-contract-request-id=${assistant?.streamContract?.requestId ?? undefined}
+      data-chat-turn-stream-contract-turn-ref=${assistant?.streamContract?.turnRef ?? undefined}
+      data-chat-turn-stream-contract-trace-events=${assistant?.streamContract?.traceEventCount ?? undefined}
+      data-chat-turn-stream-contract-lifecycle-events=${assistant?.streamContract?.lifecycleEvents?.join(',') ?? undefined}
+      data-chat-turn-stream-contract-delivery-receipt=${assistant?.streamContract?.deliveryReceipt ?? undefined}
+      data-chat-tool-output-hydration-source=${toolOutputHydrationContract?.source ?? undefined}
+      data-chat-tool-output-hydration-status=${toolOutputHydrationContract?.status ?? 'not-requested'}
+      data-chat-tool-output-hydration-failure=${toolOutputHydrationContract?.failureReason ?? undefined}
+      data-chat-tool-output-covered-since=${toolOutputsCoveredSinceMs ?? undefined}
+      data-chat-tool-output-covered-through=${toolOutputsCoveredThroughMs ?? undefined}
+      data-chat-turn-order-signature=${orderSignature || undefined}
+    >
       <button
         type="button"
         class="chat-block-trace-hd"
@@ -2751,6 +3110,9 @@ function ToolTraceCard({
           ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
           ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
+          ${coverageGapN > 0 ? html`<span class="text-[var(--color-status-warn)]">출력 범위 밖 ${coverageGapN}</span>` : null}
+          ${hydrationFailedN > 0 ? html`<span class="text-[var(--color-status-warn)]">출력 hydration 실패 ${hydrationFailedN}</span>` : null}
+          ${unlinkedN > 0 ? html`<span class="text-[var(--color-status-warn)]">조인 불가 ${unlinkedN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
         </span>
       </button>
@@ -2763,17 +3125,21 @@ function ToolTraceCard({
                   ? html`<${ChatTraceStep}
                       key=${`trace-${index}`}
                       step=${item.step}
+                      orderIndex=${index}
                       streaming=${assistant !== null && !turnComplete}
                     />`
                   : item.kind === 'tool'
                     ? (() => {
-                        const entry = item.entry ?? toolEntryFromTraceStep(item.step)
                         return html`<${ToolTraceStep}
                           key=${`tool-trace-${item.entry?.id ?? item.step.toolCallId ?? item.step.name}-${index}`}
-                          entry=${entry}
+                          entry=${item.entry}
                           output=${item.output}
                           canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
+                          coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
+                          hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
+                          orderIndex=${index}
+                          orderKind="tool"
                         />`
                       })()
                     : item.kind === 'tool-entry'
@@ -2782,8 +3148,12 @@ function ToolTraceCard({
                           entry=${item.entry}
                           output=${item.output}
                           canMarkMissing=${canMarkMissingForEntry(item.entry)}
+                          coverageState=${coverageStateForEntry(item.entry)}
+                          hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
+                          orderIndex=${index}
+                          orderKind="tool-entry"
                         />`
-                    : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} />`)}
+                    : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} orderIndex=${index} />`)}
             </div>
           `
         : null}
@@ -2806,6 +3176,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   showSourceBadge,
   toolOutputsCoveredSinceMs,
   toolOutputsCoveredThroughMs,
+  toolOutputHydrationContract,
   action,
 }: {
   tools: KeeperConversationEntry[]
@@ -2815,6 +3186,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   showSourceBadge: boolean
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
+  toolOutputHydrationContract: ToolCallOutputHydrationContract | null
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
@@ -2830,6 +3202,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
         turnComplete=${turnComplete}
         toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
       />
       <${ChatMessageBubble}
         entry=${assistant}
@@ -2848,6 +3221,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   && prev.showSourceBadge === next.showSourceBadge
   && prev.toolOutputsCoveredSinceMs === next.toolOutputsCoveredSinceMs
   && prev.toolOutputsCoveredThroughMs === next.toolOutputsCoveredThroughMs
+  && prev.toolOutputHydrationContract === next.toolOutputHydrationContract
   && prev.action === next.action
 )
 
@@ -2973,12 +3347,13 @@ function renderChatTranscriptBody(opts: {
   showSourceBadge: boolean
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
+  toolOutputHydrationContract: ToolCallOutputHydrationContract | null
   // Since-last-seen cursor (unix seconds) for the unread divider; null on every
   // non-keeper chat surface so those transcripts render unchanged.
   unreadAfterTs: number | null
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, unreadAfterTs, action } = opts
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract, unreadAfterTs, action } = opts
   const units = buildChatRenderUnits(entries, groupToolCalls)
   const unreadAnchorKey = unreadDividerAnchorKey(
     units.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
@@ -3005,7 +3380,13 @@ function renderChatTranscriptBody(opts: {
       out.push(html`<div class="kw-daydiv kw-unreaddiv" key="unread-divider">${UNREAD_DIVIDER_LABEL}</div>`)
     }
     if (unit.kind === 'toolGroup') {
-      out.push(html`<${ToolTraceCard} key=${unit.id} tools=${unit.entries} />`)
+      out.push(html`<${ToolTraceCard}
+        key=${unit.id}
+        tools=${unit.entries}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
+      />`)
     } else if (unit.kind === 'turnBundle') {
       out.push(html`<${TurnWorkBundle}
         key=${unit.id}
@@ -3016,6 +3397,7 @@ function renderChatTranscriptBody(opts: {
         showSourceBadge=${showSourceBadge}
         toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
         action=${action}
       />`)
     } else if (unit.entry.role === 'tool') {
@@ -3055,6 +3437,7 @@ export function ChatTranscript({
   showSourceBadge = false,
   toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
+  toolOutputHydrationContract = null,
   unreadAfterTs = null,
   onSeenBottom,
   action,
@@ -3073,6 +3456,7 @@ export function ChatTranscript({
   showSourceBadge?: boolean
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
+  toolOutputHydrationContract?: ToolCallOutputHydrationContract | null
   // Since-last-seen cursor (unix seconds) driving the unread divider. Null on
   // non-keeper surfaces -> no divider.
   unreadAfterTs?: number | null
@@ -3095,7 +3479,7 @@ export function ChatTranscript({
   )
   const toolOutputSignature = useMemo(
     () => {
-      const coverageSig = `${toolOutputsCoveredSinceMs ?? ''}:${toolOutputsCoveredThroughMs ?? ''}`
+      const coverageSig = `${toolOutputsCoveredSinceMs ?? ''}:${toolOutputsCoveredThroughMs ?? ''}:${toolOutputHydrationContract?.status ?? ''}:${toolOutputHydrationContract?.failureReason ?? ''}`
       return entries
         .filter(entry => entry.role === 'tool')
         .map((entry) => {
@@ -3106,7 +3490,7 @@ export function ChatTranscript({
         })
         .join('|')
     },
-    [entries, toolCallOutputsById.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs],
+    [entries, toolCallOutputsById.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract],
   )
 
   const scrollToBottom = () => {
@@ -3194,6 +3578,7 @@ export function ChatTranscript({
               showSourceBadge,
               toolOutputsCoveredSinceMs,
               toolOutputsCoveredThroughMs,
+              toolOutputHydrationContract,
               unreadAfterTs,
               action,
             })}
@@ -3253,6 +3638,10 @@ export function AttachDraftChip({
   `
 }
 
+export interface ComposerVoiceDraft {
+  transcript: string
+}
+
 export function ChatComposer({
   draft: draftProp,
   placeholder,
@@ -3310,6 +3699,7 @@ export function ChatComposer({
   const [drag, setDrag] = useState(false)
   const [slashIdx, setSlashIdx] = useState(0)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
+  const [voiceDraft, setVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
   const isControlled = typeof draftProp === 'string'
   const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
   const slashMenuKeeperLabel = keeperLabel?.trim() || CHAT_COMPOSER_DEFAULT_KEEPER_LABEL
@@ -3360,12 +3750,15 @@ export function ChatComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // RFC-0236 P1: speak to compose. Transcribed text appends to the draft at a
-  // newline; an empty draft is replaced outright. Send stays manual (no
-  // auto-send) so the operator can correct a transcription before it lands.
+  // RFC-0236 P1: speak to compose. Voice transcription is saved as a visual draft
+  // card (VoiceDraft) matching the mockup and board composers.
   const voice = useVoiceInput({
     onTranscribed: (text) => {
-      setDraft(draft.trim() === '' ? text : `${draft}\n${text}`)
+      if (text) {
+        setVoiceDraft({
+          transcript: text,
+        })
+      }
     },
     onError: (message) => showToast(message, 'error'),
   })
@@ -3376,7 +3769,10 @@ export function ChatComposer({
       return
     }
     const startedAt = Date.now()
-    const tick = () => setVoiceElapsed(Math.round((Date.now() - startedAt) / 1000))
+    const tick = () => {
+      const duration = Math.round((Date.now() - startedAt) / 1000)
+      setVoiceElapsed(duration)
+    }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
@@ -3407,7 +3803,7 @@ export function ChatComposer({
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '전송'
   const isStreamWarning = streaming && elapsed > 60
-  const hasContent = draft.trim() !== '' || attachments.length > 0
+  const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
   const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
@@ -3482,7 +3878,12 @@ export function ChatComposer({
         size: att.size,
       })
     }
-    const text = draft.trim()
+    let text = draft.trim()
+    if (voiceDraft) {
+      const voiceText = voiceDraft.transcript
+      text = text ? `${voiceText}\n\n${text}` : voiceText
+    }
+
     if (text) {
       blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
       userBlocks.push({ type: 'text', text })
@@ -3496,6 +3897,7 @@ export function ChatComposer({
     setDraft('')
     setSlashIdx(0)
     setAttachments([])
+    setVoiceDraft(null)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -3583,7 +3985,7 @@ export function ChatComposer({
                 <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
               </div>
             `}
-        ${attachments.length > 0
+        ${attachments.length > 0 || voiceDraft
           ? html`
               <div class="composer-tray">
                 ${attachments.map((att) => html`
@@ -3593,6 +3995,27 @@ export function ChatComposer({
                     onRemove=${() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
                   />
                 `)}
+                ${voiceDraft
+                  ? html`
+                      <div class="cdraft voice" data-testid="composer-voice-draft">
+                        <span class="cdraft-glyph mic">◌</span>
+                        <div class="cdraft-tx">
+                          <span class="cdraft-tx-k">받아쓰기</span>
+                          <span class="cdraft-tx-v">${voiceDraft.transcript}</span>
+                        </div>
+                        <button
+                          type="button"
+                          class="cdraft-x"
+                          title="음성 제거"
+                          aria-label="Remove voice draft"
+                          onClick=${() => { setVoiceDraft(null) }}
+                          disabled=${disabled}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    `
+                  : null}
               </div>
             `
           : null}

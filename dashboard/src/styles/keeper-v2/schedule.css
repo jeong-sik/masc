@@ -28,16 +28,27 @@
 .sch-banner.approve { border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); background: color-mix(in oklab, var(--status-ok) 8%, transparent); }
 .sch-banner.reject { border-color: color-mix(in oklab, var(--status-bad) 38%, transparent); background: color-mix(in oklab, var(--status-bad) 7%, transparent); }
 .sch-banner.cancel { border-color: var(--border-highlight); }
+.sch-banner.payload { align-items: flex-start; border-color: color-mix(in oklab, var(--status-warn) 40%, transparent); background: color-mix(in oklab, var(--status-warn) 8%, transparent); }
+.sch-banner.payload.bad { border-color: color-mix(in oklab, var(--status-bad) 44%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
+.sch-banner.payload.warn { border-color: color-mix(in oklab, var(--status-warn) 40%, transparent); background: color-mix(in oklab, var(--status-warn) 8%, transparent); }
 .sch-banner-ico { flex: none; font-size: var(--fs-14); }
 .sch-banner.approve .sch-banner-ico { color: var(--status-ok); }
 .sch-banner.reject .sch-banner-ico { color: var(--status-bad); }
 .sch-banner.cancel .sch-banner-ico { color: var(--text-dim); }
+.sch-banner.payload.bad .sch-banner-ico { color: var(--status-bad); }
+.sch-banner.payload.warn .sch-banner-ico { color: var(--status-warn); }
 .sch-banner-txt { flex: 1; min-width: 0; }
 .sch-banner-txt b { color: var(--text-bright); }
+.sch-banner-sub { margin-top: 3px; color: var(--text-mid); line-height: 1.45; }
 .sch-banner-go { flex: none; background: none; border: 1px solid var(--border-highlight); color: var(--text-mid); border-radius: var(--radius-pill); font-family: var(--font-ui); font-size: 11.5px; padding: 4px 12px; cursor: pointer; transition: 0.14s; }
 .sch-banner-go:hover { border-color: var(--volt-dim); color: var(--volt); }
 .sch-banner-x { flex: none; background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: var(--fs-12); padding: 2px 4px; }
 .sch-banner-x:hover { color: var(--text-bright); }
+.sch-payload-kinds, .sch-payload-rows, .sch-evidence-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sch-payload-kind { display: inline-flex; align-items: center; gap: 6px; border: 1px solid color-mix(in oklab, var(--status-bad) 32%, transparent); border-radius: var(--radius-pill); padding: 2px 8px; color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 7%, transparent); font-size: var(--fs-10); }
+.sch-evidence-count { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-main); border-radius: var(--radius-pill); padding: 2px 8px; color: var(--text-mid); background: var(--bg-sunken); font-size: var(--fs-10); }
+.sch-payload-row { border: 1px solid var(--border-main); border-radius: var(--radius-pill); background: var(--bg-sunken); color: var(--text-mid); cursor: pointer; font-size: var(--fs-10); padding: 2px 8px; }
+.sch-payload-row:hover { border-color: var(--volt-dim); color: var(--volt); }
 
 /* ── schedule cards ── */
 .sch-list { display: flex; flex-direction: column; gap: 11px; }
@@ -64,6 +75,10 @@
 .sch-risk.warn { --tone: var(--status-warn); }
 .sch-risk.bad  { --tone: var(--status-bad); }
 .sch-risk.volt { --tone: var(--volt-strong); }
+.sch-payload-support { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: var(--fs-10); padding: 1px 7px; border-radius: var(--radius-pill); color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 34%, transparent); background: color-mix(in oklab, var(--tone) 8%, transparent); white-space: nowrap; }
+.sch-payload-support.ok { --tone: var(--status-ok); }
+.sch-payload-support.warn { --tone: var(--status-warn); }
+.sch-payload-support.bad { --tone: var(--status-bad); }
 
 .sch-summary { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 9px 0 0; cursor: pointer; font-size: var(--fs-13); line-height: 1.5; color: var(--text-primary); text-wrap: pretty; }
 .sch-summary:hover { color: var(--text-bright); }
@@ -99,6 +114,7 @@
 .sch-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .sch-src { font-size: 10.5px; color: var(--text-dim); border: 1px solid var(--border-main); padding: 1px 7px; border-radius: var(--radius-pill); }
 .sch-kvs { display: flex; flex-direction: column; gap: 6px; }
+.sch-payload-kvs { margin-bottom: 9px; }
 .sch-kv { display: flex; align-items: baseline; gap: 12px; }
 .sch-kv .k { flex: none; width: 130px; font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
 .sch-kv .v { font-size: 12.5px; color: var(--text-bright); word-break: break-word; }

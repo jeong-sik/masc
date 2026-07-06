@@ -735,15 +735,34 @@ let update_pending_entry ~id f =
     | Some entry -> SMap.add id (f entry) map)
 ;;
 
+let record_summary_failure ~id ~reason ~retryable =
+  let now = Time_compat.now () in
+  update_pending_entry ~id (fun e ->
+    { e with summary_status = Summary_failed { reason; retryable } });
+  match get_pending_entry ~id with
+  | Some updated -> record_summary_updated ~now updated
+  | None -> ()
+;;
+
 let provider_config_for_summary ~keeper_name =
-  let runtime_id =
+  (* The HITL evaluator is a dedicated judge (mirroring the memory-os librarian's
+     dedicated runtime), not the requesting keeper's own model. Route to
+     [runtime].structured_judge so the evaluation is consistent and can target a
+     structured-output-capable model regardless of which keeper — e.g. a raw
+     OpenAI-compatible endpoint such as mimo, which OAS cannot wire native
+     structured output for — asked for approval. Fall back to the keeper's own
+     runtime only when the judge runtime cannot be resolved. *)
+  let resolve id =
+    Option.map (fun rt -> rt.Runtime.provider_config) (Runtime.get_runtime_by_id id)
+  in
+  let keeper_runtime_id () =
     match Runtime.runtime_id_for_keeper keeper_name with
     | Some id when String.trim id <> "" -> id
     | Some _ | None -> Keeper_config.default_runtime_id ()
   in
-  match Runtime.get_runtime_by_id runtime_id with
-  | Some rt -> Some rt.Runtime.provider_config
-  | None -> None
+  match resolve (Runtime.runtime_id_for_structured_judge ()) with
+  | Some _ as cfg -> cfg
+  | None -> resolve (keeper_runtime_id ())
 ;;
 
 let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
@@ -764,17 +783,32 @@ let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
       | None -> ()
     in
     let on_failure ~reason ~retryable =
-      update_pending_entry ~id:entry.id (fun e ->
-        { e with summary_status = Summary_failed { reason; retryable } });
-      match get_pending_entry ~id:entry.id with
-      | Some updated -> record_summary_updated ~now updated
-      | None -> ()
+      record_summary_failure ~id:entry.id ~reason ~retryable
     in
     match provider_config_for_summary ~keeper_name:entry.keeper_name with
     | None ->
       on_failure ~reason:"HITL summary: no runtime provider config available" ~retryable:false
     | Some config ->
       Hitl_summary_worker.spawn ~sw ~entry ~provider_config:config ~on_summary ~on_failure ()
+;;
+
+let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =
+  (* HITL summaries are queued background enrichment, not turn-scoped work.
+     Fork on the server root switch so the worker can finish after the keeper
+     turn that created the approval has unwound. *)
+  match entry.risk_level with
+  | Low -> ()
+  | Medium | High | Critical ->
+    (match Eio_context.get_root_switch_opt () with
+     | Some sw -> spawn_hitl_summary_worker ~sw ~entry
+     | None ->
+       let reason = "HITL summary: server root switch unavailable" in
+       Log.Keeper.warn
+         "HITL summary worker not spawned approval_id=%s keeper=%s reason=%s"
+         entry.id
+         entry.keeper_name
+         reason;
+       record_summary_failure ~id:entry.id ~reason ~retryable:false)
 ;;
 
 (* Wake the keeper that was waiting on this approval. A keeper that enqueued an
@@ -1022,11 +1056,7 @@ let submit_and_await
   in
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
-  let () =
-    match Eio_context.get_switch_opt () with
-    | Some sw -> spawn_hitl_summary_worker ~sw ~entry
-    | None -> ()
-  in
+  spawn_hitl_summary_worker_on_root_switch ~entry;
   let timeout_decision reason =
     let decision = Agent_sdk.Hooks.Reject reason in
     match Eio.Promise.peek promise with
@@ -1203,11 +1233,7 @@ let submit_pending
       if Atomic.compare_and_set pending map updated
       then (
         record_pending entry;
-        let () =
-          match Eio_context.get_switch_opt () with
-          | Some sw -> spawn_hitl_summary_worker ~sw ~entry
-          | None -> ()
-        in
+        spawn_hitl_summary_worker_on_root_switch ~entry;
         id)
       else submit ()
   in

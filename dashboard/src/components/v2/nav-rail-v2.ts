@@ -21,19 +21,17 @@ type NavEntry = SurfaceEntry | 'sep'
 const SURFACES: readonly NavEntry[] = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
-  { tab: 'keepers', label: 'Keepers', icon: 'users' },
-  { tab: 'monitoring', label: 'Monitor', icon: 'monitor' },
-  'sep',
   { tab: 'workspace', label: '작업', icon: 'target' },
-  { tab: 'approvals', label: '승인', icon: 'shield' },
-  { tab: 'schedule', label: '예약', icon: 'clock' },
+  { tab: 'keepers', label: 'Keepers', icon: 'users' },
   'sep',
   { tab: 'board', label: '보드', icon: 'board' },
+  { tab: 'schedule', label: '예약', icon: 'clock' },
+  { tab: 'approvals', label: '승인', icon: 'shield' },
   { tab: 'fusion', label: 'Fusion', icon: 'fusion' },
-  { tab: 'logs', label: '로그', icon: 'logs' },
   'sep',
   { tab: 'code', label: 'IDE', icon: 'code' },
   { tab: 'connectors', label: '커넥터', icon: 'plug' },
+  { tab: 'logs', label: '로그', icon: 'logs' },
 ]
 
 export interface NavBadges {
@@ -53,7 +51,7 @@ export function surfaceLabel(tab: TabId): string {
 // On phones the rail collapses to a bottom tab bar: the operator's daily loop
 // (home / agents / work / approvals) gets first-class tabs; the rest live behind
 // a 더보기 sheet so no tab drops below the 44px hit target (prototype shell.jsx).
-const MOBILE_PRIMARY: readonly TabId[] = ['overview', 'keepers', 'workspace', 'approvals']
+const MOBILE_PRIMARY: readonly TabId[] = ['overview', 'workspace', 'keepers', 'approvals']
 const SURFACE_ENTRIES: readonly SurfaceEntry[] = SURFACES.filter((e): e is SurfaceEntry => e !== 'sep')
 
 export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobile?: boolean }) {

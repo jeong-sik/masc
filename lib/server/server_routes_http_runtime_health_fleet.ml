@@ -17,6 +17,7 @@ let keeper_reaction_ledger_health_json () =
     `Assoc
       [ "schema", `String "keeper.reaction_ledger.fleet_summary.v1"
       ; "status", `String "unavailable"
+      ; "status_reasons", `List []
       ; "operator_action_required", `Bool false
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
@@ -26,6 +27,22 @@ let keeper_reaction_ledger_health_json () =
       ; "reaction_count", `Int 0
       ; "stimulus_consumed_count", `Int 0
       ; "pending_stimulus_count", `Int 0
+      ; "durable_event_queue_count", `Int 0
+      ; "durable_event_queue_pending_count", `Int 0
+      ; "durable_event_queue_inflight_count", `Int 0
+      ; "durable_event_queue_discovered_keeper_count", `Int 0
+      ; "durable_event_queue_discovered_keeper_names", `List []
+      ; "durable_event_queue_discovery_error", `Null
+      ; "durable_event_queue_discovery_error_count", `Int 0
+      ; ( "durable_event_queue_stale_after_sec"
+        , `Float (Env_config.KeeperHealth.durable_queue_stale_sec ()) )
+      ; "durable_event_queue_stale_count", `Int 0
+      ; "durable_event_queue_stale_keeper_count", `Int 0
+      ; "durable_event_queue_read_error_count", `Int 0
+      ; "durable_event_queue_read_errors_by_keeper", `List []
+      ; "durable_event_queue_by_keeper", `List []
+      ; "durable_event_queue_stale_by_keeper", `List []
+      ; "durable_event_queue_payload_counts", `List []
       ; "pending_by_keeper", `List []
       ; "read_error_count", `Int 0
       ; "keepers", `List []
@@ -46,6 +63,68 @@ let keeper_reaction_ledger_health_json () =
          ~base_path:config.base_path
          ~keeper_names:(keeper_names |> sorted_unique_strings |> take 64)
          ~limit_per_keeper:20)
+;;
+
+let keeper_turn_admission_health_json () =
+  match current_server_state_opt () with
+  | None ->
+    `Assoc
+      [ "schema", `String "masc.keeper_turn_admission.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "status_reasons", `List []
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "max_waiting_chat_requests", `Int Keeper_turn_admission.max_waiting_chat_requests
+      ; "chat_waiting_keeper_count", `Int 0
+      ; "chat_waiting_total_count", `Int 0
+      ; "chat_waiting_full_keeper_count", `Int 0
+      ; "chat_rejected_total_count", `Int 0
+      ; "in_flight_keeper_count", `Int 0
+      ; "keepers", `List []
+      ]
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    let keeper_names =
+      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.warn
+          "health: failed to compute keeper turn admission names: %s"
+          (Printexc.to_string exn);
+        []
+    in
+    Keeper_turn_admission.fleet_health_json ~base_path:config.base_path ~keeper_names
+;;
+
+let keeper_board_event_collection_health_json () =
+  match current_server_state_opt () with
+  | None ->
+    `Assoc
+      [ "schema", `String "masc.keeper_board_event_collection.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "status_reasons", `List []
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "failed_keeper_count", `Int 0
+      ; "failure_count", `Int 0
+      ; "failures", `List []
+      ]
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    let keeper_names =
+      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.warn
+          "health: failed to compute board event collection keeper names: %s"
+          (Printexc.to_string exn);
+        []
+    in
+    Keeper_heartbeat_loop_board_events.fleet_health_json
+      ~base_path:config.base_path
+      ~keeper_names
 ;;
 
 let paused_keeper_count = function
@@ -72,6 +151,34 @@ let runtime_base_path_opt () =
   match current_server_state_opt () with
   | Some state -> Some (Mcp_server.workspace_config state).base_path
   | None -> None
+
+let keeper_event_queue_health_json () =
+  match runtime_base_path_opt () with
+  | None ->
+    `Assoc
+      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "pending_count", `Int 0
+      ; "inflight_count", `Int 0
+      ; "total_count", `Int 0
+      ; "oldest_arrived_at_unix", `Null
+      ; "oldest_age_seconds", `Null
+      ; "pending_by_keeper", `List []
+      ; "inflight_by_keeper", `List []
+      ; "read_error_count", `Int 0
+      ; "read_errors", `List []
+      ; "keepers", `List []
+      ]
+  | Some base_path ->
+    let now =
+      Unix.gettimeofday ()
+      (* NDT-OK: full health samples wall-clock at the HTTP boundary to report
+         durable queue ages; queue parsing below stays deterministic. *)
+    in
+    Keeper_event_queue_persistence.fleet_summary_json ~now ~base_path
 
 let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan
@@ -117,6 +224,8 @@ let keeper_fleet_runtime_resolution_base_fields
       , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
           ~starting_keepers:0 ~requested_keepers:24 () )
     ; "keeper_fleet_safety", fleet_safety
+    ; "keeper_turn_admission", keeper_turn_admission_health_json ()
+    ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
     ]
   in
   if include_reaction_ledger

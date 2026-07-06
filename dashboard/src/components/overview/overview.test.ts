@@ -16,7 +16,7 @@ import {
   computeOverviewStats,
   computeOverviewDigest,
   buildOverviewTelemetrySnapshot,
-  keeperModelLabel,
+  keeperRuntimeLabel,
   OVERVIEW_TELEMETRY_BAR_COUNT,
   OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
   OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
@@ -642,21 +642,25 @@ describe('computeOverviewStats', () => {
   })
 })
 
-describe('keeperModelLabel', () => {
-  it('prefers explicit model labels before runtime fallback is needed', () => {
-    expect(keeperModelLabel(makeKeeper({
+describe('keeperRuntimeLabel', () => {
+  it('uses the shared runtime display priority', () => {
+    expect(keeperRuntimeLabel(makeKeeper({
+      runtime_canonical: 'oas.primary',
+      selected_runtime_canonical: 'oas.secondary',
+      runtime_id: 'legacy.runtime',
+    }))).toBe('oas.primary')
+  })
+
+  it('does not expose raw keeper model fields as runtime labels', () => {
+    expect(keeperRuntimeLabel(makeKeeper({
       active_model_label: 'deepseek-v4-flash',
       active_model: 'claude-sonnet-4',
       model: 'fallback',
-    }))).toBe('deepseek-v4-flash')
+    }))).toBe('')
   })
 
-  it('normalizes claude-prefixed model names', () => {
-    expect(keeperModelLabel(makeKeeper({ active_model: 'claude-sonnet-4' }))).toBe('sonnet-4')
-  })
-
-  it('returns an empty string when no model field is present', () => {
-    expect(keeperModelLabel(makeKeeper({}))).toBe('')
+  it('returns an empty string when no runtime field is present', () => {
+    expect(keeperRuntimeLabel(makeKeeper({}))).toBe('')
   })
 })
 

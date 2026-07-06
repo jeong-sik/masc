@@ -94,12 +94,14 @@
 .chat-block-trace-label {
   font-weight: var(--fw-semi);
   color: var(--chat-tool-fg, var(--color-fg-secondary));
+  white-space: nowrap;
 }
 
 .chat-block-trace-count,
 .chat-block-trace-meta {
   color: var(--color-fg-muted);
   font-size: var(--fs-2xs);
+  white-space: nowrap;
 }
 
 .chat-block-trace-meta {
@@ -174,6 +176,45 @@
   color: var(--color-fg-muted);
 }
 
+.chat-block-source-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  min-height: 18px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-0);
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-tight);
+  color: var(--color-fg-muted);
+  background: var(--color-bg-surface);
+}
+
+.chat-block-source-badge.stream {
+  border-color: var(--color-accent-soft);
+  color: var(--color-accent-fg);
+  background: var(--accent-10);
+}
+
+.chat-block-source-badge.tool {
+  border-color: rgb(var(--color-status-ok-glow) / 0.4);
+  color: var(--color-status-ok);
+}
+
+.chat-block-source-badge.reply {
+  color: var(--color-fg-secondary);
+}
+
+.chat-block-source-badge.warn {
+  border-color: rgb(var(--color-status-warn-glow) / 0.4);
+  color: var(--color-status-warn);
+  background: var(--warn-10);
+}
+
 .chat-block-tstep-name {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -206,6 +247,21 @@
    the muted in-flight "pending" dot and from a reported failure. */
 .chat-block-tstep-status.missing {
   background: var(--color-status-warn);
+}
+
+.chat-block-tstep-status.coverage-gap {
+  border: 1px solid var(--color-status-warn);
+  background: color-mix(in oklab, var(--color-status-warn) 28%, transparent);
+}
+
+.chat-block-tstep-status.hydration-failed {
+  border: 1px solid var(--color-status-warn);
+  background: color-mix(in oklab, var(--color-status-warn) 42%, transparent);
+}
+
+.chat-block-tstep-status.unlinked {
+  border: 1px solid var(--color-status-warn);
+  background: transparent;
 }
 
 .chat-block-tstep-dur {

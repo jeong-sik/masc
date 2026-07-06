@@ -59,6 +59,7 @@
   padding: 2px 6px; background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-default); border-radius: var(--r-1);
   color: var(--color-fg-secondary); letter-spacing: .02em;
+  white-space: nowrap;
 }
 .chip-err { background: rgb(var(--err-glow) / .1); border-color: rgb(var(--err-glow) / .3); color: var(--err); }
 .chip.k-tool { color: var(--brass-1); border-color: var(--brass-3); }

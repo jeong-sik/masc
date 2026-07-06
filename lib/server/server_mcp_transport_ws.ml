@@ -278,13 +278,14 @@ let record_pong session =
   Atomic.set session.last_pong_at (Unix.gettimeofday ())
 (* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
 
-(** Send a pre-allocated frame to a WebSocket client.
+(** Send a pre-encoded text payload to a WebSocket client.
 
-    The caller owns the [bytes] buffer; this function only reads it.  In
-    server mode ws-direct does not mask (RFC 6455 §5.3), and the payload is
-    copied into the faraday writer synchronously, so the same [bytes] value can
-    safely be passed to multiple sessions in one broadcast. *)
-let send_frame_bytes session bytes ~len =
+    The caller owns the [payload] bigstring and must treat it as immutable after
+    passing it here.  ws-direct owns RFC 6455 framing and role-specific masking;
+    server-mode fanout can therefore reuse one immutable payload across
+    sessions without allocating a per-session payload string. *)
+let send_text_bigstring session payload =
+  let len = Bigstringaf.length payload in
   if is_session_closed session then begin
     Atomic.set session.closed true;
     false
@@ -293,7 +294,7 @@ let send_frame_bytes session bytes ~len =
       if is_session_closed session then false
       else begin
         try
-          Ws_wsd.send_text session.wsd (Bytes.sub_string bytes 0 len);
+          Ws_wsd.send_text_bigstring session.wsd payload;
           Transport_metrics.inc_ws_bytes_sent ~bytes:len;
           Transport_metrics.observe_ws_message_bytes_sent len;
           true
@@ -314,42 +315,50 @@ let websocket_text_payload text =
   Inference_utils.sanitize_text_utf8 text
 
 (** Send a text frame to a WebSocket client.
-    Allocates [Bytes.t] per call — fine for single-destination sends.
+    Allocates a [Bigstringaf.t] per call — fine for single-destination sends.
     Multicast paths should go through [send_text_shared] instead so the
-    bytes allocation is paid once per broadcast, not once per session. *)
+    payload allocation is paid once per broadcast, not once per session. *)
 let send_text session text =
-  let bytes = Bytes.of_string (websocket_text_payload text) in
-  send_frame_bytes session bytes ~len:(Bytes.length bytes)
+  let payload_text = websocket_text_payload text in
+  let payload =
+    Bigstringaf.of_string payload_text ~off:0 ~len:(String.length payload_text)
+  in
+  send_text_bigstring session payload
 
-(** Module-local cache of the last [Bytes.of_string sse_event] result.
+(** Module-local cache of the last [Bigstringaf.of_string sse_event] result.
 
     [Sse.notify_external_subscribers] delivers the same [event: string]
     reference to every subscribed WS session in sequence.  Before this
-    cache, every session ran [Bytes.of_string] independently in the
-    raw-SSE-forward path, producing O(sessions) identical allocations.
+    cache, every session encoded the same payload independently in the
+    raw-SSE-forward path, producing O(sessions) identical allocations and
+    copies at the WebSocket API boundary.
     Keyed by physical equality so a fresh broadcast invalidates it. *)
-let bytes_cache : (string * Bytes.t) Atomic.t =
-  Atomic.make ("", Bytes.empty)
+let bigstring_cache : (string * Bigstringaf.t) Atomic.t =
+  Atomic.make ("", Bigstringaf.empty)
 
-let bytes_of_shared_text text =
-  let cached_str, cached_bytes = Atomic.get bytes_cache in
+let bigstring_of_shared_text text =
+  let cached_str, cached_payload = Atomic.get bigstring_cache in
   if cached_str == text then begin
     Transport_metrics.inc_ws_bytes_cache_hit ();
-    cached_bytes
+    cached_payload
   end
   else begin
     Transport_metrics.inc_ws_bytes_cache_miss ();
-    let bytes = Bytes.of_string (websocket_text_payload text) in
-    Atomic.set bytes_cache (text, bytes);
-    bytes
+    let payload_text = websocket_text_payload text in
+    let payload =
+      Bigstringaf.of_string payload_text ~off:0
+        ~len:(String.length payload_text)
+    in
+    Atomic.set bigstring_cache (text, payload);
+    payload
   end
 
 (** Send a text frame that will also be sent to other sessions in this
-    broadcast.  Allocates [Bytes.of_string text] once per unique string
-    reference; subsequent sessions in the same fanout reuse the bytes. *)
+    broadcast.  Encodes [text] to [Bigstringaf.t] once per unique string
+    reference; subsequent sessions in the same fanout reuse that payload. *)
 let send_text_shared session text =
-  let bytes = bytes_of_shared_text text in
-  send_frame_bytes session bytes ~len:(Bytes.length bytes)
+  let payload = bigstring_of_shared_text text in
+  send_text_bigstring session payload
 
 let send_text_checked ~context session text =
   let sent = send_text session text in
@@ -371,6 +380,11 @@ let jsonrpc_notification method_ params =
       ("method", `String method_);
       ("params", params);
     ]
+
+type dashboard_delta_payload_frame = {
+  slice: string;
+  text: string;
+}
 
 (* Cross-domain-safe seq allocator: [fetch_and_add] atomically claims a unique
    slot, so two domains never hand out the same seq.  The old plain
@@ -653,7 +667,7 @@ let parse_cache : (string * parsed_sse_event option) Atomic.t =
     [Yojson.Safe.from_string].
 
     The earlier implementation skipped this step, so every production
-    parse failed and dashboard_delta_for_sse always fell through to
+    parse failed and send_dashboard_delta_for_sse always fell through to
     raw-SSE-forward — defeating the parse cache, slice-aware fanout
     (Phase 2 of #10119), and delta-built counter.  Pure-JSON inputs
     (the unit-test path) still work via the [_ -> Some sse_event]
@@ -741,35 +755,75 @@ let parse_sse_dashboard_event sse_event =
     result
   end
 
-(** Build a dashboard/delta notification from an already-parsed SSE
-    event when the session subscribes to its slice.  Pulled out of the
-    earlier [dashboard_delta_for_sse] so callers that already have the
-    parsed event in hand do not re-enter [parse_sse_dashboard_event]
-    just to feed it back through; see [send_dashboard_or_raw_sse]. *)
-let dashboard_delta_for_parsed session parsed =
-  match parsed with
-  | Some { event_type; slice = Some slice; payload; broadcast_ts }
-    when List.mem slice (Atomic.get session.dashboard_slices) ->
-      Transport_metrics.inc_ws_delta_built ();
-      let seq = next_dashboard_seq session in
+(** Shared dashboard/delta payload-frame cache.
+
+    The per-session [seq] is intentionally excluded from [text].  That keeps
+    the expensive payload serialization keyed by the physical SSE broadcast
+    reference instead of by recipient, so a fan-out pays one
+    [Yojson.Safe.to_string] for the payload frame. *)
+let dashboard_delta_payload_text_cache :
+    (string * dashboard_delta_payload_frame option) Atomic.t =
+  Atomic.make ("", None)
+
+let dashboard_delta_payload_text_for_parsed sse_event parsed =
+  let cached_event, cached_payload =
+    Atomic.get dashboard_delta_payload_text_cache
+  in
+  if cached_event == sse_event then cached_payload
+  else begin
+    let payload_frame =
+      match parsed with
+      | Some { event_type; slice = Some slice; payload; broadcast_ts } ->
+          Transport_metrics.inc_ws_delta_payload_serialization ();
+          Some
+            {
+              slice;
+              text =
+                Yojson.Safe.to_string
+                  (jsonrpc_notification "dashboard/delta"
+                     (`Assoc
+                       [
+                         ("protocol", `String "dashboard-ws.v1");
+                         ("slice", `String slice);
+                         ("event_type", `String event_type);
+                         ("mode", `String "snapshot");
+                         ("payload", payload);
+                         ("ts_unix", `Float broadcast_ts);
+                       ]));
+            }
+      | _ -> None
+    in
+    Atomic.set dashboard_delta_payload_text_cache (sse_event, payload_frame);
+    payload_frame
+  end
+
+let dashboard_delta_seq_notification seq =
+  jsonrpc_notification "dashboard/delta"
+    (`Assoc [ ("protocol", `String "dashboard-ws.v1"); ("seq", `Int seq) ])
+
+let send_dashboard_delta_frame session { slice; text } =
+  if not (List.mem slice (Atomic.get session.dashboard_slices)) then false
+  else begin
+    Transport_metrics.inc_ws_delta_built ();
+    let seq = next_dashboard_seq session in
+    if send_text_shared_checked ~context:"dashboard-delta-payload" session text
+    then begin
       Atomic.set session.dashboard_last_delta_seq seq;
       Atomic.set session.dashboard_last_delta_at (Time_compat.now ());
-      Some
-        (jsonrpc_notification "dashboard/delta"
-           (`Assoc
-             [
-               ("protocol", `String "dashboard-ws.v1");
-               ("seq", `Int seq);
-               ("slice", `String slice);
-               ("event_type", `String event_type);
-               ("mode", `String "snapshot");
-               ("payload", payload);
-               ("ts_unix", `Float broadcast_ts);
-             ]))
-  | _ -> None
+      send_json_checked ~context:"dashboard-delta-seq" session
+        (dashboard_delta_seq_notification seq)
+    end
+    else false
+  end
 
-let dashboard_delta_for_sse session sse_event =
-  dashboard_delta_for_parsed session (parse_sse_dashboard_event sse_event)
+let send_dashboard_delta_for_parsed session sse_event parsed =
+  match dashboard_delta_payload_text_for_parsed sse_event parsed with
+  | Some frame -> send_dashboard_delta_frame session frame
+  | None -> false
+
+let send_dashboard_delta_for_sse session sse_event =
+  send_dashboard_delta_for_parsed session sse_event
+    (parse_sse_dashboard_event sse_event)
 
 (** TTL cache for env-var reads on the fan-out hot path.
 
@@ -906,12 +960,11 @@ let send_dashboard_or_raw_sse session sse_event =
        difference.  At fanout fleet scale (100+ authenticated dashboard
        sessions) the second call is pure overhead. *)
     let parsed = parse_sse_dashboard_event sse_event in
-    match dashboard_delta_for_parsed session parsed with
-    | Some delta ->
-        (* Delta carries a per-session [seq], so the encoded text is unique
-           per session and cannot be shared. *)
-        send_json_checked ~context:"dashboard-delta" session delta
-    | None ->
+    match parsed with
+    | Some { slice = Some slice; _ }
+      when List.mem slice (Atomic.get session.dashboard_slices) ->
+        send_dashboard_delta_for_parsed session sse_event parsed
+    | _ ->
         (* Two sub-cases lead here:
            1. The event has a parsed slice but this session's route is
               not subscribed.  Today we raw-forward anyway so the client
@@ -928,7 +981,7 @@ let send_dashboard_or_raw_sse session sse_event =
            [parsed] (captured above) is the source of truth for which
            case applies.  A [Some _] result with a [Some slice] field
            means case 1 (slice known, session did not subscribe —
-           [dashboard_delta_for_parsed] would have returned [Some]
+           [send_dashboard_delta_for_parsed] would have sent the split delta
            otherwise).  Anything else is case 2. *)
         let is_slice_mismatch =
           match parsed with
@@ -942,7 +995,7 @@ let send_dashboard_or_raw_sse session sse_event =
         else
           (* Same event string is forwarded verbatim to every session that
              does not match a subscribed dashboard slice; the shared cache
-             collapses N identical [Bytes.of_string] allocations into 1. *)
+             collapses N identical payload encodings into 1. *)
           send_text_shared_checked ~context:"sse-forward" session sse_event
   end
   else begin
@@ -1057,6 +1110,10 @@ let __test_missed_pong_threshold = missed_pong_threshold
    equals the total number of calls (no lost updates). *)
 let __test_next_dashboard_seq = next_dashboard_seq
 let __test_dashboard_seq_value session = Atomic.get session.dashboard_seq
+
+let __test_dashboard_delta_payload_text_for_sse sse_event =
+  dashboard_delta_payload_text_for_parsed sse_event
+    (parse_sse_dashboard_event sse_event)
 
 let start_upgrade_heartbeat ?sw ?clock session_id session =
   match sw, clock with

@@ -176,12 +176,19 @@ function runtimeRequestConfigSummary(
   ].filter((value): value is string => Boolean(value))
   const toolChoice = runtimeRequestToolChoiceSummary(entry)
   const format = runtimeRequestFormatSummary(entry)
+  const requestPath = request.request_path_targets_responses_api
+    ? 'responses-api'
+    : request.request_path
+      ? `path ${request.request_path}`
+      : null
   const parts = [
     request.provider_kind ? request.provider_kind : null,
-    request.request_path_targets_responses_api ? 'responses-api' : null,
+    request.source ? `source ${request.source}` : null,
+    requestPath,
     typeof request.max_tokens === 'number' ? `out ${request.max_tokens}` : null,
     typeof request.max_context === 'number' ? `ctx ${request.max_context}` : null,
     sampling.length > 0 ? sampling.join(',') : null,
+    request.has_system_prompt ? 'system prompt' : null,
     typeof request.enable_thinking === 'boolean' ? `think ${request.enable_thinking ? 'on' : 'off'}` : null,
     typeof request.preserve_thinking === 'boolean' ? `preserve ${request.preserve_thinking ? 'on' : 'off'}` : null,
     typeof request.clear_thinking === 'boolean' ? `clear ${request.clear_thinking ? 'on' : 'off'}` : null,
@@ -220,6 +227,11 @@ function runtimeDeclaredSpecSummary(
   const spec = entry.declared_spec
   if (!spec) return null
   const caps = spec.model?.capabilities
+  const samplingConfig = [
+    typeof spec.model?.top_p === 'number' ? `top_p ${spec.model.top_p}` : null,
+    typeof spec.model?.top_k === 'number' ? `top_k ${spec.model.top_k}` : null,
+    typeof spec.model?.min_p === 'number' ? `min_p ${spec.model.min_p}` : null,
+  ].filter((value): value is string => Boolean(value))
   const sampling = [
     caps?.supports_top_k ? 'top_k' : null,
     caps?.supports_min_p ? 'min_p' : null,
@@ -254,6 +266,8 @@ function runtimeDeclaredSpecSummary(
     caps?.supports_required_tool_choice ? 'required' : null,
     caps?.supports_named_tool_choice ? 'named' : null,
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
+    caps?.supports_extended_thinking ? 'extended-thinking' : null,
+    caps?.supports_reasoning_budget ? 'reasoning-budget' : null,
     caps?.supports_native_streaming ? 'native-stream' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_caching ? 'cache' : null,
@@ -272,6 +286,7 @@ function runtimeDeclaredSpecSummary(
   const parts = [
     spec.provider?.api_format ? spec.provider.api_format : null,
     spec.provider?.protocol ? spec.provider.protocol : null,
+    spec.provider?.transport ? `transport ${spec.provider.transport}` : null,
     spec.provider?.auth_kind ? `auth ${spec.provider.auth_kind}` : null,
     spec.provider?.is_non_interactive ? 'non-interactive' : null,
     typeof spec.provider?.custom_header_count === 'number' ? `headers ${spec.provider.custom_header_count}` : null,
@@ -290,6 +305,7 @@ function runtimeDeclaredSpecSummary(
     typeof caps?.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     inputs.length > 0 ? `input ${inputs.join(',')}` : null,
+    samplingConfig.length > 0 ? `sampling config ${samplingConfig.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
     controls.length > 0 ? `controls ${controls.join(',')}` : null,
     spec.model?.match_prefixes.length ? `match ${spec.model.match_prefixes.join(',')}` : null,
@@ -303,6 +319,13 @@ function runtimeDeclaredSpecSummary(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function runtimeReasoningStreamingFormatSummary(
+  format: { kind?: string | null; field?: string | null } | null | undefined,
+): string | null {
+  if (!format?.kind) return null
+  return format.field ? `${format.kind}:${format.field}` : format.kind
+}
+
 function runtimeEffectiveCapabilitySummary(
   entry: NonNullable<ReturnType<typeof findRuntimeCatalogEntry>>,
 ): string | null {
@@ -313,25 +336,51 @@ function runtimeEffectiveCapabilitySummary(
     caps.supports_min_p ? 'min_p' : null,
     caps.supports_seed ? 'seed' : null,
   ].filter((value): value is string => Boolean(value))
+  const ignoredSampling = caps.ignored_sampling_parameters.join(',')
   const formats = [
     caps.supports_response_format_json ? 'json' : null,
     caps.supports_structured_output ? 'schema' : null,
   ].filter((value): value is string => Boolean(value))
+  const inputs = [
+    caps.supports_multimodal_inputs ? 'multimodal' : null,
+    caps.supports_image_input ? 'image' : null,
+    caps.supports_audio_input ? 'audio' : null,
+    caps.supports_video_input ? 'video' : null,
+  ].filter((value): value is string => Boolean(value))
+  const reasoningStream = runtimeReasoningStreamingFormatSummary(caps.reasoning_streaming_format)
   const parts = [
+    caps.source ? `source ${caps.source}` : null,
+    typeof caps.max_context_tokens === 'number' ? `ctx ${caps.max_context_tokens}` : null,
     typeof caps.max_output_tokens === 'number' ? `out ${caps.max_output_tokens}` : null,
-    caps.supports_tool_choice ? `tool_choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}` : null,
+    caps.supports_tools ? 'tools' : null,
+    caps.supports_tool_choice
+      ? `tool_choice${[
+        caps.supports_required_tool_choice ? 'required' : null,
+        caps.supports_named_tool_choice ? 'named' : null,
+        caps.supports_parallel_tool_calls ? 'parallel' : null,
+      ].filter((value): value is string => Boolean(value)).map(flag => `+${flag}`).join('')}`
+      : null,
     caps.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
     caps.supports_runtime_tool_events ? 'runtime-tool-events' : null,
     formats.length > 0 ? `format ${formats.join(',')}` : null,
     sampling.length > 0 ? `sampling ${sampling.join(',')}` : null,
+    ignoredSampling ? `ignored ${ignoredSampling}` : null,
+    inputs.length > 0 ? `input ${inputs.join(',')}` : null,
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content ${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
+    caps.supports_extended_thinking ? 'extended thinking' : null,
+    caps.supports_reasoning_budget ? 'reasoning budget' : null,
+    caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
+      ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
+      : null,
+    caps.thinking_control_format ? `wire ${caps.thinking_control_format}` : null,
     caps.preserve_thinking_control_format ? `preserve ${caps.preserve_thinking_control_format}` : null,
     caps.reasoning_output_format ? `reasoning-out ${caps.reasoning_output_format}` : null,
-    caps.reasoning_streaming_format?.kind ? `reasoning-stream ${caps.reasoning_streaming_format.kind}` : null,
+    reasoningStream ? `reasoning-stream ${reasoningStream}` : null,
     caps.reasoning_replay_override ? `replay ${caps.reasoning_replay_override}` : null,
     caps.task ? `task ${caps.task}` : null,
+    caps.supports_native_streaming ? 'native-stream' : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
     caps.supports_prompt_caching
       ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
@@ -377,7 +426,12 @@ function RuntimeSection({
   // (reasoning-effort mode or a reasoning-budget knob). Both come from the
   // /api/v1/providers projection — no per-keeper mutation here (deferred).
   const multimodal = capabilitiesDeclared
-    ? Boolean(entry?.supports_multimodal_inputs || entry?.supports_image_input)
+    ? Boolean(
+        entry?.supports_multimodal_inputs
+        || entry?.supports_image_input
+        || entry?.supports_audio_input
+        || entry?.supports_video_input,
+      )
     : null
   const effortMode = entry?.thinking_control_format ?? null
   const effortControlled = effortMode !== null && effortMode !== 'none'

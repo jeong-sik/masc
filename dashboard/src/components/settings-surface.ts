@@ -39,14 +39,30 @@ import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+  runtimeCatalogSnapshotFacts,
+} from '../lib/runtime-provider-summary'
 
 type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
 type RuntimeRoutingSaveState = 'idle' | 'saving' | 'saved' | 'error'
+type SettingsControlKind = 'live-read' | 'live-write' | 'browser-local' | 'unsupported'
 type RuntimeSelectOption = {
   readonly id: string
   readonly label: string
+}
+export type SettingsControlInventoryItem = {
+  readonly id: string
+  readonly section: SectionId
+  readonly label: string
+  readonly kind: SettingsControlKind
+  readonly source: string
+  readonly action: string
 }
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
@@ -85,6 +101,141 @@ const MCP_PUBLIC_SURFACE = 'public_mcp'
 const SETTINGS_LOG_LIMIT = 50
 const SETTINGS_LOG_POLL_MS = 3000
 const DISPLAY_DENSITY_OPTIONS: Density[] = ['compact', 'regular', 'spacious']
+
+const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
+  {
+    id: 'runtime-default-runtime',
+    section: 'runtime',
+    label: 'Default runtime',
+    kind: 'live-write',
+    source: 'GET /api/v1/dashboard/runtime-defaults + runtime provider catalog',
+    action: 'PATCH /api/v1/runtime/routing lane=default',
+  },
+  {
+    id: 'runtime-catalog-summary',
+    section: 'runtime',
+    label: 'Runtime catalog cards',
+    kind: 'live-read',
+    source: 'GET /api/v1/dashboard/runtime-providers, fallback runtime-defaults projection',
+    action: 'read-only projection',
+  },
+  {
+    id: 'runtime-routing-lanes',
+    section: 'routing',
+    label: 'Model routing lanes',
+    kind: 'live-write',
+    source: 'GET /api/v1/dashboard/runtime-defaults',
+    action: 'PATCH /api/v1/runtime/routing for default/librarian/structured_judge/cross_verifier',
+  },
+  {
+    id: 'runtime-media-failover',
+    section: 'routing',
+    label: 'Media failover list',
+    kind: 'live-write',
+    source: '[runtime].media_failover in runtime.toml',
+    action: 'PATCH /api/v1/runtime/media-failover',
+  },
+  {
+    id: 'runtime-toml-editor',
+    section: 'runtimes',
+    label: 'runtime.toml editor',
+    kind: 'live-write',
+    source: 'GET /api/v1/runtime/config/raw',
+    action: 'PUT /api/v1/runtime/config/raw',
+  },
+  {
+    id: 'settings-path-resolution',
+    section: 'paths',
+    label: 'Resolved paths',
+    kind: 'live-read',
+    source: 'dashboard shell path/config resolution + config projection',
+    action: 'read-only projection',
+  },
+  {
+    id: 'settings-mcp-status',
+    section: 'mcp',
+    label: 'MCP status check',
+    kind: 'live-read',
+    source: 'public MCP server + dashboard tool inventory',
+    action: 'call masc_status; no settings mutation',
+  },
+  {
+    id: 'settings-repositories',
+    section: 'repositories',
+    label: 'Repository settings',
+    kind: 'live-write',
+    source: 'repositories API',
+    action: 'SettingsRepositoriesSection owned writer',
+  },
+  {
+    id: 'settings-notify-thresholds',
+    section: 'notify',
+    label: 'Alert thresholds',
+    kind: 'live-read',
+    source: 'GET /api/v1/dashboard/config',
+    action: 'read-only projection',
+  },
+  {
+    id: 'settings-notify-routing',
+    section: 'notify',
+    label: 'Notification routing',
+    kind: 'unsupported',
+    source: 'no dashboard writer exposed',
+    action: 'render read-only unsupported state',
+  },
+  {
+    id: 'settings-prompts',
+    section: 'prompts',
+    label: 'Prompt registry',
+    kind: 'live-write',
+    source: 'prompt registry API',
+    action: 'PromptRegistryPanel owned writer',
+  },
+  {
+    id: 'settings-fusion',
+    section: 'fusion',
+    label: 'Fusion settings',
+    kind: 'live-write',
+    source: 'runtime.toml fusion settings',
+    action: 'FusionSettingsPanel owned writer',
+  },
+  {
+    id: 'settings-logs',
+    section: 'logs',
+    label: 'System log filters',
+    kind: 'live-read',
+    source: 'GET /api/v1/dashboard/logs',
+    action: 'client-side filter only',
+  },
+  {
+    id: 'settings-theme-density',
+    section: 'display',
+    label: 'Theme and density',
+    kind: 'browser-local',
+    source: 'DOM dataset + localStorage persistent signals',
+    action: 'browser shell only; no server settings write',
+  },
+  {
+    id: 'settings-display-locale',
+    section: 'display',
+    label: 'Locale / time format',
+    kind: 'unsupported',
+    source: 'no renderer-wide setting exposed',
+    action: 'render read-only unsupported state',
+  },
+  {
+    id: 'settings-html-snapshot',
+    section: 'display',
+    label: 'HTML snapshot export',
+    kind: 'browser-local',
+    source: 'current DOM outerHTML',
+    action: 'download DOM snapshot; no standalone resource claim',
+  },
+]
+
+export function settingsControlInventory(section: SectionId): readonly SettingsControlInventoryItem[] {
+  return SETTINGS_CONTROL_INVENTORY.filter(item => item.section === section)
+}
 
 export function normalizeSettingsSection(value: string | null | undefined): SectionId {
   return SETTINGS_ROUTE_SECTION_SET.has(value ?? '') ? (value as SectionId) : DEFAULT_SETTINGS_SECTION
@@ -186,6 +337,42 @@ function PreviewBadge({ label }: { label: string }) {
   `
 }
 
+function settingsControlKindLabel(kind: SettingsControlKind): string {
+  if (kind === 'live-write') return 'live write'
+  if (kind === 'live-read') return 'live read'
+  if (kind === 'browser-local') return 'browser local'
+  return 'unsupported'
+}
+
+function SettingsControlLedger({ section }: { section: SectionId }) {
+  const items = settingsControlInventory(section)
+  if (items.length === 0) return null
+  return html`
+    <section class="set-control-ledger" data-testid="settings-control-ledger">
+      <div class="set-control-ledger-h">
+        <span>Control backing</span>
+        <span class="mono" data-testid="settings-control-ledger-count">${items.length}</span>
+      </div>
+      <div class="set-control-ledger-grid">
+        ${items.map(item => html`
+          <div
+            key=${item.id}
+            class=${`set-control-ledger-row ${item.kind}`}
+            data-testid="settings-control-ledger-row"
+            data-control-id=${item.id}
+            data-control-kind=${item.kind}
+          >
+            <span class="set-control-kind">${settingsControlKindLabel(item.kind)}</span>
+            <span class="set-control-label">${item.label}</span>
+            <span class="set-control-source mono" title=${item.source}>${item.source}</span>
+            <span class="set-control-action" title=${item.action}>${item.action}</span>
+          </div>
+        `)}
+      </div>
+    </section>
+  `
+}
+
 function formatRuntimeContext(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'ctx 미수집'
   if (value >= 1_000_000) return `${Number.parseFloat((value / 1_000_000).toFixed(1))}M ctx`
@@ -214,230 +401,31 @@ function RuntimeCatalogCapability({ label, value }: { label: string; value: bool
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
 }
 
-function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnapshot): string | null {
-  const policy = item.parameter_policy
-  if (!policy) return null
-  const ignored = policy.ignored_sampling_params.join(',')
-  const alwaysIgnored = policy.always_ignored_sampling_params.join(',')
-  const parts = [
-    policy.reasoning_toggle_wire ? `wire:${policy.reasoning_toggle_wire}` : null,
-    policy.reasoning_replay_policy ? `replay:${policy.reasoning_replay_policy}` : null,
-    policy.requires_reasoning_replay_on_tool_call ? 'tool-call-replay:required' : null,
-    ignored ? `ignore:${ignored}` : null,
-    alwaysIgnored ? `always:${alwaysIgnored}` : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
+type RuntimeCatalogFact = {
+  readonly id: string
+  readonly label: string
+  readonly value: string
 }
 
-function runtimeCatalogRequestToolChoice(item: DashboardRuntimeProviderSnapshot): string | null {
-  const choice = item.request_config?.tool_choice
-  if (!choice?.kind) return null
-  return choice.name ? `${choice.kind}:${choice.name}` : choice.kind
-}
-
-function runtimeCatalogRequestFormat(item: DashboardRuntimeProviderSnapshot): string | null {
-  const format = item.request_config?.response_format
-  if (!format?.kind) return null
-  return format.has_schema ? `${format.kind}+schema` : format.kind
-}
-
-function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapshot): string | null {
-  const request = item.request_config
-  if (!request) return null
-  const sampling = [
-    typeof request.temperature === 'number' ? `temp:${request.temperature}` : null,
-    typeof request.top_p === 'number' ? `top_p:${request.top_p}` : null,
-    typeof request.top_k === 'number' ? `top_k:${request.top_k}` : null,
-    typeof request.min_p === 'number' ? `min_p:${request.min_p}` : null,
-  ].filter((value): value is string => Boolean(value))
-  const toolChoice = runtimeCatalogRequestToolChoice(item)
-  const format = runtimeCatalogRequestFormat(item)
-  const parts = [
-    request.provider_kind ? `kind:${request.provider_kind}` : null,
-    request.request_path_targets_responses_api ? 'responses-api' : null,
-    typeof request.max_tokens === 'number' ? `out:${request.max_tokens}` : null,
-    typeof request.max_context === 'number' ? `ctx:${request.max_context}` : null,
-    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
-    typeof request.enable_thinking === 'boolean' ? `think:${request.enable_thinking ? 'on' : 'off'}` : null,
-    typeof request.preserve_thinking === 'boolean' ? `preserve:${request.preserve_thinking ? 'on' : 'off'}` : null,
-    typeof request.clear_thinking === 'boolean' ? `clear:${request.clear_thinking ? 'on' : 'off'}` : null,
-    typeof request.thinking_budget === 'number' ? `budget:${request.thinking_budget}` : null,
-    request.resolved_reasoning_effort ? `effort:${request.resolved_reasoning_effort}` : null,
-    request.glm_clear_thinking ? 'glm:clear' : null,
-    request.glm_replay_reasoning ? 'glm:replay' : null,
-    typeof request.tool_stream === 'boolean' ? `tool-stream:${request.tool_stream ? 'on' : 'off'}` : null,
-    toolChoice ? `tool:${toolChoice}` : null,
-    request.disable_parallel_tool_use ? 'parallel:off' : null,
-    format ? `format:${format}` : null,
-    request.has_output_schema ? 'output-schema' : null,
-    request.cache_system_prompt ? 'cache-system' : null,
-    typeof request.supports_tool_choice_override === 'boolean'
-      ? `tool-override:${request.supports_tool_choice_override ? 'on' : 'off'}`
-      : null,
-    typeof request.supports_structured_output_override === 'boolean'
-      ? `schema-override:${request.supports_structured_output_override ? 'on' : 'off'}`
-      : null,
-    request.has_model_capabilities_override ? 'cap-override' : null,
-    typeof request.seed === 'number' ? `seed:${request.seed}` : null,
-    typeof request.internal_model_rotation_count === 'number'
-      ? `rotation:${request.internal_model_rotation_count}`
-      : null,
-    typeof request.num_ctx === 'number' ? `num_ctx:${request.num_ctx}` : null,
-    request.keep_alive ? `keep:${request.keep_alive}` : null,
-    request.has_previous_response_id ? 'previous-response' : null,
-    typeof request.connect_timeout_s === 'number' ? `connect:${request.connect_timeout_s}s` : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
-}
-
-function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapshot): string | null {
-  const spec = item.declared_spec
-  if (!spec) return null
-  const caps = spec.model?.capabilities
-  const sampling = [
-    caps?.supports_top_k ? 'top_k' : null,
-    caps?.supports_min_p ? 'min_p' : null,
-    caps?.supports_seed ? 'seed' : null,
-  ].filter((value): value is string => Boolean(value))
-  const inputs = [
-    caps?.supports_multimodal_inputs ? 'multimodal' : null,
-    caps?.supports_image_input ? 'image' : null,
-    caps?.supports_audio_input ? 'audio' : null,
-    caps?.supports_video_input ? 'video' : null,
-  ].filter((value): value is string => Boolean(value))
-  const formats = [
-    caps?.supports_response_format_json ? 'json' : null,
-    caps?.supports_structured_output ? 'schema' : null,
-  ].filter((value): value is string => Boolean(value))
-  const behavior = spec.provider?.behavior_capabilities
-  const behaviorParts = behavior
-    ? [
-        behavior.supports_inline_tools ? 'inline-tools' : null,
-        behavior.requires_per_keeper_bridging_for_bound_actor_tools ? 'keeper-bridge' : null,
-        behavior.argv_prompt_preflight ? 'argv-preflight' : null,
-        behavior.uses_anthropic_caching ? 'anthropic-cache' : null,
-        typeof behavior.max_turns_per_attempt === 'number' ? `max-turns:${behavior.max_turns_per_attempt}` : null,
-        behavior.tolerates_bound_actor_fallback ? 'bound-fallback' : null,
-        behavior.identity_runtime_mcp_header_keys.length > 0
-          ? `mcp-headers:${behavior.identity_runtime_mcp_header_keys.join(',')}`
-          : null,
-      ].filter((value): value is string => Boolean(value))
-    : []
-  const controls = [
-    caps?.supports_tool_choice ? 'tool-choice' : null,
-    caps?.supports_required_tool_choice ? 'required' : null,
-    caps?.supports_named_tool_choice ? 'named' : null,
-    caps?.supports_parallel_tool_calls ? 'parallel' : null,
-    caps?.supports_native_streaming ? 'native-stream' : null,
-    caps?.supports_system_prompt ? 'system-prompt' : null,
-    caps?.supports_caching ? 'cache' : null,
-    caps?.supports_prompt_caching
-      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
-      : null,
-    caps?.supports_seed_with_images ? 'seed+images' : null,
-    caps?.emits_usage_tokens ? 'usage' : null,
-    caps?.supports_computer_use ? 'computer-use' : null,
-    caps?.supports_code_execution ? 'code-exec' : null,
-  ].filter((value): value is string => Boolean(value))
-  let thinking: string | null = null
-  if (typeof spec.model?.thinking_support === 'boolean') {
-    thinking = spec.model.thinking_support ? 'think:on' : 'think:off'
-  }
-  const parts = [
-    spec.provider?.api_format ? `api:${spec.provider.api_format}` : null,
-    spec.provider?.protocol ? `protocol:${spec.provider.protocol}` : null,
-    spec.provider?.auth_kind ? `auth:${spec.provider.auth_kind}` : null,
-    spec.provider?.is_non_interactive ? 'non-interactive' : null,
-    typeof spec.provider?.custom_header_count === 'number' ? `headers:${spec.provider.custom_header_count}` : null,
-    typeof spec.provider?.connect_timeout_s === 'number' ? `connect:${spec.provider.connect_timeout_s}s` : null,
-    behaviorParts.length > 0 ? `behavior:${behaviorParts.join(',')}` : null,
-    typeof spec.model?.max_context === 'number' ? `ctx:${spec.model.max_context}` : null,
-    typeof spec.model?.temperature === 'number' ? `temp:${spec.model.temperature}` : null,
-    typeof spec.model?.tools_support === 'boolean' ? `tools:${spec.model.tools_support ? 'on' : 'off'}` : null,
-    typeof spec.model?.streaming === 'boolean' ? `stream:${spec.model.streaming ? 'on' : 'off'}` : null,
-    typeof spec.model?.preserve_thinking === 'boolean'
-      ? `preserve:${spec.model.preserve_thinking ? 'on' : 'off'}`
-      : null,
-    thinking,
-    typeof spec.model?.max_thinking_budget === 'number' ? `budget:${spec.model.max_thinking_budget}` : null,
-    caps?.thinking_control_format ? `wire:${caps.thinking_control_format}` : null,
-    typeof caps?.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null,
-    formats.length > 0 ? `format:${formats.join(',')}` : null,
-    inputs.length > 0 ? `input:${inputs.join(',')}` : null,
-    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
-    controls.length > 0 ? `controls:${controls.join(',')}` : null,
-    spec.model?.match_prefixes.length ? `match:${spec.model.match_prefixes.join(',')}` : null,
-    spec.binding?.is_default ? 'default' : null,
-    typeof spec.binding?.max_concurrent === 'number' ? `concurrency:${spec.binding.max_concurrent}` : null,
-    typeof spec.binding?.price_input === 'number' ? `price-in:${spec.binding.price_input}` : null,
-    typeof spec.binding?.price_output === 'number' ? `price-out:${spec.binding.price_output}` : null,
-    spec.binding?.keep_alive ? `keep:${spec.binding.keep_alive}` : null,
-    typeof spec.binding?.num_ctx === 'number' ? `num_ctx:${spec.binding.num_ctx}` : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
-}
-
-function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProviderSnapshot): string | null {
-  const caps = item.effective_capabilities
-  if (!caps) return null
-  const sampling = [
-    caps.supports_top_k ? 'top_k' : null,
-    caps.supports_min_p ? 'min_p' : null,
-    caps.supports_seed ? 'seed' : null,
-  ].filter((value): value is string => Boolean(value))
-  const output = typeof caps.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null
-  const format = [
-    caps.supports_response_format_json ? 'json' : null,
-    caps.supports_structured_output ? 'schema' : null,
-  ].filter((value): value is string => Boolean(value))
-  const toolChoice = caps.supports_tool_choice
-    ? `tool-choice${caps.supports_parallel_tool_calls ? '+parallel' : ''}`
-    : null
-  const parts = [
-    output,
-    toolChoice,
-    item.effective_capabilities?.supports_runtime_mcp_tools ? 'runtime-mcp-tools' : null,
-    item.effective_capabilities?.supports_runtime_tool_events ? 'runtime-tool-events' : null,
-    format.length > 0 ? `format:${format.join(',')}` : null,
-    sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
-    item.effective_capabilities?.modality_priority
-      ? `modality:${item.effective_capabilities.modality_priority}`
-      : null,
-    item.effective_capabilities?.assistant_tool_content_format
-      ? `tool-content:${item.effective_capabilities.assistant_tool_content_format}`
-      : null,
-    item.effective_capabilities?.supports_reasoning ? 'reasoning' : null,
-    item.effective_capabilities?.preserve_thinking_control_format
-      ? `preserve:${item.effective_capabilities.preserve_thinking_control_format}`
-      : null,
-    item.effective_capabilities?.reasoning_output_format
-      ? `reasoning-out:${item.effective_capabilities.reasoning_output_format}`
-      : null,
-    item.effective_capabilities?.reasoning_streaming_format?.kind
-      ? `reasoning-stream:${item.effective_capabilities.reasoning_streaming_format.kind}`
-      : null,
-    item.effective_capabilities?.reasoning_replay_override
-      ? `replay:${item.effective_capabilities.reasoning_replay_override}`
-      : null,
-    item.effective_capabilities?.task
-      ? `task:${item.effective_capabilities.task}`
-      : null,
-    item.effective_capabilities?.supports_system_prompt ? 'system-prompt' : null,
-    item.effective_capabilities?.supports_prompt_caching
-      ? `prompt-cache${typeof item.effective_capabilities.prompt_cache_alignment === 'number'
-        ? `@${item.effective_capabilities.prompt_cache_alignment}`
-        : ''}`
-      : null,
-    item.effective_capabilities?.supports_caching ? 'cache' : null,
-    item.effective_capabilities?.supports_seed_with_images ? 'seed+images' : null,
-    item.effective_capabilities?.supports_computer_use ? 'computer-use' : null,
-    item.effective_capabilities?.supports_code_execution ? 'code-exec' : null,
-    item.effective_capabilities?.emits_usage_tokens ? 'usage' : null,
-    item.effective_capabilities?.supported_models && item.effective_capabilities.supported_models.length > 0
-      ? `models:${item.effective_capabilities.supported_models.length}`
-      : null,
-  ].filter((value): value is string => Boolean(value))
-  return parts.length > 0 ? parts.join(' · ') : null
+function RuntimeCatalogDiagnostics({ facts }: { facts: readonly RuntimeCatalogFact[] }) {
+  if (facts.length === 0) return null
+  return html`
+    <details class="set-rt-facts" data-testid="runtime-catalog-diagnostics">
+      <summary>Diagnostics <span class="mono">${facts.length}</span></summary>
+      <div class="set-rt-facts-body">
+        ${facts.map(fact => html`
+          <div
+            key=${fact.id}
+            class="set-rt-fact"
+            data-testid=${`runtime-catalog-fact-${fact.id}`}
+          >
+            <span class="set-rt-fact-k">${fact.label}:</span>
+            <span class="set-rt-fact-v mono" title=${fact.value}>${fact.value}</span>
+          </div>
+        `)}
+      </div>
+    </details>
+  `
 }
 
 function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
@@ -479,6 +467,14 @@ function RuntimeCatalogCard({
   const parameterPolicy = runtimeCatalogParameterPolicy(item)
   const requestConfig = runtimeCatalogRequestConfig(item)
   const declaredSpec = runtimeCatalogDeclaredSpec(item)
+  const snapshotFacts = runtimeCatalogSnapshotFacts(item)
+  const diagnosticFacts = [
+    snapshotFacts ? { id: 'snapshot', label: 'snapshot', value: snapshotFacts } : null,
+    effectiveCapabilities ? { id: 'effective', label: 'effective', value: effectiveCapabilities } : null,
+    parameterPolicy ? { id: 'policy', label: 'policy', value: parameterPolicy } : null,
+    requestConfig ? { id: 'request', label: 'request', value: requestConfig } : null,
+    declaredSpec ? { id: 'declared', label: 'declared', value: declaredSpec } : null,
+  ].filter((fact): fact is RuntimeCatalogFact => fact !== null)
 
   return html`
     <div class="set-rt" data-testid="runtime-catalog-card">
@@ -490,11 +486,11 @@ function RuntimeCatalogCard({
       </div>
       <div class="set-rt-row">
         <span class="sub-k">provider</span>
-        <span class="mono">${providerName}</span>
+        <span class="mono set-rt-value" title=${providerName}>${providerName}</span>
       </div>
       <div class="set-rt-row">
         <span class="sub-k">model</span>
-        <span class="mono">${modelName}</span>
+        <span class="mono set-rt-value" title=${modelName}>${modelName}</span>
       </div>
       <div class="set-rt-row">
         <span class="sub-k">context</span>
@@ -504,22 +500,11 @@ function RuntimeCatalogCard({
         <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
         <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
         <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
-        ${effectiveCapabilities
-          ? html`<span class="rt-cap tcf mono" title=${effectiveCapabilities}>${effectiveCapabilities}</span>`
-          : null}
-        ${parameterPolicy
-          ? html`<span class="rt-cap tcf mono" title=${parameterPolicy}>${parameterPolicy}</span>`
-          : null}
-        ${requestConfig
-          ? html`<span class="rt-cap tcf mono" title=${requestConfig}>${requestConfig}</span>`
-          : null}
-        ${declaredSpec
-          ? html`<span class="rt-cap tcf mono" title=${declaredSpec}>declared:${declaredSpec}</span>`
-          : null}
       </div>
+      <${RuntimeCatalogDiagnostics} facts=${diagnosticFacts} />
       <div class="set-rt-row">
         <span class="sub-k">transport</span>
-        <span class="mono set-runtime-transport">${transport}</span>
+        <span class="mono set-rt-value set-runtime-transport" title=${transport}>${transport}</span>
       </div>
     </div>
   `
@@ -833,7 +818,7 @@ function settingsSectionState(
   if (section === 'repositories') return { mode: 'live', label: 'repositories API live-backed' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
   if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
-  if (section === 'display') return { mode: 'live', label: 'theme/density live' }
+  if (section === 'display') return { mode: 'local', label: 'browser-local shell state' }
   return { mode: 'local', label: 'read-only preview' }
 }
 
@@ -968,6 +953,19 @@ export function SettingsSurface() {
   function openSection(id: SectionId) {
     setSec(id)
     navigate('settings', id === DEFAULT_SETTINGS_SECTION ? {} : { section: id })
+  }
+
+  function handleExportHtmlSnapshot() {
+    const htmlContent = document.documentElement.outerHTML
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `MASC_Dashboard_snapshot.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   // Server config projection — used by Paths, MCP and Notifications.
@@ -1281,6 +1279,7 @@ export function SettingsSurface() {
             data-preview-locked="false"
             data-settings-mode=${sectionState.mode}
           >
+            <${SettingsControlLedger} section=${sec} />
             ${sec === 'mcp' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 현재 대시보드가 사용하는 HTTP MCP 서버 상태와 public MCP 도구 노출 목록입니다. 도구 노출은 서버 capability registry가 SSOT입니다.
@@ -1658,6 +1657,17 @@ export function SettingsSurface() {
                   <span class="mono">read-only</span>
                   <span class="set-truth-source">no writer</span>
                 </div>
+              <//>
+
+              <${SetRow} label="HTML 스냅샷 내보내기" hint="현재 렌더링된 DOM을 HTML 파일로 저장하여 다운로드합니다.">
+                <button
+                  type="button"
+                  class="cn-act act"
+                  style=${{ background: 'var(--color-brand)', color: 'var(--volt-ink)', fontWeight: '600' }}
+                  onClick=${handleExportHtmlSnapshot}
+                >
+                  내보내기 ⤓
+                </button>
               <//>
             `}
           </div>

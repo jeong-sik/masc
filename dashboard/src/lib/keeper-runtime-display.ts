@@ -34,6 +34,11 @@ interface KeeperModelDisplay {
   value: string
 }
 
+interface KeeperRuntimeDisplay {
+  label: string
+  value: string
+}
+
 export interface KeeperPauseDisplay {
   reason: string
   nextAction: string | null
@@ -50,6 +55,13 @@ type KeeperModelDisplaySource = {
   model?: string | null
   primary_model?: string | null
   metrics_series?: Array<{ model_used?: string | null } | null> | null
+}
+
+type KeeperRuntimeDisplaySource = {
+  runtime_id?: string | null
+  runtime_ref?: { group?: string | null; item?: string | null } | null
+  runtime_canonical?: string | null
+  selected_runtime_canonical?: string | null
 }
 
 type KeeperActivityDisplaySource = {
@@ -94,6 +106,24 @@ export function keeperDisplayModel(
   _source: KeeperModelDisplaySource | null | undefined,
 ): KeeperModelDisplay | null {
   return null
+}
+
+export function keeperDisplayRuntime(
+  source: KeeperRuntimeDisplaySource | null | undefined,
+): KeeperRuntimeDisplay | null {
+  const canonical = firstNonEmptyString(
+    source?.runtime_canonical,
+    source?.selected_runtime_canonical,
+  )
+  if (canonical) return { label: 'Runtime', value: canonical }
+
+  const runtimeId = trimmed(source?.runtime_id)
+  if (runtimeId) return { label: 'Runtime', value: runtimeId }
+
+  const group = trimmed(source?.runtime_ref?.group)
+  if (!group) return null
+  const item = trimmed(source?.runtime_ref?.item)
+  return { label: 'Runtime', value: item ? `${group}.${item}` : group }
 }
 
 function timestampCandidate(

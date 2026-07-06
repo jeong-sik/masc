@@ -195,8 +195,14 @@ jobs:
 
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BASE_REF}" --depth=200
-            base_ref="origin/${GITHUB_BASE_REF}"
             head_ref="${GITHUB_HEAD_SHA}"
+            base_branch_ref="origin/${GITHUB_BASE_REF}"
+            if ! merge_base="$(git merge-base "${base_branch_ref}" "${head_ref}")"; then
+              echo "::warning::Unable to resolve PR merge-base at depth=200; deepening ${GITHUB_BASE_REF} history"
+              bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BASE_REF}" --deepen=1000
+              merge_base="$(git merge-base "${base_branch_ref}" "${head_ref}")"
+            fi
+            base_ref="${merge_base}"
           elif [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
             base_ref="${GITHUB_BEFORE}"
           fi

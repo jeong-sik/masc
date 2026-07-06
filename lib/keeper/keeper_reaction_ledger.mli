@@ -17,12 +17,16 @@ type stimulus_kind =
   | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (** RFC-0290: generic background job completion wake *)
   | Schedule_signal  (** Schedule runner due/blocked signal wake. *)
-  | Connector_attention  (** RFC-connector-ambient-attention-wake wake. *)
+  | Schedule_due  (** Scheduled automation due wake for a specific keeper *)
+  | Connector_attention
+      (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (** HITL approval resolution wake — unblocks [Skip Approval_pending] *)
+  | Goal_verification_failed
+      (** Goal verification rejection wake — resumes assigned goal work. *)
 
 type reaction_kind =
   | Turn_started
-  | Stimulus_consumed  (** Event queue stimulus was acknowledged after a turn completed. *)
+  | Event_queue_ack
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -75,6 +79,25 @@ val record_event_queue_reaction_result :
   Keeper_event_queue.stimulus ->
   (unit, string) result
 (** Result-returning variant of {!record_event_queue_reaction}. *)
+
+type event_queue_reaction_evidence =
+  { keeper_name : string
+  ; stimulus_id : string
+  ; stimulus_seen : bool
+  ; turn_started_seen : bool
+  ; event_queue_ack_seen : bool
+  ; stimulus_recorded_at : float option
+  ; turn_started_recorded_at : float option
+  ; event_queue_ack_recorded_at : float option
+  ; latest_recorded_at : float option
+  ; matched_record_count : int
+  }
+
+val event_queue_reaction_evidence :
+  base_path:string -> keeper_name:string -> stimulus_id:string -> event_queue_reaction_evidence
+(** Stream the durable reaction ledger for exact rows sharing [stimulus_id].
+    This intentionally does not use a "recent rows" limit, because dashboards
+    use it to prove a specific queue stimulus was observed by the keeper. *)
 
 val record_board_cursor_ack :
   base_path:string ->

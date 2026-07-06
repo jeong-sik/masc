@@ -576,6 +576,67 @@ module KeeperVisibilityGate = struct
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_VISIBILITY_GATE"
 end
 
+(** {1 Keeper turn admission policy} *)
+
+module KeeperTurnAdmission = struct
+  (** Maximum chat requests allowed to park behind one keeper's admitted turn.
+      Default preserves the previous per-keeper cap. Runtime operators may raise
+      it for high-fan-in dashboard/connector deployments through
+      [turn.chat_waiting_cap] in runtime.toml or the env var below. Floored at
+      1 because [run_serialized] counts the caller before acquiring the slot.
+
+      Env: [MASC_KEEPER_TURN_CHAT_WAITING_CAP].
+      @category Concurrency @ops_class operator *)
+  let max_waiting_chat_requests =
+    max 1 (get_int ~default:8 "MASC_KEEPER_TURN_CHAT_WAITING_CAP")
+  ;;
+end
+
+(** {1 Keeper health policy} *)
+
+module KeeperHealth = struct
+  (** Durable event-queue backlog age threshold for fleet health degradation.
+      The durable queue remains fully reported regardless of this value; this
+      policy only decides when backlog should flip [/health?full=1] from
+      informational to operator-actionable. Default [0.0] preserves the
+      existing behavior where any durable backlog is immediately visible as
+      degraded. Operators may raise it to avoid treating fresh, expected queue
+      handoff as degraded.
+
+      Env: [MASC_KEEPER_DURABLE_QUEUE_STALE_SEC].
+      @category Telemetry @ops_class operator *)
+  let durable_queue_stale_sec () =
+    get_float_nonneg ~default:0.0 "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
+  ;;
+end
+
+(** {1 Keeper proactive scheduler policy} *)
+
+module KeeperProactivePolicy = struct
+  (** Maximum exponent used by no-op cooldown backoff:
+      [base_cooldown * (1 lsl min consecutive_noop_count value)].
+      Default [2] preserves the previous maximum 4x cooldown. Range [0, 8]
+      keeps the policy bounded while allowing operators to disable or relax
+      no-op backoff.
+
+      Env: [MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT].
+      @category Timeouts @ops_class operator *)
+  let noop_backoff_max_shift =
+    min 8 (get_int_nonneg ~default:2 "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT")
+  ;;
+
+  (** Maximum idle-decay periods applied after a keeper has been idle longer
+      than its effective proactive base cooldown. Default [4] preserves the
+      previous floor-reaching behavior. Range [0, 16] prevents an accidental
+      hot loop while still making the policy explicit.
+
+      Env: [MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS].
+      @category Timeouts @ops_class operator *)
+  let idle_decay_max_periods =
+    min 16 (get_int_nonneg ~default:4 "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS")
+  ;;
+end
+
 (** {1 Keeper Keepalive Loop Constants} *)
 
 module KeeperKeepalive = struct

@@ -64,7 +64,13 @@ val ack_consumed :
 (** Acknowledge consumed stimuli after a keepalive turn completes. Until this
     runs, a restart reloads the leased stimuli for at-least-once replay. A
     successful acknowledgement also appends a reaction-ledger
-    [Stimulus_consumed] receipt for each consumed stimulus. *)
+    [Event_queue_ack] receipt for each consumed stimulus. *)
+
+val ack_consumed_result :
+  base_path:string -> string -> Keeper_event_queue.stimulus list -> (unit, string) result
+(** Result-returning variant of {!ack_consumed}. Callers that publish follow-on
+    evidence must use this so they do not claim an acknowledgement after durable
+    queue persistence failed. *)
 
 val drop_by_post_id :
   base_path:string

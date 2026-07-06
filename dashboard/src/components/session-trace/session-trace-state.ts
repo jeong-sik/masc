@@ -89,6 +89,9 @@ export interface TraceSummary {
   total_cost_usd: number
   oas_input_tokens: number
   oas_output_tokens: number
+  oas_cache_creation_tokens: number
+  oas_cache_read_tokens: number
+  oas_cache_miss_input_tokens: number
   oas_llm_call_count: number
   oas_error_count: number
   oas_tokens_saved: number
@@ -208,6 +211,14 @@ export function getStatusCounts(agent: string): Record<TraceStatus | 'all', numb
   return { all: success + failure + gate_rejected, success, failure, gate_rejected }
 }
 
+function detailNumber(detail: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const value = detail[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return null
+}
+
 export function getTraceSummary(agent: string): TraceSummary {
   const events = getTraceEvents(agent)
   let tool_call_count = 0
@@ -223,6 +234,9 @@ export function getTraceSummary(agent: string): TraceSummary {
   let total_cost_usd = 0
   let oas_input_tokens = 0
   let oas_output_tokens = 0
+  let oas_cache_creation_tokens = 0
+  let oas_cache_read_tokens = 0
+  let oas_cache_miss_input_tokens = 0
   let oas_llm_call_count = 0
   let oas_error_count = 0
   let oas_tokens_saved = 0
@@ -262,10 +276,30 @@ export function getTraceSummary(agent: string): TraceSummary {
         lifecycle_count++
         total_cost_usd += e.cost_usd ?? 0
         {
-          const inTok = e.detail.input_tokens
-          const outTok = e.detail.output_tokens
-          if (typeof inTok === 'number') oas_input_tokens += inTok
-          if (typeof outTok === 'number') oas_output_tokens += outTok
+          const inTok = detailNumber(e.detail, 'input_tokens')
+          const outTok = detailNumber(e.detail, 'output_tokens')
+          const cacheCreation = detailNumber(
+            e.detail,
+            'cache_creation_tokens',
+            'cache_creation_input_tokens',
+          )
+          const cacheRead = detailNumber(
+            e.detail,
+            'cache_read_tokens',
+            'cache_read_input_tokens',
+          )
+          const cacheMiss =
+            detailNumber(e.detail, 'cache_miss_input_tokens')
+            ?? (
+              inTok != null && (cacheCreation != null || cacheRead != null)
+                ? Math.max(0, inTok - (cacheCreation ?? 0) - (cacheRead ?? 0))
+                : null
+            )
+          if (inTok != null) oas_input_tokens += inTok
+          if (outTok != null) oas_output_tokens += outTok
+          if (cacheCreation != null) oas_cache_creation_tokens += cacheCreation
+          if (cacheRead != null) oas_cache_read_tokens += cacheRead
+          if (cacheMiss != null) oas_cache_miss_input_tokens += cacheMiss
           const durableKind = e.detail.durable_kind
           if (durableKind === 'llm_request') oas_llm_call_count++
           if (durableKind === 'error_occurred') oas_error_count++
@@ -291,6 +325,9 @@ export function getTraceSummary(agent: string): TraceSummary {
     total_cost_usd,
     oas_input_tokens,
     oas_output_tokens,
+    oas_cache_creation_tokens,
+    oas_cache_read_tokens,
+    oas_cache_miss_input_tokens,
     oas_llm_call_count,
     oas_error_count,
     oas_tokens_saved,

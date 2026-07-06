@@ -25,7 +25,7 @@
  (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
  (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
  (depends
-  (ocaml (>= 5.4))
+  (ocaml (>= 5.5))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —
   ; declaring it again here makes the generated .opam emit
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).
@@ -55,14 +55,11 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.17 (oas#2463). Beyond the earlier baseline it adds
-  ;; the exact Uri.host ollama classifier (oas#2458), wire-capture I/O on a
-  ;; background fiber (oas#2456) with Eio.Mutex protection (oas#2460),
-  ;; output_schema wire serialization pinned for ollama+anthropic (oas#2459),
-  ;; kimi sampling/k2 thinking-dialect alignment (oas#2461/#2465), and removal
-  ;; of a stream-idle assert-false control path (oas#2462). Exact pin sha lives
+  ;; Pinned to OAS v0.208.19 (oas#2474). Beyond v0.208.18 (oas#2468) it adds
+  ;; the reasoning replay token-waste fix (oas#2470, released via oas#2473).
+  ;; Exact pin sha lives
   ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.208.17))
+  (agent_sdk (>= 0.208.19))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

@@ -1,14 +1,14 @@
 (** task-1743 — typed "metric unevaluated" state for the goal panel.
 
-    A goal's [metric] is stored but never evaluated: the convergence
-    evaluator (Convergence.check_convergence) has no caller, so the metric
-    is only ever declared. The dashboard attainment projection derives its
-    percentages from linked task completion, not from the metric, yet
-    labels them "metric_target_*" — presenting task progress as a metric
-    result. These tests pin the additive typed [metric_evaluation] field
-    that keeps the two apart: a declared metric is "unevaluated" regardless
-    of how the task-derived attainment looks, and that is distinct from a
-    goal with no metric ("absent"). *)
+    A goal's [metric] is stored but never evaluated: task convergence may be
+    checked, but no metric measurement source turns the declared metric into an
+    observed value. The dashboard attainment projection derives its percentages
+    from linked task completion, not from the metric, yet labels them
+    "metric_target_*" — presenting task progress as a metric result. These
+    tests pin the additive typed [metric_evaluation] field that keeps the two
+    apart: a declared metric is "unevaluated" regardless of how the
+    task-derived attainment looks, and that is distinct from a goal with no
+    metric ("absent"). *)
 
 open Alcotest
 open Masc
@@ -37,6 +37,7 @@ let make_goal ?metric ?target_value id title =
 
 module A = Dashboard_goals_types_attainment
 module Acc = Dashboard_goals_types_accessor
+module Timeline = Dashboard_goals_types_timeline
 module MD = Masc_domain
 
 let json_str j key = Yojson.Safe.Util.(j |> member key |> to_string)
@@ -85,6 +86,19 @@ let make_node ?(tasks = []) goal : Acc.tree_node =
     activity_observation = "none";
     stagnation_status = "fresh";
   }
+
+let make_keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ ("name", `String name)
+        ; ("agent_name", `String ("agent-" ^ name))
+        ; ("trace_id", `String ("trace-" ^ name))
+        ; ("goal", `String "goal timeline test")
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("make_keeper_meta: " ^ err)
 
 (* (a) A goal that declares a metric is exposed as typed "unevaluated". *)
 let test_declared_metric_is_unevaluated () =
@@ -167,6 +181,33 @@ let test_unevaluated_metric_does_not_enable_completion_ready () =
   check string "task-derived attainment is not completion-ready" "in_progress"
     (json_str json "state")
 
+let test_keeper_receipt_timeline_missing_runtime_stays_missing () =
+  let goal = make_goal "g7" "timeline" in
+  let meta = make_keeper_meta "timeline-keeper" in
+  let receipt =
+    `Assoc
+      [ ("outcome", `String "ok")
+      ; ("ended_at", `String "2026-07-06T02:00:00Z")
+      ]
+  in
+  let detail =
+    Acc.
+      { meta
+      ; latest_receipt = Some receipt
+      ; runtime_trust = `Assoc []
+      }
+  in
+  let events = Timeline.build_goal_timeline (make_node goal) [ detail ] [] [] in
+  let receipt_event =
+    List.find
+      (fun event -> String.equal (json_str event "kind") "keeper_receipt")
+      events
+  in
+  check string
+    "receipt without runtime does not borrow configured runtime"
+    "ok · <missing receipt.runtime.name>"
+    (json_str receipt_event "summary")
+
 let () =
   run "goal metric unevaluated"
     [
@@ -182,5 +223,7 @@ let () =
           test_case "absent metric in json" `Quick test_absent_metric_in_json;
           test_case "unevaluated metric does not enable completion ready" `Quick
             test_unevaluated_metric_does_not_enable_completion_ready;
+          test_case "receipt timeline does not fabricate runtime" `Quick
+            test_keeper_receipt_timeline_missing_runtime_stays_missing;
         ] );
     ]

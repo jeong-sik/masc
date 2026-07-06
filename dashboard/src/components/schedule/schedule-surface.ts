@@ -8,6 +8,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { DashboardToolsResponse, DashboardScheduledAutomation } from '../../api'
+import { ConnectionStatus } from '../dashboard-shell'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { KeeperWaitingInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
@@ -130,7 +131,7 @@ export function ScheduleSurface() {
   return html`
     <main class="ov ov-2col sch-surf" data-screen-label="예약" data-testid="schedule-surface">
       <div class="ov-scroll">
-        <header class="ov-head">
+        <header class="ov-head" style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <span class="ov-eyebrow">Schedule</span>
             <h1>예약 · 자동화 큐</h1>
@@ -151,6 +152,7 @@ export function ScheduleSurface() {
                 `
               : null}
           </div>
+          <${ConnectionStatus} />
         </header>
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}

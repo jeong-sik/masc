@@ -265,6 +265,78 @@ describe('GoalTree', () => {
       .toContain('requested completion')
   })
 
+  it('does not render unevaluated metric completion pct as goal progress truth', async () => {
+    const goal = {
+      ...makeGoal('goal-unevaluated', 'Unevaluated metric goal'),
+      metric: '신규 3축 갭 해소 PR 수',
+      target_value: '6',
+      task_count: 15,
+      task_done_count: 5,
+      attainment: {
+        state: 'in_progress',
+        basis: 'metric_target_count',
+        metric: '신규 3축 갭 해소 PR 수',
+        metric_evaluation: 'unevaluated',
+        target_value: '6',
+        target_parse_status: 'parseable',
+        unit: 'count',
+        observed_value: 5,
+        target_numeric: 6,
+        attainment_pct: 83,
+        task_done_count: 5,
+        task_count: 15,
+        note: 'Derived from completed linked tasks against a count target.',
+      },
+      completion_summary: {
+        state: 'in_progress',
+        pct: 83,
+        pct_source: 'attainment',
+        attainment_state: 'in_progress',
+        attainment_basis: 'metric_target_count',
+        metric_evaluation: 'unevaluated',
+        task_total: 15,
+        task_done: 5,
+        task_open: 9,
+        is_complete: false,
+        is_terminal: false,
+        ready_to_request_completion: false,
+        gate: 'none',
+        requires_verifier: false,
+        requires_completion_approval: false,
+        active_verification_request: false,
+        blocking_source: 'goal_linkage',
+        blocking_reason: 'Linked tasks exist, but no keeper is assigned or linked.',
+      },
+    } satisfies GoalTreeNode
+    const treePayload: DashboardGoalsTreeResponse = {
+      tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1, total_tasks: 15, done_tasks: 5 },
+    }
+    const detailPayload: DashboardGoalDetailResponse = {
+      goal,
+      linked_tasks: [],
+      linked_keepers: [],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(treePayload)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
+
+    const { container } = render(html`<${GoalTree} />`)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id'))
+        .toBe('goal-unevaluated')
+    })
+    const completion = container.querySelector('[data-goal-completion-summary]') as HTMLElement | null
+    expect(completion).not.toBeNull()
+    expect(completion?.textContent).toContain('metric unevaluated')
+    expect(completion?.textContent).not.toContain('83%')
+    expect(completion?.querySelector('[data-goal-completion-metric-evaluation="unevaluated"]'))
+      .not.toBeNull()
+  })
+
   it('renders a loading indicator while the goal tree is refreshing', async () => {
     const goal = makeGoal('goal-loading', 'Loading goal')
     const treePayload: DashboardGoalsTreeResponse = {

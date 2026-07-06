@@ -154,6 +154,7 @@ export interface IdeRunProgressGoal {
 
 export interface IdeActivityPanelProps {
   readonly activeFile?: string | null
+  readonly repoId?: string | null
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly pollMs?: number
@@ -196,9 +197,9 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
   }
 }
 
-async function fetchActivityEvents(): Promise<ActivityFetchResult> {
+async function fetchActivityEvents(repoId?: string | null): Promise<ActivityFetchResult> {
   const graph = await fetchActivityGraphEvents()
-  const bridgeEvents = await fetchIdeBridgeRunActivityEvents(graph.workspaceId)
+  const bridgeEvents = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId)
   return {
     ...graph,
     events: mergeRunActivityEvents(graph.events, bridgeEvents),
@@ -222,9 +223,10 @@ async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
 
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
+  repoId?: string | null,
 ): Promise<ReadonlyArray<RunActivityEvent>> {
   try {
-    const events = await fetchIdeEvents({ limit: 50 })
+    const events = await fetchIdeEvents({ limit: 50, repoId })
     return events.map((event, index) => mapIdeBridgeEvent(event, workspaceId, index))
   } catch {
     return EMPTY_ACTIVITY
@@ -422,6 +424,7 @@ function normalizedPollMs(value: number | undefined): number | null {
 export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
+    repoId = null,
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
     pollMs = 0,
@@ -446,7 +449,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok } = await fetchActivityEvents()
+      const { events, workspaceId, ok } = await fetchActivityEvents(repoId)
       if (cancelled) return
       if (ok) {
         store.reset(workspaceId)
@@ -472,7 +475,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       cancelled = true
       if (timer !== null) clearTimeout(timer)
     }
-  }, [store, refreshMs])
+  }, [store, refreshMs, repoId])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)

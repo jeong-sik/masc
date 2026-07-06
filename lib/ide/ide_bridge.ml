@@ -266,9 +266,13 @@ let cursor_matches_file file_path json =
      | None -> false)
 ;;
 
-let valid_focus_mode = function
-  | "reading" | "editing" | "reviewing" | "planning" -> true
-  | _ -> false
+let cursor_focus_mode_of_string = function
+  | ("reading" | "editing" | "reviewing" | "planning") as mode -> Some mode
+  | _ -> None
+;;
+
+let valid_focus_mode mode =
+  Option.is_some (cursor_focus_mode_of_string mode)
 ;;
 
 let cursor_is_valid json =
@@ -548,6 +552,15 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
          let base = Yojson.Safe.Util.member "base" descriptor_json |> Yojson.Safe.Util.to_string in
          let draft = Yojson.Safe.Util.member "draft" descriptor_json |> Yojson.Safe.Util.to_bool in
          Some (Ide_event_types.Gh_pr_create { title; base; draft })
+       | "gh_pr_search" ->
+         let query = Yojson.Safe.Util.member "query" descriptor_json |> Yojson.Safe.Util.to_string in
+         let state =
+           match Yojson.Safe.Util.member "state" descriptor_json with
+           | `String value -> Some value
+           | `Null -> None
+           | _ -> None
+         in
+         Some (Ide_event_types.Gh_pr_search { query; state })
        | "gh_pr_merge" ->
          let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
          let squash = Yojson.Safe.Util.member "squash" descriptor_json |> Yojson.Safe.Util.to_bool in
@@ -600,15 +613,7 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
   with _ -> None
 
 let cursor_file_path_of_input input =
-  let non_empty = function
-    | Some s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-    | None -> None
-  in
-  match non_empty (string_field "file_path" input) with
-  | Some _ as path -> path
-  | None -> non_empty (string_field "path" input)
+  Tool_input_path.tool_input_file_path input
 ;;
 
 let cursor_line_of_input input =
@@ -726,7 +731,12 @@ let ingest_cursor_event
     ?focus_mode
     ~source
     ()
+    : (unit, string) result
   =
+  (* The explicit return annotation pins the branches to [result]: this file
+     [open Ide_event_types], whose [exit_semantics] also has an [Error of
+     string] constructor, so a bare [Error msg] arm would otherwise infer
+     [exit_semantics] and reject the sibling [Ok ()]. *)
   (* DEFER (task-1733): this is the human-IDE direct path (server_ide_http.ml
      POST /api/v1/ide/cursors). [partition] is accepted so the caller CAN scope
      the write, but the server call site does not yet resolve one from the
@@ -737,13 +747,15 @@ let ingest_cursor_event
   let column = Option.value column ~default:0 in
   let focus_mode =
     match focus_mode with
-    | None -> Some "editing"
-    | Some mode when valid_focus_mode mode -> Some mode
-    | Some _ -> None
+    | None -> Ok "editing"
+    | Some mode ->
+      (match cursor_focus_mode_of_string mode with
+       | Some mode -> Ok mode
+       | None -> Error "Invalid focus_mode")
   in
   match focus_mode with
-  | None -> ()
-  | Some focus_mode ->
+  | Error msg -> Error msg
+  | Ok focus_mode ->
     let timestamp_ms = now_ms () in
     let json =
       cursor_event_json
@@ -758,11 +770,14 @@ let ingest_cursor_event
         ~turn_id:""
         ()
     in
-    (try append_cursor ~base_dir:base_path ~partition json
+    (try
+       append_cursor ~base_dir:base_path ~partition json;
+       Ok ()
      with exn ->
        Printf.eprintf
          "Ide_bridge.ingest_cursor_event error: %s\n%!"
-         (Printexc.to_string exn))
+         (Printexc.to_string exn);
+       Error "Failed to persist cursor event")
 ;;
 ;;
 
@@ -781,14 +796,7 @@ let ingest_tool_event_from_hook
     ~output_text
     ~(input : Yojson.Safe.t)
   =
-  let file_path =
-    match Yojson.Safe.Util.member "path" input with
-    | `String p -> Some p
-    | _ ->
-      match Yojson.Safe.Util.member "file_path" input with
-      | `String p -> Some p
-      | _ -> None
-  in
+  let file_path = Tool_input_path.tool_input_file_path input in
   let summary =
     if String.length output_text > 200 then String.sub output_text 0 200
     else output_text
@@ -972,7 +980,7 @@ let ingest_pr_event_from_descriptor
         ~pr_state:"open" ~repo ~keeper_id ~turn_id
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
+    | Some (Ide_event_types.Gh_pr_search _ | Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
     | None -> ()
 
 (** Ingest PR creation/update events from descriptor-backed tool output.
@@ -1047,12 +1055,21 @@ let install_agent_observation_sinks () =
           ~timestamp_ms:event.timestamp_ms));
   Agent_observation.register_write_region_sink
     (fun (event : Agent_observation.write_region_event) ->
-      Ide_region_tracker.ingest_tool_call
-        ~base_dir:event.base_path
-        ~partition:event.partition
-        ~keeper_id:event.keeper_id
-        ~turn:event.turn
-        event.tool_call_json);
+      try
+        Ide_region_tracker.ingest_tool_call
+          ~base_dir:event.base_path
+          ~partition:event.partition
+          ~keeper_id:event.keeper_id
+          ~turn:event.turn
+          event.tool_call_json;
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Printf.eprintf
+          "Ide_bridge.ingest_write_region_event error: %s\n%!"
+          (Printexc.to_string exn);
+        Error Agent_observation.Write_region_sink_failed);
   Agent_observation.register_annotation_sink
     (fun ({ base_path
            ; partition

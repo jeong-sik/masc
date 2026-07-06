@@ -51,6 +51,9 @@ let qwen_model =
   ; max_thinking_budget = None
   ; streaming = true
   ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
   ; capabilities = None
   ; match_prefixes = []
   }
@@ -66,7 +69,7 @@ let runpod_binding =
   ; num_ctx = None
   }
 
-let runtime_toml_with_credentials ?(provider_extra = "") credentials =
+let runtime_toml_with_credentials ?(provider_extra = "") ?(model_extra = "") credentials =
   Printf.sprintf
     {|
 [runtime]
@@ -85,6 +88,7 @@ endpoint = "https://example-runpod.proxy.runpod.net/v1"
 api-name = "qwen"
 max-context = 160000
 tools-support = true
+%s
 
 [runpod_mtp.qwen]
 is-default = true
@@ -92,6 +96,7 @@ max-concurrent = 4
 |}
     provider_extra
     credentials
+    model_extra
 
 let check_parse_error errors expected_path expected_message =
   let matches =
@@ -166,6 +171,47 @@ let test_runtime_toml_threads_provider_connect_timeout () =
      | providers, bindings ->
        failf "expected one provider/binding, got %d/%d"
          (List.length providers)
+         (List.length bindings))
+
+let test_runtime_toml_threads_model_sampling_config () =
+  let content =
+    runtime_toml_with_credentials
+      ~model_extra:{|top-p = 0.91
+top-k = 42
+min-p = 0.07
+|}
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML model sampling config to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models, cfg.bindings with
+     | [ model ], [ binding ] ->
+       check (option (float 0.0001)) "model top_p" (Some 0.91)
+         model.Runtime_schema.top_p;
+       check (option int) "model top_k" (Some 42) model.Runtime_schema.top_k;
+       check (option (float 0.0001)) "model min_p" (Some 0.07)
+         model.Runtime_schema.min_p;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check (option (float 0.0001)) "provider config top_p" (Some 0.91)
+            provider_cfg.top_p;
+          check (option int) "provider config top_k" (Some 42)
+            provider_cfg.top_k;
+          check (option (float 0.0001)) "provider config min_p" (Some 0.07)
+            provider_cfg.min_p)
+     | models, bindings ->
+       failf "expected one model/binding, got %d/%d"
+         (List.length models)
          (List.length bindings))
 
 let test_runtime_toml_rejects_non_positive_provider_connect_timeout () =
@@ -389,12 +435,12 @@ streaming = true
 let incompatible_messages_http_toml =
   {|
 [runtime]
-default = "openai.model"
+default = "deepseek.model"
 
-[providers.openai]
-display-name = "OpenAI over wrong protocol"
+[providers.deepseek]
+display-name = "DeepSeek over wrong protocol"
 protocol = "messages-http"
-endpoint = "https://api.openai.example/v1/messages"
+endpoint = "https://api.deepseek.com/v1/messages"
 
 [models.model]
 api-name = "model"
@@ -402,7 +448,7 @@ max-context = 8192
 tools-support = true
 streaming = true
 
-[openai.model]
+[deepseek.model]
 |}
 
 let test_runtime_adapter_rejects_unregistered_messages_http () =
@@ -456,8 +502,8 @@ let test_runtime_adapter_rejects_incompatible_messages_http_kind () =
             bool
             "error names provider"
             true
-            (String_util.contains_substring msg "openai"))
-     | bindings -> failf "expected one OpenAI binding, got %d" (List.length bindings))
+            (String_util.contains_substring msg "deepseek"))
+     | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings))
 
 let deepseek_runtime_toml =
   {|
@@ -1141,6 +1187,84 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
   check int "resume adds fresh per-call turn budget" 31
     prepared.agent_config.max_turns
 
+let test_runtime_agent_context_preserves_provider_sampling_config () =
+  let provider_cfg =
+    { (provider_cfg ()) with
+      Llm_provider.Provider_config.top_p = Some 0.91
+    ; top_k = Some 42
+    ; min_p = Some 0.07
+    }
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg
+      ~system_prompt:""
+      ~tools:[]
+  in
+  check (option (float 0.0001)) "config top_p" (Some 0.91) config.top_p;
+  check (option int) "config top_k" (Some 42) config.top_k;
+  check (option (float 0.0001)) "config min_p" (Some 0.07) config.min_p;
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder_without_approval
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_sdk.Builder.build_safe builder with
+      | Error err -> fail (Agent_sdk.Error.to_string err)
+      | Ok agent ->
+        let agent_config = (Agent_sdk.Agent.state agent).config in
+        check (option (float 0.0001)) "builder top_p" (Some 0.91)
+          agent_config.top_p;
+        check (option int) "builder top_k" (Some 42) agent_config.top_k;
+        check (option (float 0.0001)) "builder min_p" (Some 0.07)
+          agent_config.min_p;
+        Eio.Switch.on_release sw (fun () ->
+          Agent_sdk.Agent.close agent)));
+  let checkpoint =
+    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "oas-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count = 3
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = Some 0.12
+    ; top_k = Some 7
+    ; min_p = Some 0.02
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.default_config.response_format
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; context = Agent_sdk.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  check (option (float 0.0001)) "resume checkpoint top_p" (Some 0.91)
+    prepared.patched_checkpoint.top_p;
+  check (option int) "resume checkpoint top_k" (Some 42)
+    prepared.patched_checkpoint.top_k;
+  check (option (float 0.0001)) "resume checkpoint min_p" (Some 0.07)
+    prepared.patched_checkpoint.min_p;
+  check (option (float 0.0001)) "resume agent top_p" (Some 0.91)
+    prepared.agent_config.top_p;
+  check (option int) "resume agent top_k" (Some 42)
+    prepared.agent_config.top_k;
+  check (option (float 0.0001)) "resume agent min_p" (Some 0.07)
+    prepared.agent_config.min_p
+
 let test_runtime_agent_context_preserves_unbounded_resume_budget () =
   let config =
     Runtime_agent.default_config
@@ -1386,6 +1510,10 @@ let () =
             `Quick
             test_runtime_toml_threads_provider_connect_timeout
         ; test_case
+            "runtime TOML threads model sampling config"
+            `Quick
+            test_runtime_toml_threads_model_sampling_config
+        ; test_case
             "runtime TOML rejects non-positive provider connect timeout"
             `Quick
             test_runtime_toml_rejects_non_positive_provider_connect_timeout
@@ -1461,6 +1589,10 @@ let () =
             "runtime agent context uses configured turn budget"
             `Quick
             test_runtime_agent_context_uses_configured_turn_budget
+        ; test_case
+            "runtime agent context preserves provider sampling config"
+            `Quick
+            test_runtime_agent_context_preserves_provider_sampling_config
         ; test_case
             "runtime agent context preserves unbounded resume budget"
             `Quick

@@ -9,6 +9,7 @@ import {
   logEntryToSysRow,
   logRowStatus,
   normalizeSettingsSection,
+  settingsControlInventory,
 } from './settings-surface'
 import type {
   ConfigEntry,
@@ -20,6 +21,7 @@ import type {
   RuntimeDefaultsResponse,
 } from '../api/dashboard'
 import { DashboardMain } from './dashboard-shell'
+import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
 import { connected } from '../sse'
 import { tweaksDensity } from './tweaks-panel'
@@ -491,7 +493,14 @@ describe('SettingsSurface', () => {
     render(html`<${SettingsSurface} />`, container)
 
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
-      .toContain('theme/density live')
+      .toContain('browser-local shell state')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+    expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
+      .toContain('browser shell only')
+    expect(container.querySelector('[data-control-id="settings-theme-density"]')?.getAttribute('data-control-kind'))
+      .toBe('browser-local')
+    expect(container.querySelector('[data-control-id="settings-display-locale"]')?.getAttribute('data-control-kind'))
+      .toBe('unsupported')
     expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
       .toContain('spacious')
 
@@ -522,6 +531,51 @@ describe('SettingsSurface', () => {
     expect(tweaksDensity.value).toBe('compact')
     expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
       .toContain('compact')
+  })
+
+  it('exports display HTML as a DOM snapshot without standalone resource claims', async () => {
+    route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:masc-dashboard-snapshot')
+    const revokeObjectURL = vi.fn()
+    class TestURL extends URL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = revokeObjectURL
+    }
+    vi.stubGlobal('URL', TestURL)
+    const originalClick = HTMLAnchorElement.prototype.click
+    let clickedAnchor: HTMLAnchorElement | null = null
+    HTMLAnchorElement.prototype.click = function clickSnapshotDownload() {
+      clickedAnchor = this
+    }
+
+    try {
+      render(html`<${SettingsSurface} />`, container)
+
+      await waitFor(() => {
+        expect(container.textContent).toContain('HTML 스냅샷 내보내기')
+      })
+      expect(container.textContent).toContain('현재 렌더링된 DOM을 HTML 파일로 저장하여 다운로드합니다')
+      expect(container.textContent).not.toContain('Standalone HTML')
+      expect(container.textContent).not.toContain('모든 리소스')
+
+      const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find(candidate => candidate.textContent?.includes('내보내기'))
+      expect(button).toBeTruthy()
+
+      await fireEvent.click(button as HTMLButtonElement)
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      const blob = createObjectURL.mock.calls[0]?.[0] as Blob | undefined
+      expect(blob?.type).toBe('text/html;charset=utf-8')
+      await expect(blob?.text()).resolves.toContain('HTML 스냅샷 내보내기')
+      const anchor = clickedAnchor as HTMLAnchorElement | null
+      expect(anchor?.href).toBe('blob:masc-dashboard-snapshot')
+      expect(anchor?.download).toBe('MASC_Dashboard_snapshot.html')
+      expect(document.body.contains(clickedAnchor)).toBe(false)
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:masc-dashboard-snapshot')
+    } finally {
+      HTMLAnchorElement.prototype.click = originalClick
+    }
   })
 
   it('falls invalid settings sections back to runtime without a fake subsection', () => {
@@ -682,6 +736,10 @@ describe('SettingsSurface', () => {
       expect(container.textContent).toContain('70%')
       expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
       expect(container.querySelector('[data-testid="notify-routing-readonly"]')?.textContent).toContain('no writer')
+      expect(container.querySelector('[data-control-id="settings-notify-thresholds"]')?.getAttribute('data-control-kind'))
+        .toBe('live-read')
+      expect(container.querySelector('[data-control-id="settings-notify-routing"]')?.getAttribute('data-control-kind'))
+        .toBe('unsupported')
     })
 
     expect(container.querySelector('[data-testid="notify-local-summary"]')).toBeNull()
@@ -782,6 +840,36 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders({
       providers: [
         makeRuntimeProvider({
+          model_count: 2,
+          models: ['m1', 'm1-fallback'],
+          temperature: 0.7,
+          capabilities_declared: true,
+          max_output_tokens: 4096,
+          supports_tool_choice: true,
+          supports_required_tool_choice: true,
+          supports_named_tool_choice: true,
+          supports_parallel_tool_calls: true,
+          supports_extended_thinking: true,
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+          supports_reasoning_budget: true,
+          supports_response_format_json: true,
+          supports_structured_output: true,
+          supports_native_streaming: true,
+          supports_system_prompt: true,
+          supports_caching: true,
+          supports_prompt_caching: true,
+          prompt_cache_alignment: 1024,
+          supports_top_k: true,
+          supports_min_p: true,
+          supports_seed: true,
+          supports_seed_with_images: true,
+          emits_usage_tokens: true,
+          supports_computer_use: true,
+          supports_code_execution: true,
+          note: 'verified by runtime discovery',
           parameter_policy: {
             reasoning_toggle_wire: 'chat-template-kwargs',
             reasoning_replay_policy: 'preserve-always',
@@ -826,8 +914,12 @@ describe('SettingsSurface', () => {
           },
           effective_capabilities: {
             source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
             max_output_tokens: 4096,
+            supports_tools: true,
             supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
@@ -835,7 +927,10 @@ describe('SettingsSurface', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
-            accepted_reasoning_efforts: null,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
+            thinking_control_format: 'reasoning-effort',
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -843,6 +938,7 @@ describe('SettingsSurface', () => {
               field: 'reasoning_content',
             },
             reasoning_replay_override: 'preserve-always',
+            supports_native_streaming: true,
             supports_system_prompt: true,
             supports_caching: true,
             supports_prompt_caching: true,
@@ -851,8 +947,13 @@ describe('SettingsSurface', () => {
             supports_min_p: true,
             supports_seed: true,
             supports_seed_with_images: true,
+            ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
             supports_code_execution: true,
             emits_usage_tokens: true,
+            supports_multimodal_inputs: true,
+            supports_image_input: true,
+            supports_audio_input: true,
+            supports_video_input: false,
             modality_priority: 'visual-first',
             task: 'transcription',
             supported_models: ['m1'],
@@ -961,18 +1062,52 @@ describe('SettingsSurface', () => {
         expect.stringContaining('Provider B'),
       ])
       expect(cards[0]?.textContent).toContain('wire:chat-template-kwargs')
+      expect(cards[0]?.textContent).toContain('snapshot:source:runtime.toml')
+      expect(cards[0]?.querySelector('[data-testid="runtime-catalog-diagnostics"]')).not.toBeNull()
+      expect((cards[0]?.querySelector('[data-testid="runtime-catalog-diagnostics"]') as HTMLDetailsElement | null)?.open)
+        .toBe(false)
+      expect(cards[0]?.querySelectorAll('.rt-cap.tcf').length).toBe(0)
+      expect(cards[0]?.querySelector('[data-testid="runtime-catalog-fact-snapshot"]')?.textContent)
+        .toContain('source:runtime.toml')
+      expect(cards[0]?.querySelector('[data-testid="runtime-catalog-fact-request"]')?.textContent)
+        .toContain('path:/chat/completions')
+      expect(cards[0]?.textContent).toContain('models:2')
+      expect(cards[0]?.textContent).toContain('ctx:128000')
+      expect(cards[0]?.textContent).toContain('out:4096')
+      expect(cards[0]?.textContent).toContain('model-temp:0.7')
+      expect(cards[0]?.textContent).toContain('caps:declared')
+      expect(cards[0]?.textContent).toContain('format:json,schema')
+      expect(cards[0]?.textContent).toContain('sampling:top_k,min_p,seed')
+      expect(cards[0]?.textContent).toContain('audio:on')
+      expect(cards[0]?.textContent).toContain('video:off')
+      expect(cards[0]?.textContent).toContain(
+        'controls:tool-choice,required,named,parallel,extended-thinking,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      )
+      expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
+      expect(cards[0]?.textContent).toContain('source:oas-provider-config')
+      expect(cards[0]?.textContent).toContain('path:/chat/completions')
+      expect(cards[0]?.textContent).toContain('system-prompt')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
+      expect(cards[0]?.textContent).toContain('source:oas-provider-config-model · ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
+      expect(cards[0]?.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
+      expect(cards[0]?.textContent).toContain('input:multimodal,image,audio')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
+      expect(cards[0]?.textContent).toContain('extended-thinking')
+      expect(cards[0]?.textContent).toContain('reasoning-budget')
+      expect(cards[0]?.textContent).toContain('effort:low,medium,high')
+      expect(cards[0]?.textContent).toContain('wire:reasoning-effort')
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
-      expect(cards[0]?.textContent).toContain('task:transcription')
+      expect(cards[0]?.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
+      expect(cards[0]?.textContent).toContain('task:transcription · native-stream')
       expect(cards[0]?.textContent).toContain('declared:api:chat-completions')
+      expect(cards[0]?.textContent).toContain('transport:http')
       expect(cards[0]?.textContent).toContain('headers:1')
       expect(cards[0]?.textContent).toContain('temp:0.65')
       expect(cards[0]?.textContent).toContain('budget:8192')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+        'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
       )
       expect(cards[0]?.textContent).toContain('behavior:inline-tools,keeper-bridge')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')
@@ -1044,6 +1179,10 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
+      expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
+        .toContain('PATCH /api/v1/runtime/routing')
+      expect(container.querySelector('[data-control-id="runtime-routing-lanes"]')?.getAttribute('data-control-kind'))
+        .toBe('live-write')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
         .toContain('수동 reroute')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
@@ -1365,6 +1504,39 @@ describe('SettingsSurface shell route', () => {
 })
 
 describe('settings read-surface helpers', () => {
+  it('settingsControlInventory covers every settings route section with unique ids', () => {
+    const items = SETTINGS_ROUTE_SECTION_IDS.flatMap(section => settingsControlInventory(section))
+    const ids = new Set<string>()
+
+    for (const section of SETTINGS_ROUTE_SECTION_IDS) {
+      expect(settingsControlInventory(section).length).toBeGreaterThan(0)
+    }
+    for (const item of items) {
+      expect(ids.has(item.id)).toBe(false)
+      ids.add(item.id)
+    }
+  })
+
+  it('settingsControlInventory classifies browser-local and unsupported controls explicitly', () => {
+    const displayKinds = settingsControlInventory('display').map(item => [item.id, item.kind])
+    expect(displayKinds).toContainEqual(['settings-theme-density', 'browser-local'])
+    expect(displayKinds).toContainEqual(['settings-display-locale', 'unsupported'])
+
+    const notifyKinds = settingsControlInventory('notify').map(item => [item.id, item.kind])
+    expect(notifyKinds).toContainEqual(['settings-notify-thresholds', 'live-read'])
+    expect(notifyKinds).toContainEqual(['settings-notify-routing', 'unsupported'])
+  })
+
+  it('settingsControlInventory records runtime routing writers as live-backed actions', () => {
+    const routing = settingsControlInventory('routing')
+    expect(routing.map(item => item.id)).toEqual([
+      'runtime-routing-lanes',
+      'runtime-media-failover',
+    ])
+    expect(routing.every(item => item.kind === 'live-write')).toBe(true)
+    expect(routing.map(item => item.action).join('\n')).toContain('/api/v1/runtime/routing')
+  })
+
   it('mcpExposedToolNames keeps only public_mcp tools, sorted', () => {
     const names = mcpExposedToolNames([
       makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),

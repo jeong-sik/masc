@@ -1080,12 +1080,7 @@ let run_turn
           ~ttfrc_ms
           ~sampling:
             { temperature = Some temperature
-            ; top_p = None
-              (* TODO: top_p is not yet threaded through Keeper_run_context /
-                 Keeper_turn_driver / Runtime_agent_context. The dashboard
-                 previously fabricated 0.95; we now render absence until the
-                 runtime pipeline exposes the effective value. See PR
-                 description for adversarial gap analysis. *)
+            ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
             ; max_tokens =
                 (match pre_dispatch_max_tokens_error with
                  | None -> Some max_tokens

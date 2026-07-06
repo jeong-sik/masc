@@ -69,6 +69,7 @@ type t =
   | GenerationLineageFailures
   | KeepaliveSignalFailures
   | BoardSignalNoWakeTotal
+  | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
   | ToolsOasFailures
   | ToolsOasDeterministicFailures
@@ -233,6 +234,7 @@ type t =
   | KeeperToolCallRetryLoop
   | AttemptWatchdogFired
   | ShellIrEffectTotal
+  | ToolExecutePrActionTotal
   | KeeperRepoMappingDefaultScopeAllowed
   | KeeperRepoMappingDeniedUnregistered
   | KeeperRepoMappingDeniedNotInMapping

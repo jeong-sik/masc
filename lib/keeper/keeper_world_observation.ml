@@ -30,8 +30,27 @@ type observation_provenance =
          id); defaults to the quarantine side — see {!should_quarantine} *)
 [@@deriving show, eq]
 
+type board_reaction_event =
+  { target_type : Board.reaction_target_type
+  ; target_id : string
+  ; user_id : string
+  ; emoji : string
+  ; reacted : bool
+  }
+
+type pending_board_event_kind =
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed of board_reaction_event
+  | Fusion_completed
+  | Bg_completed
+  | Schedule_due
+  | External_attention
+  | Goal_verification_failed
+
 type pending_board_event =
-  { post_id : string
+  { event_kind : pending_board_event_kind
+  ; post_id : string
   ; author : string
   ; title : string
   ; preview : string
@@ -123,6 +142,7 @@ type event_queue_trigger =
   Keeper_world_observation_turn_types.event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Scheduled_automation_stimulus
   | Connector_attention_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
@@ -400,6 +420,26 @@ let read_scheduled_automation_observation ~(config : Workspace.config) ?keeper_n
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
 
+let board_reaction_event_of_dispatch
+      (reaction : Board_dispatch.board_reaction_change)
+  : board_reaction_event
+  =
+  { target_type = reaction.target_type
+  ; target_id = reaction.target_id
+  ; user_id = reaction.user_id
+  ; emoji = reaction.emoji
+  ; reacted = reaction.reacted
+  }
+;;
+
+let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
+  match signal.kind with
+  | Board_dispatch.Board_post_created -> Board_post_created
+  | Board_dispatch.Board_comment_added -> Board_comment_added
+  | Board_dispatch.Board_reaction_changed reaction ->
+    Board_reaction_changed (board_reaction_event_of_dispatch reaction)
+;;
+
 let pending_board_event_of_board_signal
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -433,6 +473,7 @@ let pending_board_event_of_board_signal
       , Board.Human_post
       , arrived_at )
   in
+  let event_kind = pending_board_event_kind_of_signal signal in
   let ( self_commented
       , new_external_since
       , latest_external_author
@@ -458,8 +499,14 @@ let pending_board_event_of_board_signal
          , Some (short_preview ~max_len:60 signal.content)
          , None )
        | `Comment_read_error error -> false, 0, None, None, Some error)
+    | Board_dispatch.Board_reaction_changed _ ->
+      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+       | `Never -> false, 0, None, None, None
+       | `No_new_external | `New_external _ -> true, 0, None, None, None
+       | `Comment_read_error error -> false, 0, None, None, Some error)
   in
-  { post_id = signal.post_id
+  { event_kind
+  ; post_id = signal.post_id
   ; author = signal.author
   ; title
   ; preview
@@ -508,7 +555,8 @@ let pending_board_event_of_fusion_completion
     then Printf.sprintf "Fusion deliberation complete (run %s)" fc.run_id
     else Printf.sprintf "Fusion deliberation failed (run %s)" fc.run_id
   in
-  { post_id
+  { event_kind = Fusion_completed
+  ; post_id
   ; author = meta.name
   ; title
   ; preview = short_preview ~max_len:fusion_result_preview_max_len fc.resolved_answer
@@ -553,7 +601,8 @@ let pending_board_event_of_bg_job_completion
     | Keeper_event_queue.Bg_failed _ ->
       Printf.sprintf "Background %s failed (run %s)" kind c.bg_run_id
   in
-  { post_id
+  { event_kind = Bg_completed
+  ; post_id
   ; author = meta.name
   ; title
   ; preview =
@@ -572,6 +621,38 @@ let pending_board_event_of_bg_job_completion
   ; post_read_error = None
   ; comment_read_error = None
   ; provenance = provenance_of ~self_ids Board.System_post ~author:meta.name
+  }
+;;
+
+let scheduled_automation_actor = "scheduled_automation"
+
+let pending_board_event_of_scheduled_wake
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (sw : Keeper_event_queue.scheduled_wake)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let title =
+    match sw.title with
+    | Some title -> title
+    | None -> Printf.sprintf "Scheduled keeper wake due (schedule %s)" sw.schedule_id
+  in
+  { event_kind = Schedule_due
+  ; post_id = Keeper_event_queue.schedule_due_post_id sw
+  ; author = scheduled_automation_actor
+  ; title
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len sw.message
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author:scheduled_automation_actor
   }
 ;;
 
@@ -601,7 +682,8 @@ let pending_board_event_of_external_attention
     | Keeper_external_attention.System ->
       false, []
   in
-  { post_id = "connector-attention:" ^ item.event_id
+  { event_kind = External_attention
+  ; post_id = "connector-attention:" ^ item.event_id
   ; author = actor
   ; title =
       Printf.sprintf
@@ -625,6 +707,69 @@ let pending_board_event_of_external_attention
   }
 ;;
 
+let goal_verification_failure_author =
+  Tool_name.Goal_name.to_string Tool_name.Goal_name.Goal_verify
+;;
+
+let goal_verification_failure_preview
+      (failure : Keeper_event_queue.goal_verification_failure)
+  =
+  let metric_line =
+    match failure.metric, failure.target_value with
+    | Some metric, Some target ->
+      Printf.sprintf " metric=%s target=%s" metric target
+    | Some metric, None -> Printf.sprintf " metric=%s" metric
+    | None, Some target -> Printf.sprintf " target=%s" target
+    | None, None -> ""
+  in
+  let note_line =
+    match failure.note with
+    | Some note when String.trim note <> "" -> " note=" ^ note
+    | Some _ | None -> ""
+  in
+  let evidence_line =
+    match failure.evidence_refs with
+    | [] -> ""
+    | refs -> " evidence_refs=" ^ String.concat "," refs
+  in
+  Printf.sprintf
+    "Goal verification rejected by %s; goal returned to phase=%s.%s%s%s"
+    failure.rejected_by
+    failure.phase
+    metric_line
+    note_line
+    evidence_line
+;;
+
+let pending_board_event_of_goal_verification_failure
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (failure : Keeper_event_queue.goal_verification_failure)
+  : pending_board_event
+  =
+  let author = goal_verification_failure_author in
+  let self_ids = self_ids meta in
+  { event_kind = Goal_verification_failed
+  ; post_id = Keeper_event_queue.goal_verification_failure_post_id failure
+  ; author
+  ; title = Printf.sprintf "Goal verification failed: %s" failure.goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (goal_verification_failure_preview failure)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some failure.rejected_by
+  ; latest_external_preview = failure.note
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -644,6 +789,14 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bg_completed c ->
     Some
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
+  | Keeper_event_queue.Schedule_due sw ->
+    Some (pending_board_event_of_scheduled_wake ~meta ~arrived_at:stimulus.arrived_at sw)
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    Some
+      (pending_board_event_of_goal_verification_failure
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         failure)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
   | Keeper_event_queue.Schedule_signal _
@@ -744,7 +897,8 @@ let collect_board_events_with_cursor_policy
              consume_posts
                
                (Some next_cursor)
-               ({ post_id
+               ({ event_kind = Board_post_created
+                ; post_id
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
                 ; preview = short_preview ~max_len:80 p.content
@@ -818,7 +972,8 @@ let collect_board_events_with_cursor_policy
              consume_posts
                
                (Some next_cursor)
-               ({ post_id
+               ({ event_kind = Board_post_created
+                ; post_id
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
                 ; preview = short_preview ~max_len:80 p.content
@@ -1148,12 +1303,14 @@ let effective_scheduled_autonomous_cooldown
   : int
   =
   (* Noop backoff: consecutive observation-only cycles multiply the base
-     cooldown by 2^min(n, 2), capping at 4x (see [noop_multiplier] below: the
-     shift is [min consecutive_noop_count 2], i.e. 1, 2, 4). This prevents
-     token waste when the keeper repeatedly reads board_list without acting. *)
+     cooldown by [2^shift], where [shift] is a named runtime policy. This
+     prevents token waste when the keeper repeatedly reads board_list without
+     acting, without burying the cap as a local heuristic. *)
+  let noop_backoff_max_shift = Keeper_config.keeper_proactive_noop_backoff_max_shift () in
   let noop_multiplier =
-    if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 2
-    (* 1, 2, 4 *)
+    if consecutive_noop_count <= 0
+    then 1
+    else 1 lsl min consecutive_noop_count noop_backoff_max_shift
   in
   let effective_base = base_cooldown * noop_multiplier in
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
@@ -1164,7 +1321,9 @@ let effective_scheduled_autonomous_cooldown
   then effective_base
   else (
     let decay_periods = (since_last - effective_base) / max 1 effective_base in
-    let capped_periods = min decay_periods 4 in
+    let capped_periods =
+      min decay_periods (Keeper_config.keeper_proactive_idle_decay_max_periods ())
+    in
     let factor = 1.0 /. Float.pow 2.0 (float_of_int capped_periods) in
     max floor (int_of_float (Float.round (float_of_int effective_base *. factor))))
 ;;

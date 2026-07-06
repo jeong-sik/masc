@@ -36,11 +36,20 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
     && s.task_completed_count === 0
     && s.oas_input_tokens === 0
     && s.oas_output_tokens === 0
+    && s.oas_cache_creation_tokens === 0
+    && s.oas_cache_read_tokens === 0
+    && s.oas_cache_miss_input_tokens === 0
     && s.oas_llm_call_count === 0
     && s.oas_error_count === 0
   ) return null
 
   const items: string[] = []
+  const cacheSeenTokens =
+    s.oas_cache_read_tokens + s.oas_cache_miss_input_tokens
+  const cacheHitPct =
+    cacheSeenTokens > 0
+      ? Math.round((s.oas_cache_read_tokens / cacheSeenTokens) * 100)
+      : null
   if (s.tool_call_count > 0) items.push(`도구 ${s.tool_call_count}회`)
   if (s.oas_tool_count > 0) items.push(`OAS 도구 ${s.oas_tool_count}회`)
   if (s.oas_turn_count > 0) items.push(`OAS 턴 ${s.oas_turn_count}건`)
@@ -49,6 +58,10 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   if (s.oas_input_tokens > 0 || s.oas_output_tokens > 0) {
     items.push(`OAS 토큰 ${s.oas_input_tokens}→${s.oas_output_tokens}`)
   }
+  if (s.oas_cache_read_tokens > 0) items.push(`캐시 read ${s.oas_cache_read_tokens}tok`)
+  if (s.oas_cache_creation_tokens > 0) items.push(`캐시 write ${s.oas_cache_creation_tokens}tok`)
+  if (s.oas_cache_miss_input_tokens > 0) items.push(`캐시 miss ${s.oas_cache_miss_input_tokens}tok`)
+  if (cacheHitPct != null) items.push(`캐시 hit ${cacheHitPct}%`)
   if (s.oas_llm_call_count > 0) items.push(`LLM 호출 ${s.oas_llm_call_count}회`)
   if (s.oas_error_count > 0) items.push(`OAS 에러 ${s.oas_error_count}건`)
   if (s.task_completed_count > 0) items.push(`완료 ${s.task_completed_count}건`)

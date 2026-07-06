@@ -247,6 +247,95 @@
   border-style: dashed;
 }
 
+.set-control-ledger {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-well);
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+
+.set-control-ledger-h {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-mid);
+  display: flex;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  justify-content: space-between;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+
+.set-control-ledger-grid {
+  display: grid;
+  gap: 0;
+}
+
+.set-control-ledger-row {
+  align-items: start;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(88px, 0.7fr) minmax(140px, 1fr) minmax(180px, 1.25fr) minmax(180px, 1.25fr);
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.set-control-ledger-row:first-child {
+  border-top: 0;
+}
+
+.set-control-kind {
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  display: inline-flex;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  justify-content: center;
+  line-height: 1.2;
+  padding: 3px 6px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.set-control-ledger-row.live-write .set-control-kind {
+  border-color: color-mix(in oklab, var(--status-ok) 45%, transparent);
+  color: var(--status-ok);
+}
+
+.set-control-ledger-row.browser-local .set-control-kind {
+  border-color: color-mix(in oklab, var(--status-warn) 45%, transparent);
+  color: var(--status-warn);
+}
+
+.set-control-ledger-row.unsupported .set-control-kind {
+  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
+  color: var(--status-fail);
+}
+
+.set-control-label {
+  color: var(--text-primary);
+  font-size: var(--fs-12);
+  min-width: 0;
+}
+
+.set-control-source,
+.set-control-action {
+  color: var(--text-dim);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .set-control-ledger-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-surf .set-card-b {
   padding: 8px 28px 40px;
   max-width: 760px;
@@ -615,21 +704,32 @@
   padding: 12px 14px;
   margin-top: 10px;
   background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .set-rt-top {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 10px;
+  min-width: 0;
 }
 
 .set-rt-name {
+  flex: 1 1 150px;
   font-size: var(--fs-13);
+  line-height: 1.35;
   color: var(--text-bright);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .set-rt-kind {
+  flex: none;
   font-family: var(--font-ui);
   font-size: 9.5px;
   letter-spacing: 0.1em;
@@ -641,6 +741,7 @@
 }
 
 .set-rt-keepers {
+  flex: none;
   font-size: var(--fs-11);
   color: var(--text-dim);
 }
@@ -653,15 +754,95 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 6px;
+  min-width: 0;
 }
 
 .set-rt-row .sub-k {
+  flex: none;
   min-width: 62px;
+}
+
+.set-rt-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .set-rt-row .set-input {
   flex: 1;
+}
+
+.settings-surf .set-rt .rt-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 0;
+  min-width: 0;
+}
+
+.settings-surf .set-rt .rt-cap {
+  flex: none;
+}
+
+.settings-surf .set-rt-facts {
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  min-width: 0;
+  padding-top: 7px;
+}
+
+.settings-surf .set-rt-facts > summary {
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  letter-spacing: 0.04em;
+  list-style-position: inside;
+  text-transform: uppercase;
+}
+
+.settings-surf .set-rt-facts > summary .mono {
+  color: var(--info);
+  margin-left: 4px;
+}
+
+.settings-surf .set-rt-facts-body {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+  min-width: 0;
+}
+
+.settings-surf .set-rt-fact {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.settings-surf .set-rt-fact-k {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  line-height: 1.45;
+  text-transform: uppercase;
+}
+
+.settings-surf .set-rt-fact-v {
+  color: var(--info);
+  line-height: 1.45;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-surf .set-rt-facts[open] .set-rt-fact-v {
+  overflow-wrap: anywhere;
+  text-overflow: initial;
+  white-space: normal;
 }
 
 .set-rt-launch {
@@ -1178,6 +1359,12 @@
   background: var(--volt-wash);
 }
 
+.set-fusion-composition {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 /* fusion settings editor rows — classes referenced by fusion-settings-panel.ts
    (set-fusion-editor / set-line) but never defined, which left label+control
    rendered inline. Mirrors .set-row / .set-input tokens. */
@@ -1190,8 +1377,15 @@
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
   padding: 12px 0;
   border-top: 1px solid var(--border-soft);
+}
+
+.set-line-stack {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .set-line:first-child {
@@ -1206,7 +1400,8 @@
 }
 
 .set-line > input[type='text'],
-.set-line > input[type='number'] {
+.set-line > input[type='number'],
+.set-line > select {
   flex: none;
   width: 230px;
   font-family: var(--font-mono);
@@ -1220,9 +1415,60 @@
 }
 
 .set-line > input[type='text']:focus,
-.set-line > input[type='number']:focus {
+.set-line > input[type='number']:focus,
+.set-line > select:focus {
   border-color: var(--volt-dim);
   box-shadow: 0 0 0 2px var(--volt-wash);
+}
+
+.set-fusion-runtime-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.set-fusion-runtime-chips {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.set-fusion-runtime-chip {
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.set-fusion-runtime-chip button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font-size: var(--fs-13);
+  justify-content: center;
+  padding: 0 2px;
+}
+
+.set-fusion-runtime-chip button:hover {
+  color: var(--status-fail);
+}
+
+.set-fusion-runtime-add {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .set-line > input[type='checkbox'] {

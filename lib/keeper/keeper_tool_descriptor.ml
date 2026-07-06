@@ -1528,7 +1528,7 @@ let internal_descriptors : t list =
       "keeper_voice_session_end"
       "End the current voice session."
       ~readonly:false
-    (* ── task / broadcast cluster (RFC-0179 PR-3, 9 tools) ────── *)
+    (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
   ; task_descriptor
       "list"
       "keeper_tasks_list"
@@ -1559,7 +1559,7 @@ let internal_descriptors : t list =
       "keeper_task_done"
       "Mark the claimed MASC task as done."
       ~readonly:false
-    (* ── board cluster (RFC-0179 PR-3, 14 tools) ──────────────── *)
+    (* ── board cluster (RFC-0179 PR-3, 15 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"
       "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get."
@@ -1719,10 +1719,7 @@ let internal_descriptors : t list =
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ [
-  (* ── RFC-0182 §3.1 — masc_keeper cluster (1 entry today) ──── *)
-  (* Other masc_keeper_ tools (status, msg, clear, compact,
-     sandbox lifecycle) use the keeper Eio context and are gated on
-     Phase 5 Eio plumbing scope. *)
+  (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor "list" "masc_keeper_list"
       "List configured keepers with optional detailed metadata." ~readonly:true
   ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"

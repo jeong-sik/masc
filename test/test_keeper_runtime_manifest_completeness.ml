@@ -61,15 +61,28 @@ let test_is_finished_turn () =
     [ manifest ~event:M.Turn_started
         ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
         ~links:(links ())
+    ; manifest ~event:M.Runtime_execution_built
+        ~decision:(clock_refs [ ("edge_id", `String "e2"); ("lane", `String "L1") ])
+        ~links:(links ())
     ; manifest ~event:M.Turn_finished
-        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
+        ~decision:(clock_refs [ ("edge_id", `String "e3"); ("lane", `String "L1") ])
         ~links:(links ())
     ]
   in
   Alcotest.(check bool) "turn with Turn_finished is finished" true
     (M.is_finished_turn manifests);
-  Alcotest.(check bool) "turn without Turn_finished is not finished" false
-    (M.is_finished_turn [ List.hd manifests ])
+  let pre_dispatch_ready =
+    [ manifest ~event:M.Turn_started
+        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
+        ~links:(links ())
+    ; manifest ~event:M.Runtime_execution_built
+        ~decision:(clock_refs [ ("edge_id", `String "e2"); ("lane", `String "L1") ])
+        ~links:(links ())
+    ]
+  in
+  Alcotest.(check bool)
+    "runtime execution built is not a terminal turn" false
+    (M.is_finished_turn pre_dispatch_ready)
 
 let test_is_complete_turn () =
   let finished_only =

@@ -4,7 +4,9 @@
     names the payload kinds MASC can understand, validates side-effecting
     creation requests, and returns typed views for production dispatch. *)
 
-type known_kind = Board_post
+type known_kind =
+  | Board_post
+  | Keeper_wake
 
 type support_status =
   | Supported

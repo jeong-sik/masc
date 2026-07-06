@@ -193,6 +193,8 @@ val keeper_proactive_min_cooldown_sec : unit -> int
 val keeper_proactive_min_interval_sec : unit -> int
 val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
+val keeper_proactive_noop_backoff_max_shift : unit -> int
+val keeper_proactive_idle_decay_max_periods : unit -> int
 
 val keeper_batch_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool

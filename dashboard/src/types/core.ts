@@ -145,6 +145,7 @@ export interface BoardContributorQuality {
   accountability_score?: number
   autonomy_level?: string
   thompson_confidence?: number
+  evidence_state?: 'default' | 'measured'
 }
 
 export interface BoardActorIdentity {
@@ -896,6 +897,48 @@ export type KeeperConversationStreamState =
   | 'finalizing'
   | null
 
+export type KeeperConversationStreamContractSource =
+  | 'keeper_chat_store'
+  | 'backend_stream_lifecycle'
+  | 'backend_turn_trace'
+  | 'rest_history'
+  | 'sse_event'
+  | 'queue_event'
+  | 'queue_poll'
+  | 'pending_request_store'
+  | 'client_local_send'
+  | 'client_reconciliation'
+
+export type KeeperConversationStreamContractStatus =
+  | 'backend_stream_event'
+  | 'backend_terminal_event'
+  | 'backend_lifecycle_replay'
+  | 'backend_trace_join'
+  | 'history_without_turn_ref'
+  | 'history_without_stream_events'
+  | 'queue_request_event'
+  | 'queue_poll_result'
+  | 'client_placeholder'
+  | 'client_reconciled_history'
+  | 'contract_gap'
+
+export type KeeperConversationStreamDeliveryReceipt =
+  | 'client_observed_sse_event'
+  | 'server_lifecycle_replay_only'
+  | 'no_delivery_receipt'
+
+export interface KeeperConversationStreamContract {
+  source: KeeperConversationStreamContractSource
+  status: KeeperConversationStreamContractStatus
+  eventName?: string | null
+  requestId?: string | null
+  turnRef?: string | null
+  traceEventCount?: number | null
+  lifecycleEvents?: string[] | null
+  deliveryReceipt?: KeeperConversationStreamDeliveryReceipt | null
+  reason?: string | null
+}
+
 export interface SurfaceRef {
   kind: 'dashboard' | 'discord' | 'slack' | 'github' | 'webhook' | 'agent' | 'gate' | string
   session_id?: string
@@ -927,6 +970,9 @@ export interface KeeperConversationEntry {
   turnRef?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  streamContract?: KeeperConversationStreamContract | null
+  queueSeq?: number | null
+  queueClientActionId?: string | null
   attachments?: KeeperConversationAttachment[]
   blocks?: ChatBlock[]
   traceSteps?: ChatTraceStep[]
@@ -1538,6 +1584,12 @@ interface KeeperConfigLimits {
   max_context_override_tokens: number | null
 }
 
+export interface KeeperConfigFieldPresence {
+  schema: string
+  producer: string
+  present_paths: string[]
+}
+
 export interface KeeperHookSlot {
   active: boolean
   source: string
@@ -1579,4 +1631,5 @@ export interface KeeperConfig {
   tools: KeeperConfigTools
   sources: KeeperConfigSources
   metrics: KeeperConfigMetrics
+  field_presence?: KeeperConfigFieldPresence
 }

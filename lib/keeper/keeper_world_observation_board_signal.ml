@@ -18,6 +18,23 @@ type comment_status =
   | `Comment_read_error of string
   ]
 
+let board_reaction_target_of_queue = function
+  | Keeper_event_queue.Reaction_post -> Board.Reaction_post
+  | Keeper_event_queue.Reaction_comment -> Board.Reaction_comment
+;;
+
+let board_reaction_change_of_queue
+      (reaction : Keeper_event_queue.board_reaction_change)
+  : Board_dispatch.board_reaction_change
+  =
+  { target_type = board_reaction_target_of_queue reaction.target_type
+  ; target_id = reaction.target_id
+  ; user_id = reaction.user_id
+  ; emoji = reaction.emoji
+  ; reacted = reaction.reacted
+  }
+;;
+
 (* RFC-0020: board signals are carried as a typed [Keeper_event_queue.board_stimulus]
    end-to-end. This total conversion rebuilds the [Board_dispatch.board_signal]
    the downstream matchers expect from the typed payload, taking the board post
@@ -31,7 +48,9 @@ let board_signal_of_board_stimulus
   { Board_dispatch.kind =
       (match bs.kind with
        | Keeper_event_queue.Post_created -> Board_dispatch.Board_post_created
-       | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added)
+       | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added
+       | Keeper_event_queue.Reaction_changed reaction ->
+         Board_dispatch.Board_reaction_changed (board_reaction_change_of_queue reaction))
   ; post_id
   ; author = bs.author
   ; title = bs.title
@@ -165,11 +184,12 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
     [string option] producer/consumer contract (RFC-0020): the matchers in
     {!wake_reason} are the only producers, so a reason no matcher emits — e.g.
     the previously dead ["board_activity"] generic bucket the consumer used to
-    match — is now unrepresentable rather than a string the consumer guesses at.
-    [None] stays an [option] at the call site: it means the deterministic
-    relevance pipeline examined the signal and found no reason for this keeper.
-    Relatedness/proactive wake requires an explicit LLM/Fusion judgment boundary;
-    local keyword scoring must not produce wake decisions. *)
+    match — is now unrepresentable rather than a string the consumer guesses
+    at. [None] stays an [option] at the call site: it means the structural
+    reactive pipeline examined the signal and found no deterministic address for
+    this keeper. Semantic relatedness is intentionally not represented here: it
+    requires an LLM/Judge attention boundary, not goal-keyword matching in the
+    board publish hook. *)
 type wake_reason =
   | Explicit_mention
       (** The signal mentions one of the keeper's identity targets. *)
@@ -178,11 +198,37 @@ type wake_reason =
   | Board_comment_read_error of string
       (** The comment stream could not be read, so the keeper is woken to observe
           the explicit failure instead of treating it as no prior participation. *)
+  | Reaction_after_self_activity
+      (** An external reaction landed on a post the keeper authored or a thread
+          the keeper had commented on. *)
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
   | Board_comment_read_error _ -> "board_comment_read_error"
+  | Reaction_after_self_activity -> "reaction_after_self_activity"
+;;
+
+let self_authored_post ~self_ids ~(post_id : string) =
+  match Board_dispatch.get_post ~post_id with
+  | Error _ -> false
+  | Ok post ->
+    Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string post.author)
+;;
+
+(* TEL-OK: pure wake predicate; board persistence and keeper wake execution own
+   telemetry at their action boundaries. *)
+let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_signal) =
+  match signal.kind with
+  | Board_dispatch.Board_reaction_changed _ ->
+    (not (Message_scope.is_self_author ~self_ids signal.author))
+    &&
+    (self_authored_post ~self_ids ~post_id:signal.post_id
+     ||
+     match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+     | `Never -> false
+     | `No_new_external | `New_external _ | `Comment_read_error _ -> true)
+  | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added -> false
 ;;
 
 let wake_reason
@@ -197,6 +243,14 @@ let wake_reason
   else (
     let self_ids = Message_scope.self_ids meta in
     match signal.kind with
+    | Board_dispatch.Board_reaction_changed _ ->
+      if self_authored_post ~self_ids ~post_id:signal.post_id
+      then Some Reaction_after_self_activity
+      else (
+        match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+        | `Comment_read_error error -> Some (Board_comment_read_error error)
+        | `No_new_external | `New_external _ -> Some Reaction_after_self_activity
+        | `Never -> None)
     | Board_dispatch.Board_comment_added ->
       (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
        | `New_external _ -> Some Thread_reply_after_self_comment

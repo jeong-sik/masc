@@ -13,6 +13,10 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
+let activity_result_json ~ok ~message =
+  `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
+;;
+
 let include_moderation_projection ~base_path request =
   match auth_token_from_request request with
   | None -> false
@@ -162,6 +166,258 @@ let board_karma_ledger_json req =
                `Assoc [ ("agent", `String agent_name); ("karma", `Int k) ])
              totals) );
     ]
+
+type board_context_inference_target_source =
+  | Explicit_target
+  | Post_author
+
+let board_context_inference_target_source_to_string = function
+  | Explicit_target -> "explicit_target"
+  | Post_author -> "post_author"
+
+type board_context_inference_request =
+  { post_id : string
+  ; target_keeper : string option
+  }
+
+let json_assoc_member key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let trimmed_json_string_member ~field json =
+  match json_assoc_member field json with
+  | None | Some `Null -> Ok None
+  | Some (`String value) ->
+      let value = String.trim value in
+      Ok (if value = "" then None else Some value)
+  | Some _ -> Error (Printf.sprintf "%s must be a string" field)
+
+let required_trimmed_json_string_member ~field json =
+  match trimmed_json_string_member ~field json with
+  | Ok (Some value) -> Ok value
+  | Ok None -> Error (Printf.sprintf "%s is required" field)
+  | Error _ as err -> err
+
+let parse_board_context_inference_request = function
+  | `Assoc _ as json -> (
+      match required_trimmed_json_string_member ~field:"post_id" json with
+      | Error msg -> Error msg
+      | Ok post_id -> (
+          match trimmed_json_string_member ~field:"target_keeper" json with
+          | Error msg -> Error msg
+          | Ok target_keeper -> Ok { post_id; target_keeper }))
+  | _ -> Error "request body must be a JSON object"
+
+let board_context_string_option_json = function
+  | Some value -> `String value
+  | None -> `Null
+
+let board_context_field key value =
+  `Assoc [ ("k", `String key); ("v", value) ]
+
+let board_context_comment_json (comment : Board.comment) =
+  `Assoc
+    [
+      ("id", `String (Board.Comment_id.to_string comment.id));
+      ("post_id", `String (Board.Post_id.to_string comment.post_id));
+      ( "parent_id",
+        board_context_string_option_json
+          (Option.map Board.Comment_id.to_string comment.parent_id) );
+      ("author", `String (Board.Agent_id.to_string comment.author));
+      ("content", `String comment.content);
+      ("created_at", `Float comment.created_at);
+    ]
+
+let board_context_inference_surface_context (post : Board.post) comments =
+  let post_id = Board.Post_id.to_string post.id in
+  let author = Board.Agent_id.to_string post.author in
+  `Assoc
+    [
+      ("label", `String "Board post context inference");
+      ("route", `String (Printf.sprintf "#board?post=%s" post_id));
+      ("scene", `String "board_post_context");
+      ( "fields",
+        `List
+          [
+            board_context_field "board_post_id" (`String post_id);
+            board_context_field "author" (`String author);
+            board_context_field "title" (`String post.title);
+            board_context_field "body" (`String post.body);
+            board_context_field "content" (`String post.content);
+            board_context_field "post_kind" (`String (Board.post_kind_to_string post.post_kind));
+            board_context_field "visibility" (`String (Board.visibility_to_string post.visibility));
+            board_context_field "hearth" (board_context_string_option_json post.hearth);
+            board_context_field "thread_id" (board_context_string_option_json post.thread_id);
+            board_context_field "reply_count" (`Int post.reply_count);
+            board_context_field "comment_count" (`Int (List.length comments));
+            board_context_field "comments" (`List (List.map board_context_comment_json comments));
+          ] );
+    ]
+
+let board_context_inference_message (post : Board.post) =
+  Printf.sprintf
+    "Infer the context of board post %s. Use the supplied board surface \
+     context and MASC tools as needed. Identify related work, missing context, \
+     and whether a follow-up action or board comment is warranted. Do not \
+     invent facts that are not present in board context, memory, or tools."
+    (Board.Post_id.to_string post.id)
+
+let resolve_board_context_inference_target ~config (post : Board.post) target_keeper =
+  let resolve source requested =
+    match Keeper_meta_store.read_meta_resolved config requested with
+    | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, source)
+    | Ok None ->
+        Error
+          (`Bad_request
+             (Printf.sprintf
+                "target_keeper %S is not a registered keeper"
+                requested))
+    | Error msg ->
+        Error
+          (`Internal_server_error
+             (Printf.sprintf
+                "failed to read keeper metadata for %S: %s"
+                requested
+                msg))
+  in
+  match target_keeper with
+  | Some requested -> resolve Explicit_target requested
+  | None ->
+      let author = Board.Agent_id.to_string post.author in
+      (match Keeper_meta_store.read_meta_resolved config author with
+       | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, Post_author)
+       | Ok None ->
+           Error
+             (`Bad_request
+                (Printf.sprintf
+                   "target_keeper is required because board post author %S is not a registered keeper"
+                   author))
+       | Error msg ->
+           Error
+             (`Internal_server_error
+                (Printf.sprintf
+                   "failed to read keeper metadata for board author %S: %s"
+                   author
+                   msg)))
+
+let non_empty_json_string_member field json =
+  match json_assoc_member field json with
+  | Some (`String value) ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | _ -> None
+
+let board_context_inference_submission_json ~post_id ~target_source tool_data =
+  match
+    ( non_empty_json_string_member "request_id" tool_data,
+      non_empty_json_string_member "keeper_name" tool_data,
+      non_empty_json_string_member "status" tool_data )
+  with
+  | Some request_id, Some keeper_name, Some status ->
+      let fields =
+        [
+          ("ok", `Bool true);
+          ("request_id", `String request_id);
+          ("keeper_name", `String keeper_name);
+          ("post_id", `String post_id);
+          ("status", `String status);
+          ( "target_source",
+            `String (board_context_inference_target_source_to_string target_source) );
+        ]
+      in
+      let fields =
+        match non_empty_json_string_member "message" tool_data with
+        | Some message -> fields @ [ ("message", `String message) ]
+        | None -> fields
+      in
+      Ok (`Assoc fields)
+  | _ -> Error "masc_keeper_msg returned a malformed queue submission"
+
+let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
+    ~target_source ~(post : Board.post) ~comments =
+  let config = Mcp_server.workspace_config state in
+  let agent_name = board_tool_agent_name_from_request request in
+  let keeper_ctx : _ Keeper_tool_surface.context =
+    {
+      config;
+      agent_name;
+      sw;
+      clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
+      net = state.Mcp_server.net;
+    }
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let args =
+    `Assoc
+      [
+        ("name", `String target_keeper);
+        ("message", `String (board_context_inference_message post));
+        ("direct_reply", `Bool true);
+        ( "surface_context",
+          board_context_inference_surface_context post comments );
+      ]
+  in
+  match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
+  | None -> Error (`Internal_server_error "masc_keeper_msg tool is unavailable")
+  | Some result ->
+      if Tool_result.is_success result
+      then
+        (match
+           board_context_inference_submission_json ~post_id ~target_source
+             (Tool_result.data result)
+         with
+         | Ok json -> Ok json
+         | Error msg -> Error (`Internal_server_error msg))
+      else Error (`Bad_request (Tool_result.message result))
+
+let respond_board_context_inference_error request reqd ~status ~message =
+  respond_json_value_with_cors ~status request reqd
+    (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
+
+let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error msg ->
+      respond_board_context_inference_error request reqd ~status:`Bad_request
+        ~message:("Invalid JSON: " ^ msg)
+  | parsed -> (
+      match parse_board_context_inference_request parsed with
+      | Error message ->
+          respond_board_context_inference_error request reqd ~status:`Bad_request
+            ~message
+      | Ok { post_id; target_keeper } -> (
+          match Board_dispatch.get_post_and_comments ~post_id () with
+          | Error err ->
+              respond_board_context_inference_error request reqd
+                ~status:`Bad_request
+                ~message:(Board_tool.board_error_to_string err)
+          | Ok (post, comments) -> (
+              let config = Mcp_server.workspace_config state in
+              match
+                resolve_board_context_inference_target ~config post target_keeper
+              with
+              | Error (`Bad_request message) ->
+                  respond_board_context_inference_error request reqd
+                    ~status:`Bad_request
+                    ~message
+              | Error (`Internal_server_error message) ->
+                  respond_board_context_inference_error request reqd
+                    ~status:`Internal_server_error
+                    ~message
+              | Ok (target_keeper, target_source) -> (
+                  match
+                    dispatch_board_context_inference ~state ~sw ~clock ~request
+                      ~target_keeper ~target_source ~post ~comments
+                  with
+                  | Ok json ->
+                      respond_json_value_with_cors ~status:`Accepted request reqd
+                        json
+                  | Error (`Bad_request message) ->
+                      respond_board_context_inference_error request reqd
+                        ~status:`Bad_request ~message
+                  | Error (`Internal_server_error message) ->
+                      respond_board_context_inference_error request reqd
+                        ~status:`Internal_server_error ~message))))
 
 let respond_board_json reqd json =
   Http.Response.json_value json reqd
@@ -394,6 +650,14 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/board/sub-boards" (fun _request reqd ->
        respond_board_json reqd (board_sub_boards_json ()))
 
+  |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg"
+         (fun state _req reqd ->
+         Http.Request.read_body_async reqd
+           (handle_board_context_inference_request ~state ~sw ~clock ~request
+              reqd))
+         request reqd)
+
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_sub_board_create"
          (fun _state _req reqd ->
@@ -555,8 +819,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -569,14 +832,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -591,8 +850,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -610,14 +868,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -632,8 +886,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -646,14 +899,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -670,8 +919,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc
-                        [ ("ok", `Bool false); ("message", `String msg) ])
+                     (activity_result_json ~ok:false ~message:msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -684,14 +932,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+               (activity_result_json ~ok ~message:msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("message", `String (Printexc.to_string exn));
-                  ])
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->

@@ -863,8 +863,9 @@ let append_memory_notes_from_reply_result
   (* [source] is the per-note provenance written to the memory-bank JSONL — a
      separate vocabulary from the turn-cascade [state_snapshot_source]. The
      turn-cascade source (when present) is rendered to its wire string and carries
-     its typed synthetic-ness; the internal fallback labels are never synthetic.
-     RFC-0242 §3.2: the candidate gate now receives the [is_synthetic] bit, not a
+     its typed synthetic-ness. The meta-goal fallback is also constructed rather
+     than model-authored, so it is marked synthetic before candidate selection.
+     RFC-0242 §3.2: the candidate gate receives the [is_synthetic] bit, not a
      string to re-classify. *)
   let (snapshot, source, is_synthetic) =
     match snapshot with
@@ -879,9 +880,10 @@ let append_memory_notes_from_reply_result
       (match parse_state_snapshot_from_reply reply with
     | Some s -> (s, "reply_state_block", false)
     | None ->
-        (* Deterministic fallback: use keeper meta fields as memory source.
-           This guarantees memory write regardless of LLM output format.
-           See RFC #3646 Section 3: Det/NonDet boundary principle. *)
+        (* Deterministic fallback: use keeper meta fields as a continuity
+           snapshot only. Because this snapshot is constructed rather than
+           model-authored, the candidate gate suppresses durable writes and
+           reports the suppression explicitly. *)
         ( {
             Keeper_memory_policy.priority = None;
             Keeper_memory_policy.goal =
@@ -894,12 +896,18 @@ let append_memory_notes_from_reply_result
             open_questions = [];
             constraints = [];
           },
-          "meta_goal_fallback", false ))
+          "meta_goal_fallback", true ))
   in
   let selection =
     memory_candidates_from_snapshot_gated ~is_synthetic snapshot
   in
   let notes = selection.selected in
+  if selection.suppressed_synthetic_candidates > 0 then
+    Log.Keeper.info
+      ~keeper_name:meta.name
+      "memory_candidates suppressed source=%s synthetic_candidates=%d"
+      source
+      selection.suppressed_synthetic_candidates;
   if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then
     Log.Keeper.warn
       ~keeper_name:meta.name

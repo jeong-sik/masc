@@ -129,7 +129,7 @@ let record_reaction_ledger_consumed ~base_path ~keeper_name stimulus =
     Keeper_reaction_ledger.record_event_queue_reaction_result
       ~base_path
       ~keeper_name
-      ~reaction_kind:Keeper_reaction_ledger.Stimulus_consumed
+      ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
       stimulus
   with
   | Ok () -> ()
@@ -144,13 +144,14 @@ let record_reaction_ledger_consumed ~base_path ~keeper_name stimulus =
 
 let replay_snapshot_contains queue stimulus = queue_contains queue stimulus
 
-let acknowledged_stimuli_from_replay_snapshot ~base_path ~keeper_name stimuli =
-  let replayable =
-    Keeper_event_queue_persistence.load ~base_path ~keeper_name
-  in
-  stimuli
-  |> List.filter (replay_snapshot_contains replayable)
-  |> Keeper_event_queue.uniq_stimuli
+let acknowledged_stimuli_from_replay_snapshot_result ~base_path ~keeper_name stimuli =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Error msg -> Error msg
+  | Ok replayable ->
+    Ok
+      (stimuli
+       |> List.filter (replay_snapshot_contains replayable)
+       |> Keeper_event_queue.uniq_stimuli)
 ;;
 
 let persist_live_queue_result ~base_path (entry : Keeper_registry.registry_entry) name =
@@ -330,20 +331,29 @@ let requeue_front ~base_path name stimuli =
       msg
 ;;
 
-let ack_consumed ~base_path name stimuli =
-  let acknowledged_stimuli =
-    acknowledged_stimuli_from_replay_snapshot ~base_path ~keeper_name:name stimuli
-  in
+let ack_consumed_result ~base_path name stimuli =
   match
-    Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
+    acknowledged_stimuli_from_replay_snapshot_result ~base_path ~keeper_name:name stimuli
   with
-  | Ok () ->
-    List.iter
-      (fun stimulus ->
-         record_reaction_ledger_consumed ~base_path ~keeper_name:name stimulus;
-         record_consume_metric ~keeper_name:name stimulus Consume_completed;
-         record_completed_delay_metric ~keeper_name:name stimulus)
-      acknowledged_stimuli
+  | Error msg -> Error msg
+  | Ok acknowledged_stimuli ->
+    (match
+       Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
+     with
+     | Error msg -> Error msg
+     | Ok () ->
+       List.iter
+         (fun stimulus ->
+            record_reaction_ledger_consumed ~base_path ~keeper_name:name stimulus;
+            record_consume_metric ~keeper_name:name stimulus Consume_completed;
+            record_completed_delay_metric ~keeper_name:name stimulus)
+         acknowledged_stimuli;
+       Ok ())
+;;
+
+let ack_consumed ~base_path name stimuli =
+  match ack_consumed_result ~base_path name stimuli with
+  | Ok () -> ()
   | Error msg ->
     Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
 ;;

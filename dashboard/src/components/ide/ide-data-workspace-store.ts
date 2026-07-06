@@ -1,12 +1,14 @@
 import { signal, effect } from '@preact/signals'
 import { activeIdeFile } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
+import { route } from '../../router'
 import { selectedTask } from '../goals/task-detail-selection'
 import {
   discoverRepositories,
   fetchRepositoriesList,
   type Repository,
 } from '../../api/repositories'
+import { extractApiError } from '../../api/core'
 import {
   fetchWorkspaceFile,
   fetchWorkspaceChildren,
@@ -35,11 +37,15 @@ import {
   type IdeAnnotation,
 } from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
+import { isAbortError } from '../../lib/async-state'
+import { isDiffEditorView, viewFromRoute } from './ide-view-route'
 
 export interface IdeDataWorkspaceStore {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
   readonly fileTreeStore: FileTreeStore
+  readonly workspaceIssues: () => ReadonlyArray<WorkspaceFetchIssue>
+  readonly subscribeWorkspaceIssues: (listener: () => void) => () => void
   readonly diffRows: () => ReadonlyArray<UnifiedDiffRow>
   readonly subscribeDiffRows: (listener: () => void) => () => void
   readonly workspaceSource: () => WorkspaceSource
@@ -61,6 +67,34 @@ export interface WorkspaceTreeIdentity {
   readonly source: WorkspaceSource
   readonly basePath: string | null
 }
+
+export type WorkspaceFetchIssueKind =
+  | 'repositories'
+  | 'tree'
+  | 'file'
+  | 'regions'
+  | 'blame'
+  | 'diff'
+  | 'annotations'
+
+export interface WorkspaceFetchIssue {
+  readonly kind: WorkspaceFetchIssueKind
+  readonly message: string
+  readonly file_path: string | null
+  readonly keeper: string | null
+  readonly repo_id: string | null
+  readonly observed_at_ms: number
+}
+
+export interface WorkspaceFetchIssueContext {
+  readonly filePath?: string | null
+  readonly keeper?: string | null
+  readonly repoId?: string | null
+  readonly fallbackMessage?: string
+  readonly nowMs?: number
+}
+
+type WorkspaceFetchIssueScope = Pick<WorkspaceFetchIssueContext, 'filePath' | 'keeper' | 'repoId'>
 
 function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>): string | null {
   const firstFile = nodes.find(node => !node.hasChildren)
@@ -99,6 +133,73 @@ export function sameWorkspaceTreeIdentity(
     case 'keeper_unknown':
       return rightSource.kind === 'keeper_unknown' && leftSource.keeper === rightSource.keeper
   }
+}
+
+export function workspaceFetchIssueFromError(
+  kind: WorkspaceFetchIssueKind,
+  error: unknown,
+  context: WorkspaceFetchIssueContext = {},
+): WorkspaceFetchIssue | null {
+  if (isAbortError(error)) return null
+  const summary = extractApiError(error, context.fallbackMessage ?? `${kind} fetch failed`)
+  return {
+    kind,
+    message: summary.message,
+    file_path: context.filePath ?? null,
+    keeper: context.keeper ?? null,
+    repo_id: context.repoId ?? null,
+    observed_at_ms: context.nowMs ?? Date.now(),
+  }
+}
+
+function sameWorkspaceIssueScope(
+  left: WorkspaceFetchIssue,
+  right: WorkspaceFetchIssue,
+): boolean {
+  return left.kind === right.kind
+    && left.file_path === right.file_path
+    && left.keeper === right.keeper
+    && left.repo_id === right.repo_id
+}
+
+export function replaceWorkspaceFetchIssue(
+  issues: ReadonlyArray<WorkspaceFetchIssue>,
+  next: WorkspaceFetchIssue,
+): ReadonlyArray<WorkspaceFetchIssue> {
+  return [
+    ...issues.filter(issue => !sameWorkspaceIssueScope(issue, next)),
+    next,
+  ]
+}
+
+export function clearWorkspaceFetchIssue(
+  issues: ReadonlyArray<WorkspaceFetchIssue>,
+  kind: WorkspaceFetchIssueKind,
+  context: WorkspaceFetchIssueScope = {},
+): ReadonlyArray<WorkspaceFetchIssue> {
+  const issueToClear: WorkspaceFetchIssue = {
+    kind,
+    message: '',
+    file_path: context.filePath ?? null,
+    keeper: context.keeper ?? null,
+    repo_id: context.repoId ?? null,
+    observed_at_ms: 0,
+  }
+  return issues.filter(issue => !sameWorkspaceIssueScope(issue, issueToClear))
+}
+
+export function retainCurrentWorkspaceFetchIssues(
+  issues: ReadonlyArray<WorkspaceFetchIssue>,
+  context: WorkspaceFetchIssueContext,
+): ReadonlyArray<WorkspaceFetchIssue> {
+  const currentFilePath = context.filePath ?? null
+  const currentKeeper = context.keeper ?? null
+  const currentRepoId = context.repoId ?? null
+  return issues.filter(issue => {
+    if (issue.kind === 'repositories') return true
+    if (issue.keeper !== currentKeeper || issue.repo_id !== currentRepoId) return false
+    return issue.file_path === null || issue.file_path === currentFilePath
+  })
 }
 
 function isManagedMirrorRepository(repository: Repository): boolean {
@@ -157,11 +258,34 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const ownershipStore = createKeeperLineOwnershipStore(activeIdeFile.value)
 
   const diffRowsSignal = signal<ReadonlyArray<UnifiedDiffRow>>([])
+  const workspaceIssuesSignal = signal<ReadonlyArray<WorkspaceFetchIssue>>([])
   const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
   const workspaceBasePathSignal = signal<string | null>(null)
   const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
   const activeRepositoryIdSignal = signal<string | null>(null)
   const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
+  const currentWorkspaceIssues = (): ReadonlyArray<WorkspaceFetchIssue> =>
+    workspaceIssuesSignal.peek()
+  const clearIssue = (
+    kind: WorkspaceFetchIssueKind,
+    context: WorkspaceFetchIssueScope = {},
+  ): void => {
+    workspaceIssuesSignal.value = clearWorkspaceFetchIssue(
+      currentWorkspaceIssues(),
+      kind,
+      context,
+    )
+  }
+  const recordIssue = (
+    kind: WorkspaceFetchIssueKind,
+    error: unknown,
+    context: WorkspaceFetchIssueContext = {},
+  ): void => {
+    const issue = workspaceFetchIssueFromError(kind, error, context)
+    if (issue) {
+      workspaceIssuesSignal.value = replaceWorkspaceFetchIssue(currentWorkspaceIssues(), issue)
+    }
+  }
 
   // Lazy tree: expanding a directory fetches its immediate children on demand.
   // The loader reads the current keeper/repo at call time (not capture time),
@@ -194,9 +318,17 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   }
 
   const refreshRepositories = async (): Promise<ReadonlyArray<Repository>> => {
-    const repositories = await fetchRepositoriesList()
-    applyRepositories(repositories)
-    return repositories
+    try {
+      const repositories = await fetchRepositoriesList()
+      clearIssue('repositories')
+      applyRepositories(repositories)
+      return repositories
+    } catch (error) {
+      recordIssue('repositories', error, {
+        fallbackMessage: 'repository list fetch failed',
+      })
+      throw error
+    }
   }
 
   const scanRepositories = async (): Promise<ReadonlyArray<Repository>> => {
@@ -206,7 +338,10 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   }
 
   refreshRepositories()
-    .catch(() => {
+    .catch(error => {
+      recordIssue('repositories', error, {
+        fallbackMessage: 'repository list fetch failed',
+      })
       repositoriesSignal.value = []
     })
 
@@ -233,10 +368,16 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
+    workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
+      filePath,
+      keeper: keeperParam ?? null,
+      repoId,
+    })
 
     // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {
       if (signal.aborted) return
+      clearIssue('tree', { keeper: keeperParam ?? null, repoId })
       // Same source + base path ⇒ live refresh: keep the operator's expansion
       // and any lazily-loaded children. A change ⇒ workspace switch: reset.
       const treeIdentity = workspaceTreeIdentity(source, basePath)
@@ -268,56 +409,132 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       if (nextFile && nextFile !== activeIdeFile.value) {
         activeIdeFile.value = nextFile
       }
-    }).catch(() => {})
+    }).catch(error => {
+      recordIssue('tree', error, {
+        keeper: keeperParam ?? null,
+        repoId,
+        fallbackMessage: 'workspace tree fetch failed',
+      })
+    })
 
     // File-scoped fetches require an active file path; skip when none is selected.
     if (filePath === null) {
       diffRowsSignal.value = []
       annotationsSignal.value = []
+      workspaceIssuesSignal.value = currentWorkspaceIssues().filter(issue => issue.file_path === null)
       return
     }
 
     // Load file content
     fetchWorkspaceFile(filePath, opts).then(response => {
       if (signal.aborted) return
-      if (response?.ok && response.content) {
-        documentStore.load({
+      if (response?.ok === true && typeof response.content === 'string') {
+        const loaded = documentStore.load({
           file_path: filePath,
           language: response.language ?? DEFAULT_LANGUAGE_ID,
           content: response.content,
         })
-      }
-    }).catch(() => {})
-
-    // Load regions
-    documentStore.loadRegions(filePath, opts).catch(() => {})
-
-    // Load blame → ownership
-    fetchGitBlame(filePath, opts).then(blocks => {
-      if (signal.aborted) return
-      for (const block of blocks) {
-        ownershipStore.ingest({
-          file_path: block.file_path,
-          line_start: block.line_start,
-          line_end: block.line_end,
-          keeper_id: block.keeper_id,
-          timestamp_ms: block.timestamp_ms,
-          kind: block.kind as KeeperEditKind,
+        if (!loaded) {
+          recordIssue('file', new Error('workspace file response was malformed'), {
+            filePath,
+            keeper: keeperParam ?? null,
+            repoId,
+            fallbackMessage: 'workspace file fetch failed',
+          })
+          return
+        }
+        clearIssue('file', { filePath, keeper: keeperParam ?? null, repoId })
+      } else {
+        recordIssue('file', new Error('workspace file response was not available'), {
+          filePath,
+          keeper: keeperParam ?? null,
+          repoId,
+          fallbackMessage: 'workspace file fetch failed',
         })
       }
-    }).catch(() => {})
+    }).catch(error => {
+      recordIssue('file', error, {
+        filePath,
+        keeper: keeperParam ?? null,
+        repoId,
+        fallbackMessage: 'workspace file fetch failed',
+      })
+    })
 
-    // Load diff
-    fetchGitDiff(filePath, { ...opts, baseRef: 'HEAD' }).then(rows => {
+    // Load regions
+    documentStore.loadRegions(filePath, opts).then(() => {
       if (signal.aborted) return
-      diffRowsSignal.value = rows
-    }).catch(() => {})
+      clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
+    }).catch(error => {
+      recordIssue('regions', error, {
+        filePath,
+        keeper: keeperParam ?? null,
+        repoId,
+        fallbackMessage: 'IDE regions fetch failed',
+      })
+    })
+
+    // Load blame & diff conditionally on view tab to prevent over-fetching.
+    // Use the same route normalization as IdeShell so legacy aliases such as
+    // "merge" do not silently suppress the diff fetch.
+    const currentView = viewFromRoute(route.value.params.view)
+    const isBlameView = currentView === 'blame'
+    const isDiffView = isDiffEditorView(currentView)
+
+    if (isBlameView) {
+      fetchGitBlame(filePath, opts).then(blocks => {
+        if (signal.aborted) return
+        clearIssue('blame', { filePath, keeper: keeperParam ?? null, repoId })
+        for (const block of blocks) {
+          ownershipStore.ingest({
+            file_path: block.file_path,
+            line_start: block.line_start,
+            line_end: block.line_end,
+            keeper_id: block.keeper_id,
+            timestamp_ms: block.timestamp_ms,
+            kind: block.kind as KeeperEditKind,
+          })
+        }
+      }).catch(error => {
+        recordIssue('blame', error, {
+          filePath,
+          keeper: keeperParam ?? null,
+          repoId,
+          fallbackMessage: 'git blame fetch failed',
+        })
+      })
+    }
+
+    if (isDiffView) {
+      fetchGitDiff(filePath, { ...opts, baseRef: 'HEAD' }).then(rows => {
+        if (signal.aborted) return
+        clearIssue('diff', { filePath, keeper: keeperParam ?? null, repoId })
+        diffRowsSignal.value = rows
+      }).catch(error => {
+        recordIssue('diff', error, {
+          filePath,
+          keeper: keeperParam ?? null,
+          repoId,
+          fallbackMessage: 'git diff fetch failed',
+        })
+      })
+    } else {
+      diffRowsSignal.value = []
+    }
 
     // Load annotations
     fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, opts).then(annotations => {
       if (signal.aborted) return
+      clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
       annotationsSignal.value = annotations
-    }).catch(() => {})
+    }).catch(error => {
+      recordIssue('annotations', error, {
+        filePath,
+        keeper: keeperParam ?? null,
+        repoId,
+        fallbackMessage: 'IDE annotations fetch failed',
+      })
+    })
   }
 
   // Re-run fetches on navigation-signal changes. Reading the signals
@@ -337,6 +554,9 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     documentStore,
     ownershipStore,
     fileTreeStore,
+    workspaceIssues: () => workspaceIssuesSignal.value,
+    subscribeWorkspaceIssues: (listener: () => void) =>
+      workspaceIssuesSignal.subscribe(listener),
     diffRows: () => diffRowsSignal.value,
     subscribeDiffRows: (listener: () => void) =>
       diffRowsSignal.subscribe(listener),

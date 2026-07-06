@@ -112,4 +112,26 @@ describe('RichContent', () => {
     expect(urls).not.toContain('https://img.com/pic.png')
     render(null, container)
   })
+
+  it('renders standalone video URLs as playable media instead of link cards', async () => {
+    const container = document.createElement('div')
+    render(h(RichContent, { text: 'https://cdn.example.com/demo.mp4' }), container)
+    const video = container.querySelector('video') as HTMLVideoElement | null
+    expect(video?.getAttribute('src')).toBe('https://cdn.example.com/demo.mp4')
+    expect(video?.hasAttribute('controls')).toBe(true)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(mockedFetchLinkPreviews).not.toHaveBeenCalled()
+    render(null, container)
+  })
+
+  it('renders standalone YouTube URLs as safe iframe embeds', async () => {
+    const container = document.createElement('div')
+    render(h(RichContent, { text: 'https://youtu.be/dQw4w9WgXcQ' }), container)
+    const frame = container.querySelector('iframe') as HTMLIFrameElement | null
+    expect(frame?.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
+    expect(frame?.getAttribute('referrerpolicy')).toBe('strict-origin-when-cross-origin')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(mockedFetchLinkPreviews).not.toHaveBeenCalled()
+    render(null, container)
+  })
 })

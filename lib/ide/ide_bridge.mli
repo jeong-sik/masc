@@ -31,6 +31,10 @@ val list_cursors :
   unit ->
   Yojson.Safe.t list
 
+val cursor_focus_mode_of_string : string -> string option
+(** Return the canonical cursor focus mode when [mode] is part of the IDE
+    cursor contract. *)
+
 (** Ingest a cursor event from an external source (e.g. editor or LSP).
     Unlike [ingest_cursor_event_from_hook], this does not require a tool hook
     context and uses the provided [source] label as the tool_name field. *)
@@ -45,7 +49,7 @@ val ingest_cursor_event :
   ?focus_mode:string ->
   source:string ->
   unit ->
-  unit
+  (unit, string) result
 (** Return latest valid cursor records, newest first. Cursor records are
     produced from tool hooks only when the hook input contains a non-empty
     file path and a positive line number. *)

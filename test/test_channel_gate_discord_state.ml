@@ -4,6 +4,41 @@ module Discord_state = Channel_gate_discord_state
 module Discord_names = Channel_gate_discord_names
 module U = Yojson.Safe.Util
 
+module Registry_test_connector_a = struct
+  let connector_id = "registry-test-connector"
+  let display_name = "Registry Test A"
+  let channel = "registry-test"
+  let status_json ?(audit_limit = 10) () = ignore audit_limit; `Assoc []
+  let connector_json ?gate_status_json ?(audit_limit = 10) () =
+    ignore gate_status_json;
+    ignore audit_limit;
+    `Assoc
+      [ "connector_id", `String connector_id
+      ; "display_name", `String display_name
+      ]
+  let bind ~channel_id:_ ~keeper_name:_ ~actor_name:_ =
+    Ok (`Assoc [ "variant", `String "a" ])
+  let unbind ~channel_id:_ ~actor_name:_ =
+    Ok (`Assoc [ "variant", `String "a" ])
+  let bound_channels ~keeper_name:_ = []
+  let connected () = false
+end
+
+module Registry_test_connector_b = struct
+  include Registry_test_connector_a
+
+  let display_name = "Registry Test B"
+  let connector_json ?gate_status_json ?(audit_limit = 10) () =
+    ignore gate_status_json;
+    ignore audit_limit;
+    `Assoc
+      [ "connector_id", `String connector_id
+      ; "display_name", `String display_name
+      ]
+  let bind ~channel_id:_ ~keeper_name:_ ~actor_name:_ =
+    Ok (`Assoc [ "variant", `String "b" ])
+end
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with
@@ -205,6 +240,28 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
       (connector |> U.member "observed_channel" |> U.member "channel"
        |> U.to_string))
 
+let test_registry_register_replaces_and_all_snapshots () =
+  Channel_gate_connector.register (module Registry_test_connector_a);
+  (match Channel_gate_connector.find Registry_test_connector_a.connector_id with
+   | None -> fail "expected initial registry test connector"
+   | Some (module C : Channel_gate_connector.S) ->
+     check string "initial connector" "Registry Test A" C.display_name);
+  Channel_gate_connector.register (module Registry_test_connector_b);
+  (match Channel_gate_connector.find Registry_test_connector_a.connector_id with
+   | None -> fail "expected replacement registry test connector"
+   | Some (module C : Channel_gate_connector.S) ->
+     check string "replacement connector" "Registry Test B" C.display_name);
+  let registered =
+    Channel_gate_connector.all ()
+    |> List.filter (fun (module C : Channel_gate_connector.S) ->
+      String.equal C.connector_id Registry_test_connector_a.connector_id)
+  in
+  check int "single connector id after replace" 1 (List.length registered);
+  match registered with
+  | [ (module C : Channel_gate_connector.S) ] ->
+    check string "snapshot sees replacement" "Registry Test B" C.display_name
+  | _ -> fail "unexpected registry snapshot"
+
 let test_name_map_round_trip () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
@@ -394,6 +451,8 @@ let () =
             test_unbind_removes_existing_binding;
           test_case "connectors json advertises connector descriptor" `Quick
             test_connectors_json_advertises_gate_connector_descriptor;
+          test_case "registry register replaces and all snapshots" `Quick
+            test_registry_register_replaces_and_all_snapshots;
         ] );
       ( "name_map",
         [

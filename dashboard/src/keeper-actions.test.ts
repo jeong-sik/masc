@@ -90,6 +90,9 @@ import {
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import {
   resetToolCallOutputs,
+  toolCallOutputHydrationContract,
+  toolCallOutputHydrationFailureReason,
+  toolCallOutputHydrationStatus,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
@@ -97,7 +100,7 @@ import { _resetKeeperStreamBuffersForTests } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperToolReply } from './api/keeper'
 import type { ToolCallEntry } from './api/dashboard'
-import type { KeeperConversationAttachment, KeeperStatusDetail } from './types'
+import type { ChatBlock, KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
   fetchKeeperToolCalls.mockReset()
@@ -207,7 +210,42 @@ describe('hydrateKeeperChatHistory', () => {
     const thread = keeperThreads.value.echo ?? []
     expect(thread).toHaveLength(2)
     expect(thread[0]?.delivery).toBe('history')
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'rest_history',
+      status: 'history_without_stream_events',
+    })
     expect(thread[1]?.role).toBe('assistant')
+  })
+
+  it('keeps backend stream contracts when hydrating server history', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_000,
+        turn_ref: 'trace-hydrate#2',
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          turn_ref: 'trace-hydrate#2',
+          trace_event_count: 2,
+          delivery_receipt: 'no_delivery_receipt',
+          reason: 'turn_ref joined to retained trajectory/internal-history events',
+        },
+      },
+    ])
+
+    await hydrateKeeperChatHistory('echo')
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread[0]?.streamContract).toEqual({
+      source: 'backend_turn_trace',
+      status: 'backend_trace_join',
+      turnRef: 'trace-hydrate#2',
+      traceEventCount: 2,
+      deliveryReceipt: 'no_delivery_receipt',
+      reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
   })
 
   it('fetches only once per keeper per page lifetime', async () => {
@@ -258,6 +296,21 @@ describe('hydrateKeeperChatHistory', () => {
 
     expect(toolCallOutputsCoveredSinceMs('echo')).toBe(Number.POSITIVE_INFINITY)
     expect(toolCallOutputsCoveredThroughMs('echo')).not.toBeNull()
+  })
+
+  it('records tool-output hydration failures with a visible contract reason', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperToolCalls.mockRejectedValueOnce(new Error('HTTP 502'))
+
+    await hydrateKeeperChatHistory('echo')
+
+    expect(toolCallOutputHydrationStatus('echo')).toBe('failed')
+    expect(toolCallOutputHydrationFailureReason('echo')).toBe('HTTP 502')
+    expect(toolCallOutputHydrationContract('echo')).toMatchObject({
+      source: 'tool_calls_endpoint',
+      status: 'failed',
+      failureReason: 'HTTP 502',
+    })
   })
 
   it('allows a retry after a failed fetch', async () => {
@@ -386,6 +439,20 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const firstError = await firstSend
     expect(firstError).toBeInstanceOf(Error)
     expect(firstError.name).toBe('AbortError')
+  })
+
+  it('preserves supplied display blocks on the optimistic user entry', async () => {
+    const blocks: ChatBlock[] = [
+      { t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello voice' },
+      { t: 'p', html: '[Voice memo 00:03 (12 KB)]<br />hello voice' },
+    ]
+    streamKeeperMessage.mockResolvedValue({ terminal: true })
+
+    await sendKeeperThreadMessage('echo', '[Voice memo 00:03 (12 KB)]\nhello voice', { blocks })
+
+    const userEntry = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'user')
+    expect(userEntry?.blocks).toEqual(blocks)
+    expect(userEntry?.delivery).toBe('delivered')
   })
 
   it('dedupes repeated firing of the same client action id while in flight', async () => {
@@ -887,6 +954,51 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await sendPromise
   })
 
+  it('persists the live assistant draft while the stream is in flight', async () => {
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_draft', status: 'queued' },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_START' })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: '부분 응답' })
+      opts.onEvent({
+        type: 'TOOL_CALL_START',
+        toolCallId: 'tc-draft',
+        toolCallName: 'keeper_board_list',
+      })
+      return new Promise<{ terminal: boolean }>(resolve => {
+        resolveStream = resolve
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', '진행 상황?')
+    await Promise.resolve()
+
+    const [pending] = pendingKeeperChatRequestsForKeeper('echo')
+    expect(pending?.assistantDraft?.text).toBe('부분 응답')
+    expect(pending?.assistantDraft?.delivery).toBe('streaming')
+    expect(pending?.assistantDraft?.streamState).toBe('streaming')
+    expect(pending?.assistantDraft?.traceSteps).toEqual([
+      expect.objectContaining({
+        kind: 'tool',
+        name: 'keeper_board_list',
+        toolCallId: 'tc-draft',
+        status: 'pending',
+      }),
+    ])
+
+    resolveStream({ terminal: true })
+    await sendPromise
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
   it('marks the reply interrupted when the stream ends without a terminal event', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       { type: 'RUN_STARTED' },
@@ -900,6 +1012,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(reply?.delivery).toBe('interrupted')
     expect(reply?.text).toContain('부분 응답')
     expect(reply?.error).toContain('끊겼습니다')
+    expect(reply?.streamContract?.deliveryReceipt).toBe('no_delivery_receipt')
     expect(keeperActionErrors.value.echo).toContain('끊겼습니다')
   })
 
@@ -917,6 +1030,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
     expect(reply?.delivery).toBe('delivered')
     expect(reply?.text).toContain('완료된 응답')
+    expect(reply?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
     // Regression guard: the per-message force refresh re-rendered the
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
@@ -1133,6 +1247,18 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['user', '진행 상황?', 'delivered'],
       ['assistant', 'polling으로 복구됨', 'delivered'],
     ])
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
+    expect(thread[1]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
   })
 
   it('reconciles a stream network failure when the server history has the completed reply', async () => {
@@ -1181,6 +1307,18 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['user', '어디까지 했어?', 'delivered'],
       ['assistant', '여기까지 했습니다.', 'delivered'],
     ])
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
+    expect(thread[1]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'queue_poll_result',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
 
@@ -1369,6 +1507,18 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['user', '어디까지 했어?', 'error'],
       ['assistant', '', 'error'],
     ])
+    expect(thread[0]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'contract_gap',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
+    expect(thread[1]?.streamContract).toMatchObject({
+      source: 'queue_poll',
+      status: 'contract_gap',
+      requestId: 'kmsg_echo_1',
+      deliveryReceipt: 'no_delivery_receipt',
+    })
     expect(keeperActionErrors.value.echo).toContain('서버 재시작')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
   })
@@ -1434,7 +1584,16 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
       // During the first sleep the assistant should still be queued.
       await vi.advanceTimersByTimeAsync(1_000)
-      expect((keeperThreads.value.echo ?? []).some(entry => entry.role === 'assistant' && entry.delivery === 'queued')).toBe(true)
+      const queuedAssistant = (keeperThreads.value.echo ?? []).find(
+        entry => entry.role === 'assistant' && entry.delivery === 'queued',
+      )
+      expect(queuedAssistant).not.toBeUndefined()
+      expect(queuedAssistant?.streamContract).toMatchObject({
+        source: 'pending_request_store',
+        status: 'client_placeholder',
+        requestId: 'kmsg_echo_1',
+        deliveryReceipt: 'no_delivery_receipt',
+      })
 
       // Let the resume loop finish.
       await vi.advanceTimersByTimeAsync(2_000)
@@ -1444,6 +1603,81 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       expect(thread.filter(entry => entry.role === 'user')).toHaveLength(1)
       expect(thread.some(entry => entry.role === 'assistant' && entry.delivery === 'delivered')).toBe(true)
       expect(keeperActionErrors.value.echo).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('restores the partial assistant draft after page reload while the request is still running', async () => {
+    vi.useFakeTimers()
+    try {
+      _resetChatHydrationForTests()
+      _clearPendingKeeperChatRequestsForTests()
+      upsertPendingKeeperChatRequest({
+        requestId: 'kmsg_echo_draft',
+        keeperName: 'echo',
+        message: '진행 상황?',
+        submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+        assistantDraft: {
+          text: '부분 응답',
+          rawText: '부분 응답',
+          delivery: 'streaming',
+          streamState: 'streaming',
+          traceSteps: [
+            { kind: 'think', text: '상태 확인 중' },
+            {
+              kind: 'tool',
+              name: 'keeper_board_list',
+              toolCallId: 'tc-draft',
+              status: 'pending',
+              args: '{"limit":5}',
+            },
+          ],
+        },
+      })
+
+      fetchKeeperChatHistory.mockResolvedValue([
+        { role: 'user', content: '진행 상황?', ts: 1_780_000_000 },
+      ])
+
+      let pollCount = 0
+      fetchQueuedKeeperMessageResult.mockImplementation(() => {
+        pollCount += 1
+        if (pollCount === 1) {
+          return Promise.resolve({ status: 'queued' })
+        }
+        return Promise.resolve({ status: 'done', ok: true, result: { reply: '완료' } })
+      })
+
+      await hydrateKeeperChatHistory('echo')
+      const resumePromise = resumePendingKeeperChatRequests('echo')
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      const pendingAssistant = (keeperThreads.value.echo ?? [])
+        .find(entry => entry.id === 'pending-assistant-kmsg_echo_draft')
+      expect(pendingAssistant).toEqual(expect.objectContaining({
+        role: 'assistant',
+        text: '부분 응답',
+        delivery: 'streaming',
+        streamState: 'streaming',
+      }))
+      expect(pendingAssistant?.traceSteps).toEqual([
+        { kind: 'think', text: '상태 확인 중' },
+        {
+          kind: 'tool',
+          name: 'keeper_board_list',
+          toolCallId: 'tc-draft',
+          status: 'pending',
+          args: '{"limit":5}',
+        },
+      ])
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      await resumePromise
+
+      const thread = keeperThreads.value.echo ?? []
+      expect(thread.some(entry => entry.role === 'assistant' && entry.text === '완료')).toBe(true)
+      expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     } finally {
       vi.useRealTimers()
     }

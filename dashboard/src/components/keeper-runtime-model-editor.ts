@@ -31,6 +31,13 @@ import {
   loadRuntimeCatalog,
   runtimeCatalogState,
 } from '../lib/runtime-catalog-resource'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+  runtimeCatalogSnapshotFacts,
+} from '../lib/runtime-provider-summary'
 import { refreshKeeperRuntimeStatus } from '../store'
 
 // Pending dropdown selection before save. `null` = no pending change (show the
@@ -83,6 +90,15 @@ function RuntimeCapabilityPill({ label, value }: { label: string; value: boolean
   `
 }
 
+function RuntimeCatalogDetailRow({ label, value }: { label: string; value: string }) {
+  return html`
+    <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-subtle)]/70 bg-[var(--color-bg-surface)]/45 px-2 py-1">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
+      <div class="break-words font-mono text-3xs leading-relaxed text-[var(--color-fg-secondary)]" title=${value}>${value}</div>
+    </div>
+  `
+}
+
 function RuntimeCatalogSummary({
   runtimeId,
   entry,
@@ -116,6 +132,11 @@ function RuntimeCatalogSummary({
   const provider = entry.provider_display_name ?? entry.provider_id ?? MISSING_DATA_DASH
   const model = entry.model_api_name ?? entry.model_id ?? MISSING_DATA_DASH
   const endpoint = entry.endpoint_url ?? entry.transport ?? MISSING_DATA_DASH
+  const snapshotFacts = runtimeCatalogSnapshotFacts(entry)
+  const effectiveCapabilities = runtimeCatalogEffectiveCapabilities(entry)
+  const declaredSpec = runtimeCatalogDeclaredSpec(entry)
+  const parameterPolicy = runtimeCatalogParameterPolicy(entry)
+  const requestConfig = runtimeCatalogRequestConfig(entry)
   return html`
     <div class="border-t border-[var(--accent-20)] pt-2">
       <div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -134,7 +155,22 @@ function RuntimeCatalogSummary({
         <${RuntimeCapabilityPill} label="tools" value=${entry.tools_support} />
         <${RuntimeCapabilityPill} label="thinking" value=${entry.thinking_support} />
         <${RuntimeCapabilityPill} label="stream" value=${entry.streaming} />
+        <${RuntimeCapabilityPill} label="json" value=${entry.supports_response_format_json} />
+        <${RuntimeCapabilityPill} label="schema" value=${entry.supports_structured_output} />
+        <${RuntimeCapabilityPill} label="multimodal" value=${entry.supports_multimodal_inputs} />
+        <${RuntimeCapabilityPill} label="reasoning-budget" value=${entry.supports_reasoning_budget} />
       </div>
+      ${snapshotFacts || effectiveCapabilities || declaredSpec || parameterPolicy || requestConfig
+        ? html`
+            <div class="mt-2 grid gap-1.5">
+              ${snapshotFacts ? html`<${RuntimeCatalogDetailRow} label="snapshot" value=${snapshotFacts} />` : null}
+              ${effectiveCapabilities ? html`<${RuntimeCatalogDetailRow} label="effective" value=${effectiveCapabilities} />` : null}
+              ${declaredSpec ? html`<${RuntimeCatalogDetailRow} label="declared" value=${declaredSpec} />` : null}
+              ${parameterPolicy ? html`<${RuntimeCatalogDetailRow} label="policy" value=${parameterPolicy} />` : null}
+              ${requestConfig ? html`<${RuntimeCatalogDetailRow} label="request" value=${requestConfig} />` : null}
+            </div>
+          `
+        : null}
       <div class="mt-2 truncate font-mono text-3xs text-[var(--color-fg-disabled)]">${endpoint}</div>
     </div>
   `

@@ -409,7 +409,7 @@ let test_board_auto_resume_allows_auto_paused_keeper () =
     (KKS.paused_meta_allows_board_auto_resume meta)
 
 let test_board_wakeup_selection_keeps_explicit_mentions () =
-  let selected =
+  let selected, dropped =
     KKS.select_board_wakeup_candidates
       [
         "a", Some KWOBS.Thread_reply_after_self_comment;
@@ -417,18 +417,15 @@ let test_board_wakeup_selection_keeps_explicit_mentions () =
         "c", Some KWOBS.Explicit_mention;
       ]
   in
-  (* Explicit mentions keep their typed reason, and other typed reasons are
-     still delivered. A typed wake reason is not suppressed by fanout ordering. *)
+  (* Explicit mentions short-circuit and wake unconditionally. Non-explicit
+     candidates are ignored when explicit mentions are present. *)
   check (list (pair string string)) "selected explicit wakeups"
-    [
-      "a", "thread_reply_after_self_comment";
-      "b", "explicit_mention";
-      "c", "explicit_mention";
-    ]
-    (labeled selected)
+    [ "b", "explicit_mention"; "c", "explicit_mention" ]
+    (labeled selected);
+  check int "explicit short circuit drops no capped candidates" 0 dropped
 
 let test_board_wakeup_selection_drops_none_reasons () =
-  let selected =
+  let selected, dropped =
     KKS.select_board_wakeup_candidates
       [
         "a", Some KWOBS.Thread_reply_after_self_comment;
@@ -436,14 +433,15 @@ let test_board_wakeup_selection_drops_none_reasons () =
         "c", Some (KWOBS.Board_comment_read_error "comments unavailable");
       ]
   in
-  (* [None] reasons (no relevance match) are dropped; real reasons survive in
-     candidate order. *)
+  (* [None] reasons (no deterministic address) are dropped; structural
+     followup reasons survive in candidate order. *)
   check (list (pair string string)) "None dropped, real reasons kept"
     [ "a", "thread_reply_after_self_comment"; "c", "board_comment_read_error" ]
-    (labeled selected)
+    (labeled selected);
+  check int "no cap drops under total limit" 0 dropped
 
 let test_board_wakeup_selection_keeps_comment_read_errors () =
-  let selected =
+  let selected, dropped =
     KKS.select_board_wakeup_candidates
       [
         "a", None;
@@ -456,26 +454,58 @@ let test_board_wakeup_selection_keeps_comment_read_errors () =
       "b", "board_comment_read_error";
       "c", "thread_reply_after_self_comment";
     ]
-    (labeled selected)
+    (labeled selected);
+  check int "no cap drops under total limit" 0 dropped
 
-let test_board_wakeup_selection_keeps_all_typed_reasons () =
-  let selected =
+let test_board_wakeup_selection_caps_total_non_explicit () =
+  let selected, dropped =
     KKS.select_board_wakeup_candidates
+      ~total_limit:2
       [
         "a", Some (KWOBS.Board_comment_read_error "comments unavailable");
         "b", Some KWOBS.Thread_reply_after_self_comment;
-        "c", Some (KWOBS.Board_comment_read_error "comments unavailable");
+        "c", Some KWOBS.Reaction_after_self_activity;
         "d", Some KWOBS.Thread_reply_after_self_comment;
       ]
   in
-  check (list (pair string string)) "all typed wake reasons kept in order"
-    [
-      "a", "board_comment_read_error";
-      "b", "thread_reply_after_self_comment";
-      "c", "board_comment_read_error";
-      "d", "thread_reply_after_self_comment";
-    ]
-    (labeled selected)
+  check (list (pair string string)) "first two non-explicit kept in order"
+    [ "a", "board_comment_read_error"; "b", "thread_reply_after_self_comment" ]
+    (labeled selected);
+  check int "overflow dropped" 2 dropped
+
+let test_board_wakeup_selection_caps_thread_followups () =
+  let selected, dropped =
+    KKS.select_board_wakeup_candidates
+      ~total_limit:2
+      [
+        "a", Some KWOBS.Thread_reply_after_self_comment;
+        "b", Some KWOBS.Thread_reply_after_self_comment;
+        "c", Some KWOBS.Thread_reply_after_self_comment;
+        "d", Some KWOBS.Thread_reply_after_self_comment;
+      ]
+  in
+  (* Thread followups compete for [total_limit] slots in candidate order; the
+     overflow is dropped. *)
+  check (list (pair string string)) "first two non-explicit kept in order"
+    [ "a", "thread_reply_after_self_comment"; "b", "thread_reply_after_self_comment" ]
+    (labeled selected);
+  check int "overflow dropped" 2 dropped
+
+let test_board_goal_keyword_overlap_is_not_wake_reason () =
+  let meta = make_board_resume_meta "keyword-overlap" in
+  let signal : Board_dispatch.board_signal =
+    { kind = Board_dispatch.Board_post_created
+    ; post_id = "post-keyword-overlap"
+    ; author = "external-author"
+    ; title = "test"
+    ; content = "this test overlaps the keeper goal but does not address it"
+    ; hearth = None
+    ; updated_at = Some 123.0
+    }
+  in
+  check (option string) "goal keyword overlap no longer wakes" None
+    (Option.map KWOBS.wake_reason_label
+       (KWOBS.wake_reason ~continuity_summary:"" ~meta ~signal))
 
 let test_after_wake_idle_woken_continues () =
   let next = Unix.gettimeofday () +. 60.0 in
@@ -633,8 +663,12 @@ let () =
         `Quick test_board_wakeup_selection_drops_none_reasons;
       test_case "comment read errors remain typed wake reasons"
         `Quick test_board_wakeup_selection_keeps_comment_read_errors;
-      test_case "all typed reasons are delivered"
-        `Quick test_board_wakeup_selection_keeps_all_typed_reasons;
+      test_case "total non-explicit fanout is capped"
+        `Quick test_board_wakeup_selection_caps_total_non_explicit;
+      test_case "thread followup fanout is capped"
+        `Quick test_board_wakeup_selection_caps_thread_followups;
+      test_case "goal keyword overlap is not a wake reason"
+        `Quick test_board_goal_keyword_overlap_is_not_wake_reason;
       test_case "operator pauses are not board-auto-resumed"
         `Quick test_board_auto_resume_rejects_operator_pause;
       test_case "auto-paused keepers can be board-auto-resumed"

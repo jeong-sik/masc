@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  buildKeeperCursorStreamUrl,
   connectKeeperCursorStream,
   getKeeperColor,
   normalizeKeeperCursorSnapshot,
@@ -10,6 +11,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  window.sessionStorage.clear()
 })
 
 describe('getKeeperColor', () => {
@@ -79,11 +81,13 @@ describe('getKeeperColor', () => {
   it('connects to the dedicated cursor stream endpoint', () => {
     const instances: Array<{
       readonly url: string
+      onopen: ((event: Event) => void) | null
       onmessage: ((event: MessageEvent) => void) | null
       onerror: ((event: Event) => void) | null
       close: () => void
     }> = []
     class MockEventSource {
+      onopen: ((event: Event) => void) | null = null
       onmessage: ((event: MessageEvent) => void) | null = null
       onerror: ((event: Event) => void) | null = null
       readonly url: string
@@ -104,17 +108,108 @@ describe('getKeeperColor', () => {
     expect(instances[0]?.close).toHaveBeenCalled()
   })
 
+  it('builds cursor stream URLs with repository and token scope', () => {
+    window.sessionStorage.setItem('masc_bearer_token', 'token-1')
+
+    expect(buildKeeperCursorStreamUrl('', ' masc ')).toBe(
+      '/api/v1/ide/cursors/stream?repo_id=masc&token=token-1',
+    )
+  })
+
+  it('builds cursor stream URLs with canonical URL scope', () => {
+    expect(buildKeeperCursorStreamUrl('', {
+      scope: {
+        kind: 'canonical_url',
+        canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+      },
+    })).toBe(
+      '/api/v1/ide/cursors/stream?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git',
+    )
+  })
+
+  it('reports a degraded cursor stream when EventSource is unavailable', () => {
+    vi.stubGlobal('EventSource', undefined)
+    const onStatus = vi.fn()
+
+    const cleanup = connectKeeperCursorStream('', () => {}, { onStatus })
+
+    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'degraded',
+      failedCount: 1,
+      error: 'EventSource unavailable',
+      lastErrorMs: expect.any(Number),
+    }))
+    cleanup()
+    expect(onStatus).toHaveBeenLastCalledWith({ status: 'closed', failedCount: 1 })
+  })
+
+  it('reports cursor stream lifecycle state to callers', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const instances: Array<{
+      readonly url: string
+      onopen: ((event: Event) => void) | null
+      onmessage: ((event: MessageEvent) => void) | null
+      onerror: ((event: Event) => void) | null
+      close: () => void
+    }> = []
+    class MockEventSource {
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      readonly url: string
+
+      constructor(url: string) {
+        this.url = url
+        instances.push(this)
+      }
+
+      close = vi.fn()
+    }
+    vi.stubGlobal('EventSource', MockEventSource)
+
+    const onStatus = vi.fn()
+    const cleanup = connectKeeperCursorStream('http://localhost:8935', () => {}, {
+      repoId: 'masc',
+      onStatus,
+    })
+
+    expect(instances[0]?.url).toBe('http://localhost:8935/api/v1/ide/cursors/stream?repo_id=masc')
+    expect(onStatus).toHaveBeenLastCalledWith({ status: 'connecting', failedCount: 0 })
+
+    instances[0]!.onopen?.(new Event('open'))
+    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'live',
+      failedCount: 0,
+      lastOpenMs: expect.any(Number),
+    }))
+
+    instances[0]!.onerror?.(new Event('error'))
+    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'degraded',
+      failedCount: 1,
+      error: 'SSE transport error',
+      lastErrorMs: expect.any(Number),
+    }))
+
+    cleanup()
+    expect(onStatus).toHaveBeenLastCalledWith({ status: 'closed', failedCount: 1 })
+  })
+
   it('cancels cursor stream reconnect timers during cleanup', () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const instances: Array<{
       readonly url: string
+      onopen: ((event: Event) => void) | null
       onmessage: ((event: MessageEvent) => void) | null
       onerror: ((event: Event) => void) | null
       close: () => void
     }> = []
     class MockEventSource {
+      onopen: ((event: Event) => void) | null = null
       onmessage: ((event: MessageEvent) => void) | null = null
       onerror: ((event: Event) => void) | null = null
       readonly url: string

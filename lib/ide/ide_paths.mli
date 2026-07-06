@@ -51,6 +51,13 @@ type partition =
     here instead of dropping them; the reason distinguishes {v2 §7}
     empty-repo / unmatched-repo_id / base-loss / structural-default. *)
 
+val partition_kind : partition -> string
+(** Stable JSON/debug label for [partition]. *)
+
+val partition_is_orphan : partition -> bool
+(** [partition_is_orphan partition] is [true] when [partition] writes to
+    the shared [_orphan/] store. *)
+
 val partition_store_dir : base_dir:string -> partition -> string
 (** [partition_store_dir ~base_dir partition] returns the directory
     that holds [annotations.jsonl] / [regions.jsonl] for the chosen

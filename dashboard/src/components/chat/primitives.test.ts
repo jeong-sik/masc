@@ -15,6 +15,7 @@ import {
   type ChatComposerSendPayload,
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
+import { chatHistoryEntriesFromRest } from '../../keeper-state'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
@@ -25,6 +26,20 @@ vi.mock('./attachments', () => ({
 
 vi.mock('../../api/board', () => ({
   fetchBoardPost: vi.fn(),
+}))
+
+export let mockTranscribeCallback: ((text: string) => void) | null = null
+vi.mock('./voice-input', () => ({
+  voiceInputSupported: () => true,
+  useVoiceInput: ({ onTranscribed }: any) => {
+    mockTranscribeCallback = onTranscribed
+    return {
+      state: 'idle',
+      supported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+    }
+  },
 }))
 
 const flushUi = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
@@ -163,6 +178,219 @@ describe('ChatTranscript', () => {
       node.textContent?.includes('ollama_cloud.deepseek-v4-flash'),
     )).toBe(true)
     expect(container.querySelector('[data-chat-blocks]')).toBeNull()
+  })
+
+  it('exposes entry provenance as rendered attributes and surface links', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'discord-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'channel reply',
+            rawText: 'channel reply',
+            turnRef: 'trace-ui#9',
+            streamContract: {
+              source: 'backend_stream_lifecycle',
+              status: 'backend_lifecycle_replay',
+              turnRef: 'trace-ui#9',
+              eventName: 'RUN_FINISHED',
+              lifecycleEvents: [
+                'RUN_STARTED',
+                'TEXT_MESSAGE_START',
+                'TEXT_MESSAGE_END',
+                'RUN_FINISHED',
+              ],
+              deliveryReceipt: 'server_lifecycle_replay_only',
+              reason: 'history row records durable server stream lifecycle replay',
+            },
+            surface: {
+              kind: 'discord',
+              guild_id: 'guild-1',
+              channel_id: 'channel-1',
+              thread_id: 'thread-1',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="discord-1"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-source')).toBe('direct_assistant')
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('discord')
+    expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-ui#9')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
+    expect(bubble.getAttribute('data-chat-stream-contract-turn-ref')).toBe('trace-ui#9')
+    expect(bubble.getAttribute('data-chat-stream-contract-event')).toBe('RUN_FINISHED')
+    expect(bubble.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe(
+      'RUN_STARTED,TEXT_MESSAGE_START,TEXT_MESSAGE_END,RUN_FINISHED',
+    )
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe(
+      'server_lifecycle_replay_only',
+    )
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      'history row records durable server stream lifecycle replay',
+    )
+    const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
+    expect(surfaceLink?.textContent).toContain('Discord Thread')
+  })
+
+  it('exposes interrupted stream reconciliation as a no-receipt contract gap', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'assistant-interrupted',
+            text: 'partial answer',
+            role: 'assistant',
+            source: 'direct_assistant',
+            delivery: 'interrupted',
+            streamState: null,
+            error: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+            streamContract: {
+              source: 'client_reconciliation',
+              status: 'contract_gap',
+              deliveryReceipt: 'no_delivery_receipt',
+              reason: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="assistant-interrupted"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('interrupted')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('client_reconciliation')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('contract_gap')
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+    )
+  })
+
+  it('renders REST replay failure and no-turn-ref gaps as visible stream contract badges', () => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [
+      {
+        id: 'smoke-legacy-user',
+        role: 'user',
+        content: 'legacy row without turn ref',
+        ts: 1_780_000_000,
+        stream_contract: {
+          source: 'keeper_chat_store',
+          status: 'history_without_turn_ref',
+          delivery_receipt: 'no_delivery_receipt',
+          reason: 'history row has no durable turn_ref; cannot join stream events',
+        },
+      },
+      {
+        id: 'smoke-error-assistant',
+        role: 'assistant',
+        content: 'Keeper request failed: Timeout after 630.0s',
+        ts: 1_780_000_001,
+        kind: 'transport_failure',
+        turn_ref: 'trace-chat-contract-smoke#8',
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-chat-contract-smoke#8',
+          event_name: 'RUN_ERROR',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'RUN_ERROR',
+          ],
+          delivery_receipt: 'server_lifecycle_replay_only',
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      },
+    ])
+
+    render(
+      html`<${ChatTranscript}
+        entries=${entries}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const legacy = container.querySelector('[data-chat-entry-id="smoke-legacy-user"]') as HTMLElement
+    expect(legacy).not.toBeNull()
+    expect(legacy.getAttribute('data-chat-stream-contract-source')).toBe('keeper_chat_store')
+    expect(legacy.getAttribute('data-chat-stream-contract-status')).toBe('history_without_turn_ref')
+    expect(legacy.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(legacy.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
+    expect(legacy.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('턴 연결 없음')
+
+    const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
+    expect(failure).not.toBeNull()
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('error')
+    expect(failure.getAttribute('data-chat-turn-ref')).toBe('trace-chat-contract-smoke#8')
+    expect(failure.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
+    expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
+    expect(failure.getAttribute('data-chat-stream-contract-event')).toBe('RUN_ERROR')
+    expect(failure.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe('RUN_STARTED,RUN_ERROR')
+    expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
+    expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
+    expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
+    expect(failure.textContent).toContain('Timeout after 630.0s')
+    expect(
+      [...container.querySelectorAll('[data-chat-stream-contract-delivery-receipt]')]
+        .map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt')),
+    ).not.toContain('client_observed_sse_event')
+  })
+
+  it('exposes tool-call transcript provenance as rendered attributes', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-toolu_prov',
+            label: 'keeper_context_status',
+            turnRef: 'trace-tool#3',
+            delivery: 'history',
+            streamContract: {
+              source: 'rest_history',
+              status: 'history_without_stream_events',
+              deliveryReceipt: 'no_delivery_receipt',
+              reason: 'tool history rows carry arguments, not live stream lifecycle',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${false}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-entry-id')).toBe('tool-toolu_prov')
+    expect(bubble.getAttribute('data-chat-role')).toBe('tool')
+    expect(bubble.getAttribute('data-chat-source')).toBe('tool_result')
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('history')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      'tool history rows carry arguments, not live stream lifecycle',
+    )
+    expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-tool#3')
+    expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
   })
 
   it('marks a failed tool call with the error status glyph', () => {
@@ -553,6 +781,19 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('img[alt="screenshot.png"]')).not.toBeNull()
     expect(container.textContent).toContain('log.txt')
     expect(container.textContent).not.toContain('상세 보기')
+    const bubble = container.querySelector('[data-chat-entry-id="u1"]')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('2')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('persisted_attachment')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image,document')
+    const imageCard = container.querySelector('[data-chat-attachment-card="att-1"]')
+    expect(imageCard?.getAttribute('data-chat-multimodal-source')).toBe('persisted_attachment')
+    expect(imageCard?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(imageCard?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(imageCard?.getAttribute('data-chat-multimodal-size-bytes')).toBe('1024')
+    const fileCard = container.querySelector('[data-chat-attachment-card="att-2"]')
+    expect(fileCard?.getAttribute('data-chat-multimodal-kind')).toBe('document')
+    expect(fileCard?.getAttribute('data-chat-multimodal-mime')).toBe('text/plain')
   })
 
   it('does not show streaming ellipsis before elapsed time starts', () => {
@@ -1191,11 +1432,15 @@ describe('Keeper v2 chat blocks', () => {
             blocks: [
               {
                 t: 'attach',
+                id: 'srv-att-1',
                 name: 'screen.png',
+                kind: 'image',
                 dims: '100×100',
                 src: 'https://example.com/screen.png',
                 via: 'vision',
                 size: '12 KB',
+                mimeType: 'image/png',
+                sizeBytes: 12_288,
               },
             ],
           }),
@@ -1207,9 +1452,20 @@ describe('Keeper v2 chat blocks', () => {
 
     const blocks = container.querySelector('[data-chat-blocks]')
     const attach = container.querySelector('[data-chat-block="attach"]')
+    const bubble = container.querySelector('[data-chat-entry-id="u-rich"]')
     expect(blocks).not.toBeNull()
     expect(attach?.textContent).toContain('screen.png')
     expect(attach?.querySelector('img')?.getAttribute('src')).toBe('https://example.com/screen.png')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('1')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('server_block')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(attach?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-attachment-id')).toBe('srv-att-1')
+    expect(attach?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(attach?.getAttribute('data-chat-multimodal-size-bytes')).toBe('12288')
+    expect(attach?.getAttribute('data-chat-attach-via')).toBe('vision')
   })
 
   it('blocks unsafe attach image src and falls back to placeholder', () => {
@@ -1225,6 +1481,8 @@ describe('Keeper v2 chat blocks', () => {
     ])
 
     expect(container.querySelector('[data-chat-block="attach"] img')).toBeNull()
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-kind')).toBeNull()
     expect(container.textContent).toContain('unsafe URL')
   })
 
@@ -1247,17 +1505,12 @@ describe('Keeper v2 chat blocks', () => {
     expect(voice?.textContent).toContain('whisper')
   })
 
-  it('toggles the voice memo play button label', async () => {
+  it('does not render a synthetic voice play button without a safe audio source', () => {
     renderBlocks([{ t: 'voice', secs: 2, wave: [0.2, 0.5] }])
 
-    const play = container.querySelector('[data-chat-block="voice"] button') as HTMLButtonElement
-    expect(play?.textContent?.trim()).toBe('▶')
-    play.click()
-    await flushUi()
-    expect(play?.textContent?.trim()).toBe('❙❙')
-    play.click()
-    await flushUi()
-    expect(play?.textContent?.trim()).toBe('▶')
+    expect(container.querySelector('[data-chat-block="voice"] button')).toBeNull()
+    expect(container.querySelector('[data-chat-block="voice"] audio')).toBeNull()
+    expect(container.querySelectorAll('.chat-block-vbar').length).toBe(2)
   })
 
   it('renders an image block', () => {
@@ -1640,6 +1893,59 @@ describe('ChatComposer multimodal', () => {
     const sendBtn = container.querySelector('.send') as HTMLButtonElement
     expect(sendBtn.disabled).toBe(true)
   })
+
+  it('handles voice draft transcription, rendering, removal, and serialization on send', async () => {
+    const onSend = vi.fn()
+    renderComposer({ onSend })
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    expect(sendBtn.disabled).toBe(true)
+
+    // Simulate the capture/transcribe boundary completing transcription.
+    if (mockTranscribeCallback) {
+      mockTranscribeCallback('스케줄러 결과 확인 바람')
+    }
+    await new Promise((r) => setTimeout(r, 10))
+
+    // 1. Voice draft should be rendered
+    const voiceDraftEl = container.querySelector('[data-testid="composer-voice-draft"]')
+    expect(voiceDraftEl).not.toBeNull()
+    expect(voiceDraftEl?.textContent).toContain('스케줄러 결과 확인 바람')
+
+    // 2. Send button should be enabled because we have content
+    expect(sendBtn.disabled).toBe(false)
+
+    // 3. Click send button and verify text-only STT serialization.
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledOnce()
+    const payload = onSend.mock.calls[0]?.[0]
+    expect(payload.text).toContain('스케줄러 결과 확인 바람')
+    expect(payload.blocks).toHaveLength(1)
+    expect(payload.blocks[0]).toMatchObject({ t: 'p' })
+    expect(payload.blocks.some((block: ChatBlock) => block.t === 'voice')).toBe(false)
+
+    // 4. Voice draft should be cleared after send
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).toBeNull()
+  })
+
+  it('allows removing voice draft before send', async () => {
+    renderComposer()
+
+    if (mockTranscribeCallback) {
+      mockTranscribeCallback('임시 받아쓰기')
+    }
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).not.toBeNull()
+
+    const removeBtn = container.querySelector('[data-testid="composer-voice-draft"] .cdraft-x') as HTMLButtonElement
+    removeBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).toBeNull()
+  })
 })
 
 describe('rich block URL safety', () => {
@@ -1922,6 +2228,115 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
   })
 
+  it('badges turn timeline rows with field-level provenance', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-provenance',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-prov#7',
+            traceSteps: [
+              { kind: 'think', text: 'checking context', oasBlockIndex: 3 },
+              {
+                kind: 'tool',
+                name: 'keeper_board_list',
+                toolCallId: 'tc-prov',
+                status: 'ok',
+                args: '{"limit":1}',
+                oasBlockIndex: 4,
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const badges = [...container.querySelectorAll('[data-chat-trace-provenance]')]
+      .map(node => node.getAttribute('data-chat-trace-provenance'))
+    expect(badges).toContain('OAS #3')
+    expect(badges).toContain('OAS #4')
+    expect(badges).toContain('reply')
+
+    const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement
+    expect(think.getAttribute('data-chat-trace-provenance')).toBe('OAS #3')
+    expect(think.getAttribute('data-chat-trace-oas-block-index')).toBe('3')
+
+    const tool = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
+    expect(tool.getAttribute('data-chat-trace-provenance')).toBe('OAS #4')
+    expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-prov')
+    expect(tool.getAttribute('data-chat-trace-oas-block-index')).toBe('4')
+    expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
+    expect(tool.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(tool.getAttribute('data-chat-trace-entry-id')).toBeNull()
+
+    const chat = container.querySelector('[data-chat-trace-step="chat"]') as HTMLElement
+    expect(chat.getAttribute('data-chat-trace-provenance')).toBe('reply')
+    expect(chat.getAttribute('data-chat-trace-entry-id')).toBe('a-provenance')
+    expect(chat.getAttribute('data-chat-trace-source')).toBe('direct_assistant')
+    expect(chat.getAttribute('data-chat-trace-turn-ref')).toBe('trace-prov#7')
+  })
+
+  it('exposes structural turn order without timestamp sorting', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-t-order',
+            label: 'keeper_context_status',
+            text: '{"ok":true}',
+            timestamp: '2026-03-24T00:00:01.000Z',
+            turnRef: 'trace-order#1',
+          }),
+          entry({
+            id: 'assistant-order',
+            text: '완료했습니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            timestamp: '2026-03-24T00:00:00.000Z',
+            turnRef: 'trace-order#1',
+            traceSteps: [
+              { kind: 'think', text: 'first structural thought', ts: '2026-03-24T00:00:04.000Z' },
+              {
+                kind: 'tool',
+                name: 'keeper_context_status',
+                toolCallId: 't-order',
+                status: 'ok',
+                ts: '2026-03-24T00:00:02.000Z',
+              },
+              { kind: 'think', text: 'second structural thought', ts: '2026-03-24T00:00:03.000Z' },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-work-trace]') as HTMLElement
+    expect(trace.getAttribute('data-chat-turn-order-signature')).toBe(
+      'trace:think|tool:t-order|trace:think|chat:assistant-order',
+    )
+
+    const ordered = [...trace.querySelectorAll('[data-chat-turn-order-index]')] as HTMLElement[]
+    expect(ordered).toHaveLength(4)
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-index'))).toEqual(['0', '1', '2', '3'])
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-kind'))).toEqual(['trace', 'tool', 'trace', 'chat'])
+
+    const tool = ordered[1] as HTMLElement
+    expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('t-order')
+    expect(tool.getAttribute('data-chat-trace-entry-id')).toBe('tool-t-order')
+    expect(tool.getAttribute('data-chat-trace-link-state')).toBe('joined')
+  })
+
   it('renders thinking text as sanitized markdown with newlines preserved', async () => {
     render(
       html`<${ChatTranscript}
@@ -2021,6 +2436,8 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     const traceToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
     expect(trace).not.toBeNull()
     expect(traceToggle).not.toBeNull()
+    expect(trace?.getAttribute('data-chat-turn-stream-state')).toBe('streaming')
+    expect(trace?.getAttribute('data-chat-turn-complete')).toBe('false')
     expect(traceToggle?.getAttribute('aria-expanded')).toBe('false')
     expect(trace?.textContent).toContain('턴 타임라인')
     expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
@@ -2081,6 +2498,9 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
       const settledToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
       expect(settledToggle?.getAttribute('aria-expanded')).toBe('true')
     })
+    const settledTrace = container.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(settledTrace?.getAttribute('data-chat-turn-stream-state')).toBe('complete')
+    expect(settledTrace?.getAttribute('data-chat-turn-complete')).toBe('true')
     expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain(thinking)
     expect(container.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('완료된 응답')
   })
@@ -2164,6 +2584,43 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
   })
 
+  it('marks trace-only tool steps without tool_call_id as unlinked, not pending', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-unlinked-trace-tool',
+            text: 'legacy trace',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'tool', name: 'legacy_tool_without_id' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle?.textContent).toContain('조인 불가 1')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
+    expect(step?.querySelector('.chat-block-tstep-status.unlinked')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('unlinked_trace')
+    expect(step?.getAttribute('data-chat-trace-link-state')).toBe('unlinked')
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('unlinked')
+    expect(step?.getAttribute('data-chat-trace-tool-call-id')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-entry-id')).toBeNull()
+
+    ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+
+    expect(step?.textContent).toContain('도구 호출 ID 없음')
+    expect(step?.textContent).not.toContain('출력 대기 중')
+  })
+
   it('marks an unjoined tool step as missing once the owning turn has settled', () => {
     render(
       html`<${ChatTranscript}
@@ -2188,10 +2645,15 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     expect(bundle).not.toBeNull()
+    const trace = bundle?.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe(`${Date.parse('2026-03-24T00:00:00.000Z')}`)
+    expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(`${Date.parse('2026-03-24T00:00:01.000Z')}`)
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
     // Settled turn + never-joined output is a real gap, not an indefinite pending.
     expect(step?.querySelector('.chat-block-tstep-status.missing')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('missing')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
     // The gap is surfaced in the card header so silent failures are visible.
     expect(bundle?.textContent).toContain('결과 누락 1')
   })
@@ -2220,10 +2682,66 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('not-hydrated')
     expect(bundle?.textContent).not.toContain('결과 누락')
   })
 
-  it('keeps a settled unjoined tool step pending when only older output hydration completed', () => {
+  it('marks settled unjoined tool steps as hydration-failed when the output surface failed', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-hydration-failed', label: 'keeper_context_status', turnRef: 'trace-f#1' }),
+          entry({
+            id: 'a-hydration-failed',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-f#1',
+            streamState: null,
+            streamContract: {
+              source: 'sse_event',
+              status: 'backend_terminal_event',
+              eventName: 'RUN_FINISHED',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputHydrationContract=${{
+          source: 'tool_calls_endpoint',
+          status: 'failed',
+          failureReason: 'HTTP 502',
+          startedAtMs: 1_000,
+          completedAtMs: 1_500,
+          coveredSinceMs: null,
+          coveredThroughMs: null,
+        }}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const trace = bundle?.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-source')).toBe('tool_calls_endpoint')
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 502')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-source')).toBe('sse_event')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-status')).toBe('backend_terminal_event')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
+    expect(step?.querySelector('.chat-block-tstep-status.hydration-failed')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+    expect(bundle?.textContent).toContain('출력 hydration 실패 1')
+
+    ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+    expect(step?.textContent).toContain('출력 hydration 실패 — HTTP 502')
+  })
+
+  it('marks a settled unjoined tool step as coverage-gap when only older output hydration completed', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -2251,12 +2769,16 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('coverage-gap')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
     expect(bundle?.textContent).not.toContain('결과 누락')
+    expect(bundle?.textContent).toContain('출력 범위 밖 1')
   })
 
-  it('keeps a settled unjoined tool step pending when it predates the hydrated tool-output tail', () => {
+  it('marks a settled unjoined tool step as coverage-gap when it predates the hydrated tool-output tail', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -2285,9 +2807,13 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
-    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('coverage-gap')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
     expect(bundle?.textContent).not.toContain('결과 누락')
+    expect(bundle?.textContent).toContain('출력 범위 밖 1')
   })
 
   it('keeps an unjoined tool step pending while the owning turn is still streaming', () => {

@@ -120,7 +120,8 @@ describe('KeeperWorkspaceRail', () => {
     // low-signal in the detail view; the 런타임 section keeps its vitals.
     expect(container.textContent).not.toContain('처리량')
     expect(container.textContent).toContain('런타임')
-    expect(container.textContent).toContain('sonnet-4.6')
+    expect(container.textContent).not.toContain('sonnet-4.6')
+    expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
     expect(container.textContent).toContain('oas·seoul-1')
   })
 
@@ -202,8 +203,10 @@ describe('KeeperWorkspaceRail', () => {
           tools_support: true,
           thinking_support: true,
           streaming: true,
-          supports_multimodal_inputs: true,
+          supports_multimodal_inputs: false,
           supports_image_input: false,
+          supports_audio_input: true,
+          supports_video_input: false,
           supports_reasoning_budget: true,
           thinking_control_format: 'reasoning-effort',
           parameter_policy: {
@@ -250,15 +253,27 @@ describe('KeeperWorkspaceRail', () => {
           },
           effective_capabilities: {
             source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
             max_output_tokens: 65536,
+            supports_tools: true,
             supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
             supports_parallel_tool_calls: true,
             supports_runtime_mcp_tools: true,
             supports_runtime_tool_events: true,
             assistant_tool_content_format: 'null',
             supports_response_format_json: true,
             supports_structured_output: true,
+            supports_multimodal_inputs: true,
+            supports_image_input: true,
+            supports_audio_input: true,
+            supports_video_input: false,
             supports_reasoning: true,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
+            thinking_control_format: 'chat-template-kwargs',
             preserve_thinking_control_format: 'always-preserved',
             reasoning_output_format: 'split-reasoning-fields',
             reasoning_streaming_format: {
@@ -266,6 +281,7 @@ describe('KeeperWorkspaceRail', () => {
               field: 'reasoning_content',
             },
             reasoning_replay_override: 'preserve-always',
+            supports_native_streaming: true,
             supports_system_prompt: true,
             supports_caching: true,
             supports_prompt_caching: true,
@@ -274,6 +290,7 @@ describe('KeeperWorkspaceRail', () => {
             supports_min_p: true,
             supports_seed: true,
             supports_seed_with_images: true,
+            ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
             supports_code_execution: true,
             emits_usage_tokens: true,
             modality_priority: 'visual-first',
@@ -313,6 +330,9 @@ describe('KeeperWorkspaceRail', () => {
               max_thinking_budget: 32768,
               streaming: true,
               temperature: 0.65,
+              top_p: 0.91,
+              top_k: 42,
+              min_p: 0.07,
               capabilities: {
                 source: 'runtime.toml',
                 max_output_tokens: 65536,
@@ -379,21 +399,35 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('params')
     expect(container.textContent).toContain('chat_template_kwargs · preserve_always')
     expect(container.textContent).toContain('request')
-    expect(container.textContent).toContain('openai_compat · out 65536 · ctx 131072')
+    expect(container.textContent).toContain(
+      'openai_compat · source oas-provider-config · path /chat/completions · out 65536 · ctx 131072',
+    )
+    expect(container.textContent).toContain('system prompt')
     expect(container.textContent).toContain('tool required')
     expect(container.textContent).toContain('declared')
     expect(container.textContent).toContain('chat-completions · openai-compatible-http')
+    expect(container.textContent).toContain('transport http')
     expect(container.textContent).toContain('headers 1')
     expect(container.textContent).toContain('temp 0.65')
+    expect(container.textContent).toContain('sampling config top_p 0.91,top_k 42,min_p 0.07')
     expect(container.textContent).toContain('budget 32768')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge')
     expect(container.textContent).toContain(
-      'controls tool-choice,required,named,parallel,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
+    expect(container.textContent).toContain('source oas-provider-config-model')
+    expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
+    expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
+    expect(container.textContent).toContain('input multimodal,image,audio')
     expect(container.textContent).toContain('modality visual-first')
     expect(container.textContent).toContain('tool-content null')
+    expect(container.textContent).toContain('extended thinking')
+    expect(container.textContent).toContain('reasoning budget')
+    expect(container.textContent).toContain('effort low,medium,high')
+    expect(container.textContent).toContain('wire chat-template-kwargs')
     expect(container.textContent).toContain('preserve always-preserved')
-    expect(container.textContent).toContain('task transcription')
+    expect(container.textContent).toContain('reasoning-stream delta-reasoning-field:reasoning_content')
+    expect(container.textContent).toContain('task transcription · native-stream')
     // the "no source" stub is replaced once the catalog reports capabilities
     expect(container.textContent).not.toContain('조정 정보 미수신')
   })
@@ -411,6 +445,8 @@ describe('KeeperWorkspaceRail', () => {
           capabilities_declared: false,
           supports_multimodal_inputs: false,
           supports_image_input: false,
+          supports_audio_input: false,
+          supports_video_input: false,
           supports_reasoning_budget: false,
           thinking_control_format: 'none',
           models: ['gemma'],

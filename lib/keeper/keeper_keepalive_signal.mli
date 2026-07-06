@@ -192,13 +192,18 @@ val board_reactive_wakeup_allowed :
     resumed implicitly by board posts or comments. *)
 val paused_meta_allows_board_auto_resume : keeper_meta -> bool
 
-(** Select which keepers wake for a board signal (RFC-0020). [None] reasons are
-    dropped; every typed wake reason is returned in candidate order. Fanout
-    suppression belongs at explicit backpressure/debounce boundaries, not after a
-    keeper already has a typed wake reason. *)
+(** Select which keepers wake for a board signal (RFC-0020). Explicit mentions
+    short-circuit and wake unconditionally (returned with [dropped = 0]);
+    thread-reply, reaction, and read-error followups compete for [?total_limit]
+    slots in candidate order.
+    [None] reasons are dropped. Semantic relatedness is not a deterministic
+    board wake reason; it belongs behind an LLM/Judge attention boundary.
+    Returns the selected [(item, reason)] pairs and the number of non-explicit
+    candidates dropped by the cap. *)
 val select_board_wakeup_candidates :
+  ?total_limit:int ->
   ('a * Keeper_world_observation_board_signal.wake_reason option) list ->
-  ('a * Keeper_world_observation_board_signal.wake_reason) list
+  ('a * Keeper_world_observation_board_signal.wake_reason) list * int
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.board_signal -> unit

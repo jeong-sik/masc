@@ -123,15 +123,21 @@ let governance_model_source_to_string = function
   | Telemetry_resolved -> "telemetry_resolved"
   | Unknown_source -> "unknown_source"
 
+let redacted_runtime_model_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+
+let unknown_model_label =
+  Boundary_redaction.to_string Boundary_redaction.unknown_model_label
+
 let resolve_governance_model_used ~raw_model ~canonical_model_id =
-  if String.trim raw_model <> "" then "runtime", Response_model
+  if String.trim raw_model <> "" then redacted_runtime_model_label, Response_model
   else
     match canonical_model_id with
     | Some id ->
         let trimmed = String.trim id in
-        if trimmed <> "" then "runtime", Telemetry_resolved
-        else "runtime", Unknown_source
-    | None -> "runtime", Unknown_source
+        if trimmed <> "" then redacted_runtime_model_label, Telemetry_resolved
+        else unknown_model_label, Unknown_source
+    | None -> unknown_model_label, Unknown_source
 
 let governance_dir base_path =
   Filename.concat

@@ -15,11 +15,16 @@ import {
   oasHealthSummary,
   oasKeeperSnapshots,
 } from './store'
+import {
+  ensureLiveTraceSlot,
+  liveTraceFeeds,
+} from './components/session-trace/session-trace-live-store'
 
 const fetchTelemetryMock = vi.mocked(fetchTelemetry)
 
 function resetRuntimeState() {
   hydrateOasRuntimeFromTelemetryEntries([])
+  liveTraceFeeds.value = {}
 }
 
 describe('oas-runtime-store', () => {
@@ -97,6 +102,32 @@ describe('oas-runtime-store', () => {
     expect(oasHealthSummary.value.lastErrorTs).toBe(400_000)
     expect(oasAgentEvents.value[0]?.agent_name).toBe('alpha')
     expect(oasKeeperSnapshots.value.get('keeper-a')?.generation).toBe(3)
+  })
+
+  it('preserves cache delta fields on live durable llm_request trace events', () => {
+    ensureLiveTraceSlot('alpha')
+
+    expect(
+      applyOasRuntimeEvent({
+        type: 'oas:durable:llm_request',
+        ts_unix: 300,
+        correlation_id: 'corr-cache',
+        run_id: 'run-cache',
+        payload: {
+          agent_name: 'alpha',
+          model: 'gpt-5',
+          input_tokens: 100,
+          cache_creation_input_tokens: 10,
+          cache_read_input_tokens: 20,
+          cache_miss_input_tokens: 70,
+        },
+      }, { includeLiveTrace: true }),
+    ).toBe(true)
+
+    const detail = liveTraceFeeds.value.alpha?.[0]?.detail ?? {}
+    expect(detail.cache_creation_tokens).toBe(10)
+    expect(detail.cache_read_tokens).toBe(20)
+    expect(detail.cache_miss_input_tokens).toBe(70)
   })
 
   it('dedupes a live event already present in replayed telemetry', () => {

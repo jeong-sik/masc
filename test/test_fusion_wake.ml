@@ -145,6 +145,29 @@ let bg_stimulus ?bg_run_id ?bg_kind ?bg_outcome ?bg_board_post_id ()
   }
 ;;
 
+let scheduled_wake
+      ?(schedule_id = "sched-1")
+      ?(due_at = 3000.0)
+      ?(payload_digest = "digest-1")
+      ?(title = Some "Scheduled lane wake")
+      ?(message = "SCHEDULE-ANSWER-TOKEN")
+      ()
+  : Keeper_event_queue.scheduled_wake
+  =
+  { schedule_id; due_at; payload_digest; title; message }
+;;
+
+let schedule_stimulus ?schedule_id ?due_at ?payload_digest ?title ?message ()
+  : Keeper_event_queue.stimulus
+  =
+  let wake = scheduled_wake ?schedule_id ?due_at ?payload_digest ?title ?message () in
+  { post_id = Keeper_event_queue.schedule_due_post_id wake
+  ; urgency = Keeper_event_queue.Normal
+  ; arrived_at = 3000.0
+  ; payload = Keeper_event_queue.Schedule_due wake
+  }
+;;
+
 (* (1) closed-sum helpers classify the new variant *)
 let test_closed_sum_helpers () =
   let p = Keeper_event_queue.Fusion_completed (fusion_payload ()) in
@@ -263,6 +286,34 @@ let test_bg_failure_missing_board_post_id_fallback () =
     "preview carries failure reason"
     true
     (contains ~needle:"exit status 127" ev.preview)
+;;
+
+let test_scheduled_wake_is_actionable () =
+  let meta = make_meta ~name:"schedule-keeper" () in
+  let wake = scheduled_wake ~message:"SCHEDULE-ANSWER-TOKEN" () in
+  let ev : Keeper_world_observation.pending_board_event =
+    Keeper_world_observation.pending_board_event_of_scheduled_wake
+      ~meta
+      ~arrived_at:3000.0
+      wake
+  in
+  check string "post_id correlates to schedule" "schedule-due:sched-1" ev.post_id;
+  check bool "preview carries schedule message" true
+    (contains ~needle:"SCHEDULE-ANSWER-TOKEN" ev.preview);
+  check bool "provenance is Automation" true
+    (match ev.provenance with
+     | Keeper_world_observation.Automation -> true
+     | _ -> false);
+  match
+    Keeper_world_observation.pending_board_event_of_stimulus
+      ~continuity_summary:""
+      ~meta
+      (schedule_stimulus ~message:"SCHEDULE-ANSWER-TOKEN" ())
+  with
+  | Some (ev : Keeper_world_observation.pending_board_event) ->
+    check bool "stimulus path preview carries the schedule message" true
+      (contains ~needle:"SCHEDULE-ANSWER-TOKEN" ev.preview)
+  | None -> fail "Schedule_due stimulus must produce Some pending_board_event, not None"
 ;;
 
 (* (3) an empty board_post_id (sink failed to create the post) still delivers
@@ -407,6 +458,10 @@ let () =
             "background failure falls back to bg-run id"
             `Quick
             test_bg_failure_missing_board_post_id_fallback
+        ; test_case
+            "scheduled wake is actionable (non-empty, carries message)"
+            `Quick
+            test_scheduled_wake_is_actionable
         ] )
     ]
 ;;

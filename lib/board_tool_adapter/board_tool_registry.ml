@@ -188,6 +188,7 @@ let tools =
   ; board_tool_curation_read
   ; board_tool_curation_submit
   ; tool_delete
+  ; board_tool_cleanup
   ; Board_tool_schemas.tool_sub_board_create
   ; Board_tool_schemas.tool_sub_board_list
   ; Board_tool_schemas.tool_sub_board_get

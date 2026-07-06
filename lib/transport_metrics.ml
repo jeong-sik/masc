@@ -78,6 +78,12 @@ let inc_external_subscriber_callback_failure () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_sse_external_subscriber_callback_failures ()
 ;;
 
+let observe_external_subscriber_fanout_duration seconds =
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_sse_external_fanout_duration_seconds
+    (max 0.0 seconds)
+;;
+
 (* P2 silent-failure fix (transport scan):
    The OAS relay drop-marker is the operator-visible signal that an
    OAS event was dropped after exhausting retries.  If the drop marker
@@ -240,6 +246,10 @@ let inc_grpc_bytes_sent ~bytes =
 ;;
 
 let inc_ws_delta_built () = Otel_metric_store.inc_counter Otel_metric_store.metric_ws_delta_built ()
+
+let inc_ws_delta_payload_serialization () =
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_delta_payload_serializations ()
+;;
 
 let inc_grpc_backlog_replay_lines_scanned ?(delta = 1) () =
   if delta > 0
@@ -490,6 +500,7 @@ type ws_delivery_metric_names =
   ; bytes_cache_misses : string
   ; client_acks : string
   ; throttled_deliveries : string
+  ; delta_payload_serializations : string
   ; client_buffered_bytes : string
   ; client_buffered_bytes_count : string
   ; hello_latency : string
@@ -503,6 +514,7 @@ let ws_delivery_metric_names =
   ; bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
   ; client_acks = "masc_ws_client_acks_total"
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
+  ; delta_payload_serializations = "masc_ws_delta_payload_serializations_total"
   ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
   ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
   ; hello_latency = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
@@ -555,6 +567,17 @@ let transport_health_json ~config =
   let broadcast_count = v "masc_sse_broadcast_duration_seconds_count" () in
   let broadcast_avg =
     if broadcast_count > 0.0 then broadcast_sum /. broadcast_count else 0.0
+  in
+  let external_fanout_sum =
+    v Otel_metric_store.metric_sse_external_fanout_duration_seconds ()
+  in
+  let external_fanout_count =
+    v (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count") ()
+  in
+  let external_fanout_avg =
+    if external_fanout_count > 0.0
+    then external_fanout_sum /. external_fanout_count
+    else 0.0
   in
   let grpc_streams = v Otel_metric_store.metric_grpc_active_streams () in
   let grpc_subscribers = v Otel_metric_store.metric_grpc_subscribers () in
@@ -629,6 +652,9 @@ let transport_health_json ~config =
           ; "external_subscribers", `Int sse_external_subscribers
           ; "broadcast_avg_seconds", `Float broadcast_avg
           ; "broadcast_count", `Int (int_of_float broadcast_count)
+          ; "external_fanout_avg_seconds", `Float external_fanout_avg
+          ; "external_fanout_count", `Int (int_of_float external_fanout_count)
+          ; "external_fanout_sum_seconds", `Float external_fanout_sum
           ; "queue_avg_depth", `Float sse_queue_avg
           ; "queue_max_depth", `Int sse_queue_max
           ; "relay_queue_depth", `Int relay_queue_depth
@@ -686,6 +712,10 @@ let transport_health_json ~config =
                   , `Int (int_of_float (v ws_delivery_metrics.client_acks ())) )
                 ; ( "throttled_deliveries"
                   , `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())) )
+                ; ( "delta_payload_serializations"
+                  , `Int
+                      (int_of_float
+                         (v ws_delivery_metrics.delta_payload_serializations ())) )
                 ; (* Histogram sum + auto _count give operators enough to compute
            average buffered bytes per ack without external telemetry queries. *)
                   ( "client_buffered_bytes_sum"

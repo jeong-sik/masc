@@ -47,6 +47,7 @@ import { clearTraces, pushTrace } from './keeper-trace-store'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -101,9 +102,11 @@ const dashboardFetchHandlers: ReadonlyArray<[
   () => Response,
 ]> = [
   [/\/api\/v1\/workspace\/tree/, () => jsonResponse([])],
-  [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: false, content: '' })],
+  [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: true, content: '{}', language: 'json' })],
   [/\/api\/v1\/git\/blame/, () => jsonResponse([])],
   [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
+  [/\/api\/v1\/ide\/regions/, () => jsonResponse({ ok: true, data: [] })],
+  [/\/api\/v1\/ide\/annotations/, () => jsonResponse({ ok: true, data: [] })],
   [/\/state-diagram/, () => jsonResponse({
     keeper: 'sangsu',
     current_phase: 'observe',
@@ -116,6 +119,28 @@ function dashboardFetchMock(input: RequestInfo | URL): Promise<Response> {
   const handler = dashboardFetchHandlers.find(([pattern]) => pattern.test(url))
   if (!handler) throw new Error(`Unmocked fetch URL: ${url}`)
   return Promise.resolve(handler[1]())
+}
+
+function dashboardFetchMockWithFailure(
+  pattern: RegExp,
+  error: Error,
+): (input: RequestInfo | URL) => Promise<Response> {
+  return (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    if (pattern.test(url)) return Promise.reject(error)
+    return dashboardFetchMock(input)
+  }
+}
+
+function dashboardFetchMockWithResponse(
+  pattern: RegExp,
+  response: Response,
+): (input: RequestInfo | URL) => Promise<Response> {
+  return (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    if (pattern.test(url)) return Promise.resolve(response)
+    return dashboardFetchMock(input)
+  }
 }
 
 describe('IdeShell', () => {
@@ -139,6 +164,7 @@ describe('IdeShell', () => {
     activeIdeFile.value = 'package.json'
     ideContextFocus.value = null
     cursorOverlaySignal.value = { cursors: new Map(), heatmap: new Map(), collisions: [], active_file: null }
+    lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
     clearTraces()
     clearLocalStorage()
   })
@@ -479,6 +505,95 @@ describe('IdeShell', () => {
     ])
   })
 
+  it('surfaces workspace fetch failures in the IDE statusbar', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(dashboardFetchMockWithFailure(
+        /\/api\/v1\/git\/diff/,
+        new Error('diff endpoint unavailable'),
+      )),
+    )
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-workspace-fetch"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('IDE fetch degraded diff')
+    expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
+  })
+
+  it('surfaces malformed annotation responses in the IDE statusbar', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(dashboardFetchMockWithResponse(
+        /\/api\/v1\/ide\/annotations/,
+        jsonResponse({ ok: true, data: [null] }),
+      )),
+    )
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-workspace-fetch"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('IDE fetch degraded annotations')
+    expect(chip.getAttribute('title')).toContain(
+      'fetchIdeAnnotations returned malformed row at index 0',
+    )
+  })
+
+  it('surfaces overlay-only LSP languages in the IDE statusbar', async () => {
+    lspStatusSnapshot.value = {
+      langs: [
+        {
+          lang: 'ocaml',
+          connected: false,
+          overlay_only: true,
+          command: 'ocamllsp',
+          last_error: 'ocamllsp unavailable',
+        },
+        {
+          lang: 'typescript',
+          connected: true,
+          overlay_only: false,
+          command: 'typescript-language-server',
+          last_error: null,
+        },
+      ],
+    }
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-lsp-status"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('LSP overlay-only 1')
+    expect(chip.getAttribute('title')).toContain('ocaml: ocamllsp unavailable')
+    expect(chip.getAttribute('title')).not.toContain('typescript')
+  })
+
   it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {
     route.value = {
       tab: 'code',
@@ -814,12 +929,22 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
   })
 
-  it('switches the IDE right rail tabs and renders cursor stream focus', () => {
+  it('switches the IDE right rail tabs and renders cursor stream focus', async () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
       postId: null,
     }
+    class MockEventSource {
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(_url: string) {}
+
+      close = vi.fn()
+    }
+    vi.stubGlobal('EventSource', MockEventSource)
     cursorOverlaySignal.value = {
       cursors: new Map([[
         'sangsu',
@@ -841,6 +966,16 @@ describe('IdeShell', () => {
     }
 
     render(h(IdeShell, {}), container)
+    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('connecting'))
+    cursorOverlaySignal.value = {
+      ...cursorOverlaySignal.value,
+      stream: {
+        status: 'degraded',
+        failedCount: 2,
+        lastErrorMs: Date.UTC(2026, 6, 4, 1, 2, 3),
+        error: 'SSE transport error',
+      },
+    }
 
     fireEvent.click(buttonByText(container, 'Activity'))
     expect(buttonByText(container, 'Activity').getAttribute('aria-selected')).toBe('true')
@@ -859,6 +994,10 @@ describe('IdeShell', () => {
     expect(cursorRail?.textContent).toContain('str_replace')
     expect(cursorRail?.textContent).toContain('round.ml:94-96')
     expect(cursorRail?.textContent).toContain('L94')
+    expect(container.querySelector('[data-testid="ide-cursor-stream-status"]')?.textContent)
+      .toBe('stream degraded 2 failed')
+    expect(container.querySelector('[data-testid="ide-cursor-stream-status"]')?.getAttribute('data-state'))
+      .toBe('degraded')
 
     fireEvent.click(buttonByText(container, 'Focus'))
     expect(ideContextFocus.value).toMatchObject({

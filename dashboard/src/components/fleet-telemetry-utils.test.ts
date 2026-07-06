@@ -226,6 +226,18 @@ describe('buildFleetRows runtime labels', () => {
     })
   })
 
+  it('does not fabricate a runtime model label when model evidence is absent', () => {
+    const [row] = buildFleetRows([
+      {
+        name: 'unknown-model-keeper',
+        status: 'active',
+        keepalive_running: true,
+      },
+    ], EMPTY_TOOL_QUALITY)
+
+    expect(row?.model).toBe('unknown')
+  })
+
   it('projects the keeper stop_cause into fleet rows', () => {
     const [row] = buildFleetRows([
       {

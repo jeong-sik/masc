@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchRuntimeTomlConfig, saveRuntimeTomlConfig } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
 import {
+  applyFusionPresetComposition,
   applyFusionSettings,
   readFusionPresetMinAnswered,
   readFusionSettingsResult,
@@ -22,6 +23,7 @@ import {
 } from '../lib/fusion-settings'
 import { readFusionPresetView } from '../lib/fusion-preset-view'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
+import { parseRuntimeTomlEnvironment } from '../lib/runtime-toml-config'
 
 type EditorState = 'loading' | 'idle' | 'saving' | 'saved' | 'error'
 type FusionSettingsDraft = {
@@ -29,14 +31,20 @@ type FusionSettingsDraft = {
   readonly defaultPreset: string
   readonly maxConcurrentPanels: string
   readonly minAnswered: string
+  readonly panel: readonly string[]
+  readonly judge: string
 }
 
-function draftFromSettings(s: FusionSettings): FusionSettingsDraft {
+function draftFromSettings(sourceText: string, s: FusionSettings): FusionSettingsDraft {
+  const presetView = readFusionPresetView(sourceText, s.defaultPreset)
+  const flatPreset = presetView !== null && !presetView.grouped ? presetView : null
   return {
     enabled: s.enabled,
     defaultPreset: s.defaultPreset,
     maxConcurrentPanels: String(s.maxConcurrentPanels),
     minAnswered: String(s.minAnswered),
+    panel: flatPreset?.panel ?? [],
+    judge: flatPreset?.judge ?? '',
   }
 }
 
@@ -100,6 +108,78 @@ function backendValidationMessage(cfg: { message?: string | null; reason?: strin
   )
 }
 
+function uniqueRuntimeIds(ids: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const id of ids) {
+    const trimmed = id.trim()
+    if (trimmed === '' || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    result.push(trimmed)
+  }
+  return result
+}
+
+function sameRuntimeIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
+function runtimeOptionsFromSource(sourceText: string, draft: FusionSettingsDraft): string[] {
+  const environment = parseRuntimeTomlEnvironment(sourceText)
+  return uniqueRuntimeIds([
+    ...environment.bindings.map(binding => binding.id),
+    ...draft.panel,
+    draft.judge,
+  ]).sort((a, b) => a.localeCompare(b))
+}
+
+function RuntimePanelEditor({
+  panel,
+  options,
+  onChange,
+}: {
+  panel: readonly string[]
+  options: readonly string[]
+  onChange: (panel: readonly string[]) => void
+}) {
+  const addable = options.filter(option => !panel.includes(option))
+  return html`
+    <div class="set-fusion-runtime-list" data-testid="fusion-panel-runtime-editor">
+      <div class="set-fusion-runtime-chips">
+        ${panel.length === 0
+          ? html`<span class="set-hint" data-testid="fusion-panel-runtime-empty">패널 런타임 없음</span>`
+          : panel.map(runtimeId => html`
+            <span key=${runtimeId} class="set-fusion-runtime-chip mono">
+              ${runtimeId}
+              <button
+                type="button"
+                aria-label=${`${runtimeId} 제거`}
+                data-testid="fusion-panel-runtime-remove"
+                onClick=${() => onChange(panel.filter(id => id !== runtimeId))}
+              >
+                ×
+              </button>
+            </span>
+          `)}
+      </div>
+      <select
+        class="set-fusion-runtime-add mono"
+        data-testid="fusion-panel-runtime-add"
+        value=""
+        disabled=${addable.length === 0}
+        onChange=${(event: Event) => {
+          const value = (event.target as HTMLSelectElement).value
+          if (value) onChange([...panel, value])
+          ;(event.target as HTMLSelectElement).value = ''
+        }}
+      >
+        <option value="">패널 런타임 추가</option>
+        ${addable.map(option => html`<option key=${option} value=${option}>${option}</option>`)}
+      </select>
+    </div>
+  `
+}
+
 export function FusionSettingsPanel() {
   const [source, setSource] = useState<string | null>(null)
   const [draft, setDraft] = useState<FusionSettingsDraft | null>(null)
@@ -124,7 +204,7 @@ export function FusionSettingsPanel() {
           return
         }
         setSource(cfg.source_text)
-        setDraft(draftFromSettings(parsed.settings))
+        setDraft(draftFromSettings(cfg.source_text, parsed.settings))
         setState('idle')
       } catch (err) {
         if (!active) return
@@ -156,7 +236,12 @@ export function FusionSettingsPanel() {
   }
 
   const patchDefaultPreset = (defaultPreset: string) => {
-    const next: { defaultPreset: string; minAnswered?: string } = { defaultPreset }
+    const next: {
+      defaultPreset: string
+      minAnswered?: string
+      panel?: readonly string[]
+      judge?: string
+    } = { defaultPreset }
     if (source !== null) {
       const minAnswered = readFusionPresetMinAnswered(source, defaultPreset)
       if (typeof minAnswered === 'number') {
@@ -164,6 +249,14 @@ export function FusionSettingsPanel() {
       } else {
         setError(parseIssueMessage([minAnswered]))
         setState('error')
+      }
+      const nextPresetView = readFusionPresetView(source, defaultPreset)
+      if (nextPresetView !== null && !nextPresetView.grouped) {
+        next.panel = nextPresetView.panel
+        next.judge = nextPresetView.judge ?? ''
+      } else {
+        next.panel = []
+        next.judge = ''
       }
     }
     patch(next)
@@ -180,7 +273,23 @@ export function FusionSettingsPanel() {
     setState('saving')
     setError('')
     try {
-      const cfg = await saveRuntimeTomlConfig(applyFusionSettings(source, settings))
+      let nextSourceText = applyFusionSettings(source, settings)
+      const activePresetView = readFusionPresetView(source, settings.defaultPreset)
+      if (activePresetView !== null && !activePresetView.grouped) {
+        const panel = uniqueRuntimeIds(draft.panel)
+        const judge = draft.judge.trim()
+        const compositionChanged =
+          !sameRuntimeIds(activePresetView.panel, panel)
+          || (activePresetView.judge ?? '') !== judge
+        if (compositionChanged) {
+          nextSourceText = applyFusionPresetComposition(nextSourceText, {
+            preset: settings.defaultPreset,
+            panel,
+            judge,
+          })
+        }
+      }
+      const cfg = await saveRuntimeTomlConfig(nextSourceText)
       if (!mountedRef.current) return
       if (!cfg.ok) {
         setError(backendValidationMessage(cfg))
@@ -194,7 +303,7 @@ export function FusionSettingsPanel() {
         return
       }
       setSource(cfg.source_text)
-      setDraft(draftFromSettings(parsed.settings))
+      setDraft(draftFromSettings(cfg.source_text, parsed.settings))
       try {
         await refreshRuntimeConfigConsumers()
         setSavedMessage(cfg.reloaded ? '저장됨 (reload 완료)' : '저장됨')
@@ -224,9 +333,12 @@ export function FusionSettingsPanel() {
   // Flat preset with panel models → full read-only card. Grouped preset
   // ([[...panels]] array-of-tables) → fail-visible note (a single flat card
   // cannot represent N groups without silently dropping some).
-  const showPresetView = presetView !== null && !presetView.grouped && presetView.panel.length > 0
+  const showPresetEditor = presetView !== null && !presetView.grouped
+  const showPresetView = showPresetEditor && presetView.panel.length > 0
   const showGroupedNote = presetView !== null && presetView.grouped
+  const runtimeOptions = runtimeOptionsFromSource(source, draft)
   const timeoutLabel = (value: number | null): string => (value === null ? '—' : `${value}s`)
+  const judgeLabel = presetView?.judgeGroupCount ? 'Judge-of-judges runtime' : 'Judge runtime'
 
   return html`
     <div class="set-fusion-editor" data-testid="fusion-settings-editor">
@@ -260,6 +372,33 @@ export function FusionSettingsPanel() {
             <div class="set-sub-h">${presetView.preset} 프리셋</div>
             <div class="set-hint" data-testid="fusion-preset-grouped">
               그룹형 패널 구성 · ${presetView.groupCount}개 그룹 (<span class="mono">[[fusion.presets.${presetView.preset}.panels]]</span>) · 미리보기 미지원
+            </div>
+          `
+        : null}
+      ${showPresetEditor && presetView
+        ? html`
+            <div class="set-sub-h">${presetView.preset} 런타임 구성</div>
+            <div class="set-fusion-composition" data-testid="fusion-preset-composition-editor">
+              <label class="set-line set-line-stack">
+                <span>Panel runtimes</span>
+                <${RuntimePanelEditor}
+                  panel=${draft.panel}
+                  options=${runtimeOptions}
+                  onChange=${(panel: readonly string[]) => patch({ panel })}
+                />
+              </label>
+              <label class="set-line">
+                <span>${judgeLabel}</span>
+                <select
+                  class="set-fusion-runtime-add mono"
+                  data-testid="fusion-judge-runtime"
+                  value=${draft.judge}
+                  onChange=${(event: Event) => patch({ judge: (event.target as HTMLSelectElement).value })}
+                >
+                  <option value="">미지정</option>
+                  ${runtimeOptions.map(option => html`<option key=${option} value=${option}>${option}</option>`)}
+                </select>
+              </label>
             </div>
           `
         : null}

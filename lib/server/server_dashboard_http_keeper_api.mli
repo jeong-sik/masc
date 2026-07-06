@@ -16,6 +16,7 @@ val keeper_api_prefix : string
 
 val keeper_suffix_tools : string
 val keeper_suffix_config : string
+val keeper_suffix_secrets : string
 val keeper_suffix_boot : string
 val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
@@ -70,6 +71,12 @@ val handle_keeper_tools_post :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Handle [POST /tools] (tool-grant edits). *)
 
+val handle_keeper_catchup_judge_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
+    and starting an out-of-band Fusion judge run. *)
+
 (** {1 POST route classifier}
 
     keeper_post_route_kind ADT + classifier + path helpers live in
@@ -111,6 +118,35 @@ val keeper_runtime_trace_json :
   [ `Not_found | `OK ] * Yojson.Safe.t
 (** Runtime manifest + receipt evidence chain for [GET /runtime-trace]. *)
 
+val offline_keeper_composite_json :
+  config:Workspace.config ->
+  string -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Offline/paused composite fallback for keepers missing from the live
+    registry. Exposed so dashboard tests can pin the JSON shape. *)
+
+(** {1 Keeper state diagram runtime projection} *)
+
+type state_diagram_runtime_projection =
+  { runtime_models : string list
+  ; last_provider_result : string option
+  ; runtime_models_source : string
+  ; last_provider_result_source : string
+  ; effective_runtime_reason : string option
+  }
+
+val state_diagram_runtime_projection :
+  Keeper_meta_contract.keeper_meta option -> state_diagram_runtime_projection
+(** Redacted runtime/provider projection for [GET /state-diagram].
+    It never exposes concrete OAS provider or model identifiers. *)
+
+val state_diagram_runtime_projection_json :
+  state_diagram_runtime_projection -> Yojson.Safe.t
+(** JSON fields embedded in the [GET /state-diagram] response. *)
+
+val state_diagram_runtime_fsm_mermaid :
+  state_diagram_runtime_projection -> string
+(** Runtime FSM Mermaid rendered from the redacted projection. *)
+
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
@@ -144,6 +180,11 @@ val handle_keeper_config_post :
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /config] (TOML edits). *)
+
+val handle_keeper_secrets_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /secrets] (redacted env-secret projection edits). *)
 
 val handle_keeper_lifecycle_post :
   ?body_str:string ->

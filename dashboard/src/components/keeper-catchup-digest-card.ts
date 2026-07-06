@@ -1,9 +1,13 @@
 import { html } from 'htm/preact'
+import { ExternalLink, Scale } from 'lucide-preact'
+import { useState } from 'preact/hooks'
+import { runKeeperCatchupJudgment } from '../api/keeper'
 import type {
   KeeperCatchupDigest,
   KeeperCatchupDigestCoverageCause,
 } from '../api/schemas/keeper-catchup-digest'
 import { KEEPER_DIGEST_MIN_ACTIVITY } from '../config/constants'
+import { navigate } from '../router'
 
 // Total count of new activity across every category since the operator's
 // last-seen cursor. Drives the "is there anything worth showing" gate.
@@ -83,6 +87,8 @@ const CHIP_BASE =
 const CHIP_DEFAULT =
   'border-[var(--color-border-default)] bg-[var(--color-bg-page)] text-[var(--color-fg-secondary)]'
 const CHIP_WARN = 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
+const ACTION_BUTTON =
+  'inline-flex h-7 items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 text-2xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-accent-muted)] hover:text-[var(--color-fg-default)] disabled:cursor-wait disabled:opacity-60'
 
 function digestChips(digest: KeeperCatchupDigest): DigestChip[] {
   const { chat, turns, tasks, board, lifecycle } = digest
@@ -109,6 +115,24 @@ function digestChips(digest: KeeperCatchupDigest): DigestChip[] {
 export function KeeperCatchupDigestCard({ digest }: { digest: KeeperCatchupDigest }) {
   const chips = digestChips(digest)
   const coverageWarningItems = coverageWarnings(digest)
+  const [running, setRunning] = useState(false)
+  const [runId, setRunId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function runJudge() {
+    if (running) return
+    setRunning(true)
+    setError(null)
+    try {
+      const result = await runKeeperCatchupJudgment(digest.keeper, digest.since_unix)
+      setRunId(result.runId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '판정 실행에 실패했습니다.')
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return html`
     <div
       data-keeper-catchup-digest
@@ -121,9 +145,36 @@ export function KeeperCatchupDigestCard({ digest }: { digest: KeeperCatchupDiges
             ? html`<span class="text-2xs text-[var(--color-fg-secondary)]">이후 ${digest.chat.new_messages}개 메시지</span>`
             : null}
         </div>
-        ${digest.lifecycle.paused_now
-          ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-2xs font-medium text-[var(--warn-bright)]">일시정지됨</span>`
-          : null}
+        <div class="flex flex-wrap items-center gap-1.5">
+          ${digest.lifecycle.paused_now
+            ? html`<span class="inline-flex h-7 items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 text-2xs font-medium text-[var(--warn-bright)]">일시정지됨</span>`
+            : null}
+          ${runId
+            ? html`
+                <button
+                  type="button"
+                  class=${ACTION_BUTTON}
+                  title="Fusion 판정 결과 열기"
+                  data-testid="keeper-catchup-judge-open"
+                  onClick=${() => navigate('fusion', { run_id: runId })}
+                >
+                  <${ExternalLink} size=${12} aria-hidden="true" />
+                  결과 보기
+                </button>
+              `
+            : null}
+          <button
+            type="button"
+            class=${ACTION_BUTTON}
+            title="그 사이 활동을 엄격 판정자로 평가"
+            disabled=${running}
+            data-testid="keeper-catchup-judge-run"
+            onClick=${runJudge}
+          >
+            <${Scale} size=${12} aria-hidden="true" />
+            ${running ? '판정 중' : '판정 실행'}
+          </button>
+        </div>
       </div>
       ${chips.length > 0
         ? html`
@@ -136,6 +187,13 @@ export function KeeperCatchupDigestCard({ digest }: { digest: KeeperCatchupDiges
                   ${chip.text}
                 </span>
               `)}
+            </div>
+          `
+        : null}
+      ${error
+        ? html`
+            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] px-2 py-1 text-2xs leading-relaxed text-[var(--bad-light)]" role="alert">
+              ${error}
             </div>
           `
         : null}

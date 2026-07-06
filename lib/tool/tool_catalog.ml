@@ -285,6 +285,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_create", broadcast_tool);
     ("masc_board_sub_board_update", broadcast_tool);
     ("masc_board_sub_board_delete", broadcast_tool);
+    ("masc_board_cleanup", destructive_tool);
     ("masc_board_delete", destructive_tool);
     ("masc_tool_stats", read_state_tool);
     ("masc_pause", broadcast_tool);

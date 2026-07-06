@@ -397,7 +397,6 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
     in
     let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
     let soft_forbidden = auto_approval_soft_forbidden ~tool_name ~input in
-    let hitl_disabled = Env_config_core.disable_hitl () in
     if hard_forbidden
     then (
       Log.Governance.debug
@@ -408,13 +407,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         (risk_level_to_string risk);
       reject_hard_forbidden ~config ~keeper_name ~tool_name ~input ~risk ~meta ())
     else (
-      let auto_approval_forbidden = (not hitl_disabled) && soft_forbidden in
-      if hitl_disabled && soft_forbidden
-      then
-        Log.Governance.warn
-          "[%s] HITL bypass: soft_forbidden tool=%s allowed via disable_hitl"
-          keeper_name
-          tool_name;
+      let auto_approval_forbidden = soft_forbidden in
       let requires_operator_approval = needs_approval || auto_approval_forbidden in
       if trifecta_active
       then

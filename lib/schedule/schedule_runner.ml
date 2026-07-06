@@ -55,7 +55,11 @@ and dispatch_result =
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
-  ; dispatch : Schedule_domain.schedule_request -> (Yojson.Safe.t, string) result
+  ; dispatch :
+      Workspace_utils.config ->
+      now:float ->
+      Schedule_domain.schedule_request ->
+      (Yojson.Safe.t, string) result
   }
 
 type dispatch_wrapper =
@@ -280,9 +284,8 @@ let finish_failed_dispatch config ~now ~schedule_id error =
     dispatch_result ~error schedule_id Dispatch_failed
 ;;
 
-let safe_consumer_dispatch consumer request =
-  try consumer.dispatch request with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+let safe_consumer_dispatch config ~now consumer request =
+  try consumer.dispatch config ~now request with
   | exn -> Error (Printexc.to_string exn)
 ;;
 
@@ -316,7 +319,7 @@ let dispatch_candidate
          dispatch_result ~error:(Schedule_store.store_error_to_string err) schedule_id
            Dispatch_start_rejected
        | Ok running_request ->
-         (match safe_consumer_dispatch consumer running_request with
+         (match safe_consumer_dispatch config ~now consumer running_request with
           | Error error -> finish_failed_dispatch config ~now ~schedule_id error
           | Ok detail ->
             (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with

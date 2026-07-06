@@ -162,6 +162,20 @@ let str_starts_with ~prefix s =
   let len_prefix = String.length prefix in
   len_s >= len_prefix && String.sub s 0 len_prefix = prefix
 
+let make_task_contract ?(strict = false) ?(completion_contract = [])
+    ?(required_evidence = []) ?(inspect_gate_evidence = [])
+    ?(verify_gate_evidence = []) () : Masc_domain.task_contract =
+  {
+    strict;
+    completion_contract;
+    required_evidence;
+    inspect_gate_evidence;
+    verify_gate_evidence;
+    evidence_claims = [];
+    stale_claim_timeout_sec = 0;
+    links = { operation_id = None; session_id = None };
+  }
+
 let add_priority_task ctx ~title =
   let result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -172,6 +186,45 @@ let add_priority_task ctx ~title =
         ])
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result)
+
+let start_task_001 ctx =
+  let claim =
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  if not (Tool_result.is_success claim) then failwith (Tool_result.message claim);
+  let start =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "start");
+        ])
+  in
+  if not (Tool_result.is_success start) then failwith (Tool_result.message start)
+
+let with_cdal_evidence_gate_decide decide f =
+  let previous = Atomic.get Workspace_hooks.cdal_evidence_gate_decide_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn previous)
+    (fun () ->
+       Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide;
+       f ())
+
+let workspace_evidence_verdict_of_cdal = function
+  | Cdal_evidence_gate.Pass -> Workspace_hooks.Pass
+  | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
+      Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
+
+let real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff () =
+  Cdal_evidence_gate.decide
+    ~task_id
+    ~task_opt
+    ~notes
+    ~handoff_context:handoff
+    ()
+  |> workspace_evidence_verdict_of_cdal
 
 let verifier_transition_action_denylist =
   List.map
@@ -276,6 +329,21 @@ let assert_task_awaiting_verification_by ctx agent_name =
       assert (assignee = agent_name);
       assert (verification_id <> "")
   | _ -> failwith "expected task to be awaiting verification"
+
+let set_only_task_contract ctx contract =
+  let config = ctx.Task.Tool.config in
+  let backlog = Workspace.read_backlog config in
+  match backlog.Masc_domain.tasks with
+  | [ task ] ->
+      Workspace.write_backlog config
+        {
+          Masc_domain.tasks = [ { task with contract } ];
+          last_updated = Masc_domain.now_iso ();
+          version = backlog.version + 1;
+        }
+  | tasks ->
+      failwith
+        (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
 
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
@@ -1188,6 +1256,214 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "currently owned by other-agent");
   assert (not (str_contains (Tool_result.message result) "contract verdict"))
+)
+
+let () = test "handle_transition_done_rejects_cdal_evidence_gate_failure" (fun () ->
+  let ctx = make_test_ctx () in
+  let add_result =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("title", `String "CDAL Done gate task");
+          ( "contract",
+            `Assoc
+              [
+                ("required_evidence", `List [ `String "artifact:run_deliverable" ]);
+              ] );
+        ])
+  in
+  if not (Tool_result.is_success add_result) then
+    failwith (Tool_result.message add_result);
+  set_only_task_contract ctx
+    (Some
+       (make_task_contract
+          ~required_evidence:[ "artifact:run_deliverable" ]
+          ()));
+  start_task_001 ctx;
+  let gate_calls = ref 0 in
+  with_cdal_evidence_gate_decide
+    (fun ~task_id ~task_opt ~notes ~handoff:_ () ->
+       incr gate_calls;
+       assert (String.equal task_id "task-001");
+       assert (str_contains notes "artifact:run_deliverable");
+       (match task_opt with
+        | Some { Masc_domain.contract = Some _; _ } -> ()
+        | _ -> failwith "expected contracted task to reach CDAL gate");
+       Workspace_hooks.Reject
+         {
+           reason = "missing reviewable evidence";
+           rule_id = "cdal_evidence_incomplete";
+           hint = "Attach concrete evidence before marking the task done.";
+           payload_json = `Assoc [ ("source", `String "test") ];
+         })
+    (fun () ->
+       let result =
+         Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+           (`Assoc
+             [
+               ("task_id", `String "task-001");
+               ("action", `String "done");
+               ( "notes",
+                 `String
+                   "Implemented deliverable-ready output with artifact:run_deliverable evidence." );
+             ])
+       in
+       assert (!gate_calls = 1);
+       assert (not (Tool_result.is_success result));
+       assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+       let payload = Yojson.Safe.from_string (Tool_result.message result) in
+       assert
+         (json_string [ "diagnosis"; "rule_id" ] payload
+          = "cdal_evidence_incomplete"))
+)
+
+let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun () ->
+  let ctx = make_test_ctx () in
+  let add_message =
+    Workspace.add_task
+      ctx.config
+      ~title:"Analysis-only Done task"
+      ~priority:1
+      ~description:"No persisted verification contract"
+  in
+  assert (str_starts_with ~prefix:"Added task-001" add_message);
+  set_only_task_contract ctx None;
+  start_task_001 ctx;
+  let gate_calls = ref 0 in
+  with_cdal_evidence_gate_decide
+    (fun ~task_id ~task_opt ~notes ~handoff () ->
+       incr gate_calls;
+       assert (String.equal task_id "task-001");
+       assert (str_contains notes "commit:abc123");
+       (match task_opt with
+        | Some { Masc_domain.contract = None; _ } -> ()
+        | _ -> failwith "expected analysis-only task with no contract");
+       real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff ())
+    (fun () ->
+       let result =
+         Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+           (`Assoc
+             [
+               ("task_id", `String "task-001");
+               ("action", `String "done");
+               ( "notes",
+                 `String
+                   "Analysis-only task completed with implementation notes and commit:abc123." );
+             ])
+       in
+       assert (!gate_calls = 1);
+       if not (Tool_result.is_success result) then
+         failwith (Tool_result.message result);
+       match (only_task ctx).Masc_domain.task_status with
+       | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
+       | other ->
+         failwith
+           (Printf.sprintf
+              "expected Done after no-contract CDAL pass, got: %s"
+              (Masc_domain.task_status_to_string other)))
+)
+
+let () = test "handle_transition_done_default_contract_accepts_default_evidence_tokens" (fun () ->
+  let ctx = make_test_ctx () in
+  let add_result =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("title", `String "Default contract Done task");
+          ("description", `String "Mirrors contract harness task completion.");
+        ])
+  in
+  if not (Tool_result.is_success add_result) then
+    failwith (Tool_result.message add_result);
+  start_task_001 ctx;
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ( "notes",
+            `String
+              "completion_notes: contract harness completed the live workflow. \
+               Task scope satisfied: Default contract Done task - Mirrors \
+               contract harness task completion. \
+               reviewable_evidence_ref: contract-harness transcript." );
+        ])
+  in
+  if not (Tool_result.is_success result) then
+    failwith (Tool_result.message result);
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
+  | other ->
+    failwith
+      (Printf.sprintf
+         "expected Done after default-contract CDAL pass, got: %s"
+         (Masc_domain.task_status_to_string other))
+)
+
+let () = test "handle_transition_force_done_still_rejects_cdal_evidence_incomplete" (fun () ->
+  let ctx = make_test_ctx_with_agent "admin-agent" in
+  let add_result =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("title", `String "Forced Done evidence task");
+          ( "contract",
+            `Assoc
+              [
+                ("required_evidence", `List [ `String "artifact:run_deliverable" ]);
+              ] );
+        ])
+  in
+  if not (Tool_result.is_success add_result) then
+    failwith (Tool_result.message add_result);
+  set_only_task_contract ctx
+    (Some
+       (make_task_contract
+          ~required_evidence:[ "artifact:run_deliverable" ]
+          ()));
+  start_task_001 ctx;
+  let previous_is_admin = Atomic.get Workspace_hooks.is_admin_agent_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.is_admin_agent_fn previous_is_admin)
+    (fun () ->
+       Atomic.set Workspace_hooks.is_admin_agent_fn
+         (fun ~base_path:_ ~agent_name ->
+            String.equal agent_name "admin-agent");
+       let gate_calls = ref 0 in
+       with_cdal_evidence_gate_decide
+         (fun ~task_id ~task_opt ~notes ~handoff () ->
+            incr gate_calls;
+            real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff ())
+         (fun () ->
+            let result =
+              Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+                (`Assoc
+                  [
+                    ("task_id", `String "task-001");
+                    ("action", `String "done");
+                    ("force", `Bool true);
+                    ("notes", `String "");
+                  ])
+            in
+            assert (!gate_calls = 1);
+            assert (not (Tool_result.is_success result));
+            assert
+              ((Tool_result.failure_class result)
+               = Some Tool_result.Workflow_rejection);
+            let payload = Yojson.Safe.from_string (Tool_result.message result) in
+            assert
+              (json_string [ "diagnosis"; "rule_id" ] payload
+               = "cdal_evidence_incomplete");
+            match (only_task ctx).Masc_domain.task_status with
+            | Masc_domain.InProgress { assignee; _ } ->
+              assert (String.equal assignee "admin-agent")
+            | other ->
+              failwith
+                (Printf.sprintf
+                   "evidence-gated force=true Done must not mutate status, got: %s"
+                   (Masc_domain.task_status_to_string other))))
 )
 
 let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun () ->

@@ -465,6 +465,8 @@ let keeper_keepalive_entries =
       "Max dispatch attempts for the same keeper turn id before livelock guard blocks";
     entry ~default:"1800.0" "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC"
       "Max seconds a keeper turn id may stay active before livelock guard blocks";
+    entry ~default:"8" "MASC_KEEPER_TURN_CHAT_WAITING_CAP"
+      "Max chat requests parked behind one keeper turn admission slot (floored at 1)";
     entry ~default:"600.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
       "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
     entry ~default:"1800.0" "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"
@@ -483,10 +485,20 @@ let keeper_metrics_entries =
       "Number of rotated files to keep";
   ]
 
+let keeper_health_entries =
+  [
+    entry ~default:"0.0" "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
+      "Durable keeper event-queue backlog age before full-health degrades (seconds)";
+  ]
+
 let keeper_proactive_entries =
   [
     entry ~default:"3" "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"
       "Max proactive generation attempts (clamped 1-10)";
+    entry ~default:"2" "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT"
+      "Max exponent for no-op proactive cooldown backoff (clamped 0-8)";
+    entry ~default:"4" "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS"
+      "Max idle-decay periods for proactive cooldown decay (clamped 0-16)";
     entry ~default:"100" "MASC_KEEPER_STAGE_TIMING_RING_SIZE"
       "Stage timing ring buffer size for profiling (clamped 10-1000)";
   ]
@@ -851,8 +863,11 @@ let all_categories () =
       (inference_entries @ model_routing_entries @ oas_sse_entries
        @ local_runtime_entries);
     category "keeper"
-      (keeper_entries @ keeper_bootstrap_entries @ keeper_keepalive_entries
-       @ keeper_metrics_entries @ docker_playground_entries @ keeper_sandbox_entries);
+      (keeper_entries @ keeper_alert_entries @ keeper_bootstrap_entries
+       @ keeper_keepalive_entries @ keeper_metrics_entries
+       @ keeper_health_entries
+       @ docker_playground_entries
+       @ keeper_sandbox_entries);
     category "keeper_execution"
       (keeper_execution_entries @ compaction_entries @ decision_entries
        @ keeper_tool_entries @ keeper_runtime_entries

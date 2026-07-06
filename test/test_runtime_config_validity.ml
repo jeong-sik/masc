@@ -431,6 +431,53 @@ let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_token))
 
+let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
+  let provider_model_id = "ollama/" ^ model_id in
+  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
+   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
+   | Some entry ->
+     check (option string) (provider_model_id ^ " base") (Some "ollama")
+       entry.base_label;
+     check (option int) (provider_model_id ^ " context") (Some 131072)
+       entry.max_context_tokens;
+     check
+       (option bool)
+       (provider_model_id ^ " audio input")
+       (Some true)
+       entry.supports_audio_input;
+     check
+       (option string)
+       (provider_model_id ^ " thinking token")
+       (Some "<|think|>")
+       entry.thinking_control_token);
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"ollama"
+      ~model_id
+  with
+  | None -> failf "local Gemma4 E2B QAT must resolve via strict Ollama gate path"
+  | Some caps ->
+    check (option int) "Local Gemma4 E2B context" (Some 131072)
+      caps.max_context_tokens;
+    check bool "Local Gemma4 E2B tools" true caps.supports_tools;
+    check bool "Local Gemma4 E2B forced tool_choice disabled" false
+      caps.supports_tool_choice;
+    check bool "Local Gemma4 E2B image input" true caps.supports_image_input;
+    check bool "Local Gemma4 E2B audio input" true caps.supports_audio_input;
+    check bool "Local Gemma4 E2B chat-template token thinking" true
+      (Llm_provider.Capabilities.(
+         caps.thinking_control_format = Chat_template_token));
+    check
+      (option string)
+      "Local Gemma4 E2B thinking token"
+      (Some "<|think|>")
+      (Llm_provider.Capabilities.thinking_control_token_for_provider_model_id
+         ~provider_label:"ollama"
+         ~model_id)
+
 let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->
   let expect_catalog_field ~field_name ~get model_id expected =
@@ -535,7 +582,7 @@ let test_repo_oas_model_catalog_modality_priorities_resolve () =
     List.filter
       (fun (entry : Llm_provider.Model_catalog.model_entry) ->
          Option.is_some entry.modality_priority)
-      catalog
+      (Llm_provider.Model_catalog.model_entries catalog)
   in
   check bool "repo OAS catalog has modality priority rows" true (rows <> []);
   List.iter
@@ -633,6 +680,34 @@ let test_repo_runtime_toml_loads () =
           check bool "Gemma4 forced tool_choice disabled" false
             caps.supports_tool_choice
         | None -> fail "expected Gemma4 capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "ollama.gemma4-e2b-it-qat")
+         runtimes
+     with
+     | None -> fail "expected Gemma4 E2B Ollama runtime in seed"
+     | Some runtime ->
+       check string
+         "Gemma4 E2B model api name"
+         "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+         runtime.model.api_name;
+       check int "Gemma4 E2B context" 131072 runtime.model.max_context;
+       check bool "Gemma4 E2B thinking enabled" true
+         runtime.model.thinking_support;
+       check (option bool) "Gemma4 E2B thinking not preserved" (Some false)
+         runtime.model.preserve_thinking;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "Gemma4 E2B chat-template-token thinking control" true
+            (Runtime_schema.equal_thinking_control_format
+               caps.thinking_control_format
+               Runtime_schema.Chat_template_token);
+          check bool "Gemma4 E2B forced tool_choice disabled" false
+            caps.supports_tool_choice;
+          check bool "Gemma4 E2B image input" true caps.supports_image_input;
+          check bool "Gemma4 E2B audio input" true caps.supports_audio_input
+        | None -> fail "expected Gemma4 E2B capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1356,7 +1431,212 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
                  (Runtime.Missing_catalog_models report))
-              "oas-models.toml"))
+              "oas-models.toml");
+         check bool "diagnostic reports provider label" true
+           (String_util.contains_substring
+              (Runtime.strict_init_error_to_string
+                 (Runtime.Missing_catalog_models report))
+              "provider_label=openai_compat"))
+
+let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-oas-catalog\"\n\
+     max-context = 1024\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.good\"\n\
+     librarian = \"ollama.missing\"\n\
+     media_failover = [\"ollama.missing\", \"ollama.good\"]\n\
+     \n\
+     [runtime.assignments]\n\
+     keeper_a = \"ollama.missing\"\n\
+     keeper_b = \"ollama.good\"\n\
+     \n\
+     [runtime.lanes.safe]\n\
+     candidates = [\"ollama.missing\", \"ollama.good\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_degraded_report ~config_path:path with
+       | Ok Runtime.Initialized -> fail "expected referenced missing runtime to fail"
+       | Ok (Runtime.Initialized_degraded _) ->
+         fail "referenced missing runtime must not degrade into fallback routing"
+       | Error (Runtime.Missing_catalog_models report) ->
+         failf
+           "expected routing-reference config error, got missing catalog report: %s"
+           (Runtime.strict_init_error_to_string (Runtime.Missing_catalog_models report))
+       | Error (Runtime.Runtime_config_error msg) ->
+         check bool "diagnostic names librarian route" true
+           (String_util.contains_substring msg "[runtime].librarian");
+         check bool "diagnostic names keeper assignment" true
+           (String_util.contains_substring msg "[runtime.assignments].keeper_a");
+         check bool "diagnostic names media failover" true
+           (String_util.contains_substring msg "[runtime].media_failover");
+         check bool "diagnostic names lane candidates" true
+           (String_util.contains_substring msg "[runtime.lanes].candidates.safe");
+         check bool "diagnostic rejects fallback erasure" true
+           (String_util.contains_substring msg "default fallback"))
+
+let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-oas-catalog\"\n\
+     max-context = 1024\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.good\"\n\
+     librarian = \"ollama.good\"\n\
+     media_failover = [\"ollama.good\"]\n\
+     \n\
+     [runtime.assignments]\n\
+     keeper_b = \"ollama.good\"\n\
+     \n\
+     [runtime.lanes.safe]\n\
+     candidates = [\"ollama.good\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_degraded_report ~config_path:path with
+       | Error err ->
+         failf
+           "server degraded init should disable only unreferenced catalog gaps: %s"
+           (Runtime.strict_init_error_to_string err)
+       | Ok Runtime.Initialized -> fail "expected degraded startup outcome"
+       | Ok (Runtime.Initialized_degraded degradation) ->
+         check string "configured default"
+           "ollama.good"
+           degradation.configured_default_runtime_id;
+         check string "effective default"
+           "ollama.good"
+           degradation.effective_default_runtime_id;
+         check (list string) "active runtime ids"
+           [ "ollama.good" ]
+           (Runtime.get_runtime_ids ());
+         check (list string) "no dropped assignment"
+           []
+           (List.map
+              (fun (entry : Runtime.dropped_runtime_assignment) -> entry.keeper_name)
+              degradation.dropped_assignments);
+         check (option string) "catalog-known assignment preserved"
+           (Some "ollama.good")
+           (Runtime.runtime_id_for_keeper "keeper_b");
+         check (option string) "librarian route preserved"
+           (Some "ollama.good")
+           (Runtime.librarian_runtime_id ());
+         check (list string) "media failover keeps known ids only"
+           [ "ollama.good" ]
+           (Runtime.media_failover ());
+         (match Runtime.get_lane_by_id "safe" with
+          | None -> fail "lane should remain with its known candidate"
+          | Some lane ->
+            check (list string) "lane candidates keep known ids only"
+              [ "ollama.good" ]
+              (Runtime_lane.ordered_candidates lane));
+         check bool "runtime records startup degradation" true
+           (Runtime.startup_degraded ());
+         let json =
+           Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
+         in
+         let rendered = Yojson.Safe.to_string json in
+         check bool "json is operator-visible degraded" true
+           (String_util.contains_substring rendered "\"status\":\"degraded\"");
+         check bool "json names disabled runtime" true
+           (String_util.contains_substring rendered "ollama.missing"))
+
+let test_server_degraded_init_rejects_uncatalogued_default () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-oas-catalog\"\n\
+     max-context = 1024\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.missing\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_degraded_report ~config_path:path with
+       | Ok Runtime.Initialized -> fail "expected missing default catalog row"
+       | Ok (Runtime.Initialized_degraded _) ->
+         fail "missing configured default must not pick another effective default"
+       | Error (Runtime.Missing_catalog_models report) ->
+         failf
+           "expected default-specific config error, got missing catalog report: %s"
+           (Runtime.strict_init_error_to_string
+              (Runtime.Missing_catalog_models report))
+       | Error (Runtime.Runtime_config_error msg) ->
+         check bool "error names runtime default" true
+           (String_util.contains_substring msg "[runtime].default");
+         check bool "error names missing default runtime" true
+           (String_util.contains_substring msg "ollama.missing");
+         check bool "error rejects alternate default routing" true
+           (String_util.contains_substring msg "default fallback"))
 
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -1693,6 +1973,9 @@ let () =
             "repo OAS catalog covers live RunPod RTX A6000 Gemma runtime"
             `Quick test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
           test_case
+            "repo OAS catalog covers local Gemma4 E2B QAT runtime"
+            `Quick test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat;
+          test_case
             "repo OAS catalog preserves typed thinking/replay axes"
             `Quick test_repo_oas_model_catalog_preserve_axes_resolve;
           test_case
@@ -1737,6 +2020,15 @@ let () =
           test_case
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
+          test_case
+            "server degraded init rejects referenced uncatalogued runtimes"
+            `Quick test_server_degraded_init_rejects_referenced_uncatalogued_runtimes;
+          test_case
+            "server degraded init disables unreferenced uncatalogued runtimes"
+            `Quick test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes;
+          test_case
+            "server degraded init rejects uncatalogued default"
+            `Quick test_server_degraded_init_rejects_uncatalogued_default;
           test_case
             "runtime assignment rejects commented disabled binding"
             `Quick test_runtime_assignment_rejects_commented_disabled_binding;

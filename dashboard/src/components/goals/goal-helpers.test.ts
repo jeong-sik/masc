@@ -1,3 +1,6 @@
+// @vitest-environment happy-dom
+import { html } from 'htm/preact'
+import { render } from 'preact'
 import { describe, it, expect } from 'vitest'
 import {
   priorityStars,
@@ -11,6 +14,8 @@ import {
   taskSearchQuery,
   countAwaitingVerificationTasks,
   countAwaitingVerificationInTree,
+  formatProgressPct,
+  TaskProgressBar,
 } from './goal-helpers'
 import type { Task } from '../../types'
 
@@ -241,6 +246,34 @@ describe('resetTaskSearch', () => {
     taskSearchQuery.value = 'something'
     resetTaskSearch()
     expect(taskSearchQuery.value).toBe('')
+  })
+})
+
+// ================================================================
+// task completion display truth
+// ================================================================
+
+describe('task completion display truth', () => {
+  it('does not turn zero linked tasks into a fake 0% goal progress value', () => {
+    expect(formatProgressPct({ done: 0, total: 0, ratio: 0 })).toBe('no linked tasks')
+  })
+
+  it('formats linked task counts instead of a goal-attainment percentage', () => {
+    expect(formatProgressPct({ done: 2, total: 5, ratio: 0.4 })).toBe('2/5 tasks')
+  })
+
+  it('renders the task-count meter with neutral source metadata', () => {
+    const container = document.createElement('div')
+    render(html`<${TaskProgressBar} done=${1} total=${4} size="sm" />`, container)
+
+    const meter = container.querySelector('[data-task-count-meter]') as HTMLElement | null
+    expect(meter).not.toBeNull()
+    expect(meter?.getAttribute('data-task-count-meter-pct')).toBe('25')
+    expect(meter?.getAttribute('title')).toContain('not a goal-attainment metric')
+    const fill = meter?.firstElementChild as HTMLElement | null
+    expect(fill?.className).toContain('bg-[var(--color-accent-fg)]')
+    expect(fill?.className).not.toContain('status-ok')
+    expect(fill?.className).not.toContain('status-err')
   })
 })
 

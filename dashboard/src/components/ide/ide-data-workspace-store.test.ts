@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clearWorkspaceFetchIssue,
+  replaceWorkspaceFetchIssue,
+  retainCurrentWorkspaceFetchIssues,
   sameWorkspaceTreeIdentity,
   selectPreferredIdeRepositoryId,
+  workspaceFetchIssueFromError,
   workspaceTreeIdentity,
 } from './ide-data-workspace-store'
+import { isDiffEditorView, viewFromRoute } from './ide-view-route'
 import type { Repository } from '../../api/repositories'
 
 function repo(
@@ -153,6 +158,99 @@ describe('selectPreferredIdeRepositoryId', () => {
     // After self-healing excludes llama-cpp:
     const excluded = new Set(['llama-cpp'])
     expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-a')
+  })
+})
+
+describe('workspace fetch diagnostics', () => {
+  it('materializes failed fetches without stringly fallback coercion', () => {
+    const issue = workspaceFetchIssueFromError('diff', new Error('network down'), {
+      filePath: 'lib/runtime.ml',
+      keeper: 'sangsu',
+      repoId: 'masc',
+      nowMs: 42,
+    })
+
+    expect(issue).toEqual({
+      kind: 'diff',
+      message: 'network down',
+      file_path: 'lib/runtime.ml',
+      keeper: 'sangsu',
+      repo_id: 'masc',
+      observed_at_ms: 42,
+    })
+  })
+
+  it('keeps one issue per fetch scope and clears only that scope', () => {
+    const treeIssue = workspaceFetchIssueFromError('tree', new Error('tree failed'), {
+      repoId: 'masc',
+      nowMs: 1,
+    })!
+    const diffIssue = workspaceFetchIssueFromError('diff', new Error('diff failed'), {
+      filePath: 'lib/runtime.ml',
+      repoId: 'masc',
+      nowMs: 2,
+    })!
+    const newerDiffIssue = workspaceFetchIssueFromError('diff', new Error('diff still failed'), {
+      filePath: 'lib/runtime.ml',
+      repoId: 'masc',
+      nowMs: 3,
+    })!
+
+    const issues = replaceWorkspaceFetchIssue(
+      replaceWorkspaceFetchIssue(
+        replaceWorkspaceFetchIssue([], treeIssue),
+        diffIssue,
+      ),
+      newerDiffIssue,
+    )
+
+    expect(issues).toHaveLength(2)
+    expect(issues.map(issue => issue.message)).toEqual(['tree failed', 'diff still failed'])
+    expect(clearWorkspaceFetchIssue(issues, 'diff', {
+      filePath: 'lib/runtime.ml',
+      repoId: 'masc',
+    })).toEqual([treeIssue])
+  })
+
+  it('does not record navigation aborts as degraded workspace fetches', () => {
+    const abort = new DOMException('Aborted', 'AbortError')
+    expect(workspaceFetchIssueFromError('file', abort)).toBeNull()
+  })
+
+  it('drops stale workspace-scoped issues when the active repo changes', () => {
+    const repositoryIssue = workspaceFetchIssueFromError('repositories', new Error('repo list down'), {
+      nowMs: 1,
+    })!
+    const oldTreeIssue = workspaceFetchIssueFromError('tree', new Error('old repo tree down'), {
+      repoId: 'old-repo',
+      nowMs: 2,
+    })!
+    const oldFileIssue = workspaceFetchIssueFromError('file', new Error('old repo same file down'), {
+      filePath: 'README.md',
+      repoId: 'old-repo',
+      nowMs: 3,
+    })!
+    const currentDiffIssue = workspaceFetchIssueFromError('diff', new Error('current diff down'), {
+      filePath: 'README.md',
+      repoId: 'current-repo',
+      nowMs: 4,
+    })!
+
+    expect(retainCurrentWorkspaceFetchIssues(
+      [repositoryIssue, oldTreeIssue, oldFileIssue, currentDiffIssue],
+      { filePath: 'README.md', repoId: 'current-repo' },
+    )).toEqual([repositoryIssue, currentDiffIssue])
+  })
+})
+
+describe('ide route view helpers', () => {
+  it('normalizes legacy diff aliases through one shared helper', () => {
+    expect(viewFromRoute('split')).toBe('split-diff')
+    expect(viewFromRoute('split_diff')).toBe('split-diff')
+    expect(viewFromRoute('merge')).toBe('split-diff')
+    expect(isDiffEditorView(viewFromRoute('merge'))).toBe(true)
+    expect(isDiffEditorView(viewFromRoute('unified'))).toBe(true)
+    expect(isDiffEditorView(viewFromRoute('blame'))).toBe(false)
   })
 })
 

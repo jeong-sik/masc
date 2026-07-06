@@ -97,13 +97,16 @@ let dedupe values =
        compare (String.length b, b) (String.length a, a))
 
 let snapshot ~base_path ~keeper_name =
-  let root = Keeper_secret_projection.secret_root ~base_path ~keeper_name in
-  let env_root = Filename.concat root "env" in
-  let files_root = Filename.concat root "files" in
   let values =
-    []
-    |> collect_env_values env_root
-    |> collect_file_values files_root
+    Keeper_secret_projection.secret_roots ~base_path ~keeper_name
+    |> List.fold_left
+         (fun acc info ->
+            let env_root = Filename.concat info.Keeper_secret_projection.root "env" in
+            let files_root =
+              Filename.concat info.Keeper_secret_projection.root "files"
+            in
+            acc |> collect_env_values env_root |> collect_file_values files_root)
+         []
     |> dedupe
   in
   let patterns =
@@ -119,6 +122,36 @@ let redact_text t text =
       t.patterns
   in
   Observability_redact.redact_text text
+
+(* Streaming chunk redaction. [redact_text] is stateless: a single-line
+   secret split across chunk N's tail and chunk N+1's head matches in
+   neither call. [stream_state] buffers raw bytes up to the last ['\n'] so
+   the containing line is reassembled before redaction. Multi-line secrets
+   (a value containing ['\n'], e.g. a PEM block) may still partially
+   surface if the buffer's last ['\n'] falls inside the secret; this is
+   strictly better than the pre-fix behaviour where every cross-chunk split
+   leaked. *)
+type stream_state = { pending : Buffer.t }
+
+let create_stream_state () = { pending = Buffer.create 256 }
+
+let redact_stream_chunk t state chunk =
+  Buffer.add_string state.pending chunk;
+  let contents = Buffer.contents state.pending in
+  match String.rindex_opt contents '\n' with
+  | None -> ""
+  | Some nl_pos ->
+    let safe_len = nl_pos + 1 in
+    let safe_raw = String.sub contents 0 safe_len in
+    let held = String.sub contents safe_len (String.length contents - safe_len) in
+    Buffer.clear state.pending;
+    Buffer.add_string state.pending held;
+    redact_text t safe_raw
+
+let redact_stream_finish t state =
+  let contents = Buffer.contents state.pending in
+  Buffer.clear state.pending;
+  if String.equal contents "" then "" else redact_text t contents
 
 let rec redact_json_exact t = function
   | `String s -> `String (redact_text t s)

@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState, useCallback } from 'preact/hooks'
 import { MemoryLens } from '../memory/memory-lens'
 import type { MemoryLensProps } from '../memory/memory-lens'
+import { appendIdeScopeParams, type IdeScope } from '../../api/ide'
 
 interface MemoryEntry {
   readonly id: string
@@ -34,6 +35,9 @@ interface MemoryResponse {
 
 interface IdeMemoryPanelProps {
   readonly keeperName?: string | null
+  readonly scope?: IdeScope | null
+  readonly repoId?: string | null
+  readonly canonicalUrl?: string | null
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -139,7 +143,7 @@ function buildLensGraph(entries: ReadonlyArray<MemoryEntry>): {
   return { nodes, edges, start: entries[0]!.id }
 }
 
-export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
+export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeMemoryPanelProps) {
   const [entries, setEntries] = useState<ReadonlyArray<MemoryEntry>>([])
   const [total, setTotal] = useState(0)
   const [contract, setContract] = useState<MemoryContract | null>(null)
@@ -152,6 +156,7 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
     try {
       const params = new URLSearchParams()
       if (keeperName) params.set('keeper_id', keeperName)
+      appendIdeScopeParams(params, { scope, repoId, canonicalUrl })
       params.set('limit', '50')
       const res = await fetch(`/api/v1/ide/memory?${params}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -164,7 +169,7 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
     } finally {
       setLoading(false)
     }
-  }, [keeperName])
+  }, [keeperName, scope, repoId, canonicalUrl])
 
   useEffect(() => {
     fetchMemory()

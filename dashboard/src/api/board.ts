@@ -28,6 +28,18 @@ export interface BoardFlair {
   label: string
 }
 
+export type BoardContextInferenceTargetSource = 'explicit_target' | 'post_author'
+
+export interface BoardContextInferenceSubmission {
+  ok: true
+  requestId: string
+  keeperName: string
+  postId: string
+  status: string
+  targetSource?: BoardContextInferenceTargetSource
+  message?: string
+}
+
 function toIsoTimestamp(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value
   if (typeof value !== 'number' || Number.isNaN(value)) return null
@@ -479,6 +491,11 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
   const source = asString(raw.source, '').trim() || undefined
   const band = normalizeBoardContributorBand(raw.band)
   const autonomyLevel = asString(raw.autonomy_level, '').trim() || undefined
+  const rawEvidenceState = asString(raw.evidence_state, '').trim()
+  const evidenceState = rawEvidenceState === 'measured' || rawEvidenceState === 'default'
+    ? rawEvidenceState
+    : undefined
+
   if (
     score === undefined
     && completionRate === undefined
@@ -490,6 +507,7 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
     && source === undefined
     && band === undefined
     && autonomyLevel === undefined
+    && evidenceState === undefined
   ) return null
   return {
     score,
@@ -502,6 +520,7 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
     accountability_score: accountabilityScore,
     autonomy_level: autonomyLevel,
     thompson_confidence: thompsonConfidence,
+    evidence_state: evidenceState,
   }
 }
 
@@ -841,6 +860,30 @@ function normalizeBoardReactionToggleResult(raw: unknown): BoardReactionToggleRe
   }
 }
 
+function normalizeBoardContextInferenceTargetSource(raw: unknown): BoardContextInferenceTargetSource | undefined {
+  const source = asString(raw, '').trim()
+  return source === 'explicit_target' || source === 'post_author' ? source : undefined
+}
+
+export function normalizeBoardContextInferenceSubmission(raw: unknown): BoardContextInferenceSubmission | null {
+  if (!isRecord(raw) || raw.ok !== true) return null
+  const requestId = asString(raw.request_id, '').trim()
+  const keeperName = asString(raw.keeper_name, '').trim()
+  const postId = asString(raw.post_id, '').trim()
+  const status = asString(raw.status, '').trim()
+  if (!requestId || !keeperName || !postId || !status) return null
+  const message = asString(raw.message, '').trim()
+  return {
+    ok: true,
+    requestId,
+    keeperName,
+    postId,
+    status,
+    targetSource: normalizeBoardContextInferenceTargetSource(raw.target_source),
+    message: message || undefined,
+  }
+}
+
 export async function fetchBoard(
   sortBy?: BoardSortMode,
   options?: {
@@ -997,6 +1040,25 @@ export async function toggleReaction(
     }
     return normalized
   })
+}
+
+export async function requestBoardContextInference(
+  postId: string,
+  targetKeeper?: string,
+): Promise<BoardContextInferenceSubmission> {
+  const normalizedPostId = postId.trim()
+  if (!normalizedPostId) throw new Error('postId is required')
+  const body: Record<string, string> = {
+    post_id: normalizedPostId,
+  }
+  const normalizedTargetKeeper = targetKeeper?.trim()
+  if (normalizedTargetKeeper) body.target_keeper = normalizedTargetKeeper
+  const raw = await post<unknown>('/api/v1/board/context-inference', body)
+  const normalized = normalizeBoardContextInferenceSubmission(raw)
+  if (!normalized) {
+    throw new Error('Malformed board context inference response')
+  }
+  return normalized
 }
 
 export function createPost(

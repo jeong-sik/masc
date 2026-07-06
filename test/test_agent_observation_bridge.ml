@@ -103,21 +103,28 @@ let test_write_region_observation_reaches_ide_storage () =
   with_temp_dir (fun base_dir ->
     install_fresh_ide_sink ();
     let partition = Agent_observation.By_url "github.com_owner_repo" in
-    Agent_observation.emit_write_region_event
-      { base_path = base_dir
-      ; partition
-      ; keeper_id = "keeper-delta"
-      ; turn = 12
-      ; tool_call_json =
-          `Assoc
-            [ "name", `String "write_file"
-            ; ( "arguments"
-              , `Assoc
-                  [ "path", `String "lib/region.ml"
-                  ; "content", `String "let a = 1\nlet b = 2\n"
-                  ] )
-            ]
-      };
+    (match
+       Agent_observation.emit_write_region_event
+         { base_path = base_dir
+         ; partition
+         ; keeper_id = "keeper-delta"
+         ; turn = 12
+         ; tool_call_json =
+             `Assoc
+               [ "name", `String "write_file"
+               ; ( "arguments"
+                 , `Assoc
+                     [ "path", `String "lib/region.ml"
+                     ; "content", `String "let a = 1\nlet b = 2\n"
+                     ] )
+               ]
+         }
+     with
+     | Ok () -> ()
+     | Error err ->
+       failf
+         "write-region emit failed: %s"
+         (Agent_observation.write_region_error_to_string err));
     match
       Ide_region_tracker.read_regions
         ~base_dir
@@ -135,6 +142,35 @@ let test_write_region_observation_reaches_ide_storage () =
          check int "turn" 12 turn
        | Ide_annotation_types.Manual _ -> fail "expected tool-call region source")
     | _ -> fail "expected one region")
+;;
+
+let test_write_region_no_sink_returns_error () =
+  with_temp_dir (fun base_dir ->
+    Agent_observation.reset_for_testing ();
+    let result =
+      Agent_observation.emit_write_region_event
+        { base_path = base_dir
+        ; partition = Agent_observation.Legacy_default
+        ; keeper_id = "keeper-delta"
+        ; turn = 12
+        ; tool_call_json =
+            `Assoc
+              [ "name", `String "write_file"
+              ; ( "arguments"
+                , `Assoc
+                    [ "path", `String "lib/region.ml"
+                    ; "content", `String "let a = 1\n"
+                    ] )
+              ]
+        }
+    in
+    match result with
+    | Error Agent_observation.Write_region_sink_not_installed -> ()
+    | Ok () -> fail "expected missing write-region sink error"
+    | Error err ->
+      failf
+        "unexpected write-region error: %s"
+        (Agent_observation.write_region_error_to_string err))
 ;;
 
 let test_annotation_request_reaches_ide_storage () =
@@ -200,6 +236,10 @@ let () =
             "write-region observation reaches IDE storage"
             `Quick
             test_write_region_observation_reaches_ide_storage
+        ; test_case
+            "write-region no-sink returns error"
+            `Quick
+            test_write_region_no_sink_returns_error
         ; test_case
             "annotation request reaches IDE storage"
             `Quick

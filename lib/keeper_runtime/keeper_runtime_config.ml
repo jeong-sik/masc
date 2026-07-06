@@ -30,11 +30,16 @@ let key_to_env =
     "heartbeat.smart_heartbeat",        "MASC_KEEPER_SMART_HEARTBEAT";
     "heartbeat.jitter_factor",          "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR";
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
+    "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
+    (* [health] *)
+    "health.durable_queue_stale_sec",   "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC";
     (* [wire_capture] *)
     "wire_capture.enabled",             "MASC_KEEPER_WIRE_CAPTURE";
     (* [proactive] *)
     "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
+    "proactive.noop_backoff_max_shift", "MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT";
+    "proactive.idle_decay_max_periods", "MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS";
     (* [turn] *)
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";
@@ -44,6 +49,7 @@ let key_to_env =
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
+    "turn.chat_waiting_cap",          "MASC_KEEPER_TURN_CHAT_WAITING_CAP";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
     "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
     "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";
@@ -75,6 +81,24 @@ let key_to_env =
     "memory.placeholders",              "MASC_KEEPER_MEMORY_PLACEHOLDERS";
     "memory.consensus_pattern",         "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN";
     "memory.llm_summary",               "MASC_KEEPER_MEMORY_LLM_SUMMARY";
+    (* [alert] *)
+    "alert.enabled",                    "MASC_KEEPER_ALERT_ENABLED";
+    "alert.min_score",                  "MASC_KEEPER_ALERT_MIN_SCORE";
+    "alert.max_body_chars",             "MASC_KEEPER_ALERT_MAX_BODY_CHARS";
+    "alert.max_retries",                "MASC_KEEPER_ALERT_MAX_RETRIES";
+    "alert.retry_base_delay_ms",        "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS";
+    "alert.board_enabled",              "MASC_KEEPER_ALERT_BOARD_ENABLED";
+    "alert.board_author",               "MASC_KEEPER_ALERT_BOARD_AUTHOR";
+    "alert.board_hearth",               "MASC_KEEPER_ALERT_BOARD_HEARTH";
+    "alert.board_visibility",           "MASC_KEEPER_ALERT_BOARD_VISIBILITY";
+    "alert.slack_enabled",              "MASC_KEEPER_ALERT_SLACK_ENABLED";
+    "alert.slack_webhook_url",          "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL";
+    "alert.slack_dm_enabled",           "MASC_KEEPER_ALERT_SLACK_DM_ENABLED";
+    "alert.slack_dm_user_id",           "MASC_KEEPER_ALERT_SLACK_DM_USER_ID";
+    "alert.github_enabled",             "MASC_KEEPER_ALERT_GITHUB_ENABLED";
+    "alert.github_repo",                "MASC_KEEPER_ALERT_GITHUB_REPO";
+    "alert.github_label",               "MASC_KEEPER_ALERT_GITHUB_LABEL";
+    "alert.github_min_score",           "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE";
     (* [web_search] *)
     "web_search.searxng_url",           "MASC_SEARXNG_URL";
     "web_search.provider",              "MASC_WEB_SEARCH_PROVIDER";

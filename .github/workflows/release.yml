@@ -153,6 +153,7 @@ jobs:
             | sort -z \
             | xargs -0 sha256sum > SHA256SUMS
           (cd ../config && sha256sum tool_policy.toml runtime.toml) >> SHA256SUMS
+          (cd .. && sha256sum oas-models.toml) >> SHA256SUMS
           cat SHA256SUMS
 
       - name: Create Release

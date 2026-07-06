@@ -41,7 +41,8 @@ let keeper_direct_completion_files () = direct_completion_files_under "lib/keepe
 let expected_structured_completion_files =
   List.sort
     String.compare
-    [ "lib/keeper/keeper_librarian_runtime.ml"
+    [ "lib/keeper/hitl_summary_worker.ml"
+    ; "lib/keeper/keeper_librarian_runtime.ml"
     ; "lib/keeper/keeper_memory_llm_summary.ml"
     ; "lib/keeper/keeper_memory_os_consolidation_runtime.ml"
     ; "lib/keeper/keeper_vision_tool.ml"
@@ -206,6 +207,18 @@ let test_keeper_direct_completions_are_enumerated () =
     (keeper_direct_completion_files ())
 ;;
 
+let structured_output_schema_application_count rel =
+  Ast_grep.count_calls
+    ~module_path:rel
+    ~callee:"Keeper_structured_output_schema.apply_to_provider_config"
+  + Ast_grep.count_calls
+      ~module_path:rel
+      ~callee:"Keeper_structured_output_schema.apply_schema_or_prompt_tier"
+  + Ast_grep.count_calls
+      ~module_path:rel
+      ~callee:"Keeper_structured_output_schema.apply_hitl_summary_schema_to_config"
+;;
+
 let test_keeper_direct_completions_request_structured_output () =
   List.iter
     (fun rel ->
@@ -213,9 +226,7 @@ let test_keeper_direct_completions_request_structured_output () =
          int
          (rel ^ " applies structured-output schema")
          1
-         (Ast_grep.count_calls
-            ~module_path:rel
-            ~callee:"Keeper_structured_output_schema.apply_to_provider_config"))
+         (structured_output_schema_application_count rel))
     expected_structured_completion_files
 ;;
 
@@ -226,9 +237,7 @@ let test_agent_run_json_judges_request_structured_output rels =
          int
          (rel ^ " applies structured-output schema")
          1
-         (Ast_grep.count_calls
-            ~module_path:rel
-            ~callee:"Keeper_structured_output_schema.apply_to_provider_config"))
+         (structured_output_schema_application_count rel))
     rels
 ;;
 
@@ -432,13 +441,19 @@ let test_structured_tool_agent_runs_use_tool_schema_output () =
 let test_structured_tool_agent_runs_request_provider_native_output () =
   List.iter
     (fun rel ->
+       (* module마다 provider-native schema를 직접 적용(apply_to_provider_config)하거나
+          공유 prompt-tier 헬퍼(apply_schema_or_prompt_tier)로 위임한다. 둘 중 하나면
+          schema 적용 의도를 만족한다. 각 module의 callee는 아래 두 count의 합으로 잡는다. *)
        check
          int
          (rel ^ " applies provider-native structured-output schema")
          1
          (Ast_grep.count_calls
             ~module_path:rel
-            ~callee:"Keeper_structured_output_schema.apply_to_provider_config");
+            ~callee:"Keeper_structured_output_schema.apply_to_provider_config"
+          + Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Keeper_structured_output_schema.apply_schema_or_prompt_tier");
        check
          int
          (rel ^ " wires provider_config_transform")

@@ -211,6 +211,7 @@ let clock_lane_of_event = function
   | Turn_finished ->
     "keeper"
   | Runtime_routed
+  | Runtime_execution_built
   | Runtime_completed
   | Runtime_failed
   | Provider_lane_resolved ->
@@ -381,6 +382,7 @@ let decision_public_allowlist =
     ; "context_compact_started_count"; "context_compacted_count"
     ; "last_compaction"; "active_open_loop_count"
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
+    ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"
     ; "clock_refs"
     ]

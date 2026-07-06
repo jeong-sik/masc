@@ -129,6 +129,39 @@ let test_orphan_path () =
     (Paths.orphan_path ~base_dir:"/tmp/base")
 ;;
 
+let check_partition_metadata ~name ~partition ~kind ~is_orphan =
+  check string (name ^ " kind") kind (Paths.partition_kind partition);
+  check bool (name ^ " orphan") is_orphan (Paths.partition_is_orphan partition)
+;;
+
+let test_partition_metadata () =
+  check_partition_metadata
+    ~name:"by_url"
+    ~partition:(Paths.By_url "github.com_jeong-sik_masc")
+    ~kind:"by_url"
+    ~is_orphan:false;
+  check_partition_metadata
+    ~name:"no_canonical_url"
+    ~partition:Paths.No_canonical_url
+    ~kind:"no_canonical_url"
+    ~is_orphan:true;
+  check_partition_metadata
+    ~name:"unmatched"
+    ~partition:Paths.Unmatched
+    ~kind:"unmatched"
+    ~is_orphan:true;
+  check_partition_metadata
+    ~name:"base_unresolved"
+    ~partition:Paths.Base_unresolved
+    ~kind:"base_unresolved"
+    ~is_orphan:true;
+  check_partition_metadata
+    ~name:"legacy_default"
+    ~partition:Paths.Legacy_default
+    ~kind:"legacy_default"
+    ~is_orphan:true
+;;
+
 let () =
   run
     "ide_paths"
@@ -156,5 +189,6 @@ let () =
       , [ test_case "by_url_path" `Quick test_by_url_path
         ; test_case "orphan_path" `Quick test_orphan_path
         ] )
+    ; "partition metadata", [ test_case "kind and orphan flag" `Quick test_partition_metadata ]
     ]
 ;;

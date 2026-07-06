@@ -150,6 +150,28 @@ let with_persist_lock store f =
 ;;
 
 (** {1 Sweeper - Aggressive Cleanup} *)
+(* Extract [(target_kind, target_id)] from a vote_log key of the form
+   "post:<id>:<voter>" or "comment:<id>:<voter>".  Mirrors
+   [Board_votes.parse_vote_key], but lives in this lower module so [sweep] can
+   reclaim orphaned votes without an upward dependency on [Board_votes]. *)
+let vote_key_target key =
+  match String.index_opt key ':' with
+  | None -> None
+  | Some i1 ->
+    let kind = String.sub key 0 i1 in
+    let rest = String.sub key (i1 + 1) (String.length key - i1 - 1) in
+    (match String.index_opt rest ':' with
+     | None -> None
+     | Some i2 ->
+       let target_id = String.sub rest 0 i2 in
+       if String.equal target_id "" then None
+       else (
+         match kind with
+         | "post" -> Some (`Post, target_id)
+         | "comment" -> Some (`Comment, target_id)
+         | _ -> None))
+;;
+
 let sweep store =
   with_lock store (fun () ->
     let now = Time_compat.now () in
@@ -240,6 +262,50 @@ let sweep store =
                   Stdlib.incr cap_evicted)
                to_evict))
         author_posts);
+    (* Reclaim reactions and votes whose target post/comment no longer exists.
+       [sweep] removes posts/comments but historically left [store.reactions] and
+       [store.vote_log] resident: those two tables were pruned only by the
+       explicit [delete_post] path, not by the TTL lifecycle, so they grew for
+       the whole process lifetime and reloaded whole from disk on boot.  Pruning
+       by target existence reclaims new expirations AND boot-reloaded orphans
+       (whose targets are already gone, so a per-removal hook would never revisit
+       them).  Work is bounded per pass by [sweeper_batch_size] via [Seq.take],
+       so a large backlog drains across sweeps without a long lock hold; disk is
+       compacted by the next full snapshot flush, which dumps the pruned tables. *)
+    let orphan_reaction_keys =
+      Hashtbl.to_seq store.reactions
+      |> Seq.filter_map (fun (key, (reaction : reaction)) ->
+        let target_present =
+          match reaction.target_type with
+          | Reaction_post -> Hashtbl.mem store.posts reaction.target_id
+          | Reaction_comment -> Hashtbl.mem store.comments reaction.target_id
+        in
+        if target_present then None else Some key)
+      |> Seq.take Limits.sweeper_batch_size
+      |> List.of_seq
+    in
+    List.iter (Hashtbl.remove store.reactions) orphan_reaction_keys;
+    let orphan_vote_keys =
+      Hashtbl.to_seq store.vote_log
+      |> Seq.filter_map (fun (key, _) ->
+        match vote_key_target key with
+        | Some (`Post, target_id) when not (Hashtbl.mem store.posts target_id) ->
+          Some key
+        | Some (`Comment, target_id)
+          when not (Hashtbl.mem store.comments target_id) ->
+          Some key
+        | Some _ | None -> None)
+      |> Seq.take Limits.sweeper_batch_size
+      |> List.of_seq
+    in
+    List.iter (Hashtbl.remove store.vote_log) orphan_vote_keys;
+    let removed_reactions = List.length orphan_reaction_keys in
+    let removed_votes = List.length orphan_vote_keys in
+    if removed_reactions > 0 || removed_votes > 0 then
+      Log.BoardLog.debug
+        "sweep reclaimed %d orphaned reactions, %d orphaned votes"
+        removed_reactions
+        removed_votes;
     let window = Stdlib.Float.of_int Limits.comment_rate_window_sec in
     Board_comment_rate_limit.sweep_stale ~now ~window;
     if !removed_posts > 0 || !cap_evicted > 0 then invalidate_post_caches store;

@@ -75,6 +75,15 @@ type backend_state =
 type board_signal_kind =
   | Board_post_created
   | Board_comment_added
+  | Board_reaction_changed of board_reaction_change
+
+and board_reaction_change = {
+  target_type : Board.reaction_target_type;
+  target_id : string;
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+}
 
 type board_signal = {
   kind : board_signal_kind;
@@ -557,11 +566,56 @@ let vote_comment ~voter ~comment_id ~direction =
          comment_id voter (Board_types.show_board_error e));
   result
 
+let post_for_reaction_target store ~target_type ~target_id =
+  match target_type with
+  | Board.Reaction_post -> Board.get_post store ~post_id:target_id
+  | Board.Reaction_comment ->
+      (match Board.get_comment store ~comment_id:target_id with
+       | Error _ as err -> err
+       | Ok comment ->
+           let post_id = Board.Post_id.to_string comment.post_id in
+           Board.get_post store ~post_id)
+
+let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
+  match
+    post_for_reaction_target store ~target_type:toggled.target_type
+      ~target_id:toggled.target_id
+  with
+  | Ok post ->
+      emit_board_signal
+        {
+          kind =
+            Board_reaction_changed
+              {
+                target_type = toggled.target_type;
+                target_id = toggled.target_id;
+                user_id = toggled.user_id;
+                emoji = toggled.emoji;
+                reacted = toggled.reacted;
+              };
+          post_id = Board.Post_id.to_string post.id;
+          author = toggled.user_id;
+          title = post.title;
+          content = post.content;
+          hearth = post.hearth;
+          updated_at = Some post.updated_at;
+        }
+  | Error e ->
+      Log.BoardLog.warn
+        "board reaction signal skipped: target=%s:%s user=%s emoji=%s: %s"
+        (Board.reaction_target_type_to_string toggled.target_type)
+        toggled.target_id toggled.user_id toggled.emoji
+        (Board_types.show_board_error e)
+
 let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
   let result =
     match backend () with
     | Jsonl store ->
-        Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji
+        (match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
+         | Ok toggled as ok ->
+             emit_reaction_board_signal store toggled;
+             ok
+         | Error _ as err -> err)
   in
   (match result with
    | Ok toggled ->

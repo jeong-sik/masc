@@ -13,6 +13,7 @@ import {
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
   setRuntimeTomlProviderField,
+  setRuntimeTomlStringArrayKey,
   cascadeDeleteProvider,
 } from './runtime-toml-config'
 
@@ -140,6 +141,31 @@ mad-improver = "runpod_mtp.qwen"
     // only the value should change, not the key syntax the TOML author chose.
     expect(next).toContain('"nick0cave" = "ollama_cloud.kimi-k2-6"')
     expect(next).not.toContain('\nnick0cave = ')
+  })
+
+  it('rewrites a multi-line TOML string array without leaving stale elements behind', () => {
+    const withFusionPreset = `${sourceText}
+
+[fusion.presets.trio]
+panel = [
+  "old.a",
+  "old.b",
+]
+judge = "meta.old"
+`
+
+    const next = setRuntimeTomlStringArrayKey(
+      withFusionPreset,
+      'fusion.presets.trio',
+      'panel',
+      ['new.a', 'new.b'],
+    )
+
+    const preset = next.split('[fusion.presets.trio]')[1] ?? ''
+    expect(preset).toContain('panel = ["new.a", "new.b"]')
+    expect(preset).toContain('judge = "meta.old"')
+    expect(preset).not.toContain('old.a')
+    expect(preset).not.toContain('old.b')
   })
 
   it('does not write a keeper name requiring quotes as an invalid bare key', () => {

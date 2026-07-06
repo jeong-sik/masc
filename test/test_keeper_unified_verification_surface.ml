@@ -25,6 +25,7 @@ let base_observation : WO.world_observation =
 
 let sample_board_event : WO.pending_board_event =
   {
+    event_kind = WO.Board_post_created;
     post_id = "board-post-1";
     author = "alice";
     title = "Need help";
@@ -362,6 +363,39 @@ let test_board_signal_goal_keyword_does_not_wake_without_judgment () =
         ^ Masc.Keeper_world_observation_board_signal.wake_reason_label reason )
 ;;
 
+let test_board_reaction_event_renders_reaction_context () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  let reaction_event =
+    {
+      sample_board_event with
+      event_kind =
+        WO.Board_reaction_changed
+          {
+            target_type = Masc.Board.Reaction_comment;
+            target_id = "comment-1";
+            user_id = "reactor";
+            emoji = "👏";
+            reacted = true;
+          };
+      post_id = "reaction-parent";
+      author = "reactor";
+    }
+  in
+  let obs = { base_observation with pending_board_events = [ reaction_event ] } in
+  let _, user_msg =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs ()
+  in
+  check bool "prompt labels reaction board event" true
+    (contains_sub "event=reaction_changed" user_msg);
+  check bool "prompt includes reaction target" true
+    (contains_sub "target=comment:comment-1" user_msg);
+  check bool "prompt includes reaction actor" true
+    (contains_sub "user=reactor" user_msg);
+  check bool "prompt includes reaction emoji" true
+    (contains_sub "emoji=\"👏\"" user_msg)
+;;
+
 let test_task_claim_requires_matched_backlog () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 0 }
@@ -515,6 +549,9 @@ let () =
           test_case
             "board signal: goal keyword overlap does not wake without judgment"
             `Quick test_board_signal_goal_keyword_does_not_wake_without_judgment;
+          test_case
+            "prompt: board reaction event renders reaction context"
+            `Quick test_board_reaction_event_renders_reaction_context;
           test_case "affordance: task claim requires matched backlog" `Quick
             test_task_claim_requires_matched_backlog;
           test_case "affordance: task claim present for claimable backlog" `Quick

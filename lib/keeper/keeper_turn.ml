@@ -1327,6 +1327,12 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                   | Some c -> `Float c
                   | None -> `Null
                 in
+                let cache_miss_input_tokens =
+                  Keeper_hooks_oas.cache_miss_input_tokens
+                    ~input_tokens:u.input_tokens
+                    ~cache_creation_input_tokens:u.cache_creation_input_tokens
+                    ~cache_read_input_tokens:u.cache_read_input_tokens
+                in
                 let tool_call_evidence =
                   result.tool_calls
                   |> List.filter_map (fun detail ->
@@ -1355,6 +1361,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                     ("output_tokens", `Int u.output_tokens);
                     ("cache_creation_input_tokens", `Int u.cache_creation_input_tokens);
                     ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
+                    ("cache_miss_input_tokens", `Int cache_miss_input_tokens);
                     ("cost_usd", cost_field);
                   ]);
                   (* RFC-0233 §7: the turn's join key, minted once from the
@@ -1405,3 +1412,19 @@ let handle_keeper_msg ?on_text_delta ?on_event ?event_bus ctx args : tool_result
              name
              waiting
              in_flight_text)
+
+let handle_keeper_msg_if_free ?on_text_delta ?on_event ?event_bus ctx args =
+  let event_bus =
+    match event_bus with
+    | Some _ -> event_bus
+    | None -> Keeper_event_bus.get ()
+  in
+  let name = get_string args "name" "" in
+  if not (validate_name name) then
+    `Ran (run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args)
+  else
+    Keeper_turn_admission.run_chat_if_free
+      ~base_path:ctx.config.base_path
+      ~keeper_name:name
+      (fun () ->
+        run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args)

@@ -56,6 +56,7 @@ type agent_reputation = {
   thompson_confidence: float; [@default 0.5]
   (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
       0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
+  evidence_state: string; [@default "default"]
 } [@@deriving yojson { strict = false }]
 
 (** {1 Defaults} *)
@@ -83,6 +84,7 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     safety_compliance = 1.0;
     autonomy_level = "standard";
     thompson_confidence = 0.5;
+    evidence_state = "default";
   }
 
 (** {1 JSON Serialization}
@@ -356,6 +358,21 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
       ~safety_compliance:v2_metrics.Reputation_ledger_v2.safety_compliance
       ~accountability_score:(clamp01 accountability_score)
   in
+  let has_evidence =
+    tasks_claimed > 0
+    || mentions_received > 0
+    || board_posts > 0
+    || board_comments > 0
+    || accountability_source <> "none"
+    || v2_metrics.Reputation_ledger_v2.tool_calls > 0
+    || v2_metrics.Reputation_ledger_v2.goal_completions > 0
+    || v2_metrics.Reputation_ledger_v2.safety_violations > 0
+    || (let stats = Thompson_sampling.get_stats agent_name in
+        stats.Thompson_sampling.total_votes_up > 0
+        || stats.Thompson_sampling.total_votes_down > 0
+        || stats.Thompson_sampling.selections > 0)
+  in
+  let evidence_state = if has_evidence then "measured" else "default" in
   { agent_name;
     tasks_completed; tasks_claimed; completion_rate;
     mentions_received; mentions_responded; response_rate;
@@ -373,4 +390,5 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     safety_compliance = v2_metrics.Reputation_ledger_v2.safety_compliance;
     autonomy_level = Reputation_autonomy.autonomy_level_to_string autonomy;
     thompson_confidence;
+    evidence_state;
   }

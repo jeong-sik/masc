@@ -7,6 +7,35 @@ open Dashboard_http_keeper_types
 open Dashboard_http_helpers
 open Keeper_status_bridge
 
+let keeper_config_field_presence_json config_json =
+  let rec collect prefix json acc =
+    match json with
+    | `Assoc fields ->
+      List.fold_left
+        (fun acc (key, value) ->
+          let path = if prefix = "" then key else prefix ^ "." ^ key in
+          collect path value (path :: acc))
+        acc
+        fields
+    | _ -> acc
+  in
+  let present_paths =
+    collect "" config_json [] |> List.sort_uniq String.compare
+  in
+  `Assoc
+    [ ("schema", `String "keeper.config.field_presence.v1")
+    ; ("producer", `String "dashboard_http_keeper_snapshot")
+    ; ("present_paths", Json_util.json_string_list present_paths)
+    ]
+;;
+
+let with_keeper_config_field_presence = function
+  | `Assoc fields as config_json ->
+    `Assoc
+      (fields @ [ ("field_presence", keeper_config_field_presence_json config_json) ])
+  | other -> other
+;;
+
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)
 let keeper_config_json (config : Workspace.config) (name : string)
@@ -299,7 +328,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
         | Some entry -> entry.last_error
         | None -> None
       in
-      (`OK,
+      let body =
        `Assoc [
          ("name", `String m.name);
          ("active_goal_ids", active_goal_ids_json);
@@ -339,7 +368,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("workspace", workspace);
          ("sources", source_provenance_json config m);
          ("metrics", metrics);
-       ])
+       ]
+      in
+      (`OK, with_keeper_config_field_presence body)
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 

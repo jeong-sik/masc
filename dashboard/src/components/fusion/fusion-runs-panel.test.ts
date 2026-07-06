@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseFusionRunsResponse } from '../../api/dashboard'
-import { fusionRuns, fusionRunsLoading } from '../../store'
+import { fusionRuns, fusionRunsError, fusionRunsLoading } from '../../store'
 import {
   FusionRunsPanel,
   fusionRunPipelineSegments,
@@ -118,6 +118,7 @@ describe('FusionRunsPanel', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     fusionRuns.value = []
+    fusionRunsError.value = null
     fusionRunsLoading.value = false
   })
 
@@ -125,6 +126,7 @@ describe('FusionRunsPanel', () => {
     render(null, container)
     container.remove()
     fusionRuns.value = []
+    fusionRunsError.value = null
     fusionRunsLoading.value = false
   })
 
@@ -138,6 +140,44 @@ describe('FusionRunsPanel', () => {
     fusionRunsLoading.value = true
     render(html`<${FusionRunsPanel} />`, container)
     expect(container.textContent).toContain('Loading fusion runs')
+  })
+
+  it('renders a registry load error instead of the empty state', () => {
+    fusionRunsError.value = 'HTTP 503 registry unavailable'
+
+    render(html`<${FusionRunsPanel} />`, container)
+
+    const error = container.querySelector('[data-testid="fusion-runs-error"]')
+    expect(error).not.toBeNull()
+    expect(error?.getAttribute('data-registry-source')).toBe('/api/v1/dashboard/fusion-runs')
+    expect(error?.textContent).toContain('Registry load failed')
+    expect(error?.textContent).toContain('HTTP 503 registry unavailable')
+    expect(container.querySelector('[data-testid="fusion-runs-empty"]')).toBeNull()
+    expect(container.textContent).not.toContain('No active or recent fusion runs')
+  })
+
+  it('keeps cached registry rows visible while surfacing the refresh error', () => {
+    fusionRuns.value = [
+      {
+        runId: 'cached-failed',
+        keeper: 'analyst',
+        preset: 'trio',
+        startedAt: 1_783_106_656,
+        status: 'failed',
+        error: 'fusion aborted: 0 of 3 panels answered',
+        failureCode: 'panels_unavailable',
+      },
+    ]
+    fusionRunsError.value = 'network offline'
+
+    render(html`<${FusionRunsPanel} />`, container)
+
+    expect(container.querySelector('[data-testid="fusion-runs-error"]')?.textContent).toContain('network offline')
+    const cards = container.querySelectorAll('[data-testid="fusion-run-status-card"]')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.getAttribute('data-run-id')).toBe('cached-failed')
+    expect(cards[0]?.textContent).toContain('panels_unavailable')
+    expect(container.textContent).not.toContain('No active or recent fusion runs')
   })
 
   it('renders one card per run with its status and a running indicator', () => {

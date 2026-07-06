@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearLspDiagnosticSnapshot,
+  EMPTY_LSP_STATUS_SNAPSHOT,
   LspConnection,
   lspDiagnosticSnapshot,
+  lspStatusSnapshot,
+  parseLspStatusSnapshot,
   resolveLspDiagnosticFilePath,
 } from './ide-lsp-client'
 import {
@@ -66,6 +69,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   lspDiagnosticSnapshot.value = new Map()
+  lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
   mockSockets.length = 0
 })
 
@@ -141,6 +145,71 @@ describe('clearLspDiagnosticSnapshot', () => {
 })
 
 describe('LspConnection', () => {
+  it('publishes typed masc/lspStatus notifications', () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const socket = mockSockets[0]!
+    socket.open()
+
+    socket.message({
+      jsonrpc: '2.0',
+      method: 'masc/lspStatus',
+      params: {
+        langs: [{
+          lang: 'ocaml',
+          connected: false,
+          overlay_only: true,
+          command: 'ocamllsp',
+          last_error: 'ocamllsp unavailable',
+        }],
+      },
+    })
+
+    expect(lspStatusSnapshot.value).toEqual({
+      langs: [{
+        lang: 'ocaml',
+        connected: false,
+        overlay_only: true,
+        command: 'ocamllsp',
+        last_error: 'ocamllsp unavailable',
+      }],
+    })
+    conn.dispose()
+  })
+
+  it('rejects malformed masc/lspStatus payloads without mutating the snapshot', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    lspStatusSnapshot.value = {
+      langs: [{
+        lang: 'ocaml',
+        connected: true,
+        overlay_only: false,
+        command: 'ocamllsp',
+        last_error: null,
+      }],
+    }
+
+    expect(parseLspStatusSnapshot({ langs: [{ lang: 'ocaml', connected: true }] }))
+      .toBeNull()
+
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const socket = mockSockets[0]!
+    socket.open()
+    socket.message({
+      jsonrpc: '2.0',
+      method: 'masc/lspStatus',
+      params: { langs: [{ lang: 'ocaml', connected: true }] },
+    })
+
+    expect(warn).toHaveBeenCalledWith('[LSP] invalid masc/lspStatus payload')
+    expect(lspStatusSnapshot.value.langs).toHaveLength(1)
+    expect(lspStatusSnapshot.value.langs[0]?.connected).toBe(true)
+    conn.dispose()
+  })
+
   it('settles pending requests when the socket closes', async () => {
     installWebSocketMock()
     const conn = new LspConnection(() => {}, () => {})

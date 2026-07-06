@@ -66,7 +66,7 @@ val auth_token_from_request : Httpun.Request.t -> string option
 (** Token from [Authorization: Bearer …] on the request. *)
 
 val observer_sse_query_token_from_request : Httpun.Request.t -> string option
-(** Observer/presence SSE allows the token via query string for browser
+(** Observer/presence/cursor SSE allows the token via query string for browser
     EventSource. *)
 
 val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
@@ -330,6 +330,13 @@ val with_public_read :
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Public-read combinator (no auth, looser CORS). *)
+
+val with_observer_sse_read_auth :
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Read combinator for browser EventSource endpoints that must accept
+    [token] in the query string when strict HTTP auth is active. *)
 
 val with_read_auth :
   (Mcp_server.server_state ->

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { ConnectionStatus } from '../dashboard-shell'
 import { useSignalValue, useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
 import {
   activeIdeFile,
@@ -32,11 +33,14 @@ import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
 import {
+  connectKeeperCursorStream,
   cursorOverlaySignal,
   getKeeperColor,
   type KeeperCursor,
   type KeeperCursorOverlay,
+  type KeeperCursorStreamState,
 } from './keeper-cursor-overlay'
+import { lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -48,15 +52,17 @@ import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashbo
 import type { Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import { KeeperBadge } from '../keeper-badge'
+import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
 import {
   parseActive,
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
+import { viewFromRoute } from './ide-view-route'
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
 type IdeRightRailTab = 'context' | 'activity' | 'cursors'
-type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok'
+type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
 
 export interface IdeStatusbarChip {
@@ -150,18 +156,9 @@ interface IdeStatusbarInput {
   readonly activeRepositoryId?: string | null
   readonly workspaceSource?: WorkspaceSource
   readonly workspaceBasePath?: string | null
+  readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
   readonly dashboardConnected?: boolean
-}
-
-function viewFromRoute(raw: string | null | undefined): ViewTab {
-  const normalized = raw
-    ?.trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, '-')
-  if (normalized === 'split' || normalized === 'split-diff' || normalized === 'merge') return 'split-diff'
-  if (normalized === 'unified') return 'unified'
-  if (normalized === 'blame') return 'blame'
-  return 'source'
+  readonly lspStatus?: LspStatusSnapshot
 }
 
 function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
@@ -394,6 +391,48 @@ function statusbarTelemetryLabelFromFocus(focus: IdeContextFocus | null | undefi
   return first ? `Telemetry ${first}` : undefined
 }
 
+function workspaceIssueLabel(issue: WorkspaceFetchIssue): string {
+  switch (issue.kind) {
+    case 'repositories':
+      return 'repos'
+    case 'tree':
+      return 'tree'
+    case 'file':
+      return issue.file_path ? `file ${shortStatusbarPath(issue.file_path)}` : 'file'
+    case 'regions':
+      return 'regions'
+    case 'blame':
+      return 'blame'
+    case 'diff':
+      return 'diff'
+    case 'annotations':
+      return 'annotations'
+  }
+}
+
+function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string {
+  return issues
+    .map(issue => {
+      const scope = [
+        issue.file_path ? `file=${issue.file_path}` : null,
+        issue.repo_id ? `repo=${issue.repo_id}` : null,
+        issue.keeper ? `keeper=${issue.keeper}` : null,
+      ].filter((part): part is string => part !== null)
+      const scoped = scope.length > 0 ? ` (${scope.join(', ')})` : ''
+      return `${workspaceIssueLabel(issue)}${scoped}: ${issue.message}`
+    })
+    .join('\n')
+}
+
+function lspOverlayOnlyStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
+  return (status?.langs ?? [])
+    .filter(lang => lang.overlay_only)
+    .map(lang => {
+      const error = lang.last_error?.trim()
+      return error ? `${lang.lang}: ${error}` : lang.lang
+    })
+}
+
 function addStatusbarChip(
   chips: IdeStatusbarChip[],
   id: string,
@@ -420,7 +459,9 @@ export function deriveIdeStatusbarModel({
   activeRepositoryId,
   workspaceSource,
   workspaceBasePath = null,
+  workspaceIssues = [],
   dashboardConnected = false,
+  lspStatus,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
   const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
@@ -435,6 +476,22 @@ export function deriveIdeStatusbarModel({
 
   const layerLabel = statusbarLayerLabel(activeLayers)
   addStatusbarChip(chips, 'layers', layerLabel ?? undefined, 'info', layerLabel ? `Active layers: ${layerLabel}` : '')
+  const issueLabels = [...new Set(workspaceIssues.map(workspaceIssueLabel))]
+  addStatusbarChip(
+    chips,
+    'workspace-fetch',
+    issueLabels.length > 0 ? `IDE fetch degraded ${issueLabels.join('/')}` : undefined,
+    'warn',
+    workspaceIssueTitle(workspaceIssues),
+  )
+  const lspOverlayOnly = lspOverlayOnlyStatus(lspStatus)
+  addStatusbarChip(
+    chips,
+    'lsp-status',
+    lspOverlayOnly.length > 0 ? `LSP overlay-only ${lspOverlayOnly.length}` : undefined,
+    'warn',
+    lspOverlayOnly.join('\n'),
+  )
   if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
   if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')
@@ -543,6 +600,42 @@ function cursorAgeLabel(lastUpdate: number): string {
   return `${Math.round(minutes / 60)}h ago`
 }
 
+function cursorStreamStatusTone(status: KeeperCursorStreamState['status']): 'ghost' | 'info' | 'ok' | 'warn' {
+  switch (status) {
+    case 'connecting':
+      return 'info'
+    case 'live':
+      return 'ok'
+    case 'degraded':
+      return 'warn'
+    case 'closed':
+      return 'ghost'
+  }
+}
+
+function cursorStreamStatusLabel(stream: KeeperCursorStreamState): string {
+  switch (stream.status) {
+    case 'connecting':
+      return 'stream connecting'
+    case 'live':
+      return 'stream live'
+    case 'degraded':
+      return stream.failedCount > 0
+        ? `stream degraded ${stream.failedCount} failed`
+        : 'stream degraded'
+    case 'closed':
+      return 'stream closed'
+  }
+}
+
+function cursorStreamStatusTitle(stream: KeeperCursorStreamState): string {
+  const parts = [cursorStreamStatusLabel(stream)]
+  if (stream.lastOpenMs !== undefined) parts.push(`last open ${new Date(stream.lastOpenMs).toISOString()}`)
+  if (stream.lastErrorMs !== undefined) parts.push(`last error ${new Date(stream.lastErrorMs).toISOString()}`)
+  if (stream.error) parts.push(stream.error)
+  return parts.join(' · ')
+}
+
 function sortedCursors(overlay: KeeperCursorOverlay): ReadonlyArray<KeeperCursor> {
   return [...overlay.cursors.values()].sort((left, right) => {
     if (right.last_update !== left.last_update) return right.last_update - left.last_update
@@ -594,6 +687,16 @@ function IdeCursorRailPanel() {
         <span>KEEPER CURSORS</span>
         <span>${cursors.length} active</span>
       </div>
+      ${overlay.stream ? html`
+        <div
+          class=${`ide-cursor-stream-status chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
+          data-testid="ide-cursor-stream-status"
+          data-state=${overlay.stream.status}
+          role="status"
+          aria-live="polite"
+          title=${cursorStreamStatusTitle(overlay.stream)}
+        >${cursorStreamStatusLabel(overlay.stream)}</div>
+      ` : null}
       ${overlay.active_file ? html`
         <div class="ide-cursor-rail-active-file" title=${overlay.active_file}>
           active file · ${shortCursorPath(overlay.active_file)}
@@ -772,6 +875,10 @@ export function IdeShell() {
     workspaceStore.workspaceBasePath,
     workspaceStore.subscribeWorkspaceBasePath,
   )
+  const workspaceIssues = useSubscribedValue(
+    workspaceStore.workspaceIssues,
+    workspaceStore.subscribeWorkspaceIssues,
+  )
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
   useEffect(() => {
@@ -784,6 +891,25 @@ export function IdeShell() {
     const unsubscribe = ideContextFocus.subscribe(setContextFocus)
     return () => unsubscribe()
   }, [])
+
+  useEffect(() => {
+    const repoId = activeRepositoryId?.trim()
+    if (!repoId) {
+      cursorOverlaySignal.value = {
+        ...cursorOverlaySignal.value,
+        stream: { status: 'closed', failedCount: 0 },
+      }
+      return
+    }
+    return connectKeeperCursorStream('', (overlay) => {
+      cursorOverlaySignal.value = { ...overlay, stream: cursorOverlaySignal.value.stream }
+    }, {
+      repoId,
+      onStatus: stream => {
+        cursorOverlaySignal.value = { ...cursorOverlaySignal.value, stream }
+      },
+    })
+  }, [activeRepositoryId])
 
   const routeFileFocus = routeFocusFile(route.value.params)
   const routeLineFocus = routeFocusLine(route.value.params)
@@ -863,6 +989,7 @@ export function IdeShell() {
 
   const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
+  const lspStatus = useSignalValue(lspStatusSnapshot)
   const reviewFocusActive = activeFocus === 'review' && activeView === 'unified'
   const activeLayers = layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null)
   const terminalOpen =
@@ -887,7 +1014,9 @@ export function IdeShell() {
     activeRepositoryId,
     workspaceSource,
     workspaceBasePath,
+    workspaceIssues,
     dashboardConnected: dashboardRuntimeConnected(),
+    lspStatus,
   })
 
   useEffect(() => {
@@ -1033,10 +1162,7 @@ export function IdeShell() {
             `)}
           </div>
           <${IdePresenceStrip} />
-          <span
-            class="ide-plane-connection"
-            data-state=${statusbar.connectionTone}
-          >● ${statusbar.connectionLabel}</span>
+          <${ConnectionStatus} />
         </header>
         <${IdeToolbar}
           activeView=${activeView}
@@ -1125,7 +1251,7 @@ export function IdeShell() {
                   >
                     <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                     <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                    <${IdeMemoryPanel} keeperName=${terminalKeeper} />
+                    <${IdeMemoryPanel} keeperName=${terminalKeeper} repoId=${activeRepositoryId} />
                   </div>
                   <div
                     class="ide-plane-primary-rail"
@@ -1138,6 +1264,7 @@ export function IdeShell() {
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
+                      repoId=${activeRepositoryId}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}

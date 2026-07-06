@@ -78,6 +78,10 @@ type lsp_method =
   | Shutdown
   | Exit
   | Masc_lsp_status
+  | Did_open
+  | Did_change
+  | Did_save
+  | Did_close
   | Hover
   | CodeLens
   | InlayHint
@@ -90,43 +94,105 @@ type lsp_method =
   | Folding_range
   | Document_highlight
 
-let lsp_method_of_string = function
-  | "initialize" -> Some Initialize
-  | "initialized" -> Some Initialized
-  | "shutdown" -> Some Shutdown
-  | "exit" -> Some Exit
-  | "masc/lspStatus" -> Some Masc_lsp_status
-  | "textDocument/hover" -> Some Hover
-  | "textDocument/codeLens" -> Some CodeLens
-  | "textDocument/inlayHint" -> Some InlayHint
-  | "textDocument/diagnostic" -> Some Diagnostic
-  | "textDocument/definition" -> Some Definition
-  | "textDocument/references" -> Some References
-  | "textDocument/completion" -> Some Completion
-  | "textDocument/codeAction" -> Some CodeAction
-  | "textDocument/documentSymbol" -> Some Document_symbol
-  | "textDocument/foldingRange" -> Some Folding_range
-  | "textDocument/documentHighlight" -> Some Document_highlight
-  | _ -> None
-;;
+module Lsp_method_catalog = struct
+  type classification =
+    | Read_only
+    | Mutation
+    | Lifecycle
+    | Status
 
-let lsp_method_to_string = function
-  | Initialize -> "initialize"
-  | Initialized -> "initialized"
-  | Shutdown -> "shutdown"
-  | Exit -> "exit"
-  | Masc_lsp_status -> "masc/lspStatus"
-  | Hover -> "textDocument/hover"
-  | CodeLens -> "textDocument/codeLens"
-  | InlayHint -> "textDocument/inlayHint"
-  | Diagnostic -> "textDocument/diagnostic"
-  | Definition -> "textDocument/definition"
-  | References -> "textDocument/references"
-  | Completion -> "textDocument/completion"
-  | CodeAction -> "textDocument/codeAction"
-  | Document_symbol -> "textDocument/documentSymbol"
-  | Folding_range -> "textDocument/foldingRange"
-  | Document_highlight -> "textDocument/documentHighlight"
+  type entry =
+    { method_ : lsp_method
+    ; wire_method : string
+    ; classification : classification
+    }
+
+  let entry method_ =
+    let wire_method, classification =
+      match method_ with
+      | Initialize -> "initialize", Lifecycle
+      | Initialized -> "initialized", Lifecycle
+      | Shutdown -> "shutdown", Lifecycle
+      | Exit -> "exit", Lifecycle
+      | Masc_lsp_status -> "masc/lspStatus", Status
+      | Did_open -> "textDocument/didOpen", Mutation
+      | Did_change -> "textDocument/didChange", Mutation
+      | Did_save -> "textDocument/didSave", Mutation
+      | Did_close -> "textDocument/didClose", Mutation
+      | Hover -> "textDocument/hover", Read_only
+      | CodeLens -> "textDocument/codeLens", Read_only
+      | InlayHint -> "textDocument/inlayHint", Read_only
+      | Diagnostic -> "textDocument/diagnostic", Read_only
+      | Definition -> "textDocument/definition", Read_only
+      | References -> "textDocument/references", Read_only
+      | Completion -> "textDocument/completion", Read_only
+      | CodeAction -> "textDocument/codeAction", Read_only
+      | Document_symbol -> "textDocument/documentSymbol", Read_only
+      | Folding_range -> "textDocument/foldingRange", Read_only
+      | Document_highlight -> "textDocument/documentHighlight", Read_only
+    in
+    { method_; wire_method; classification }
+  ;;
+
+  let entries =
+    [ entry Initialize
+    ; entry Initialized
+    ; entry Shutdown
+    ; entry Exit
+    ; entry Masc_lsp_status
+    ; entry Did_open
+    ; entry Did_change
+    ; entry Did_save
+    ; entry Did_close
+    ; entry Hover
+    ; entry CodeLens
+    ; entry InlayHint
+    ; entry Diagnostic
+    ; entry Definition
+    ; entry References
+    ; entry Completion
+    ; entry CodeAction
+    ; entry Document_symbol
+    ; entry Folding_range
+    ; entry Document_highlight
+    ]
+  ;;
+
+  let handled_methods = List.map (fun (e : entry) -> e.method_) entries
+
+  let of_string method_ =
+    List.find_map
+      (fun entry ->
+         if String.equal entry.wire_method method_ then Some entry.method_ else None)
+      entries
+  ;;
+
+  let to_string method_ = (entry method_).wire_method
+  let classification method_ = (entry method_).classification
+end
+
+let lsp_method_of_string = Lsp_method_catalog.of_string
+let lsp_method_to_string = Lsp_method_catalog.to_string
+let lsp_method_classification = Lsp_method_catalog.classification
+
+let is_document_sync_notification = function
+  | Did_open | Did_change | Did_save | Did_close -> true
+  | Initialize
+  | Initialized
+  | Shutdown
+  | Exit
+  | Masc_lsp_status
+  | Hover
+  | CodeLens
+  | InlayHint
+  | Diagnostic
+  | Definition
+  | References
+  | Completion
+  | CodeAction
+  | Document_symbol
+  | Folding_range
+  | Document_highlight -> false
 ;;
 
 type conn_state =
@@ -673,6 +739,24 @@ let forward_notification cs lang_id method_ params =
   | Ok proc -> Lsp_message_router.send_notification cs.router proc ~method_ ~params
 ;;
 
+let forward_document_sync_notification cs method_ params =
+  let wire_method = lsp_method_to_string method_ in
+  match extract_uri params with
+  | None -> ()
+  | Some uri ->
+    (match resolve_relative ~base:cs.base_path uri with
+     | None -> ()
+     | Some relative ->
+       if method_ = Did_save
+       then
+         Lsp_overlay_provider.invalidate_cache
+           ~base_dir:cs.base_path
+           ~file_path:relative;
+       (match resolve_lang relative with
+        | Unknown_lang -> ()
+        | Known_lang lang_id -> forward_notification cs lang_id wire_method params))
+;;
+
 (* Read-only method allowlist for the catch-all forwarder (task-1692). The
    observation plane must never forward a write-adjacent request — rename,
    any formatting, executeCommand, applyEdit, willSaveWaitUntil — to the
@@ -1166,6 +1250,14 @@ let dispatch_message cs msg =
              connected / overlay_only / command / last_error. *)
           | Some Masc_lsp_status, Some n -> send_response cs n (current_status_json cs)
           | Some Masc_lsp_status, None -> ()
+          | Some method_, None when is_document_sync_notification method_ ->
+            forward_document_sync_notification cs method_ params
+          | Some method_, Some n when is_document_sync_notification method_ ->
+            send_error cs n
+              Mcp_error_code.(to_wire_code Invalid_request)
+              (Printf.sprintf
+                 "Document-sync LSP method must be a notification: %s"
+                 (lsp_method_to_string method_))
           (* MASC-overlay-aware handlers *)
           | Some Hover, Some n -> handle_hover cs params n
           | Some CodeLens, Some n -> handle_codelens cs params n
@@ -1179,74 +1271,49 @@ let dispatch_message cs msg =
           | Some Folding_range, Some n -> handle_folding_range cs params n
           | Some Document_highlight, Some n -> handle_document_highlight cs params n
           | _ ->
-            (* File notifications → forward to appropriate LSP process *)
-            if String.starts_with ~prefix:"textDocument/did" method_str
-            then
-              (match extract_uri params with
-               | Some uri ->
-                 (match resolve_relative ~base:cs.base_path uri with
-                  | None -> ()
-                  | Some relative ->
-                    if String.equal method_str "textDocument/didSave"
-                    then
-                      Lsp_overlay_provider.invalidate_cache
-                        ~base_dir:cs.base_path
-                        ~file_path:relative;
-                    (match resolve_lang relative with
-                     | Unknown_lang -> ()
-                     | Known_lang lang_id -> forward_notification cs lang_id method_str params))
-               | None -> ())
-            else
-              (match id_opt with
-               | Some n ->
-                 (* Other read-only requests with a textDocument URI → forward to LSP.
-                    Write-adjacent / unrecognized methods are rejected here (task-1692)
-                    rather than forwarded, so the observation plane never mutates the
-                    workspace through the language server. *)
-                 (match classify_forwarded_method method_str with
-                  | Reject_write_adjacent ->
-                    send_error cs n
-                      Mcp_error_code.(to_wire_code Invalid_request)
-                      ("Read-only LSP proxy: method not permitted: " ^ method_str)
-                  | Unknown_forwarded_method unknown ->
-                    send_error cs n
-                      Mcp_error_code.(to_wire_code Method_not_found)
-                      ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
-                  | Forward_read_only ->
-                    (match extract_uri params with
-                     | None ->
-                       send_error cs n
-                         Mcp_error_code.(to_wire_code Method_not_found)
-                         ("Unhandled method: " ^ method_str)
-                     | Some uri ->
-                       (* Resolve the URI explicitly: an out-of-workspace or malformed
-                          URI ([None]) is rejected here rather than collapsed to a
-                          path, so the forward is only reached for a resolved
-                          in-workspace file. *)
-                       (match resolve_relative ~base:cs.base_path uri with
-                        | None ->
-                          send_error
-                            cs
-                            n
-                            Mcp_error_code.(to_wire_code Invalid_params)
-                            "Path is outside the workspace"
-                        | Some relative ->
-                          (match resolve_lang relative with
-                           | Known_lang lang_id -> forward_request cs lang_id method_str params n
-                           | Unknown_lang ->
-                             send_error
-                               cs
-                               n
-                               Mcp_error_code.(to_wire_code Invalid_params)
-                               ("No LSP server for: " ^ relative)))))
-               | None ->
-                 (* Server-initiated notification broadcast *)
-                 if not (Atomic.get cs.disconnected)
-                 then
-                   List.iter
-                     (fun (_lang_id, proc) ->
-                        Lsp_message_router.send_notification cs.router proc ~method_:method_str ~params)
-                     (process_snapshot cs)))
+            (match id_opt with
+             | Some n ->
+               (* Other read-only requests with a textDocument URI → forward to LSP.
+                  Write-adjacent / unrecognized methods are rejected here (task-1692)
+                  rather than forwarded, so the observation plane never mutates the
+                  workspace through the language server. *)
+               (match classify_forwarded_method method_str with
+                | Reject_write_adjacent ->
+                  send_error cs n
+                    Mcp_error_code.(to_wire_code Invalid_request)
+                    ("Read-only LSP proxy: method not permitted: " ^ method_str)
+                | Unknown_forwarded_method unknown ->
+                  send_error cs n
+                    Mcp_error_code.(to_wire_code Method_not_found)
+                    ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
+                | Forward_read_only ->
+                  (match extract_uri params with
+                   | None ->
+                     send_error cs n
+                       Mcp_error_code.(to_wire_code Method_not_found)
+                       ("Unhandled method: " ^ method_str)
+                   | Some uri ->
+                     (* Resolve the URI explicitly: an out-of-workspace or malformed
+                        URI ([None]) is rejected here rather than collapsed to a
+                        path, so the forward is only reached for a resolved
+                        in-workspace file. *)
+                     (match resolve_relative ~base:cs.base_path uri with
+                      | None ->
+                        send_error
+                          cs
+                          n
+                          Mcp_error_code.(to_wire_code Invalid_params)
+                          "Path is outside the workspace"
+                      | Some relative ->
+                        (match resolve_lang relative with
+                         | Known_lang lang_id -> forward_request cs lang_id method_str params n
+                         | Unknown_lang ->
+                           send_error
+                             cs
+                             n
+                             Mcp_error_code.(to_wire_code Invalid_params)
+                             ("No LSP server for: " ^ relative)))))
+             | None -> ()))
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())
@@ -1393,6 +1460,24 @@ module For_testing = struct
     | Unknown_forwarded_method of string
 
   let classify_forwarded_method = classify_forwarded_method
+
+  (* task-1694: canonical handled LSP command catalog. *)
+  type method_class = Lsp_method_catalog.classification =
+    | Read_only
+    | Mutation
+    | Lifecycle
+    | Status
+
+  let handled_lsp_methods () =
+    List.map
+      (fun (entry : Lsp_method_catalog.entry) ->
+         entry.wire_method, entry.classification)
+      Lsp_method_catalog.entries
+  ;;
+
+  let classify_handled_lsp_method method_ =
+    Option.map lsp_method_classification (lsp_method_of_string method_)
+  ;;
 
   type lang = resolved_lang =
     | Known_lang of string

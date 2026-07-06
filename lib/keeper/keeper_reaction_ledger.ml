@@ -10,13 +10,16 @@ type stimulus_kind =
   | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (* RFC-0290: generic background job completion wake *)
   | Schedule_signal  (* Schedule runner due/blocked signal wake. *)
+  | Schedule_due  (* Scheduled automation due wake for a specific keeper *)
   | Connector_attention
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL approval resolution wake — unblocks Skip Approval_pending *)
+  | Goal_verification_failed
+      (* Goal verification rejection wake — resumes assigned goal work. *)
 
 type reaction_kind =
   | Turn_started
-  | Stimulus_consumed  (* Event queue stimulus was acknowledged after a turn completed. *)
+  | Event_queue_ack
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -33,8 +36,10 @@ let stimulus_kind_to_string = function
   | Fusion_completed -> "fusion_completed"
   | Bg_completed -> "bg_completed"
   | Schedule_signal -> "schedule_signal"
+  | Schedule_due -> "schedule_due"
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
+  | Goal_verification_failed -> "goal_verification_failed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -48,14 +53,16 @@ let stimulus_kind_of_string = function
   | "fusion_completed" -> Some Fusion_completed
   | "bg_completed" -> Some Bg_completed
   | "schedule_signal" -> Some Schedule_signal
+  | "schedule_due" -> Some Schedule_due
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
+  | "goal_verification_failed" -> Some Goal_verification_failed
   | _ -> None
 ;;
 
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
-  | Stimulus_consumed -> "stimulus_consumed"
+  | Event_queue_ack -> "event_queue_ack"
   | Execution_receipt -> "execution_receipt"
   | Terminal_reason -> "terminal_reason"
   | Cursor_ack -> "cursor_ack"
@@ -70,7 +77,7 @@ let reaction_kind_to_string = function
    추가 시 컴파일러가 분류 누락을 강제한다(stimulus와 동일한 닫힌-합 안티패턴 방지). *)
 let reaction_kind_of_string = function
   | "turn_started" -> Turn_started
-  | "stimulus_consumed" -> Stimulus_consumed
+  | "event_queue_ack" -> Event_queue_ack
   | "execution_receipt" -> Execution_receipt
   | "terminal_reason" -> Terminal_reason
   | "cursor_ack" -> Cursor_ack
@@ -97,8 +104,10 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
   | Keeper_event_queue.Bg_completed _ -> Bg_completed
   | Keeper_event_queue.Schedule_signal _ -> Schedule_signal
+  | Keeper_event_queue.Schedule_due _ -> Schedule_due
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
+  | Keeper_event_queue.Goal_verification_failed _ -> Goal_verification_failed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -161,7 +170,17 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "board_signal kind=%s author=%s title=%s"
       (match bs.kind with
        | Keeper_event_queue.Post_created -> "post_created"
-       | Keeper_event_queue.Comment_added -> "comment_added")
+       | Keeper_event_queue.Comment_added -> "comment_added"
+       | Keeper_event_queue.Reaction_changed reaction ->
+         Printf.sprintf
+           "reaction_changed target=%s:%s user=%s emoji=%s active=%b"
+           (match reaction.target_type with
+            | Keeper_event_queue.Reaction_post -> "post"
+            | Keeper_event_queue.Reaction_comment -> "comment")
+           reaction.target_id
+           reaction.user_id
+           reaction.emoji
+           reaction.reacted)
       bs.author
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"
@@ -179,6 +198,8 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       signal.schedule_signal_id
       (Keeper_event_queue.schedule_signal_kind_to_string signal.schedule_signal_kind)
       signal.schedule_id
+  | Keeper_event_queue.Schedule_due sw ->
+    Printf.sprintf "schedule_due schedule_id=%s due_at=%.3f" sw.schedule_id sw.due_at
   | Keeper_event_queue.Connector_attention ca ->
     Printf.sprintf "connector_attention event_id=%s" ca.event_id
   | Keeper_event_queue.Hitl_resolved r ->
@@ -186,6 +207,12 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "hitl_resolved approval=%s decision=%s"
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    Printf.sprintf
+      "goal_verification_failed goal_id=%s request_id=%s rejected_by=%s"
+      failure.goal_id
+      failure.request_id
+      failure.rejected_by
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -200,8 +227,10 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Bg_completed _
     | Keeper_event_queue.Schedule_signal _
+    | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Connector_attention _
-    | Keeper_event_queue.Hitl_resolved _ -> None
+    | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Goal_verification_failed _ -> None
   in
   `Assoc
     (base_fields
@@ -469,6 +498,89 @@ let bool_field name json =
   | _ -> false
 ;;
 
+type event_queue_reaction_evidence =
+  { keeper_name : string
+  ; stimulus_id : string
+  ; stimulus_seen : bool
+  ; turn_started_seen : bool
+  ; event_queue_ack_seen : bool
+  ; stimulus_recorded_at : float option
+  ; turn_started_recorded_at : float option
+  ; event_queue_ack_recorded_at : float option
+  ; latest_recorded_at : float option
+  ; matched_record_count : int
+  }
+
+let max_recorded_at current candidate =
+  match current, candidate with
+  | None, None -> None
+  | Some value, None | None, Some value -> Some value
+  | Some left, Some right -> Some (Float.max left right)
+;;
+
+let reaction_kind_field row =
+  match assoc_field "reaction" row with
+  | Some reaction ->
+    (match string_field "kind" reaction with
+     | None -> None
+     | Some kind -> Some (reaction_kind_of_string kind))
+  | None -> None
+;;
+
+let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
+  let stimulus_seen = ref false in
+  let turn_started_seen = ref false in
+  let event_queue_ack_seen = ref false in
+  let stimulus_recorded_at = ref None in
+  let turn_started_recorded_at = ref None in
+  let event_queue_ack_recorded_at = ref None in
+  let latest_recorded_at = ref None in
+  let matched_record_count = ref 0 in
+  let store = store_for_base_path ~base_path ~keeper_name in
+  Dated_jsonl.iter_all store (fun row ->
+    match string_field "stimulus_id" row with
+    | Some row_stimulus_id when String.equal row_stimulus_id stimulus_id ->
+      incr matched_record_count;
+      let recorded_at = float_field "recorded_at_unix" row in
+      latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
+      (match string_field "record_kind" row with
+       | Some record_kind when String.equal record_kind "stimulus" ->
+         stimulus_seen := true;
+         stimulus_recorded_at := max_recorded_at !stimulus_recorded_at recorded_at
+       | Some record_kind when String.equal record_kind "reaction" ->
+         (match reaction_kind_field row with
+          | Some Turn_started ->
+            turn_started_seen := true;
+            turn_started_recorded_at
+              := max_recorded_at !turn_started_recorded_at recorded_at
+          | Some Event_queue_ack ->
+            event_queue_ack_seen := true;
+            event_queue_ack_recorded_at
+              := max_recorded_at !event_queue_ack_recorded_at recorded_at
+          | Some Execution_receipt
+          | Some Terminal_reason
+          | Some Cursor_ack
+          | Some Operator_escalation
+          | Some Supervisor_recovery_requested
+          | Some (Unknown_reaction _)
+          | None -> ())
+       | Some _
+       | None -> ())
+    | Some _
+    | None -> ());
+  { keeper_name
+  ; stimulus_id
+  ; stimulus_seen = !stimulus_seen
+  ; turn_started_seen = !turn_started_seen
+  ; event_queue_ack_seen = !event_queue_ack_seen
+  ; stimulus_recorded_at = !stimulus_recorded_at
+  ; turn_started_recorded_at = !turn_started_recorded_at
+  ; event_queue_ack_recorded_at = !event_queue_ack_recorded_at
+  ; latest_recorded_at = !latest_recorded_at
+  ; matched_record_count = !matched_record_count
+  }
+;;
+
 let string_list_field name json =
   list_field name json
   |> List.filter_map (function
@@ -570,6 +682,144 @@ let count_table_json tbl =
   |> fun values -> `List values
 ;;
 
+let string_count_table_json ~field tbl =
+  Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
+  |> List.sort (fun (left_name, left_count) (right_name, right_count) ->
+    let count_cmp = Int.compare right_count left_count in
+    if count_cmp <> 0 then count_cmp else String.compare left_name right_name)
+  |> List.map (fun (name, count) ->
+    `Assoc [ field, `String name; "count", `Int count ])
+  |> fun values -> `List values
+;;
+
+type durable_event_queue_health =
+  { keeper_name : string
+  ; durable_event_queue_count : int
+  ; durable_event_queue_pending_count : int
+  ; durable_event_queue_inflight_count : int
+  ; immediate_count : int
+  ; oldest_arrived_at : float option
+  ; newest_arrived_at : float option
+  ; payload_kind_counts : (string * int) list
+  ; read_errors : Keeper_event_queue_persistence.snapshot_read_error list
+  }
+
+let durable_event_queue_is_stale ~now ~stale_after_sec health =
+  health.durable_event_queue_count > 0
+  &&
+  match health.oldest_arrived_at with
+  | None -> false
+  | Some arrived_at -> now -. arrived_at >= stale_after_sec
+;;
+
+let payload_kind_count_pairs stimuli =
+  let tbl = Hashtbl.create 8 in
+  List.iter
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+      increment_count tbl (Keeper_event_queue.payload_kind_label stimulus.payload))
+    stimuli;
+  Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
+  |> List.sort (fun (left_name, left_count) (right_name, right_count) ->
+    let count_cmp = Int.compare right_count left_count in
+    if count_cmp <> 0 then count_cmp else String.compare left_name right_name)
+;;
+
+let durable_event_queue_health ~base_path ~keeper_name =
+  let snapshot =
+    Keeper_event_queue_persistence.load_snapshot_pair_with_errors ~base_path ~keeper_name
+  in
+  let queue =
+    Keeper_event_queue.prepend_list
+      (Keeper_event_queue.to_list snapshot.inflight)
+      snapshot.pending
+    |> Keeper_event_queue.dedup_by_identity
+  in
+  let stimuli = Keeper_event_queue.to_list queue in
+  let oldest_arrived_at, newest_arrived_at =
+    List.fold_left
+      (fun (oldest, newest) (stimulus : Keeper_event_queue.stimulus) ->
+        let arrived_at = stimulus.arrived_at in
+        ( (match oldest with
+           | None -> Some arrived_at
+           | Some value -> Some (Float.min value arrived_at))
+        , match newest with
+          | None -> Some arrived_at
+          | Some value -> Some (Float.max value arrived_at) ))
+      (None, None)
+      stimuli
+  in
+  let immediate_count =
+    List.fold_left
+      (fun acc (stimulus : Keeper_event_queue.stimulus) ->
+        match stimulus.urgency with
+        | Keeper_event_queue.Immediate -> acc + 1
+        | Normal | Low -> acc)
+      0
+      stimuli
+  in
+  { keeper_name
+  ; durable_event_queue_count = Keeper_event_queue.length queue
+  ; durable_event_queue_pending_count = Keeper_event_queue.length snapshot.pending
+  ; durable_event_queue_inflight_count = Keeper_event_queue.length snapshot.inflight
+  ; immediate_count
+  ; oldest_arrived_at
+  ; newest_arrived_at
+  ; payload_kind_counts = payload_kind_count_pairs stimuli
+  ; read_errors = snapshot.read_errors
+  }
+;;
+
+let durable_event_queue_health_json ~now ~stale_after_sec health =
+  let float_opt_to_json = function
+    | None -> `Null
+    | Some value -> `Float value
+  in
+  let age_opt_to_json = function
+    | None -> `Null
+    | Some value -> `Int (int_of_float (max 0.0 (now -. value)))
+  in
+  let stale = durable_event_queue_is_stale ~now ~stale_after_sec health in
+  let read_errors_json =
+    List.map
+      (fun (error : Keeper_event_queue_persistence.snapshot_read_error) ->
+        `Assoc
+          [ ( "kind"
+            , `String
+                (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string
+                   error.kind) )
+          ; ( "path"
+            , match error.path with
+              | Some path -> `String path
+              | None -> `Null )
+          ; "message", `String error.message
+          ])
+      health.read_errors
+  in
+  `Assoc
+    [ "keeper_name", `String health.keeper_name
+    ; "durable_event_queue_count", `Int health.durable_event_queue_count
+    ; ( "durable_event_queue_pending_count"
+      , `Int health.durable_event_queue_pending_count )
+    ; ( "durable_event_queue_inflight_count"
+      , `Int health.durable_event_queue_inflight_count )
+    ; "immediate_count", `Int health.immediate_count
+    ; "oldest_arrived_at_unix", float_opt_to_json health.oldest_arrived_at
+    ; "oldest_age_sec", age_opt_to_json health.oldest_arrived_at
+    ; "newest_arrived_at_unix", float_opt_to_json health.newest_arrived_at
+    ; "newest_age_sec", age_opt_to_json health.newest_arrived_at
+    ; "stale_after_sec", `Float stale_after_sec
+    ; "stale", `Bool stale
+    ; "read_error_count", `Int (List.length health.read_errors)
+    ; "read_errors", `List read_errors_json
+    ; ( "payload_kind_counts"
+      , `List
+          (List.map
+             (fun (payload_kind, count) ->
+               `Assoc [ "payload_kind", `String payload_kind; "count", `Int count ])
+             health.payload_kind_counts) )
+    ]
+;;
+
 let compare_board_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
   let cmp = Float.compare ts_a ts_b in
   if cmp <> 0 then cmp else String.compare post_id_a post_id_b
@@ -599,7 +849,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let stimulus_count = ref 0 in
   let reaction_count = ref 0 in
   let turn_started_count = ref 0 in
-  let stimulus_consumed_count = ref 0 in
+  let event_queue_ack_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let execution_receipt_count = ref 0 in
   let terminal_reason_count = ref 0 in
@@ -690,7 +940,7 @@ let summarize_rows ~keeper_name ~limit rows =
     | Some raw ->
       (match reaction_kind_of_string raw with
        | Turn_started -> incr turn_started_count
-       | Stimulus_consumed -> incr stimulus_consumed_count
+       | Event_queue_ack -> incr event_queue_ack_count
        | Cursor_ack -> incr cursor_ack_count
        | Execution_receipt -> incr execution_receipt_count
        | Terminal_reason -> incr terminal_reason_count
@@ -743,7 +993,8 @@ let summarize_rows ~keeper_name ~limit rows =
           강제한다 (catch-all 금지). *)
        | Some
            ( Board_signal | Bootstrap | No_progress_recovery | Fusion_completed
-           | Bg_completed | Schedule_signal | Connector_attention | Hitl_resolved )
+           | Bg_completed | Schedule_signal | Schedule_due | Connector_attention | Hitl_resolved
+           | Goal_verification_failed )
          -> ())
   in
   let note_payload_parse_error row =
@@ -837,7 +1088,8 @@ let summarize_rows ~keeper_name ~limit rows =
         | Some No_progress_recovery -> true
         | Some
             ( Board_signal | Bootstrap | Fusion_completed | Bg_completed
-            | Schedule_signal | Connector_attention | Hitl_resolved )
+            | Schedule_signal | Schedule_due | Connector_attention | Hitl_resolved
+            | Goal_verification_failed )
         | None ->
           false)
       pending_stimulus_ids
@@ -867,7 +1119,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "stimulus_count", `Int !stimulus_count
     ; "reaction_count", `Int !reaction_count
     ; "turn_started_count", `Int !turn_started_count
-    ; "stimulus_consumed_count", `Int !stimulus_consumed_count
+    ; "event_queue_ack_count", `Int !event_queue_ack_count
     ; "cursor_ack_count", `Int !cursor_ack_count
     ; "execution_receipt_count", `Int !execution_receipt_count
     ; "terminal_reason_count", `Int !terminal_reason_count
@@ -916,7 +1168,7 @@ let error_summary ~keeper_name ~limit error =
     ; "stimulus_count", `Int 0
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
-    ; "stimulus_consumed_count", `Int 0
+    ; "event_queue_ack_count", `Int 0
     ; "cursor_ack_count", `Int 0
     ; "execution_receipt_count", `Int 0
     ; "terminal_reason_count", `Int 0
@@ -977,7 +1229,7 @@ let fleet_summary_read_error_json ~limit_per_keeper ~source ~error =
     ; "stimulus_count", `Int 0
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
-    ; "stimulus_consumed_count", `Int 0
+    ; "event_queue_ack_count", `Int 0
     ; "cursor_ack_count", `Int 0
     ; "execution_receipt_count", `Int 0
     ; "terminal_reason_count", `Int 0
@@ -1005,14 +1257,109 @@ let fleet_summary_read_error_json ~limit_per_keeper ~source ~error =
 ;;
 
 let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
-  let keeper_names = List.sort_uniq String.compare keeper_names in
+  let durable_event_queue_discovery =
+    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots ~base_path
+  in
+  let keeper_names =
+    List.sort_uniq
+      String.compare
+      (keeper_names @ durable_event_queue_discovery.keeper_names)
+  in
+  (* NDT-OK: fleet summary health renders stale-age telemetry at the read
+     boundary; keeper control flow never branches on this timestamp. *)
+  let now = Unix.gettimeofday () in
   let summaries =
     List.map
       (fun keeper_name -> summary_for_keeper ~base_path ~keeper_name ~limit:limit_per_keeper)
       keeper_names
   in
+  let durable_event_queue_summaries =
+    List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
+  in
+  let durable_event_queue_stale_after_sec =
+    Env_config.KeeperHealth.durable_queue_stale_sec ()
+  in
   let total_int name =
     List.fold_left (fun acc summary -> acc + int_field name summary) 0 summaries
+  in
+  let durable_event_queue_count =
+    List.fold_left
+      (fun acc summary -> acc + summary.durable_event_queue_count)
+      0
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_pending_count =
+    List.fold_left
+      (fun acc summary -> acc + summary.durable_event_queue_pending_count)
+      0
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_inflight_count =
+    List.fold_left
+      (fun acc summary -> acc + summary.durable_event_queue_inflight_count)
+      0
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_by_keeper =
+    durable_event_queue_summaries
+    |> List.filter (fun summary -> summary.durable_event_queue_count > 0)
+    |> List.map
+         (durable_event_queue_health_json
+            ~now
+            ~stale_after_sec:durable_event_queue_stale_after_sec)
+  in
+  let durable_event_queue_stale_summaries =
+    List.filter
+      (durable_event_queue_is_stale
+         ~now
+         ~stale_after_sec:durable_event_queue_stale_after_sec)
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_stale_count =
+    List.fold_left
+      (fun acc summary -> acc + summary.durable_event_queue_count)
+      0
+      durable_event_queue_stale_summaries
+  in
+  let durable_event_queue_stale_keeper_count =
+    List.length durable_event_queue_stale_summaries
+  in
+  let durable_event_queue_read_error_count =
+    List.fold_left
+      (fun acc summary -> acc + List.length summary.read_errors)
+      0
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_read_errors_by_keeper =
+    durable_event_queue_summaries
+    |> List.filter (fun summary -> summary.read_errors <> [])
+    |> List.map
+         (durable_event_queue_health_json
+            ~now
+            ~stale_after_sec:durable_event_queue_stale_after_sec)
+  in
+  let durable_event_queue_stale_by_keeper =
+    durable_event_queue_stale_summaries
+    |> List.map
+         (durable_event_queue_health_json
+            ~now
+            ~stale_after_sec:durable_event_queue_stale_after_sec)
+  in
+  let durable_event_queue_payload_counts =
+    let tbl = Hashtbl.create 8 in
+    List.iter
+      (fun summary ->
+        List.iter
+          (fun (payload_kind, count) ->
+            let current =
+              match Hashtbl.find_opt tbl payload_kind with
+              | Some value -> value
+              | None -> 0
+            in
+            Hashtbl.replace tbl payload_kind (current + count))
+          summary.payload_kind_counts)
+      durable_event_queue_summaries;
+    string_count_table_json ~field:"payload_kind" tbl
   in
   let pending_by_keeper =
     List.filter_map
@@ -1118,16 +1465,55 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   let unsupported_stimulus_count = total_int "unsupported_stimulus_count" in
   let payload_parse_error_count = total_int "payload_parse_error_count" in
   let row_count = total_int "row_count" in
+  let durable_event_queue_discovery_error_count =
+    match durable_event_queue_discovery.read_error with
+    | Some _ -> 1
+    | None -> 0
+  in
+  let status_reasons =
+    []
+    |> (fun reasons -> if read_error_count > 0 then "read_error" :: reasons else reasons)
+    |> (fun reasons ->
+      if durable_event_queue_discovery_error_count > 0
+      then "durable_event_queue_discovery_error" :: reasons
+      else reasons)
+    |> (fun reasons ->
+      if durable_event_queue_read_error_count > 0
+      then "durable_event_queue_read_error" :: reasons
+      else reasons)
+    |> (fun reasons ->
+      if pending_count > 0 then "reaction_ledger_pending_stimulus" :: reasons else reasons)
+    |> (fun reasons ->
+      if durable_event_queue_stale_count > 0
+      then "durable_event_queue_stale" :: reasons
+      else reasons)
+    |> (fun reasons ->
+      if unknown_reaction_count > 0 then "unknown_reaction" :: reasons else reasons)
+    |> (fun reasons ->
+      if completion_contract_unknown_result_count > 0
+      then "completion_contract_unknown_result" :: reasons
+      else reasons)
+    |> (fun reasons ->
+      if unsupported_stimulus_count > 0 then "unsupported_stimulus" :: reasons else reasons)
+    |> (fun reasons ->
+      if payload_parse_error_count > 0 then "payload_parse_error" :: reasons else reasons)
+    |> List.rev
+  in
   let status =
-    if read_error_count > 0 then "unknown"
+    if
+      read_error_count > 0
+      || durable_event_queue_discovery_error_count > 0
+      || durable_event_queue_read_error_count > 0
+    then "unknown"
     else if
       pending_count > 0
+      || durable_event_queue_stale_count > 0
       || unknown_reaction_count > 0
       || completion_contract_unknown_result_count > 0
       || unsupported_stimulus_count > 0
       || payload_parse_error_count > 0
     then "degraded"
-    else if row_count = 0 then "empty"
+    else if row_count = 0 && durable_event_queue_count = 0 then "empty"
     else if List.exists (fun summary -> summary_status summary = "degraded") summaries
     then "degraded"
     else "ok"
@@ -1135,15 +1521,10 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   `Assoc
     [ "schema", `String fleet_summary_schema
     ; "status", `String status
+    ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
     ; ( "operator_action_required"
       , `Bool
-          (read_error_count > 0
-           || pending_count > 0
-           || unknown_reaction_count > 0
-           || completion_contract_unknown_result_count > 0
-           || unsupported_stimulus_count > 0
-           || payload_parse_error_count > 0) )
-    ; "keeper_count_known", `Bool true
+          (status_reasons <> []) )
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
     ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
@@ -1151,7 +1532,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "stimulus_count", `Int (total_int "stimulus_count")
     ; "reaction_count", `Int (total_int "reaction_count")
     ; "turn_started_count", `Int (total_int "turn_started_count")
-    ; "stimulus_consumed_count", `Int (total_int "stimulus_consumed_count")
+    ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "execution_receipt_count", `Int (total_int "execution_receipt_count")
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")
@@ -1173,6 +1554,32 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; ( "legacy_cursor_swept_stimulus_count"
       , `Int (total_int "legacy_cursor_swept_stimulus_count") )
     ; "pending_stimulus_count", `Int pending_count
+    ; "durable_event_queue_count", `Int durable_event_queue_count
+    ; "durable_event_queue_pending_count", `Int durable_event_queue_pending_count
+    ; "durable_event_queue_inflight_count", `Int durable_event_queue_inflight_count
+    ; ( "durable_event_queue_discovered_keeper_count"
+      , `Int (List.length durable_event_queue_discovery.keeper_names) )
+    ; ( "durable_event_queue_discovered_keeper_names"
+      , `List
+          (List.map
+             (fun value -> `String value)
+             durable_event_queue_discovery.keeper_names) )
+    ; ( "durable_event_queue_discovery_error"
+      , match durable_event_queue_discovery.read_error with
+        | Some error -> `String error
+        | None -> `Null )
+    ; ( "durable_event_queue_discovery_error_count"
+      , `Int durable_event_queue_discovery_error_count )
+    ; "durable_event_queue_stale_after_sec", `Float durable_event_queue_stale_after_sec
+    ; "durable_event_queue_stale_count", `Int durable_event_queue_stale_count
+    ; ( "durable_event_queue_stale_keeper_count"
+      , `Int durable_event_queue_stale_keeper_count )
+    ; "durable_event_queue_read_error_count", `Int durable_event_queue_read_error_count
+    ; ( "durable_event_queue_read_errors_by_keeper"
+      , `List durable_event_queue_read_errors_by_keeper )
+    ; "durable_event_queue_by_keeper", `List durable_event_queue_by_keeper
+    ; "durable_event_queue_stale_by_keeper", `List durable_event_queue_stale_by_keeper
+    ; "durable_event_queue_payload_counts", durable_event_queue_payload_counts
     ; "pending_no_progress_recovery_count", `Int pending_no_progress_recovery_count
     ; "pending_by_keeper", `List pending_by_keeper
     ; ( "pending_no_progress_recovery_by_keeper"

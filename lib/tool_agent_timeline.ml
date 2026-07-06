@@ -383,6 +383,9 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
          Safe_ops.json_int_opt "cache_creation_tokens" e.payload
        in
        let cache_read_tokens = Safe_ops.json_int_opt "cache_read_tokens" e.payload in
+       let cache_miss_input_tokens =
+         Safe_ops.json_int_opt "cache_miss_input_tokens" e.payload
+       in
        let cost_usd = Safe_ops.json_float_opt "cost_usd" e.payload in
        let latency_ms = Safe_ops.json_int_opt "latency_ms" e.payload in
        let model_used = Safe_ops.json_string ~default:"unknown" "model_used" e.payload in
@@ -431,6 +434,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
                  ("output_tokens", Json_util.int_opt_to_json output_tokens);
                  ("cache_creation_tokens", Json_util.int_opt_to_json cache_creation_tokens);
                  ("cache_read_tokens", Json_util.int_opt_to_json cache_read_tokens);
+                 ("cache_miss_input_tokens", Json_util.int_opt_to_json cache_miss_input_tokens);
                  ("cost_usd", Json_util.float_opt_to_json cost_usd);
                  ("latency_ms", Json_util.int_opt_to_json latency_ms);
                  ("model_used", `String model_used);

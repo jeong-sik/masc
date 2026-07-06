@@ -91,6 +91,7 @@ let contains_substring haystack needle =
     loop 0
 
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
+    ?(cache_read_tokens=0) ?(cache_creation_tokens=0)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
     ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
     ?(cost_usd=0.01) ?(tools_used=[]) () =
@@ -134,7 +135,8 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
       ("request_latency_ms", `Int latency_ms);
       ("input_tokens", `Int input_tokens);
       ("output_tokens", `Int output_tokens);
-      ("cache_read_tokens", `Int 0);
+      ("cache_read_tokens", `Int cache_read_tokens);
+      ("cache_creation_tokens", `Int cache_creation_tokens);
       ("reasoning_tokens", `Int 0);
       ("fallback_applied", `Bool false);
       ("cost_usd", `Float cost_usd);
@@ -458,6 +460,8 @@ let test_recent_entries () =
       List.init 8 (fun i ->
         success_entry ~model:"m1" ~ts:(ts -. Float.of_int (i * 10))
           ~input_tokens:(100 + i * 10) ~output_tokens:50
+          ~cache_read_tokens:(if i = 0 then 32 else 0)
+          ~cache_creation_tokens:(if i = 0 then 8 else 0)
           ~latency_ms:500 ~cost_usd:0.01 ())
     );
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -465,7 +469,11 @@ let test_recent_entries () =
     check int "recent_entries capped at 5" 5 (List.length s.recent_entries);
     (* First recent entry should be the most recent (highest ts_unix) *)
     let first_re = List.hd s.recent_entries in
-    check bool "most recent first" true (first_re.re_ts_unix >= (ts -. 1.0)))
+    check bool "most recent first" true (first_re.re_ts_unix >= (ts -. 1.0));
+    check (option int) "recent cache read" (Some 32)
+      first_re.re_cache_read_tokens;
+    check (option int) "recent cache creation" (Some 8)
+      first_re.re_cache_creation_tokens)
 
 let test_window_filter () =
   let base = test_dir () in
@@ -486,6 +494,8 @@ let test_json_roundtrip () =
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"test-model" ~ts:(ts -. 10.0)
+        ~cache_read_tokens:21
+        ~cache_creation_tokens:7
         ~tools_used:["t1"] ~cost_usd:0.05 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -507,6 +517,11 @@ let test_json_roundtrip () =
       (match m |> member "top_tools" with `List _ -> true | _ -> false);
     check bool "has recent_entries list" true
       (match m |> member "recent_entries" with `List _ -> true | _ -> false);
+    let recent = m |> member "recent_entries" |> to_list |> List.hd in
+    check int "recent cache_read_tokens" 21
+      (recent |> member "cache_read_tokens" |> to_int);
+    check int "recent cache_creation_tokens" 7
+      (recent |> member "cache_creation_tokens" |> to_int);
     check int "total_error_entries" 0
       (json |> member "total_error_entries" |> to_int))
 
@@ -573,6 +588,10 @@ let test_missing_usage_serializes_unknowns () =
     check (option (float 0.001)) "cost unknown" None s.total_cost_usd;
     let recent = List.hd s.recent_entries in
     check (option int) "recent input unknown" None recent.re_input_tokens;
+    check (option int) "recent cache read unknown" None
+      recent.re_cache_read_tokens;
+    check (option int) "recent cache creation unknown" None
+      recent.re_cache_creation_tokens;
     check (option (float 0.001)) "recent latency unknown" None recent.re_latency_ms;
     let json = M.to_json agg in
     let open Yojson.Safe.Util in
@@ -583,7 +602,13 @@ let test_missing_usage_serializes_unknowns () =
       (match m |> member "avg_latency_ms" with `Null -> true | _ -> false);
     let recent_json = m |> member "recent_entries" |> to_list |> List.hd in
     check bool "recent json input null" true
-      (match recent_json |> member "input_tokens" with `Null -> true | _ -> false))
+      (match recent_json |> member "input_tokens" with `Null -> true | _ -> false);
+    check bool "recent json cache read null" true
+      (match recent_json |> member "cache_read_tokens" with `Null -> true | _ -> false);
+    check bool "recent json cache creation null" true
+      (match recent_json |> member "cache_creation_tokens" with
+       | `Null -> true
+       | _ -> false))
 
 let test_coverage_diagnostics_survive_aggregation () =
   let base = test_dir () in

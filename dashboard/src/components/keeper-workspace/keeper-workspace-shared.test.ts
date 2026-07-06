@@ -90,18 +90,20 @@ describe('statePillTone', () => {
 })
 
 describe('keeperModelLabel', () => {
-  it('prefers active_model_label, then active_model, then model', () => {
-    expect(keeperModelLabel(mk({ active_model_label: 'A', active_model: 'B', model: 'C' }))).toBe('A')
-    expect(keeperModelLabel(mk({ active_model: 'B', model: 'C' }))).toBe('B')
-    expect(keeperModelLabel(mk({ model: 'C' }))).toBe('C')
+  it('does not expose raw keeper model fields', () => {
+    expect(keeperModelLabel(mk({ active_model_label: 'A', active_model: 'B', model: 'C' }))).toBeNull()
+    expect(keeperModelLabel(mk({ active_model: 'B', model: 'C' }))).toBeNull()
+    expect(keeperModelLabel(mk({ model: 'C' }))).toBeNull()
     expect(keeperModelLabel(mk({}))).toBeNull()
   })
 })
 
 describe('keeperRuntimeLabel', () => {
-  it('prefers runtime_canonical then selected_runtime_canonical', () => {
-    expect(keeperRuntimeLabel(mk({ runtime_canonical: 'oas·seoul-1' }))).toBe('oas·seoul-1')
+  it('uses the shared runtime display priority', () => {
+    expect(keeperRuntimeLabel(mk({ runtime_canonical: ' oas.seoul-1 ' }))).toBe('oas.seoul-1')
     expect(keeperRuntimeLabel(mk({ selected_runtime_canonical: 'local·docker' }))).toBe('local·docker')
+    expect(keeperRuntimeLabel(mk({ runtime_id: 'keeper_unified' }))).toBe('keeper_unified')
+    expect(keeperRuntimeLabel(mk({ runtime_ref: { group: 'tier', item: 'resilient_breaker' } }))).toBe('tier.resilient_breaker')
     expect(keeperRuntimeLabel(mk({}))).toBeNull()
   })
 })

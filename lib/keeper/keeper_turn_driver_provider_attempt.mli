@@ -83,6 +83,20 @@ val success_selected_model_raw :
 
 val health_error_kind : string -> Keeper_binding_health.error_kind
 
+type provider_cooldown_block =
+  { blocked_provider_keys : string list
+  ; cooldown_remaining_sec : int
+  }
+
+val provider_cooldown_block :
+  keeper_name:string -> Runtime_candidate.t -> provider_cooldown_block option
+
+val provider_cooldown_block_decision :
+  provider_cooldown_block -> Yojson.Safe.t
+
+val provider_cooldown_block_error :
+  runtime_id:string -> provider_cooldown_block -> Agent_sdk.Error.sdk_error
+
 val record_candidate_health_success :
   keeper_name:string -> Runtime_candidate.t -> latency_ms:float -> unit
 

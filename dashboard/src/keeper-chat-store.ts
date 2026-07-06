@@ -8,14 +8,17 @@
 // from the server SSOT (.masc/keeper_chat/<name>.jsonl via
 // GET /chat/history), so the duplicate client-side store was deleted.
 
-import type { KeeperConversationAttachment } from './types'
+import type { ChatBlock, KeeperConversationAttachment, KeeperUserInputBlock } from './types'
 
 export interface QueuedMessage {
   id: string
   content: string
   timestamp: number
+  sequence: number
   sent: boolean
   attachments?: KeeperConversationAttachment[]
+  blocks?: ChatBlock[]
+  userBlocks?: KeeperUserInputBlock[]
   clientActionId?: string
 }
 
@@ -25,6 +28,7 @@ export interface InputQueue {
 }
 
 const _queues = new Map<string, InputQueue>()
+let _nextQueueSequence = 0
 
 function _ensureQueue(keeperName: string): InputQueue {
   let q = _queues.get(keeperName)
@@ -79,6 +83,8 @@ export function enqueueInput(
   content: string,
   attachments?: KeeperConversationAttachment[],
   clientActionId?: string,
+  blocks?: ChatBlock[],
+  userBlocks?: KeeperUserInputBlock[],
 ): QueuedMessage {
   const q = _ensureQueue(keeperName)
   const actionId = clientActionId?.trim()
@@ -90,8 +96,11 @@ export function enqueueInput(
     id: `${keeperName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     content,
     timestamp: Date.now(),
+    sequence: ++_nextQueueSequence,
     sent: false,
     ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    ...(blocks && blocks.length > 0 ? { blocks } : {}),
+    ...(userBlocks && userBlocks.length > 0 ? { userBlocks } : {}),
     ...(actionId ? { clientActionId: actionId } : {}),
   }
   q.items.push(msg)
@@ -118,7 +127,7 @@ export function getQueuedMessages(keeperName: string): QueuedMessage[] {
 export function updateQueuedMessage(
   keeperName: string,
   id: string,
-  updates: Partial<Pick<QueuedMessage, 'content' | 'attachments'>>,
+  updates: Partial<Pick<QueuedMessage, 'content' | 'attachments' | 'blocks' | 'userBlocks'>>,
 ): QueuedMessage | null {
   const q = _queues.get(keeperName)
   if (!q) return null
@@ -136,6 +145,18 @@ export function updateQueuedMessage(
     changed = true
   }
   if (changed) delete item.clientActionId
+  if (changed) {
+    if ('blocks' in updates && updates.blocks && updates.blocks.length > 0) {
+      item.blocks = updates.blocks
+    } else {
+      delete item.blocks
+    }
+    if ('userBlocks' in updates && updates.userBlocks && updates.userBlocks.length > 0) {
+      item.userBlocks = updates.userBlocks
+    } else {
+      delete item.userBlocks
+    }
+  }
   return item
 }
 
@@ -192,4 +213,5 @@ export function getQueueTotal(keeperName: string): number {
 export function _resetChatStoreForTests(): void {
   _queues.clear()
   _drafts.clear()
+  _nextQueueSequence = 0
 }

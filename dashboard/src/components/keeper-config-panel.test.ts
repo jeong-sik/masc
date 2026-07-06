@@ -9,6 +9,11 @@ import {
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
+  KCF_TAB_IDS,
+  keeperConfigControlContractStatus,
+  keeperConfigControlInventory,
+  keeperRuntimeConfigCanWrite,
+  keeperRuntimeConfigWriteUnsupportedReason,
   type HookSlotEntry,
   type RuntimeDraft,
 } from './keeper-config-panel'
@@ -266,6 +271,198 @@ describe('sandbox coerce helpers', () => {
     expect(coerceNetworkMode(undefined)).toBe('inherit')
   })
 
+})
+
+describe('keeperRuntimeConfigCanWrite', () => {
+  it('allows writes only for a TOML-backed keeper manifest', () => {
+    const base = makeKeeperConfig()
+    expect(keeperRuntimeConfigCanWrite(base)).toBe(true)
+    expect(keeperRuntimeConfigWriteUnsupportedReason(base)).toBeNull()
+  })
+
+  it('rejects persona-backed config even when a path-like value is present', () => {
+    const base = makeKeeperConfig()
+    const c = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: '/tmp/config/keepers/default.toml',
+      },
+    })
+
+    expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
+    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('현재 기본 소스: persona')
+  })
+
+  it('rejects TOML config without a manifest path', () => {
+    const base = makeKeeperConfig()
+    const c = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'toml',
+        default_manifest_path: null,
+      },
+    })
+
+    expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
+    expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('기본 매니페스트 경로')
+  })
+})
+
+describe('keeperConfigControlInventory', () => {
+  function findItem(tab: (typeof KCF_TAB_IDS)[number], c: KeeperConfig, id: string) {
+    const item = keeperConfigControlInventory(tab, c).find((entry) => entry.id === id)
+    if (!item) throw new Error(`inventory item missing: ${id}`)
+    return item
+  }
+
+  it('backs every tab with at least one uniquely identified row', () => {
+    const c = makeKeeperConfig()
+    const ids = new Set<string>()
+    for (const tab of KCF_TAB_IDS) {
+      const rows = keeperConfigControlInventory(tab, c)
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) {
+        expect(row.tab).toBe(tab)
+        expect(ids.has(row.id)).toBe(false)
+        ids.add(row.id)
+      }
+    }
+  })
+
+  it('ties every ledger row to structured field, api, local-state, or unsupported contracts', () => {
+    const c = makeKeeperConfig()
+    for (const tab of KCF_TAB_IDS) {
+      for (const row of keeperConfigControlInventory(tab, c)) {
+        expect(row.contracts.length, row.id).toBeGreaterThan(0)
+        const contractKinds = row.contracts.map(contract => contract.kind)
+        if (row.kind === 'browser-local') {
+          expect(contractKinds, row.id).toContain('browser-state')
+          expect(contractKinds, row.id).not.toContain('keeper-config-field')
+        } else if (row.kind === 'unsupported') {
+          expect(contractKinds, row.id).toContain('unsupported')
+        } else {
+          expect(
+            contractKinds.includes('api') || contractKinds.includes('keeper-config-field'),
+            row.id,
+          ).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('records exact api contracts for controls that are easy to drift from their source text', () => {
+    const c = makeKeeperConfig()
+
+    expect(findItem('runtime', c, 'kcf-runtime-catalog').contracts).toContainEqual({
+      kind: 'api',
+      method: 'GET',
+      endpoint: '/api/v1/providers',
+    })
+    expect(findItem('policy', c, 'kcf-policy-tool-policy').contracts).toContainEqual({
+      kind: 'api',
+      method: 'POST',
+      endpoint: '/api/v1/keepers/:name/tools',
+      operation: 'set_policy',
+    })
+    expect(findItem('goals', c, 'kcf-goals-catalog-filter').contracts).toContainEqual({
+      kind: 'api',
+      method: 'GET',
+      endpoint: '/api/v1/dashboard/goals',
+    })
+    expect(findItem('health', c, 'kcf-health-directives').contracts).toContainEqual({
+      kind: 'api',
+      method: 'POST',
+      endpoint: '/api/v1/keepers/:name/directive',
+      operation: 'pause/resume/wakeup',
+    })
+  })
+
+  it('classifies runtime-backed controls from the manifest writer guard', () => {
+    const toml = makeKeeperConfig()
+    const base = makeKeeperConfig()
+    const persona = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+
+    const runtimeWrite = findItem('runtime', toml, 'kcf-runtime-assignment')
+    expect(runtimeWrite.kind).toBe('live-write')
+    expect(runtimeWrite.action).toContain('PATCH /api/v1/keepers/:name/config runtime_id')
+    expect(runtimeWrite.contracts).toContainEqual({
+      kind: 'keeper-config-field',
+      path: 'execution.selected_runtime_id',
+    })
+    expect(runtimeWrite.contracts).toContainEqual({
+      kind: 'api',
+      method: 'PATCH',
+      endpoint: '/api/v1/keepers/:name/config',
+      operation: 'runtime_id',
+    })
+
+    const runtimeUnsupported = findItem('runtime', persona, 'kcf-runtime-assignment')
+    expect(runtimeUnsupported.kind).toBe('unsupported')
+    expect(runtimeUnsupported.action).toContain('현재 기본 소스: persona')
+    expect(runtimeUnsupported.contracts).toContainEqual({
+      kind: 'unsupported',
+      reason: expect.stringContaining('현재 기본 소스: persona'),
+    })
+  })
+
+  it('reports missing optional config fields without treating present nulls as absent', () => {
+    const c = makeKeeperConfig({ hooks: undefined })
+
+    const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
+    const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
+    expect(hookStatus.kind).toBe('missing-config-field')
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget'])
+
+    const contextOverride = findItem('runtime', c, 'kcf-runtime-context-override')
+    const contextStatus = keeperConfigControlContractStatus(contextOverride.contracts, c)
+    expect(contextStatus.kind).toBe('ok')
+  })
+
+  it('uses backend field-presence proof instead of normalized defaults for contract gaps', () => {
+    const c = makeKeeperConfig({
+      field_presence: {
+        schema: 'keeper.config.field_presence.v1',
+        producer: 'dashboard_http_keeper_snapshot',
+        present_paths: ['hooks', 'hooks.slots'],
+      },
+    })
+
+    const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
+    const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
+
+    expect(c.hooks?.deny_list).toEqual([])
+    expect(hookStatus.kind).toBe('missing-config-field')
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.deny_list', 'hooks.cost_budget'])
+  })
+
+  it('keeps separate API writers live even when runtime manifest writes are unsupported', () => {
+    const base = makeKeeperConfig()
+    const persona = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+
+    expect(findItem('policy', persona, 'kcf-policy-continuity').kind).toBe('unsupported')
+    expect(findItem('policy', persona, 'kcf-policy-tool-policy').kind).toBe('live-write')
+    expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
+  })
+
+  it('marks hooks as read-only global state plus browser-local filtering, not a fake editor', () => {
+    const c = makeKeeperConfig()
+    expect(findItem('hooks', c, 'kcf-hooks-slots').kind).toBe('live-read')
+    expect(findItem('hooks', c, 'kcf-hooks-filter').kind).toBe('browser-local')
+    expect(findItem('hooks', c, 'kcf-hooks-editing').kind).toBe('unsupported')
+  })
 })
 
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
@@ -635,6 +832,143 @@ const mocks = vi.hoisted(() => {
         },
       ],
     })),
+    fetchRuntimeProviders: vi.fn(async () => ({
+      updated_at: '2026-07-05T00:00:00Z',
+      summary: {
+        providers: 1,
+        runtimes: 1,
+        local_models: 0,
+        cloud_models: 1,
+        cli_models: 0,
+        default_runtime_id: 'tier-group.keeper_unified',
+      },
+      providers: [
+        {
+          provider: 'tier-group.keeper_unified',
+          runtime_id: 'tier-group.keeper_unified',
+          provider_id: 'runpod_mtp',
+          provider_display_name: 'RunPod MTP',
+          model_id: 'qwen',
+          model_api_name: 'Qwen/Qwen3-32B',
+          models: ['Qwen/Qwen3-32B'],
+          status: 'configured',
+          available: true,
+          source: 'runtime.toml',
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+          parameter_policy: {
+            reasoning_toggle_wire: 'chat_template_kwargs',
+            reasoning_replay_policy: 'preserve_always',
+            requires_reasoning_replay_on_tool_call: true,
+            ignored_sampling_params: ['temperature'],
+            always_ignored_sampling_params: [],
+          },
+          request_config: {
+            source: 'oas-provider-config',
+            provider_kind: 'openai_compat',
+            request_path: '/chat/completions',
+            request_path_targets_responses_api: false,
+            enable_thinking: true,
+            preserve_thinking: true,
+            thinking_budget: 32768,
+            glm_replay_reasoning: true,
+            has_model_capabilities_override: true,
+          },
+          declared_spec: {
+            source: 'runtime.toml',
+            provider: {
+              id: 'runpod_mtp',
+              display_name: 'RunPod MTP',
+              protocol: 'openai-compatible-http',
+              api_format: 'chat-completions',
+              transport: 'http',
+              auth_kind: 'env:RUNPOD_API_KEY',
+              is_non_interactive: true,
+              has_capabilities: true,
+              behavior_capabilities: {
+                supports_inline_tools: true,
+                requires_per_keeper_bridging_for_bound_actor_tools: true,
+                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+                argv_prompt_preflight: true,
+                uses_anthropic_caching: false,
+                max_turns_per_attempt: 3,
+                tolerates_bound_actor_fallback: true,
+              },
+              custom_header_count: 1,
+              connect_timeout_s: 120,
+            },
+            model: {
+              id: 'qwen',
+              api_name: 'Qwen/Qwen3-32B',
+              tools_support: true,
+              max_context: 128000,
+              thinking_support: true,
+              preserve_thinking: true,
+              max_thinking_budget: 32768,
+              streaming: true,
+              temperature: 0.65,
+              capabilities: {
+                source: 'runtime.toml',
+                supports_tool_choice: true,
+                supports_required_tool_choice: true,
+                supports_named_tool_choice: true,
+                supports_parallel_tool_calls: true,
+                supports_extended_thinking: true,
+                supports_reasoning_budget: true,
+                thinking_control_format: 'chat-template-kwargs',
+                supports_multimodal_inputs: true,
+                supports_image_input: true,
+                supports_audio_input: true,
+                supports_video_input: false,
+                supports_response_format_json: true,
+                supports_structured_output: true,
+              },
+              match_prefixes: ['Qwen/'],
+            },
+            binding: {
+              provider_id: 'runpod_mtp',
+              model_id: 'qwen',
+              is_default: true,
+              max_concurrent: 4,
+              price_input: 0.1,
+              price_output: 0.2,
+              keep_alive: '30m',
+              num_ctx: 131072,
+            },
+          },
+          effective_capabilities: {
+            source: 'oas-provider-config-model',
+            max_context_tokens: 131072,
+            max_output_tokens: 65536,
+            supports_tools: true,
+            supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
+            supports_parallel_tool_calls: true,
+            supports_runtime_mcp_tools: true,
+            supports_runtime_tool_events: true,
+            supports_reasoning: true,
+            supports_extended_thinking: true,
+            supports_reasoning_budget: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
+            thinking_control_format: 'chat-template-kwargs',
+            preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
+            reasoning_output_format: 'split-reasoning-fields',
+            reasoning_streaming_format: {
+              kind: 'delta-reasoning-field',
+              field: 'reasoning_content',
+            },
+            supports_multimodal_inputs: true,
+            supports_image_input: true,
+            supports_audio_input: true,
+            supports_video_input: false,
+            ignored_sampling_parameters: ['temperature'],
+          },
+        },
+      ],
+    })),
     patchKeeperConfig: vi.fn(),
     updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
     setKeeperToolPolicy: vi.fn(async () => makeKeeperConfig()),
@@ -658,6 +992,7 @@ vi.mock('../api/dashboard', () => ({
   fetchRuntimeProfiles: mocks.fetchRuntimeProfiles,
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
   fetchKeeperConfig: mocks.fetchKeeperConfig,
+  fetchRuntimeProviders: mocks.fetchRuntimeProviders,
   patchKeeperConfig: mocks.patchKeeperConfig,
   updateKeeperRuntime: mocks.updateKeeperRuntime,
   setKeeperToolPolicy: mocks.setKeeperToolPolicy,
@@ -678,6 +1013,7 @@ import {
   loadKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
+import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 import type { GoalTreeNode } from '../types'
 
 async function flush() {
@@ -702,9 +1038,11 @@ describe('KeeperConfigPanel', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     resetKeeperConfig()
+    resetRuntimeCatalog()
     mocks.fetchKeeperConfig.mockClear()
     mocks.fetchDashboardGoalsTree.mockClear()
     mocks.fetchRuntimeProfiles.mockClear()
+    mocks.fetchRuntimeProviders.mockClear()
     mocks.patchKeeperConfig.mockClear()
     mocks.updateKeeperRuntime.mockClear()
     mocks.setKeeperToolPolicy.mockClear()
@@ -718,6 +1056,7 @@ describe('KeeperConfigPanel', () => {
     render(null, container)
     container.remove()
     resetKeeperConfig()
+    resetRuntimeCatalog()
   })
 
   it('separates editable prompt controls from read-only runtime metadata', async () => {
@@ -741,6 +1080,15 @@ describe('KeeperConfigPanel', () => {
     await flush()
     expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
+    expect(container.textContent).toContain('Runtime catalog spec')
+    expect(container.textContent).toContain('RunPod MTP')
+    expect(container.textContent).toContain('Qwen/Qwen3-32B')
+    expect(container.textContent).toContain('effective')
+    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('request')
+    expect(container.textContent).toContain('think:on')
+    expect(container.textContent).toContain('policy')
+    expect(container.textContent).toContain('wire:chat_template_kwargs')
     expect(container.textContent).toContain('활성 런타임')
 
     // goals tab: assigned goal-store bindings.
@@ -910,6 +1258,101 @@ describe('KeeperConfigPanel', () => {
     expect(tokenGateInput!.type).toBe('number')
     // Value reflects the loaded config (makeKeeperConfig compaction.token_gate = 24000).
     expect(tokenGateInput!.value).toBe('24000')
+  })
+
+  it('keeps runtime config controls read-only when the keeper is not manifest-backed', async () => {
+    const base = makeKeeperConfig()
+    const personaConfig = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(personaConfig)
+    mocks.setKeeperToolPolicy.mockResolvedValueOnce(personaConfig)
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+    expect(container.querySelector('[data-testid="keeper-config-control-ledger"]')?.textContent)
+      .toContain('Control backing')
+    expect(container.querySelector('[data-control-id="kcf-runtime-assignment"]')?.getAttribute('data-control-kind'))
+      .toBe('unsupported')
+    expect(container.querySelector('[data-testid="keeper-runtime-write-unsupported"]')).not.toBeNull()
+    expect(container.textContent).toContain('현재 기본 소스: persona')
+    expect(container.querySelector('select[aria-label="runtime_id"]')).toBeNull()
+    expect(container.querySelector('input[aria-label="컨텍스트 오버라이드"]')).toBeNull()
+    expect(container.textContent).toContain('tier-group.keeper_unified')
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    expect(container.querySelector('select[aria-label="compaction_profile"]')).toBeNull()
+    expect(container.querySelector('input[aria-label="토큰 게이트"]')).toBeNull()
+    expect(container.querySelector('button[aria-label="자동 부팅"]')).toBeNull()
+    expect(container.querySelector('textarea[aria-label="tool_access"]')).not.toBeNull()
+    const denylist = container.querySelector('textarea[aria-label="tool_denylist"]') as HTMLTextAreaElement | null
+    expect(denylist).not.toBeNull()
+    denylist!.value = 'Execute\nDangerTool'
+    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const policySave = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('정책 저장'),
+    )
+    policySave?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
+      tool_access: ['tool_read_file'],
+      deny: ['Execute', 'DangerTool'],
+    })
+
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    expect(container.querySelector('select[aria-label="sandbox_profile"]')).toBeNull()
+    expect(container.querySelector('select[aria-label="network_mode"]')).toBeNull()
+    expect(container.querySelector('textarea[aria-label="allowed_paths"]')).toBeNull()
+    expect(container.querySelector('textarea[aria-label="mention_targets"]')).toBeNull()
+    expect(container.textContent).toContain('allowed_paths')
+    expect(container.textContent).toContain('/tmp/workspace')
+
+    selectKcfTab(container, '목표')
+    await flush()
+    expect(container.querySelector('input[aria-label="goal 검색"]')).toBeNull()
+    expect(container.querySelectorAll('.kcf-goal').length).toBe(0)
+    expect(container.textContent).toContain('goal-runtime')
+    expect(container.textContent).toContain('읽기 전용')
+
+    const runtimeSave = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    expect(runtimeSave).toBeUndefined()
+    expect(mocks.patchKeeperConfig).not.toHaveBeenCalled()
+  })
+
+  it('surfaces missing config-field contracts in the rendered ledger', async () => {
+    const noHooksConfig = makeKeeperConfig({ hooks: undefined })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(noHooksConfig)
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '훅')
+    await flush()
+
+    const hookRow = container.querySelector('[data-control-id="kcf-hooks-slots"]')
+    expect(hookRow?.getAttribute('data-control-contract-status')).toBe('missing-config-field')
+    expect(hookRow?.getAttribute('data-control-missing-config-fields'))
+      .toBe('hooks.slots | hooks.deny_list | hooks.cost_budget')
+    expect(hookRow?.textContent).toContain('missing 3 config fields')
+
+    const hookFilter = container.querySelector('[data-control-id="kcf-hooks-filter"]')
+    expect(hookFilter?.getAttribute('data-control-contract-status')).toBe('ok')
+    expect(hookFilter?.getAttribute('data-control-missing-config-fields')).toBe('')
   })
 
   it('saves the tool denylist via set_policy, echoing current tool_access and deduping entries', async () => {
@@ -1374,6 +1817,60 @@ describe('KeeperConfigPanel', () => {
       b.textContent?.includes('정책 저장'),
     ) as HTMLButtonElement
     expect(saveButton.disabled).toBe(true)
+  })
+
+  it('resets runtime draft when switching from keeper A to keeper B to prevent stale settings leakage', async () => {
+    const configA = makeKeeperConfig({
+      name: 'keeper-a',
+      execution: {
+        selected_runtime_id: 'ollama_cloud.deepseek-v4-flash',
+        runtime_options: ['ollama_cloud.deepseek-v4-flash', 'ollama_cloud.qwen-2.5-coder'],
+        selected_runtime_canonical: 'ollama_cloud.deepseek-v4-flash',
+        models: ['ollama_cloud.deepseek-v4-flash'],
+      } as any,
+    })
+    const configB = makeKeeperConfig({
+      name: 'keeper-b',
+      execution: {
+        selected_runtime_id: 'ollama_cloud.qwen-2.5-coder',
+        runtime_options: ['ollama_cloud.deepseek-v4-flash', 'ollama_cloud.qwen-2.5-coder'],
+        selected_runtime_canonical: 'ollama_cloud.qwen-2.5-coder',
+        models: ['ollama_cloud.qwen-2.5-coder'],
+      } as any,
+    })
+
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(configA)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-a" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+
+    const select = container.querySelector('select[aria-label="runtime_id"]') as HTMLSelectElement
+    expect(select.value).toBe('ollama_cloud.deepseek-v4-flash')
+
+    select.value = 'ollama_cloud.qwen-2.5-coder'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(configB)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-b" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+
+    const finalSelect = container.querySelector('select[aria-label="runtime_id"]') as HTMLSelectElement
+    expect(finalSelect.value).toBe('ollama_cloud.qwen-2.5-coder')
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('저장'),
+    ) as HTMLButtonElement
+    if (saveButton) {
+      expect(saveButton.disabled).toBe(true)
+    }
   })
 })
 

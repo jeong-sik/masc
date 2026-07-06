@@ -336,6 +336,16 @@ let wakeup_all_keepers ?base_path () =
 
 let board_reactive_debounce_sec = 60.0
 
+let board_reactive_wakeup_max =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_BOARD_WAKEUP_MAX"
+    ~default:4
+    ~min_v:1
+    ~max_v:64
+;;
+
+let take = List.take
+
 (* RFC-0239 R4: collapse runs of whitespace and lowercase so trivial spacing
    or case differences do not split a re-post into a fresh dedup key. *)
 let normalize_for_fingerprint s =
@@ -369,6 +379,30 @@ let board_wakeup_dedup_key ~post_id ~author ~title ~content =
     "cfp:" ^ Digest.to_hex (Digest.string (author ^ "\x00" ^ normalized)))
 ;;
 
+let board_signal_wakeup_dedup_key (signal : Board_dispatch.board_signal) =
+  let base =
+    board_wakeup_dedup_key
+      ~post_id:signal.post_id
+      ~author:signal.author
+      ~title:signal.title
+      ~content:signal.content
+  in
+  match signal.kind with
+  | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added -> base
+  | Board_dispatch.Board_reaction_changed reaction ->
+    let reaction_key =
+      String.concat
+        "\x00"
+        [ Board.reaction_target_type_to_string reaction.target_type
+        ; reaction.target_id
+        ; reaction.user_id
+        ; reaction.emoji
+        ; string_of_bool reaction.reacted
+        ]
+    in
+    base ^ ":reaction:" ^ Digest.to_hex (Digest.string reaction_key)
+;;
+
 let board_reactive_wakeup_allowed
       ~base_path
       ~keeper_name
@@ -377,12 +411,7 @@ let board_reactive_wakeup_allowed
   Keeper_registry.board_wakeup_allowed
     ~base_path
     keeper_name
-    ~dedup_key:
-      (board_wakeup_dedup_key
-         ~post_id:signal.post_id
-         ~author:signal.author
-         ~title:signal.title
-         ~content:signal.content)
+    ~dedup_key:(board_signal_wakeup_dedup_key signal)
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
@@ -409,15 +438,41 @@ let connector_reactive_wakeup_allowed ~base_path ~keeper_name ~channel_id =
 ;;
 
 (* RFC-0020: select which keepers wake for a board signal from typed
-   [Board_wake.wake_reason] candidates. [None] reasons are dropped (the
-   relevance pipeline found nothing for that keeper); every typed reason is
-   delivered in candidate order. The prior generic ["board_activity"] throttle
-   bucket is gone: the producer never emitted it, so it never fired — typing
-   the carrier made that dead branch unrepresentable. *)
-let select_board_wakeup_candidates candidates =
-  List.filter_map
-    (fun (item, reason) -> match reason with None -> None | Some r -> Some (item, r))
+   [Board_wake.wake_reason] candidates. Explicit mentions short-circuit and
+   wake unconditionally; thread-reply/reaction/read-error followups compete for
+   [total_limit] slots in candidate order. [None] reasons are dropped (the
+   structural reactive pipeline found no deterministic address for that keeper).
+   Semantic relatedness is intentionally not a wake reason here: it must enter
+   through an LLM/Judge attention boundary, not goal-keyword matching in the
+   board publish hook. *)
+let select_board_wakeup_candidates
+    ?(total_limit = board_reactive_wakeup_max)
+    candidates =
+  let explicit =
     candidates
+    |> List.filter_map (fun (item, reason) ->
+      match reason with
+      | Some Board_wake.Explicit_mention -> Some (item, Board_wake.Explicit_mention)
+      | Some
+          ( Board_wake.Thread_reply_after_self_comment
+          | Board_wake.Reaction_after_self_activity
+          | Board_wake.Board_comment_read_error _ )
+      | None -> None)
+  in
+  match explicit with
+  | _ :: _ -> explicit, 0
+  | [] ->
+    let non_explicit =
+      List.filter_map
+        (fun (item, reason) ->
+           match reason with
+           | None -> None
+           | Some r -> Some (item, r))
+        candidates
+    in
+    let selected = take total_limit non_explicit in
+    let dropped = List.length non_explicit - List.length selected in
+    selected, dropped
 ;;
 
 (* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
@@ -425,6 +480,23 @@ let select_board_wakeup_candidates candidates =
    here it only picks urgency (explicit mentions are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
+let queue_reaction_target_of_board = function
+  | Board.Reaction_post -> Keeper_event_queue.Reaction_post
+  | Board.Reaction_comment -> Keeper_event_queue.Reaction_comment
+;;
+
+let queue_reaction_change_of_board
+      (reaction : Board_dispatch.board_reaction_change)
+  : Keeper_event_queue.board_reaction_change
+  =
+  { target_type = queue_reaction_target_of_board reaction.target_type
+  ; target_id = reaction.target_id
+  ; user_id = reaction.user_id
+  ; emoji = reaction.emoji
+  ; reacted = reaction.reacted
+  }
+;;
+
 let board_signal_stimulus
       ~(reason : Board_wake.wake_reason)
       (signal : Board_dispatch.board_signal)
@@ -434,7 +506,9 @@ let board_signal_stimulus
       { kind =
           (match signal.kind with
            | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added)
+           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
+           | Board_dispatch.Board_reaction_changed reaction ->
+             Keeper_event_queue.Reaction_changed (queue_reaction_change_of_board reaction))
       ; author = signal.author
       ; title = signal.title
       ; content = signal.content
@@ -448,6 +522,7 @@ let board_signal_stimulus
       (match reason with
        | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
        | Board_wake.Thread_reply_after_self_comment
+       | Board_wake.Reaction_after_self_activity
        | Board_wake.Board_comment_read_error _ ->
          Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
@@ -459,6 +534,46 @@ let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_ent
   match entry.phase with
   | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
   | _ -> false
+;;
+
+let record_board_attention_candidate
+      ~(config : Workspace.config)
+      ~(signal_kind_label : string)
+      ~(meta : keeper_meta)
+      (signal : Board_dispatch.board_signal)
+  =
+  let candidate =
+    Keeper_board_attention_candidate.of_board_signal
+      ~keeper_name:meta.name
+      ~recorded_at:(Time_compat.now ())
+      signal
+  in
+  match Keeper_board_attention_candidate.record ~base_path:config.base_path candidate with
+  | `Recorded ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+      ~labels:
+        [ ("keeper", meta.name)
+        ; ("kind", signal_kind_label)
+        ; ( "attention_authority"
+          , Keeper_board_attention_candidate.attention_authority_to_string
+              candidate.attention_authority )
+        ; ( "wake_authority"
+          , Keeper_board_attention_candidate.wake_authority_to_string
+              candidate.wake_authority )
+        ]
+      ()
+  | `Duplicate _ -> ()
+  | `Error err ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string KeepaliveSignalFailures)
+      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
+      ();
+    Log.Keeper.warn
+      "board attention candidate record failed: keeper=%s post=%s error=%s"
+      meta.name
+      signal.post_id
+      err
 ;;
 
 let paused_meta_allows_board_auto_resume (meta : keeper_meta) =
@@ -543,6 +658,7 @@ let wakeup_relevant_keeper_for_board_signal
     match signal.kind with
     | Board_dispatch.Board_post_created -> "post_created"
     | Board_dispatch.Board_comment_added -> "comment_added"
+    | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   in
   (* Yield meter: scanning all running keepers' meta files is CPU-bound
      when many keepers share a domain.  Yield every ~1000 iterations. *)
@@ -560,12 +676,12 @@ let wakeup_relevant_keeper_for_board_signal
               ~signal
           in
           (* Visibility for the REPO_WAKE_UP audit finding: a [None]
-             wake_reason means the running keeper had no explicit_mention
-             match, scope feed disabled, and (for comments) no external
-             reply after a self-comment. Without this counter, operators
-             cannot distinguish between a board post that legitimately
-             had no addressee and one that was silently dropped by a
-             keeper whose mention_targets configuration is too narrow. *)
+             wake_reason means the running keeper had no explicit mention
+             match and (for comments) no external reply after its own comment.
+             Without this counter, operators cannot distinguish between a
+             board post that legitimately had no deterministic addressee and
+             one that was silently dropped by a keeper whose mention_targets
+             configuration is too narrow. *)
           (match wake_reason, entry.phase with
            | None, Keeper_state_machine.Running ->
              Otel_metric_store.inc_counter
@@ -574,7 +690,8 @@ let wakeup_relevant_keeper_for_board_signal
                  ("keeper", meta.name);
                  ("kind", signal_kind_label);
                ]
-               ()
+               ();
+             record_board_attention_candidate ~config ~signal_kind_label ~meta signal
            | None, _ | Some _, _ -> ());
           (match entry.phase, wake_reason with
            | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention
@@ -611,12 +728,25 @@ let wakeup_relevant_keeper_for_board_signal
           signal.post_id
           err)
   in
-  let selected = select_board_wakeup_candidates candidates in
+  let selected, dropped = select_board_wakeup_candidates candidates in
   let yield_meter = Eio_guard.create_yield_meter ~interval:1 () in
   selected
   |> List.iter (fun (meta, reason) ->
          wake_meta meta reason;
-         Eio_guard.yield_step yield_meter)
+         Eio_guard.yield_step yield_meter);
+  if dropped > 0 then begin
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
+      ~labels:[ "kind", signal_kind_label ]
+      ~delta:(float_of_int dropped)
+      ();
+    Log.Keeper.info
+      "board signal wakeup capped by configured fanout: dropped=%d post=%s \
+       total_limit=%d"
+      dropped
+      signal.post_id
+      board_reactive_wakeup_max
+  end
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

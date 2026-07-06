@@ -78,6 +78,7 @@ type t =
   | GenerationLineageFailures
   | KeepaliveSignalFailures
   | BoardSignalNoWakeTotal
+  | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
   | ToolsOasFailures
   | ToolsOasDeterministicFailures
@@ -243,6 +244,7 @@ type t =
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
+  | ToolExecutePrActionTotal    (* counter: raw tool_execute gh PR actions *)
   | KeeperRepoMappingDefaultScopeAllowed (* counter: missing mapping default-scope access allowed *)
   | KeeperRepoMappingDeniedUnregistered (* counter: repository policy denied an unregistered repo id *)
   | KeeperRepoMappingDeniedNotInMapping (* counter: keeper repo mapping decision: repo not in mapping *)
@@ -333,6 +335,8 @@ let to_string = function
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
+  | BoardSignalAttentionCandidateTotal ->
+    "masc_keeper_board_signal_attention_candidate_total"
   | MetaJsonFailures -> "masc_keeper_meta_json_failures_total"
   | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
   | ToolsOasDeterministicFailures ->
@@ -514,6 +518,7 @@ let to_string = function
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
+  | ToolExecutePrActionTotal -> "masc_keeper_tool_execute_pr_action_total"
   | KeeperRepoMappingDefaultScopeAllowed ->
     "masc_keeper_repo_mapping_default_scope_allowed_total"
   | KeeperRepoMappingDeniedUnregistered ->
@@ -591,7 +596,7 @@ let all : t list =
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
-    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal;
+    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;
   KeeperRepoMappingDefaultScopeAllowed; KeeperRepoMappingDeniedUnregistered;
   KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;

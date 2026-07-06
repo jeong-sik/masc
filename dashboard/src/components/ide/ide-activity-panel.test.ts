@@ -311,6 +311,33 @@ describe('IdeActivityPanel', () => {
     })
   })
 
+  it('scopes IDE bridge activity events to the active repository', async () => {
+    const ideEventUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        ideEventUrls.push(url)
+        return new Response(JSON.stringify({ ok: true, data: { events: [] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', repoId: 'masc' }), container)
+
+    await waitFor(() => expect(ideEventUrls).toHaveLength(1))
+    const url = new URL(ideEventUrls[0]!, 'http://localhost')
+    expect(url.pathname).toBe('/api/v1/ide/events')
+    expect(url.searchParams.get('repo_id')).toBe('masc')
+    expect(url.searchParams.get('limit')).toBe('50')
+  })
+
   it('shows linked context coverage for mixed activity events', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({
@@ -612,7 +639,7 @@ describe('IdeActivityPanel', () => {
       expect(container.textContent).toContain('GOAL TRACK')
       expect(container.textContent).toContain('Runtime goal')
       expect(container.textContent).toContain('1/2 tasks')
-      expect(container.textContent).toContain('50%')
+      expect(container.textContent).not.toContain('50%')
     })
 
     const goalLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-goal-links button')]
@@ -871,7 +898,7 @@ describe('IdeActivityPanel', () => {
         taskId: 'task-runtime',
         title: 'Runtime goal',
         progress: { done: 1, total: 2, ratio: 0.5 },
-        progressLabel: '50%',
+        progressLabel: '1/2 tasks',
       },
     })
     expect(summary.surfaceCounts.map(surface => [surface.label, surface.count])).toEqual([

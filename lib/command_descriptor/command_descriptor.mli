@@ -6,6 +6,7 @@
 
 type t =
   | Gh_pr_create of { title : string; base : string; draft : bool }
+  | Gh_pr_search of { query : string; state : string option }
   | Gh_pr_merge of { pr_number : int; squash : bool }
   | Gh_pr_comment of { pr_number : int; body : string }
   | Gh_pr_close of { pr_number : int }
@@ -21,5 +22,27 @@ type t =
   | Pipe_chain of { first_cmd : string; last_cmd : string; length : int }
   | Generic
 
+type pr_action_surface =
+  | Gh_cli
+
+type pr_action =
+  | Create
+  | Search
+  | Merge
+  | Comment
+  | Close
+  | Edit
+  | Review
+  | Reopen
+  | Ready
+
+type pr_action_event =
+  { surface : pr_action_surface
+  ; action : pr_action
+  }
+
 val to_json : t -> Yojson.Safe.t
 val compute : Masc_exec.Shell_ir.t -> t
+val pr_action_surface_to_string : pr_action_surface -> string
+val pr_action_to_string : pr_action -> string
+val pr_action_events_of_ir : Masc_exec.Shell_ir.t -> pr_action_event list

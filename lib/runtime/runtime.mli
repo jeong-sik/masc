@@ -54,11 +54,49 @@ type missing_catalog_report =
   ; missing_models : missing_catalog_model list
   }
 
+type dropped_runtime_assignment =
+  { keeper_name : string
+  ; runtime_id : string
+  }
+
+type dropped_runtime_route =
+  { route_name : string
+  ; runtime_id : string
+  }
+
+type dropped_runtime_lane =
+  { lane_id : string
+  ; runtime_ids : string list
+  }
+
+type startup_degradation =
+  { report : missing_catalog_report
+  ; configured_default_runtime_id : string
+  ; effective_default_runtime_id : string
+  ; disabled_runtime_ids : string list
+  ; dropped_assignments : dropped_runtime_assignment list
+  ; dropped_routes : dropped_runtime_route list
+  ; dropped_media_failover : string list
+  ; dropped_lane_candidates : dropped_runtime_lane list
+  ; dropped_lanes : dropped_runtime_lane list
+  }
+(** Operator-visible startup degradation. Missing-catalog runtime bindings are
+    removed from the active runtime set so requests never dispatch through OAS
+    [provider_default]. The server may continue only when at least one
+    catalog-known runtime remains and no routing config references a disabled
+    runtime id. *)
+
+type init_default_outcome =
+  | Initialized
+  | Initialized_degraded of startup_degradation
+
 type strict_init_error =
   | Runtime_config_error of string
   | Missing_catalog_models of missing_catalog_report
 
 val strict_init_error_to_string : strict_init_error -> string
+val startup_degradation_to_string : startup_degradation -> string
+val startup_degradation_to_yojson : startup_degradation option -> Yojson.Safe.t
 
 val load_list :
   config_path:string
@@ -95,18 +133,29 @@ val runtime_ids : t list -> string list
 
 val init_default : config_path:string -> (unit, string) result
 (** Parse + RFC-0206 routing validation + populate the singletons. Does NOT apply
-    the OAS capability-catalog gate (use {!init_default_strict} at production
-    startup). Safe for tests with arbitrary-model runtime fixtures. *)
+    the OAS capability-catalog gate (use {!init_default_strict} for fail-closed
+    callers or {!init_default_degraded_report} for server boot). Safe for tests
+    with arbitrary-model runtime fixtures. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
-(** Production startup entry point: {!init_default} PLUS the OAS capability-catalog
-    gate ({!decide_capability_gate}). Rejects ([Error]) a runtime whose model is
-    absent from the catalog before boot. Used by server boot and fusion run. *)
+(** Fail-closed startup entry point: {!init_default} PLUS the OAS
+    capability-catalog gate ({!decide_capability_gate}). Rejects ([Error]) a
+    runtime whose model is absent from the catalog before boot. Used by strict
+    validation callers such as fusion run. *)
 
 val init_default_strict_report :
   config_path:string -> (unit, strict_init_error) result
-(** Typed form of {!init_default_strict}. Server bootstrap uses this to log
-    missing catalog models without string-matching the fatal error message. *)
+(** Typed form of {!init_default_strict}. Useful when callers need missing
+    catalog models without string-matching the fatal error message. *)
+
+val init_default_degraded_report :
+  config_path:string -> (init_default_outcome, strict_init_error) result
+(** Server bootstrap entry point. Applies the strict OAS catalog gate, but when
+    only unreferenced catalog-membership rows fail it can remove uncatalogued
+    runtimes from the active runtime set and continue in an operator-visible
+    degraded mode. Routing/parse errors, all-missing runtime sets, and explicit
+    routing references to uncatalogued runtimes remain fatal so configured intent
+    is never erased into default fallback. *)
 
 module For_testing : sig
   type snapshot
@@ -118,6 +167,8 @@ end
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
+val startup_degradation : unit -> startup_degradation option
+val startup_degraded : unit -> bool
 val runtimes_and_media_failover : unit -> t list * string list
 (** Atomically consistent snapshot of configured runtimes plus
     [\[runtime\].media_failover]. Use when both values drive one routing
@@ -239,6 +290,19 @@ val temperature_of_runtime_id : string -> float option
     {!Runtime_inference.resolve_temperature}: a keeper turn uses this value when
     set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
     for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
+
+val top_p_of_runtime_id : string -> float option
+(** Request [top_p] from the materialized OAS provider config for runtime [id],
+    or [None] when the runtime is not configured or no explicit value is
+    declared.  This projects the Provider_config SSOT used for dispatch. *)
+
+val top_k_of_runtime_id : string -> int option
+(** Request [top_k] from the materialized OAS provider config for runtime [id],
+    or [None] when absent. *)
+
+val min_p_of_runtime_id : string -> float option
+(** Request [min_p] from the materialized OAS provider config for runtime [id],
+    or [None] when absent. *)
 
 val preserve_thinking_of_runtime_id : string -> bool option
 (** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,

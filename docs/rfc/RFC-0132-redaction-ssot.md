@@ -176,6 +176,10 @@ val runtime_provider_label : public_label
 val runtime_model_label : public_label
 (** The redaction label used for *model_id* on external surfaces. *)
 
+val unknown_model_label : public_label
+(** The label used for *model_id* on external surfaces when no model evidence
+    exists. *)
+
 val to_string : public_label -> string
 (** Project a redaction label into a plain string at the emit boundary. *)
 ```
@@ -187,6 +191,7 @@ type public_label = string
 
 let runtime_provider_label = "runtime"
 let runtime_model_label = "runtime"
+let unknown_model_label = "unknown_model"
 let to_string s = s
 ```
 
@@ -266,6 +271,7 @@ Once PR-3 is merged, any future PR that adds an inline `"runtime"` literal at an
 | Phase | Verification |
 |---|---|
 | PR-1 | Alcotest: `runtime_provider_label \|> to_string = "runtime"` and `runtime_model_label \|> to_string = "runtime"`. Compile-time: attempting `let x : Boundary_redaction.public_label = "foo"` outside the module fails the build. |
+| 2026-07-06 extension | Alcotest: `unknown_model_label \|> to_string = "unknown_model"` and the value is distinct from `runtime_model_label`. Governance dashboard model classification routes missing model evidence through this typed label instead of a local string. |
 | PR-2 | For each of the 23 sites: dashboard SSE / OAS bridge / keeper telemetry output byte-equality regression test. The boundary-emit byte stream must be identical to pre-codemod main. Regression count target: 0. |
 | PR-3 | Adding a test fixture that places `let _ = "runtime"` at `lib/runtime/foo.ml` causes a build failure with the lint rule error message. Removing the fixture restores the build. |
 | Overall | After PR-3 merge, `rg -n '"runtime"' lib/runtime/ lib/keeper/` should return only: (a) `boundary_redaction.ml` source, (b) `keeper_status_runtime.ml:219` allow-listed heuristic, (c) `.mli` doc comments. Total expected hits: ≤ 4. |

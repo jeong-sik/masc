@@ -124,7 +124,8 @@ let governance_model_source_to_string = function
 let redacted_runtime_model_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
-let unknown_model_label = "unknown_model"
+let unknown_model_label =
+  Boundary_redaction.to_string Boundary_redaction.unknown_model_label
 
 let resolve_governance_model_used ~raw_model ~canonical_model_id =
   if String.trim raw_model <> "" then redacted_runtime_model_label, Response_model

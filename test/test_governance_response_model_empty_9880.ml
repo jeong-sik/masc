@@ -23,6 +23,8 @@ module Metrics = Masc.Otel_metric_store
 module Judge = Dashboard_governance_judge
 
 let metric_name = "masc_governance_response_model_empty_total"
+let unknown_model_label =
+  Boundary_redaction.to_string Boundary_redaction.unknown_model_label
 
 let count_for ~source =
   Metrics.metric_value_or_zero metric_name ~labels:[ "source", source ] ()
@@ -119,7 +121,7 @@ let test_empty_everywhere_uses_unknown_source () =
     ~msg:"unknown source"
     ~raw_model:""
     ~canonical_model_id:None
-    ~expected_model:"unknown_model"
+    ~expected_model:unknown_model_label
     ~expected_source:"unknown_source"
 ;;
 
@@ -128,7 +130,7 @@ let test_empty_canonical_id_uses_unknown_source () =
     ~msg:"empty canonical"
     ~raw_model:""
     ~canonical_model_id:(Some "")
-    ~expected_model:"unknown_model"
+    ~expected_model:unknown_model_label
     ~expected_source:"unknown_source"
 ;;
 

@@ -121,6 +121,8 @@ let classify_failure_output (output : string) : string =
 let bucket_key record field ~default =
   Safe_ops.json_string_opt field record |> Option.value ~default
 
+let unknown_runtime_profile_bucket = "unknown_runtime_profile"
+
 let runtime_bucket_key record =
   match Safe_ops.json_string_opt "runtime_profile" record with
   | Some value when String.trim value <> "" -> value
@@ -128,7 +130,7 @@ let runtime_bucket_key record =
     let runtime_contract = Option.value ~default:`Null (Json_util.assoc_member_opt "runtime_contract" record) in
     (match Safe_ops.json_string_opt "runtime_profile" runtime_contract with
      | Some value when String.trim value <> "" -> value
-     | _ -> "unknown_runtime_profile")
+     | _ -> unknown_runtime_profile_bucket)
 
 (* Split the two failure modes that previously collapsed to the
    bare "unknown" bucket so a non-zero count on either tells the

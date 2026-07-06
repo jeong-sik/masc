@@ -238,7 +238,8 @@ val resolve_governance_model_used :
     falls back to [canonical_model_id], otherwise the unknown source branch.
     Evidence-backed model ids are projected to the neutral [runtime] lane so
     dashboard state does not expose concrete provider/model identity. Missing
-    evidence returns ["unknown_model"] instead of fabricating runtime evidence. *)
+    evidence returns [Boundary_redaction.unknown_model_label] instead of
+    fabricating runtime evidence. *)
 
 type governance_response_parse_failure =
   | Structural_error of string

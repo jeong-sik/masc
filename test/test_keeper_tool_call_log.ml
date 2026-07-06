@@ -903,7 +903,9 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
     let by_runtime = Yojson.Safe.Util.member "by_runtime" summary in
-    let unknown_bucket = find_bucket "unknown_runtime_profile" by_runtime in
+    let unknown_bucket =
+      find_bucket Dashboard_http_tool_quality.unknown_runtime_profile_bucket by_runtime
+    in
     Alcotest.(check int)
       "missing runtime profile goes to unknown bucket"
       1

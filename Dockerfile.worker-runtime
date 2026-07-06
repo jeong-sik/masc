@@ -1,4 +1,4 @@
-FROM ocaml/opam:debian-12-ocaml-5.4 AS build
+FROM ocaml/opam:debian-12-ocaml-5.5 AS build
 
 WORKDIR /src
 

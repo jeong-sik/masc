@@ -775,7 +775,9 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
      check string "execution failed" "failed"
        (Schedule_domain.execution_status_to_string execution.status);
      check (option string) "execution error"
-       (Some "keeper_name must match [A-Za-z0-9._-]+")
+       (Some
+          (Schedule_supported_kinds.keeper_wake_target_name_error
+             ~field:"masc.keeper_wake payload body.keeper_name"))
        execution.error);
   check int "invalid keeper wake does not enqueue" 0
     (Keeper_event_queue.length

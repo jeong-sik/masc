@@ -1,5 +1,6 @@
 open Alcotest
 module U = Yojson.Safe.Util
+module Keeper_meta_store = Masc.Keeper_meta_store
 
 let temp_dir () =
   let path = Filename.temp_file "keeper_waiting_inventory_test" "" in

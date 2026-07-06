@@ -355,6 +355,7 @@ val read_continuity_summary :
   string
 
 val read_scheduled_automation_observation :
+  ?keeper_name:string ->
   config:Workspace.config ->
   now:float ->
   scheduled_automation_observation

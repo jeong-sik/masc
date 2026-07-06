@@ -680,7 +680,7 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       _major="${_ocaml_v%%.*}"
       _minor="${_ocaml_v##*.}"
       if [[ "${_major}" -lt 5 \
-            || ( "${_major}" -eq 5 && "${_minor}" -lt 4 ) ]]; then
+            || ( "${_major}" -eq 5 && "${_minor}" -lt 5 ) ]]; then
         printf '[dune-local] OCaml %s detected; this repo requires >= 5.5 (dune-project:28, masc.opam:14)\n' \
           "${_ocaml_v}" >&2
         printf '[dune-local] symptom under older switch: opam dep resolution fails or stdlib API missing\n' >&2

@@ -516,13 +516,18 @@ let risk_of_gh_verb (v : Gh_verb.t) : risk_class =
     | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
     | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
     | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as fam ->
-    let command = Gh_verb.family_token fam in
-    let action = Option.value v.Gh_verb.action ~default:"" in
-    if in_table repo_hosting_cli_irreversible_ops command action then
-      R2_Irreversible
-    else if in_table repo_hosting_cli_reversible_mutations command action then
-      R1_Reversible_mutation
-    else R0_Read
+    (* [None] is a bare family invocation ([gh repo]) — a read, not a hidden
+       default. Matched explicitly rather than collapsed to an empty-string
+       default so the "no action" case is a decision, not a silent fold. *)
+    (match v.Gh_verb.action with
+     | None -> R0_Read
+     | Some action ->
+       let command = Gh_verb.family_token fam in
+       if in_table repo_hosting_cli_irreversible_ops command action then
+         R2_Irreversible
+       else if in_table repo_hosting_cli_reversible_mutations command action
+       then R1_Reversible_mutation
+       else R0_Read)
 
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)

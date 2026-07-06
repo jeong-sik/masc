@@ -19,6 +19,8 @@ let words_of s = "gh" :: (String.split_on_char ' ' s |> List.filter (( <> ) ""))
 
 (* --- 1. classify parses family + action ---------------------------------- *)
 
+let action_str = function Some a -> a | None -> "<none>"
+
 let test_classify_family_action () =
   let check s exp_family exp_action =
     let v = Gh_verb.classify (words_of s) in
@@ -28,8 +30,7 @@ let test_classify_family_action () =
         (Gh_verb.string_of_family exp_family);
     if v.Gh_verb.action <> exp_action then
       Alcotest.failf "%S: action %s, expected %s" s
-        (Option.value v.Gh_verb.action ~default:"<none>")
-        (Option.value exp_action ~default:"<none>")
+        (action_str v.Gh_verb.action) (action_str exp_action)
   in
   check "repo create owner/x" Gh_verb.Repo (Some "create");
   check "pr view 123" Gh_verb.Pr (Some "view");

@@ -24,7 +24,9 @@ import {
 } from './config/constants'
 import { DASHBOARD_PUSH_SLICES } from './dashboard-slices'
 import {
+  _resetDashboardWsCounterForTests,
   dashboardWsConnected,
+  dashboardWsEventCount60s,
   dashboardWsLastError,
   dashboardWsLastPingAt,
   dashboardWsLastPongAt,
@@ -221,6 +223,7 @@ afterEach(() => {
   dashboardWsLastPongLatencyMs.value = null
   dashboardWsLastSeq.value = 0
   dashboardWsReady.value = false
+  _resetDashboardWsCounterForTests()
   clearStoredToken()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -1035,6 +1038,47 @@ describe('dashboard websocket route subscriptions', () => {
     })
     expect(ack).not.toHaveProperty('id')
     expect(dashboardWsLastSeq.value).toBe(42)
+    expect(dashboardWsEventCount60s.value).toBe(0)
+  })
+
+  it('hydrates payload-only dashboard deltas without acking', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+    const sentBeforeDelta = socket.sent.length
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: {
+        slice: 'execution',
+        event_type: 'execution_snapshot',
+        payload: { agents: [] },
+      },
+    })
+
+    expect(dashboardWsLastSeq.value).toBe(1)
+    expect(dashboardWsEventCount60s.value).toBe(1)
+    expect(socket.sent).toHaveLength(sentBeforeDelta)
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'execution',
+      { agents: [] },
+      'execution_snapshot',
+    )
   })
 
   it('parses inbound deltas inline on the main thread', async () => {

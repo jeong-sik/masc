@@ -727,6 +727,8 @@ export interface KeeperStateDiagramResponse {
   recovery_floor_count?: number
   runtime_models?: string[]
   last_provider_result?: string | null
+  runtime_models_source?: string
+  last_provider_result_source?: string
   memory_kind_usage?: MemoryKindUsageEntry[]
   /** RFC-0149 §3.1 — sibling field carrying the typed memory-bank
    *  read failure class (`yojson_parse_error | io_error | type_error

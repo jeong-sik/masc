@@ -37,9 +37,24 @@ interface ToolCallOutputHydrationState {
   coveredSinceMs: number | null
   coveredThroughMs: number | null
   failed: boolean
+  failureReason: string | null
+  lastStartedAtMs: number | null
+  lastCompletedAtMs: number | null
 }
 
 export const toolCallOutputHydrationByKeeper = signal<Record<string, ToolCallOutputHydrationState>>({})
+
+export type ToolCallOutputHydrationStatus = 'idle' | 'hydrating' | 'hydrated' | 'failed'
+
+export interface ToolCallOutputHydrationContract {
+  source: 'tool_calls_endpoint'
+  status: ToolCallOutputHydrationStatus
+  failureReason: string | null
+  startedAtMs: number | null
+  completedAtMs: number | null
+  coveredSinceMs: number | null
+  coveredThroughMs: number | null
+}
 
 function keeperKey(keeperName: string): string {
   return keeperName.trim()
@@ -51,6 +66,9 @@ function currentHydrationState(keeperName: string): ToolCallOutputHydrationState
     coveredSinceMs: null,
     coveredThroughMs: null,
     failed: false,
+    failureReason: null,
+    lastStartedAtMs: null,
+    lastCompletedAtMs: null,
   }
 }
 
@@ -67,6 +85,9 @@ function updateHydrationState(
     && current.coveredSinceMs === next.coveredSinceMs
     && current.coveredThroughMs === next.coveredThroughMs
     && current.failed === next.failed
+    && current.failureReason === next.failureReason
+    && current.lastStartedAtMs === next.lastStartedAtMs
+    && current.lastCompletedAtMs === next.lastCompletedAtMs
   ) return
   toolCallOutputHydrationByKeeper.value = {
     ...toolCallOutputHydrationByKeeper.value,
@@ -82,6 +103,8 @@ export function markToolCallOutputsHydrating(keeperName: string): number {
     ...current,
     inFlight: current.inFlight + 1,
     failed: false,
+    failureReason: null,
+    lastStartedAtMs: startedAtMs,
   }))
   return startedAtMs
 }
@@ -97,22 +120,30 @@ export function markToolCallOutputsHydrated(
   coveredSinceMs: number | null = null,
 ): void {
   updateHydrationState(keeperName, current => ({
+    ...current,
     inFlight: Math.max(0, current.inFlight - 1),
     coveredSinceMs: current.coveredThroughMs == null
       ? coveredSinceMs
       : mergeCoveredSince(current.coveredSinceMs, coveredSinceMs),
     coveredThroughMs: Math.max(current.coveredThroughMs ?? 0, coveredThroughMs),
     failed: false,
+    failureReason: null,
+    lastCompletedAtMs: Date.now(),
   }))
 }
 
-export function markToolCallOutputsHydrationFailed(keeperName: string): void {
+export function markToolCallOutputsHydrationFailed(
+  keeperName: string,
+  reason: string | null = null,
+): void {
   const key = keeperKey(keeperName)
   if (!key) return
   updateHydrationState(key, current => ({
     ...current,
     inFlight: Math.max(0, current.inFlight - 1),
     failed: true,
+    failureReason: reason,
+    lastCompletedAtMs: Date.now(),
   }))
 }
 
@@ -124,6 +155,38 @@ export function toolCallOutputsCoveredThroughMs(keeperName: string): number | nu
 export function toolCallOutputsCoveredSinceMs(keeperName: string): number | null {
   const key = keeperKey(keeperName)
   return key ? (toolCallOutputHydrationByKeeper.value[key]?.coveredSinceMs ?? null) : null
+}
+
+export function toolCallOutputHydrationStatus(keeperName: string): ToolCallOutputHydrationStatus {
+  const key = keeperKey(keeperName)
+  if (!key) return 'idle'
+  const state = toolCallOutputHydrationByKeeper.value[key]
+  if (!state) return 'idle'
+  if (state.inFlight > 0) return 'hydrating'
+  if (state.failed) return 'failed'
+  if (state.coveredThroughMs != null) return 'hydrated'
+  return 'idle'
+}
+
+export function toolCallOutputHydrationFailureReason(keeperName: string): string | null {
+  const key = keeperKey(keeperName)
+  return key ? (toolCallOutputHydrationByKeeper.value[key]?.failureReason ?? null) : null
+}
+
+export function toolCallOutputHydrationContract(
+  keeperName: string,
+): ToolCallOutputHydrationContract {
+  const key = keeperKey(keeperName)
+  const state = key ? toolCallOutputHydrationByKeeper.value[key] : undefined
+  return {
+    source: 'tool_calls_endpoint',
+    status: key ? toolCallOutputHydrationStatus(key) : 'idle',
+    failureReason: state?.failureReason ?? null,
+    startedAtMs: state?.lastStartedAtMs ?? null,
+    completedAtMs: state?.lastCompletedAtMs ?? null,
+    coveredSinceMs: state?.coveredSinceMs ?? null,
+    coveredThroughMs: state?.coveredThroughMs ?? null,
+  }
 }
 
 /** Merge tool-call entries into the store, keyed by tool_use_id. Entries

@@ -54,6 +54,26 @@ describe('keeper-chat-store input queue', () => {
     expect(dequeueInput('keeper-q')).toBeNull()
   })
 
+  it('assigns stable enqueue sequence across dequeue and requeue', () => {
+    const first = enqueueInput('keeper-q', 'first')
+    const second = enqueueInput('keeper-q', 'second')
+
+    expect(first.sequence).toBe(1)
+    expect(second.sequence).toBe(2)
+
+    const msg = dequeueInput('keeper-q')
+    expect(msg!.sequence).toBe(1)
+
+    requeueInputFront('keeper-q', msg!)
+
+    const replay = dequeueInput('keeper-q')
+    expect(replay!.sequence).toBe(1)
+    markInputSent('keeper-q')
+
+    const next = dequeueInput('keeper-q')
+    expect(next!.sequence).toBe(2)
+  })
+
   it('prevents dequeue while sending', () => {
     enqueueInput('keeper-q', 'only')
     dequeueInput('keeper-q')

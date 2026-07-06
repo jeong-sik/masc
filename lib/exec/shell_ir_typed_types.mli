@@ -410,6 +410,8 @@ and (_, _, _, _) command =
       ; delete_branch : bool
       ; body : string option
       ; title : string option
+      ; search : string option
+      ; state : string option
       ; rest : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command

@@ -429,28 +429,28 @@ let test_parse_cache_counters () =
   Alcotest.(check (float 0.001)) "fresh allocation forces miss"
     1.0 (misses2 -. misses1)
 
-(* ====== Bytes cache for broadcast fanout ====== *)
+(* ====== Bigstring cache for broadcast fanout ====== *)
 
 (* Sse.notify_external_subscribers delivers the same event string reference
-   to every WS session.  The bytes cache collapses N identical
-   [Bytes.of_string] allocations into one per unique string reference. *)
+   to every WS session.  The bigstring cache collapses N identical payload
+   encodings into one per unique string reference. *)
 
-let test_bytes_of_shared_text_reuses_same_ref () =
+let test_bigstring_of_shared_text_reuses_same_ref () =
   let text = String.make 32 'x' in
-  let b1 = Ws.bytes_of_shared_text text in
-  let b2 = Ws.bytes_of_shared_text text in
+  let b1 = Ws.bigstring_of_shared_text text in
+  let b2 = Ws.bigstring_of_shared_text text in
   (* Physical equality: the same reference returns the exact same
-     [Bytes.t] (not just equal content), proving no re-allocation. *)
-  Alcotest.(check bool) "same string ref returns same Bytes"
+     [Bigstringaf.t] (not just equal content), proving no re-allocation. *)
+  Alcotest.(check bool) "same string ref returns same Bigstringaf.t"
     true (b1 == b2)
 
-let test_bytes_of_shared_text_content_matches () =
+let test_bigstring_of_shared_text_content_matches () =
   let text = "{\"type\":\"execution_snapshot\",\"payload\":{\"n\":1}}" in
-  let bytes = Ws.bytes_of_shared_text text in
+  let payload = Ws.bigstring_of_shared_text text in
   Alcotest.(check int) "length matches" (String.length text)
-    (Bytes.length bytes);
+    (Bigstringaf.length payload);
   Alcotest.(check string) "content round-trips" text
-    (Bytes.to_string bytes)
+    (Bigstringaf.to_string payload)
 
 let contains_substring haystack needle =
   let hlen = String.length haystack in
@@ -461,33 +461,54 @@ let contains_substring haystack needle =
   in
   nlen = 0 || loop 0
 
-let test_bytes_of_shared_text_repairs_invalid_utf8_for_text_frames () =
+let test_bigstring_of_shared_text_repairs_invalid_utf8_for_text_frames () =
   let text =
     "id: 42\nevent: message\ndata: {\"type\":\"transport_health_snapshot\",\
      \"payload\":\"bad\xC3\"}\n\n"
   in
-  let bytes = Ws.bytes_of_shared_text text in
-  let wire = Bytes.to_string bytes in
+  let payload = Ws.bigstring_of_shared_text text in
+  let wire = Bigstringaf.to_string payload in
   Alcotest.(check bool) "wire payload is valid UTF-8"
     true (String.is_valid_utf_8 wire);
   Alcotest.(check bool) "invalid byte is replaced"
     true (contains_substring wire "\xEF\xBF\xBD")
 
-let test_bytes_of_shared_text_invalidates_on_new_ref () =
+let test_bigstring_of_shared_text_invalidates_on_new_ref () =
   (* Force two distinct string allocations so physical equality differs
      even though content is the same.  The cache must re-allocate rather
-     than return the prior bytes. *)
+     than return the prior payload. *)
   let a = String.concat "" ["hello"; "-world"] in
   let b = String.concat "" ["hello"; "-world"] in
   assert (not (a == b));
-  let ba = Ws.bytes_of_shared_text a in
-  let bb = Ws.bytes_of_shared_text b in
-  Alcotest.(check bool) "distinct refs get distinct bytes"
+  let ba = Ws.bigstring_of_shared_text a in
+  let bb = Ws.bigstring_of_shared_text b in
+  Alcotest.(check bool) "distinct refs get distinct payloads"
     true (not (ba == bb));
   Alcotest.(check string) "content still correct for A"
-    a (Bytes.to_string ba);
+    a (Bigstringaf.to_string ba);
   Alcotest.(check string) "content still correct for B"
-    b (Bytes.to_string bb)
+    b (Bigstringaf.to_string bb)
+
+let test_shared_send_avoids_per_session_payload_string_copy () =
+  let source = read_source_file "lib/server/server_mcp_transport_ws.ml" in
+  let send_span =
+    substring_between source
+      ~start_marker:"let send_text_bigstring"
+      ~end_marker:"let websocket_text_payload"
+  in
+  let cache_span =
+    substring_between source
+      ~start_marker:"let bigstring_of_shared_text"
+      ~end_marker:"let send_text_checked"
+  in
+  Alcotest.(check bool) "send path uses ws-direct bigstring API" true
+    (contains_substring send_span "Ws_wsd.send_text_bigstring");
+  Alcotest.(check bool) "send path avoids payload string copy" false
+    (contains_substring send_span "Bytes.sub_string");
+  Alcotest.(check bool) "shared cache encodes to bigstring" true
+    (contains_substring cache_span "Bigstringaf.of_string");
+  Alcotest.(check bool) "shared cache avoids bytes payload copy" false
+    (contains_substring cache_span "Bytes.of_string")
 
 (* Observability: the Otel_metric_store counters must account exactly for the
    traffic the cache absorbs — hits for reuse, misses for fresh
@@ -501,9 +522,9 @@ let test_bytes_cache_counters () =
   let hits0 = read_counter hits_name in
   let misses0 = read_counter misses_name in
   let text = String.make 16 'z' in
-  let _ = Ws.bytes_of_shared_text text in   (* miss: first time *)
-  let _ = Ws.bytes_of_shared_text text in   (* hit *)
-  let _ = Ws.bytes_of_shared_text text in   (* hit *)
+  let _ = Ws.bigstring_of_shared_text text in   (* miss: first time *)
+  let _ = Ws.bigstring_of_shared_text text in   (* hit *)
+  let _ = Ws.bigstring_of_shared_text text in   (* hit *)
   Alcotest.(check (float 0.001)) "two hits observed"
     2.0 (read_counter hits_name -. hits0);
   Alcotest.(check (float 0.001)) "one miss observed"
@@ -513,9 +534,67 @@ let test_bytes_cache_counters () =
      level too. *)
   let text' = String.concat "" [String.make 8 'z'; String.make 8 'z'] in
   assert (not (text == text'));
-  let _ = Ws.bytes_of_shared_text text' in
+  let _ = Ws.bigstring_of_shared_text text' in
   Alcotest.(check (float 0.001)) "fresh allocation forces another miss"
     2.0 (read_counter misses_name -. misses0)
+
+let test_dashboard_delta_payload_text_excludes_seq () =
+  let event =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("type", `String "goal_loop_status");
+          ("payload", `Assoc [ ("status", `String "running") ]);
+        ])
+  in
+  match Ws.__test_dashboard_delta_payload_text_for_sse event with
+  | None -> Alcotest.fail "expected shared dashboard delta payload"
+  | Some frame ->
+      Alcotest.(check string) "slice" "goals" frame.slice;
+      let json = Yojson.Safe.from_string frame.text in
+      let params =
+        match json with
+        | `Assoc fields -> List.assoc "params" fields
+        | _ -> Alcotest.fail "expected JSON-RPC object"
+      in
+      let fields =
+        match params with
+        | `Assoc fields -> fields
+        | _ -> Alcotest.fail "expected params object"
+      in
+      Alcotest.(check bool) "seq is split out"
+        false
+        (List.mem_assoc "seq" fields);
+      Alcotest.(check (option string)) "event type preserved"
+        (Some "goal_loop_status")
+        (Option.bind (List.assoc_opt "event_type" fields) (function
+          | `String s -> Some s
+          | _ -> None))
+
+let test_dashboard_delta_payload_serializes_once_per_broadcast_ref () =
+  let metric_name =
+    Masc.Otel_metric_store.metric_ws_delta_payload_serializations
+  in
+  let before = read_counter metric_name in
+  let event =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("type", `String "execution_snapshot");
+          ("payload", `Assoc [ ("agents", `List []) ]);
+        ])
+  in
+  let first = Ws.__test_dashboard_delta_payload_text_for_sse event in
+  let second = Ws.__test_dashboard_delta_payload_text_for_sse event in
+  let after = read_counter metric_name in
+  Alcotest.(check bool) "payload frame exists" true (Option.is_some first);
+  Alcotest.(check bool) "same broadcast ref reuses same text"
+    true
+    (match first, second with
+     | Some a, Some b -> a.text == b.text
+     | _ -> false);
+  Alcotest.(check (float 0.001)) "one payload serialization"
+    1.0 (after -. before)
 
 (* ====== dashboard/ack observability metrics ====== *)
 
@@ -1169,16 +1248,22 @@ let () =
         test_parse_cache_counters;
     ]);
     ("bytes_cache", [
-      Alcotest.test_case "same string ref returns same Bytes" `Quick
-        test_bytes_of_shared_text_reuses_same_ref;
+      Alcotest.test_case "same string ref returns same Bigstringaf.t" `Quick
+        test_bigstring_of_shared_text_reuses_same_ref;
       Alcotest.test_case "content round-trips through cache" `Quick
-        test_bytes_of_shared_text_content_matches;
+        test_bigstring_of_shared_text_content_matches;
       Alcotest.test_case "invalid UTF-8 is repaired before text frames" `Quick
-        test_bytes_of_shared_text_repairs_invalid_utf8_for_text_frames;
+        test_bigstring_of_shared_text_repairs_invalid_utf8_for_text_frames;
       Alcotest.test_case "distinct refs force re-allocation" `Quick
-        test_bytes_of_shared_text_invalidates_on_new_ref;
+        test_bigstring_of_shared_text_invalidates_on_new_ref;
+      Alcotest.test_case "shared send avoids payload string copy" `Quick
+        test_shared_send_avoids_per_session_payload_string_copy;
       Alcotest.test_case "hit/miss counters track reuse" `Quick
         test_bytes_cache_counters;
+      Alcotest.test_case "dashboard delta shared payload excludes seq" `Quick
+        test_dashboard_delta_payload_text_excludes_seq;
+      Alcotest.test_case "dashboard delta payload serializes once per broadcast ref" `Quick
+        test_dashboard_delta_payload_serializes_once_per_broadcast_ref;
     ]);
     ("ack_observability", [
       Alcotest.test_case "buffered_bytes sum and count track observations" `Quick

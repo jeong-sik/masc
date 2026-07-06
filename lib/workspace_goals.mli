@@ -61,6 +61,18 @@ val handle_goal_transition
   -> Yojson.Safe.t
   -> Tool_result.result
 
+(** [handle_goal_hygiene_review ctx args] handles
+    [masc_goal_hygiene_review].  Reports G-GHYG hygiene issues
+    for active goals and, when [apply=true] is supplied by an
+    authorized operator, blocks stale executing goals that need
+    review without inventing missing metric values. *)
+val handle_goal_hygiene_review
+  :  tool_name:string
+  -> start_time:float
+  -> Workspace_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.result
+
 (** [handle_goal_verify ctx args] handles [masc_goal_verify] —
     record an operator/keeper verification vote (approve /
     reject) on a goal completion claim.  Updates the goal's

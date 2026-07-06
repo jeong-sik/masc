@@ -730,7 +730,6 @@
  (libraries
   masc_test_deps
   masc_schedule
-  masc.keeper_external_attention
   multimodal
   bigstringaf))
 

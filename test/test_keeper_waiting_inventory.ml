@@ -2,6 +2,7 @@ open Alcotest
 module U = Yojson.Safe.Util
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Otel_metric_store = Masc.Otel_metric_store
+module Schedule_domain = Masc.Schedule_domain
 
 let () = ignore Operator_tool.force_link
 

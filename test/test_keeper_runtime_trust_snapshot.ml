@@ -93,7 +93,7 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
 let test_active_model_missing_attempt_is_unknown () =
   let meta = make_meta "status-runtime-missing-attempt" in
   let unknown_model_label =
-    Masc.Boundary_redaction.to_string Masc.Boundary_redaction.unknown_model_label
+    Boundary_redaction.to_string Boundary_redaction.unknown_model_label
   in
   Alcotest.(check string)
     "missing runtime attempt is explicit unknown"

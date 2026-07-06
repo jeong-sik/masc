@@ -199,26 +199,45 @@ gh_unknown          | Requires_approval | Requires_approval | Suggest_confirm
 
 (Values illustrative; the W2 PR fixes the table with the operator.)
 
-### 3.4 Non-blocking approval disposition (G-6..G-8) — the core
+### 3.4 Approval disposition (G-6..G-8) — the core
 
-- `Requires_approval` disposition resolves to `Verdict.Ask`, which the exec
-  gate translates into an **enqueue** on `keeper_approval_queue` — the same
-  non-blocking queue HITL already uses (`keeper_approval_queue.ml:730`
-  **(verified)** non-blocking update; `:841` **(verified)**
-  `wake_keeper_on_approval_resolution`).
-- The keeper turn **does not wait**: the tool call returns immediately with a
-  typed `Pending_approval { ticket }` result the keeper can report, plan
-  around, or park. On operator resolution, `Hitl_resolved` wakes the keeper
-  (stimulus-gated wake, RFC-0303) and the approved command executes in the
-  resumed turn.
-- The autonomous overlay's all-`Observe` rationale ("no resolver") becomes
-  false by construction, so the overlay maps gated verb families to
-  `Requires_approval` instead (G-8).
-- **Invariant (absolute):** no code path introduced by this RFC may
-  synchronously wait on approval resolution inside a keeper turn.
-  Enforcement: G-11 block-time metric (p99 = 0 ms), G-12 TLA+
-  `NonBlockingApproval` invariant (clean + buggy cfg pair), G-13 gated-op
-  observability (100% of gated ops emit queue/resolution/wake events).
+**Correction (W3 implementation, verified against source).** An earlier draft
+described the mechanism as "enqueue and resume in a later turn." Reading the
+runtime, the existing HITL mechanism is different and already correct:
+`Keeper_approval_queue` is **Eio-promise based** — the tool-invocation fiber
+awaits a promise; the dashboard approval handler resolves it and the *same*
+fiber resumes (`keeper_approval_queue.mli` header **(verified)**). Because the
+keeper runs on Eio, awaiting a promise **suspends the fiber, not the domain**:
+other fibers (accept loop, other keepers, HTTP/WS) keep running. "Non-blocking"
+here means *domain-non-blocking*, not *turn-returns-immediately*. The RFC does
+not need a new queue or a `Pending_approval` return type.
+
+W3 delivers the **decision layer** only:
+
+- `Gh_capability_policy.disposition_of` gives each gh verb a capability
+  disposition (`Allowed | Requires_approval | Denied`), computed from the
+  typed verb identity and the risk axis, orthogonal to the trust overlay.
+- `Approval_policy.decide` consults it **between the catastrophic floor and the
+  risk-graded trust overlay**: a `Requires_approval` gh verb produces
+  `Verdict.Ask` **even under the autonomous (all-`Observe`) overlay**. This is
+  additive — the layer only *adds* an approval requirement for gh, never
+  removes one, and never touches non-gh commands.
+- This makes the autonomous overlay's all-`Observe` rationale ("no resolver to
+  answer an Ask") no longer a reason to auto-run gated gh: the verb now asks.
+
+What W3 does **not** yet do (deliberately, pending CI/runtime verification):
+wire the resulting `Ask` at the keeper-tool layer to the OAS Agent HITL
+approval hook so an operator resolution actually resumes execution. Today the
+keeper surface still renders `Ask` as an `Approval_required` typed error
+(`keeper_tool_execute_shell_ir.ml`), i.e. the gated op does not auto-run and is
+reported to the operator, but operator-resolve-to-execute is a follow-up
+(requires runtime/integration tests, which need the CI runner restored).
+
+- **Invariant (absolute):** no code path may *synchronously spin* on approval
+  inside a domain. The promise-await suspends the fiber only. Enforcement
+  targets (future waves): G-11 block-time metric (domain-occupancy p99 = 0 ms),
+  G-12 TLA+ `NonBlockingApproval` invariant (clean + buggy cfg pair), G-13
+  gated-op observability.
 
 ### 3.5 What #23362 got right and keeps
 

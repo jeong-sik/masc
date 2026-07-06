@@ -1048,6 +1048,8 @@ let add_routes ~sw ~clock router =
          let json = dashboard_governance_tool_events_http_json req in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/repository-observation-snapshot" (fun request reqd ->
+       Server_dashboard_http.handle_repository_observation_snapshot ~sw ~clock request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =

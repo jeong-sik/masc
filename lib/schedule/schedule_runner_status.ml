@@ -48,21 +48,6 @@ type snapshot =
   ; last_counts : tick_counts option
   }
 
-type runner_status =
-  | Not_started
-  | Running
-  | Stale
-  | Degraded
-  | Ok
-
-let runner_status_to_string = function
-  | Not_started -> "not_started"
-  | Running -> "running"
-  | Stale -> "stale"
-  | Degraded -> "degraded"
-  | Ok -> "ok"
-;;
-
 let empty =
   { tick_in_flight = false
   ; tick_count = 0
@@ -82,10 +67,7 @@ let empty =
 let state = ref empty
 let state_mu = Stdlib.Mutex.create ()
 
-let with_lock f =
-  Stdlib.Mutex.lock state_mu;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock state_mu) f
-;;
+let with_lock f = Stdlib.Mutex.protect state_mu f
 
 let reset_for_test () =
   with_lock (fun () -> state := empty)
@@ -96,6 +78,10 @@ let record_tick_started ~now =
     state := { !state with tick_in_flight = true; last_tick_started_at = Some now })
 ;;
 
+(* TEL-OK: this module is a pure process-local projection over
+   [Schedule_runner.tick_result]. The server maintenance loop owns concrete Log
+   and Otel_metric_store emission at the same tick record call sites, while
+   [/health?full=1] reads this snapshot for the structured health surface. *)
 let tick_counts_of_result
       ~(wake_enqueue_counts : wake_enqueue_counts)
       (result : Schedule_runner.tick_result)
@@ -104,11 +90,11 @@ let tick_counts_of_result
     List.fold_left
       (fun (succeeded, failed, unsupported, start_rejected)
         (dispatch : Schedule_runner.dispatch_result) ->
-        match dispatch.status with
-        | Dispatch_succeeded -> succeeded + 1, failed, unsupported, start_rejected
-        | Dispatch_failed -> succeeded, failed + 1, unsupported, start_rejected
-        | Dispatch_unsupported -> succeeded, failed, unsupported + 1, start_rejected
-        | Dispatch_start_rejected -> succeeded, failed, unsupported, start_rejected + 1)
+         match dispatch.status with
+         | Dispatch_succeeded -> succeeded + 1, failed, unsupported, start_rejected
+         | Dispatch_failed -> succeeded, failed + 1, unsupported, start_rejected
+         | Dispatch_unsupported -> succeeded, failed, unsupported + 1, start_rejected
+         | Dispatch_start_rejected -> succeeded, failed, unsupported, start_rejected + 1)
       (0, 0, 0, 0)
       result.dispatches
   in
@@ -121,8 +107,10 @@ let tick_counts_of_result
   ; dispatch_start_rejected
   ; wake_enqueued = wake_enqueue_counts.wake_enqueued
   ; wake_skipped_no_keeper = wake_enqueue_counts.wake_skipped_no_keeper
-  ; wake_skipped_missing_schedule = wake_enqueue_counts.wake_skipped_missing_schedule
-  ; wake_skipped_non_keeper_actor = wake_enqueue_counts.wake_skipped_non_keeper_actor
+  ; wake_skipped_missing_schedule =
+      wake_enqueue_counts.wake_skipped_missing_schedule
+  ; wake_skipped_non_keeper_actor =
+      wake_enqueue_counts.wake_skipped_non_keeper_actor
   ; wake_skipped_unregistered_keeper =
       wake_enqueue_counts.wake_skipped_unregistered_keeper
   ; wake_failed = wake_enqueue_counts.wake_failed
@@ -131,55 +119,6 @@ let tick_counts_of_result
 
 let duration ~started_at ~finished_at = max 0.0 (finished_at -. started_at)
 
-let tick_counts_has_activity counts =
-  counts.due_changed > 0
-  || counts.emitted > 0
-  || counts.rescheduled > 0
-  || counts.dispatch_succeeded > 0
-  || counts.dispatch_failed > 0
-  || counts.dispatch_unsupported > 0
-  || counts.dispatch_start_rejected > 0
-  || counts.wake_enqueued > 0
-  || counts.wake_skipped_no_keeper > 0
-  || counts.wake_skipped_missing_schedule > 0
-  || counts.wake_skipped_non_keeper_actor > 0
-  || counts.wake_skipped_unregistered_keeper > 0
-  || counts.wake_failed > 0
-;;
-
-let tick_counts_has_dispatch_failure counts =
-  counts.dispatch_failed > 0
-  || counts.dispatch_unsupported > 0
-  || counts.dispatch_start_rejected > 0
-;;
-
-let observe_tick_ok ~duration_sec counts =
-  if tick_counts_has_dispatch_failure counts || counts.wake_failed > 0
-  then
-    Log.Misc.warn
-      "schedule_runner_status: degraded tick duration=%.3fs due_changed=%d emitted=%d rescheduled=%d dispatch_succeeded=%d dispatch_failed=%d dispatch_unsupported=%d dispatch_start_rejected=%d wake_enqueued=%d wake_failed=%d"
-      duration_sec
-      counts.due_changed
-      counts.emitted
-      counts.rescheduled
-      counts.dispatch_succeeded
-      counts.dispatch_failed
-      counts.dispatch_unsupported
-      counts.dispatch_start_rejected
-      counts.wake_enqueued
-      counts.wake_failed
-  else if tick_counts_has_activity counts
-  then
-    Log.Misc.info
-      "schedule_runner_status: tick observed duration=%.3fs due_changed=%d emitted=%d rescheduled=%d dispatch_succeeded=%d wake_enqueued=%d"
-      duration_sec
-      counts.due_changed
-      counts.emitted
-      counts.rescheduled
-      counts.dispatch_succeeded
-      counts.wake_enqueued
-;;
-
 let record_tick_ok
       ?(wake_enqueue_counts = empty_wake_enqueue_counts)
       ~started_at
@@ -187,7 +126,6 @@ let record_tick_ok
       result
   =
   let counts = tick_counts_of_result ~wake_enqueue_counts result in
-  let duration_sec = duration ~started_at ~finished_at in
   with_lock (fun () ->
     let current = !state in
     state :=
@@ -198,14 +136,12 @@ let record_tick_ok
       ; last_tick_started_at = Some started_at
       ; last_tick_finished_at = Some finished_at
       ; last_success_at = Some finished_at
-      ; last_duration_sec = Some duration_sec
+      ; last_duration_sec = Some (duration ~started_at ~finished_at)
       ; last_counts = Some counts
-      });
-  observe_tick_ok ~duration_sec counts
+      })
 ;;
 
 let record_failure ~crashed ~started_at ~finished_at error =
-  let duration_sec = duration ~started_at ~finished_at in
   with_lock (fun () ->
     let current = !state in
     state :=
@@ -218,13 +154,8 @@ let record_failure ~crashed ~started_at ~finished_at error =
       ; last_tick_finished_at = Some finished_at
       ; last_error_at = Some finished_at
       ; last_error = Some error
-      ; last_duration_sec = Some duration_sec
-      });
-  Log.Misc.warn
-    "schedule_runner_status: tick %s duration=%.3fs error=%s"
-    (if crashed then "crashed" else "failed")
-    duration_sec
-    error
+      ; last_duration_sec = Some (duration ~started_at ~finished_at)
+      })
 ;;
 
 let record_tick_error ~started_at ~finished_at error =
@@ -282,7 +213,10 @@ let latest_tick_has_wake_failure snapshot =
 
 let latest_tick_has_dispatch_failure snapshot =
   match snapshot.last_counts with
-  | Some counts -> tick_counts_has_dispatch_failure counts
+  | Some counts ->
+    counts.dispatch_failed > 0
+    || counts.dispatch_unsupported > 0
+    || counts.dispatch_start_rejected > 0
   | None -> false
 ;;
 
@@ -294,17 +228,16 @@ let status ?now ?stale_after_sec snapshot =
     | _ -> false
   in
   if snapshot.tick_in_flight
-  then Running
+  then "running"
   else if snapshot.tick_count = 0
-  then Not_started
+  then "not_started"
   else if stale
-  then Stale
-  else if
-    latest_error_is_newer snapshot
-    || latest_tick_has_dispatch_failure snapshot
-    || latest_tick_has_wake_failure snapshot
-  then Degraded
-  else Ok
+  then "stale"
+  else if latest_error_is_newer snapshot
+          || latest_tick_has_dispatch_failure snapshot
+          || latest_tick_has_wake_failure snapshot
+  then "degraded"
+  else "ok"
 ;;
 
 let snapshot_to_yojson ?now ?stale_after_sec snapshot =
@@ -315,7 +248,7 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
   in
   `Assoc
     [ "schema", `String "masc.schedule.runner_status.v1"
-    ; "status", `String (runner_status_to_string (status ?now ?stale_after_sec snapshot))
+    ; "status", `String (status ?now ?stale_after_sec snapshot)
     ; "tick_in_flight", `Bool snapshot.tick_in_flight
     ; "tick_count", `Int snapshot.tick_count
     ; "success_count", `Int snapshot.success_count

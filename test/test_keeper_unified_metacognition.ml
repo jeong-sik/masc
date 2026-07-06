@@ -212,6 +212,45 @@ let test_on_idle_tool_search_loop_maps_internal_file_tools () =
             (Agent_sdk.Hooks.classify_decision other)))
 ;;
 
+let test_on_idle_alternatives_use_visible_aliases () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "tool_write_file"; "tool_read_file"; "tool_execute" ]
+      ~tool_names:[ "keeper_board_list" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "idle alternatives expose visible aliases"
+      true
+      (contains_substring msg "Available alternatives: Write, Read, Execute");
+    check
+      bool
+      "idle alternatives hide internal write id"
+      false
+      (contains_substring msg "tool_write_file");
+    check
+      bool
+      "idle alternatives hide internal read id"
+      false
+      (contains_substring msg "tool_read_file");
+    check
+      bool
+      "idle alternatives hide internal execute id"
+      false
+      (contains_substring msg "tool_execute")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
 let test_on_idle_final_warning_before_skip () =
   let decision =
     HK.on_idle_decision_with_threshold
@@ -321,6 +360,10 @@ let () =
             "on_idle tool_search loop maps internal file tools"
             `Quick
             test_on_idle_tool_search_loop_maps_internal_file_tools
+        ; test_case
+            "on_idle alternatives use visible aliases"
+            `Quick
+            test_on_idle_alternatives_use_visible_aliases
         ; test_case
             "on_idle final warning before skip"
             `Quick

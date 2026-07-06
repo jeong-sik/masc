@@ -90,9 +90,15 @@ cleanup_contract_task() {
 }
 trap 'cleanup_contract_task' EXIT
 
+public_tool_manifest_exe="${PUBLIC_TOOL_MANIFEST_EXE:-${ROOT_DIR}/_build/default/bin/public_tool_manifest.exe}"
+if [[ ! -x "$public_tool_manifest_exe" ]]; then
+  echo "FAIL: public tool manifest executable not found: ${public_tool_manifest_exe}" >&2
+  echo "Build ./bin/public_tool_manifest.exe before running the contract harness." >&2
+  exit 1
+fi
+
 manifest_json="$(
-  env -u DUNE_RPC \
-    opam exec -- dune exec --root "$ROOT_DIR" bin/public_tool_manifest.exe \
+  "$public_tool_manifest_exe" \
     | awk 'BEGIN { printing = 0 } /^\{/ { printing = 1 } printing { print }'
 )"
 expected_public_tools="$(printf '%s\n' "$manifest_json" | jq -c '.public_tool_names | sort')"

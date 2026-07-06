@@ -1,10 +1,9 @@
 (** Process-local schedule runner status.
 
     The scheduler domain/store remain durable SSOTs for scheduled work. This
-    module tracks only the currently running process' runner loop liveness and
-    latest tick outcome so health/dashboard surfaces can report whether the
-    production caller is ticking and whether the latest tick carried degraded
-    dispatch or wake evidence. *)
+    module only tracks the currently running process' runner loop liveness so
+    health/dashboard surfaces can answer whether the production caller has been
+    ticking recently. *)
 
 type tick_counts =
   { due_changed : int
@@ -50,16 +49,17 @@ val reset_for_test : unit -> unit
 
 val record_tick_started : now:float -> unit
 val empty_wake_enqueue_counts : wake_enqueue_counts
-
 val record_tick_ok :
   ?wake_enqueue_counts:wake_enqueue_counts ->
   started_at:float ->
   finished_at:float ->
   Schedule_runner.tick_result ->
   unit
+val record_tick_error :
+  started_at:float -> finished_at:float -> string -> unit
+val record_tick_crash :
+  started_at:float -> finished_at:float -> string -> unit
 
-val record_tick_error : started_at:float -> finished_at:float -> string -> unit
-val record_tick_crash : started_at:float -> finished_at:float -> string -> unit
 val snapshot : unit -> snapshot
 
 val snapshot_to_yojson :

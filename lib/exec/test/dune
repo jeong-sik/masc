@@ -22,6 +22,7 @@
   test_shell_ir_risk_repo_hosting_cli_stress
   test_shell_ir_gh_capability_baseline
   test_gh_verb
+  test_gh_capability_policy
   test_shell_ir_typed_e2e
   test_shell_ir_differential
   test_shell_ir_oracle

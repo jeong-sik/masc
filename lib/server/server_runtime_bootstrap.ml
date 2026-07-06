@@ -218,6 +218,7 @@ let configure_oas_capability_manifest_env
       ?(load_manifest = Llm_provider.Capability_manifest.load_runtime_file)
       ?(set_manifest = Llm_provider.Capability_manifest.set_global)
       ()
+      : capability_manifest_env_resolution option
   =
   match resolve_oas_capability_manifest_path ~env ~config_root () with
   | Some { source = Capability_manifest_env_var; path } as resolution ->

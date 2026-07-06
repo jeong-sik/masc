@@ -204,13 +204,11 @@ let observation_snapshot_handler request reqd =
   in
   let json = Ide_bridge.observation_snapshot_json ~take in
   let body = json_ok json in
-  let headers =
-    Httpun.Headers.of_list
-      [ ( "content-type", "application/json" )
-      ; ( "x-observation-mode", if take then "take" else "peek" )
-      ]
-  in
-  Http.respond ~headers ~body:(Yojson.Safe.to_string body) reqd
+  Http.Response.json_value
+    ~request
+    ~extra_headers:[ "x-observation-mode", if take then "take" else "peek" ]
+    body
+    reqd
 ;;
 
 let keeper_id_not_accepted_error =

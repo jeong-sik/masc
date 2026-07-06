@@ -103,6 +103,17 @@ let masc_dashboard_spec : tool_spec =
   }
 ;;
 
+let masc_keeper_waiting_inventory_spec : tool_spec =
+  { name = "masc_keeper_waiting_inventory"
+  ; description =
+      "Return the canonical keeper waiting inventory read model: what each keeper is \
+       waiting on, source counts, global waiting rows, and supported state labels."
+  ; parameters = []
+  ; additional_properties = false
+  ; behavior_contract = []
+  }
+;;
+
 let masc_gc_spec : tool_spec =
   { name = "masc_gc"
   ; description =
@@ -380,6 +391,7 @@ let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_tool_help_spec
   ; masc_dashboard_spec
+  ; masc_keeper_waiting_inventory_spec
   ; masc_gc_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec

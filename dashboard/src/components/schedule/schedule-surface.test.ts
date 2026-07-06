@@ -1,13 +1,14 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardScheduledAutomation } from '../../api'
+import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
   tool_inventory: { tools: unknown[] }
   tool_usage: Record<string, unknown>
   scheduled_automation?: DashboardScheduledAutomation
+  keeper_waiting_inventory?: DashboardKeeperWaitingInventory
 }
 
 const mocks = vi.hoisted(() => ({
@@ -81,6 +82,48 @@ function sampleAutomation(): DashboardScheduledAutomation {
   }
 }
 
+function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
+  return {
+    schema: 'masc.dashboard.keeper_waiting_inventory.v1',
+    source: 'server_keeper_waiting_inventory',
+    keeper_count_known: true,
+    keeper_count: 1,
+    waiting_keeper_count: 1,
+    row_count: 1,
+    global_row_count: 1,
+    global_pending_confirm_count: 0,
+    source_counts: {
+      schedule_waiting: 1,
+      hitl_pending: 1,
+    },
+    keepers: [
+      {
+        keeper_name: 'sangsu',
+        state: 'waiting',
+        waiting_count: 1,
+        sources: { hitl_pending: 1 },
+        waiting_on: [
+          {
+            keeper_name: 'sangsu',
+            source: 'hitl_pending',
+            waiting_on: 'schedule approval',
+            since_iso: '2026-07-04T00:00:00Z',
+            next_action: 'operator_resolve_hitl',
+          },
+        ],
+      },
+    ],
+    global_waiting_on: [
+      {
+        source: 'schedule_waiting',
+        waiting_on: 'masc.board_post',
+        due_at_iso: '2026-07-04T01:00:00Z',
+        next_action: 'schedule_runner_dispatch',
+      },
+    ],
+  }
+}
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -125,6 +168,7 @@ describe('ScheduleSurface', () => {
       tool_inventory: { tools: [] },
       tool_usage: {},
       scheduled_automation: sampleAutomation(),
+      keeper_waiting_inventory: sampleWaitingInventory(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -146,6 +190,12 @@ describe('ScheduleSurface', () => {
     expect(summary?.textContent).not.toContain('승인 차단')
     // The wake-signal feed header is renamed in v2.
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+      .toContain('Keeper Waiting Inventory')
+    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+      .toContain('sangsu')
+    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+      .toContain('masc.board_post')
     // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
     // the v2 surface (it is diagnostics-only); no equivalent element exists to
     // retarget, so this coverage is dropped rather than weakened.

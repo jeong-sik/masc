@@ -14,6 +14,30 @@
 val public_mcp_surface_tools : string list
 (** Externally reachable MCP tools — the public surface. *)
 
+val schedule_request_surface_tools : string list
+(** Schedule request tools that read/create/cancel durable schedule rows. *)
+
+val schedule_operator_decision_tools : string list
+(** Human decision tools for approve/reject. These are not public MCP or
+    keeper-standard tools; dashboard/operator endpoints own those actions. *)
+
+val public_schedule_surface_tools : string list
+(** Schedule tools visible to external MCP clients. *)
+
+val keeper_schedule_surface_tools : string list
+(** Schedule tools visible to keeper-standard projections. *)
+
+val spawned_agent_schedule_surface_tools : string list
+(** Schedule tools visible to spawned managed agents. Empty by policy until
+    spawned agents have a lane ownership contract for reservations. *)
+
+val local_worker_schedule_surface_tools : string list
+(** Schedule tools visible to local worker containers. Empty by policy:
+    local workers execute bounded delegated work, not durable reservations. *)
+
+val schedule_surface_tools : string list
+(** Compatibility alias for {!schedule_request_surface_tools}. *)
+
 val spawned_agent_surface_tools : string list
 (** Tools visible to spawned worker agents. *)
 

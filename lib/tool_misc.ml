@@ -71,6 +71,23 @@ let workflow_err ~tool_name ~start_time msg : Tool_result.result =
     ~start_time
     msg
 
+let expect_no_args ~tool_name ~start_time args =
+  match args with
+  | `Assoc [] -> Ok ()
+  | `Assoc fields ->
+      let names = fields |> List.map fst |> String.concat ", " in
+      Error
+        (workflow_err
+           ~tool_name
+           ~start_time
+           (Printf.sprintf "%s does not accept arguments: %s" tool_name names))
+  | _ ->
+      Error
+        (workflow_err
+           ~tool_name
+           ~start_time
+           (Printf.sprintf "%s arguments must be an object" tool_name))
+
 let dashboard_handler =
   ref (fun ~tool_name ~start_time:_ _ctx _args ->
     Tool_result.make_err
@@ -133,6 +150,16 @@ let handle_tool_stats ~tool_name ~start_time _ctx args : Tool_result.result =
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
   text_ok ~tool_name ~start_time (Yojson.Safe.to_string report)
 
+let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_result.result =
+  match expect_no_args ~tool_name ~start_time args with
+  | Error result -> result
+  | Ok () ->
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:(Server_keeper_waiting_inventory.dashboard_json ctx.config)
+        ()
+
 let strip_mcp_prefix name =
   let prefix = "mcp__masc__" in
   let plen = String.length prefix in
@@ -186,6 +213,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
   | "masc_dashboard" ->
       Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
+  | "masc_keeper_waiting_inventory" ->
+      Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
   | "masc_cleanup_zombies" ->
       Some (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
@@ -209,6 +238,7 @@ let tool_spec_read_only =
   [
     "masc_tool_help";
     "masc_dashboard";
+    "masc_keeper_waiting_inventory";
   ]
 
 let () =

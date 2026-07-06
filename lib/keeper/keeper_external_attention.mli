@@ -140,6 +140,8 @@ val record : base_path:string -> item -> record_result
     duplicate older than the window is re-appended rather than
     suppressed — a rare, harmless duplicate, never data loss. *)
 
+val attention_path : base_path:string -> keeper_name:string -> string
+
 val claim_for_turn :
   base_path:string ->
   keeper_name:string ->
@@ -168,6 +170,9 @@ val mark_ignored :
   unit ->
   (unit, string) result
 
+val load_events_result :
+  base_path:string -> keeper_name:string -> (event list, string) result
+
 val load_events : base_path:string -> keeper_name:string -> event list
 
 val pending_for_keeper :
@@ -181,3 +186,12 @@ val pending_for_keeper :
 (** Returns pending items ordered by [received_at], capped to [limit].
     A non-terminal claim older than [claim_stale_after] is projected back
     to pending instead of dropped. *)
+
+val pending_for_keeper_result :
+  base_path:string ->
+  keeper_name:string ->
+  ?now:float ->
+  ?claim_stale_after:float ->
+  limit:int ->
+  unit ->
+  (item list, string) result

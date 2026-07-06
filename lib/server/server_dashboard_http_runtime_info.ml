@@ -3381,12 +3381,20 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
       ; "tool_usage", usage
       ]
   in
-  let attach_scheduled_automation json =
+  let attach_live_tools_projections json =
     let scheduled_automation =
       run Tools_compute (fun () -> scheduled_automation_dashboard_json config)
     in
+    let keeper_waiting_inventory =
+      run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
+    in
     match json with
-    | `Assoc fields -> `Assoc (fields @ [ "scheduled_automation", scheduled_automation ])
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [ "scheduled_automation", scheduled_automation
+           ; "keeper_waiting_inventory", keeper_waiting_inventory
+           ])
     | other -> other
   in
   let cached =
@@ -3399,7 +3407,7 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
         Dashboard_cache.get_or_compute cache_key
           ~ttl:dashboard_tools_cache_ttl_sec compute)
   in
-  attach_scheduled_automation cached
+  attach_live_tools_projections cached
 ;;
 
 let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

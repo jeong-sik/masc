@@ -31,6 +31,15 @@ type store_error =
 
 val store_error_to_string : store_error -> string
 
+type read_error =
+  | Corrupt_read_ledger of
+      { primary_err : string
+      ; recovery_err : string option
+      }
+      (** Read-only access found a present-but-unparseable ledger. *)
+
+val read_error_to_string : read_error -> string
+
 (** Outcome of loading the durable ledger. [Fresh] is a legitimately absent file
     (empty store); [Corrupt] is a present-but-unparseable file that must not be
     silently defaulted or overwritten. *)
@@ -60,6 +69,11 @@ val load : Workspace_utils.config -> load_outcome
 (** Read-only snapshot. Returns the empty [default_state] for a [Fresh] store and
     raises {!Corrupt_ledger_exn} for a corrupt one. Never writes to disk. *)
 val read_state : Workspace_utils.config -> state
+
+(** Result-returning read-only snapshot. Returns the empty [default_state] for a
+    [Fresh] store and [Error (Corrupt_read_ledger _)] for a corrupt one. Never
+    writes to disk. *)
+val read_state_result : Workspace_utils.config -> (state, read_error) result
 
 val default_state : unit -> state
 val state_to_yojson : state -> Yojson.Safe.t

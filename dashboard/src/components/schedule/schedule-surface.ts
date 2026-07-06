@@ -11,6 +11,7 @@ import { ConnectionStatus } from '../dashboard-shell'
 import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { StatusChip } from '../common/status-chip'
+import { KeeperWaitingInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
 import { ScheduleAside, ScheduledAutomationPanel, normalizedScheduleStatus, scheduledPendingApprovalCount } from '../tools/scheduled-automation-panel'
 import {
   loadTools,
@@ -39,6 +40,7 @@ function countByStatus(
 export function ScheduleSurface() {
   const data = toolsData.value
   const automation = data?.scheduled_automation ?? null
+  const waitingInventory = data?.keeper_waiting_inventory ?? null
   const loading = toolsLoading.value
   const error = toolsError.value
   const dueEffective = automation?.derived_counts?.due_effective ?? 0
@@ -96,6 +98,11 @@ export function ScheduleSurface() {
             <div class="ov-kpi-k">총 예약</div>
             <div class="ov-kpi-v volt">${countLabel(totalCount)}</div>
           </div>
+        </section>
+
+        <section class="ov-card mt-4" aria-label="Keeper waiting inventory" data-testid="schedule-waiting-inventory">
+          <div class="ov-card-h"><h3>Keeper Waiting Inventory</h3></div>
+          <${KeeperWaitingInventoryPanel} inventory=${waitingInventory} />
         </section>
 
         ${loading && !automation

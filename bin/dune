@@ -196,6 +196,17 @@
   agent_sdk
   agent_sdk.llm_provider))
 
+;; Offline mention backfill for board post/comment rows. Stamps the
+;; [mention_ids] field onto pre-structured-mention rows; run with the server
+;; stopped.
+
+(executable
+ (name board_backfill_mentions)
+ (modules board_backfill_mentions)
+ (public_name masc-board-backfill-mentions)
+ (package masc)
+ (libraries masc.board_handlers))
+
 ;; RFC-0232 P4: offline mention backfill for keeper chat lanes.
 ;; Stamps the [mentions] field onto pre-P4 user rows; run with the
 ;; server stopped.

@@ -497,6 +497,55 @@ let start_keeper_loops
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:(Mcp_server.workspace_config state)
       signal);
+  let bg_task_status_label = function
+    | Unix.WEXITED code -> Printf.sprintf "exited:%d" code
+    | Unix.WSIGNALED signal -> Printf.sprintf "signaled:%d" signal
+    | Unix.WSTOPPED signal -> Printf.sprintf "stopped:%d" signal
+  in
+  Bg_task.set_completion_observer
+    (fun (completion : Bg_task.completion) ->
+       match completion.base_path with
+       | None | Some "" -> ()
+       | Some base_path ->
+         let status_label = bg_task_status_label completion.status in
+         let outcome_label, outcome =
+           match completion.status with
+           | Unix.WEXITED 0 -> "ok", Keeper_event_queue.Bg_ok status_label
+           | Unix.WEXITED _
+           | Unix.WSIGNALED _
+           | Unix.WSTOPPED _ -> "failed", Keeper_event_queue.Bg_failed status_label
+         in
+         let bg_completion : Keeper_event_queue.bg_job_completion =
+           { bg_run_id = Bg_task.task_id_to_string completion.task_id
+           ; bg_kind = Keeper_event_queue.Subprocess
+           ; bg_outcome = outcome
+           ; bg_board_post_id = ""
+           }
+         in
+         let stimulus : Keeper_event_queue.stimulus =
+           { Keeper_event_queue.post_id =
+               Keeper_event_queue.bg_job_completion_post_id bg_completion
+           ; urgency = Keeper_event_queue.Low
+           ; arrived_at = completion.finished_at
+           ; payload = Keeper_event_queue.Bg_completed bg_completion
+           }
+         in
+         Log.Keeper.info
+           "background task completion wake: keeper=%s task_id=%s status=%s"
+           completion.keeper
+           (Bg_task.task_id_to_string completion.task_id)
+           status_label;
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_keeper_bg_completion_wake_total
+           ~labels:
+             [ "kind", Keeper_event_queue.bg_job_kind_to_string bg_completion.bg_kind
+             ; "outcome", outcome_label
+             ]
+           ();
+         Keeper_keepalive_signal.wakeup_keeper
+           ~base_path
+           ~stimulus
+           completion.keeper);
   (* Wake a keeper when one of its pending HITL approvals resolves/expires.
      Registered here (composition root) rather than in Keeper_approval_queue to
      break the Keeper_approval_queue -> Keeper_keepalive_signal ->
@@ -822,14 +871,21 @@ let start_keeper_loops
       let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
-      let all_names = Keeper_meta_store.keeper_names config in
-      let all_count = List.length all_names in
+      let keeper_json_count, keeper_json_known =
+        match Keeper_meta_store.keeper_names_result config with
+        | Ok names -> (List.length names, true)
+        | Error error ->
+          Log.Keeper.warn "autoboot: keeper JSON discovery failed: %s" error;
+          (0, false)
+      in
       Log.Keeper.info
-        "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
+        "autoboot: base_path=%s masc_root=%s keeper_dir=%s \
+         keeper_json_count=%d keeper_json_known=%b"
         config.base_path
         masc_root
         keeper_dir
-        all_count;
+        keeper_json_count
+        keeper_json_known;
       let names = Keeper_runtime.bootable_keeper_names config in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
       let keeper_boot_ctx : _ Keeper_types_profile.context =

@@ -51,43 +51,56 @@ let keeper_context_snapshot_from_metrics_json (json : Yojson.Safe.t) =
   if keeper_context_snapshot_is_empty snapshot then None else Some snapshot
 ;;
 
-let latest_keeper_context_snapshot_from_files config keeper_name =
-  let metrics_lines =
+let latest_keeper_context_snapshot_from_files_with_read_errors config keeper_name =
+  let metrics_lines, line_path =
     let store = Keeper_types_support.keeper_metrics_store config keeper_name in
     let dated = Dated_jsonl.read_recent_lines store 32 in
     if dated <> []
-    then dated
+    then dated, Dated_jsonl.base_dir store
     else (
       let path = Keeper_types_support.keeper_metrics_path config keeper_name in
       match
         Keeper_memory.read_file_tail_lines_result path
           ~max_bytes:32000 ~max_lines:32
       with
-      | Ok lines -> lines
+      | Ok lines -> lines, path
       | Error exn_class ->
           Keeper_memory.record_memory_recall_read_error
             ~site:"operator_context_snapshot_metrics" path exn_class;
-          [])
+          [], path)
+  in
+  let parsed_metrics, parse_errors =
+    Keeper_status_metrics.parse_metrics_json_lines metrics_lines
+  in
+  let read_errors =
+    List.map
+      (Keeper_status_metrics.metrics_json_line_parse_error_to_json
+         ~source:"operator_context_snapshot_metrics_jsonl"
+         ~keeper:keeper_name
+         ~path:line_path)
+      parse_errors
   in
   let snapshots =
-    List.rev metrics_lines
-    |> List.filter_map (fun line ->
-      try
-        let json = Yojson.Safe.from_string line in
-        keeper_context_snapshot_from_metrics_json json
-      with
-      | Yojson.Json_error _ -> None)
+    List.rev parsed_metrics
+    |> List.filter_map keeper_context_snapshot_from_metrics_json
   in
-  match
-    List.find_opt
-      (fun snapshot -> snapshot.context_source = Some "keeper_context_status")
-      snapshots
-  with
-  | Some snapshot -> Some snapshot
-  | None ->
-    (match snapshots with
-     | snapshot :: _ -> Some snapshot
-     | [] -> None)
+  let snapshot =
+    match
+      List.find_opt
+        (fun snapshot -> snapshot.context_source = Some "keeper_context_status")
+        snapshots
+    with
+    | Some snapshot -> Some snapshot
+    | None ->
+      (match snapshots with
+       | snapshot :: _ -> Some snapshot
+       | [] -> None)
+  in
+  snapshot, read_errors
+;;
+
+let latest_keeper_context_snapshot_from_files config keeper_name =
+  fst (latest_keeper_context_snapshot_from_files_with_read_errors config keeper_name)
 ;;
 
 let fallback_keeper_context_snapshot (meta : Keeper_meta_contract.keeper_meta) =
@@ -107,6 +120,16 @@ let keeper_context_snapshot_of_meta config (meta : Keeper_meta_contract.keeper_m
   match latest_keeper_context_snapshot_from_files config meta.name with
   | Some snapshot -> snapshot
   | None -> fallback_keeper_context_snapshot meta
+;;
+
+let keeper_context_snapshot_of_meta_with_read_errors config
+    (meta : Keeper_meta_contract.keeper_meta) =
+  let snapshot, read_errors =
+    latest_keeper_context_snapshot_from_files_with_read_errors config meta.name
+  in
+  match snapshot with
+  | Some snapshot -> snapshot, read_errors
+  | None -> fallback_keeper_context_snapshot meta, read_errors
 ;;
 
 let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =

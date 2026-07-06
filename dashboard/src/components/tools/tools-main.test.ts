@@ -97,6 +97,7 @@ describe('Tools', () => {
     expect(container.textContent).toContain('도구 사용 현황')
     expect(container.textContent).toContain('ToolMetrics')
     expect(container.textContent).toContain('PromptRegistryPanel')
+    expect(container.textContent).toContain('Keeper Waiting Inventory')
   })
 
   it('renders scheduled automation FSM projection', async () => {

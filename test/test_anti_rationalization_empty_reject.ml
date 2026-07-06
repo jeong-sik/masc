@@ -69,6 +69,56 @@ let test_whitespace_only_verdict_also_empty () =
   | Ok _ ->
       Alcotest.fail "parse_verdict of whitespace should return Error"
 
+let test_text_protocol_accepts_exact_approve () =
+  match AR.parse_verdict_typed "APPROVE" with
+  | Ok AR.Approve -> ()
+  | Ok (AR.Reject reason) ->
+      Alcotest.failf "APPROVE parsed as reject: %s" reason
+  | Error err ->
+      Alcotest.failf "APPROVE returned %s"
+        (AR.verdict_parse_error_to_string err)
+
+let test_text_protocol_accepts_reject_with_reason () =
+  match AR.parse_verdict_typed "REJECT: missing deployment proof" with
+  | Ok (AR.Reject reason) ->
+      Alcotest.(check string)
+        "reason"
+        "missing deployment proof"
+        reason
+  | Ok AR.Approve ->
+      Alcotest.fail "REJECT with reason parsed as approve"
+  | Error err ->
+      Alcotest.failf "REJECT returned %s"
+        (AR.verdict_parse_error_to_string err)
+
+let test_text_protocol_rejects_embedded_approve_keyword () =
+  match AR.parse_verdict_typed "The answer is APPROVE because it looks done." with
+  | Error (AR.Unrecognized_review_format _) -> ()
+  | Error AR.Empty_review_output ->
+      Alcotest.fail "embedded approve should be unrecognized, not empty"
+  | Ok _ ->
+      Alcotest.fail "embedded APPROVE keyword must not produce a verdict"
+
+let test_text_protocol_rejects_lowercase_approve () =
+  match AR.parse_verdict_typed "approve" with
+  | Error (AR.Unrecognized_review_format _) -> ()
+  | Error AR.Empty_review_output ->
+      Alcotest.fail "lowercase approve should be unrecognized, not empty"
+  | Ok _ ->
+      Alcotest.fail "lowercase approve must not produce a verdict"
+
+let test_text_protocol_rejects_empty_reject_reason () =
+  match AR.parse_verdict_typed "REJECT:   " with
+  | Error (AR.Unrecognized_review_format msg) ->
+      Alcotest.(check string)
+        "missing reason"
+        "REJECT verdict requires a non-empty reason"
+        msg
+  | Error AR.Empty_review_output ->
+      Alcotest.fail "empty reject reason should be malformed, not empty"
+  | Ok _ ->
+      Alcotest.fail "REJECT with empty reason must not produce a verdict"
+
 let test_review_rejects_empty_evaluator_output () =
   with_reviewer
     (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
@@ -161,6 +211,26 @@ let () =
             "whitespace-only"
             `Quick
             test_whitespace_only_verdict_also_empty;
+          Alcotest.test_case
+            "exact APPROVE passes"
+            `Quick
+            test_text_protocol_accepts_exact_approve;
+          Alcotest.test_case
+            "REJECT with reason passes"
+            `Quick
+            test_text_protocol_accepts_reject_with_reason;
+          Alcotest.test_case
+            "embedded APPROVE keyword rejects"
+            `Quick
+            test_text_protocol_rejects_embedded_approve_keyword;
+          Alcotest.test_case
+            "lowercase approve rejects"
+            `Quick
+            test_text_protocol_rejects_lowercase_approve;
+          Alcotest.test_case
+            "empty REJECT reason rejects"
+            `Quick
+            test_text_protocol_rejects_empty_reject_reason;
         ] );
       ( "review policy",
         [

@@ -25,13 +25,57 @@ let same_public_tool ~current next =
   | true, "execute" -> true
   | _ -> String.equal current next
 
-let result_cwd raw_result =
-  try
-    match Yojson.Safe.from_string raw_result with
-    | `Assoc fields -> string_assoc "cwd" fields
-    | _ -> None
-  with
-  | Yojson.Json_error _ -> None
+type result_cwd_decode =
+  | Result_cwd_found of string
+  | Result_cwd_absent
+  | Result_cwd_not_object of string
+  | Result_cwd_parse_error of string
+
+let result_cwd_decode raw_result =
+  match Yojson.Safe.from_string raw_result with
+  | `Assoc fields ->
+    (match string_assoc "cwd" fields with
+     | Some cwd -> Result_cwd_found cwd
+     | None -> Result_cwd_absent)
+  | other -> Result_cwd_not_object (Json_util.kind_name other)
+  | exception Yojson.Json_error detail -> Result_cwd_parse_error detail
+
+let result_cwd_of_decode = function
+  | Result_cwd_found cwd -> Some cwd
+  | Result_cwd_absent
+  | Result_cwd_not_object _
+  | Result_cwd_parse_error _ ->
+    None
+
+let result_cwd raw_result = result_cwd_decode raw_result |> result_cwd_of_decode
+
+let log_unusable_result_cwd ~tool_name = function
+  | Result_cwd_found _
+  | Result_cwd_absent ->
+    ()
+  | Result_cwd_not_object kind ->
+    Log.Keeper.warn
+      "post_execute_git_status: %s result payload is %s, expected object with cwd"
+      tool_name
+      kind
+  | Result_cwd_parse_error detail ->
+    Log.Keeper.warn
+      "post_execute_git_status: %s result JSON parse failed; skipping git status \
+       delta: %s"
+      tool_name
+      detail
+
+module For_testing = struct
+  type nonrec result_cwd_decode =
+    result_cwd_decode =
+    | Result_cwd_found of string
+    | Result_cwd_absent
+    | Result_cwd_not_object of string
+    | Result_cwd_parse_error of string
+
+  let result_cwd_decode = result_cwd_decode
+  let result_cwd = result_cwd
+end
 
 let directory_exists path =
   try Sys.file_exists path && Sys.is_directory path with
@@ -67,7 +111,9 @@ let post_execute_git_status_change ~(tool_name : string) raw_result =
   if not (is_execute_tool_name tool_name)
   then None
   else (
-    match result_cwd raw_result with
+    let decoded_cwd = result_cwd_decode raw_result in
+    log_unusable_result_cwd ~tool_name decoded_cwd;
+    match result_cwd_of_decode decoded_cwd with
     | None -> None
     | Some cwd when not (directory_exists cwd) -> None
     | Some cwd ->
@@ -139,6 +185,10 @@ let execute_with_observers
     then (
       let failure_boundary =
         Keeper_tools_oas_failure_boundary.classify_raw_failure raw_result
+      in
+      let failure_boundary_parse_fields =
+        Keeper_tools_oas_failure_boundary.parse_observation_log_fields
+          failure_boundary
       in
       let is_workflow_rejection = failure_boundary.is_workflow_rejection in
       (* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
@@ -263,7 +313,8 @@ let execute_with_observers
         ~success:false
         ~error_text:detail
         ~extra_fields:
-          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
+          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ()
+           @ failure_boundary_parse_fields)
         ~site:"error_result"
         ~ts
         ();
@@ -386,6 +437,7 @@ let execute_with_observers
              ; "ok", `Bool false
              ; "error_preview", `String detail
              ]
+             @ failure_boundary_parse_fields
              @ deterministic_decision_log_fields));
       Keeper_tool_call_log.set_truncation_info
         ~keeper_name:meta.name
@@ -453,7 +505,11 @@ let execute_with_observers
       let original_len = String.length final_result in
       let truncated_result = Tool_output_validation.cap final_result in
       let was_truncated = original_len > Tool_output_validation.max_output_chars in
-      let result_markers = Keeper_tools_oas_markers.tool_exec_result_markers ~input ~output:final_result in
+      let result_marker_report =
+        Keeper_tools_oas_markers.tool_exec_result_marker_report ~input
+          ~output:final_result
+      in
+      let result_markers = result_marker_report.markers in
       let result_marker_fields =
         match result_markers with
         | [] -> []
@@ -461,6 +517,17 @@ let execute_with_observers
           [ ( "result_markers"
             , `List (List.map (fun marker -> `String marker) markers) )
           ]
+      in
+      let result_marker_parse_error_fields =
+        match result_marker_report.output_parse_error with
+        | None -> []
+        | Some error ->
+            [
+              ( "result_marker_parse_error",
+                `String
+                  (Keeper_tools_oas_markers.output_marker_parse_error_to_string
+                     error) );
+            ]
       in
       if was_truncated
       then
@@ -483,6 +550,7 @@ let execute_with_observers
              ; "ok", `Bool true
              ]
              @ result_marker_fields
+             @ result_marker_parse_error_fields
              @
              if was_truncated
              then [ "truncated_to", `Int (String.length truncated_result) ]

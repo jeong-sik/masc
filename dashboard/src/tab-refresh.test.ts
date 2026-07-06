@@ -46,8 +46,13 @@ vi.mock('./keeper-runtime', () => ({
   refreshActiveKeeperChatHistory: vi.fn(),
 }))
 
+vi.mock('./components/tools/tool-state', () => ({
+  loadTools: vi.fn(),
+}))
+
 import { refreshFeatureHealth } from './components/feature-health'
 import { refreshObservatorySurface } from './components/observatory/observatory'
+import { loadTools } from './components/tools/tool-state'
 import { refreshActiveKeeperChatHistory } from './keeper-runtime'
 import { refreshServerConfig } from './components/server-config'
 import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
@@ -78,6 +83,13 @@ describe('refreshPlanForRoute', () => {
       tab: 'board',
       params: {},
     })).toEqual(['board'])
+  })
+
+  it('hydrates the top-level schedule surface from the tools projection', () => {
+    expect(refreshPlanForRoute({
+      tab: 'schedule',
+      params: {},
+    })).toEqual(['toolsProjection'])
   })
 
   it('hydrates Fusion from its own board-sink source and the registry source', () => {
@@ -296,6 +308,17 @@ describe('refreshPlanForRoute', () => {
     await waitFor(() => {
       expect(refreshFusionBoard).toHaveBeenCalledTimes(1)
       expect(refreshFusionRuns).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('refreshes schedule projection on schedule route entry', async () => {
+    refreshForRoute({
+      tab: 'schedule',
+      params: {},
+    })
+
+    await waitFor(() => {
+      expect(loadTools).toHaveBeenCalledTimes(1)
     })
   })
 })

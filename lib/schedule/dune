@@ -9,9 +9,11 @@
  (public_name masc.masc_schedule)
  (wrapped false)
  (modules
+  schedule_audit_log
   schedule_domain
   schedule_supported_kinds
   schedule_store
   schedule_service
-  schedule_runner)
+  schedule_runner
+  schedule_runner_status)
  (libraries digestif masc_workspace dated_jsonl masc_log unix yojson))

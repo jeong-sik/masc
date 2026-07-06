@@ -4,6 +4,20 @@ module H = Dashboard_harness_health
 
 let temp_dir_counter = ref 0
 
+let json_member key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_string_member key json =
+  match json_member key json with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let json_bool_member key json =
+  match json_member key json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+
 let with_temp_dir prefix f =
   incr temp_dir_counter;
   let dir =
@@ -102,6 +116,45 @@ let test_pre_compact_store_setter_records_event () =
   check bool "local model" true event.is_local_model;
   check string "trigger" "manual" (Compaction_trigger.to_label event.trigger)
 
+let test_json_surfaces_handoff_keeper_name_read_error () =
+  reset_after @@ fun () ->
+  with_temp_dir "harness-missing-keepers" @@ fun base ->
+  let config = Workspace.default_config base in
+  let json = H.json ~config () in
+  let recent_handoffs =
+    match json_member "recent_handoffs" json with
+    | Some value -> value
+    | None -> fail "missing recent_handoffs"
+  in
+  check (option string)
+    "handoff rail status is unknown"
+    (Some "unknown")
+    (json_string_member "status" recent_handoffs);
+  check (option string)
+    "empty reason is keeper-name read failure"
+    (Some "keeper_names_read_failed")
+    (json_string_member "empty_reason" recent_handoffs);
+  check (option bool)
+    "keeper names are not known"
+    (Some false)
+    (json_bool_member "keeper_names_known" recent_handoffs);
+  (match json_member "read_errors" recent_handoffs with
+   | Some (`List (_ :: _)) -> ()
+   | _ -> fail "expected handoff read_errors");
+  let overview =
+    match json_member "overview" json with
+    | Some value -> value
+    | None -> fail "missing overview"
+  in
+  check (option string)
+    "overview handoff status is unknown"
+    (Some "unknown")
+    (json_string_member "handoff_status" overview);
+  check (option bool)
+    "overview keeper names are not known"
+    (Some false)
+    (json_bool_member "handoff_keeper_names_known" overview)
+
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -114,5 +167,7 @@ let () =
             test_reset_rebinds_wake_payload_store;
           test_case "pre-compact setter records event" `Quick
             test_pre_compact_store_setter_records_event;
+          test_case "handoff read errors are fail-visible" `Quick
+            test_json_surfaces_handoff_keeper_name_read_error;
         ] );
     ]

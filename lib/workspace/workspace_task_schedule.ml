@@ -41,17 +41,48 @@ let task_is_claim_pool_candidate (task : Masc_domain.task) =
 let underscore_name = Workspace_task_receipts.underscore_name
 let hyphen_name = Workspace_task_receipts.hyphen_name
 let keeper_name_from_agent_name = Workspace_task_receipts.keeper_name_from_agent_name
+type receipt_read_error = Workspace_task_receipts.receipt_read_error =
+  | Agent_record_read_failed of { path : string; message : string }
+  | Directory_stat_failed of { path : string; message : string }
+  | Directory_list_failed of { path : string; message : string }
+  | Receipt_line_read_failed of { path : string; message : string }
+  | Receipt_json_parse_failed of { path : string; message : string }
+
+let receipt_read_error_to_string =
+  Workspace_task_receipts.receipt_read_error_to_string
+;;
+
+let agent_record_keeper_name_result =
+  Workspace_task_receipts.agent_record_keeper_name_result
+;;
+
 let agent_record_keeper_name = Workspace_task_receipts.agent_record_keeper_name
+let keeper_receipt_candidate_names_result =
+  Workspace_task_receipts.keeper_receipt_candidate_names_result
+;;
+
 let keeper_receipt_candidate_names = Workspace_task_receipts.keeper_receipt_candidate_names
+let directory_exists_result = Workspace_task_receipts.directory_exists_result
 let directory_exists = Workspace_task_receipts.directory_exists
+let directory_entries_result = Workspace_task_receipts.directory_entries_result
 let directory_entries = Workspace_task_receipts.directory_entries
+let jsonl_files_under_result = Workspace_task_receipts.jsonl_files_under_result
 let jsonl_files_under = Workspace_task_receipts.jsonl_files_under
+let last_nonempty_line_result = Workspace_task_receipts.last_nonempty_line_result
 let last_nonempty_line = Workspace_task_receipts.last_nonempty_line
+let latest_json_in_receipt_dir_result =
+  Workspace_task_receipts.latest_json_in_receipt_dir_result
+;;
+
 let latest_json_in_receipt_dir = Workspace_task_receipts.latest_json_in_receipt_dir
 let json_member_path = Workspace_task_receipts.json_member_path
 let json_raw_string_path = Workspace_task_receipts.json_raw_string_path
 let json_string_path = Workspace_task_receipts.json_string_path
 let receipt_sort_key = Workspace_task_receipts.receipt_sort_key
+let latest_execution_receipt_json_result =
+  Workspace_task_receipts.latest_execution_receipt_json_result
+;;
+
 let latest_execution_receipt_json = Workspace_task_receipts.latest_execution_receipt_json
 let active_task_assignees_by_task_id backlog =
   let table = Hashtbl.create (List.length backlog.tasks) in
@@ -76,7 +107,7 @@ let agent_current_task_matches_backlog backlog ~agent_name task_id =
   agent_current_task_matches_assignments active_task_assignees ~agent_name task_id
 ;;
 
-let reconcile_agent_current_task_record
+let reconcile_agent_current_task_record_result
       config
       ?(touch_last_seen = true)
       ~agent_file
@@ -102,19 +133,46 @@ let reconcile_agent_current_task_record
       ; last_seen = (if touch_last_seen then now_iso () else agent.last_seen)
       }
     in
-    write_json config agent_file (agent_to_yojson updated);
-    log_event
-      config
-      (`Assoc
-          [ "type", `String "agent_current_task_reconciled"
-          ; "agent", `String agent.name
-          ; "stale_task", `String task_id
-          ; "ts", `String (now_iso ())
-          ])
-  | Some _ | None -> ()
+    (match write_agent_result config agent_file updated with
+     | Error msg ->
+       Error
+         (Printf.sprintf
+            "agent current-task reconcile write failed for %s: %s"
+            agent_file
+            msg)
+     | Ok () ->
+       log_event
+         config
+         (`Assoc
+             [ "type", `String "agent_current_task_reconciled"
+             ; "agent", `String agent.name
+             ; "stale_task", `String task_id
+             ; "ts", `String (now_iso ())
+             ]);
+       Ok ())
+  | Some _ | None -> Ok ()
 ;;
 
-let reconcile_agent_current_task_with_assignments
+let reconcile_agent_current_task_record
+      config
+      ?(touch_last_seen = true)
+      ~agent_file
+      ~(agent : Masc_domain.agent)
+      active_task_assignees
+  =
+  match
+    reconcile_agent_current_task_record_result
+      config
+      ~touch_last_seen
+      ~agent_file
+      ~agent
+      active_task_assignees
+  with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.error "%s" msg
+;;
+
+let reconcile_agent_current_task_with_assignments_result
       config
       ?(touch_last_seen = true)
       ~agent_name
@@ -128,13 +186,50 @@ let reconcile_agent_current_task_with_assignments
     with_file_lock config agent_file (fun () ->
       match read_agent_with_repair config agent_file with
       | Ok agent ->
-        reconcile_agent_current_task_record
+        reconcile_agent_current_task_record_result
           config
           ~touch_last_seen
           ~agent_file
           ~agent
           active_task_assignees
-      | Error msg -> Log.Misc.error "agent state reconcile failed: %s" msg)
+      | Error msg ->
+        Error
+          (Printf.sprintf
+             "agent state reconcile failed for %s: %s"
+             agent_name
+             msg))
+  else Ok ()
+;;
+
+let reconcile_agent_current_task_with_assignments
+      config
+      ?(touch_last_seen = true)
+      ~agent_name
+      active_task_assignees
+  =
+  match
+    reconcile_agent_current_task_with_assignments_result
+      config
+      ~touch_last_seen
+      ~agent_name
+      active_task_assignees
+  with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.error "%s" msg
+;;
+
+let reconcile_agent_current_task_with_backlog_result
+      config
+      ?(touch_last_seen = true)
+      ~agent_name
+      backlog
+  =
+  let active_task_assignees = active_task_assignees_by_task_id backlog in
+  reconcile_agent_current_task_with_assignments_result
+    config
+    ~touch_last_seen
+    ~agent_name
+    active_task_assignees
 ;;
 
 let reconcile_agent_current_task_with_backlog
@@ -143,12 +238,65 @@ let reconcile_agent_current_task_with_backlog
       ~agent_name
       backlog
   =
-  let active_task_assignees = active_task_assignees_by_task_id backlog in
-  reconcile_agent_current_task_with_assignments
-    config
-    ~touch_last_seen
-    ~agent_name
-    active_task_assignees
+  match
+    reconcile_agent_current_task_with_backlog_result
+      config
+      ~touch_last_seen
+      ~agent_name
+      backlog
+  with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.error "%s" msg
+;;
+
+let reconcile_all_agent_current_tasks_with_backlog_result
+      config
+      ?(touch_last_seen = true)
+      backlog
+  =
+  let agents_path = agents_dir config in
+  match Sys.file_exists agents_path with
+  | false -> Ok ()
+  | true ->
+      let active_task_assignees = active_task_assignees_by_task_id backlog in
+      (match Sys.readdir agents_path with
+       | exception Sys_error msg ->
+         Error (Printf.sprintf "agent state reconcile scan failed: %s" msg)
+       | entries ->
+         let agent_files =
+           entries
+           |> Array.to_list
+           |> List.filter (fun name -> Filename.check_suffix name ".json")
+         in
+         let rec reconcile_files = function
+           | [] -> Ok ()
+           | name :: rest ->
+             Workspace_query.safe_yield ();
+             let path = Filename.concat agents_path name in
+             let result =
+               with_file_lock config path (fun () ->
+                 match read_agent_with_repair config path with
+                 | Ok (agent : Masc_domain.agent) ->
+                   reconcile_agent_current_task_record_result
+                     config
+                     ~touch_last_seen
+                     ~agent_file:path
+                     ~agent
+                     active_task_assignees
+                 | Error msg ->
+                   Error
+                     (Printf.sprintf
+                        "agent state reconcile failed for %s: %s"
+                        name
+                        msg))
+             in
+             (match result with
+              | Ok () -> reconcile_files rest
+              | Error _ as error -> error)
+         in
+         reconcile_files agent_files)
+  | exception Sys_error msg ->
+    Error (Printf.sprintf "agent state reconcile scan failed: %s" msg)
 ;;
 
 let reconcile_all_agent_current_tasks_with_backlog
@@ -156,37 +304,50 @@ let reconcile_all_agent_current_tasks_with_backlog
       ?(touch_last_seen = true)
       backlog
   =
-  let agents_path = agents_dir config in
-  try
-    if Sys.file_exists agents_path
-    then (
-      let active_task_assignees = active_task_assignees_by_task_id backlog in
-      Sys.readdir agents_path
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.iter (fun name ->
-        Workspace_query.safe_yield ();
-        let path = Filename.concat agents_path name in
-        with_file_lock config path (fun () ->
-          match read_agent_with_repair config path with
-          | Ok (agent : Masc_domain.agent) ->
-            reconcile_agent_current_task_record
-              config
-              ~touch_last_seen
-              ~agent_file:path
-              ~agent
-              active_task_assignees
-          | Error msg -> Log.Misc.error "agent state reconcile failed for %s: %s" name msg)))
+  match
+    reconcile_all_agent_current_tasks_with_backlog_result
+      config
+      ~touch_last_seen
+      backlog
   with
-  | Sys_error msg -> Log.Misc.error "agent state reconcile scan failed: %s" msg
+  | Ok () -> ()
+  | Error msg -> Log.Misc.error "%s" msg
 ;;
 
-let reconcile_all_agent_current_tasks_with_fresh_backlog ?(touch_last_seen = true) config =
+let reconcile_all_agent_current_tasks_with_fresh_backlog_result
+      ?(touch_last_seen = true)
+      config
+  =
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
-    let backlog = read_backlog config in
-    reconcile_all_agent_current_tasks_with_backlog config ~touch_last_seen backlog;
-    backlog)
+    match read_backlog_r config with
+    | Error msg -> Error (Printf.sprintf "backlog read failed: %s" msg)
+    | Ok backlog ->
+      (match
+         reconcile_all_agent_current_tasks_with_backlog_result
+           config
+           ~touch_last_seen
+           backlog
+       with
+       | Ok () -> Ok backlog
+       | Error msg -> Error msg))
+;;
+
+let reconcile_all_agent_current_tasks_with_fresh_backlog ?touch_last_seen config =
+  match
+    reconcile_all_agent_current_tasks_with_fresh_backlog_result
+      ?touch_last_seen
+      config
+  with
+  | Ok backlog -> backlog
+  | Error msg ->
+    let message =
+      Printf.sprintf
+        "reconcile_all_agent_current_tasks_with_fresh_backlog failed: %s"
+        msg
+    in
+    Log.Misc.error "%s" message;
+    failwith message
 ;;
 
 (** Claim next highest priority unclaimed task.
@@ -215,7 +376,14 @@ let claim_next_r
       match read_backlog_r config with
       | Error msg -> Claim_next_error msg, None
       | Ok backlog ->
-        reconcile_agent_current_task_with_backlog config ~agent_name backlog;
+        (match
+           reconcile_agent_current_task_with_backlog_result
+             config
+             ~agent_name
+             backlog
+         with
+         | Error msg -> Claim_next_error msg, None
+         | Ok () ->
         (* #10421: If this agent already holds a Claimed or InProgress task,
          return that task instead of implicitly releasing it.  Automatic
          release caused keeper hot-potato loops: a repeated claim_next call
@@ -582,7 +750,7 @@ let claim_next_r
               ; message
               ; scope_widened
               }
-          , Some task.id ))
+          , Some task.id )))
     with
     | Existing_claim result -> result, None
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -618,12 +786,12 @@ let claim_next config ~agent_name =
     A Claimed or InProgress task whose assignee has no recent heartbeat
     and whose task-status timestamp exceeds the TTL is considered stale.
     Returns list of (task_id, assignee) pairs that were released. *)
-let release_stale_claims config ~ttl_seconds =
-  ensure_initialized config;
+let release_stale_claims_result config ~ttl_seconds =
+  try
+    ensure_initialized config;
   match read_backlog_r config with
   | Error msg ->
-    Log.TaskState.warn "release_stale_claims: skipped unreadable backlog: %s" msg;
-    []
+    Error (Printf.sprintf "release_stale_claims unreadable backlog: %s" msg)
   | Ok _ ->
     let now = Time_compat.now () in
     let status_timestamp = function
@@ -679,5 +847,19 @@ let release_stale_claims config ~ttl_seconds =
                 ]);
           None)
     in
-    Workspace_query.audit_orphan_tasks config |> List.filter_map release_one
+    (match Workspace_query.audit_orphan_tasks_result config with
+     | Error msg ->
+       Error (Printf.sprintf "release_stale_claims agent audit failed: %s" msg)
+     | Ok orphan_tasks -> Ok (orphan_tasks |> List.filter_map release_one))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let release_stale_claims config ~ttl_seconds =
+  match release_stale_claims_result config ~ttl_seconds with
+  | Ok released -> released
+  | Error msg ->
+    Log.TaskState.warn "release_stale_claims: skipped: %s" msg;
+    []
 ;;

@@ -73,44 +73,6 @@ let first_sentence text =
 let truncate ~max_len text =
   String_util.utf8_safe ~max_bytes:((max 0 (max_len - 1)) + 3) ~suffix:"…" text |> String_util.to_string
 
-(* RFC-0089 §4-1 G1: tool family typed classifier.
-
-   Closed sum over live tool name prefixes.  Adding a new family
-   requires extending [tool_family] AND every [match] — the
-   compiler refuses partial coverage.
-
-   The only string classifier is [classify_tool_family] — the
-   boundary parser from tool name to typed family.  After this
-   point every consumer uses the variant directly. *)
-type tool_family =
-  | Policy
-  | Observe
-
-let tool_family_prefix = function
-  | Policy -> "masc_policy_"
-  | Observe -> "masc_observe_"
-
-let all_tool_families =
-  [ Policy; Observe ]
-
-(* The single boundary parser.  Internal callers receive
-   [tool_family option] and dispatch via exhaustive [match];
-   no other site in this module compares a tool-name prefix. *)
-let classify_tool_family name =
-  List.find_opt
-    (fun family -> String.starts_with ~prefix:(tool_family_prefix family) name)
-    all_tool_families
-
-let help_doc_refs name =
-  match classify_tool_family name with
-  | Some Policy
-  | Some Observe ->
-      [
-        "docs/COMMAND-PLANE-RUNBOOK.md";
-        "docs/BENCHMARK-RUNBOOK.md";
-      ]
-  | None -> []
-
 let help_prompt_hints name =
   if String.equal name "masc_tool_help" then
     [ "Use prompt 'tool_help' when the caller needs a guided explanation." ]
@@ -326,7 +288,7 @@ let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
         when_to_use = default_when_to_use schema.name;
         key_constraints = constraints_from_meta meta;
         details_markdown = derived_details_with_meta meta schema.description;
-        doc_refs = help_doc_refs schema.name;
+        doc_refs = Tool_catalog.doc_refs schema.name;
         prompt_hints = help_prompt_hints schema.name;
         examples = [];
         alternatives = [];

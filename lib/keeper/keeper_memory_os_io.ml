@@ -56,27 +56,75 @@ let facts_path ~keeper_id =
    keepers with persisted facts. The reserved shared id is excluded so a prior
    sweep's output is never folded back in as a source keeper. Sorted for
    deterministic sweep order. *)
+let fact_store_keeper_ids_of_names names =
+  names
+  |> Array.to_list
+  |> List.filter_map (fun name ->
+    match Filename.chop_suffix_opt ~suffix:".facts.jsonl" name with
+    | Some id when not (String.equal id shared_store_id) -> Some id
+    | Some _ | None -> None)
+  |> List.sort String.compare
+;;
+
+let list_fact_store_keeper_ids_for_keepers_dir_result ~keepers_dir =
+  try
+    if not (Sys.file_exists keepers_dir)
+    then Ok []
+    else if not (Sys.is_directory keepers_dir)
+    then Error (Printf.sprintf "not a directory: %s" keepers_dir)
+    else Ok (Sys.readdir keepers_dir |> fact_store_keeper_ids_of_names)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
 let list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir =
-  let dir = keepers_dir in
-  if not (Sys.file_exists dir && Sys.is_directory dir)
-  then []
-  else
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter_map (fun name ->
-      match Filename.chop_suffix_opt ~suffix:".facts.jsonl" name with
-      | Some id when not (String.equal id shared_store_id) -> Some id
-      | Some _ | None -> None)
-    |> List.sort String.compare
+  match list_fact_store_keeper_ids_for_keepers_dir_result ~keepers_dir with
+  | Ok keeper_ids -> keeper_ids
+  | Error error ->
+    Log.Keeper.warn
+      "list_fact_store_keeper_ids_for_keepers_dir: failed to list fact stores \
+       for %s: %s"
+      keepers_dir
+      error;
+    []
+;;
+
+let list_fact_store_keeper_ids_result () =
+  try list_fact_store_keeper_ids_for_keepers_dir_result ~keepers_dir:(keepers_dir ()) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 ;;
 
 let list_fact_store_keeper_ids () =
-  list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
+  match list_fact_store_keeper_ids_result () with
+  | Ok keeper_ids -> keeper_ids
+  | Error error ->
+    Log.Keeper.warn
+      "list_fact_store_keeper_ids: failed to list fact stores: %s"
+      error;
+    []
+;;
+
+let list_fact_store_keeper_ids_for_base_path_result ~base_path =
+  try
+    list_fact_store_keeper_ids_for_keepers_dir_result
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 ;;
 
 let list_fact_store_keeper_ids_for_base_path ~base_path =
-  list_fact_store_keeper_ids_for_keepers_dir
-    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+  match list_fact_store_keeper_ids_for_base_path_result ~base_path with
+  | Ok keeper_ids -> keeper_ids
+  | Error error ->
+    Log.Keeper.warn
+      "list_fact_store_keeper_ids_for_base_path: failed to list fact stores for \
+       %s: %s"
+      base_path
+      error;
+    []
 ;;
 
 let events_path_for_keepers_dir ~keepers_dir ~keeper_id =
@@ -198,16 +246,39 @@ let max_generation_from_files ~keeper_id ~trace_id =
   |> List.fold_left max (-1)
 ;;
 
-let read_generation_counter path =
-  if not (Sys.file_exists path)
-  then None
-  else (
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         let len = in_channel_length ic in
-         really_input_string ic len |> String.trim |> int_of_string_opt))
+let read_generation_counter_result path =
+  try
+    if not (Sys.file_exists path)
+    then Ok None
+    else (
+      let ic = open_in_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+           let len = in_channel_length ic in
+           let raw = really_input_string ic len |> String.trim in
+           match int_of_string_opt raw with
+           | Some next when next >= 0 -> Ok (Some next)
+           | Some _ ->
+             Error
+               (Printf.sprintf
+                  "invalid generation counter %s: negative value %S"
+                  path
+                  raw)
+           | None ->
+             Error
+               (Printf.sprintf
+                  "invalid generation counter %s: %S"
+                  path
+                  raw)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "failed to read generation counter %s: %s"
+         path
+         (Printexc.to_string exn))
 ;;
 
 (** Compute the next generation number for a trace's episode files.
@@ -217,22 +288,41 @@ let read_generation_counter path =
     lock. The counter intentionally allows gaps when extraction later fails;
     uniqueness is more important than contiguous numbering across fibers or
     processes. *)
-let next_generation_with_floor ~floor ~keeper_id ~trace_id =
+let next_generation_with_floor_result ~floor ~keeper_id ~trace_id =
   let counter_path = generation_counter_path ~keeper_id ~trace_id in
-  File_lock_eio.with_lock counter_path (fun () ->
-    let next_from_files = max_generation_from_files ~keeper_id ~trace_id + 1 in
-    let next_from_counter =
-      match read_generation_counter counter_path with
-      | Some next -> next
-      | None -> 0
-    in
-    let generation = max floor (max next_from_files next_from_counter) in
-    write_file_atomically counter_path (Printf.sprintf "%d\n" (generation + 1));
-    generation)
+  try
+    File_lock_eio.with_lock counter_path (fun () ->
+      let next_from_files = max_generation_from_files ~keeper_id ~trace_id + 1 in
+      match read_generation_counter_result counter_path with
+      | Error error -> Error error
+      | Ok next_from_counter ->
+        let next_from_counter = Option.value next_from_counter ~default:0 in
+        let generation = max floor (max next_from_files next_from_counter) in
+        write_file_atomically counter_path (Printf.sprintf "%d\n" (generation + 1));
+        Ok generation)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "failed to reserve episode generation keeper=%s trace=%s: %s"
+         keeper_id
+         trace_id
+         (Printexc.to_string exn))
+;;
+
+let next_generation_with_floor ~floor ~keeper_id ~trace_id =
+  match next_generation_with_floor_result ~floor ~keeper_id ~trace_id with
+  | Ok generation -> generation
+  | Error error -> invalid_arg error
 ;;
 
 let next_generation ~keeper_id ~trace_id =
   next_generation_with_floor ~floor:0 ~keeper_id ~trace_id
+;;
+
+let next_generation_result ~keeper_id ~trace_id =
+  next_generation_with_floor_result ~floor:0 ~keeper_id ~trace_id
 ;;
 
 let unique_episode_path ~keeper_id episode =
@@ -448,9 +538,67 @@ let take_last n xs =
   if n <= 0 then [] else if len <= n then xs else drop (len - n) xs
 ;;
 
-let parse_json_line parse line =
-  try parse (Yojson.Safe.from_string line) with
-  | Yojson.Json_error _ -> None
+type fact_jsonl_read_scope =
+  | Fact_read_full_file
+  | Fact_read_tail_window
+
+type fact_jsonl_parse_error =
+  { path : string
+  ; scope : fact_jsonl_read_scope
+  ; line_index : int
+  ; message : string
+  }
+
+type fact_read_with_errors =
+  { facts : fact list
+  ; parse_errors : fact_jsonl_parse_error list
+  }
+
+let fact_jsonl_read_scope_to_string = function
+  | Fact_read_full_file -> "full_file"
+  | Fact_read_tail_window -> "tail_window"
+;;
+
+let fact_jsonl_parse_error_to_string error =
+  Printf.sprintf
+    "%s:%s:%d: %s"
+    error.path
+    (fact_jsonl_read_scope_to_string error.scope)
+    error.line_index
+    error.message
+;;
+
+let warn_fact_jsonl_parse_errors ~site ~keeper_id errors =
+  match errors with
+  | [] -> ()
+  | first :: _ ->
+    Log.Keeper.warn
+      "memory_os %s keeper=%s fact JSONL parse errors count=%d first=%s"
+      site
+      keeper_id
+      (List.length errors)
+      (fact_jsonl_parse_error_to_string first)
+;;
+
+let parse_fact_json_line_with_error ~path ~scope ~line_index line =
+  match Yojson.Safe.from_string line with
+  | exception Yojson.Json_error message ->
+    Error { path; scope; line_index; message = "invalid fact JSON: " ^ message }
+  | json ->
+    (match fact_of_json json with
+     | Some fact -> Ok fact
+     | None -> Error { path; scope; line_index; message = "invalid fact JSON shape" })
+;;
+
+let parse_fact_lines_with_errors ~path ~scope lines =
+  let rec loop line_index facts errors = function
+    | [] -> { facts = List.rev facts; parse_errors = List.rev errors }
+    | line :: rest ->
+      (match parse_fact_json_line_with_error ~path ~scope ~line_index line with
+       | Ok fact -> loop (line_index + 1) (fact :: facts) errors rest
+       | Error error -> loop (line_index + 1) facts (error :: errors) rest)
+  in
+  loop 1 [] [] lines
 ;;
 
 let parse_fact_json_line_strict ~path ~line_number line =
@@ -463,9 +611,25 @@ let parse_fact_json_line_strict ~path ~line_number line =
     Error (Printf.sprintf "%s:%d: invalid fact JSON: %s" path line_number message)
 ;;
 
+let read_facts_all_with_errors_for_keepers_dir ~keepers_dir ~keeper_id =
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  read_lines_all path
+  |> parse_fact_lines_with_errors ~path ~scope:Fact_read_full_file
+;;
+
+let read_facts_all_with_errors ~keeper_id =
+  read_facts_all_with_errors_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+;;
+
 let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
-  read_lines_all (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  |> List.filter_map (parse_json_line fact_of_json)
+  let result = read_facts_all_with_errors_for_keepers_dir ~keepers_dir ~keeper_id in
+  warn_fact_jsonl_parse_errors
+    ~site:"read_facts_all_for_keepers_dir"
+    ~keeper_id
+    result.parse_errors;
+  result.facts
 ;;
 
 let read_facts_all ~keeper_id =
@@ -487,21 +651,133 @@ let read_facts_all_strict ~keeper_id =
   read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
+let read_facts_tail_with_errors_for_keepers_dir ~keepers_dir ~keeper_id ~n =
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let result =
+    read_lines_tail path ~n
+    |> parse_fact_lines_with_errors ~path ~scope:Fact_read_tail_window
+  in
+  { result with facts = take_last n result.facts }
+;;
+
 let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
-  read_lines_tail (facts_path_for_keepers_dir ~keepers_dir ~keeper_id) ~n
-  |> List.filter_map (parse_json_line fact_of_json)
-  |> take_last n
+  let result = read_facts_tail_with_errors_for_keepers_dir ~keepers_dir ~keeper_id ~n in
+  warn_fact_jsonl_parse_errors
+    ~site:"read_facts_tail_for_keepers_dir"
+    ~keeper_id
+    result.parse_errors;
+  result.facts
 ;;
 
 let read_facts_tail ~keeper_id ~n =
   read_facts_tail_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id ~n
 ;;
 
-let read_facts_tail_for_base_path ~base_path ~keeper_id ~n =
-  read_facts_tail_for_keepers_dir
+let read_facts_tail_with_errors ~keeper_id ~n =
+  read_facts_tail_with_errors_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~n
+;;
+
+let read_facts_tail_with_errors_for_base_path ~base_path ~keeper_id ~n =
+  read_facts_tail_with_errors_for_keepers_dir
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
     ~keeper_id
     ~n
+;;
+
+let read_facts_tail_for_base_path ~base_path ~keeper_id ~n =
+  let result = read_facts_tail_with_errors_for_base_path ~base_path ~keeper_id ~n in
+  warn_fact_jsonl_parse_errors
+    ~site:"read_facts_tail_for_base_path"
+    ~keeper_id
+    result.parse_errors;
+  result.facts
+;;
+
+type episode_read_scope =
+  | Episode_read_events_tail
+  | Episode_read_episode_dir
+  | Episode_read_episode_file
+  | Episode_read_episode_file_unlink
+
+type episode_parse_error =
+  { episode_parse_path : string
+  ; episode_parse_scope : episode_read_scope
+  ; episode_parse_line_index : int
+  ; episode_parse_message : string
+  }
+
+type episode_read_with_errors =
+  { episodes : episode list
+  ; episode_parse_errors : episode_parse_error list
+  }
+
+type episode_file_cap_result =
+  { episode_files_dropped : int
+  ; episode_file_cap_errors : episode_parse_error list
+  }
+
+let episode_read_scope_to_string = function
+  | Episode_read_events_tail -> "events_tail"
+  | Episode_read_episode_dir -> "episode_dir"
+  | Episode_read_episode_file -> "episode_file"
+  | Episode_read_episode_file_unlink -> "episode_file_unlink"
+;;
+
+let episode_parse_error_to_string error =
+  Printf.sprintf
+    "%s:%s:%d: %s"
+    error.episode_parse_path
+    (episode_read_scope_to_string error.episode_parse_scope)
+    error.episode_parse_line_index
+    error.episode_parse_message
+;;
+
+let warn_episode_parse_errors ~site ~keeper_id errors =
+  match errors with
+  | [] -> ()
+  | first :: _ ->
+    Log.Keeper.warn
+      "memory_os %s keeper=%s episode parse errors count=%d first=%s"
+      site
+      keeper_id
+      (List.length errors)
+      (episode_parse_error_to_string first)
+;;
+
+let parse_episode_json_with_error ~path ~scope ~line_index text =
+  match Yojson.Safe.from_string text with
+  | exception Yojson.Json_error message ->
+    Error
+      { episode_parse_path = path
+      ; episode_parse_scope = scope
+      ; episode_parse_line_index = line_index
+      ; episode_parse_message = "invalid episode JSON: " ^ message
+      }
+  | json ->
+    (match episode_of_json json with
+     | Some episode -> Ok episode
+     | None ->
+       Error
+         { episode_parse_path = path
+         ; episode_parse_scope = scope
+         ; episode_parse_line_index = line_index
+         ; episode_parse_message = "invalid episode JSON shape"
+         })
+;;
+
+let parse_episode_lines_with_errors ~path ~scope lines =
+  let rec loop line_index episodes errors = function
+    | [] ->
+      { episodes = List.rev episodes; episode_parse_errors = List.rev errors }
+    | line :: rest ->
+      (match parse_episode_json_with_error ~path ~scope ~line_index line with
+       | Ok episode -> loop (line_index + 1) (episode :: episodes) errors rest
+       | Error error -> loop (line_index + 1) episodes (error :: errors) rest)
+  in
+  loop 1 [] [] lines
 ;;
 
 (* RFC-0239 Q4: Memory OS size policy lives in [Keeper_memory_os_policy]. These
@@ -673,20 +949,36 @@ let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
     { merged; appended; dropped = rank_dropped + List.length expired })
 ;;
 
-let read_events_tail ~keeper_id ~n =
-  read_lines_tail (events_path ~keeper_id) ~n
-  |> List.filter_map (parse_json_line episode_of_json)
-  |> take_last n
+let read_events_tail_with_errors ~keeper_id ~n =
+  let path = events_path ~keeper_id in
+  let result =
+    read_lines_tail path ~n
+    |> parse_episode_lines_with_errors ~path ~scope:Episode_read_events_tail
+  in
+  { result with episodes = take_last n result.episodes }
 ;;
 
-let read_episode_file path =
+let read_events_tail ~keeper_id ~n =
+  let result = read_events_tail_with_errors ~keeper_id ~n in
+  warn_episode_parse_errors
+    ~site:"read_events_tail"
+    ~keeper_id
+    result.episode_parse_errors;
+  result.episodes
+;;
+
+let read_episode_file_with_error path =
   let ic = open_in_bin path in
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)
     (fun () ->
        let len = in_channel_length ic in
        let buf = really_input_string ic len in
-       parse_json_line episode_of_json buf)
+       parse_episode_json_with_error
+         ~path
+         ~scope:Episode_read_episode_file
+         ~line_index:1
+         buf)
 ;;
 
 let compare_episode_recency a b =
@@ -704,24 +996,111 @@ let compare_episode_recency a b =
       else String.compare a.episode_summary b.episode_summary))
 ;;
 
-let read_episode_files_tail ~keeper_id ~n =
-  let dir = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
-  if n <= 0 || not (Sys.file_exists dir && Sys.is_directory dir)
-  then []
+let episode_dir_read_error ~path message =
+  { episode_parse_path = path
+  ; episode_parse_scope = Episode_read_episode_dir
+  ; episode_parse_line_index = 0
+  ; episode_parse_message = message
+  }
+;;
+
+let episode_file_unlink_error ~path message =
+  { episode_parse_path = path
+  ; episode_parse_scope = Episode_read_episode_file_unlink
+  ; episode_parse_line_index = 0
+  ; episode_parse_message = message
+  }
+;;
+
+let episode_file_paths_in_dir_with_errors dir =
+  try
+    if not (Sys.file_exists dir)
+    then [], []
+    else if not (Sys.is_directory dir)
+    then [], [ episode_dir_read_error ~path:dir "not a directory" ]
+    else (
+      let paths =
+        Sys.readdir dir
+        |> Array.to_list
+        |> List.filter (fun name -> Filename.check_suffix name ".json")
+        |> List.map (fun name -> Filename.concat dir name)
+        |> List.filter Sys.file_exists
+      in
+      paths, [])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> [], [ episode_dir_read_error ~path:dir (Printexc.to_string exn) ]
+;;
+
+let episode_file_paths_in_dir dir =
+  let paths, errors = episode_file_paths_in_dir_with_errors dir in
+  (match errors with
+   | [] -> ()
+   | first :: _ ->
+     Log.Keeper.warn
+       "memory_os episode_file_paths_in_dir episode dir read errors count=%d \
+        first=%s"
+       (List.length errors)
+       (episode_parse_error_to_string first));
+  paths
+;;
+
+let episode_files_dir_path ~keeper_id =
+  Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes")
+;;
+
+let episode_file_paths ~keeper_id =
+  episode_files_dir_path ~keeper_id |> episode_file_paths_in_dir
+;;
+
+let parse_episode_files_with_errors paths =
+  let rec loop parsed errors = function
+    | [] -> List.rev parsed, List.rev errors
+    | path :: rest ->
+      (match read_episode_file_with_error path with
+       | Ok episode -> loop ((path, episode) :: parsed) errors rest
+       | Error error -> loop parsed (error :: errors) rest)
+  in
+  loop [] [] paths
+;;
+
+let read_episode_files_tail_with_errors ~keeper_id ~n =
+  if n <= 0
+  then { episodes = []; episode_parse_errors = [] }
   else (
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".json")
-    |> List.map (fun name -> Filename.concat dir name)
-    |> List.filter Sys.file_exists
-    |> List.filter_map read_episode_file
-    |> List.sort compare_episode_recency
-    |> take_last n)
+    let paths, path_read_errors =
+      episode_files_dir_path ~keeper_id |> episode_file_paths_in_dir_with_errors
+    in
+    let parsed, episode_parse_errors =
+      paths |> parse_episode_files_with_errors
+    in
+    let episodes =
+      parsed
+      |> List.map snd
+      |> List.sort compare_episode_recency
+      |> take_last n
+    in
+    { episodes; episode_parse_errors = path_read_errors @ episode_parse_errors })
+;;
+
+let read_episodes_tail_with_errors ~keeper_id ~n =
+  let events = read_events_tail_with_errors ~keeper_id ~n in
+  if events.episodes = []
+  then (
+    let files = read_episode_files_tail_with_errors ~keeper_id ~n in
+    { episodes = files.episodes
+    ; episode_parse_errors = events.episode_parse_errors @ files.episode_parse_errors
+    })
+  else events
 ;;
 
 let read_episodes_tail ~keeper_id ~n =
-  let events = read_events_tail ~keeper_id ~n in
-  if events = [] then read_episode_files_tail ~keeper_id ~n else events
+  let result = read_episodes_tail_with_errors ~keeper_id ~n in
+  warn_episode_parse_errors
+    ~site:"read_episodes_tail"
+    ~keeper_id
+    result.episode_parse_errors;
+  result.episodes
 ;;
 
 (* RFC-0272 (defect D): the hysteresis decision shared by the episode-log caps.
@@ -765,7 +1144,7 @@ let cap_events ~keeper_id ~keep ~trigger =
    best-effort / [Sys_error]-tolerant: a concurrent reader holding a file is
    fine, and no lock is taken here that could deadlock with the bundle lock the
    caller already holds. Returns the number unlinked. *)
-let cap_episode_files ~keeper_id ~keep ~trigger =
+let cap_episode_files_with_errors ~keeper_id ~keep ~trigger =
   (* RFC-0302 (#22823): resolve [episodes_dir] on the main domain (it touches the
      Config_dir_resolver plain-ref memo + mkdir), then offload the blocking
      readdir + per-file episode read + best-effort unlink scan to the shared
@@ -776,23 +1155,48 @@ let cap_episode_files ~keeper_id ~keep ~trigger =
      (inline-fallback in tests) submit. *)
   let dir = episodes_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline (fun () ->
-    let parsed =
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.map (fun name -> Filename.concat dir name)
-      |> List.filter Sys.file_exists
-      |> List.filter_map (fun p ->
-        match read_episode_file p with
-        | Some ep -> Some (p, ep)
-        | None -> None)
+    let paths, path_read_errors = episode_file_paths_in_dir_with_errors dir in
+    let parsed, episode_parse_errors =
+      paths |> parse_episode_files_with_errors
     in
-    match trim_target ~count:(List.length parsed) ~keep ~trigger with
-    | None -> 0
-    | Some keep_n ->
-      let sorted = List.sort (fun (_, a) (_, b) -> compare_episode_recency a b) parsed in
-      let n_drop = List.length sorted - keep_n in
-      let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
-      List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) to_drop;
-      List.length to_drop)
+    let dropped, unlink_errors =
+      match trim_target ~count:(List.length parsed) ~keep ~trigger with
+      | None -> 0, []
+      | Some keep_n ->
+        let sorted =
+          List.sort (fun (_, a) (_, b) -> compare_episode_recency a b) parsed
+        in
+        let n_drop = List.length sorted - keep_n in
+        let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
+        List.fold_left
+          (fun (dropped, errors) path ->
+             try
+               Sys.remove path;
+               dropped + 1, errors
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | Sys_error message ->
+               dropped, episode_file_unlink_error ~path message :: errors
+             | Unix.Unix_error (error, fn, arg) ->
+               let message =
+                 Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)
+               in
+               dropped, episode_file_unlink_error ~path message :: errors)
+          (0, [])
+          to_drop
+        |> fun (dropped, errors) -> dropped, List.rev errors
+    in
+    { episode_files_dropped = dropped
+    ; episode_file_cap_errors =
+        path_read_errors @ episode_parse_errors @ unlink_errors
+    })
+;;
+
+let cap_episode_files ~keeper_id ~keep ~trigger =
+  let result = cap_episode_files_with_errors ~keeper_id ~keep ~trigger in
+  warn_episode_parse_errors
+    ~site:"cap_episode_files"
+    ~keeper_id
+    result.episode_file_cap_errors;
+  result.episode_files_dropped
 ;;

@@ -26,6 +26,31 @@ let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
       ())
 ;;
 
+let warn_telemetry_drop_error ~(event : Workspace_telemetry_drop_event.t) error =
+  let event_family = Workspace_telemetry_drop_event.family_to_wire event in
+  let event_kind = Workspace_telemetry_drop_event.kind_to_wire event in
+  let details =
+    `Assoc
+      [ "event_family", `String event_family
+      ; "event_kind", `String event_kind
+      ; "error", `String error
+      ]
+  in
+  Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_log" (fun () ->
+    Log.Workspace.emit
+      Log.Warn
+      ~details
+      (Printf.sprintf
+         "telemetry/audit dropped (non-Eio context): %s/%s"
+         event_family
+         event_kind));
+  Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_metric" (fun () ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_workspace_telemetry_drop
+      ~labels:(Workspace_telemetry_drop_event.to_metric_labels event)
+      ())
+;;
+
 let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = function
   | Masc_domain.Claim -> Audit_log.ClaimTask
   | Masc_domain.Start -> Audit_log.StartTask
@@ -167,16 +192,21 @@ let observe_task_transition_event
    with
    | Stdlib.Effect.Unhandled _ as exn ->
      warn_telemetry_drop ~event:(Task_transition transition) exn);
-  try
-    Keeper_accountability.record_task_transition
-      config
-      ~agent_name
-      ~task_id
-      ~transition
-      ~details
-  with
-  | Stdlib.Effect.Unhandled _ as exn ->
-    warn_telemetry_drop ~event:(Accountability transition) exn
+  (try
+     match
+       Keeper_accountability.record_task_transition_result
+         config
+         ~agent_name
+         ~task_id
+         ~transition
+         ~details
+     with
+     | Ok () -> ()
+     | Error error ->
+       warn_telemetry_drop_error ~event:(Accountability transition) error
+   with
+   | Stdlib.Effect.Unhandled _ as exn ->
+     warn_telemetry_drop ~event:(Accountability transition) exn)
 ;;
 
 (* #9795: wire the FSM drift hook to a Otel_metric_store counter emit. *)

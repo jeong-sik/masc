@@ -1,13 +1,18 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
+  cancelSchedule,
   resolveScheduleApproval,
+  type DashboardScheduleApprovalDecision,
   type DashboardScheduleDecision,
   type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
   type DashboardScheduledAutomationExecution,
+  type DashboardScheduledAutomationLifecycleAudit,
+  type DashboardScheduledAutomationLifecycleEvent,
   type DashboardScheduledAutomationRequest,
   type DashboardScheduledAutomationSignal,
+  type DashboardScheduledAutomationSignalError,
 } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
 import { ActionButton } from '../common/button'
@@ -60,17 +65,53 @@ function normalized(value: string | null | undefined): string {
 // (schedule.jsx: onSchedule lift keeps the chip/badge in sync). Same derivation
 // as the surface's '승인 대기' KPI: sparse backend counts vs materialized request
 // statuses, whichever is larger, so a projection that ships only one is honored.
-const SCHEDULE_PENDING_STATUSES = ['pending', 'pending_approval', 'awaiting_approval']
+export const SCHEDULE_PENDING_STATUSES = ['pending', 'pending_approval', 'awaiting_approval', 'blocked_approval'] as const
+export const SCHEDULE_DUE_STATUSES = ['due', 'due_pending_refresh'] as const
+export const SCHEDULE_READY_STATUSES = ['ready', 'execution_ready'] as const
+export const SCHEDULE_SCHEDULED_STATUSES = ['scheduled'] as const
+export const SCHEDULE_RUNNING_STATUSES = ['running'] as const
+export const SCHEDULE_ACTIVE_STATUSES = [...SCHEDULE_DUE_STATUSES, ...SCHEDULE_RUNNING_STATUSES] as const
+export const SCHEDULE_DUE_FILTER_STATUSES = [...SCHEDULE_DUE_STATUSES, 'blocked_approval'] as const
+export const SCHEDULE_SCHEDULED_FILTER_STATUSES = [
+  ...SCHEDULE_SCHEDULED_STATUSES,
+  ...SCHEDULE_RUNNING_STATUSES,
+] as const
+export const SCHEDULE_FAILED_STATUSES = ['failed'] as const
+export const SCHEDULE_TERMINAL_STATUSES = [
+  'succeeded',
+  'failed',
+  'rejected',
+  'expired',
+  'cancelled',
+  'canceled',
+] as const
+
+export const SCHEDULE_PENDING_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_PENDING_STATUSES)
+export const SCHEDULE_DUE_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_DUE_STATUSES)
+export const SCHEDULE_READY_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_READY_STATUSES)
+export const SCHEDULE_SCHEDULED_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_SCHEDULED_STATUSES)
+export const SCHEDULE_RUNNING_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_RUNNING_STATUSES)
+export const SCHEDULE_ACTIVE_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_ACTIVE_STATUSES)
+export const SCHEDULE_DUE_FILTER_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_DUE_FILTER_STATUSES)
+export const SCHEDULE_SCHEDULED_FILTER_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_SCHEDULED_FILTER_STATUSES)
+export const SCHEDULE_FAILED_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_FAILED_STATUSES)
+export const SCHEDULE_TERMINAL_STATUS_SET: ReadonlySet<string> = new Set(SCHEDULE_TERMINAL_STATUSES)
+
+const SCHEDULE_PENDING_OPERATOR_ACTION_SET: ReadonlySet<string> = new Set(['approve_or_reject'])
 export function scheduledPendingApprovalCount(
   automation: DashboardScheduledAutomation | null | undefined,
-): number {
+): number | null {
   if (!automation) return 0
-  const statuses = SCHEDULE_PENDING_STATUSES.map(normalizedScheduleStatus)
-  const fromCounts = statuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
+  if (automation.schedule_store_known === false) return null
+  const fromCounts = SCHEDULE_PENDING_STATUSES.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
   const fromRequests = (automation.requests ?? [])
-    .filter(request => statuses.includes(normalizedScheduleStatus(request.effective_status ?? request.status)))
+    .filter(request => SCHEDULE_PENDING_STATUS_SET.has(normalizedScheduleStatus(request.effective_status ?? request.status)))
     .length
   return Math.max(fromCounts, fromRequests)
+}
+
+function scheduleCountLabel(count: number | null | undefined): string {
+  return count == null ? 'unknown' : count.toLocaleString()
 }
 
 function automationTone(status: string | null | undefined): StatusChipTone {
@@ -98,6 +139,30 @@ function automationTone(status: string | null | undefined): StatusChipTone {
     default:
       return 'neutral'
   }
+}
+
+function runnerStatusTone(status: string | null | undefined): StatusChipTone {
+  switch (normalized(status)) {
+    case 'ok':
+      return 'ok'
+    case 'running':
+    case 'not_started':
+      return 'warn'
+    case 'stale':
+    case 'degraded':
+      return 'bad'
+    default:
+      return 'neutral'
+  }
+}
+
+function secondsLabel(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  if (value < 1) return `${Math.round(value * 1000)}ms`
+  if (value < 60) return `${value.toFixed(1)}s`
+  const minutes = Math.floor(value / 60)
+  const seconds = Math.round(value % 60)
+  return `${minutes}m ${seconds}s`
 }
 
 function effectiveStatus(request: DashboardScheduledAutomationRequest): string {
@@ -136,15 +201,15 @@ export function filterMatches(filter: ScheduleFilterKey, request: DashboardSched
   const operatorAction = normalized(request.operator_action)
   switch (filter) {
     case 'pending':
-      return status.includes('approval') || operatorAction.includes('approve')
+      return SCHEDULE_PENDING_STATUS_SET.has(status) || SCHEDULE_PENDING_OPERATOR_ACTION_SET.has(operatorAction)
     case 'due':
-      return status === 'due' || status === 'due_pending_refresh' || status === 'blocked_approval'
+      return SCHEDULE_DUE_FILTER_STATUS_SET.has(status)
     case 'ready':
-      return ['ready', 'execution_ready'].includes(readiness)
+      return SCHEDULE_READY_STATUS_SET.has(readiness)
     case 'scheduled':
-      return status === 'scheduled' || status === 'running'
+      return SCHEDULE_SCHEDULED_FILTER_STATUS_SET.has(status)
     case 'terminal':
-      return ['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'canceled'].includes(status)
+      return SCHEDULE_TERMINAL_STATUS_SET.has(status)
     default:
       // Exhaustiveness: a new ScheduleFilterKey must fail to compile here rather
       // than silently fall through to "show all" (Unknown->Permissive-Default).
@@ -214,13 +279,9 @@ export interface WakeSignal {
 // are history, and running rows have already woken.
 const NON_UPCOMING_WAKE_READINESS: ReadonlySet<string> = new Set(['terminal', 'expired', 'running'])
 const NON_UPCOMING_WAKE_STATUS: ReadonlySet<string> = new Set([
-  'running',
+  ...SCHEDULE_RUNNING_STATUSES,
   'terminal',
-  'expired',
-  'cancelled',
-  'succeeded',
-  'failed',
-  'rejected',
+  ...SCHEDULE_TERMINAL_STATUSES,
 ])
 
 export function selectWakeSignals(
@@ -234,8 +295,8 @@ export function selectWakeSignals(
     if (at == null) continue
     const readiness = request.execution_readiness ?? null
     const status = request.effective_status ?? request.status
-    if (readiness != null && NON_UPCOMING_WAKE_READINESS.has(readiness)) continue
-    if (NON_UPCOMING_WAKE_STATUS.has(status)) continue
+    if (readiness != null && NON_UPCOMING_WAKE_READINESS.has(normalized(readiness))) continue
+    if (NON_UPCOMING_WAKE_STATUS.has(normalized(status))) continue
     signals.push({
       id: request.schedule_id,
       at,
@@ -327,10 +388,40 @@ function executionDetailRows(detail: unknown): Array<{ label: string; value: str
     .slice(0, 6)
 }
 
+function lifecycleStatusTransition(event: DashboardScheduledAutomationLifecycleEvent): string {
+  const previous = event.previous_status ? enumLabel(event.previous_status) : 'none'
+  return `${previous} -> ${enumLabel(event.current_status)}`
+}
+
+function lifecycleEventActorLabel(event: DashboardScheduledAutomationLifecycleEvent): string | null {
+  const actor = event.actor
+  if (!actor) return null
+  const display = actor.display_name?.trim() || actor.id
+  return `${display} · ${enumLabel(actor.kind)}`
+}
+
+function lifecycleEventDetailRows(
+  event: DashboardScheduledAutomationLifecycleEvent,
+): Array<{ label: string; value: string }> {
+  return executionDetailRows(event.detail)
+}
+
+function lifecycleAuditTone(audit: DashboardScheduledAutomationLifecycleAudit | null | undefined): StatusChipTone {
+  if (!audit) return 'neutral'
+  return audit.status === 'ok' ? 'ok' : 'bad'
+}
+
+function lifecycleAuditEvents(
+  audit: DashboardScheduledAutomationLifecycleAudit | null | undefined,
+): DashboardScheduledAutomationLifecycleEvent[] {
+  return audit?.events ?? []
+}
+
 function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest }) {
   const kind = request.payload_kind ?? '-'
   const target = request.payload_target?.trim() || null
   const summary = request.payload_summary?.trim() || null
+  const dispatchTool = request.payload_dispatch_tool?.trim() || null
   const support = request.payload_support
   const supportTone: StatusChipTone =
     support === 'supported' ? 'ok' : support === 'unsupported' ? 'bad' : 'neutral'
@@ -344,6 +435,9 @@ function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest
       </div>
       ${target
         ? html`<div class="mt-1 font-mono text-3xs text-[var(--color-fg-muted)]">${target}</div>`
+        : null}
+      ${dispatchTool
+        ? html`<div class="mt-1 font-mono text-3xs text-[var(--color-fg-muted)]">tool ${dispatchTool}</div>`
         : null}
       ${summary
         ? html`<div class="mt-1 truncate text-3xs text-[var(--color-fg-muted)]" title=${summary}>${summary}</div>`
@@ -410,25 +504,20 @@ function KeeperActionCell({ request }: { request: DashboardScheduledAutomationRe
 }
 
 function isTerminalStatus(status: string | null | undefined): boolean {
-  switch (status) {
-    case 'succeeded':
-    case 'failed':
-    case 'rejected':
-    case 'cancelled':
-    case 'expired':
-      return true
-    default:
-      return false
-  }
+  return SCHEDULE_TERMINAL_STATUS_SET.has(normalized(status))
 }
 
 function isApprovalActionable(request: DashboardScheduledAutomationRequest): boolean {
   if (isTerminalStatus(request.status) || isTerminalStatus(request.effective_status)) return false
-  return request.operator_action === 'approve_or_reject'
-    || request.execution_readiness === 'blocked_approval'
-    || request.execution_readiness === 'awaiting_approval'
-    || request.effective_status === 'blocked_approval'
-    || request.effective_status === 'awaiting_approval'
+  return SCHEDULE_PENDING_OPERATOR_ACTION_SET.has(normalized(request.operator_action))
+    || SCHEDULE_PENDING_STATUS_SET.has(normalized(request.execution_readiness))
+    || SCHEDULE_PENDING_STATUS_SET.has(normalized(request.effective_status))
+}
+
+function isScheduleCancelable(request: DashboardScheduledAutomationRequest): boolean {
+  if (isTerminalStatus(request.status) || isTerminalStatus(request.effective_status)) return false
+  const status = normalized(effectiveStatus(request))
+  return !SCHEDULE_RUNNING_STATUS_SET.has(status)
 }
 
 function ApprovalCell({
@@ -438,12 +527,12 @@ function ApprovalCell({
   request: DashboardScheduledAutomationRequest
   onResolved?: () => Promise<void> | void
 }) {
-  const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
+  const [pendingDecision, setPendingDecision] = useState<DashboardScheduleApprovalDecision | null>(null)
   const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   const actionable = isApprovalActionable(request)
   const busy = pendingDecision !== null
 
-  async function decide(decision: DashboardScheduleDecision) {
+  async function decide(decision: DashboardScheduleApprovalDecision) {
     setPendingDecision(decision)
     try {
       await resolveScheduleApproval(
@@ -629,6 +718,68 @@ function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutoma
   `
 }
 
+function LifecycleAuditBlock({ audit }: { audit: DashboardScheduledAutomationLifecycleAudit | null | undefined }) {
+  if (!audit) {
+    return html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">-</div>`
+  }
+  const events = lifecycleAuditEvents(audit)
+  const eventCount = audit.event_count ?? events.length
+  const coverage = audit.coverage?.trim() || null
+  const backfillPolicy = audit.backfill_policy?.trim() || null
+  return html`
+    <div class="mt-1 grid gap-2 text-xs text-[var(--color-fg-muted)]" data-schedule-lifecycle-audit-status=${audit.status}>
+      <div class="flex flex-wrap items-center gap-2">
+        <${StatusChip} tone=${lifecycleAuditTone(audit)} uppercase=${false}>${enumLabel(audit.status)}<//>
+        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${audit.source}</span>
+        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${eventCount.toLocaleString()} / ${audit.limit.toLocaleString()}</span>
+      </div>
+      ${coverage || backfillPolicy
+        ? html`
+            <div class="flex flex-wrap gap-2 font-mono text-3xs text-[var(--color-fg-disabled)]">
+              ${coverage ? html`<span data-schedule-lifecycle-audit-coverage=${coverage}>${coverage}</span>` : null}
+              ${backfillPolicy
+                ? html`<span data-schedule-lifecycle-audit-backfill=${backfillPolicy}>${backfillPolicy}</span>`
+                : null}
+            </div>
+          `
+        : null}
+      ${audit.error
+        ? html`<div class="text-[var(--color-danger-fg)]" data-schedule-lifecycle-audit-error>${audit.error}</div>`
+        : null}
+      ${events.length > 0
+        ? html`
+            <div class="grid gap-1">
+              ${events.map(event => {
+                const actor = lifecycleEventActorLabel(event)
+                const detailRows = lifecycleEventDetailRows(event)
+                return html`
+                  <div
+                    class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1"
+                    data-schedule-lifecycle-event=${event.event_id}
+                  >
+                    <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${formatDateTimeKo(event.recorded_at ?? null)}</span>
+                    <span class="min-w-0">
+                      <span class="font-mono text-[var(--color-fg-secondary)]">${enumLabel(event.action)}</span>
+                      <span class="ml-2 font-mono text-3xs text-[var(--color-fg-disabled)]">${lifecycleStatusTransition(event)}</span>
+                      ${actor
+                        ? html`<span class="ml-2 font-mono text-3xs text-[var(--color-fg-disabled)]" data-schedule-lifecycle-actor=${event.event_id}>${actor}</span>`
+                        : null}
+                      ${detailRows.map(row => html`
+                        <span class="mt-1 block font-mono text-3xs text-[var(--color-fg-disabled)]" data-schedule-lifecycle-detail=${`${event.event_id}:${row.label}`}>
+                          ${row.label}: ${row.value}
+                        </span>
+                      `)}
+                    </span>
+                  </div>
+                `
+              })}
+            </div>
+          `
+        : html`<div class="text-xs text-[var(--color-fg-muted)]">기록 없음</div>`}
+    </div>
+  `
+}
+
 function ScheduleDetailPanel({
   request,
   onResolved,
@@ -714,6 +865,10 @@ function ScheduleDetailPanel({
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">최근 실행</div>
           <${LastExecutionBlock} execution=${execution} />
+        </div>
+        <div>
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">lifecycle audit</div>
+          <${LifecycleAuditBlock} audit=${request.lifecycle_audit} />
         </div>
       </div>
     </section>
@@ -827,6 +982,23 @@ function DurableSignalItem({
   `
 }
 
+function DurableSignalErrorItem({ error }: { error: DashboardScheduledAutomationSignalError }) {
+  return html`
+    <li
+      class="grid gap-1 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2"
+      data-schedule-signal-error=${error.ordinal}
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <${StatusChip} tone="bad" uppercase=${false}>decode error<//>
+        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">#${error.ordinal.toLocaleString()}</span>
+      </div>
+      <div class="break-words font-mono text-3xs text-[var(--color-fg-secondary)]" title=${error.error}>
+        ${error.error}
+      </div>
+    </li>
+  `
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    keeper-v2 prototype surface (schedule.jsx). Emits the vendored `.sch-*` /
    `.turn-*` DOM so styles/keeper-v2/schedule.css applies. Opt-in via
@@ -836,9 +1008,9 @@ function DurableSignalItem({
    Live data only — no fabricated operator/timestamps. Live fields absent in the
    prototype model (relative due text "4h 12m 후", structured decision
    provenance, payload `body`) are rendered from the real ISO timestamps /
-   marked data-stub rather than invented (audit P2 #11, #12). The live approval
-   API supports approve/reject only (no cancel), so the prototype's cancel
-   action is omitted here rather than wired to a no-op. */
+   marked data-missing/data-projection-gap rather than invented (audit P2 #11, #12). Mutations are
+   wired only to live dashboard endpoints; cancel requires an explicit operator
+   reason before dispatch. */
 
 // Live status strings are lower_snake (pending_approval); the vendored
 // SCHED_STATUS map is keyed on Schedule_domain PascalCase. Total function:
@@ -896,18 +1068,39 @@ interface SchTabDef {
   readonly label: string
   // Effective-status values (live, normalized) this tab includes; null = all.
   readonly statuses: readonly string[] | null
+  readonly statusSet: ReadonlySet<string> | null
 }
 const SCH_TABS: readonly SchTabDef[] = [
-  { key: 'pending', label: '승인 대기', statuses: ['pending_approval', 'awaiting_approval', 'blocked_approval'] },
-  { key: 'scheduled', label: '예약됨', statuses: ['scheduled'] },
-  { key: 'active', label: 'due · 실행', statuses: ['due', 'due_pending_refresh', 'running'] },
-  { key: 'done', label: '완료 · 종료', statuses: ['succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired'] },
-  { key: 'all', label: '전체', statuses: null },
+  {
+    key: 'pending',
+    label: '승인 대기',
+    statuses: SCHEDULE_PENDING_STATUSES,
+    statusSet: SCHEDULE_PENDING_STATUS_SET,
+  },
+  {
+    key: 'scheduled',
+    label: '예약됨',
+    statuses: SCHEDULE_SCHEDULED_STATUSES,
+    statusSet: SCHEDULE_SCHEDULED_STATUS_SET,
+  },
+  {
+    key: 'active',
+    label: 'due · 실행',
+    statuses: SCHEDULE_ACTIVE_STATUSES,
+    statusSet: SCHEDULE_ACTIVE_STATUS_SET,
+  },
+  {
+    key: 'done',
+    label: '완료 · 종료',
+    statuses: SCHEDULE_TERMINAL_STATUSES,
+    statusSet: SCHEDULE_TERMINAL_STATUS_SET,
+  },
+  { key: 'all', label: '전체', statuses: null, statusSet: null },
 ]
 
 function schTabMatches(tab: SchTabDef, request: DashboardScheduledAutomationRequest): boolean {
-  if (tab.statuses === null) return true
-  return tab.statuses.includes(normalized(effectiveStatus(request)))
+  if (tab.statusSet === null) return true
+  return tab.statusSet.has(normalized(effectiveStatus(request)))
 }
 
 function recurrenceText(request: DashboardScheduledAutomationRequest): string {
@@ -932,7 +1125,7 @@ function SchRiskChip({ risk }: { risk: string | null | undefined }) {
 function SchKeeperMeta({ actor }: { actor: DashboardScheduledAutomationActor | null | undefined }) {
   const id = actor?.id?.trim()
   if (!id) {
-    return html`<span class="sch-by"><span class="sch-actor-kind mono" data-stub="no scheduled_by actor">예약</span></span>`
+    return html`<span class="sch-by"><span class="sch-actor-kind mono" data-missing="scheduled_by actor">예약</span></span>`
   }
   return html`
     <span class="sch-by">
@@ -974,7 +1167,7 @@ function SchCard({
         </button>
         ${summary
           ? html`<button type="button" class="sch-summary" onClick=${() => { onOpen(request) }}>${summary}</button>`
-          : html`<button type="button" class="sch-summary" data-stub="no payload_summary" onClick=${() => { onOpen(request) }}>요약 없음 · 상세 보기</button>`}
+          : html`<button type="button" class="sch-summary" data-missing="payload_summary" onClick=${() => { onOpen(request) }}>요약 없음 · 상세 보기</button>`}
         <div class="sch-meta">
           <${SchKeeperMeta} actor=${request.scheduled_by} />
           <span class="sch-due" title="due_at"><span class="sub-k">due</span> ${formatDateTimeKo(dueIso)}</span>
@@ -1023,6 +1216,7 @@ function SchDetail({
     {
       kind: request.payload_kind ?? null,
       digest: request.payload_digest ?? null,
+      dispatch_tool: request.payload_dispatch_tool ?? null,
       target: request.payload_target ?? null,
       summary: summary,
     },
@@ -1049,7 +1243,7 @@ function SchDetail({
             <h4>${payload.glyph} ${payload.lbl}</h4>
             ${summary
               ? html`<p class="sch-d-summary">${summary}</p>`
-              : html`<p class="sch-d-summary" data-stub="no payload_summary">요약 없음</p>`}
+              : html`<p class="sch-d-summary" data-missing="payload_summary">요약 없음</p>`}
             <div class="sch-badges">
               <${SchRiskChip} risk=${request.risk_class} />
               <span class="sch-rec mono">↻ ${recurrenceText(request)}</span>
@@ -1090,12 +1284,17 @@ function SchDetail({
 
           <div class="turn-sec">
             <h4>payload 봉투</h4>
-            <pre class="turn-pre" data-stub="payload body not in projection">${payloadEnvelope}</pre>
+            <pre class="turn-pre" data-projection-gap="payload body">${payloadEnvelope}</pre>
           </div>
 
           <div class="turn-sec">
             <h4>최근 실행 기록</h4>
             <${SchExecution} execution=${execution} />
+          </div>
+
+          <div class="turn-sec">
+            <h4>lifecycle audit</h4>
+            <${SchLifecycleAudit} audit=${request.lifecycle_audit} />
           </div>
 
           <${SchDetailActions} request=${request} onResolved=${onResolved} onClose=${onClose} />
@@ -1107,7 +1306,7 @@ function SchDetail({
 
 function SchExecution({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
   if (!execution) {
-    return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_execution">실행 기록 없음</span></div></div>`
+    return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-missing="last_execution">실행 기록 없음</span></div></div>`
   }
   const detailRows = executionDetailRows(execution.detail)
   return html`
@@ -1123,10 +1322,81 @@ function SchExecution({ execution }: { execution: DashboardScheduledAutomationEx
   `
 }
 
-/** Detail-overlay actions. Wired to the real approve/reject API only — the
- *  prototype's cancel action has no live endpoint, so it is omitted. Buttons
- *  render only when an `onResolved` refresh callback exists (mirrors the
- *  diagnostics ApprovalCell contract: no callback → read-only). */
+function SchLifecycleAudit({ audit }: { audit: DashboardScheduledAutomationLifecycleAudit | null | undefined }) {
+  if (!audit) {
+    return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono">-</span></div></div>`
+  }
+  const events = lifecycleAuditEvents(audit)
+  const eventCount = audit.event_count ?? events.length
+  const coverage = audit.coverage?.trim() || null
+  const backfillPolicy = audit.backfill_policy?.trim() || null
+  return html`
+    <div class="sch-kvs" data-schedule-lifecycle-audit-status=${audit.status}>
+      <div class="sch-kv">
+        <span class="k">status</span>
+        <span class="v mono">${enumLabel(audit.status)} · ${audit.source}</span>
+      </div>
+      <div class="sch-kv">
+        <span class="k">events</span>
+        <span class="v mono">${eventCount.toLocaleString()} / ${audit.limit.toLocaleString()}</span>
+      </div>
+      ${coverage
+        ? html`
+            <div class="sch-kv" data-schedule-lifecycle-audit-coverage=${coverage}>
+              <span class="k">coverage</span>
+              <span class="v mono">${coverage}</span>
+            </div>
+          `
+        : null}
+      ${backfillPolicy
+        ? html`
+            <div class="sch-kv" data-schedule-lifecycle-audit-backfill=${backfillPolicy}>
+              <span class="k">backfill</span>
+              <span class="v mono">${backfillPolicy}</span>
+            </div>
+          `
+        : null}
+      ${audit.error
+        ? html`
+            <div class="sch-kv" data-schedule-lifecycle-audit-error>
+              <span class="k">error</span>
+              <span class="v mono">${audit.error}</span>
+            </div>
+          `
+        : null}
+      ${events.length > 0
+        ? events.map(event => {
+            const actor = lifecycleEventActorLabel(event)
+            const detailRows = lifecycleEventDetailRows(event)
+            return html`
+              <div class="sch-kv" data-schedule-lifecycle-event=${event.event_id}>
+                <span class="k">${enumLabel(event.action)}</span>
+                <span class="v mono">${lifecycleStatusTransition(event)} · ${formatDateTimeKo(event.recorded_at ?? null)}</span>
+              </div>
+              ${actor
+                ? html`
+                    <div class="sch-kv" data-schedule-lifecycle-actor=${event.event_id}>
+                      <span class="k">actor</span>
+                      <span class="v mono">${actor}</span>
+                    </div>
+                  `
+                : null}
+              ${detailRows.map(row => html`
+                <div class="sch-kv" data-schedule-lifecycle-detail=${`${event.event_id}:${row.label}`}>
+                  <span class="k">${row.label}</span>
+                  <span class="v mono">${row.value}</span>
+                </div>
+              `)}
+            `
+          })
+        : html`<div class="sch-kv"><span class="k">events</span><span class="v mono">기록 없음</span></div>`}
+    </div>
+  `
+}
+
+/** Detail-overlay actions. Wired to real dashboard APIs. Buttons render only
+ *  when an `onResolved` refresh callback exists (mirrors the diagnostics
+ *  ApprovalCell contract: no callback → read-only). */
 function SchDetailActions({
   request,
   onResolved,
@@ -1137,10 +1407,14 @@ function SchDetailActions({
   onClose: () => void
 }) {
   const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
-  if (!onResolved || !isApprovalActionable(request)) return null
+  const [cancelReason, setCancelReason] = useState('')
+  const approvalActionable = isApprovalActionable(request)
+  const cancelable = isScheduleCancelable(request)
+  if (!onResolved || (!approvalActionable && !cancelable)) return null
   const busy = pendingDecision !== null
+  const trimmedCancelReason = cancelReason.trim()
 
-  async function decide(decision: DashboardScheduleDecision) {
+  async function decide(decision: DashboardScheduleApprovalDecision) {
     setPendingDecision(decision)
     try {
       await resolveScheduleApproval(
@@ -1158,26 +1432,72 @@ function SchDetailActions({
     }
   }
 
+  async function cancel() {
+    const reason = trimmedCancelReason
+    if (!reason) return
+    setPendingDecision('cancel')
+    try {
+      await cancelSchedule(request.schedule_id, reason)
+      showToast(`${request.schedule_id} cancelled`, 'success')
+      await onResolved?.()
+      onClose()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'schedule cancellation failed', 'error')
+    } finally {
+      setPendingDecision(null)
+    }
+  }
+
   return html`
     <div class="turn-sec sch-detail-actions">
-      <button
-        type="button"
-        class="sch-act approve"
-        data-schedule-mutation="approve"
-        data-testid=${`schedule-approve-${request.schedule_id}`}
-        disabled=${busy}
-        aria-busy=${pendingDecision === 'approve' ? 'true' : 'false'}
-        onClick=${() => { void decide('approve') }}
-      >승인 — grant 발급</button>
-      <button
-        type="button"
-        class="sch-act deny"
-        data-schedule-mutation="reject"
-        data-testid=${`schedule-reject-${request.schedule_id}`}
-        disabled=${busy}
-        aria-busy=${pendingDecision === 'reject' ? 'true' : 'false'}
-        onClick=${() => { void decide('reject') }}
-      >거부</button>
+      ${approvalActionable
+        ? html`
+            <button
+              type="button"
+              class="sch-act approve"
+              data-schedule-mutation="approve"
+              data-testid=${`schedule-approve-${request.schedule_id}`}
+              disabled=${busy}
+              aria-busy=${pendingDecision === 'approve' ? 'true' : 'false'}
+              onClick=${() => { void decide('approve') }}
+            >승인 — grant 발급</button>
+            <button
+              type="button"
+              class="sch-act deny"
+              data-schedule-mutation="reject"
+              data-testid=${`schedule-reject-${request.schedule_id}`}
+              disabled=${busy}
+              aria-busy=${pendingDecision === 'reject' ? 'true' : 'false'}
+              onClick=${() => { void decide('reject') }}
+            >거부</button>
+          `
+        : null}
+      ${cancelable
+        ? html`
+            <div class="sch-reject w-full" data-schedule-cancel-row=${request.schedule_id}>
+              <input
+                class="sch-reject-in"
+                data-testid=${`schedule-cancel-reason-${request.schedule_id}`}
+                type="text"
+                value=${cancelReason}
+                placeholder="취소 사유"
+                disabled=${busy}
+                onInput=${(event: InputEvent) => {
+                  setCancelReason((event.currentTarget as HTMLInputElement).value)
+                }}
+              />
+              <button
+                type="button"
+                class="sch-act deny"
+                data-schedule-mutation="cancel"
+                data-testid=${`schedule-cancel-${request.schedule_id}`}
+                disabled=${busy || !trimmedCancelReason}
+                aria-busy=${pendingDecision === 'cancel' ? 'true' : 'false'}
+                onClick=${() => { void cancel() }}
+              >취소</button>
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -1205,6 +1525,7 @@ function SchedulePrototypeSurface({
   const filtered = rows.filter(request => schTabMatches(tabDef, request))
   // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
   const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const signalErrors = automation.signal_errors ?? []
   const selected = selectedScheduleId
     ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
@@ -1245,10 +1566,18 @@ function SchedulePrototypeSurface({
 
       <section class="sch-signals">
         <div class="ov-card-h"><h3>wake signal 피드 · schedule_runner.tick</h3></div>
-        ${durableSignals.length === 0
-          ? html`<div class="sch-empty" data-stub="no durable runner signals">durable wake signal 없음</div>`
+        ${signalErrors.length === 0 && durableSignals.length === 0
+          ? html`<div class="sch-empty" data-missing="durable runner signals">durable wake signal 없음</div>`
           : html`
               <div class="sch-sig-list">
+                ${signalErrors.map(error => html`
+                  <div class="sch-sig st-bad" data-schedule-signal-error=${error.ordinal}>
+                    <span class="sch-sig-at mono">#${error.ordinal.toLocaleString()}</span>
+                    <span class="sch-sig-kind st-bad">decode error</span>
+                    <span class="sch-sig-id mono" title=${error.error}>${error.error}</span>
+                    <span class="sch-sig-risk mono">error</span>
+                  </div>
+                `)}
                 ${durableSignals.map(signal => {
                   const spec = statusSpecForLive(signal.kind)
                   return html`
@@ -1276,16 +1605,8 @@ function SchedulePrototypeSurface({
   `
 }
 
-// Aside triage buckets. Approval-needed statuses (pending family) surface under
-// '해야 할 일 → 승인'; imminent due statuses under 'due'; terminal statuses feed
-// the '최근 실행' recency list. Derived only from the projection — read-only.
-const SCHEDULE_ASIDE_PENDING: ReadonlySet<string> = new Set([
-  'pending', 'pending_approval', 'awaiting_approval', 'blocked_approval',
-])
-const SCHEDULE_ASIDE_DUE: ReadonlySet<string> = new Set(['due', 'due_pending_refresh'])
-const SCHEDULE_ASIDE_TERMINAL: ReadonlySet<string> = new Set([
-  'succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired',
-])
+// Aside triage buckets reuse the canonical schedule status sets above. Derived
+// only from the projection — read-only.
 const SCHEDULE_ASIDE_RECENT_MAX = 6
 
 function scheduleAsideSummary(request: DashboardScheduledAutomationRequest): string {
@@ -1303,27 +1624,27 @@ export function ScheduleAside({
   onOpen,
 }: {
   requests: readonly DashboardScheduledAutomationRequest[]
-  sum: { readonly scheduled: number; readonly dueRunning: number; readonly pending: number; readonly total: number }
+  sum: { readonly scheduled: number | null; readonly dueRunning: number | null; readonly pending: number | null; readonly total: number | null }
   onOpen: (scheduleId: string) => void
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
     normalized(effectiveStatus(request))
-  const failed = requests.filter(request => asideStatus(request) === 'failed')
-  const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)))
-  const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)))
+  const failed = requests.filter(request => SCHEDULE_FAILED_STATUS_SET.has(asideStatus(request)))
+  const pending = requests.filter(request => SCHEDULE_PENDING_STATUS_SET.has(asideStatus(request)))
+  const due = requests.filter(request => SCHEDULE_DUE_STATUS_SET.has(asideStatus(request)))
   const recent = requests
-    .filter(request => SCHEDULE_ASIDE_TERMINAL.has(asideStatus(request)))
+    .filter(request => SCHEDULE_TERMINAL_STATUS_SET.has(asideStatus(request)))
     .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
   const needTotal = pending.length + due.length
 
   return html`
     <aside class="ov-aside" aria-label="예약 운영 상태" data-testid="schedule-aside">
       <section class="wka-sec">
-        <div class="wka-h">지금 상황 <span class="n mono">${sum.total.toLocaleString()} 예약</span></div>
+        <div class="wka-h">지금 상황 <span class="n mono">${scheduleCountLabel(sum.total)} 예약</span></div>
         <div class="wka-pulse">
-          <span class="wka-pulse-i"><b class="mono">${sum.scheduled}</b> 예약됨</span>
-          <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning > 0 ? 'volt' : ''}`}>${sum.dueRunning}</b> due·실행</span>
-          <span class="wka-pulse-i"><b class=${`mono ${sum.pending > 0 ? 'warn' : ''}`}>${sum.pending}</b> 승인대기</span>
+          <span class="wka-pulse-i"><b class="mono">${scheduleCountLabel(sum.scheduled)}</b> 예약됨</span>
+          <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning != null && sum.dueRunning > 0 ? 'volt' : ''}`}>${scheduleCountLabel(sum.dueRunning)}</b> due·실행</span>
+          <span class="wka-pulse-i"><b class=${`mono ${sum.pending != null && sum.pending > 0 ? 'warn' : ''}`}>${scheduleCountLabel(sum.pending)}</b> 승인대기</span>
         </div>
         ${failed.length === 0
           ? html`<div class="wka-calm mono">실패한 실행 없음</div>`
@@ -1446,6 +1767,9 @@ export function ScheduledAutomationPanel({
   const wakeRows = [...rows].sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
   const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
   const hasDurableSignals = durableSignals.length > 0
+  const signalErrors = automation.signal_errors ?? []
+  const signalErrorCount = automation.signal_error_count ?? signalErrors.length
+  const hasSignalErrors = signalErrorCount > 0 || signalErrors.length > 0
   const selectedRequest =
     rows.find(request => request.schedule_id === selectedScheduleId)
     ?? filteredRows[0]
@@ -1456,23 +1780,52 @@ export function ScheduledAutomationPanel({
       rows.filter(request => filterMatches(filter.key, request)).length,
     ]),
   )
-  const dueEffective = automation.derived_counts?.due_effective ?? 0
-  const blockedApproval = automation.derived_counts?.blocked_approval ?? 0
-  const dueExecutionReady = automation.derived_counts?.due_execution_ready ?? 0
-  const expiredEffective = automation.derived_counts?.expired_effective ?? 0
+  const scheduleStoreKnown = automation.schedule_store_known !== false
+  const dueEffective = scheduleStoreKnown ? (automation.derived_counts?.due_effective ?? 0) : null
+  const blockedApproval = scheduleStoreKnown ? (automation.derived_counts?.blocked_approval ?? 0) : null
+  const dueExecutionReady = scheduleStoreKnown ? (automation.derived_counts?.due_execution_ready ?? 0) : null
+  const expiredEffective = scheduleStoreKnown ? (automation.derived_counts?.expired_effective ?? 0) : null
   const unsupportedPayloads =
-    automation.payload_support?.unsupported_request_count
-      ?? automation.derived_counts?.unsupported_payload_kind
-      ?? 0
+    scheduleStoreKnown
+      ? (automation.payload_support?.unsupported_request_count
+        ?? automation.derived_counts?.unsupported_payload_kind
+        ?? 0)
+      : null
   const unknownPayloads =
-    automation.payload_support?.unknown_request_count
-      ?? automation.derived_counts?.unknown_payload_kind
-      ?? 0
+    scheduleStoreKnown
+      ? (automation.payload_support?.unknown_request_count
+        ?? automation.derived_counts?.unknown_payload_kind
+        ?? 0)
+      : null
   const unsupportedKinds = automation.payload_support?.unsupported_kinds ?? []
+  const runnerStatus = automation.runner_status ?? null
+  const runnerCounts = runnerStatus?.last_counts ?? null
 
   return html`
     <div class="grid gap-4">
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="text-[var(--color-fg-muted)]">Runner</span>
+          <${StatusChip} tone=${runnerStatusTone(runnerStatus?.status)} uppercase=${false}>
+            ${enumLabel(runnerStatus?.status ?? 'unknown')}
+          <//>
+        </div>
+        <span class="text-[var(--color-fg-muted)]">
+          tick <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerStatus?.tick_count ?? 0).toLocaleString()}</span>
+        </span>
+        <span class="text-[var(--color-fg-muted)]">
+          마지막 tick <span class="font-mono text-[var(--color-fg-secondary)]">${secondsLabel(runnerStatus?.last_tick_age_sec)}</span>
+        </span>
+        <span class="text-[var(--color-fg-muted)]">
+          duration <span class="font-mono text-[var(--color-fg-secondary)]">${secondsLabel(runnerStatus?.last_duration_sec)}</span>
+        </span>
+        ${runnerStatus?.last_error
+          ? html`
+              <span class="max-w-[32rem] truncate text-[var(--color-danger-fg)]" title=${runnerStatus.last_error}>
+                runner error ${runnerStatus.last_error}
+              </span>
+            `
+          : null}
         <div class="flex items-center gap-2">
           <span class="text-[var(--color-fg-muted)]">FSM</span>
           <${StatusChip} tone=${automationTone(automation.fsm.state)} uppercase=${false}>
@@ -1480,27 +1833,27 @@ export function ScheduledAutomationPanel({
           <//>
         </div>
         <span class="text-[var(--color-fg-muted)]">
-          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.active_count.toLocaleString()}</span>
+          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${scheduleCountLabel(automation.fsm.active_count)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.terminal_count.toLocaleString()}</span>
+          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${scheduleCountLabel(automation.fsm.terminal_count)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          유효 도래 <span class="font-mono text-[var(--color-fg-secondary)]">${dueEffective.toLocaleString()}</span>
+          유효 도래 <span class="font-mono text-[var(--color-fg-secondary)]">${scheduleCountLabel(dueEffective)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          승인 차단 <span class="font-mono text-[var(--color-fg-secondary)]">${blockedApproval.toLocaleString()}</span>
+          승인 차단 <span class="font-mono text-[var(--color-fg-secondary)]">${scheduleCountLabel(blockedApproval)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          실행 준비 <span class="font-mono text-[var(--color-fg-secondary)]">${dueExecutionReady.toLocaleString()}</span>
+          실행 준비 <span class="font-mono text-[var(--color-fg-secondary)]">${scheduleCountLabel(dueExecutionReady)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          만료 <span class="font-mono text-[var(--color-fg-secondary)]">${expiredEffective.toLocaleString()}</span>
+          만료 <span class="font-mono text-[var(--color-fg-secondary)]">${scheduleCountLabel(expiredEffective)}</span>
         </span>
-        <span class=${unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
-          unsupported payload <span class="font-mono">${unsupportedPayloads.toLocaleString()}</span>
+        <span class=${unsupportedPayloads != null && unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
+          unsupported payload <span class="font-mono">${scheduleCountLabel(unsupportedPayloads)}</span>
         </span>
-        ${unknownPayloads > 0
+        ${unknownPayloads != null && unknownPayloads > 0
           ? html`
               <span class="text-[var(--color-warning-fg)]">
                 unknown payload <span class="font-mono">${unknownPayloads.toLocaleString()}</span>
@@ -1515,6 +1868,14 @@ export function ScheduledAutomationPanel({
         </span>
       </div>
 
+      ${scheduleStoreKnown
+        ? null
+        : html`
+            <div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--color-danger-fg)]" data-schedule-store-read-error>
+              schedule store read error: <span class="font-mono">${automation.schedule_store_read_error ?? 'unknown'}</span>
+            </div>
+          `}
+
       ${unsupportedKinds.length > 0
         ? html`
             <div class="flex flex-wrap gap-2">
@@ -1524,6 +1885,25 @@ export function ScheduledAutomationPanel({
                   <span class="font-mono">${kind.kind}</span>
                 </span>
               `)}
+            </div>
+          `
+        : null}
+
+      ${runnerCounts
+        ? html`
+            <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-muted)]">
+              <span>runner last</span>
+              <span>due <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.due_changed ?? 0).toLocaleString()}</span></span>
+              <span>emitted <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.emitted ?? 0).toLocaleString()}</span></span>
+              <span>rescheduled <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.rescheduled ?? 0).toLocaleString()}</span></span>
+              <span>dispatch ok <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.dispatch_succeeded ?? 0).toLocaleString()}</span></span>
+              <span>dispatch unsupported <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.dispatch_unsupported ?? 0).toLocaleString()}</span></span>
+              <span>wake queued <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.wake_enqueued ?? 0).toLocaleString()}</span></span>
+              <span>wake skipped <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.wake_skipped_no_keeper ?? 0).toLocaleString()}</span></span>
+              <span>missing schedule <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.wake_skipped_missing_schedule ?? 0).toLocaleString()}</span></span>
+              <span>non-keeper actor <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.wake_skipped_non_keeper_actor ?? 0).toLocaleString()}</span></span>
+              <span>unregistered keeper <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.wake_skipped_unregistered_keeper ?? 0).toLocaleString()}</span></span>
+              <span>wake failed <span class="font-mono text-[var(--color-fg-secondary)]">${(runnerCounts.wake_failed ?? 0).toLocaleString()}</span></span>
             </div>
           `
         : null}
@@ -1589,8 +1969,19 @@ export function ScheduledAutomationPanel({
                       ? `출처 ${automation.signal_source ?? 'schedule_runner_signals'} · ${durableSignals.length.toLocaleString()} / ${(automation.signal_count ?? durableSignals.length).toLocaleString()} signals 표시`
                       : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
                   </div>
+                  ${hasSignalErrors
+                    ? html`
+                      <div class="mt-2 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <${StatusChip} tone="bad" uppercase=${false}>signal decode error<//>
+                          <span class="font-mono">${signalErrorCount.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    `
+                    : null}
                 </div>
                 <ul class="grid gap-2">
+                  ${signalErrors.map(error => html`<${DurableSignalErrorItem} error=${error} />`)}
                   ${hasDurableSignals
                     ? durableSignals.map(signal => html`
                         <${DurableSignalItem}
@@ -1611,7 +2002,7 @@ export function ScheduledAutomationPanel({
                 </ul>
               </aside>
             </div>
-            ${automation.truncated
+            ${automation.truncated && automation.request_count != null
               ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${rows.length.toLocaleString()} / 전체 ${automation.request_count.toLocaleString()}건</div>`
               : null}
           `

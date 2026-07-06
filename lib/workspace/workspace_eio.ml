@@ -204,10 +204,26 @@ let log_event config ~event_type ~agent ~payload =
   event
 
 (** Get event by sequence *)
-let get_event config ~seq =
+let get_event_result config ~seq =
   match Backend.FileSystem.get config.backend (event_key seq) with
-  | Ok json_str -> Some (Yojson.Safe.from_string json_str)
-  | Error _ -> None
+  | Ok json_str ->
+    (match
+       Safe_ops.parse_json_safe
+         ~context:(Printf.sprintf "workspace_event:%d" seq)
+         json_str
+     with
+     | Ok json -> Ok (Some json)
+     | Error err -> Error err)
+  | Error (Backend.NotFound _) -> Ok None
+  | Error err -> Error (backend_error_to_string err)
+
+(** Compatibility wrapper around [get_event_result]. *)
+let get_event config ~seq =
+  match get_event_result config ~seq with
+  | Ok event -> event
+  | Error err ->
+    Log.Workspace.warn "get_event failed for seq %d: %s" seq err;
+    None
 
 (** Get recent events
     Uses atomic_get for cross-process safe counter read. *)
@@ -227,9 +243,12 @@ let get_recent_events config ~limit =
   let start_seq = max 0 (current_seq - limit) in
   let rec collect acc seq =
     if seq >= current_seq then List.rev acc
-    else match get_event config ~seq with
-      | Some ev -> collect (ev :: acc) (seq + 1)
-      | None -> collect acc (seq + 1)
+    else match get_event_result config ~seq with
+      | Ok (Some ev) -> collect (ev :: acc) (seq + 1)
+      | Ok None -> collect acc (seq + 1)
+      | Error err ->
+        Log.Workspace.warn "get_recent_events: event read failed seq %d: %s" seq err;
+        collect acc (seq + 1)
   in
   collect [] start_seq
 

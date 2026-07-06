@@ -152,9 +152,11 @@ let test_on_idle_tool_search_loop_suggests_code_search () =
       (contains_substring msg "does not search repository files");
     check
       bool
-      "tool_search loop prioritizes Grep"
+      "tool_search loop uses visible allowed-set order"
       true
-      (contains_substring msg "Available alternatives: Grep");
+      (contains_substring
+         msg
+         "Available alternatives: keeper_context_status, Grep, Read, Execute");
     check
       bool
       "tool_search loop points at source symbol search"
@@ -188,11 +190,13 @@ let test_on_idle_tool_search_loop_maps_internal_file_tools () =
       bool
       "tool_search loop maps internal search_files to Grep"
       true
-      (contains_substring msg "Available alternatives: Grep, Read, Execute");
+      (contains_substring
+         msg
+         "Available alternatives: keeper_context_status, Grep, Read, Execute");
     check
       bool
-      "tool_search loop maps internal ids in source hint"
-      true
+      "tool_search loop does not include a hardcoded switch chain"
+      false
       (contains_substring msg "switch to Grep then Read then Execute");
     check
       bool

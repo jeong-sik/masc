@@ -204,11 +204,16 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                       ());
                (* Hebbian: weaken only against agents with active tasks *)
                (try
-                  let workers = working_agents config in
-                  (Atomic.get Workspace_hooks.hebbian_on_task_cancelled_fn)
-                    config
-                    ~agent_name
-                    ~active_agents:workers
+                  match working_agents_result config with
+                  | Ok workers ->
+                    (Atomic.get Workspace_hooks.hebbian_on_task_cancelled_fn)
+                      config
+                      ~agent_name
+                      ~active_agents:workers
+                  | Error error ->
+                    Log.TaskState.error
+                      "hebbian task_cancelled hook skipped: %s"
+                      (working_agents_error_to_string error)
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->

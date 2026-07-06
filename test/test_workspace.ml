@@ -174,6 +174,47 @@ let test_add_task_uses_archive_max_id () =
   let _ = Workspace.reset config in
   Unix.rmdir tmp_dir
 
+let test_add_task_reports_unreadable_archive () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_test_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir tmp_dir 0o755;
+
+  let config = workspace_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
+  let archive_path =
+    Filename.concat (Filename.concat tmp_dir Common.masc_dirname) "tasks-archive.json"
+  in
+  Out_channel.with_open_text archive_path (fun oc -> output_string oc "{");
+  (match
+     Workspace.add_task_with_result
+       config
+       ~title:"Archive Read Failure"
+       ~priority:1
+       ~description:""
+   with
+   | Error (Workspace.Archive_read_failed msg) ->
+       Alcotest.(check bool)
+         "archive read error is explicit"
+         true
+         (String.length msg > 0)
+   | Error err ->
+       Alcotest.failf
+         "expected Archive_read_failed, got %s"
+         (Workspace.add_task_error_to_string err)
+   | Ok created ->
+       Alcotest.failf "expected archive read failure, created %s" created.task_id);
+
+  let _ = Workspace.reset config in
+  Unix.rmdir tmp_dir
+
 let test_broadcast_message () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -787,12 +828,113 @@ let test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid () =
           (str_contains msg "recovery")
   )
 
-let test_release_stale_claims_skips_invalid_backlog () =
+let test_working_agents_result_reports_backlog_read_failure () =
+  with_test_env (fun config ->
+    ignore (Workspace.update_state config (fun state ->
+      { state with active_agents = [ "claude"; "gemini" ] }));
+    Out_channel.with_open_text (Workspace.backlog_path config) (fun oc ->
+      output_string oc "{\n  \"tasks\": [\n");
+    Out_channel.with_open_text (backlog_recovery_path config) (fun oc ->
+      output_string oc "{\n  \"tasks\": [\n");
+    match Workspace.working_agents_result config with
+    | Ok agents ->
+        Alcotest.failf
+          "expected working_agents_result read failure, got [%s]"
+          (String.concat "," agents)
+    | Error (Workspace.Working_agents_backlog_read_failed msg) ->
+        Alcotest.(check bool) "result mentions recovery failure" true
+          (str_contains msg "recovery");
+        Alcotest.(check (list string))
+          "legacy wrapper exposes active-agent fallback"
+          [ "claude"; "gemini" ]
+          (Workspace.working_agents config))
+
+let test_working_agents_result_returns_task_holders_only () =
+  with_test_env (fun config ->
+    let add_result =
+      Workspace.add_task config ~title:"Claimed task" ~priority:1 ~description:""
+    in
+    Alcotest.(check bool) "add success" true (contains_check add_result);
+    let claim_result =
+      Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001"
+    in
+    Alcotest.(check bool) "claim success" true (contains_check claim_result);
+    ignore (Workspace.update_state config (fun state ->
+      { state with active_agents = [ "claude"; "idle-agent" ] }));
+    match Workspace.working_agents_result config with
+    | Error error ->
+        Alcotest.fail
+          (Workspace.working_agents_error_to_string error)
+    | Ok agents ->
+        Alcotest.(check (list string)) "claimed assignee only" [ "claude" ] agents)
+
+let test_release_stale_claims_reports_invalid_backlog () =
   with_test_env (fun config ->
     Out_channel.with_open_text (Workspace.backlog_path config) (fun oc ->
       output_string oc "{\n  \"tasks\": [\n");
+    (match Workspace.audit_orphan_tasks_result config with
+     | Ok orphan_tasks ->
+       Alcotest.failf
+         "expected orphan audit backlog read failure, got %d orphan tasks"
+         (List.length orphan_tasks)
+     | Error msg ->
+       Alcotest.(check bool)
+         "orphan audit reports backlog read failure"
+         true
+         (String.length msg > 0));
+    (match Workspace.release_stale_claims_result config ~ttl_seconds:60.0 with
+     | Ok released ->
+       Alcotest.failf
+         "expected stale-claim release read failure, got %d releases"
+         (List.length released)
+     | Error msg ->
+       Alcotest.(check bool)
+         "result mentions unreadable backlog"
+         true
+         (str_contains msg "unreadable backlog"));
     let released = Workspace.release_stale_claims config ~ttl_seconds:60.0 in
-    Alcotest.(check (list (pair string string))) "no stale claims released" [] released
+    Alcotest.(check (list (pair string string)))
+      "compatibility wrapper releases no stale claims"
+      []
+      released
+  )
+
+let test_release_stale_claims_reports_unreadable_agents () =
+  with_test_env (fun config ->
+    let agents_dir = Workspace.agents_dir config in
+    if not (Sys.file_exists agents_dir) then Unix.mkdir agents_dir 0o755;
+    Out_channel.with_open_text
+      (Filename.concat agents_dir "broken-agent.json")
+      (fun oc -> output_string oc "{");
+    (match Workspace.audit_orphan_tasks_result config with
+     | Ok orphan_tasks ->
+       Alcotest.failf
+         "expected active-agent read failure, got %d orphan tasks"
+         (List.length orphan_tasks)
+     | Error msg ->
+       Alcotest.(check bool)
+         "orphan audit reports agent read failure"
+         true
+         (String.length msg > 0));
+    Alcotest.(check (list (pair string string)))
+      "compatibility orphan audit returns no tasks"
+      []
+      (Workspace.audit_orphan_tasks config);
+    (match Workspace.release_stale_claims_result config ~ttl_seconds:60.0 with
+     | Ok released ->
+       Alcotest.failf
+         "expected stale-claim agent audit failure, got %d releases"
+         (List.length released)
+     | Error msg ->
+       Alcotest.(check bool)
+         "stale-claim release reports agent read failure"
+         true
+         (String.length msg > 0));
+    let released = Workspace.release_stale_claims config ~ttl_seconds:60.0 in
+    Alcotest.(check (list (pair string string)))
+      "compatibility wrapper releases no stale claims"
+      []
+      released
   )
 
 (* RFC-0034.d: release_stale_claims must clear the assignee's
@@ -1536,6 +1678,29 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
   )
 
+let test_read_backlog_counts_result_reports_unreadable_backlog () =
+  with_test_env (fun config ->
+    let meta = keeper_meta_for_self_filter "keeper-backlog-read-error-agent" in
+    Out_channel.with_open_text (Workspace.backlog_path config) (fun oc ->
+      output_string oc "{not-json");
+    Out_channel.with_open_text (backlog_recovery_path config) (fun oc ->
+      output_string oc "{not-json");
+    (match Keeper_world_observation_inputs.read_backlog_counts_result ~config ~meta with
+     | Error msg ->
+       Alcotest.(check bool)
+         "backlog count read failure reported"
+         true
+         (str_contains msg "backlog read failed")
+     | Ok _ -> Alcotest.fail "expected backlog count read failure");
+    let unclaimed, claimable, failed, pending_verification, backlog_updated =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int) "legacy unclaimed fallback" 0 unclaimed;
+    Alcotest.(check int) "legacy claimable fallback" 0 claimable;
+    Alcotest.(check int) "legacy failed fallback" 0 failed;
+    Alcotest.(check int) "legacy pending verification fallback" 0 pending_verification;
+    Alcotest.(check bool) "legacy backlog updated fallback" false backlog_updated)
+
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
   with_test_env (fun config ->
     let keeper = "keeper-task-audit-self-filter-agent" in
@@ -1933,6 +2098,8 @@ let () =
     (* === Archive Tests === *)
     "archive", [
       Alcotest.test_case "task id uses archive max" `Quick test_add_task_uses_archive_max_id;
+      Alcotest.test_case "task add reports unreadable archive" `Quick
+        test_add_task_reports_unreadable_archive;
     ];
 
     (* === Robustness: Concurrency Simulation === *)
@@ -1965,8 +2132,14 @@ let () =
         test_read_backlog_r_recovers_from_last_good_snapshot;
       Alcotest.test_case "read_backlog_r reports parse error when recovery also invalid" `Quick
         test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
-      Alcotest.test_case "release stale claims skips invalid backlog" `Quick
-        test_release_stale_claims_skips_invalid_backlog;
+      Alcotest.test_case "working_agents_result reports backlog read failure" `Quick
+        test_working_agents_result_reports_backlog_read_failure;
+      Alcotest.test_case "working_agents_result returns task holders only" `Quick
+        test_working_agents_result_returns_task_holders_only;
+      Alcotest.test_case "release stale claims reports invalid backlog" `Quick
+        test_release_stale_claims_reports_invalid_backlog;
+      Alcotest.test_case "release stale claims reports unreadable agents" `Quick
+        test_release_stale_claims_reports_unreadable_agents;
       Alcotest.test_case "release stale claims clears agent current_task" `Quick
         test_release_stale_claims_clears_agent_current_task;
       Alcotest.test_case "release stale claims preserves other agent task" `Quick
@@ -2051,6 +2224,8 @@ let () =
         test_audit_orphan_spares_keeper_owned_meta_within_grace;
       Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
         test_read_backlog_counts_excludes_self_owned_orphan;
+      Alcotest.test_case "read backlog counts result reports unreadable backlog" `Quick
+        test_read_backlog_counts_result_reports_unreadable_backlog;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
       Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;

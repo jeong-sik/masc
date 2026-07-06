@@ -327,35 +327,10 @@ let mint_token ~name =
       ~validate:(fun n -> Hashtbl.mem tag_registry n)
       ~name)
 
-(** Enumerate every tool name registered in the tag registry. Used by
-    [find_similar_names] to drive "did you mean" suggestions for Unknown tool
-    errors (#9784). Handler-only registrations are intentionally invisible. *)
+(** Enumerate every tool name registered in the tag registry.
+    Handler-only registrations are intentionally invisible. *)
 let all_registered_names () =
   with_dispatch_ro (fun () -> Hashtbl.fold (fun n _ a -> n :: a) tag_registry [])
 
 let all_schema_names () =
   with_dispatch_ro (fun () -> Hashtbl.fold (fun n _ a -> n :: a) schema_registry [])
-
-(* #9784: Unknown tool errors must include closest-name suggestions so the
-   LLM can self-correct on the next turn. Jaccard works well for snake_case
-   tool names because Text_similarity tokenizes on non-alphanumeric and
-   captures shared morphemes via byte n-grams. The default min_score 0.4
-   excludes unrelated names while accepting close task-tool typos. *)
-let find_similar_names ?(limit = 3) ?(min_score = 0.4) ~query () =
-  let candidates = all_registered_names () in
-  let scored =
-    List.filter_map
-      (fun n ->
-        let s = Text_similarity.jaccard_similarity query n in
-        if Stdlib.Float.compare s min_score >= 0 then Some (s, n) else None)
-      candidates
-  in
-  let sorted =
-    List.sort (fun (a, _) (b, _) -> Float.compare b a) scored
-  in
-  let rec take k = function
-    | _ when k <= 0 -> []
-    | [] -> []
-    | (_, n) :: rest -> n :: take (k - 1) rest
-  in
-  take limit sorted

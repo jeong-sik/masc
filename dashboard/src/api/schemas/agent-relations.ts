@@ -8,6 +8,7 @@
 
 import {
   array,
+  boolean,
   nullable,
   number,
   object,
@@ -43,12 +44,21 @@ const AgentRelationSchema = object({
 
 const DashboardFeedRetentionSchema = record(string(), unknown())
 
+const AgentRelationsReadErrorSchema = object({
+  source: string(),
+  message: string(),
+})
+
 const AgentRelationsResponseSchema = object({
   dashboard_surface: optional(string()),
   source: optional(string()),
   retention: optional(DashboardFeedRetentionSchema),
   generated_at_iso: optional(string()),
   agent_name: string(),
+  collaborators_known: optional(boolean()),
+  interests_known: optional(boolean()),
+  relations_known: optional(boolean()),
+  read_errors: optional(array(AgentRelationsReadErrorSchema)),
   collaborators: array(AgentCollaboratorSchema),
   interests: array(string()),
   relations: array(AgentRelationSchema),
@@ -56,6 +66,7 @@ const AgentRelationsResponseSchema = object({
 
 export type AgentCollaborator = InferOutput<typeof AgentCollaboratorSchema>
 export type AgentRelation = InferOutput<typeof AgentRelationSchema>
+export type AgentRelationsReadError = InferOutput<typeof AgentRelationsReadErrorSchema>
 export type AgentRelationsResponse = InferOutput<typeof AgentRelationsResponseSchema>
 
 export class AgentRelationsSchemaDriftError extends Error {

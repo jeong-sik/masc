@@ -9,15 +9,27 @@ open Server_routes_http_common
 
 module String_set = Set.Make (String)
 
+let keeper_meta_read_error_kind = "keeper_meta_read_error"
+let keeper_name_discovery_read_error_kind = "keeper_name_discovery_read_error"
+let keeper_meta_store_read_error_source = "keeper_meta_store"
+let persisted_meta_read_error_kind = "persisted_meta_read_error"
+
 type paused_keeper_scan = {
   names : string list;
   autoboot_enabled_names : string list;
   details : Yojson.Safe.t list;
   read_errors : (string * string) list;
+  discovery_read_errors : string list;
 }
 
 let empty_paused_keeper_scan =
-  { names = []; autoboot_enabled_names = []; details = []; read_errors = [] }
+  {
+    names = [];
+    autoboot_enabled_names = [];
+    details = [];
+    read_errors = [];
+    discovery_read_errors = [];
+  }
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
@@ -123,7 +135,12 @@ let running_keeper_names ?base_path () =
 let durable_paused_keeper_scan ?(include_details = true) config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
-  Keeper_meta_store.keeper_names config
+  let keeper_names, discovery_read_errors =
+    match Keeper_meta_store.keeper_names_result config with
+    | Ok names -> names, []
+    | Error error -> [], [ error ]
+  in
+  keeper_names
   |> List.fold_left
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
@@ -167,10 +184,15 @@ let durable_paused_keeper_scan ?(include_details = true) config =
           String.compare (name left) (name right))
         scan.details;
     read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
+    discovery_read_errors = List.sort_uniq String.compare discovery_read_errors;
   }
 
 let paused_keepers_health_json_of_scan ~running_names durable_scan =
   let names = sorted_unique_strings (running_names @ durable_scan.names) in
+  let read_error_count =
+    List.length durable_scan.read_errors
+    + List.length durable_scan.discovery_read_errors
+  in
   `Assoc [
     ("count", `Int (List.length names));
     ("names", `List (List.map (fun name -> `String name) names));
@@ -187,13 +209,39 @@ let paused_keepers_health_json_of_scan ~running_names durable_scan =
     ( "autoboot_enabled_names",
       `List (List.map (fun name -> `String name) durable_scan.autoboot_enabled_names) );
     ("details", `List durable_scan.details);
-    ("read_error_count", `Int (List.length durable_scan.read_errors));
+    ("read_error_count", `Int read_error_count);
     ( "read_errors",
       `List
         (List.map
            (fun (keeper, error) ->
-             `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
-           durable_scan.read_errors) );
+             `Assoc
+               [
+                 ("kind", `String keeper_meta_read_error_kind);
+                 ("keeper", `String keeper);
+                 ("error", `String error);
+               ])
+           durable_scan.read_errors
+         @ List.map
+             (fun error ->
+               `Assoc
+                 [
+                   ("kind", `String keeper_name_discovery_read_error_kind);
+                   ("source", `String keeper_meta_store_read_error_source);
+                   ("error", `String error);
+                 ])
+             durable_scan.discovery_read_errors) );
+    ( "keeper_name_discovery_read_error_count"
+    , `Int (List.length durable_scan.discovery_read_errors) );
+    ( "keeper_name_discovery_read_errors"
+    , `List
+        (List.map
+           (fun error ->
+             `Assoc
+               [
+                 ("source", `String keeper_meta_store_read_error_source);
+                 ("error", `String error);
+               ])
+           durable_scan.discovery_read_errors) );
   ]
 
 let paused_keepers_health_json () =
@@ -208,9 +256,11 @@ let paused_keepers_health_json () =
 type autoboot_keeper_scan = {
   autoboot_names : string list;
   read_errors : (string * string) list;
+  discovery_read_errors : string list;
 }
 
-let empty_autoboot_keeper_scan = { autoboot_names = []; read_errors = [] }
+let empty_autoboot_keeper_scan =
+  { autoboot_names = []; read_errors = []; discovery_read_errors = [] }
 
 type keeper_fleet_meta_scan = {
   paused_scan : paused_keeper_scan;
@@ -221,6 +271,8 @@ type keeper_fleet_meta_scan = {
 type keeper_identity_drift_scan = {
   configured_names : string list;
   persisted_meta_names : string list;
+  persisted_meta_names_known : bool;
+  persisted_meta_read_errors : string list;
   materializable_configured_names : string list;
   configured_without_meta_names : string list;
   meta_without_config_names : string list;
@@ -246,8 +298,13 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
   (* NDT-OK: request-boundary wall clock only for dashboard pause-age display. *)
   let now = Unix.gettimeofday () in
   let configured_names = Keeper_meta_store.configured_keeper_names config in
+  let persisted_names, discovery_read_errors =
+    match Keeper_meta_store.keeper_names_result config with
+    | Ok names -> names, []
+    | Error error -> [], [ error ]
+  in
   let all_names =
-    sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
+    sorted_unique_strings (configured_names @ persisted_names)
   in
   let is_configured name = List.exists (String.equal name) configured_names in
   let should_count_autoboot_target name = is_configured name in
@@ -361,6 +418,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
           List.sort
             (fun (a, _) (b, _) -> String.compare a b)
             scan.paused_scan.read_errors;
+        discovery_read_errors = List.sort_uniq String.compare discovery_read_errors;
       };
     autoboot_scan =
       {
@@ -369,6 +427,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
           List.sort
             (fun (a, _) (b, _) -> String.compare a b)
             scan.autoboot_scan.read_errors;
+        discovery_read_errors = List.sort_uniq String.compare discovery_read_errors;
       };
     bootable_names = sorted_unique_strings scan.bootable_names;
   }
@@ -561,8 +620,10 @@ let keeper_identity_drift_scan config =
   let configured_names =
     Keeper_meta_store.configured_keeper_names config |> sorted_unique_strings
   in
-  let persisted_meta_names =
-    Keeper_meta_store.persisted_keeper_names config |> sorted_unique_strings
+  let persisted_meta_names, persisted_meta_names_known, persisted_meta_read_errors =
+    match Keeper_meta_store.persisted_keeper_names_result config with
+    | Ok names -> sorted_unique_strings names, true, []
+    | Error error -> [], false, [ error ]
   in
   let materializable_configured_names =
     configured_names
@@ -571,33 +632,45 @@ let keeper_identity_drift_scan config =
   in
   let configured_set = string_set_of_list configured_names in
   let persisted_set = string_set_of_list persisted_meta_names in
+  let configured_without_meta_names, meta_without_config_names =
+    if persisted_meta_names_known then
+      ( materializable_configured_names
+        |> List.filter (fun name -> not (String_set.mem name persisted_set))
+        |> sorted_unique_strings,
+        persisted_meta_names
+        |> List.filter (fun name -> not (String_set.mem name configured_set))
+        |> sorted_unique_strings )
+    else ([], [])
+  in
   {
     configured_names;
     persisted_meta_names;
+    persisted_meta_names_known;
+    persisted_meta_read_errors =
+      List.sort_uniq String.compare persisted_meta_read_errors;
     materializable_configured_names;
-    configured_without_meta_names =
-      materializable_configured_names
-      |> List.filter (fun name -> not (String_set.mem name persisted_set))
-      |> sorted_unique_strings;
-    meta_without_config_names =
-      persisted_meta_names
-      |> List.filter (fun name -> not (String_set.mem name configured_set))
-      |> sorted_unique_strings;
+    configured_without_meta_names;
+    meta_without_config_names;
   }
 
 let keeper_identity_drift_health_json_of_scan scan =
+  let persisted_meta_read_error_count =
+    List.length scan.persisted_meta_read_errors
+  in
   let configured_without_meta_count =
     List.length scan.configured_without_meta_names
   in
   let meta_without_config_count = List.length scan.meta_without_config_names in
   let blocking = meta_without_config_count > 0 in
   let status =
-    if blocking then "blocked"
+    if persisted_meta_read_error_count > 0 then "unknown"
+    else if blocking then "blocked"
     else if configured_without_meta_count > 0 then "degraded"
     else "ok"
   in
   let terminal_reason =
-    if meta_without_config_count > 0 then "runtime_meta_without_keeper_toml"
+    if persisted_meta_read_error_count > 0 then persisted_meta_read_error_kind
+    else if meta_without_config_count > 0 then "runtime_meta_without_keeper_toml"
     else if configured_without_meta_count > 0 then "configured_keeper_without_runtime_meta"
     else "none"
   in
@@ -615,8 +688,21 @@ let keeper_identity_drift_health_json_of_scan scan =
         `Int (List.length scan.materializable_configured_names) );
       ( "materializable_configured_keeper_names",
         json_string_list scan.materializable_configured_names );
+      ("persisted_meta_names_known", `Bool scan.persisted_meta_names_known);
       ("persisted_meta_count", `Int (List.length scan.persisted_meta_names));
       ("persisted_meta_names", json_string_list scan.persisted_meta_names);
+      ("persisted_meta_read_error_count", `Int persisted_meta_read_error_count);
+      ( "persisted_meta_read_errors",
+        `List
+          (List.map
+             (fun error ->
+               `Assoc
+                 [
+                   ("kind", `String persisted_meta_read_error_kind);
+                   ("source", `String keeper_meta_store_read_error_source);
+                   ("error", `String error);
+                 ])
+             scan.persisted_meta_read_errors) );
       ("configured_without_meta_count", `Int configured_without_meta_count);
       ( "configured_without_meta_names",
         json_string_list scan.configured_without_meta_names );
@@ -625,7 +711,8 @@ let keeper_identity_drift_health_json_of_scan scan =
         json_string_list scan.meta_without_config_names );
       ( "next_action",
         `String
-          (if meta_without_config_count > 0 then
+          (if persisted_meta_read_error_count > 0 then "repair_keeper_meta_store"
+           else if meta_without_config_count > 0 then
              "add_matching_keeper_toml_or_retire_stale_meta"
            else if configured_without_meta_count > 0 then
              "materialize_configured_keeper_or_disable_unused_toml"
@@ -1438,12 +1525,19 @@ let keeper_fleet_safety_health_json
     |> List.filter (fun name -> not (List.mem name active_names))
     |> sorted_unique_strings
   in
+  let keeper_name_discovery_read_error_count =
+    List.length autoboot_scan.discovery_read_errors
+  in
+  let fleet_meta_read_error_count =
+    List.length autoboot_scan.read_errors + keeper_name_discovery_read_error_count
+  in
   let status =
     if no_executable_keeper_fibers then "blocked"
     else if no_running_fibers then "degraded"
     else if low_running_fiber_margin then "degraded"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
+    else if fleet_meta_read_error_count > 0 then "degraded"
     else "ok"
   in
   let blocked_keeper_names =
@@ -1502,6 +1596,10 @@ let keeper_fleet_safety_health_json
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if active_task_owner_without_executable_fiber
     then Some "active_task_owner_without_executable_fiber"
+    else if keeper_name_discovery_read_error_count > 0
+    then Some keeper_name_discovery_read_error_kind
+    else if List.length autoboot_scan.read_errors > 0
+    then Some keeper_meta_read_error_kind
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
@@ -1517,13 +1615,38 @@ let keeper_fleet_safety_health_json
     ; "autoboot_enabled_keeper_count", `Int target_count
     ; ( "autoboot_enabled_keeper_names"
       , `List (List.map (fun name -> `String name) autoboot_scan.autoboot_names) )
-    ; "autoboot_enabled_read_error_count", `Int (List.length autoboot_scan.read_errors)
+    ; "autoboot_enabled_read_error_count", `Int fleet_meta_read_error_count
     ; ( "autoboot_enabled_read_errors"
       , `List
           (List.map
              (fun (keeper, error) ->
-               `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
-             autoboot_scan.read_errors) )
+               `Assoc
+                 [
+                   ("kind", `String keeper_meta_read_error_kind);
+                   ("keeper", `String keeper);
+                   ("error", `String error);
+                 ])
+             autoboot_scan.read_errors
+           @ List.map
+               (fun error ->
+                 `Assoc
+                   [
+                    ("kind", `String keeper_name_discovery_read_error_kind);
+                    ("source", `String keeper_meta_store_read_error_source);
+                     ("error", `String error);
+                   ])
+               autoboot_scan.discovery_read_errors) )
+    ; "keeper_name_discovery_read_error_count", `Int keeper_name_discovery_read_error_count
+    ; ( "keeper_name_discovery_read_errors"
+      , `List
+          (List.map
+             (fun error ->
+               `Assoc
+                 [
+                   ("source", `String keeper_meta_store_read_error_source);
+                   ("error", `String error);
+                 ])
+             autoboot_scan.discovery_read_errors) )
     ; "running_keeper_fiber_count", `Int phase_counts.running
     ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
     ; "running_keeper_names", `List (List.map (fun name -> `String name) running_names)
@@ -1601,5 +1724,6 @@ let keeper_fleet_safety_health_json
            || low_running_fiber_margin
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked
-           || active_task_owner_without_executable_fiber) )
+           || active_task_owner_without_executable_fiber
+           || fleet_meta_read_error_count > 0) )
     ]

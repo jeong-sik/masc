@@ -225,6 +225,20 @@ let test_configured_ice_servers_json_override () =
         Alcotest.(check (option string)) "json username" (Some "bob") server.username;
         Alcotest.(check (option string)) "json credential" (Some "pw") server.credential))
 
+let test_configured_ice_servers_json_override_preserves_valid_partial_entry () =
+  with_env "MASC_WEBRTC_ICE_URLS" (Some "stun:ignored.example.com:3478") (fun () ->
+    with_env "MASC_WEBRTC_ICE_SERVERS_JSON"
+      (Some {|[{"urls":["turn:relay.example.com:3478",7],"username":42,"credential":"pw"}]|})
+      (fun () ->
+        let servers = Wrtc.configured_ice_servers () in
+        Alcotest.(check int) "one partial json server record" 1 (List.length servers);
+        let server = List.hd servers in
+        Alcotest.(check (list string)) "valid json url preserved"
+          [ "turn:relay.example.com:3478" ]
+          server.Webrtc.Ice.urls;
+        Alcotest.(check (option string)) "invalid username absent" None server.username;
+        Alcotest.(check (option string)) "valid credential preserved" (Some "pw") server.credential))
+
 let () =
   Alcotest.run "WebRTC Signaling" [
     ("signaling", [
@@ -256,5 +270,8 @@ let () =
     ("ice_config", [
       Alcotest.test_case "csv env" `Quick test_configured_ice_servers_from_csv_env;
       Alcotest.test_case "json override" `Quick test_configured_ice_servers_json_override;
+      Alcotest.test_case "json override partial validity"
+        `Quick
+        test_configured_ice_servers_json_override_preserves_valid_partial_entry;
     ]);
   ]

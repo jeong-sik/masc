@@ -243,6 +243,8 @@ export type BulkKeeperDirectiveAction = 'pause' | 'resume' | 'wakeup'
 export interface BulkKeeperDirectiveResult {
   name: string
   ok: boolean
+  meta_read_status?: 'present' | 'missing' | 'read_error'
+  meta_read_error?: string
   error?: string
 }
 
@@ -251,6 +253,8 @@ export interface BulkKeeperDirectiveResponse {
   action: BulkKeeperDirectiveAction
   requested: number
   succeeded: number
+  failed?: number
+  meta_read_error_count?: number
   results: BulkKeeperDirectiveResult[]
 }
 

@@ -39,6 +39,16 @@ type metrics_summary = {
   last_compaction : Yojson.Safe.t option;
 }
 
+type metrics_json_line_parse_error = {
+  line_index : int;
+  message : string;
+}
+
+type parsed_metrics_json_line = {
+  metrics_line_index : int;
+  metrics_json : Yojson.Safe.t;
+}
+
 type tool_audit_snapshot = {
   latest_tool_names : string list;
   latest_tool_call_count : int option;
@@ -70,6 +80,56 @@ let report_metrics_summary_read_drop ~reason ~detail =
     ~reason
     ~path:"<keeper_metrics_lines>"
     ~detail
+
+let parse_metrics_json_lines_with_line_indices lines =
+  let parse_line line_index line =
+    match Yojson.Safe.from_string line with
+    | `Assoc _ as json -> Ok json
+    | other ->
+      Error
+        { line_index
+        ; message =
+            Printf.sprintf
+              "keeper metrics JSONL row must be object, got %s"
+              (Json_util.kind_name other)
+        }
+    | exception Yojson.Json_error message ->
+      Error { line_index; message }
+  in
+  let rec loop line_index parsed errors = function
+    | [] -> List.rev parsed, List.rev errors
+    | line :: rest -> (
+        match parse_line line_index line with
+        | Ok json ->
+          loop
+            (line_index + 1)
+            ({ metrics_line_index = line_index; metrics_json = json } :: parsed)
+            errors
+            rest
+        | Error error -> loop (line_index + 1) parsed (error :: errors) rest)
+  in
+  loop 0 [] [] lines
+
+let parse_metrics_json_lines lines =
+  let rows, errors = parse_metrics_json_lines_with_line_indices lines in
+  List.map (fun row -> row.metrics_json) rows, errors
+
+let metrics_json_line_parse_error_to_json ~source ?keeper ?path
+    { line_index; message } =
+  `Assoc
+    ([
+       ("source", `String source);
+       ("line_index", `Int line_index);
+       ("message", `String message);
+     ]
+     @
+     (match keeper with
+      | Some keeper_name -> [ ("keeper", `String keeper_name) ]
+      | None -> [])
+     @
+     match path with
+     | Some source_path -> [ ("path", `String source_path) ]
+     | None -> [])
 
 let empty_metrics_summary =
   {
@@ -241,20 +301,11 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
       ("last_compaction", match s.last_compaction with Some j -> j | None -> `Null);
     ]
 
-let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
+let summarize_metrics_jsons (rows : Yojson.Safe.t list) ~(default_generation : int) :
     metrics_summary =
   List.fold_left
-    (fun acc line ->
+    (fun acc j ->
       try
-        let j =
-          match Yojson.Safe.from_string line with
-          | `Assoc _ as json -> json
-          | _ ->
-              report_metrics_summary_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                ~detail:"keeper metrics row is not a JSON object";
-              raise Exit
-        in
         let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key j) in
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         let trace_id = Safe_ops.json_string ~default:"" "trace_id" j in
@@ -483,18 +534,23 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           last_compaction = compaction_json;
         }
       with
-      | Exit -> acc
-      | Yojson.Json_error detail ->
-          report_metrics_summary_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-            ~detail;
-          acc
       | Yojson.Safe.Util.Type_error (detail, _) ->
           report_metrics_summary_read_drop
             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
             ~detail;
           acc)
-    empty_metrics_summary lines
+    empty_metrics_summary rows
+
+let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
+    metrics_summary =
+  let rows, parse_errors = parse_metrics_json_lines lines in
+  List.iter
+    (fun { line_index; message } ->
+      report_metrics_summary_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~detail:(Printf.sprintf "line %d: %s" line_index message))
+    parse_errors;
+  summarize_metrics_jsons rows ~default_generation
 
 
 let action_source_opt_member json =

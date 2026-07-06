@@ -3,6 +3,7 @@
 open Alcotest
 
 module BV = Masc.Board_votes
+module BVJ = Masc_board_handlers.Board_votes_json
 module P = Masc.Otel_metric_store
 
 let () = Masc.Board_metric_hooks_adapter.install ()
@@ -76,6 +77,13 @@ let test_malformed_post_meta_json_counts_drop () =
         (board_post_meta_drop_value () -. before)
   | None -> fail "expected post with malformed meta_json to load"
 
+let test_post_meta_json_string_parse_result_surfaces_json_error () =
+  match BVJ.parse_post_meta_json_string_result "{not-json" with
+  | Error (BVJ.Post_meta_json_string_json_decode_error message) ->
+      check bool "json error has message" true (String.length message > 0)
+  | Ok json ->
+      failf "expected JSON decode error, got Ok %s" (Yojson.Safe.to_string json)
+
 let () =
   run "board_vote_quarantine" [
     "explicit", [
@@ -85,6 +93,8 @@ let () =
       test_case "falsy values disable" `Quick test_quarantine_explicit_false;
     ];
     "persistence_read_drops", [
+      test_case "post meta_json string parse error is typed" `Quick
+        test_post_meta_json_string_parse_result_surfaces_json_error;
       test_case "malformed post meta_json increments drop metric" `Quick
         test_malformed_post_meta_json_counts_drop;
     ];

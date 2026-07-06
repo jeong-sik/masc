@@ -52,18 +52,32 @@ let parse_trigger_policy raw : Gw.trigger_policy =
       default_trigger_policy
 
 let resolved_trigger_policy () =
+  let warn_toml_fallback ~toml_path msg =
+    Log.Server.warn
+      "discord trigger_policy runtime.toml read failed path=%s (%s); trying env/default fallback"
+      toml_path
+      msg
+  in
   let from_toml () =
-    try
-      let resolution = Config_dir_resolver.resolve () in
-      let toml_path =
-        Filename.concat resolution.Config_dir_resolver.config_root.path
-          Config_dir_resolver.runtime_toml_filename
-      in
-      if Sys.file_exists toml_path then
-        let tbl = Otoml.Parser.from_file toml_path in
-        Otoml.find_opt tbl Otoml.get_string [ "discord"; "trigger_policy" ]
-      else None
-    with _ -> None
+    let resolution = Config_dir_resolver.resolve () in
+    let toml_path =
+      Filename.concat
+        resolution.Config_dir_resolver.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    if Sys.file_exists toml_path
+    then
+      match Otoml.Parser.from_file_result toml_path with
+      | Error msg ->
+        warn_toml_fallback ~toml_path msg;
+        None
+      | Ok tbl ->
+        (match Otoml.find_opt tbl Otoml.get_string [ "discord"; "trigger_policy" ] with
+         | raw -> raw
+         | exception Otoml.Type_error msg ->
+           warn_toml_fallback ~toml_path msg;
+           None)
+    else None
   in
   match from_toml () with
   | Some raw -> parse_trigger_policy raw
@@ -617,10 +631,9 @@ let handle_ambient ~base_dir
       (* RFC-connector-ambient-attention-wake P3: wake the (possibly idle) keeper
          on this ambient message via an edge stimulus carrying the external-
          attention event_id (not content — content stays in the durable store),
-         plus a wakeup hint for sub-second propagation. Gated off by default:
-         until the spurious-wake throttle (P4) lands, running a turn on every
-         ambient line in a chatty channel is the anti-pattern the trigger policy
-         deliberately filtered. *)
+         plus a wakeup hint for sub-second propagation. Default-off operator
+         control remains deliberate even with the P4 throttle: ambient chat can
+         be high volume, so deployments opt in per runtime policy. *)
       (match attention_event_id with
        | Some event_id
          when Feature_flag_registry.get_bool "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED"
@@ -639,8 +652,20 @@ let handle_ambient ~base_dir
            ; payload = Keeper_event_queue.Connector_attention { event_id }
            }
          in
-         Keeper_registry_event_queue.enqueue ~base_path:base_dir keeper_name stimulus;
-         Keeper_registry.wakeup ~base_path:base_dir keeper_name
+         (match
+            Keeper_keepalive_signal.enqueue_stimulus_and_wakeup_hint_result
+              ~base_path:base_dir
+              ~keeper_name
+              stimulus
+          with
+          | Ok _ -> ()
+          | Error msg ->
+            Log.Keeper.warn
+              "discord ambient wake enqueue failed keeper=%s channel=%s event_id=%s: %s"
+              keeper_name
+              channel_id
+              event_id
+              msg)
        | Some _ | None -> ());
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded
@@ -654,6 +679,10 @@ let on_ambient ~base_dir (ev : Gw.gateway_event) =
     handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
       ~author_name ~content
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
+
+module For_testing = struct
+  let handle_ambient = handle_ambient
+end
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)

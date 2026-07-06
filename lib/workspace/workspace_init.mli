@@ -18,6 +18,10 @@ val pause :
 
 (** Clear an active pause. [`Already_running] when no pause was
     set, [`Resumed] otherwise. *)
+val resume_result :
+  Workspace_utils_backend_setup.config ->
+  by:string -> ([ `Already_running | `Resumed ], string) result
+
 val resume :
   Workspace_utils_backend_setup.config ->
   by:string -> [> `Already_running | `Resumed ]

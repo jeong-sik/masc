@@ -38,11 +38,14 @@ let sample_board_event : WO.pending_board_event =
     new_external_since = 0;
     latest_external_author = None;
     latest_external_preview = None;
+    post_read_error = None;
+    comment_read_error = None;
     provenance = WO.Human_direct;
   }
 
 let scheduled_automation_observation : WO.scheduled_automation_observation =
-  { active_count = 2
+  { read_status = WO.Schedule_observation_ok
+  ; active_count = 2
   ; due_ready_count = 1
   ; blocked_approval_count = 1
   ; next_due_at = Some 200.0
@@ -214,6 +217,151 @@ let test_quarantined_board_event_wraps_in_envelope () =
     (contains_sub "observational-data" human_msg)
 ;;
 
+let board_signal_with_content content : Masc.Board_dispatch.board_signal =
+  { kind = Masc.Board_dispatch.Board_post_created
+  ; post_id = "mention-parser-post"
+  ; author = "operator"
+  ; title = "Mention parser"
+  ; content
+  ; mention_ids = Masc.Board.Mention_id.mention_ids_of_content content
+  ; hearth = None
+  ; updated_at = None
+  }
+;;
+
+let test_board_signal_exact_mention_matches_canonical_target () =
+  let meta = { minimal_meta with mention_targets = [ "alice" ] } in
+  let matched =
+    WO.board_signal_match
+      ~continuity_summary:""
+      ~meta
+      ~signal:(board_signal_with_content "hey @alice, please inspect this")
+  in
+  check bool "exact @alice token matches" true matched.explicit_mention;
+  check (list string) "matched target" [ "alice" ] matched.matched_targets
+;;
+
+let test_board_signal_substring_mention_does_not_match () =
+  let meta = { minimal_meta with mention_targets = [ "alice" ] } in
+  let matched =
+    WO.board_signal_match
+      ~continuity_summary:""
+      ~meta
+      ~signal:(board_signal_with_content "ping @alicex and email@alice.com")
+  in
+  check bool "substring forms do not mention alice" false matched.explicit_mention;
+  check (list string) "no matched targets" [] matched.matched_targets
+;;
+
+let test_board_signal_post_read_error_is_visible () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  let signal : Masc.Board_dispatch.board_signal =
+    { kind = Masc.Board_dispatch.Board_post_created
+    ; post_id = "missing-board-signal-post"
+    ; author = "operator"
+    ; title = "Signal title"
+    ; content = "Signal content fallback"
+    ; mention_ids = []
+    ; hearth = None
+    ; updated_at = None
+    }
+  in
+  let event =
+    WO.pending_board_event_of_board_signal
+      ~continuity_summary:""
+      ~meta:minimal_meta
+      ~arrived_at:100.0
+      signal
+  in
+  check string "signal title remains fallback" "Signal title" event.title;
+  check string "signal preview remains fallback" "Signal content fallback" event.preview;
+  check bool "post read error is retained" true
+    (Option.is_some event.post_read_error);
+  let obs = { base_observation with pending_board_events = [ event ] } in
+  let _, user_msg =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs ()
+  in
+  check bool "prompt surfaces board read error label" true
+    (contains_sub "post read error:" user_msg)
+;;
+
+let test_board_signal_comment_read_error_is_visible () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  let signal : Masc.Board_dispatch.board_signal =
+    { kind = Masc.Board_dispatch.Board_comment_added
+    ; post_id = "never-existed-comments"
+    ; author = "operator"
+    ; title = "Comment signal title"
+    ; content = "Comment signal content"
+    ; mention_ids = []
+    ; hearth = None
+    ; updated_at = None
+    }
+  in
+  let comment_status =
+    Masc.Keeper_world_observation_board_signal.check_self_comment_status
+      ~self_ids:[]
+      ~post_id:signal.post_id
+  in
+  (match comment_status with
+   | `Comment_read_error _ -> ()
+   | `Never | `No_new_external | `New_external _ ->
+     fail "missing comment post must remain an explicit read error");
+  (match
+     Masc.Keeper_world_observation_board_signal.wake_reason
+       ~continuity_summary:""
+       ~meta:minimal_meta
+       ~signal
+   with
+   | Some (Masc.Keeper_world_observation_board_signal.Board_comment_read_error _) ->
+     ()
+   | Some _ | None -> fail "comment read error must remain a typed wake reason");
+  let event =
+    WO.pending_board_event_of_board_signal
+      ~continuity_summary:""
+      ~meta:minimal_meta
+      ~arrived_at:100.0
+      signal
+  in
+  check bool "comment read error is retained" true
+    (Option.is_some event.comment_read_error);
+  check int "no inferred external reply count" 0 event.new_external_since;
+  check bool "no inferred self comment" false event.self_commented;
+  let obs = { base_observation with pending_board_events = [ event ] } in
+  let _, user_msg =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs ()
+  in
+  check bool "prompt surfaces comment read error label" true
+    (contains_sub "comment read error:" user_msg)
+;;
+
+let test_board_signal_goal_keyword_does_not_wake_without_judgment () =
+  let signal : Masc.Board_dispatch.board_signal =
+    { kind = Masc.Board_dispatch.Board_post_created
+    ; post_id = "goal-keyword-post"
+    ; author = "operator"
+    ; title = "test goal discussion"
+    ; content = "This text overlaps the keeper goal but does not mention it."
+    ; mention_ids = []
+    ; hearth = None
+    ; updated_at = None
+    }
+  in
+  match
+    Masc.Keeper_world_observation_board_signal.wake_reason
+      ~continuity_summary:""
+      ~meta:minimal_meta
+      ~signal
+  with
+  | None -> ()
+  | Some reason ->
+    fail
+      ( "goal keyword overlap must not produce deterministic wake reason: "
+        ^ Masc.Keeper_world_observation_board_signal.wake_reason_label reason )
+;;
+
 let test_task_claim_requires_matched_backlog () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 0 }
@@ -352,6 +500,21 @@ let () =
           test_case
             "trust: quarantined board event wraps in envelope (RFC-0248 PR-2)"
             `Quick test_quarantined_board_event_wraps_in_envelope;
+          test_case
+            "board signal: exact mention uses canonical parser"
+            `Quick test_board_signal_exact_mention_matches_canonical_target;
+          test_case
+            "board signal: substring mention forms do not match"
+            `Quick test_board_signal_substring_mention_does_not_match;
+          test_case
+            "board signal: post read error remains visible"
+            `Quick test_board_signal_post_read_error_is_visible;
+          test_case
+            "board signal: comment read error remains visible"
+            `Quick test_board_signal_comment_read_error_is_visible;
+          test_case
+            "board signal: goal keyword overlap does not wake without judgment"
+            `Quick test_board_signal_goal_keyword_does_not_wake_without_judgment;
           test_case "affordance: task claim requires matched backlog" `Quick
             test_task_claim_requires_matched_backlog;
           test_case "affordance: task claim present for claimable backlog" `Quick

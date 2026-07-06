@@ -52,7 +52,11 @@ val discover_repositories : base_path:string -> (repository list, string) result
     Directories under [.masc/] and repositories already registered in
     [repositories.toml] are excluded. This function is read-only and is
     intended for Phase 1 onboarding where the operator confirms discovered
-    repositories before adding them to the store. *)
+    repositories before adding them to the store.
+
+    Returns [Error _] when the repository store cannot be read/decoded or when
+    a discovered git repository's [origin] remote cannot be read. In both cases
+    the discovery result is unknown, not an empty candidate list. *)
 
 val register_discovered : base_path:string -> (repository list, string) result
 (** [register_discovered ~base_path] scans [base_path] for git repositories
@@ -70,6 +74,12 @@ val find_url_by_id : base_path:string -> repository_id -> string option
     field for the given repository, or [None] when the repository is
     not registered or has an empty URL. *)
 
+val find_url_by_id_result :
+  base_path:string -> repository_id -> (string option, string) result
+(** Result-returning variant of {!find_url_by_id}. [Error _] means the
+    repository store could not be read/decoded; [Ok None] means the
+    repository is absent or has an empty URL. *)
+
 val find_repo_by_path_prefix
   :  base_path:string
   -> string
@@ -77,3 +87,9 @@ val find_repo_by_path_prefix
 (** RFC-0128 §4.5. [find_repo_by_path_prefix ~base_path abs_path]
     returns the repository whose resolved {!local_path} is a directory
     ancestor of [abs_path], along with the repo-relative remainder. *)
+
+val find_repo_by_path_prefix_result :
+  base_path:string -> string -> ((repository * string) option, string) result
+(** Result-returning variant of {!find_repo_by_path_prefix}. [Error _]
+    means the repository store could not be read/decoded; [Ok None] means
+    no registered repository contains the path. *)

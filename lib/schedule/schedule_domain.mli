@@ -67,6 +67,21 @@ type recurrence =
       ; timezone : string
       }
 
+type due_calculation_error =
+  | Due_invalid_interval of int
+  | Due_invalid_daily_time of
+      { hour : int
+      ; minute : int
+      ; second : int
+      }
+  | Due_invalid_daily_timezone of string
+  | Due_invalid_cron_timezone of string
+  | Due_invalid_cron_expression of string
+  | Due_cron_search_exhausted of
+      { expression : string
+      ; timezone : string
+      }
+
 (** Opaque consumer payload.
 
     The schedule domain does not interpret payload kind or body fields, but it
@@ -158,12 +173,20 @@ val is_terminal : schedule_status -> bool
 val is_side_effecting : risk_class -> bool
 val requires_separate_human_grant : schedule_request -> bool
 val is_recurring : recurrence -> bool
-val first_due_after : now:float -> recurrence -> float option
+val due_calculation_error_to_string : due_calculation_error -> string
+
+val first_due_after_result :
+  now:float -> recurrence -> (float option, due_calculation_error) result
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)
 
-val next_due_after : now:float -> schedule_request -> float option
-val reschedule_after_due_signal : now:float -> schedule_request -> schedule_request option
+val next_due_after_result :
+  now:float -> schedule_request -> (float option, due_calculation_error) result
+
+val reschedule_after_due_signal_result :
+  now:float ->
+  schedule_request ->
+  (schedule_request option, due_calculation_error) result
 
 val payload_of_yojson : Yojson.Safe.t -> (payload, string) result
 val payload_to_yojson : payload -> Yojson.Safe.t

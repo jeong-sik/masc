@@ -94,35 +94,46 @@ let failure_site_label = function
 let failure_observer_fn : (site:string -> unit) Atomic.t =
   Atomic.make (fun ~site:_ -> ())
 
+let observe_failure_message ~site ~base_path error =
+  let site = failure_site_label site in
+  (* Telemetry observers are best-effort; keep the original discovery
+     history failure visible even if metric recording fails. *)
+  (try (Atomic.get failure_observer_fn) ~site with observer_exn ->
+    Log.Discovery.warn "discovery_history failure observer failed site=%s: %s"
+      site
+      (Printexc.to_string observer_exn));
+  Log.Discovery.error "discovery_history: %s failed base_path=%s: %s" site
+    base_path error
+
 let observe_failure ~site ~base_path exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      let site = failure_site_label site in
-      (* Telemetry observers are best-effort; keep the original discovery
-         history failure visible even if metric recording fails. *)
-      (try (Atomic.get failure_observer_fn) ~site with observer_exn ->
-        Log.Discovery.warn
-          "discovery_history failure observer failed site=%s: %s"
-          site
-          (Printexc.to_string observer_exn));
-      Log.Discovery.error "discovery_history: %s failed base_path=%s: %s"
-        site base_path (Printexc.to_string exn)
+      observe_failure_message ~site ~base_path (Printexc.to_string exn)
 
 module For_testing = struct
   let observe_failure = observe_failure
 end
 
-let record_probe ~base_path (endpoints : Llm_provider.Discovery.endpoint_status list) =
-  try
-    let store = get_or_create_store ~base_path in
-    List.iter (fun ep ->
-      let r = endpoint_to_record ep in
-      let json = record_to_json r in
-      Dated_jsonl.append store json
-    ) endpoints
-  with exn ->
-    observe_failure ~site:"record_probe" ~base_path exn
+let record_probe_result ~base_path
+    (endpoints : Llm_provider.Discovery.endpoint_status list) =
+  let store = get_or_create_store ~base_path in
+  let rec loop = function
+    | [] -> Ok ()
+    | ep :: rest ->
+        let r = endpoint_to_record ep in
+        let json = record_to_json r in
+        (match Dated_jsonl.append_result store json with
+        | Ok () -> loop rest
+        | Error error -> Error error)
+  in
+  loop endpoints
+
+let record_probe ~base_path
+    (endpoints : Llm_provider.Discovery.endpoint_status list) =
+  match record_probe_result ~base_path endpoints with
+  | Ok () -> ()
+  | Error error -> observe_failure_message ~site:"record_probe" ~base_path error
 
 (* ── Read ─────────────────────────────────────────────────── *)
 

@@ -6,12 +6,11 @@
 
     + Manual override table (curated entries for prominent tools).
     + Schema metadata extraction (description, constraints).
-    + Heuristic fallback (first-sentence summaries, derived
-      details).
+    + Schema-derived summaries and details.
 
     Internal: 11 text helpers ([normalize_spaces],
     [trim_terminal_punctuation], [first_sentence], [truncate],
-    [help_doc_refs], [help_prompt_hints], [default_when_to_use],
+    [help_prompt_hints], [default_when_to_use],
     [constraints_from_metadata], [manual_help_entry],
     [derived_short_description], [derived_details]),
     [canonicalize_schema] (singular — folded into
@@ -58,7 +57,7 @@ val entry_of_schema : Masc_domain.tool_schema -> help_entry
     + Manual override table (\[manual_help_entry\]).
     + Schema-derived fields (description -> short, metadata ->
       constraints).
-    + Heuristic fallback ([derived_short_description] +
+    + Schema-derived summary/details ([derived_short_description] +
       [derived_details]).
 
     Always returns a valid record — degraded entries surface

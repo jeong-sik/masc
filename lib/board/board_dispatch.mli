@@ -43,6 +43,7 @@ type board_signal = {
   author : string;
   title : string;
   content : string;
+  mention_ids : Board.Mention_id.t list;
   hearth : string option;
   updated_at : float option;
 }
@@ -209,9 +210,9 @@ val add_comment :
   unit ->
   (Board.comment, Board.board_error) Result.t
 
-val get_comments :
-  post_id:string ->
-  (Board.comment list, Board.board_error) Result.t
+(** Returns comments for [post_id]. Returns [Post_not_found] when [post_id] is
+    valid but the post row is absent. *)
+val get_comments : post_id:string -> (Board.comment list, Board.board_error) Result.t
 
 val get_post_and_comments :
   post_id:string ->

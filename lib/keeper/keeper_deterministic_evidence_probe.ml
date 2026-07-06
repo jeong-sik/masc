@@ -9,7 +9,18 @@ type dispatch_target =
   ; base_host_env : string array option
   }
 
-(* TEL-OK: pure dispatch-target selector (no side-effecting action; probe execution + telemetry live in make_probe/the evaluator). *)
+let shell_ir_dispatch_error_to_string = function
+  | Keeper_tool_execute_shell_ir.Gate_reject reason ->
+    "gate_reject: " ^ reason
+  | Keeper_tool_execute_shell_ir.Cannot_parse -> "cannot_parse"
+  | Keeper_tool_execute_shell_ir.Too_complex -> "too_complex"
+  | Keeper_tool_execute_shell_ir.Path_reject reason ->
+    "path_reject: " ^ reason
+  | Keeper_tool_execute_shell_ir.Approval_required { summary; bin } ->
+    Printf.sprintf "approval_required: %s (%s)" summary bin
+  | Keeper_tool_execute_shell_ir.Policy_denied { reason } ->
+    "policy_denied: " ^ reason
+
 let local_dispatch_target ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   match
@@ -18,11 +29,14 @@ let local_dispatch_target ~(config : Workspace.config)
       ~keeper_name:meta.name
       ()
   with
-  | Error _ -> None
+  | Error err ->
+    Log.Keeper.warn ~keeper_name:meta.name
+      "deterministic evidence local dispatch target unavailable: secret projection failed: %s"
+      err;
+    None
   | Ok base_host_env ->
     Some { sandbox = Masc_exec.Sandbox_target.host (); base_host_env }
 
-(* TEL-OK: pure dispatch-target selector (no side-effecting action; probe execution + telemetry live in make_probe/the evaluator). *)
 let command_dispatch_target
     ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
     ~(config : Workspace.config)
@@ -37,7 +51,11 @@ let command_dispatch_target
         ~meta
         ~cwd
     with
-    | Error _ -> None
+    | Error { Keeper_sandbox_shell_ir_target.message; _ } ->
+      Log.Keeper.warn ~keeper_name:meta.name
+        "deterministic evidence docker dispatch target unavailable: %s"
+        message;
+      None
     | Ok sandbox -> Some { sandbox; base_host_env = None })
 
 let make_probe
@@ -49,7 +67,11 @@ let make_probe
     match
       Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta ~raw_path
     with
-    | Error _ -> None
+    | Error err ->
+      Log.Keeper.warn ~keeper_name:meta.name
+        "deterministic evidence file probe path rejected path=%s: %s"
+        raw_path err;
+      None
     | Ok abs_path -> Fs_compat.file_size abs_path
   in
   let command_exit cmd =
@@ -61,10 +83,18 @@ let make_probe
         ~write_enabled:true
         ~args
     with
-    | Error _ -> None
+    | Error err ->
+      Log.Keeper.warn ~keeper_name:meta.name
+        "deterministic evidence command cwd resolution failed: %s"
+        err;
+      None
     | Ok cwd -> (
       match Exec_policy.parse_string_to_ir ~mode:Tool_execute cmd with
-      | Error _ -> None
+      | Error reason ->
+        Log.Keeper.warn ~keeper_name:meta.name
+          "deterministic evidence command rejected by Shell IR parser: %s"
+          (Exec_policy.block_reason_to_string reason);
+        None
       | Ok ir -> (
         match
           command_dispatch_target
@@ -84,7 +114,11 @@ let make_probe
               ?base_host_env
               ir
           with
-          | Error _ -> None
+          | Error err ->
+            Log.Keeper.warn ~keeper_name:meta.name
+              "deterministic evidence command dispatch failed: %s"
+              (shell_ir_dispatch_error_to_string err);
+            None
           | Ok res -> (
             match res.Masc_exec.Exec_dispatch.status with
             | Unix.WEXITED code -> Some code
@@ -98,12 +132,13 @@ let make_probe
   }
 
 
+let evaluate ?turn_sandbox_factory ~config ~meta claims =
+  Deterministic_evidence_evaluator.eval_all
+    (make_probe ~turn_sandbox_factory ~config ~meta)
+    claims
+
 let all_satisfied ?turn_sandbox_factory ~config ~meta claims =
-  match
-    Deterministic_evidence_evaluator.eval_all
-      (make_probe ~turn_sandbox_factory ~config ~meta)
-      claims
-  with
+  match evaluate ?turn_sandbox_factory ~config ~meta claims with
   | Deterministic_evidence_evaluator.Satisfied -> true
   | Deterministic_evidence_evaluator.Unsatisfied _
   | Deterministic_evidence_evaluator.Indeterminate _ -> false

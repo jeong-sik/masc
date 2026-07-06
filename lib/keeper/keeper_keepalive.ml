@@ -62,60 +62,84 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
   | None -> on_missing ()
 ;;
 
+let directive_meta_persist_error
+      (entry : Keeper_registry.registry_entry)
+      (msg : string)
+  : (unit, string) result
+  =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string WriteMetaFailures)
+    ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
+    ();
+  Log.Keeper.emit
+    Log.Warn
+    ~category:Log.Heartbeat
+    ~details:(`Assoc [ "keeper", `String entry.name; "error", `String msg ])
+    (Printf.sprintf "directive meta persist failed for %s: %s" entry.name msg);
+  Error msg
+;;
+
+let directive_meta_persist_path_result
+      (entry : Keeper_registry.registry_entry)
+      ~(keeper_filename : string)
+  : (string, string) result
+  =
+  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
+  let default_path =
+    Filename.concat (Filename.concat masc_root "keepers") keeper_filename
+  in
+  if Fs_compat.file_exists default_path
+  then Ok default_path
+  else (
+    let clusters_dir = Filename.concat masc_root "clusters" in
+    let cluster_paths_result =
+      if not (Fs_compat.file_exists clusters_dir)
+      then Ok []
+      else (
+        match Safe_ops.list_dir_safe clusters_dir with
+        | Error msg ->
+          Error
+            (Printf.sprintf
+               "clusters_dir_read_error while resolving directive meta path: %s"
+               msg)
+        | Ok names ->
+          Ok
+            (names
+             |> List.map (fun cluster_name ->
+               Filename.concat
+                 (Filename.concat (Filename.concat clusters_dir cluster_name) "keepers")
+                 keeper_filename)
+             |> List.filter Fs_compat.file_exists))
+    in
+    match cluster_paths_result with
+    | Error _ as err -> err
+    | Ok [] -> Ok default_path
+    | Ok [ path ] -> Ok path
+    | Ok paths ->
+      let by_mtime_desc a b =
+        let a_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime a) in
+        let b_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime b) in
+        Float.compare b_mtime a_mtime
+      in
+      (match List.sort by_mtime_desc paths with
+       | latest_path :: _ -> Ok latest_path
+       | [] -> Ok default_path))
+;;
+
 let persist_directive_meta_update
       (entry : Keeper_registry.registry_entry)
       ~(updated_meta : keeper_meta)
   : (unit, string) result
   =
   let keeper_filename = entry.name ^ ".json" in
-  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
-  let default_path =
-    Filename.concat (Filename.concat masc_root "keepers") keeper_filename
-  in
-  let persisted_path =
-    if Fs_compat.file_exists default_path
-    then default_path
-    else (
-      let clusters_dir = Filename.concat masc_root "clusters" in
-      let cluster_paths =
-        match Safe_ops.list_dir_safe clusters_dir with
-        | Ok names ->
-          names
-          |> List.map (fun cluster_name ->
-            Filename.concat
-              (Filename.concat (Filename.concat clusters_dir cluster_name) "keepers")
-              keeper_filename)
-          |> List.filter Fs_compat.file_exists
-        | Error _ -> []
-      in
-      match cluster_paths with
-      | [] -> default_path
-      | [ path ] -> path
-      | paths ->
-        let by_mtime_desc a b =
-          let a_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime a) in
-          let b_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime b) in
-          Float.compare b_mtime a_mtime
-        in
-        (match List.sort by_mtime_desc paths with
-         | latest_path :: _ -> latest_path
-         | [] -> default_path))
-  in
+  match directive_meta_persist_path_result entry ~keeper_filename with
+  | Error msg -> directive_meta_persist_error entry msg
+  | Ok persisted_path ->
   match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
   | Ok () ->
     Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta;
     Ok ()
-  | Error msg ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string WriteMetaFailures)
-      ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
-      ();
-    Log.Keeper.emit
-      Log.Warn
-      ~category:Log.Heartbeat
-      ~details:(`Assoc [ "keeper", `String entry.name; "error", `String msg ])
-      (Printf.sprintf "directive meta persist failed for %s: %s" entry.name msg);
-    Error msg
+  | Error msg -> directive_meta_persist_error entry msg
 ;;
 
 let directive_paused_meta (meta : keeper_meta) paused =

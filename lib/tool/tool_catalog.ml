@@ -247,6 +247,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_update", broadcast_tool);
     ("masc_keeper_list", read_state_tool);
     ("masc_keeper_status", read_state_tool);
+    ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
     ( "masc_keeper_down",
       with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
@@ -344,6 +345,34 @@ let register_metadata name (meta : metadata) =
 
 let registered_metadata name =
   Hashtbl.find_opt metadata_table name
+
+type doc_ref_bundle =
+  | Command_plane_runbooks
+
+let doc_refs_for_bundle = function
+  | Command_plane_runbooks ->
+      [
+        "docs/COMMAND-PLANE-RUNBOOK.md";
+        "docs/BENCHMARK-RUNBOOK.md";
+      ]
+
+let explicit_doc_ref_bindings =
+  [
+    ("masc_policy_approve", Command_plane_runbooks);
+    ("masc_policy_freeze_unit", Command_plane_runbooks);
+    ("masc_policy_kill_switch", Command_plane_runbooks);
+    ("masc_observe_operations", Command_plane_runbooks);
+    ("masc_observe_capacity", Command_plane_runbooks);
+    ("masc_observe_traces", Command_plane_runbooks);
+  ]
+
+let doc_refs_table : (string, doc_ref_bundle) Hashtbl.t = Hashtbl.create 16
+let () = List.iter (fun (name, bundle) -> Hashtbl.replace doc_refs_table name bundle) explicit_doc_ref_bindings
+
+let doc_refs name =
+  match Hashtbl.find_opt doc_refs_table name with
+  | Some bundle -> doc_refs_for_bundle bundle
+  | None -> []
 
 (* ================================================================ *)
 (* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)

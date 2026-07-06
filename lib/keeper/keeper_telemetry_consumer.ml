@@ -47,7 +47,9 @@ let spawn_subscriber ~sw ~clock ~base_path ~bus =
                     telemetry_event_counter
                     ~labels:[ "result", "observed" ]
                     ();
-                  Dated_jsonl.append store json
+                  (match Dated_jsonl.append_result store json with
+                   | Ok () -> ()
+                   | Error error -> raise (Sys_error error))
               | _ -> ())
            events
        with

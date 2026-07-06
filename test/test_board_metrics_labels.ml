@@ -13,7 +13,6 @@
 
 module BPH = Masc.Board_metric_hooks_adapter
 module BMH = Masc.Board_metrics_hooks
-module BCC = Masc.Board_core_classify
 module RDR = Read_drop_reason
 
 let check_label name expected actual =
@@ -23,7 +22,15 @@ let check_label name expected actual =
    the literal "board_post_meta_json". *)
 let test_board_persist_surface_to_label () =
   check_label "Board_post_meta_json" "board_post_meta_json"
-    (BPH.board_persist_surface_to_label BMH.Board_post_meta_json)
+    (BPH.board_persist_surface_to_label BMH.Board_post_meta_json);
+  check_label "Board_post_kind" "board_post_kind"
+    (BPH.board_persist_surface_to_label BMH.Board_post_kind);
+  check_label "Board_post_mention_ids" "board_post_mention_ids"
+    (BPH.board_persist_surface_to_label BMH.Board_post_mention_ids);
+  check_label "Board_comment_mention_ids" "board_comment_mention_ids"
+    (BPH.board_persist_surface_to_label BMH.Board_comment_mention_ids);
+  check_label "Board_sub_board_member_ids" "board_sub_board_member_ids"
+    (BPH.board_persist_surface_to_label BMH.Board_sub_board_member_ids)
 
 (* outcome label for masc_board_dispatch_flusher_start_outcomes_total.
    Old code passed "switch_finished" / "cas_exhausted". *)
@@ -32,24 +39,6 @@ let test_flusher_outcome_to_label () =
     (BPH.flusher_outcome_to_label BMH.Switch_finished);
   check_label "Cas_exhausted" "cas_exhausted"
     (BPH.flusher_outcome_to_label BMH.Cas_exhausted)
-
-(* automation_label label for masc_board_legacy_migrate_post_kind_total.
-   Old [automation_label_token] produced exactly these strings; the table
-   below mirrors it constructor-for-constructor. *)
-let test_automation_label_to_label () =
-  let cases =
-    [ (BCC.Auto_prefixed, "auto-prefix")
-    ; (BCC.Qa_prefixed, "qa-prefix")
-    ; (BCC.Researcher_named, "researcher")
-    ; (BCC.Harness_named, "harness")
-    ; (BCC.Smoke_named, "smoke")
-    ; (BCC.Probe_named, "probe")
-    ]
-  in
-  List.iter
-    (fun (variant, expected) ->
-      check_label expected expected (BPH.automation_label_to_label variant))
-    cases
 
 (* reason label for masc_persistence_read_drops_total. The board only
    emits Invalid_payload; the adapter reuses Read_drop_reason.to_wire,
@@ -70,8 +59,6 @@ let () =
             test_board_persist_surface_to_label
         ; Alcotest.test_case "flusher_outcome" `Quick
             test_flusher_outcome_to_label
-        ; Alcotest.test_case "automation_label" `Quick
-            test_automation_label_to_label
         ; Alcotest.test_case "read_drop_reason" `Quick
             test_read_drop_reason_to_label
         ] )

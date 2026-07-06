@@ -268,11 +268,13 @@ let log_call ~on_io_failure ~tool_name ~success ~caller =
       Log.Misc.debug "tool_usage_log: store not initialized, skipping %s" tool_name
   | Some store ->
       let json = record_to_json ~tool_name ~success ~caller in
-      (try Dated_jsonl.append store json
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      (match Dated_jsonl.append_result store json with
+       | Ok () -> ()
+       | Error msg ->
+         let exn = Sys_error msg in
          on_io_failure ~site:"tool_usage_log.append" exn;
          Log.Misc.warn "tool_usage_log: append failed for %s: %s"
-           tool_name (Stdlib.Printexc.to_string exn);
+           tool_name msg;
          let durable_store = Dated_jsonl.base_dir store in
          record_coverage_gap
            ~masc_root:(Filename.dirname durable_store)

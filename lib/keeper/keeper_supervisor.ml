@@ -219,10 +219,24 @@ let release_dead_keeper_owned_tasks (ctx : _ context) (entry : Keeper_registry.r
           err)
 ;;
 
+let pending_hitl_approval_keeper_names_result config =
+  match keeper_names_result config with
+  | Error err -> Error err
+  | Ok names ->
+    Ok
+      (names
+       |> List.filter (fun name ->
+            Keeper_approval_queue.has_pending_for_keeper ~keeper_name:name))
+;;
+
 let pending_hitl_approval_keeper_names config =
-  keeper_names config
-  |> List.filter (fun name ->
-       Keeper_approval_queue.has_pending_for_keeper ~keeper_name:name)
+  match pending_hitl_approval_keeper_names_result config with
+  | Ok names -> names
+  | Error err ->
+    Log.Keeper.warn
+      "pending HITL approval keeper-name discovery failed: %s"
+      err;
+    []
 ;;
 
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
@@ -239,8 +253,14 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
      [approval_janitor] expires it at the 30m mark). Name the keeper and
      pending approval count on every sweep so the terminal log and downstream
      consumers can see *why* the chat is awaiting a response. *)
-  pending_hitl_approval_keeper_names ctx.config
-  |> List.iter (fun name ->
+  (match pending_hitl_approval_keeper_names_result ctx.config with
+   | Error err ->
+     Log.Keeper.warn
+       "pending HITL approval visibility skipped: keeper-name discovery failed: %s"
+       err
+   | Ok names ->
+     names
+     |> List.iter (fun name ->
        let pending_count =
          Keeper_approval_queue.pending_count_for_keeper ~keeper_name:name
        in
@@ -248,7 +268,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
          "keeper:%s blocked on %d pending HITL approval(s); chat awaits operator \
           decision"
          name
-         pending_count);
+         pending_count));
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)

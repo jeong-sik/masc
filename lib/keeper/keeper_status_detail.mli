@@ -6,8 +6,8 @@
     only handles the per-keeper detail view.
 
     Selective .mli — internal helpers (cache hashtable + mutex,
-    [latest_metrics_json], [model_observability_json], the
-    [resolve_status_target] dispatch helpers, etc.) stay private. *)
+    [model_observability_json], the [resolve_status_target]
+    dispatch helpers, etc.) stay private. *)
 
 type tool_result = Keeper_types_profile.tool_result
 

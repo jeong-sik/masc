@@ -100,13 +100,13 @@ let broadcast_keeper_tool_call_event
 ;;
 
 let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
-  try
-    Keeper_types_support.append_jsonl_line
+  match
+    Keeper_types_support.append_jsonl_line_result
       (Keeper_types_support.keeper_decision_log_path config keeper_name)
       entry
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  | Ok () -> ()
+  | Error msg ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DecisionAuditFlushFailures)
       ~labels:[ "keeper", keeper_name ]
@@ -115,5 +115,5 @@ let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
       "keeper tool execution decision-log append failed: keeper=%s site=%s err=%s"
       keeper_name
       site
-      (Printexc.to_string exn)
+      msg
 ;;

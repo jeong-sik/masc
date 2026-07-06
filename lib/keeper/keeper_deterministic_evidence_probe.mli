@@ -13,6 +13,15 @@
     Other claim kinds ([PR_merged], [CI_pass], [Custom_check]) still resolve to
     [None] -> [Indeterminate] until their probes are wired. *)
 
+val evaluate :
+     ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> Evidence_claim.t list
+  -> Deterministic_evidence_evaluator.outcome
+(** Evaluate typed evidence claims and preserve the concrete
+    [Satisfied]/[Unsatisfied]/[Indeterminate] reason. *)
+
 val all_satisfied :
      ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> config:Workspace.config

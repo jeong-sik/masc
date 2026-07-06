@@ -67,6 +67,18 @@ val emit_tool_outcome :
 (** Append a [Tool_outcome] event to the ledger.  No-op when [agent_id] is
     empty; safe to call from any fiber (serialised via the Dated_jsonl mutex). *)
 
+val emit_tool_outcome_result :
+  Workspace.config ->
+  agent_id:string ->
+  tool_name:string ->
+  success:bool ->
+  ?error_kind:error_kind ->
+  ?raw_trace_run_id:string ->
+  unit ->
+  (unit, string) result
+(** Result-returning variant of {!emit_tool_outcome}.  Empty [agent_id]
+    preserves the existing no-op contract and returns [Ok ()]. *)
+
 val emit_goal_completion :
   Workspace.config ->
   agent_id:string ->
@@ -79,6 +91,19 @@ val emit_goal_completion :
   unit
 (** Append a [Goal_completion] event. *)
 
+val emit_goal_completion_result :
+  Workspace.config ->
+  agent_id:string ->
+  task_id:string ->
+  task_title:string ->
+  completed_within_budget:bool ->
+  on_topic:bool ->
+  ?raw_trace_run_id:string ->
+  unit ->
+  (unit, string) result
+(** Result-returning variant of {!emit_goal_completion}.  Empty [agent_id]
+    preserves the existing no-op contract and returns [Ok ()]. *)
+
 val emit_safety_violation :
   Workspace.config ->
   agent_id:string ->
@@ -88,6 +113,17 @@ val emit_safety_violation :
   unit ->
   unit
 (** Append a [Safety_violation] event. *)
+
+val emit_safety_violation_result :
+  Workspace.config ->
+  agent_id:string ->
+  violation_kind:string ->
+  ?tool_name:string ->
+  ?raw_trace_run_id:string ->
+  unit ->
+  (unit, string) result
+(** Result-returning variant of {!emit_safety_violation}.  Empty [agent_id]
+    preserves the existing no-op contract and returns [Ok ()]. *)
 
 (** {1 Readers} *)
 

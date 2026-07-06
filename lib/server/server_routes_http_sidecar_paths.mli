@@ -41,6 +41,7 @@ val read_file : string -> string
 val strip_matching_quotes : string -> string
 val parse_env_assignment : string -> (string * string) option
 val env_file_lookup : string -> string list -> string option
+val toml_lookup_result : string -> string list -> (string option, string) result
 val toml_lookup : string -> string list -> string option
 val resolve_relative_path : roots:string list -> string -> string list
 val first_existing_or_first : string list -> string option

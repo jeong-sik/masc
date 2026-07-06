@@ -33,7 +33,7 @@ let class_json = function
   | None -> `Null
   | Some cls -> `String (System_error_class.to_short_tag cls)
 
-let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
+let record_result ~masc_root ~source ~producer ~durable_store ~dashboard_surface
     ~stale_reason ?keeper_name ?trace_id ?error ?exn () =
   let raw_error, error_class = derive_error_and_class ~error ~exn in
   (* The OTel counter was severed in #20189 (retired scrape-backend
@@ -69,11 +69,67 @@ let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
         ("error_class", class_json error_class);
       ]
   in
-  Dated_jsonl.append store json
+  Dated_jsonl.append_result store json
 
-let read_recent ~masc_root ~n =
+let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
+    ~stale_reason ?keeper_name ?trace_id ?error ?exn () =
+  match
+    record_result ~masc_root ~source ~producer ~durable_store
+      ~dashboard_surface ~stale_reason ?keeper_name ?trace_id ?error ?exn ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+
+let read_error_to_json ~masc_root ~recent_index ~kind ~message =
+  `Assoc
+    [
+      ("source", `String "telemetry_coverage_gap_jsonl");
+      ("path", `String (store_dir masc_root));
+      ("recent_index", `Int recent_index);
+      ("kind", `String kind);
+      ("message", `String message);
+    ]
+
+let read_recent_with_read_errors ~masc_root ~n =
   if n <= 0 then []
   else
     let dir = store_dir masc_root in
     if not (Sys.file_exists dir) then []
-    else Dated_jsonl.read_recent (Dated_jsonl.create ~base_dir:dir ()) n
+    else
+      let lines =
+        Dated_jsonl.read_recent_lines (Dated_jsonl.create ~base_dir:dir ()) n
+      in
+      let rows_rev, errors_rev =
+        lines
+        |> List.mapi (fun recent_index line -> recent_index, line)
+        |> List.fold_left
+             (fun (rows, errors) (recent_index, line) ->
+               match Yojson.Safe.from_string line with
+               | `Assoc _ as json -> json :: rows, errors
+               | other ->
+                 let error =
+                   read_error_to_json
+                     ~masc_root
+                     ~recent_index
+                     ~kind:"row_not_object"
+                     ~message:
+                       (Printf.sprintf
+                          "telemetry coverage gap JSONL row must be object, got %s"
+                          (Json_util.kind_name other))
+                 in
+                 rows, error :: errors
+               | exception Yojson.Json_error message ->
+                 let error =
+                   read_error_to_json
+                     ~masc_root
+                     ~recent_index
+                     ~kind:"json_error"
+                     ~message
+                 in
+                 rows, error :: errors)
+             ([], [])
+      in
+      List.rev rows_rev, List.rev errors_rev
+
+let read_recent ~masc_root ~n =
+  fst (read_recent_with_read_errors ~masc_root ~n)

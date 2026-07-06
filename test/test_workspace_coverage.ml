@@ -141,7 +141,19 @@ let with_test_env f =
   | e ->
     let _ = Workspace.reset config in
     Unix.rmdir tmp_dir;
-    raise e
+      raise e
+;;
+
+let ensure_directory path =
+  if Sys.file_exists path
+  then
+    if not (Sys.is_directory path)
+    then Alcotest.failf "expected directory path, got file: %s" path
+  else Unix.mkdir path 0o755
+;;
+
+let write_text path content =
+  Out_channel.with_open_text path (fun oc -> output_string oc content)
 ;;
 
 let with_env key value f =
@@ -1575,6 +1587,25 @@ let test_resume_not_paused () =
     | _ -> Alcotest.fail "Expected Already_running")
 ;;
 
+let test_resume_result_reports_unreadable_state () =
+  with_test_env (fun config ->
+    let state_path = Workspace.state_path config in
+    Sys.remove state_path;
+    Unix.mkdir state_path 0o755;
+    Fun.protect
+      ~finally:(fun () ->
+        if Sys.file_exists state_path && Sys.is_directory state_path
+        then Unix.rmdir state_path)
+      (fun () ->
+        match Workspace.resume_result config ~by:"claude" with
+        | Error msg ->
+          Alcotest.(check bool)
+            "resume_result reports state read failure"
+            true
+            (str_contains msg "state read failed")
+        | Ok _ -> Alcotest.fail "expected resume_result state read failure"))
+;;
+
 let test_pause_info () =
   with_test_env (fun config ->
     Workspace.pause config ~by:"claude" ~reason:"Maintenance";
@@ -1608,6 +1639,53 @@ let test_get_tasks_raw_empty () =
   with_test_env (fun config ->
     let tasks = Workspace.get_tasks_raw config in
     Alcotest.(check int) "no tasks" 0 (List.length tasks))
+;;
+
+let test_task_query_result_apis_report_unreadable_backlog () =
+  with_test_env (fun config ->
+    write_text (Workspace.backlog_path config) "{not-json";
+    write_text (Workspace.backlog_recovery_path config) "{not-json";
+    let expect_error label = function
+      | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
+      | Error msg ->
+        Alcotest.(check bool)
+          (label ^ " reports read failure")
+          true
+          (str_contains msg "backlog")
+    in
+    expect_error "get_tasks_raw_result" (Workspace.get_tasks_raw_result config);
+    expect_error "get_tasks_safe_result" (Workspace.get_tasks_safe_result config);
+    expect_error "list_tasks_result" (Workspace.list_tasks_result config);
+    Alcotest.(check bool)
+      "legacy list_tasks returns visible read failure"
+      true
+      (str_contains
+         (Workspace.list_tasks config)
+         "Error: workspace backlog read failed");
+    Alcotest.(check bool)
+      "update_priority returns visible read failure"
+      true
+      (str_contains
+         (Workspace.update_priority config ~task_id:"task-001" ~priority:2)
+         "Error: workspace backlog read failed"))
+;;
+
+let test_workspace_status_result_reports_unreadable_backlog () =
+  with_test_env (fun config ->
+    write_text (Workspace.backlog_path config) "{not-json";
+    write_text (Workspace.backlog_recovery_path config) "{not-json";
+    (match Workspace.status_result config with
+     | Error msg ->
+       Alcotest.(check bool)
+         "status_result reports backlog read failure"
+         true
+         (str_contains msg "backlog read failed")
+     | Ok output ->
+       Alcotest.failf "expected status_result read failure, got output: %s" output);
+    Alcotest.(check bool)
+      "legacy status returns visible read failure"
+      true
+      (str_contains (Workspace.status config) "Error: workspace status read failed"))
 ;;
 
 let test_get_agents_raw () =
@@ -1676,6 +1754,14 @@ let test_get_active_agents_falls_back_to_state_when_agent_files_missing () =
            meta.session_id
        | None -> Alcotest.fail "expected synthetic agent meta")
     | _ -> Alcotest.failf "expected one state-backed agent, got %d" (List.length agents))
+;;
+
+let test_get_active_agents_does_not_synthesize_from_unreadable_state () =
+  with_test_env (fun config ->
+    remove_agent_files config;
+    write_text (Workspace.state_path config) "{not-json";
+    let agents = Workspace.get_active_agents config in
+    Alcotest.(check int) "no synthetic agents from unreadable state" 0 (List.length agents))
 ;;
 
 let test_get_active_agents_merges_state_with_file_backed_agents () =
@@ -1823,6 +1909,43 @@ let test_claim_task_r_already_claimed () =
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed")
 ;;
 
+let test_claim_next_r_reports_reconcile_agent_read_error () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task config ~title:"Blocked by corrupt agent" ~priority:1
+        ~description:""
+    in
+    let agent_file =
+      Filename.concat
+        (Workspace.agents_dir config)
+        (Workspace.safe_filename "claude" ^ ".json")
+    in
+    write_text agent_file "{";
+    match Workspace.claim_next_r config ~agent_name:"claude" () with
+    | Workspace.Claim_next_error msg ->
+      Alcotest.(check bool) "claim_next error message present" true (String.length msg > 0)
+    | Workspace.Claim_next_claimed { task_id; _ } ->
+      Alcotest.failf "claim_next must not claim with corrupt agent record, got %s" task_id
+    | Workspace.Claim_next_no_unclaimed | Workspace.Claim_next_no_eligible _ ->
+      Alcotest.fail "expected claim_next reconcile read error")
+;;
+
+let test_reconcile_all_fresh_backlog_result_reports_read_error () =
+  with_test_env (fun config ->
+    write_text (Workspace.backlog_path config) "{not-json";
+    write_text (Workspace.backlog_recovery_path config) "{not-json";
+    match Workspace.reconcile_all_agent_current_tasks_with_fresh_backlog_result config with
+    | Error msg ->
+      Alcotest.(check bool)
+        "reconcile reports backlog read failure"
+        true
+        (str_contains msg "backlog read failed")
+    | Ok backlog ->
+      Alcotest.failf
+        "expected fresh backlog reconcile read failure, got %d tasks"
+        (List.length backlog.tasks))
+;;
+
 (* Schedule-level scope fallback (#20673): a keeper must not idle when no
    in-scope task passes [task_filter] while an out-of-scope task is claimable.
    Hard scope returns no_eligible; [allow_scope_fallback] widens to all_tasks
@@ -1854,6 +1977,53 @@ let test_scope_widen_claims_unscoped_when_scope_blocks_all () =
     | Workspace.Claim_next_no_eligible _ ->
       Alcotest.fail "fallback must claim the out-of-scope task, got no_eligible"
     | _ -> Alcotest.fail "expected claim under fallback")
+;;
+
+let test_latest_receipt_result_reports_malformed_tail () =
+  with_test_env (fun config ->
+    let keepers_dir = Workspace.keepers_runtime_dir config in
+    let keeper_dir = Filename.concat keepers_dir "receipt-parse-keeper" in
+    let receipt_dir = Filename.concat keeper_dir "execution-receipts" in
+    let month_dir = Filename.concat receipt_dir "2026-07" in
+    ensure_directory keepers_dir;
+    ensure_directory keeper_dir;
+    ensure_directory receipt_dir;
+    ensure_directory month_dir;
+    let receipt_file = Filename.concat month_dir "2026-07-05.jsonl" in
+    write_text
+      receipt_file
+      "{\"recorded_at\":\"2026-07-05T00:00:00Z\",\"outcome\":\"receipt_done\"}\n{\n";
+    match Workspace_task_receipts.latest_json_in_receipt_dir_result receipt_dir with
+    | Error (Workspace_task_receipts.Receipt_json_parse_failed { path; message }) ->
+      Alcotest.(check string) "parse error path" receipt_file path;
+      Alcotest.(check bool) "parse error message present" true (String.length message > 0)
+    | Ok _ -> Alcotest.fail "expected malformed receipt tail to return Error"
+    | Error error ->
+      Alcotest.failf
+        "expected Receipt_json_parse_failed, got %s"
+        (Workspace_task_receipts.receipt_read_error_to_string error))
+;;
+
+let test_latest_execution_receipt_result_reports_agent_record_read_error () =
+  with_test_env (fun config ->
+    let agent_name = "corrupt-receipt-agent" in
+    let agent_file =
+      Filename.concat
+        (Workspace.agents_dir config)
+        (Workspace.safe_filename agent_name ^ ".json")
+    in
+    write_text agent_file "{";
+    match
+      Workspace_task_receipts.latest_execution_receipt_json_result config ~agent_name
+    with
+    | Error (Workspace_task_receipts.Agent_record_read_failed { path; message }) ->
+      Alcotest.(check string) "agent read error path" agent_file path;
+      Alcotest.(check bool) "agent read error message present" true (String.length message > 0)
+    | Ok _ -> Alcotest.fail "expected corrupt agent record to return Error"
+    | Error error ->
+      Alcotest.failf
+        "expected Agent_record_read_failed, got %s"
+        (Workspace_task_receipts.receipt_read_error_to_string error))
 ;;
 
 (* ============================================================ *)
@@ -1997,6 +2167,63 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
       "restored obligation removed from archive"
       false
       (List.mem 901 (Workspace.read_archive_task_ids config)))
+;;
+
+let test_gc_reports_unreadable_archive_restore () =
+  with_test_env (fun config ->
+    let archive_path = Workspace.archive_path config in
+    Out_channel.with_open_text archive_path (fun oc -> output_string oc "{");
+    let result = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool)
+      "archive restore read failure is reported"
+      true
+      (str_contains result "Archive restore skipped:"))
+;;
+
+let test_gc_reports_unreadable_backlog_and_skips_task_dependent_cleanup () =
+  with_test_env (fun config ->
+    write_text (Workspace.backlog_path config) "{not-json";
+    write_text (Workspace.backlog_recovery_path config) "{not-json";
+    let result = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool)
+      "terminal archive skipped on backlog read failure"
+      true
+      (str_contains result "Archive terminal skipped: backlog read failed");
+    Alcotest.(check bool)
+      "archive restore skipped on backlog read failure"
+      true
+      (str_contains result "Archive restore skipped: backlog read failed");
+    Alcotest.(check bool)
+      "old message cleanup skipped on backlog read failure"
+      true
+      (str_contains result "Old message cleanup skipped: backlog read failed");
+    Alcotest.(check bool)
+      "old messages not reported as clean"
+      false
+      (str_contains result "No old messages"))
+;;
+
+let test_gc_preserves_terminal_task_when_archive_append_fails () =
+  with_test_env (fun config ->
+    let done_task =
+      gc_make_task
+        ~id:"task-905"
+        ~created_at:gc_ancient_ts
+        ~status:
+          (Masc_domain.Done
+             { assignee = "claude"; completed_at = gc_ancient_ts; notes = None })
+    in
+    write_tasks config [ done_task ];
+    Out_channel.with_open_text (Workspace.archive_path config) (fun oc -> output_string oc "{");
+    let result = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool)
+      "terminal archive append failure is reported"
+      true
+      (str_contains result "Archive terminal skipped:");
+    Alcotest.(check bool)
+      "terminal task stays live when archive append fails"
+      true
+      (gc_backlog_has config "task-905"))
 ;;
 
 (* The same GC pass that restores an archive-only non-terminal task must use the
@@ -2292,18 +2519,34 @@ let () =
       , [ Alcotest.test_case "pause" `Quick test_pause_workspace
         ; Alcotest.test_case "resume" `Quick test_resume_workspace
         ; Alcotest.test_case "resume not paused" `Quick test_resume_not_paused
+        ; Alcotest.test_case
+            "resume result reports unreadable state"
+            `Quick
+            test_resume_result_reports_unreadable_state
         ; Alcotest.test_case "pause info" `Quick test_pause_info
         ; Alcotest.test_case "pause info not paused" `Quick test_pause_info_not_paused
         ] )
     ; (* === Raw Data Accessors === *)
-      ( "raw_data"
-      , [ Alcotest.test_case "get tasks raw" `Quick test_get_tasks_raw
-        ; Alcotest.test_case "get tasks raw empty" `Quick test_get_tasks_raw_empty
+	      ( "raw_data"
+	      , [ Alcotest.test_case "get tasks raw" `Quick test_get_tasks_raw
+	        ; Alcotest.test_case "get tasks raw empty" `Quick test_get_tasks_raw_empty
+        ; Alcotest.test_case
+            "task query result APIs report unreadable backlog"
+            `Quick
+            test_task_query_result_apis_report_unreadable_backlog
+        ; Alcotest.test_case
+            "workspace status result reports unreadable backlog"
+            `Quick
+            test_workspace_status_result_reports_unreadable_backlog
         ; Alcotest.test_case "get agents raw" `Quick test_get_agents_raw
         ; Alcotest.test_case
             "get active agents falls back to state"
             `Quick
             test_get_active_agents_falls_back_to_state_when_agent_files_missing
+        ; Alcotest.test_case
+            "get active agents does not synthesize from unreadable state"
+            `Quick
+            test_get_active_agents_does_not_synthesize_from_unreadable_state
         ; Alcotest.test_case
             "get active agents merges state and file-backed"
             `Quick
@@ -2335,9 +2578,25 @@ let () =
             `Quick
             test_claim_task_r_already_claimed
         ; Alcotest.test_case
+            "claim_next_r reports reconcile agent read error"
+            `Quick
+            test_claim_next_r_reports_reconcile_agent_read_error
+        ; Alcotest.test_case
+            "fresh backlog reconcile result reports read error"
+            `Quick
+            test_reconcile_all_fresh_backlog_result_reports_read_error
+        ; Alcotest.test_case
             "scope fallback claims out-of-scope when scope blocks all"
             `Quick
             test_scope_widen_claims_unscoped_when_scope_blocks_all
+        ; Alcotest.test_case
+            "latest receipt result reports malformed tail"
+            `Quick
+            test_latest_receipt_result_reports_malformed_tail
+        ; Alcotest.test_case
+            "latest execution receipt result reports agent record read error"
+            `Quick
+            test_latest_execution_receipt_result_reports_agent_record_read_error
         ] )
     ; (* === GC === *)
       ( "gc"
@@ -2351,6 +2610,18 @@ let () =
             "restores orphaned non-terminal from archive"
             `Quick
             test_gc_restores_orphaned_nonterminal_from_archive
+        ; Alcotest.test_case
+            "reports unreadable archive restore"
+            `Quick
+            test_gc_reports_unreadable_archive_restore
+        ; Alcotest.test_case
+            "reports unreadable backlog and skips task-dependent cleanup"
+            `Quick
+            test_gc_reports_unreadable_backlog_and_skips_task_dependent_cleanup
+        ; Alcotest.test_case
+            "preserves terminal task when archive append fails"
+            `Quick
+            test_gc_preserves_terminal_task_when_archive_append_fails
         ; Alcotest.test_case
             "restored task preserves old messages same pass"
             `Quick

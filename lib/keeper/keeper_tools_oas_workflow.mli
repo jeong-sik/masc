@@ -53,7 +53,28 @@ type workflow_rejection_payload =
   ; recoverability : workflow_rejection_recoverability option
   }
 
-(** Extract [workflow_rejection_payload] from parsed JSON. *)
+(** Parse source for workflow-rejection JSON decode failures. *)
+type workflow_rejection_parse_source =
+  | Workflow_rejection_raw
+  | Workflow_rejection_error_field
+
+type workflow_rejection_parse_error =
+  | Workflow_rejection_json_parse_error of
+      { source : workflow_rejection_parse_source
+      ; message : string
+      }
+
+val workflow_rejection_parse_error_to_string :
+  workflow_rejection_parse_error -> string
+
+(** Extract [workflow_rejection_payload] from parsed JSON, preserving malformed
+    nested JSON payload errors. *)
+val workflow_rejection_payload_of_json_result
+  :  Yojson.Safe.t
+  -> (workflow_rejection_payload option, workflow_rejection_parse_error) result
+
+(** Compatibility option wrapper for {!workflow_rejection_payload_of_json_result}.
+    Parse failures are logged before returning [None]. *)
 val workflow_rejection_payload_of_json
   :  Yojson.Safe.t
   -> workflow_rejection_payload option
@@ -89,7 +110,14 @@ val workflow_rejection_payload_json
     omits the field entirely; existing callers that omit this argument
     are unaffected. *)
 
-(** Extract [workflow_rejection_info] from a raw JSON string. *)
+(** Extract [workflow_rejection_info] from a raw JSON string, preserving JSON
+    decode failures. Plain non-JSON strings are [Ok None]. *)
+val workflow_rejection_info_of_raw_result
+  :  string
+  -> (workflow_rejection_info option, workflow_rejection_parse_error) result
+
+(** Compatibility option wrapper for {!workflow_rejection_info_of_raw_result}.
+    Parse failures are logged before returning [None]. *)
 val workflow_rejection_info_of_raw : string -> workflow_rejection_info option
 
 (** Build a stable family key for deduplication. *)

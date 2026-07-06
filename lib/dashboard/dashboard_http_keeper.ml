@@ -36,12 +36,62 @@ let keeper_trust_json = Trust.keeper_trust_json
 let execution_receipt_store_pattern = Dashboard_http_keeper_execution_receipt.execution_receipt_store_pattern
 let count_execution_receipt_entries = Dashboard_http_keeper_execution_receipt.count_execution_receipt_entries
 let execution_receipt_coverage_gaps = Dashboard_http_keeper_execution_receipt.execution_receipt_coverage_gaps
+let execution_receipt_coverage_gaps_with_read_errors =
+  Dashboard_http_keeper_execution_receipt.execution_receipt_coverage_gaps_with_read_errors
 
 let keeper_names (config : Workspace.config) =
   Keeper_meta_store.keeper_names config
 
+type keeper_name_scan = {
+  names : string list;
+  names_known : bool;
+  read_errors : Yojson.Safe.t list;
+}
+
+type keeper_count_scan = {
+  keeper_count : int;
+  keeper_count_known : bool;
+  keeper_count_read_errors : Yojson.Safe.t list;
+}
+
+type running_keeper_count_scan = {
+  running_keeper_count : int;
+  running_keeper_count_known : bool;
+  running_keeper_count_read_errors : Yojson.Safe.t list;
+}
+
+let keeper_name_read_error_json ~source ?keeper message =
+  `Assoc
+    ([
+       ("source", `String source);
+       ("message", `String message);
+     ]
+     @
+     match keeper with
+     | Some keeper_name -> [ ("keeper", `String keeper_name) ]
+     | None -> [])
+
+let keeper_name_scan config =
+  match Keeper_meta_store.keeper_names_result config with
+  | Ok names -> { names; names_known = true; read_errors = [] }
+  | Error err ->
+      {
+        names = [];
+        names_known = false;
+        read_errors =
+          [ keeper_name_read_error_json ~source:"keeper_names_result" err ];
+      }
+
+let keeper_count_scan config =
+  let name_scan = keeper_name_scan config in
+  {
+    keeper_count = List.length name_scan.names;
+    keeper_count_known = name_scan.names_known;
+    keeper_count_read_errors = name_scan.read_errors;
+  }
+
 let keeper_count (config : Workspace.config) : int =
-  List.length (keeper_names config)
+  (keeper_count_scan config).keeper_count
 
 let configured_runtime_keeper_names config =
   Keeper_meta_store.configured_keeper_names config
@@ -123,6 +173,89 @@ let degraded_keeper_dashboard_row
       ; ("active_model_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
       ; ("last_model_used_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
      ])
+
+let keeper_dashboard_read_error_row ~name ~source message =
+  let read_error = keeper_name_read_error_json ~source ~keeper:name message in
+  `Assoc
+    [
+      ("name", `String name);
+      ("agent_name", `Null);
+      ("keeper_id", `Null);
+      ("trace_id", `Null);
+      ("generation", `Null);
+      ("current_task_id", `Null);
+      ("active_goal_ids", `List []);
+      ("phase", `String "read_error");
+      ("pipeline_stage", `String "read_error");
+      ("status", `String "error");
+      ("read_error", read_error);
+      ( "trust",
+        `Assoc
+          [
+            ("disposition", `String "Degraded");
+            ("disposition_reason", `String source);
+            ("operator_disposition", `String "blocked_runtime");
+            ("needs_attention", `Bool true);
+            ("attention_reason", `String message);
+          ] );
+    ]
+
+type keeper_dashboard_json_lines_source =
+  | Keeper_alerts_jsonl
+
+let keeper_dashboard_json_lines_source_to_string = function
+  | Keeper_alerts_jsonl -> "keeper_alerts_jsonl"
+
+let keeper_dashboard_json_line_parse_error
+      ~source
+      ?keeper
+      ?path
+      ~line_index
+      message
+  =
+  `Assoc
+    ([
+       ( "source"
+       , `String (keeper_dashboard_json_lines_source_to_string source) )
+     ; ("line_index", `Int line_index)
+     ; ("message", `String message)
+     ]
+     @
+     (match keeper with
+      | Some keeper_name -> [ ("keeper", `String keeper_name) ]
+      | None -> [])
+     @
+     match path with
+     | Some source_path -> [ ("path", `String source_path) ]
+     | None -> [])
+
+let parse_keeper_dashboard_json_lines ~source ?keeper ?path lines =
+  let rec loop line_index parsed errors = function
+    | [] -> List.rev parsed, List.rev errors
+    | line :: rest -> (
+        match Yojson.Safe.from_string line with
+        | json -> loop (line_index + 1) (json :: parsed) errors rest
+        | exception Yojson.Json_error message ->
+          let error =
+            keeper_dashboard_json_line_parse_error
+              ~source
+              ?keeper
+              ?path
+              ~line_index
+              message
+          in
+          loop (line_index + 1) parsed (error :: errors) rest)
+  in
+  loop 0 [] [] lines
+
+let keeper_metrics_parse_read_error ~keeper errors =
+  `Assoc
+    [ ("source", `String "keeper_metrics_jsonl_parse")
+    ; ("keeper", `String keeper)
+    ; ("message", `String "keeper metrics JSONL contains malformed rows")
+    ; ("parse_error_count", `Int (List.length errors))
+    ; ("parse_errors", `List errors)
+    ]
 
 type keeper_activity_source =
   | Keeper_meta
@@ -315,14 +448,46 @@ let pending_approval_summary row =
   | Some risk -> Printf.sprintf "승인 대기 · %s (%s)" tool risk
   | None -> Printf.sprintf "승인 대기 · %s" tool
 
+let running_keeper_count_scan (config : Workspace.config) : running_keeper_count_scan =
+  let name_scan = keeper_name_scan config in
+  let count, row_read_errors_rev =
+    name_scan.names
+    |> List.fold_left
+         (fun (count, read_errors) name ->
+           match Keeper_meta_store.read_meta config name with
+           | Ok (Some meta) when runtime_keepalive_running config meta ->
+             (count + 1, read_errors)
+           | Ok (Some _) -> (count, read_errors)
+           | Ok None ->
+             let read_error =
+               keeper_name_read_error_json
+                 ~source:"read_meta"
+                 ~keeper:name
+                 "keeper meta missing after keeper name discovery"
+             in
+             (count, read_error :: read_errors)
+           | Error err ->
+             let read_error =
+               keeper_name_read_error_json ~source:"read_meta" ~keeper:name err
+             in
+             (count, read_error :: read_errors))
+         (0, [])
+  in
+  let row_read_errors = List.rev row_read_errors_rev in
+  {
+    running_keeper_count = count;
+    running_keeper_count_known =
+      name_scan.names_known
+      &&
+      (match row_read_errors with
+       | [] -> true
+       | _ -> false);
+    running_keeper_count_read_errors =
+      name_scan.read_errors @ row_read_errors;
+  }
+
 let running_keeper_count (config : Workspace.config) : int =
-  keeper_names config
-  |> List.fold_left
-       (fun count name ->
-         match Keeper_meta_store.read_meta config name with
-         | Ok (Some meta) when runtime_keepalive_running config meta -> count + 1
-         | _ -> count)
-       0
+  (running_keeper_count_scan config).running_keeper_count
 
 let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
   let include_goals = true in
@@ -330,7 +495,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
   let series_points = 120 in
-  let names = keeper_names config in
+  let keeper_name_scan = keeper_name_scan config in
+  let names = keeper_name_scan.names in
   let now_ts = Time_compat.now () in
   let max_restarts =
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
@@ -366,7 +532,13 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
       let row =
       try
       match Keeper_meta_store.read_meta config name with
-      | Error _ | Ok None -> None
+      | Error err -> Some (keeper_dashboard_read_error_row ~name ~source:"read_meta" err)
+      | Ok None ->
+          Some
+            (keeper_dashboard_read_error_row
+               ~name
+               ~source:"read_meta"
+               "keeper meta missing after keeper name discovery")
       | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
           let agent = Keeper_status_runtime.parse_agent_status config ~agent_name:m.agent_name in
 
@@ -457,29 +629,55 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           in
 
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
+          let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
              series_points (120) suffices for the chart; 500 covers 24h summary.
              Previous value of 12000 caused 60K+ lines across 5 keepers. *)
           let metrics_cap = if compact then series_points else 500 in
           let metrics_window_max_bytes = if compact then 50000 else 200000 in
-          let all_metrics_lines =
+          let all_metrics_lines, metrics_line_path =
             let n = metrics_cap in
             let dated = Dated_jsonl.read_recent_lines metrics_store n in
-            if dated <> [] then dated
+            if dated <> [] then dated, None
             else
-              let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
-              Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_metrics" metrics_path
-                ~max_bytes:metrics_window_max_bytes ~max_lines:n
+              ( Dashboard_http_helpers.keeper_tail_lines_or_empty
+                  ~site:"dashboard_keeper_metrics"
+                  metrics_path
+                  ~max_bytes:metrics_window_max_bytes
+                  ~max_lines:n
+              , Some metrics_path )
           in
           let (metrics_24h, metrics_24h_summary) =
             if compact then (`Null, `Null)
             else keeper_metrics_24h_json ~metrics_lines:all_metrics_lines ~now_ts
           in
+          let metrics_24h_read_errors =
+            match metrics_24h_summary with
+            | `Assoc fields -> (
+                match List.assoc_opt "read_errors" fields with
+                | Some (`List errors) -> errors
+                | _ -> [])
+            | _ -> []
+          in
           let metrics_lines = all_metrics_lines in
+          let parsed_metric_lines, metrics_parse_error_records =
+            Keeper_status_metrics.parse_metrics_json_lines_with_line_indices
+              metrics_lines
+          in
           let parsed_metrics =
-            List.filter_map (fun line ->
-              try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-            ) metrics_lines
+            List.map
+              (fun
+                (row : Keeper_status_metrics.parsed_metrics_json_line) ->
+                row.metrics_json)
+              parsed_metric_lines
+          in
+          let metrics_parse_errors =
+            List.map
+              (Keeper_status_metrics.metrics_json_line_parse_error_to_json
+                 ~source:"keeper_metrics_jsonl"
+                 ~keeper:m.name
+                 ?path:metrics_line_path)
+              metrics_parse_error_records
           in
           let last_metrics =
             List.find_opt metrics_row_has_context_snapshot
@@ -511,8 +709,26 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 
           let (metrics_series_items, metrics_window_summary, last_handoff_event, last_compaction_event) =
             compute_metrics_window
+              ~parsed_metric_lines
               ~parsed_metrics ~generation:m.runtime.generation ~compact ~series_points
               ~metrics_window_max_bytes ~primary_model_norm ~primary_model
+          in
+          let metrics_window_read_errors =
+            match metrics_window_summary with
+            | `Assoc fields -> (
+                match List.assoc_opt "read_errors" fields with
+                | Some (`List errors) -> errors
+                | _ -> [])
+            | _ -> []
+          in
+          let metrics_read_errors =
+            metrics_parse_errors @ metrics_window_read_errors
+          in
+          let metrics_read_error =
+            match metrics_read_errors with
+            | [] -> None
+            | errors ->
+              Some (keeper_metrics_parse_read_error ~keeper:m.name errors)
           in
           let metrics_series = `List metrics_series_items in
 
@@ -568,8 +784,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 k2k_mentions,
                 conversation_raw_count,
                 conversation_fragment_count,
-                conversation_fragment_filtered_count ) =
-            keeper_history_summary_json
+                conversation_fragment_filtered_count,
+                conversation_read_errors ) =
+            keeper_history_summary_json_with_read_errors
               ~all_keeper_names:names
               ~keeper_name:m.name
               ~history_path
@@ -642,7 +859,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             Option.value ~default:`Null (Json_util.assoc_member_opt "goal_progress" runtime_contract)
           in
           let blocked_task_count =
-            Safe_ops.json_int "blocked_task_count" ~default:0 runtime_contract
+            Option.value ~default:`Null (Json_util.assoc_member_opt "blocked_task_count" runtime_contract)
+          in
+          let blocked_task_count_known =
+            Option.value ~default:`Null (Json_util.assoc_member_opt "blocked_task_count_known" runtime_contract)
           in
           let approval_policy_effective =
             Option.value ~default:`Null (Json_util.assoc_member_opt "approval_policy_effective" runtime_contract)
@@ -873,6 +1093,11 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ("trust_observatory", trust_observatory);
                 ]
               in
+              let metrics_read_error_fields =
+                match metrics_read_error with
+                | None -> []
+                | Some read_error -> [ ("read_error", read_error) ]
+              in
 	              let profile = Dashboard_execution_helpers.get_agent_profile m.name in
 	              let lifecycle_phase =
 	                Option.map
@@ -911,6 +1136,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 | None -> `Null );
               ("emoji", `String profile.emoji);
               ("koreanName", `String profile.korean_name);
+              ("profile_errors", Dashboard_execution_helpers.agent_profile_errors_json profile);
+              ("profile_error_count", `Int (List.length profile.profile_errors));
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
               ( "current_task_id",
@@ -925,17 +1152,41 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("goal", if include_goals then `String m.goal else `Null);
               ( "active_goals_tree",
                 if (not compact) && include_goals && m.active_goal_ids <> [] then
-                  let all_goals = Goal_store.list_goals config () in
-                  let linked = List.filter (fun (g : Goal_store.goal) ->
-                    List.mem g.id m.active_goal_ids) all_goals in
-                  let tasks = Workspace.get_tasks_safe config in
-                  let forest =
-                    Dashboard_goals.build_forest ~config ~goals:linked ~tasks
-                  in
-                  `Assoc [
-                    ("count", `Int (List.length linked));
-                    ("nodes", `List (List.map Dashboard_goals.tree_node_to_json forest));
-                  ]
+                  (match Goal_store.list_goals_result config () with
+                   | Error msg ->
+                     `Assoc [
+                       ("count", `Int 0);
+                       ("goal_store_known", `Bool false);
+                       ("goal_store_read_error", `String msg);
+                       ("goal_task_links_known", `Bool false);
+                       ("goal_task_links_read_error", `Null);
+                       ("nodes", `List []);
+                     ]
+                   | Ok all_goals ->
+                     let linked = List.filter (fun (g : Goal_store.goal) ->
+                       List.mem g.id m.active_goal_ids) all_goals in
+                     let tasks = Workspace.get_tasks_safe config in
+                     (match
+                        Dashboard_goals.build_forest_result ~config ~goals:linked ~tasks
+                      with
+                      | Ok forest ->
+                        `Assoc [
+                          ("count", `Int (List.length linked));
+                          ("goal_store_known", `Bool true);
+                          ("goal_store_read_error", `Null);
+                          ("goal_task_links_known", `Bool true);
+                          ("goal_task_links_read_error", `Null);
+                          ("nodes", `List (List.map Dashboard_goals.tree_node_to_json forest));
+                        ]
+                      | Error msg ->
+                        `Assoc [
+                          ("count", `Int (List.length linked));
+                          ("goal_store_known", `Bool true);
+                          ("goal_store_read_error", `Null);
+                          ("goal_task_links_known", `Bool false);
+                          ("goal_task_links_read_error", `String msg);
+                          ("nodes", `List []);
+                        ]))
                 else
                   `Null );
               ( "persona",
@@ -969,7 +1220,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 Json_util.string_opt_to_json sandbox_last_error);
               ("runtime_contract", runtime_contract);
               ("goal_progress", goal_progress);
-              ("blocked_task_count", `Int blocked_task_count);
+              ("blocked_task_count", blocked_task_count);
+              ("blocked_task_count_known", blocked_task_count_known);
               ("approval_policy_effective", approval_policy_effective);
               ("runtime_trust", runtime_trust);
               ("paused", `Bool m.paused);
@@ -1049,6 +1301,12 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	              ("skill_reason", Json_util.string_opt_to_json last_skill_reason);
               ("metrics_window", metrics_window_summary);
               ("metrics_24h_summary", metrics_24h_summary);
+              ("metrics_24h_read_error_count", `Int (List.length metrics_24h_read_errors));
+              ("metrics_24h_read_errors", `List metrics_24h_read_errors);
+              ("metrics_parse_error_count", `Int (List.length metrics_parse_errors));
+              ("metrics_parse_errors", `List metrics_parse_errors);
+              ("metrics_window_read_error_count", `Int (List.length metrics_window_read_errors));
+              ("metrics_window_read_errors", `List metrics_window_read_errors);
               ("memory_note_count",
                 (match memory_bank_json with
                  | `Assoc fields ->
@@ -1074,6 +1332,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("conversation_fragment_count", `Int conversation_fragment_count);
               ("conversation_fragment_filtered_count", `Int conversation_fragment_filtered_count);
               ("conversation_fragment_filter_enabled", `Bool history_fragment_filter_enabled);
+              ("conversation_read_error_count", `Int (List.length conversation_read_errors));
+              ("conversation_read_errors", `List conversation_read_errors);
               ("k2k_count", `Int k2k_count);
               ("k2k_mentions", k2k_mentions);
               ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);
@@ -1114,7 +1374,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                       ("baseline_status", Json_util.string_opt_to_json s.baseline_status);
                     ]
                 | [] -> `Null);
-            ] @ detail_fields)
+            ] @ detail_fields @ metrics_read_error_fields)
           in
           Some summary
       with
@@ -1134,7 +1394,14 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                       ~site:"keeper_dashboard_worker_exception"
                       ~error
                       meta)
-             | Error _ | Ok None -> None
+             | Error err ->
+                 Some (keeper_dashboard_read_error_row ~name ~source:"read_meta" err)
+             | Ok None ->
+                 Some
+                   (keeper_dashboard_read_error_row
+                      ~name
+                      ~source:"read_meta"
+                      "keeper meta missing after keeper dashboard worker exception")
            with
            | Eio.Cancel.Cancelled _ as exn -> raise exn
            | fallback_exn ->
@@ -1147,58 +1414,99 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
       results.(idx) <- row)
      names);
   let summaries = Array.to_list results |> List.filter_map Fun.id in
+  let row_read_errors =
+    summaries
+    |> List.concat_map (fun row ->
+         let single =
+           match Json_util.assoc_member_opt "read_error" row with
+           | Some read_error -> [ read_error ]
+           | None -> []
+         in
+         let conversation =
+           match Json_util.assoc_member_opt "conversation_read_errors" row with
+           | Some (`List errors) -> errors
+           | _ -> []
+         in
+         single @ conversation)
+  in
   (* H-9 fix: include recent alerts so BAD alerts are visible on dashboard *)
-  let recent_alerts =
+  let recent_alerts, alert_parse_errors =
     let alerts_path = Keeper_types_support.keeper_alerts_path config in
     let lines =
       Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_alerts" alerts_path
         ~max_bytes:50000 ~max_lines:10
     in
-    List.filter_map (fun line ->
-      try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-    ) lines
+    parse_keeper_dashboard_json_lines
+      ~source:Keeper_alerts_jsonl
+      ~path:alerts_path
+      lines
   in
-  `Assoc [
-    ("keepers", `List summaries);
-    ("total", `Int (List.length summaries));
-    ("recent_alerts", `List recent_alerts);
+  let read_errors =
+    keeper_name_scan.read_errors @ row_read_errors @ alert_parse_errors
+  in
+	  `Assoc [
+	    ("keepers", `List summaries);
+	    ("total", `Int (List.length summaries));
+    ("keeper_names_known", `Bool keeper_name_scan.names_known);
+    ("keeper_count_known", `Bool keeper_name_scan.names_known);
+    ("read_errors", `List read_errors);
+	    ("recent_alerts", `List recent_alerts);
+    ("alert_parse_error_count", `Int (List.length alert_parse_errors));
     ("alert_count", `Int (List.length recent_alerts));
   ]
 
 let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
-  let keepers =
-    match keepers_dashboard_json ~compact:true config with
+  let compact_dashboard = keepers_dashboard_json ~compact:true config in
+  let keepers, dashboard_read_errors, dashboard_keeper_names_known =
+    match compact_dashboard with
     | `Assoc fields -> (
+        let read_errors =
+          match List.assoc_opt "read_errors" fields with
+          | Some (`List items) -> items
+          | _ -> []
+        in
+        let keeper_names_known =
+          match List.assoc_opt "keeper_names_known" fields with
+          | Some (`Bool known) -> known
+          | _ -> false
+        in
         match List.assoc_opt "keepers" fields with
         | Some (`List rows) ->
-          rows
-          |> List.map (fun row ->
-                 `Assoc
-                   [
-                     ("name", Option.value ~default:`Null (Json_util.assoc_member_opt "name" row));
-                     ("agent_name", Option.value ~default:`Null (Json_util.assoc_member_opt "agent_name" row));
-                     ("keeper_id", Option.value ~default:`Null (Json_util.assoc_member_opt "keeper_id" row));
-                     ("phase", Option.value ~default:`Null (Json_util.assoc_member_opt "phase" row));
-                     ( "pipeline_stage",
-                       Option.value ~default:`Null (Json_util.assoc_member_opt "pipeline_stage" row) );
-                     ("status", Option.value ~default:`Null (Json_util.assoc_member_opt "status" row));
-                     ("trace_id", Option.value ~default:`Null (Json_util.assoc_member_opt "trace_id" row));
-                     ("generation", Option.value ~default:`Null (Json_util.assoc_member_opt "generation" row));
-                     ("current_task_id", Option.value ~default:`Null (Json_util.assoc_member_opt "current_task_id" row));
-                     ("active_goal_ids", Option.value ~default:`Null (Json_util.assoc_member_opt "active_goal_ids" row));
-                     ("trust", Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row));
-                   ])
-        | _ -> [])
-    | _ -> []
+          ( rows
+            |> List.map (fun row ->
+                   `Assoc
+                     [
+                       ("name", Option.value ~default:`Null (Json_util.assoc_member_opt "name" row));
+                       ("agent_name", Option.value ~default:`Null (Json_util.assoc_member_opt "agent_name" row));
+                       ("keeper_id", Option.value ~default:`Null (Json_util.assoc_member_opt "keeper_id" row));
+                       ("phase", Option.value ~default:`Null (Json_util.assoc_member_opt "phase" row));
+                       ( "pipeline_stage",
+                         Option.value ~default:`Null (Json_util.assoc_member_opt "pipeline_stage" row) );
+                       ("status", Option.value ~default:`Null (Json_util.assoc_member_opt "status" row));
+                       ("trace_id", Option.value ~default:`Null (Json_util.assoc_member_opt "trace_id" row));
+                       ("generation", Option.value ~default:`Null (Json_util.assoc_member_opt "generation" row));
+                       ("current_task_id", Option.value ~default:`Null (Json_util.assoc_member_opt "current_task_id" row));
+                       ("active_goal_ids", Option.value ~default:`Null (Json_util.assoc_member_opt "active_goal_ids" row));
+                       ("trust", Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row));
+                     ]),
+            read_errors,
+            keeper_names_known )
+        | _ -> [], read_errors, keeper_names_known)
+    | _ -> [], [], false
   in
   let now = Unix.gettimeofday () in
-  let keeper_names = keeper_names config in
+  let keeper_name_scan = keeper_name_scan config in
   let keepers_root = Workspace.keepers_runtime_dir config in
   let exists = Sys.file_exists keepers_root in
-  let entry_count = count_execution_receipt_entries config keeper_names in
+  let entry_count = count_execution_receipt_entries config keeper_name_scan.names in
   let latest_ts = latest_receipt_ts_of_keeper_rows keepers in
-  let coverage_gaps = execution_receipt_coverage_gaps config in
+  let coverage_gaps, coverage_gap_read_errors =
+    execution_receipt_coverage_gaps_with_read_errors config
+  in
   let coverage_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
+  let read_errors =
+    dashboard_read_errors @ keeper_name_scan.read_errors @ coverage_gap_read_errors
+  in
   `Assoc
     ([
       ("source", `String execution_trust_source);
@@ -1208,6 +1516,11 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
       ("freshness_slo_s", `Float execution_trust_freshness_slo_s);
       ("entry_count", `Int entry_count);
       ("exists", `Bool exists);
+      ("keeper_names_known", `Bool (dashboard_keeper_names_known && keeper_name_scan.names_known));
+      ("keeper_count_known", `Bool (dashboard_keeper_names_known && keeper_name_scan.names_known));
+      ("read_errors", `List read_errors);
+      ("coverage_gap_read_error_count", `Int (List.length coverage_gap_read_errors));
+      ("coverage_gap_read_errors", `List coverage_gap_read_errors);
       ("generated_at", `String (Masc_domain.now_iso ()));
       ("keepers", `List keepers);
       ("total", `Int (List.length keepers));

@@ -16,34 +16,6 @@
 val state_start_re : Re.re
 val state_end_re : Re.re
 
-type alert_channel_result =
-  Keeper_memory_policy.alert_channel_result = {
-  channel : string;
-  attempted : bool;
-  success : bool;
-  attempts : int;
-  detail : string option;
-}
-(** @see [Keeper_memory_policy.alert_channel_result] *)
-
-type interesting_alert_result =
-  Keeper_memory_policy.interesting_alert_result = {
-  enabled : bool;
-  triggered : bool;
-  score : float;
-  threshold : float;
-  reasons : string list;
-  keywords : string list;
-  alert_id : string option;
-  channels : alert_channel_result list;
-  retry_queued : bool;
-  deadlettered : bool;
-}
-(** @see [Keeper_memory_policy.interesting_alert_result] *)
-
-val empty_interesting_alert_result : interesting_alert_result
-val alert_channel_result_to_json : alert_channel_result -> Yojson.Safe.t
-
 type keeper_state_snapshot =
   Keeper_memory_policy.keeper_state_snapshot = {
   priority : int option;
@@ -301,11 +273,37 @@ type keeper_memory_row_raw = {
 (** Raw row from [memory_bank.jsonl] with both the original JSON and
     parsed columns kept side by side. *)
 
+type memory_bank_row_parse_error =
+  | Malformed_json of string
+  | Non_object_json of string
+  | Schema_version_mismatch of { expected : int; actual : int option }
+  | Unknown_kind of string
+  | Missing_horizon
+  | Horizon_mismatch of { kind : string; expected : string; actual : string }
+  | Missing_source
+  | Missing_trace_id
+  | Empty_text
+  | Non_meaningful_text
+(** Typed reason why a persisted [memory_bank.jsonl] row could not be used. *)
+
 type memory_consolidation_summarizer =
   trace_id:string -> texts:string list -> string option
 (** Optional semantic summarizer for progress-cluster consolidation.
     Returning [None], an empty string, or a non-meaningful memory string
     falls back to the deterministic summary. *)
+
+val memory_bank_row_parse_error_to_json :
+  source:string ->
+  ?keeper:string ->
+  ?path:string ->
+  line_index:int ->
+  memory_bank_row_parse_error ->
+  Yojson.Safe.t
+(** Render a row parse error for dashboard/operator read-error surfaces. *)
+
+val parse_memory_bank_row_result :
+  string -> (keeper_memory_row_raw, memory_bank_row_parse_error) result
+(** Parse a single JSONL line and preserve the typed rejection reason. *)
 
 val parse_memory_bank_row : string -> keeper_memory_row_raw option
 (** Parse a single JSONL line; [None] when the row is malformed,
@@ -368,6 +366,19 @@ val append_memory_notes_from_reply :
 (** Persist new memory rows derived from a turn's [reply] (and
     optional [snapshot]); returns [(rows_written, drop_reasons)]. *)
 
+val append_memory_notes_from_reply_result :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  ?snapshot:keeper_state_snapshot ->
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
+  turn:int ->
+  reply:string ->
+  unit ->
+  (int * string list, string) result
+(** Result-returning variant of {!append_memory_notes_from_reply}. Persistence
+    failures are returned as [Error]; cancellation and non-IO invariant failures
+    are not converted. *)
+
 (** Promote explicitly tagged tool results into durable [long_term]
     memory-bank rows. Only results carrying the existing
     [Multimodal.Tool_emission] reserved kind/id tags are eligible. *)
@@ -377,6 +388,14 @@ val append_memory_notes_from_tool_results :
   turn:int ->
   results:Yojson.Safe.t list ->
   int
+
+val append_memory_notes_from_tool_results_result :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  turn:int ->
+  results:Yojson.Safe.t list ->
+  (int, string) result
+(** Result-returning variant of {!append_memory_notes_from_tool_results}. *)
 
 val append_voice_output :
   Workspace.config ->

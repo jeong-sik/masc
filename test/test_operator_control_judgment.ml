@@ -3,6 +3,9 @@ module Types = Masc_domain
 open Masc
 open Test_operator_control_support
 
+let check_error_prefix ~label ~prefix msg =
+  Alcotest.(check bool) label true (String.starts_with ~prefix msg)
+
 let test_digest_workspace_prefers_fresh_operator_judgment () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -89,6 +92,128 @@ let test_digest_workspace_ignores_stale_operator_judgment () =
         Yojson.Safe.Util.(digest |> member "active_guidance_layer" |> to_string);
       Alcotest.(check bool) "judgment missing" true
         (Yojson.Safe.Util.member "judgment" digest = `Null))
+
+let test_review_state_rejects_invalid_entry () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      Workspace_utils.mkdir_p (Operator_pending_confirm.operator_dir config);
+      Fs_compat.save_file
+        (Operator_review_state.review_state_path config)
+        "[{}]";
+      match Operator_review_state.recent_review_decisions_json_result config with
+      | Ok _ -> Alcotest.fail "invalid review_state row should be rejected"
+      | Error msg ->
+          check_error_prefix
+            ~label:"invalid row is explicit"
+            ~prefix:"review_state[0] decode failed: missing string field item_id"
+            msg)
+
+let test_digest_reports_corrupt_review_state () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      Fs_compat.save_file
+        (Operator_review_state.review_state_path config)
+        "{not json";
+      let ctx = operator_ctx env sw config "operator" in
+      match Operator_control.digest_json ~actor:"operator" ctx with
+      | Ok _ -> Alcotest.fail "digest should report corrupt review_state"
+      | Error msg ->
+          check_error_prefix
+            ~label:"digest propagates review_state read failure"
+            ~prefix:"operator review state read failed:"
+            msg)
+
+let test_digest_reports_corrupt_external_attention () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let keeper_name = "external-attention-digest-keeper" in
+      (match Keeper_runtime.ensure_keeper_meta config keeper_name with
+       | Ok _ -> ()
+       | Error err -> Alcotest.fail ("ensure_keeper_meta failed: " ^ err));
+      Fs_compat.save_file
+        (Keeper_external_attention.attention_path ~base_path:config.base_path ~keeper_name)
+        "{not json";
+      let ctx = operator_ctx env sw config "operator" in
+      match Operator_control.digest_json ~actor:"operator" ctx with
+      | Ok _ -> Alcotest.fail "digest should report corrupt external attention"
+      | Error msg ->
+          check_error_prefix
+            ~label:"digest propagates external attention read failure"
+            ~prefix:"external attention read failed for external-attention-digest-keeper:"
+            msg)
+
+let test_digest_reports_keeper_name_discovery_failure () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let keeper_dir = Keeper_types_profile.keeper_dir config in
+      cleanup_dir keeper_dir;
+      Fs_compat.save_file keeper_dir "not-a-directory";
+      let ctx = operator_ctx env sw config "operator" in
+      match Operator_control.digest_json ~actor:"operator" ctx with
+      | Ok _ -> Alcotest.fail "digest should report keeper name discovery failure"
+      | Error msg ->
+          check_error_prefix
+            ~label:"digest propagates keeper name read failure"
+            ~prefix:"keeper names read failed:"
+            msg)
+
+let test_snapshot_and_digest_report_corrupt_pending_confirms () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      Fs_compat.save_file (Operator_control.pending_confirms_path config) "{not json";
+      let ctx = operator_ctx env sw config "operator" in
+      (match Operator_control.snapshot_json_result ~actor:"operator" ctx with
+       | Ok _ -> Alcotest.fail "snapshot should report corrupt pending confirms"
+       | Error msg ->
+           check_error_prefix
+             ~label:"snapshot reports pending-confirm read failure"
+             ~prefix:"operator snapshot pending confirms read failed:"
+             msg);
+      let legacy_snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      Alcotest.(check bool) "legacy snapshot marks failure" false
+        Yojson.Safe.Util.(legacy_snapshot |> member "ok" |> to_bool);
+      check_error_prefix
+        ~label:"legacy snapshot exposes pending-confirm read failure"
+        ~prefix:"operator snapshot pending confirms read failed:"
+        Yojson.Safe.Util.(legacy_snapshot |> member "error" |> to_string);
+      match Operator_control.digest_json ~actor:"operator" ctx with
+      | Ok _ -> Alcotest.fail "digest should report corrupt pending confirms"
+      | Error msg ->
+          check_error_prefix
+            ~label:"digest reports pending-confirm read failure"
+            ~prefix:"pending confirms read failed:"
+            msg)
 
 let test_guidance_ignores_unsupported_target_type () =
   Eio_main.run @@ fun env ->
@@ -263,6 +388,16 @@ let tests =
       test_digest_workspace_prefers_fresh_operator_judgment;
     Alcotest.test_case "digest ignores stale operator judgment" `Quick
       test_digest_workspace_ignores_stale_operator_judgment;
+    Alcotest.test_case "review state rejects invalid entry" `Quick
+      test_review_state_rejects_invalid_entry;
+    Alcotest.test_case "digest reports corrupt review state" `Quick
+      test_digest_reports_corrupt_review_state;
+    Alcotest.test_case "digest reports corrupt external attention" `Quick
+      test_digest_reports_corrupt_external_attention;
+    Alcotest.test_case "digest reports keeper name discovery failure" `Quick
+      test_digest_reports_keeper_name_discovery_failure;
+    Alcotest.test_case "snapshot and digest report corrupt pending confirms" `Quick
+      test_snapshot_and_digest_report_corrupt_pending_confirms;
     Alcotest.test_case "guidance ignores unsupported target type" `Quick
       test_guidance_ignores_unsupported_target_type;
     Alcotest.test_case "operator judgment write/latest roundtrip" `Quick

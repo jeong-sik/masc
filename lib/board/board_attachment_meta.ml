@@ -16,6 +16,23 @@ let error_to_string = function
   | Invalid_payload s -> Printf.sprintf "Invalid attachment payload: %s" s
   | Missing_field s -> Printf.sprintf "Missing field: %s" s
 
+let meta_json_key = "attachments"
+
+type attachment_meta_read_error =
+  | Meta_not_object of { received : string }
+  | Attachments_not_list of { received : string }
+  | Attachment_decode_error of { index : int; error : error }
+
+let attachment_meta_read_error_to_string = function
+  | Meta_not_object { received } ->
+      Printf.sprintf "attachment meta must be an object (received %s)" received
+  | Attachments_not_list { received } ->
+      Printf.sprintf "attachment meta field %S must be a list (received %s)"
+        meta_json_key received
+  | Attachment_decode_error { index; error } ->
+      Printf.sprintf "attachment meta item %d decode failed: %s" index
+        (error_to_string error)
+
 (* Kind *)
 
 type kind =
@@ -163,8 +180,6 @@ let of_yojson (json : Yojson.Safe.t) : (t, error) result =
 
 (* meta_json embedding *)
 
-let meta_json_key = "attachments"
-
 let attach_to_post_meta ~existing (attachments : t list) : Yojson.Safe.t =
   let attachments_json = `List (List.map to_yojson attachments) in
   let other_keys =
@@ -175,15 +190,48 @@ let attach_to_post_meta ~existing (attachments : t list) : Yojson.Safe.t =
   in
   `Assoc (other_keys @ [meta_json_key, attachments_json])
 
-let attachments_of_post_meta (meta : Yojson.Safe.t option) : t list =
+type attachments_of_post_meta_result = {
+  attachments : t list;
+  errors : attachment_meta_read_error list;
+}
+
+let attachments_of_post_meta_result (meta : Yojson.Safe.t option) :
+    attachments_of_post_meta_result =
   match meta with
+  | None -> { attachments = []; errors = [] }
   | Some (`Assoc kvs) -> (
       match List.assoc_opt meta_json_key kvs with
+      | None -> { attachments = []; errors = [] }
       | Some (`List items) ->
-        List.filter_map (fun j ->
-          match of_yojson j with
-          | Ok a -> Some a
-          | Error _ -> None
-        ) items
-      | _ -> [])
-  | _ -> []
+          let rec loop index attachments errors = function
+            | [] ->
+                {
+                  attachments = List.rev attachments;
+                  errors = List.rev errors;
+                }
+            | item :: rest -> (
+                match of_yojson item with
+                | Ok attachment -> loop (index + 1) (attachment :: attachments) errors rest
+                | Error error ->
+                    loop (index + 1) attachments
+                      (Attachment_decode_error { index; error } :: errors)
+                      rest)
+          in
+          loop 0 [] [] items
+      | Some other ->
+          {
+            attachments = [];
+            errors =
+              [
+                Attachments_not_list
+                  { received = Json_util.kind_name other };
+              ];
+          })
+  | Some other ->
+      {
+        attachments = [];
+        errors = [ Meta_not_object { received = Json_util.kind_name other } ];
+      }
+
+let attachments_of_post_meta (meta : Yojson.Safe.t option) : t list =
+  (attachments_of_post_meta_result meta).attachments

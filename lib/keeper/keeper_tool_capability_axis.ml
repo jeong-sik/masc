@@ -11,7 +11,17 @@ type t =
   | Shell_command_input
   | Polling_read
 
+type command_candidate_error =
+  | Tool_execute_input_parse_error of string
 
+let command_candidate_error_label = function
+  | Tool_execute_input_parse_error _ -> "typed_input_parse"
+;;
+
+let command_candidate_error_to_string = function
+  | Tool_execute_input_parse_error detail ->
+    Printf.sprintf "tool_execute typed input parse failed: %s" detail
+;;
 
 let canonical_tool_name name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
@@ -106,9 +116,9 @@ let command_of_exec_stage ~executable ~argv =
 
 let typed_execute_command_candidates input =
   match Keeper_tool_execute_typed_input.of_json input with
-  | Error _ -> []
+  | Error error -> Error (Tool_execute_input_parse_error error)
   | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
-    command_of_exec_stage ~executable ~argv |> Option.to_list
+    Ok (command_of_exec_stage ~executable ~argv |> Option.to_list)
   | Ok (Keeper_tool_execute_typed_input.Pipeline { stages; _ }) ->
     let commands =
       stages
@@ -116,11 +126,11 @@ let typed_execute_command_candidates input =
            command_of_exec_stage ~executable ~argv)
     in
     (match commands with
-     | [] -> []
-     | _ -> [ String.concat " | " commands ])
+     | [] -> Ok []
+     | _ -> Ok [ String.concat " | " commands ])
 ;;
 
-let shell_command_input_candidates tool_name input =
+let shell_command_input_candidates_result tool_name input =
   let add_candidate candidate acc =
     match candidate with
     | None -> acc
@@ -133,10 +143,38 @@ let shell_command_input_candidates tool_name input =
     match canonical_tool_name tool_name with
     | "tool_execute" ->
       let candidates = [] |> add_candidate (Json_util.get_string input "cmd") in
-      List.fold_left
-        (fun acc command -> add_candidate (Some command) acc)
-        candidates
-        (typed_execute_command_candidates input)
-    | _ -> []
-  else []
+      (match typed_execute_command_candidates input with
+       | Ok commands ->
+         Ok
+           (List.fold_left
+              (fun acc command -> add_candidate (Some command) acc)
+              candidates
+              commands)
+       | Error _ as error -> error)
+    | _ -> Ok []
+  else Ok []
+;;
+
+let observe_command_candidate_error ~tool_name error =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ToolExecuteFailures)
+    ~labels:
+      [ "tool", tool_name
+      ; "site", "capability_axis"
+      ; "reason", command_candidate_error_label error
+      ]
+    ();
+  Log.Keeper.warn
+    "tool capability-axis command candidate parse failed: tool=%s reason=%s detail=%s"
+    tool_name
+    (command_candidate_error_label error)
+    (command_candidate_error_to_string error)
+;;
+
+let shell_command_input_candidates tool_name input =
+  match shell_command_input_candidates_result tool_name input with
+  | Ok candidates -> candidates
+  | Error error ->
+    observe_command_candidate_error ~tool_name error;
+    []
 ;;

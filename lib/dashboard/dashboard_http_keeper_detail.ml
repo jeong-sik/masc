@@ -44,6 +44,7 @@ type metrics_acc = {
   ma_proactive_previews_rev : string list;
   ma_last_handoff : Yojson.Safe.t option;
   ma_last_compaction : Yojson.Safe.t option;
+  ma_read_errors_rev : Yojson.Safe.t list;
 }
 
 let init_acc = {
@@ -87,9 +88,61 @@ let init_acc = {
   ma_proactive_previews_rev = [];
   ma_last_handoff = None;
   ma_last_compaction = None;
+  ma_read_errors_rev = [];
 }
 
+type metrics_window_row = {
+  parsed_index : int;
+  line_index : int option;
+  json : Yojson.Safe.t;
+}
+
+type metrics_window_read_error_kind =
+  | Metrics_row_not_object
+  | Metrics_row_json_error
+  | Metrics_row_type_error
+
+let keeper_detail_metrics_read_error_source =
+  "dashboard_keeper_detail_metrics_jsonl"
+
+let metrics_window_read_error_kind_to_string = function
+  | Metrics_row_not_object -> "row_not_object"
+  | Metrics_row_json_error -> "json_error"
+  | Metrics_row_type_error -> "type_error"
+
+let metrics_window_read_error_to_json ?line_index ~parsed_index ~kind ~message
+    () =
+  `Assoc
+    ([
+       ("source", `String keeper_detail_metrics_read_error_source);
+       ("parsed_index", `Int parsed_index);
+       ("kind", `String (metrics_window_read_error_kind_to_string kind));
+       ("message", `String message);
+     ]
+     @
+     match line_index with
+     | Some index -> [ ("line_index", `Int index) ]
+     | None -> [])
+
+let metric_rows_of_inputs ?parsed_metric_lines parsed_metrics =
+  match parsed_metric_lines with
+  | Some rows ->
+    List.mapi
+      (fun parsed_index
+           (row : Keeper_status_metrics.parsed_metrics_json_line) ->
+        {
+          parsed_index;
+          line_index = Some row.metrics_line_index;
+          json = row.metrics_json;
+        })
+      rows
+  | None ->
+    List.mapi
+      (fun parsed_index json -> { parsed_index; line_index = None; json })
+      parsed_metrics
+
 let compute_metrics_window
+    ?parsed_metric_lines
     ~(parsed_metrics : Yojson.Safe.t list)
     ~(generation : int)
     ~(compact : bool)
@@ -106,9 +159,12 @@ let compute_metrics_window
   let drift_reason_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let compaction_trigger_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let generation_stats : (int, keeper_gen_window_stats) Hashtbl.t = Hashtbl.create 8 in
+  let metric_rows = metric_rows_of_inputs ?parsed_metric_lines parsed_metrics in
 
   let acc, items_rev =
-    List.fold_left (fun (acc, items) j ->
+    List.fold_left (fun (acc, items) row ->
+      match row.json with
+      | `Assoc _ as j ->
       try
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         let ratio = Safe_ops.json_float ~default:0.0 "context_ratio" j in
@@ -478,10 +534,47 @@ let compute_metrics_window
         | Some i -> (acc, i :: items)
         | None -> (acc, items)
       with
-      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> (acc, items)
-    ) (init_acc, []) parsed_metrics
+      | Yojson.Json_error message ->
+        let read_error =
+          metrics_window_read_error_to_json
+            ?line_index:row.line_index
+            ~parsed_index:row.parsed_index
+            ~kind:Metrics_row_json_error
+            ~message
+            ()
+        in
+        ({ acc with ma_read_errors_rev = read_error :: acc.ma_read_errors_rev }, items)
+      | Yojson.Safe.Util.Type_error (message, value) ->
+        let read_error =
+          metrics_window_read_error_to_json
+            ?line_index:row.line_index
+            ~parsed_index:row.parsed_index
+            ~kind:Metrics_row_type_error
+            ~message:
+              (Printf.sprintf
+                 "%s (got %s)"
+                 message
+                 (Json_util.kind_name value))
+            ()
+        in
+        ({ acc with ma_read_errors_rev = read_error :: acc.ma_read_errors_rev }, items)
+      | other ->
+        let read_error =
+          metrics_window_read_error_to_json
+            ?line_index:row.line_index
+            ~parsed_index:row.parsed_index
+            ~kind:Metrics_row_not_object
+            ~message:
+              (Printf.sprintf
+                 "keeper metrics window row must be object, got %s"
+                 (Json_util.kind_name other))
+            ()
+        in
+        ({ acc with ma_read_errors_rev = read_error :: acc.ma_read_errors_rev }, items)
+    ) (init_acc, []) metric_rows
   in
   let items = List.rev items_rev in
+  let read_errors = List.rev acc.ma_read_errors_rev in
   let sample_points = List.length items in
   let turn_points_int = acc.ma_turn_points in
   let proactive_points_int = acc.ma_proactive_points in
@@ -646,6 +739,8 @@ let compute_metrics_window
          ])
   in
   let summary = `Assoc [
+    ("read_error_count", `Int (List.length read_errors));
+    ("read_errors", `List read_errors);
     ("sample_points", `Int sample_points);
     ("window_sample_points", `Int sample_points);
     ("turn_points", `Int turn_points_int);

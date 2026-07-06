@@ -814,6 +814,7 @@ describe('dashboardHealthChips', () => {
             status: 'ok',
             operator_action_required: false,
             cursor_ack_count: 4,
+            stimulus_consumed_count: 6,
             cursor_swept_stimulus_count: 3,
             legacy_cursor_swept_stimulus_count: 1,
             pending_stimulus_count: 0,
@@ -832,6 +833,7 @@ describe('dashboardHealthChips', () => {
     }))
     expect(chip?.detail).toContain('cursor_swept=3')
     expect(chip?.detail).toContain('legacy_swept=1')
+    expect(chip?.detail).toContain('stimulus_consumed=6')
   })
 
   it('warns on real reaction ledger pending backlog', () => {

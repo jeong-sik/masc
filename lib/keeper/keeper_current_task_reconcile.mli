@@ -24,6 +24,14 @@ val owned_active_task_id_for_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
 
+val owned_active_task_id_result_for_meta :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (Keeper_id.Task_id.t option, string) result
+(** Result-returning variant of {!owned_active_task_id_for_meta}.  Callers that
+    make progress/completion decisions must consume this variant so backlog
+    read failure is not projected as "no active task". *)
+
 (** Field-level merge for [Keeper_meta_store.write_meta_with_merge]. *)
 val merge_current_task_id :
   latest:Keeper_meta_contract.keeper_meta ->
@@ -38,6 +46,11 @@ val sync_current_task_id_from_backlog :
 
 (** Best-effort reconciliation for callers that only know an agent name.
     No-ops for non-keeper agents. *)
+val sync_current_task_id_for_agent_name_result :
+  config:Workspace.config ->
+  agent_name:string ->
+  (unit, string) result
+
 val sync_current_task_id_for_agent_name :
   config:Workspace.config ->
   agent_name:string ->

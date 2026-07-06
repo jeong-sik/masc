@@ -116,12 +116,29 @@ val append_from_reply :
   unit ->
   int * string list
 
+val append_from_reply_result :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  ?snapshot:state_snapshot ->
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
+  turn:int ->
+  reply:string ->
+  unit ->
+  (int * string list, string) result
+
 val append_from_tool_results :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   turn:int ->
   results:Yojson.Safe.t list ->
   int
+
+val append_from_tool_results_result :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  turn:int ->
+  results:Yojson.Safe.t list ->
+  (int, string) result
 
 val compact_if_needed :
   ?summarizer:consolidation_summarizer ->

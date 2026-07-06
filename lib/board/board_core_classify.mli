@@ -1,11 +1,10 @@
 
 (** Board_core_classify — post visibility / kind converters and
-    classification.
+    classification accessors.
 
     Two responsibilities:
     - Type / string round-trip for [visibility] and [post_kind].
-    - Legacy migration heuristics ({!legacy_migrate_post_kind}) +
-      classification reason rendering ({!post_classification_reason}).
+    - Classification reason rendering ({!post_classification_reason}).
 
     {b Include runtime:} this module starts with
     [include Board_types], so consumers using
@@ -15,12 +14,9 @@
     helpers) stay private.  {!take} is exposed because {!Board_core}
     uses it via include.
 
-    {b RFC-0089 §4-3 G2:} legacy [String.starts_with] / [List.mem]
-    author classifiers ([legacy_author_looks_automation] /
-    [legacy_system_board_author]) are removed.  Author classification
-    now flows through the typed {!author_kind} variant exposed below;
-    boundary parse via {!classify_author} happens once and callers
-    pattern-match on the variant. *)
+    Persisted rows must carry an explicit [post_kind].  Missing or
+    malformed [post_kind] is a persistence-shape failure, not a local
+    inference problem. *)
 
 include module type of struct
   include Board_types
@@ -65,64 +61,6 @@ val post_kind_of_string : string -> post_kind option
 (** [post_kind_of_string s] accepts ["direct"] / ["automation"] /
     ["system"]; returns [None] for unrecognised inputs. *)
 
-(** {1 Author classification (RFC-0089 §4-3 G2)} *)
-
-(** Re-export of {!Board_types.automation_label} (relocated there so the
-    board metric hook surface can reference it without a dependency
-    cycle). The type equation keeps existing users compiling unchanged. *)
-type automation_label = Board_types.automation_label =
-  | Auto_prefixed       (** Author starts with ["auto-"]. *)
-  | Qa_prefixed         (** Author starts with ["qa-"]. *)
-  | Researcher_named    (** Author contains ["researcher"]. *)
-  | Harness_named       (** Author contains ["harness"]. *)
-  | Smoke_named         (** Author contains ["smoke"]. *)
-  | Probe_named         (** Author contains ["probe"]. *)
-
-type system_actor =
-  | Ecosystem
-  | Operator
-
-type author_kind =
-  | Human_author
-  | Automation_author of automation_label
-  | System_author of system_actor
-
-val classify_author : string -> author_kind
-(** [classify_author author] derives the typed {!author_kind} from a
-    lowercased author string.  Resolution order matches the legacy
-    bool-OR chain (system list -> "auto-" / "qa-" prefix -> researcher
-    / harness / smoke / probe substring -> [Human_author] fallback).
-
-    Caller MUST pre-lowercase the author (callers historically called
-    [String.lowercase_ascii] before the legacy helpers; that contract
-    is preserved). *)
-
-(** {1 Legacy migration} *)
-
-val legacy_migrate_post_kind :
-  meta_json:Yojson.Safe.t option ->
-  author:string ->
-  visibility:visibility ->
-  expires_at:float ->
-  hearth:string option ->
-  post_kind
-(** [legacy_migrate_post_kind ~meta_json ~author ~visibility
-      ~expires_at ~hearth] derives the canonical [post_kind] for
-    legacy posts that lack an explicit one.  Decision priority
-    (first match wins):
-
-    + System author (one of the platform/system aliases) ->
-      [System_post].
-    + Agent board-post provenance source -> [Automation_post].
-    + Internal visibility + [expires_at > 0.0] + non-empty hearth
-      starting with ["mdal"] or containing ["harness"] ->
-      [Automation_post].
-    + Author matches the legacy automation heuristic (prefixes
-      ["auto-"] / ["qa-"], or contains ["researcher"] / ["harness"] /
-      ["smoke"] / ["probe"]) -> [Automation_post] and emits the
-      legacy-migration metric through [Board_metrics_hooks].
-    + Otherwise -> [Human_post]. *)
-
 (** {1 Classification accessors} *)
 
 val classify_post_kind : post -> post_kind
@@ -141,8 +79,8 @@ val post_classification_reason : post -> string
     + Fallback templates per
       [(post_kind, meta_json.source)] pair (Human_post + dashboard
       / Human_post + other / Automation_post + agent board post /
-      Automation_post + dashboard / Automation_post + legacy
-      heuristic / System_post / etc.). *)
+      Automation_post + dashboard / AutomationPost explicit contract /
+      System_post / etc.). *)
 
 val post_matches_filters :
   exclude_system:bool ->
@@ -164,6 +102,8 @@ type reclassify_report = {
   skipped : int;
   apply_failures : int;
   changed_post_ids : string list;
+  invalid_post_ids : string list;
 }
-(** Output of bulk reclassification operations.  Used by both the
-    filesystem and PG backends. *)
+(** Output of the retired post-kind reclassification scan.  [changed] is
+    always [0]; [invalid_post_ids] records rows that lack a valid explicit
+    [post_kind] without locally inferring a replacement. *)

@@ -53,24 +53,30 @@ implementation_prs: [15937]
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Alive_but_stuck_recovery
-  | Unknown of string                  (* (1) *)
+  | No_progress_recovery
+  | Fusion_completed
+  | Bg_completed
+  | Schedule_signal
+  | Connector_attention
+  | Hitl_resolved
 
 type reaction_kind =
   | Turn_started
+  | Stimulus_consumed
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
   | Operator_escalation
-  | Unknown_reaction of string         (* (2) *)
+  | Supervisor_recovery_requested
+  | Unknown_reaction of string         (* (1) *)
 ```
 
-(1) 과 (2) 의 `Unknown of string` catch-all 은 **AGENT-LLM-A.md `software-development.md` §"AI 코드 생성 안티패턴" §2 "Unknown → Permissive Default"** 시그니처:
+(1) 의 `Unknown_reaction of string` legacy escape 는 **AGENT-LLM-A.md `software-development.md` §"AI 코드 생성 안티패턴" §2 "Unknown → Permissive Default"** 시그니처:
 
 > 알 수 없는 입력을 에러 대신 "편리한 기본값" 으로 매핑.
 > **규칙**: unknown 입력은 `Error`/`None`/`Unknown` 변형으로 처리. `option`을 `Some default` 로 압축하지 않는다.
 
-`Unknown of string` 자체는 위 룰의 "Unknown variant 처리" 형태지만, *어떤 새 case 가 들어와도 컴파일러가 누락 감지 안함* — RFC-0042 close-sum 정신 위배. 새 stimulus / reaction kind 가 spec 에 추가될 때마다 `Unknown` 으로 fall through.
+`Unknown_reaction of string` 자체는 위 룰의 "Unknown variant 처리" 형태지만, *어떤 새 reaction case 가 들어와도 컴파일러가 누락 감지 안함* — RFC-0042 close-sum 정신 위배. 새 reaction kind 가 spec 에 추가될 때마다 `Unknown_reaction` 으로 fall through.
 
 ### Why this needs an RFC
 
@@ -119,7 +125,7 @@ KRL preamble 의 missing 3 entry point 를 typed skeleton 으로 생성:
 
 **Layer C — Catch-all sunset**
 
-`stimulus_kind.Unknown of string` 과 `reaction_kind.Unknown_reaction of string` 제거. P2 에서 KRL spec 의 가능한 모든 case 를 closed sum 으로 enumerate. 새 case 추가 시 spec PR + RFC update + runtime PR 가 같은 sprint.
+`stimulus_kind` 는 현재 closed sum 이다. 남은 `reaction_kind.Unknown_reaction of string` 제거. P2 에서 KRL spec 의 가능한 모든 reaction case 를 closed sum 으로 enumerate. 새 case 추가 시 spec PR + RFC update + runtime PR 가 같은 sprint.
 
 ## §3 Phasing
 
@@ -129,7 +135,7 @@ KRL preamble 의 missing 3 entry point 를 typed skeleton 으로 생성:
 | P2 | `Keeper_reaction_contract.t` interface + L1 verifier 함수 + 3 unit test (board enqueue → receipt success / terminal_reason success / silent_drop fail) | dune build PASS, alcotest PASS |
 | P3 | L1 wiring: `keeper_reaction_ledger` 가 L1 invariant 만족 확인 후 commit. Silent drop 시 `Result.Error \`Silent_drop` → operator-visible escalation. | PBT (`test_pbt_l1_board_receipt.ml`) PASS both clean + buggy paths. |
 | P4 | L2/L3/L4/L5 verifier + 3 missing module skeleton (typed plumbing). | KRL.tla / KRL-buggy.tla TLC PASS, runtime cross-check tool 통과. |
-| P5 | `Unknown of string` / `Unknown_reaction of string` 제거. KRL spec 의 closed sum 과 1:1 정합. | `rg "Unknown of string" lib/keeper/keeper_reaction_ledger" = 0` |
+| P5 | `Unknown_reaction of string` 제거. KRL spec 의 closed sum 과 1:1 정합. | `rg "Unknown_reaction" lib/keeper/keeper_reaction_ledger" = 0` |
 | P6 | Dashboard 가 L1-L5 invariant 위반 시 alert + operator action item 표시 | Dashboard PBT: L4 violation 시 task action-item row 표시 |
 
 P3 가 핵심 — 첫 L 의 spec 정합성 보장. P6 는 L1-L5 위반이 *operator-visible* 됨을 보장 (silent drop 차단).

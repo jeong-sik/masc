@@ -3,12 +3,14 @@ type scheduled_stat = {
   latest_ts : string option;
   latest_ts_unix : float option;
   failure_count : int;
+  read_errors : Yojson.Safe.t list;
 }
 
 type turn_span_stat = {
   interaction_count : int;
   first_ts : float option;
   latest_ts : float option;
+  read_errors : Yojson.Safe.t list;
 }
 
 let seconds_per_hour = Masc_time_constants.hour
@@ -18,34 +20,77 @@ let decision_tail_max_bytes = 512 * 1024
 let decision_tail_max_lines = 5000
 
 let empty_scheduled_stat =
-  { decision_count = 0; latest_ts = None; latest_ts_unix = None; failure_count = 0 }
+  {
+    decision_count = 0;
+    latest_ts = None;
+    latest_ts_unix = None;
+    failure_count = 0;
+    read_errors = [];
+  }
 
 let empty_turn_span_stat =
-  { interaction_count = 0; first_ts = None; latest_ts = None }
+  { interaction_count = 0; first_ts = None; latest_ts = None; read_errors = [] }
+
+let decision_log_read_error_to_json ~keeper_name ~path ?line_index message =
+  let fields =
+    [ "source", `String "dashboard_keeper_decision_log_jsonl"
+    ; "keeper", `String keeper_name
+    ; "path", `String path
+    ; "message", `String message
+    ]
+  in
+  `Assoc
+    (match line_index with
+     | Some index -> ("line_index", `Int index) :: fields
+     | None -> fields)
+
+let fold_keeper_decision_log_with_read_errors ~config keeper_name ~init ~f =
+  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
+  if not (Sys.file_exists path) then init, []
+  else
+    let raw_rows =
+      match
+        Keeper_memory.read_file_tail_lines_result path
+          ~max_bytes:decision_tail_max_bytes
+          ~max_lines:decision_tail_max_lines
+      with
+      | Ok lines -> List.mapi (fun line_index line -> line_index, Ok line) lines
+      | Error exn_class ->
+          Keeper_memory.record_memory_recall_read_error
+            ~site:"dashboard_decision_log_proof" path exn_class;
+          [
+            ( 0,
+              Error
+                (decision_log_read_error_to_json
+                   ~keeper_name
+                   ~path
+                   (Printexc.to_string exn_class)) );
+          ]
+    in
+    raw_rows
+    |> List.fold_left
+         (fun (acc, read_errors) item ->
+           match item with
+           | _, Error error -> acc, error :: read_errors
+           | line_index, Ok line ->
+               let line = String.trim line in
+               if line = "" then acc, read_errors
+               else
+                 match Yojson.Safe.from_string line with
+                 | exception Yojson.Json_error message ->
+                     ( acc
+                     , decision_log_read_error_to_json
+                         ~keeper_name
+                         ~path
+                         ~line_index
+                         message
+                       :: read_errors )
+                 | json -> f acc json, read_errors)
+         (init, [])
+    |> fun (stat, read_errors) -> stat, List.rev read_errors
 
 let fold_keeper_decision_log ~config keeper_name ~init ~f =
-  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
-  if not (Sys.file_exists path) then init
-  else
-    (match
-       Keeper_memory.read_file_tail_lines_result path
-         ~max_bytes:decision_tail_max_bytes
-         ~max_lines:decision_tail_max_lines
-     with
-     | Ok lines -> lines
-     | Error exn_class ->
-         Keeper_memory.record_memory_recall_read_error
-           ~site:"dashboard_decision_log_proof" path exn_class;
-         [])
-    |> List.fold_left
-         (fun acc line ->
-            let line = String.trim line in
-            if line = "" then acc
-            else
-              match Yojson.Safe.from_string line with
-              | exception Yojson.Json_error _ -> acc
-              | json -> f acc json)
-         init
+  fst (fold_keeper_decision_log_with_read_errors ~config keeper_name ~init ~f)
 
 let decision_ts_unix json =
   match Safe_ops.json_float_opt "ts_unix" json with
@@ -72,7 +117,8 @@ let update_scheduled_latest stat json =
        })
 
 let scheduled_stats ~config keeper_name =
-  fold_keeper_decision_log ~config keeper_name
+  let stat, read_errors =
+    fold_keeper_decision_log_with_read_errors ~config keeper_name
     ~init:empty_scheduled_stat
     ~f:(fun acc json ->
       match Safe_ops.json_string_opt "channel" json with
@@ -84,6 +130,10 @@ let scheduled_stats ~config keeper_name =
         else
           { acc with failure_count = acc.failure_count + 1 }
       | _ -> acc)
+  in
+  { stat with read_errors }
+
+let scheduled_read_errors stat = stat.read_errors
 
 let scheduled_evidence_json stat =
   `Assoc [
@@ -91,6 +141,8 @@ let scheduled_evidence_json stat =
     ("failure_count", `Int stat.failure_count);
     ( "latest_ts_unix", Json_util.float_opt_to_json stat.latest_ts_unix );
     ( "latest_ts", Json_util.string_opt_to_json stat.latest_ts );
+    ("read_error_count", `Int (List.length stat.read_errors));
+    ("read_errors", `List stat.read_errors);
   ]
 
 (* A turn-exchange row is any cycle whose channel parses to a known typed
@@ -117,13 +169,18 @@ let update_turn_span stat ts =
   }
 
 let turn_span_stats ~config keeper_name =
-  fold_keeper_decision_log ~config keeper_name ~init:empty_turn_span_stat
+  let stat, read_errors =
+    fold_keeper_decision_log_with_read_errors ~config keeper_name ~init:empty_turn_span_stat
     ~f:(fun stat json ->
       if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json) then
         match decision_ts_unix json with
         | Some ts -> update_turn_span stat ts
         | None -> stat
       else stat)
+  in
+  { stat with read_errors }
+
+let turn_span_read_errors stat = stat.read_errors
 
 let hours_between first latest =
   max 0.0 (latest -. first) /. seconds_per_hour
@@ -169,6 +226,8 @@ let turn_span_evidence_json ~now keeper_name stat =
     ("latest_ts_iso", unix_opt_to_iso_json stat.latest_ts);
     ("span_hours", turn_span_hours_json stat);
     ("latest_age_hours", latest_age_hours_json ~now stat);
+    ("read_error_count", `Int (List.length stat.read_errors));
+    ("read_errors", `List stat.read_errors);
     ( "meets_24h_persistence",
       `Bool (has_persistent_turn_span ~now stat) );
   ]

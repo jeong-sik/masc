@@ -85,10 +85,10 @@ else
   fi
 fi
 
-# 1b. OAS API surface fingerprint must not contain masc_ back-references.
+# 1b. OAS API surface fingerprint must not contain MASC domain back-references.
 #     This check is self-contained (no OAS checkout required) and fails
-#     fast if the pinned OAS API surface gains any masc_-prefixed identifier.
-echo "=== Scan: OAS API surface fingerprint for masc_ back-references ==="
+#     fast if the pinned OAS API surface gains public MASC vocabulary.
+echo "=== Scan: OAS API surface fingerprint for MASC domain back-references ==="
 oas_surface_file="scripts/oas-api-surface.json"
 if [[ -f "${oas_surface_file}" ]]; then
   masc_in_surface=$(python3 - "${oas_surface_file}" <<'PYEOF'
@@ -96,52 +96,40 @@ import json, re, sys
 with open(sys.argv[1]) as f:
     d = json.load(f)
 hits = []
-# Match 'masc_' as a prefix or embedded component (case-insensitive).
-# Using the underscore prevents false positives from unrelated words
-# such as "damascus" or "mascara".
-pattern = re.compile(r'(?i)masc_')
+# Match concrete MASC-owned public vocabulary as identifier components.
+# OAS may expose generic agent/runtime/tool vocabulary, but not MASC product
+# semantics such as keeper, fusion, or board concepts.
+patterns = [
+    ("masc_", re.compile(r"(?i)masc_")),
+    ("keeper", re.compile(r"(?i)(^|[^a-z0-9])keeper([^a-z0-9]|$)")),
+    ("fusion", re.compile(r"(?i)(^|[^a-z0-9])fusion([^a-z0-9]|$)")),
+    ("board", re.compile(r"(?i)(^|[^a-z0-9])board([^a-z0-9]|$)")),
+]
 for section, items in d.get("surfaces", {}).items():
     if isinstance(items, list):
         for item in items:
-            if pattern.search(str(item)):
-                hits.append(f"{section}: {item}")
+            text = str(item)
+            for name, pattern in patterns:
+                if pattern.search(text):
+                    hits.append(f"{section}: {item} ({name})")
 for h in hits:
     print(h)
 PYEOF
 )
   if [[ -n "$masc_in_surface" ]]; then
-    echo "FAIL: OAS API surface fingerprint contains masc_ back-reference(s):"
+    echo "FAIL: OAS API surface fingerprint contains MASC domain back-reference(s):"
     echo "$masc_in_surface"
-    echo "  OAS must not learn MASC agent stream vocabulary."
-    echo "  repair: remove the masc_-prefixed item from OAS, refresh scripts/oas-api-surface.json"
+    echo "  OAS must not learn MASC keeper/fusion/board vocabulary."
+    echo "  repair: remove the MASC-specific item from OAS, refresh scripts/oas-api-surface.json"
     exit_code=1
   else
-    echo "PASS: OAS API surface fingerprint contains no masc_ back-references"
+    echo "PASS: OAS API surface fingerprint contains no MASC domain back-references"
   fi
 else
-  echo "WARN: ${oas_surface_file} not found; skipping fingerprint masc_ back-reference check"
+  echo "WARN: ${oas_surface_file} not found; skipping fingerprint MASC domain back-reference check"
 fi
 
-# 2. MASC files that reimplement OAS patterns (heuristic)
-#    We look for OAS lifecycle patterns inside MASC modules that should
-#    instead call Oas_agent.run or similar.
-echo "=== Scan: MASC lifecycle reimplementation heuristic ==="
-# List of patterns that indicate MASC is doing OAS's job
-masc_matches=$(
-  rg -n --type ml \
-    -e 'retry_count' \
-    -e 'backoff_ms' \
-    -e 'budget_remaining' \
-    -e 'context_window' \
-    -e 'token_budget' \
-    lib/keeper/ lib/masc_*.ml 2>/dev/null || true
-)
-if [ -n "$masc_matches" ]; then
-  echo "WARN: MASC files contain OAS-reserved concepts (verify they call OAS, not reimplement):"
-  head -20 <<< "$masc_matches"
-fi
-
-# 3. MASC using Oas_worker raw/internal interfaces instead of public API.
+# 2. MASC using Oas_worker raw/internal interfaces instead of public API.
 #    lib/oas_response.ml is a MASC-owned facade module; using
 #    Oas_response.* from keeper code is the correct pattern (not a violation).
 #    Only flag truly internal Oas_worker paths that bypass the public API.

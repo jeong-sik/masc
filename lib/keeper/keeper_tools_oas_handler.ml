@@ -140,7 +140,16 @@ let make_keeper_tool_handler
             let proc_mgr =
               match Process_eio.get_proc_mgr () with
               | Ok proc_mgr -> Some proc_mgr
-              | Error _ -> None
+              | Error error ->
+                Otel_metric_store.inc_counter
+                  Keeper_metrics.(to_string ToolsOasFailures)
+                  ~labels:[ "tool", name; "site", "proc_mgr_unavailable" ]
+                  ();
+                Log.Keeper.warn
+                  "tool %s running without Eio proc_mgr: %s"
+                  name
+                  error;
+                None
             in
             Keeper_tools_oas_handler_exec.execute_with_observers
               ~name

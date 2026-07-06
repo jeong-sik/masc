@@ -1,6 +1,7 @@
 open Alcotest
 
 module KGL = Masc.Keeper_generation_lineage
+module U = Yojson.Safe.Util
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -9,6 +10,12 @@ let rec rm_rf path =
       |> Array.iter (fun name -> rm_rf (Filename.concat path name));
       Unix.rmdir path)
     else Sys.remove path
+
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 
 let with_temp_file prefix contents f =
   let path = Filename.temp_file prefix ".json" in
@@ -23,6 +30,19 @@ let persistence_read_drop_total ~surface ~reason =
     Masc.Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", surface); ("reason", reason)]
     ()
+
+let meta_fixture ~name ~trace_id =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String name
+        ; "trace_id", `String trace_id
+        ; "goal", `String "test lineage surface"
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
 
 let classify_identity_fields_marks_changed_and_dropped () =
   let inherited, changed, dropped =
@@ -73,6 +93,44 @@ let malformed_manifest_load_counts_read_drop () =
   check (float 0.0001) "manifest read drop counted" (before +. 1.0)
     (persistence_read_drop_total ~surface ~reason)
 
+let index_read_error_surfaces_in_surface_json () =
+  let surface = "keeper_generation_lineage_index" in
+  let reason = "entry_load_error" in
+  let before = persistence_read_drop_total ~surface ~reason in
+  with_temp_dir "keeper-generation-lineage-index-read-error" (fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    let meta =
+      meta_fixture
+        ~name:"lineage-index-read-error"
+        ~trace_id:"lineage-index-read-error-trace"
+    in
+    let index_path =
+      Masc.Keeper_types_support.keeper_generation_index_path config meta.name
+    in
+    let (_ : string) = Masc.Keeper_fs.ensure_dir (Filename.dirname index_path) in
+    Unix.mkdir index_path 0o700;
+    let json = KGL.surface_json config meta ~recent_limit:6 in
+    check int "recent count falls back to empty" 0 U.(json |> member "recent_count" |> to_int);
+    check string "index read error path" index_path
+      U.(json |> member "index_read_error" |> member "path" |> to_string);
+    check bool "index read error detail is present" true
+      (String.length U.(json |> member "index_read_error" |> member "detail" |> to_string)
+       > 0));
+  check (float 0.0001) "index read drop counted" (before +. 1.0)
+    (persistence_read_drop_total ~surface ~reason)
+
+let legacy_index_loader_reports_read_error_before_empty_fallback () =
+  let surface = "keeper_generation_lineage_index" in
+  let reason = "entry_load_error" in
+  let before = persistence_read_drop_total ~surface ~reason in
+  with_temp_dir "keeper-generation-lineage-legacy-index-read-error" (fun base_path ->
+    let path = Filename.concat base_path "lineage-index.jsonl" in
+    Unix.mkdir path 0o700;
+    check int "legacy loader fallback rows" 0
+      (List.length (KGL.load_jsonl_file path)));
+  check (float 0.0001) "legacy loader read drop counted" (before +. 1.0)
+    (persistence_read_drop_total ~surface ~reason)
+
 let () =
   run "Keeper_generation_lineage"
     [
@@ -92,5 +150,9 @@ let () =
         [
           test_case "malformed manifest load is counted" `Quick
             malformed_manifest_load_counts_read_drop;
+          test_case "index read error surfaces in surface JSON" `Quick
+            index_read_error_surfaces_in_surface_json;
+          test_case "legacy index loader reports read error before fallback" `Quick
+            legacy_index_loader_reports_read_error_before_empty_fallback;
         ] );
     ]

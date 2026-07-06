@@ -146,16 +146,16 @@ val build_prompt :
   ?verify_gate_evidence:string list ->
   review_request -> string
 
-(** Parse LLM text output into a verdict (lenient fallback path).
-    "APPROVE" -> [Ok Approve], "REJECT: reason" -> [Ok (Reject reason)].
+(** Parse legacy LLM text output into a verdict using a strict protocol.
+    Exact "APPROVE" -> [Ok Approve], "REJECT: <non-empty reason>" ->
+    [Ok (Reject reason)].
     Unrecognized format returns [Error] instead of silently approving (ADR D3).
     Exposed for testing.
     @since 2.223.0 changed return type from [verdict] to [(verdict, string) result] *)
 val parse_verdict : string -> (verdict, string) result
 
-(** Typed variant of {!parse_verdict}. Production routing uses this form so
-    empty output and malformed output cannot be distinguished by fragile string
-    matching. *)
+(** Typed variant of {!parse_verdict}. Empty output and malformed output are
+    distinct values; callers do not inspect error strings. *)
 val parse_verdict_typed : string -> (verdict, verdict_parse_error) result
 
 (** Parse verdict from structured tool call JSON arguments (primary path).

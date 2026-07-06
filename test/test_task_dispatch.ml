@@ -105,11 +105,14 @@ let test_update_status_and_delete_return_error_when_backlog_unreadable () =
       in
       let expect_io_error label = function
         | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> ()
-        | Ok () -> Alcotest.failf "%s unexpectedly succeeded" label
+        | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
         | Error e ->
             Alcotest.failf "%s returned unexpected error: %s" label
               (Masc_domain.show_masc_error e)
       in
+      expect_io_error "get_task"
+        (Task.Dispatch.get_task config ~task_id:"missing");
+      expect_io_error "list_tasks" (Task.Dispatch.list_tasks config ());
       expect_io_error "update_status"
         (Task.Dispatch.update_status config ~task_id:"missing" ~status);
       expect_io_error "delete_task"

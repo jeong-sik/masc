@@ -133,7 +133,12 @@ let owned_active_task_id_for_meta ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   match owned_active_task_id_result_for_meta ~config ~meta with
   | Ok task_id -> task_id
-  | Error _ -> None
+  | Error err ->
+    Log.Keeper.warn ~keeper_name:meta.name
+      "owned active task lookup projected to legacy None after explicit read \
+       failure: %s"
+      err;
+    None
 
 let merge_current_task_id ~(latest : Keeper_meta_contract.keeper_meta)
     ~(caller : Keeper_meta_contract.keeper_meta) =
@@ -202,7 +207,15 @@ let keeper_name_candidates ~(config : Workspace.config) ~(agent_name : string) =
   |> List.filter_map Keeper_identity.canonical_keeper_name
   |> List.sort_uniq String.compare
 
-let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name =
+let sync_current_task_id_for_agent_name_result ~(config : Workspace.config) ~agent_name =
+  let sync meta =
+    ignore
+      (sync_current_task_id_from_backlog
+         ~config
+         meta
+        : Keeper_meta_contract.keeper_meta);
+    Ok ()
+  in
   let candidates = keeper_name_candidates ~config ~agent_name in
   let entry_from_candidates =
     candidates
@@ -221,12 +234,34 @@ let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name
   in
   match entry with
   | Some entry ->
-    ignore (sync_current_task_id_from_backlog ~config entry.meta : Keeper_meta_contract.keeper_meta)
+    sync entry.meta
   | None ->
-    candidates
-    |> List.find_map (fun name ->
-         match Keeper_meta_store.read_meta config name with
-         | Ok (Some meta) -> Some meta
-         | Ok None | Error _ -> None)
-    |> Option.iter (fun meta ->
-         ignore (sync_current_task_id_from_backlog ~config meta : Keeper_meta_contract.keeper_meta))
+    let rec sync_first_persisted_meta = function
+      | [] -> Ok ()
+      | name :: rest -> (
+          match Keeper_meta_store.read_meta config name with
+          | Ok (Some meta) -> sync meta
+          | Ok None -> sync_first_persisted_meta rest
+          | Error err ->
+            Error
+              (Printf.sprintf
+                 "keeper meta read failed for %s while reconciling current_task \
+                  for agent %s: %s"
+                 name
+                 agent_name
+                 err))
+    in
+    sync_first_persisted_meta candidates
+
+let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name =
+  match sync_current_task_id_for_agent_name_result ~config ~agent_name with
+  | Ok () -> ()
+  | Error err ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ReconcileFailures)
+      ~labels:[("keeper", agent_name); ("phase", "agent_name_meta_read")]
+      ();
+    Log.Keeper.warn
+      "current task sync skipped for agent %s: %s"
+      agent_name
+      err

@@ -45,9 +45,10 @@ val render_if_enabled
   -> string option
 (** [render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root ()] is
     [Some block] when the flag is on and the store yields advisory content,
-    [Some block] with a sanitized unavailable advisory when recall fails after
-    the flag is on, and [None] when disabled or when no memory exists. Intended
-    for the [extra_system_context] assembly site.
+    [Some block] with a sanitized unavailable advisory when recall fails or a
+    fact store contains malformed JSONL after the flag is on, and [None] when
+    disabled or when no memory exists. Intended for the [extra_system_context]
+    assembly site.
     As a side effect (RFC-0264 P2) it appends a best-effort recall-injection
     record — which fact/episode keys reached the prompt — keyed by
     [trace_id]/[turn]; the write never affects the returned block. *)

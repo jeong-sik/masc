@@ -32,6 +32,8 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
         Json_util.string_option_to_yojson runtime.last_compute_outcome );
       ( "last_compute_reason",
         Json_util.string_option_to_yojson runtime.last_compute_reason );
+      ("judgment_read_error_count", `Int (List.length runtime.judgment_read_errors));
+      ("judgment_read_errors", `List runtime.judgment_read_errors);
       ( "lenient_json_fallback",
         Judge_diagnostics.lenient_fallback_metrics_json ~judge_label:"Governance" );
     ]
@@ -118,8 +120,8 @@ let hitl_status_json () =
     ]
 
 let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
-  let runtime = Dashboard_governance_judge.runtime_status base_path in
   let judgments = Dashboard_governance_judge.fresh_judgments_json ~base_path ~limit in
+  let runtime = Dashboard_governance_judge.runtime_status base_path in
   let approval_queue = Keeper_approval_queue.list_pending_dashboard_json () in
   let recent_resolved =
     Keeper_approval_queue.list_recent_resolved_json

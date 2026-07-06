@@ -25,16 +25,35 @@ type deps = Server_mcp_transport_http_types.deps = {
     base_path:string -> Httpun.Request.t -> (unit, string) result;
 }
 
-let method_from_body body_str =
+type method_from_body_error =
+  | Method_body_json_parse_error of string
+
+let method_from_body_error_to_string = function
+  | Method_body_json_parse_error message -> "json_parse_error: " ^ message
+;;
+
+let method_from_body_result body_str =
   try
     let json = Yojson.Safe.from_string body_str in
     match json with
-    | `Assoc fields -> (
-        match List.assoc_opt "method" fields with
-        | Some (`String m) -> Some m
-        | _ -> None)
-    | _ -> None
-  with Yojson.Json_error _ -> None
+    | `Assoc fields ->
+      (match List.assoc_opt "method" fields with
+       | Some (`String m) -> Ok (Some m)
+       | _ -> Ok None)
+    | _ -> Ok None
+  with
+  | Yojson.Json_error message -> Error (Method_body_json_parse_error message)
+;;
+
+let method_from_body body_str =
+  match method_from_body_result body_str with
+  | Ok method_ -> method_
+  | Error error ->
+    Log.Server.warn
+      "mcp-http method_from_body failed: %s"
+      (method_from_body_error_to_string error);
+    None
+;;
 
 let validate_session_requirement ~session_was_provided body_str =
   if session_was_provided then Ok ()

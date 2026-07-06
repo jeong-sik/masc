@@ -91,6 +91,13 @@ val emit_task_activity
 
 val task_actor_kind : string -> string
 val trim_opt : string option -> string option
+
+type working_agents_error =
+  | Working_agents_backlog_read_failed of string
+
+val working_agents_error_to_string : working_agents_error -> string
+val working_agents_result : config -> (string list, working_agents_error) result
+
 val working_agents : config -> string list
 val resolve_agent_name_strict : config -> string -> string
 

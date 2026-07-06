@@ -129,6 +129,48 @@ let test_with_permit_releases_active_on_exception () =
    | _ -> fail "expected Failure");
   check int "active released after exception" 0 (A.For_testing.get_active ())
 
+let test_try_with_permit_result_returns_value_without_scan_when_disabled () =
+  Eio_main.run @@ fun _env ->
+  A.reset_for_test ~max_slots:10;
+  let fd_count, calls = counting_fd ~returns:999_999 in
+  let result =
+    A.For_testing.try_with_permit_result_for_threshold
+      ~keeper_name:"try-keeper"
+      ~runtime_id:"r-try-success"
+      ~threshold:None
+      ~fd_count
+      (fun () -> 42)
+  in
+  (match result with
+   | Ok value -> check int "returned value" 42 value
+   | Error (`Host_resource_saturated msg) ->
+     failf "unexpected saturation: %s" msg);
+  check int "disabled try_with_permit_result skips fd scan" 0 !calls;
+  check int "active released after result success" 0 (A.For_testing.get_active ())
+
+let test_try_with_permit_result_surfaces_rejection () =
+  Eio_main.run @@ fun _env ->
+  A.reset_for_test ~max_slots:10;
+  let fd_count, calls = counting_fd ~returns:90 in
+  let body_called = ref false in
+  let result =
+    A.For_testing.try_with_permit_result_for_threshold
+      ~keeper_name:"try-keeper"
+      ~runtime_id:"r-try-reject"
+      ~threshold:(Some 100)
+      ~fd_count
+      (fun () ->
+         body_called := true;
+         42)
+  in
+  (match result with
+   | Error (`Host_resource_saturated msg) ->
+     check bool "rejection message present" true (String.length msg > 0)
+   | Ok _ -> fail "expected Host_resource_saturated");
+  check int "scan forced exactly once" 1 !calls;
+  check bool "body not called on rejection" false !body_called;
+  check int "active unchanged on rejection" 0 (A.For_testing.get_active ())
+
 let () =
   run "admission_fd_gate"
     [
@@ -154,5 +196,12 @@ let () =
             test_with_permit_releases_active_on_success;
           test_case "release active on exception" `Quick
             test_with_permit_releases_active_on_exception;
+        ] );
+      ( "try-with-permit-result",
+        [
+          test_case "disabled threshold returns value without fd scan" `Quick
+            test_try_with_permit_result_returns_value_without_scan_when_disabled;
+          test_case "saturation returns explicit rejection" `Quick
+            test_try_with_permit_result_surfaces_rejection;
         ] );
     ]

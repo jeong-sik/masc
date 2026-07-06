@@ -6,6 +6,7 @@
 include module type of Dashboard_http_keeper_metrics
 
 val compute_metrics_window :
+  ?parsed_metric_lines:Keeper_status_metrics.parsed_metrics_json_line list ->
   parsed_metrics:Yojson.Safe.t list ->
   generation:int ->
   compact:bool ->

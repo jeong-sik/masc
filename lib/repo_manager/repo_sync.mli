@@ -12,4 +12,7 @@ val sync_all :
   base_path:string -> now:int64 -> (repository list, string) result
 (** [sync_all ~base_path ~now] loads all repositories, filters those that
     should_sync, fetches each one, and returns the list of successfully synced
-    repositories. *)
+    repositories when every due repository succeeds. If one or more due
+    repositories fail, the function still attempts the remaining due
+    repositories and returns an aggregate [Error _] listing the failed
+    repository ids. *)

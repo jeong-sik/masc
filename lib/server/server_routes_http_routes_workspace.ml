@@ -83,12 +83,17 @@ let classify_workspace_query
   | Some raw_repo when String.trim raw_repo <> "" ->
     let repo_id = String.trim raw_repo in
     (match lookup_repository repo_id with
-     | Some repo_path when exists_dir repo_path ->
+     | Ok (Some repo_path) when exists_dir repo_path ->
        (repo_path, `Repository repo_id)
-     | Some _ ->
+     | Ok (Some _) ->
        (project_base, `RepositoryMissing repo_id)
-     | None ->
-       (project_base, `RepositoryUnknown repo_id))
+     | Ok None ->
+       (project_base, `RepositoryUnknown repo_id)
+     | Error msg ->
+       Log.Server.warn
+         "workspace repository lookup failed: repo_id=%S base=%S error=%s"
+         repo_id project_base msg;
+       (project_base, `RepositoryLookupError (repo_id, msg)))
   | _ ->
     classify_keeper_query
       ~project_base
@@ -100,9 +105,14 @@ let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
   let config = (Mcp_server.workspace_config state) in
   let lookup_repository repo_id =
-    match Repo_store.find ~base_path:project_base repo_id with
-    | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
-    | Error _ -> None
+    match Repo_store.load_all ~base_path:project_base with
+    | Error msg -> Error msg
+    | Ok repos ->
+      Ok
+        (repos
+         |> List.find_opt (fun (repo : Repo_manager_types.repository) ->
+              String.equal repo.id repo_id)
+         |> Option.map (Repo_store.local_path ~base_path:project_base))
   in
   let lookup_playground name =
     match Keeper_meta_store.read_meta config name with
@@ -142,6 +152,7 @@ let source_header source =
     | `Repository repo_id -> "repository:" ^ sanitize_header_value repo_id
     | `RepositoryMissing repo_id -> "repository_missing:" ^ sanitize_header_value repo_id
     | `RepositoryUnknown repo_id -> "repository_unknown:" ^ sanitize_header_value repo_id
+    | `RepositoryLookupError (repo_id, _) -> "repository_lookup_error:" ^ sanitize_header_value repo_id
     | `Playground name -> "playground:" ^ sanitize_header_value name
     | `PlaygroundMissing name -> "playground_missing:" ^ sanitize_header_value name
     | `KeeperUnknown name -> "keeper_unknown:" ^ sanitize_header_value name
@@ -780,6 +791,7 @@ let add_routes router =
              | `Project
              | `RepositoryMissing _
              | `RepositoryUnknown _
+             | `RepositoryLookupError _
              | `PlaygroundMissing _
              | `KeeperUnknown _ -> (0, min max_nodes 200)
              | `Repository _ | `Playground _ -> (depth, max_nodes)
@@ -792,6 +804,7 @@ let add_routes router =
                 | `Repository repo_id -> "repository:" ^ repo_id
                 | `RepositoryMissing repo_id -> "repository_missing:" ^ repo_id
                 | `RepositoryUnknown repo_id -> "repository_unknown:" ^ repo_id
+                | `RepositoryLookupError (repo_id, _) -> "repository_lookup_error:" ^ repo_id
                 | `Playground name -> "playground:" ^ name
                 | `PlaygroundMissing name -> "playground_missing:" ^ name
                 | `KeeperUnknown name -> "keeper_unknown:" ^ name)

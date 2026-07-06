@@ -11,9 +11,28 @@ open Masc_domain
 open Workspace_utils
 
 (** Read the current task status directly from the backlog.
-    Returns [None] when the task is absent or the backlog cannot be read. *)
+    [Ok None] means the task is absent in a successfully read backlog.
+    [Error _] means the status is unknown because the backlog could not be
+    read/decoded. *)
+val fresh_task_status_result :
+  Workspace_utils_backend_setup.config ->
+  task_id:string ->
+  (Masc_domain.task_status option, string) result
+
+(** Compatibility wrapper around {!fresh_task_status_result}. Returns [None]
+    for either absent task or unreadable backlog, but logs read failures. *)
 val fresh_task_status :
   Workspace_utils_backend_setup.config -> task_id:string -> Masc_domain.task_status option
+
+(** Emit an explicit diagnostic for callers that continue without a known
+    fresh task status. *)
+val report_status_read_error :
+  Workspace_utils_backend_setup.config ->
+  agent_name:string ->
+  task_id:string ->
+  module_name:string ->
+  string ->
+  unit
 
 (** [is_terminal status] returns [true] iff [status] is [Done _] or
     [Cancelled _]. *)
@@ -55,7 +74,17 @@ val clear_stale_agent_task_for_task :
       desync, and returns [None].  Callers MUST skip the original emission.
     - If the task is active: calls [f status] and returns [Some result].
     - If the task is not found: returns [None] (conservative; callers that need
-      to distinguish terminal from absent should use [fresh_task_status] directly). *)
+      to distinguish terminal from absent should use [fresh_task_status_result]
+      directly). *)
+val with_fresh_task_status_result :
+  Workspace_utils_backend_setup.config ->
+  agent_name:string ->
+  task_id:string ->
+  module_name:string ->
+  (Masc_domain.task_status -> 'a) ->
+  ('a option, string) result
+
+(** Compatibility wrapper around {!with_fresh_task_status_result}. *)
 val with_fresh_task_status :
   Workspace_utils_backend_setup.config ->
   agent_name:string ->

@@ -103,21 +103,6 @@ let read_backlog config =
       Log.Misc.error "%s" msg;
       { tasks = []; last_updated = now_iso (); version = 1 }
 
-(** [write_backlog ?after_commit config backlog] persists the backlog to
-    both the primary and recovery paths, then invokes [after_commit] if
-    provided.  The callback runs only after both writes succeed, making it
-    the correct place for cache-invalidation side-effects that must not
-    fire unless the backlog actually landed on disk (RFC-0221 §3.3). *)
-let write_backlog ?after_commit config backlog =
-  let json = backlog_to_yojson backlog in
-  write_json config (backlog_path config) json;
-  write_json config (backlog_recovery_path config) json;
-  clear_backlog_cache_for (backlog_path config);
-  clear_backlog_cache_for (backlog_recovery_path config);
-  (match after_commit with
-   | Some f -> f ()
-   | None -> ())
-
 (** Result-returning variant that verifies both primary and recovery writes by
     readback.  Only clears the cache and runs [after_commit] after the primary
     readback succeeds. *)
@@ -143,3 +128,13 @@ let write_backlog_result ?after_commit config backlog =
                    | Some f -> f ()
                    | None -> ());
                   Ok ())))
+
+(** [write_backlog ?after_commit config backlog] persists the backlog to
+    both the primary and recovery paths, then invokes [after_commit] if
+    provided.  The callback runs only after both writes succeed, making it
+    the correct place for cache-invalidation side-effects that must not
+    fire unless the backlog actually landed on disk (RFC-0221 §3.3). *)
+let write_backlog ?after_commit config backlog =
+  match write_backlog_result ?after_commit config backlog with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)

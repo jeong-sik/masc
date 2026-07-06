@@ -4,7 +4,7 @@
    - feature flag respected (off → no-op, on → captures)
    - PostToolUse: Ok content parses → accumulator grows
    - PostToolUse: Error tool_result → ignored
-   - non-JSON content → silently ignored (no exception)
+   - non-JSON content → typed parse error, not captured by the hook
    - non-PostToolUse events → ignored
    - drain empties accumulator
    - install_into_hooks chain preserves original decision *)
@@ -124,6 +124,19 @@ let test_error_tool_result_ignored () =
       assert_eq_int ~label:"error_ignored" 0
         (H.accumulator_size acc));
   print_endline "  error_tool_result_ignored: OK"
+
+let test_parse_tool_output_json_reports_error () =
+  (match H.parse_tool_output_json {|{"ok":true}|} with
+   | Ok (`Assoc _) -> ()
+   | Ok _ -> failwith "valid object parsed to non-object"
+   | Error error ->
+     failwith
+       ("valid JSON rejected: " ^ H.tool_output_parse_error_to_string error));
+  (match H.parse_tool_output_json "not actually json {{{" with
+   | Error (H.Tool_output_json_parse_error message) ->
+     assert (String.length message > 0)
+   | Ok _ -> failwith "invalid JSON parsed successfully");
+  print_endline "  parse_tool_output_json_reports_error: OK"
 
 let test_non_json_content_ignored () =
   with_env_set "MASC_TOOL_EMISSION" "1" (fun () ->
@@ -354,6 +367,7 @@ let () =
   test_disabled_no_op ();
   test_enabled_captures_post_tool_use ();
   test_error_tool_result_ignored ();
+  test_parse_tool_output_json_reports_error ();
   test_non_json_content_ignored ();
   test_other_events_ignored ();
   test_drain_empties_accumulator ();
@@ -366,4 +380,4 @@ let () =
   test_registry_registered_names_sorted ();
   test_registry_drop_keeper_unknown_name_ok ();
   test_registry_drop_then_recreate_yields_fresh_accumulator ();
-  print_endline "=== Keeper_tool_emission_hook: 15/15 OK ==="
+  print_endline "=== Keeper_tool_emission_hook: 16/16 OK ==="

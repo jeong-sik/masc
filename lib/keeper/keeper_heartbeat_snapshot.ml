@@ -444,7 +444,9 @@ let write_heartbeat_snapshot
         ; "stage_timing", Keeper_keepalive_signal.stage_timing_to_json ~ring:timing_ring ~count:timing_filled
         ]
     in
-    Dated_jsonl.append metrics_store snapshot;
+    (match Dated_jsonl.append_result metrics_store snapshot with
+     | Ok () -> ()
+     | Error error -> raise (Sys_error error));
     (try
        let json =
          `Assoc

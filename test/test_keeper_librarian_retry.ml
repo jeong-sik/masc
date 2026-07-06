@@ -270,6 +270,9 @@ let test_cadence_error_backoff_policy () =
   check bool "fact upsert failure stays due" false
     (R.should_record_cadence_backoff_after_error
        (R.Memory_fact_upsert_failed "permission denied"));
+  check bool "generation reservation failure stays due" false
+    (R.should_record_cadence_backoff_after_error
+       (R.Memory_generation_reservation_failed "invalid counter"));
   check bool "missing provider clock does not claim a completed attempt" false
     (R.should_record_cadence_backoff_after_error R.Provider_clock_unavailable)
 

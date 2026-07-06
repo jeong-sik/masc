@@ -13,6 +13,8 @@
 type set_task_goal_error =
   | Unknown_task of string
   | Unknown_goal of string
+  | Task_read_failed of string
+  | Goal_read_failed of string
   | Already_assigned of
       { task_id : string
       ; existing_goal_ids : string list
@@ -31,6 +33,10 @@ val set_task_goal :
 
     - [Error (Unknown_task _)] — no task with [task_id] in the backlog.
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the goal store.
+    - [Error (Task_read_failed _)] — the task backlog could not be read, so
+      task existence could not be proven.
+    - [Error (Goal_read_failed _)] — the goal store could not be read, so goal
+      existence could not be proven.
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which
       keeps Phase 2 strictly additive for goalless tasks).

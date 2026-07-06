@@ -26,3 +26,14 @@ val execute_with_observers
   -> input:Yojson.Safe.t
   -> unit
   -> Tool_result.result
+
+module For_testing : sig
+  type result_cwd_decode =
+    | Result_cwd_found of string
+    | Result_cwd_absent
+    | Result_cwd_not_object of string
+    | Result_cwd_parse_error of string
+
+  val result_cwd_decode : string -> result_cwd_decode
+  val result_cwd : string -> string option
+end

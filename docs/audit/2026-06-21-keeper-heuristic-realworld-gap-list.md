@@ -256,24 +256,16 @@ skip, noop, confirmation request, and non-confirmation status update.
 
 ## 9. Alert scoring
 
-Evidence:
-- `lib/keeper/keeper_alerting.ml:155-207`
-- `lib/keeper/keeper_alerting.ml:209-245`
+Status: retired.
 
-Current behavior: alert score is a sum of keyword weights plus structural
-bonuses. The code already notes these values are heuristic and not empirically
-calibrated.
+Previous behavior: `lib/keeper/keeper_alerting.ml` computed an alert score from
+keyword weights plus structural bonuses and could fan out to operator-facing
+channels.
 
-Missing real-world examples:
-- Incident posts that should alert.
-- Similar words in non-incident discussion, documentation, or historical
-  summary that should not alert.
-- Combined low-alignment and multi-tool cases where the alert should or should
-  not cross the configured threshold.
-
-Operational risk: alert fatigue or missed incident escalation. The risk is
-larger because this code fans out to operator-facing alert channels and has
-dedup logic keyed only by keeper and reason list.
+Current behavior: the score/fanout path and its `MASC_KEEPER_ALERT_*` /
+`MASC_ALERT_DEDUP_WINDOW_SEC` configuration surface were removed. Keeper or
+operator escalation must be introduced through typed runtime facts or an
+explicit LLM/Fusion boundary, not local keyword weights or numeric thresholds.
 
 Evidence fixture needed: a labeled incident/non-incident corpus with expected
 score bands and emitted reasons.

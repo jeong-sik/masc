@@ -41,6 +41,7 @@ type t =
   | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
+  | ToolEmissionParseFailures
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
@@ -67,7 +68,6 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
-  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | MetaJsonFailures
   | ToolsOasFailures

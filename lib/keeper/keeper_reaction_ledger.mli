@@ -16,12 +16,13 @@ type stimulus_kind =
   | No_progress_recovery
   | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (** RFC-0290: generic background job completion wake *)
-  | Connector_attention
+  | Schedule_signal  (** Schedule runner due/blocked signal wake. *)
+  | Connector_attention  (** RFC-connector-ambient-attention-wake wake. *)
   | Hitl_resolved  (** HITL approval resolution wake — unblocks [Skip Approval_pending] *)
-      (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
 
 type reaction_kind =
   | Turn_started
+  | Stimulus_consumed  (** Event queue stimulus was acknowledged after a turn completed. *)
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -52,6 +53,13 @@ val record_event_queue_stimulus :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
 (** Append a [record_kind="stimulus"] row for an enqueued stimulus. *)
 
+val record_event_queue_stimulus_result :
+  base_path:string ->
+  keeper_name:string ->
+  Keeper_event_queue.stimulus ->
+  (unit, string) result
+(** Result-returning variant of {!record_event_queue_stimulus}. *)
+
 val record_event_queue_reaction :
   base_path:string ->
   keeper_name:string ->
@@ -59,6 +67,14 @@ val record_event_queue_reaction :
   Keeper_event_queue.stimulus ->
   unit
 (** Append a [record_kind="reaction"] row tied to an event queue stimulus. *)
+
+val record_event_queue_reaction_result :
+  base_path:string ->
+  keeper_name:string ->
+  reaction_kind:reaction_kind ->
+  Keeper_event_queue.stimulus ->
+  (unit, string) result
+(** Result-returning variant of {!record_event_queue_reaction}. *)
 
 val record_board_cursor_ack :
   base_path:string ->
@@ -71,6 +87,16 @@ val record_board_cursor_ack :
 (** Append a durable cursor acknowledgement. Callers should write this before
     advancing the in-memory board cursor so every cursor advance has a replayable
     ack row. *)
+
+val record_board_cursor_ack_result :
+  base_path:string ->
+  keeper_name:string ->
+  ?stimulus_id:string ->
+  cursor_ts:float ->
+  post_id:string option ->
+  unit ->
+  (unit, string) result
+(** Result-returning variant of {!record_board_cursor_ack}. *)
 
 val record_execution_receipt_reaction :
   Workspace.config ->
@@ -86,6 +112,20 @@ val record_execution_receipt_reaction :
   unit
 (** Append a reaction row that links a turn execution receipt back into the
     keeper reaction ledger. *)
+
+val record_execution_receipt_reaction_result :
+  Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  ?turn_count:int ->
+  current_task_id:string option ->
+  goal_ids:string list ->
+  outcome:string ->
+  terminal_reason_code:string ->
+  receipt_json:Yojson.Safe.t ->
+  unit ->
+  (unit, string) result
+(** Result-returning variant of {!record_execution_receipt_reaction}. *)
 
 val read_recent_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t list
@@ -103,3 +143,9 @@ val fleet_summary_json :
   limit_per_keeper:int ->
   Yojson.Safe.t
 (** Summarize recent reaction-ledger state for a bounded keeper fleet. *)
+
+val fleet_summary_read_error_json :
+  limit_per_keeper:int -> source:string -> error:string -> Yojson.Safe.t
+(** Fleet summary shape for failures that happen before keeper names are known.
+    Keeps the dashboard schema explicit without projecting failed discovery as
+    an empty keeper fleet. *)

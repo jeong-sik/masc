@@ -113,7 +113,10 @@ let test_flush_preserves_cast_ts () =
     (before_flush_now > cast_ts +. 0.01);
   (* Force rewrite via the dispatch backend's Jsonl store. *)
   (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+   | Board_dispatch.Jsonl store ->
+     (match Board.flush_dirty store with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail (Board.show_board_error e)));
   let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
   let rewritten_ts =
     match find_row ~target ~voter rewrite_rows with
@@ -169,8 +172,11 @@ let test_flip_inherits_flip_time () =
         true (flip_ts > up_ts +. 0.01);
       (* Flush now and verify the latest-in-store ts matches the
          flip row's ts (and not the original up ts). *)
-      (match Board_dispatch.backend () with
-       | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+       (match Board_dispatch.backend () with
+        | Board_dispatch.Jsonl store ->
+          (match Board.flush_dirty store with
+           | Ok () -> ()
+           | Error e -> Alcotest.fail (Board.show_board_error e)));
       let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
       let rewritten_ts =
         match find_row ~target ~voter rewrite_rows with

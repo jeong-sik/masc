@@ -73,6 +73,14 @@ let list_field key json =
         (Printf.sprintf "field %s is not list: %s"
            key (Yojson.Safe.to_string other))
 
+let string_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> value
+  | other ->
+      fail
+        (Printf.sprintf "field %s is not string: %s"
+           key (Yojson.Safe.to_string other))
+
 let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -174,6 +182,57 @@ let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
         ("model breakdown should contain only the real call: "
          ^ Yojson.Safe.to_string (`List other))
 
+let test_malformed_metrics_rows_surface_as_read_errors () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let base_dir = temp_dir "keeper_cost_parse_errors" in
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:None);
+  let keeper_name = "cost-keeper-parse-errors" in
+  let meta = make_meta keeper_name in
+  let metrics_path =
+    Keeper_types_support.keeper_metrics_path config keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname metrics_path);
+  let valid_metric =
+    `Assoc
+      [
+        ("ts_unix", `Float (Unix.gettimeofday ()));
+        ("channel", `String "turn");
+        ("work_kind", `String "llm_call");
+        ("cost_usd", `Float 0.25);
+        ("latency_ms", `Int 100);
+        ("input_tokens", `Int 10);
+        ("output_tokens", `Int 5);
+        ("total_tokens", `Int 15);
+      ]
+    |> Yojson.Safe.to_string
+  in
+  Fs_compat.save_file metrics_path ("{not-json\n" ^ valid_metric ^ "\n[]\n");
+  let json =
+    Dashboard_http_keeper.keeper_cost_aggregates_json
+      ~config ~keepers:[ meta ] ~window_minutes:60
+  in
+  let aggregate = keeper_item json in
+  check int "valid metrics rows still aggregate" 1
+    (int_field "sample_count" aggregate);
+  check (float 0.0001) "valid cost survives malformed neighbors" 0.25
+    (float_field "total_cost_usd" aggregate);
+  check int "keeper exposes metrics parse errors" 2
+    (int_field "metrics_parse_error_count" aggregate);
+  check int "root exposes metrics parse errors" 2
+    (int_field "read_error_count" json);
+  let errors = list_field "read_errors" json in
+  check int "root read error length" 2 (List.length errors);
+  (match errors with
+   | first :: _ ->
+       check string "parse error source" "dashboard_keeper_cost_metrics_jsonl"
+         (string_field "source" first);
+       check string "parse error keeper" keeper_name
+         (string_field "keeper" first)
+   | [] -> fail "expected read errors")
+
 let () =
   run "dashboard_keeper_cost_aggregates"
     [
@@ -181,5 +240,7 @@ let () =
         [
           test_case "ignores heartbeat status snapshots" `Quick
             test_heartbeat_snapshots_do_not_count_as_cost_samples;
+          test_case "surfaces malformed metrics rows" `Quick
+            test_malformed_metrics_rows_surface_as_read_errors;
         ] );
     ]

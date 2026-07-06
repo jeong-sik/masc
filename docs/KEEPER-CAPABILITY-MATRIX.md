@@ -14,7 +14,6 @@ MCP runtime/session context. This matrix names internal handler IDs for
 implementation/audit purposes; model-facing prompts and recovery hints must use
 the exact active schema names, such as the public `Execute` alias when it is
 listed.
-Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
 
 ## Tool Shards
 

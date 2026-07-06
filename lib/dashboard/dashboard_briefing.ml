@@ -319,6 +319,7 @@ type briefing_projection = {
   agent_briefs : Yojson.Safe.t list;
   keeper_briefs : Yojson.Safe.t list;
   internal_signals : Yojson.Safe.t list;
+  read_errors : Yojson.Safe.t list;
 }
 
 let build_projection ?actor ~config ~sw ~clock
@@ -381,8 +382,13 @@ let build_projection ?actor ~config ~sw ~clock
     | `List items -> items
     | _ -> []
   in
-  let agent_briefs =
-    Dashboard_briefing_assembly.build_agent_briefs config sessions attention_queue namespace_json keeper_items
+  let agent_briefs, agent_brief_read_errors =
+    Dashboard_briefing_assembly.build_agent_briefs_with_read_errors
+      config
+      sessions
+      attention_queue
+      namespace_json
+      keeper_items
   in
   let keeper_briefs = Dashboard_briefing_assembly.build_keeper_briefs config keeper_items in
   let internal_signals = Dashboard_briefing_assembly.build_internal_signals incidents recommended_actions in
@@ -398,6 +404,7 @@ let build_projection ?actor ~config ~sw ~clock
     agent_briefs;
     keeper_briefs;
     internal_signals;
+    read_errors = agent_brief_read_errors;
 }
 
 let json ?actor ~config ~sw ~clock ~proc_mgr
@@ -446,6 +453,8 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
       ("agent_briefs", `List projection.agent_briefs);
       ("keeper_briefs", `List projection.keeper_briefs);
       ("internal_signals", `List projection.internal_signals);
+      ("read_error_count", `Int (List.length projection.read_errors));
+      ("read_errors", `List projection.read_errors);
     ]
 
 let session_json ?actor ~session_id ~config ~sw
@@ -517,6 +526,8 @@ let session_json ?actor ~session_id ~config ~sw
       ("operations", `List operations_json);
       ("keepers", `List keepers_json);
       ("worker_runs", worker_runs_json);
+      ("read_error_count", `Int (List.length projection.read_errors));
+      ("read_errors", `List projection.read_errors);
       ( "error",
         match session_row_json with
         | Some _ -> `Null

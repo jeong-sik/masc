@@ -41,6 +41,48 @@ let rm_rf dir =
   | _ -> ()
 ;;
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let append_file path content =
+  let oc = open_out_gen [ Open_wronly; Open_creat; Open_text; Open_append ] 0o644 path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let replace_path_with_file path content =
+  if Sys.file_exists path
+  then (
+    if Sys.is_directory path then Unix.rmdir path else Sys.remove path);
+  write_file path content
+;;
+
+let with_env name value f =
+  let original = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some previous -> Unix.putenv name previous
+      | None -> Unix.putenv name "")
+    (fun () ->
+      Unix.putenv name value;
+      f ())
+;;
+
+let rec mkdir_p path =
+  if Sys.file_exists path
+  then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then mkdir_p parent;
+    Unix.mkdir path 0o755)
+;;
+
 let test_include_entries_query_param () =
   check_include "/dashboard/memory-subsystems" false;
   check_include "/dashboard/memory-subsystems?include_memory_entries=1" true;
@@ -85,6 +127,81 @@ let test_http_json_explicitly_disabled_entries_surface () =
         "items empty"
         0
         Json.(memory_entries |> member "items" |> to_list |> List.length))
+;;
+
+let test_http_json_memory_entries_surfaces_keeper_discovery_failure () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      replace_path_with_file
+        (Keeper_types_profile.keeper_dir config)
+        "not a keeper directory";
+      let json =
+        Memory_subsystems.dashboard_memory_subsystems_http_json
+          ~config
+          ~include_memory_entries:true
+          (request "/dashboard/memory-subsystems?limit=100")
+      in
+      let memory_entries = Json.(json |> member "memory_entries") in
+      check int "memory total remains zero lower bound" 0
+        Json.(memory_entries |> member "total" |> to_int);
+      check bool "keeper names marked unknown" false
+        Json.(memory_entries |> member "keeper_names_known" |> to_bool);
+      check int "one discovery read error" 1
+        Json.(
+          memory_entries
+          |> member "keeper_name_discovery_read_error_count"
+          |> to_int);
+      check int "one combined read error" 1
+        Json.(memory_entries |> member "read_error_count" |> to_int);
+      let read_errors = Json.(memory_entries |> member "read_errors" |> to_list) in
+      match read_errors with
+      | [ error ] ->
+        check string "read error source" "keeper_names_result"
+          Json.(error |> member "source" |> to_string);
+        check bool "read error mentions keepers path" true
+          (String_util.contains_substring_ci
+             Json.(error |> member "error" |> to_string)
+             "keepers")
+      | _ -> fail "expected one memory subsystem read error")
+;;
+
+let test_http_json_episodes_surfaces_read_failure () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let masc_dir = Filename.concat dir Common.masc_dirname in
+      mkdir_p masc_dir;
+      Unix.mkdir (Filename.concat masc_dir "institution_episodes.jsonl") 0o755;
+      with_env "MASC_BASE_PATH" dir (fun () ->
+        with_env "MASC_BASE_PATH_INPUT" dir (fun () ->
+          let json =
+            Memory_subsystems.dashboard_memory_subsystems_http_json
+              ~config
+              ~include_memory_entries:false
+              (request "/dashboard/memory-subsystems?limit=100")
+          in
+          let episodes = Json.(json |> member "episodes") in
+          check int "episodes total remains zero lower bound" 0
+            Json.(episodes |> member "total" |> to_int);
+          check bool "episodes marked unknown" false
+            Json.(episodes |> member "episodes_known" |> to_bool);
+          check int "one episode read error" 1
+            Json.(episodes |> member "read_error_count" |> to_int);
+          let read_errors = Json.(episodes |> member "read_errors" |> to_list) in
+          match read_errors with
+          | [ error ] ->
+            check string "read error source" "institution_episodes_jsonl"
+              Json.(error |> member "source" |> to_string);
+            check string "read error path"
+              (Filename.concat masc_dir "institution_episodes.jsonl")
+              Json.(error |> member "path" |> to_string)
+          | _ -> fail "expected one episode read error")))
 ;;
 
 let fact ?(category = Types.Preference) ?(trace_id = "trace-user-model")
@@ -142,6 +259,10 @@ let test_http_json_surfaces_user_model_projection () =
           Json.(prompt |> member "injection" |> to_string);
         check string "prompt hook" "keeper_run_tools_hooks.before_turn_params"
           Json.(prompt |> member "runtime_hook" |> to_string);
+        check bool "keeper ids known" true
+          Json.(user_model |> member "keeper_ids_known" |> to_bool);
+        check int "no user model read errors" 0
+          Json.(user_model |> member "read_error_count" |> to_int);
         check int "total" 2 Json.(user_model |> member "total" |> to_int);
         check int "shown" 2 Json.(user_model |> member "shown" |> to_int);
         let items = Json.(user_model |> member "items" |> to_list) in
@@ -187,6 +308,92 @@ let test_http_json_user_model_uses_config_base_path () =
           items |> List.map (fun item -> Json.(item |> member "claim" |> to_string))
         in
         check (list string) "scoped claims" [ "Target workspace preference" ] claims))
+;;
+
+let test_http_json_user_model_surfaces_fact_store_discovery_failure () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+       in
+       mkdir_p (Filename.dirname keepers_dir);
+       write_file keepers_dir "not a keepers directory";
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request "/dashboard/memory-subsystems?limit=100")
+       in
+       let user_model = Json.(json |> member "user_model") in
+       check int "user model total remains zero lower bound" 0
+         Json.(user_model |> member "total" |> to_int);
+       check bool "keeper ids marked unknown" false
+         Json.(user_model |> member "keeper_ids_known" |> to_bool);
+       check int "one discovery read error" 1
+         Json.(
+           user_model
+           |> member "keeper_id_discovery_read_error_count"
+           |> to_int);
+       check int "one combined read error" 1
+         Json.(user_model |> member "read_error_count" |> to_int);
+       let read_errors = Json.(user_model |> member "read_errors" |> to_list) in
+       match read_errors with
+       | [ error ] ->
+         check string "read error source" "list_fact_store_keeper_ids_for_base_path"
+           Json.(error |> member "source" |> to_string);
+         check bool "read error mentions keepers dir" true
+           (String_util.contains_substring_ci
+              Json.(error |> member "error" |> to_string)
+              "keepers")
+       | _ -> fail "expected one user model read error")
+;;
+
+let test_http_json_user_model_surfaces_fact_store_parse_failure () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+       in
+       let keeper_id = "parse-broken-user-model" in
+       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+         Memory_io.append_fact
+           ~keeper_id
+           (fact ~category:Types.Preference "Visible only if parse failures are ignored"));
+       let facts_path =
+         Memory_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
+       in
+       append_file facts_path "{ this is not valid fact json\n";
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request "/dashboard/memory-subsystems?limit=100")
+       in
+       let user_model = Json.(json |> member "user_model") in
+       check bool "keeper ids known" true
+         Json.(user_model |> member "keeper_ids_known" |> to_bool);
+       check int "partial user model item not projected" 0
+         Json.(user_model |> member "total" |> to_int);
+       check int "one user model parse read error" 1
+         Json.(user_model |> member "read_error_count" |> to_int);
+       let read_errors = Json.(user_model |> member "read_errors" |> to_list) in
+       match read_errors with
+       | [ error ] ->
+         check string "read error source" "user_model_fact_store_parse"
+           Json.(error |> member "source" |> to_string);
+         check string "read error keeper" keeper_id
+           Json.(error |> member "keeper" |> to_string);
+         check string "read error path" facts_path
+           Json.(error |> member "path" |> to_string);
+         check int "read error line index" 2
+           Json.(error |> member "line_index" |> to_int)
+       | _ -> fail "expected one user model fact parse read error")
 ;;
 
 let skill_candidate () =
@@ -503,6 +710,10 @@ let test_http_json_hebbian_derives_from_shared_facts () =
              (request "/dashboard/memory-subsystems?limit=100")
          in
          let hebbian = Json.(json |> member "hebbian") in
+         check bool "hebbian known" true
+           Json.(hebbian |> member "hebbian_known" |> to_bool);
+         check int "no hebbian read errors" 0
+           Json.(hebbian |> member "read_error_count" |> to_int);
          check
            (float 0.0001)
            "last_consolidation from shared fact"
@@ -531,6 +742,10 @@ let test_http_json_hebbian_empty_without_shared_facts () =
            (request "/dashboard/memory-subsystems?limit=100")
        in
        let hebbian = Json.(json |> member "hebbian") in
+       check bool "empty graph still known" true
+         Json.(hebbian |> member "hebbian_known" |> to_bool);
+       check int "no hebbian read errors" 0
+         Json.(hebbian |> member "read_error_count" |> to_int);
        check int "empty synapses" 0 Json.(hebbian |> member "synapses" |> to_list |> List.length);
        check
          (float 0.0001)
@@ -566,6 +781,97 @@ let test_http_json_hebbian_dedupes_duplicate_observers () =
          check int "one synapse after dedupe" 1 (List.length synapses)))
 ;;
 
+let test_http_json_hebbian_surfaces_shared_fact_read_failure () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+       in
+       mkdir_p keepers_dir;
+       let shared_facts_path =
+         Memory_io.facts_path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:Types.shared_store_id
+       in
+       Unix.mkdir shared_facts_path 0o755;
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request "/dashboard/memory-subsystems?limit=100")
+       in
+       let hebbian = Json.(json |> member "hebbian") in
+       check bool "hebbian marked unknown" false
+         Json.(hebbian |> member "hebbian_known" |> to_bool);
+       check int "empty synapses on read failure" 0
+         Json.(hebbian |> member "synapses" |> to_list |> List.length);
+       check
+         (float 0.0001)
+         "last_consolidation zero lower bound on read failure"
+         0.0
+         Json.(hebbian |> member "last_consolidation" |> to_number);
+       check int "one hebbian read error" 1
+         Json.(hebbian |> member "read_error_count" |> to_int);
+       let read_errors = Json.(hebbian |> member "read_errors" |> to_list) in
+       match read_errors with
+       | [ error ] ->
+         check string "read error source" "memory_os_shared_facts"
+           Json.(error |> member "source" |> to_string);
+         check string "read error path" shared_facts_path
+           Json.(error |> member "path" |> to_string)
+       | _ -> fail "expected one Hebbian read error")
+;;
+
+let test_http_json_hebbian_surfaces_shared_fact_parse_failure () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+       in
+       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+         Memory_io.append_fact
+           ~keeper_id:Types.shared_store_id
+           (shared_fact
+              ~observed_by:[ "keeper-a"; "keeper-b" ]
+              ~last_verified_at:42.0
+              "Shared fact that must not render through a corrupt store"));
+       let shared_facts_path =
+         Memory_io.facts_path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:Types.shared_store_id
+       in
+       append_file shared_facts_path "{ this is not valid shared fact json\n";
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request "/dashboard/memory-subsystems?limit=100")
+       in
+       let hebbian = Json.(json |> member "hebbian") in
+       check bool "hebbian marked unknown" false
+         Json.(hebbian |> member "hebbian_known" |> to_bool);
+       check int "partial shared graph not projected" 0
+         Json.(hebbian |> member "synapses" |> to_list |> List.length);
+       check int "one shared fact parse read error" 1
+         Json.(hebbian |> member "read_error_count" |> to_int);
+       let read_errors = Json.(hebbian |> member "read_errors" |> to_list) in
+       match read_errors with
+       | [ error ] ->
+         check string "read error source" "memory_os_shared_fact_store_parse"
+           Json.(error |> member "source" |> to_string);
+         check string "read error path" shared_facts_path
+           Json.(error |> member "path" |> to_string);
+         check int "read error line index" 2
+           Json.(error |> member "line_index" |> to_int)
+       | _ -> fail "expected one Hebbian fact parse read error")
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   Alcotest.run
@@ -590,9 +896,25 @@ let () =
             `Quick
             test_http_json_surfaces_user_model_projection
         ; test_case
+            "memory entries surfaces keeper discovery failure"
+            `Quick
+            test_http_json_memory_entries_surfaces_keeper_discovery_failure
+        ; test_case
+            "episodes surfaces read failure"
+            `Quick
+            test_http_json_episodes_surfaces_read_failure
+        ; test_case
             "user model projection reads config base path"
             `Quick
             test_http_json_user_model_uses_config_base_path
+        ; test_case
+            "user model surfaces fact-store discovery failure"
+            `Quick
+            test_http_json_user_model_surfaces_fact_store_discovery_failure
+        ; test_case
+            "user model surfaces fact-store parse failure"
+            `Quick
+            test_http_json_user_model_surfaces_fact_store_parse_failure
         ; test_case
             "hebbian derives from shared facts"
             `Quick
@@ -613,6 +935,14 @@ let () =
             "hebbian dedupes duplicate observers"
             `Quick
             test_http_json_hebbian_dedupes_duplicate_observers
+        ; test_case
+            "hebbian surfaces shared fact read failure"
+            `Quick
+            test_http_json_hebbian_surfaces_shared_fact_read_failure
+        ; test_case
+            "hebbian surfaces shared fact parse failure"
+            `Quick
+            test_http_json_hebbian_surfaces_shared_fact_parse_failure
         ; test_case
             "surfaces draft skill candidates"
             `Quick

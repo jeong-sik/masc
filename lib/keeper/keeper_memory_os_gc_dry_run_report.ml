@@ -28,6 +28,8 @@ type keeper_result =
 
 type t =
   { keepers_dir : string
+  ; keeper_ids_known : bool
+  ; keeper_id_discovery_read_errors : string list
   ; results : keeper_result list
   ; total_input : int
   ; ttl_expired : int
@@ -150,8 +152,18 @@ let run_for_keepers_dir_with_runner
     match keeper_ids with
     | Some ids -> true, unique_sorted ids
     | None ->
-      ( false
-      , Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir )
+      false, []
+  in
+  let keeper_ids_known, keeper_id_discovery_read_errors, keeper_ids =
+    if explicit
+    then true, [], keeper_ids
+    else (
+      match
+        Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir_result
+          ~keepers_dir
+      with
+      | Ok keeper_ids -> true, [], keeper_ids
+      | Error error -> false, [ error ], [])
   in
   let results =
     List.map
@@ -202,6 +214,8 @@ let run_for_keepers_dir_with_runner
       results
   in
   { keepers_dir
+  ; keeper_ids_known
+  ; keeper_id_discovery_read_errors
   ; results
   ; total_input
   ; ttl_expired
@@ -210,7 +224,7 @@ let run_for_keepers_dir_with_runner
   ; ttl_expired_by_category
   ; dedup_removed
   ; written
-  ; error_count
+  ; error_count = error_count + List.length keeper_id_discovery_read_errors
   }
 ;;
 
@@ -265,6 +279,19 @@ let to_json report =
   `Assoc
     [ "keepers_dir", `String report.keepers_dir
     ; "dry_run", `Bool true
+    ; "keeper_ids_known", `Bool report.keeper_ids_known
+    ; ( "keeper_id_discovery_read_error_count"
+      , `Int (List.length report.keeper_id_discovery_read_errors) )
+    ; ( "keeper_id_discovery_read_errors"
+      , `List
+          (List.map
+             (fun error ->
+               `Assoc
+                 [ "source", `String "list_fact_store_keeper_ids_for_keepers_dir"
+                 ; "path", `String report.keepers_dir
+                 ; "error", `String error
+                 ])
+             report.keeper_id_discovery_read_errors) )
     ; "keeper_count", `Int (List.length report.results)
     ; "error_count", `Int report.error_count
     ; "total_input", `Int report.total_input
@@ -301,7 +328,12 @@ let render_result = function
 let render_text report =
   let body =
     match report.results with
-    | [] -> "no keeper fact stores found\n"
+    | [] when report.keeper_ids_known -> "no keeper fact stores found\n"
+    | [] ->
+      "keeper fact store discovery failed:\n"
+      ^ (report.keeper_id_discovery_read_errors
+         |> List.map (fun error -> "- " ^ error ^ "\n")
+         |> String.concat "")
     | rows -> rows |> List.map render_result |> String.concat ""
   in
   Printf.sprintf

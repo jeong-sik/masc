@@ -9,12 +9,14 @@ type stimulus_kind =
   | No_progress_recovery
   | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (* RFC-0290: generic background job completion wake *)
+  | Schedule_signal  (* Schedule runner due/blocked signal wake. *)
   | Connector_attention
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL approval resolution wake — unblocks Skip Approval_pending *)
 
 type reaction_kind =
   | Turn_started
+  | Stimulus_consumed  (* Event queue stimulus was acknowledged after a turn completed. *)
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -30,6 +32,7 @@ let stimulus_kind_to_string = function
   | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed -> "fusion_completed"
   | Bg_completed -> "bg_completed"
+  | Schedule_signal -> "schedule_signal"
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
 ;;
@@ -44,6 +47,7 @@ let stimulus_kind_of_string = function
   | "no_progress_recovery" -> Some No_progress_recovery
   | "fusion_completed" -> Some Fusion_completed
   | "bg_completed" -> Some Bg_completed
+  | "schedule_signal" -> Some Schedule_signal
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
   | _ -> None
@@ -51,6 +55,7 @@ let stimulus_kind_of_string = function
 
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
+  | Stimulus_consumed -> "stimulus_consumed"
   | Execution_receipt -> "execution_receipt"
   | Terminal_reason -> "terminal_reason"
   | Cursor_ack -> "cursor_ack"
@@ -65,6 +70,7 @@ let reaction_kind_to_string = function
    추가 시 컴파일러가 분류 누락을 강제한다(stimulus와 동일한 닫힌-합 안티패턴 방지). *)
 let reaction_kind_of_string = function
   | "turn_started" -> Turn_started
+  | "stimulus_consumed" -> Stimulus_consumed
   | "execution_receipt" -> Execution_receipt
   | "terminal_reason" -> Terminal_reason
   | "cursor_ack" -> Cursor_ack
@@ -90,6 +96,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.No_progress_recovery -> No_progress_recovery
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
   | Keeper_event_queue.Bg_completed _ -> Bg_completed
+  | Keeper_event_queue.Schedule_signal _ -> Schedule_signal
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
 ;;
@@ -166,6 +173,12 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "bg_completed run_id=%s kind=%s"
       c.bg_run_id
       (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
+  | Keeper_event_queue.Schedule_signal signal ->
+    Printf.sprintf
+      "schedule_signal signal_id=%s kind=%s schedule_id=%s"
+      signal.schedule_signal_id
+      (Keeper_event_queue.schedule_signal_kind_to_string signal.schedule_signal_kind)
+      signal.schedule_id
   | Keeper_event_queue.Connector_attention ca ->
     Printf.sprintf "connector_attention event_id=%s" ca.event_id
   | Keeper_event_queue.Hitl_resolved r ->
@@ -186,6 +199,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.No_progress_recovery
     | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Bg_completed _
+    | Keeper_event_queue.Schedule_signal _
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _ -> None
   in
@@ -209,10 +223,16 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
        ])
 ;;
 
-let record_event_queue_stimulus ~base_path ~keeper_name stimulus =
-  Dated_jsonl.append
+let record_event_queue_stimulus_result ~base_path ~keeper_name stimulus =
+  Dated_jsonl.append_result
     (store_for_base_path ~base_path ~keeper_name)
     (stimulus_json ~keeper_name stimulus)
+;;
+
+let record_event_queue_stimulus ~base_path ~keeper_name stimulus =
+  match record_event_queue_stimulus_result ~base_path ~keeper_name stimulus with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 ;;
 
 let event_queue_reaction_json ~keeper_name ~reaction_kind stimulus =
@@ -243,10 +263,18 @@ let event_queue_reaction_json ~keeper_name ~reaction_kind stimulus =
        ])
 ;;
 
-let record_event_queue_reaction ~base_path ~keeper_name ~reaction_kind stimulus =
-  Dated_jsonl.append
+let record_event_queue_reaction_result ~base_path ~keeper_name ~reaction_kind stimulus =
+  Dated_jsonl.append_result
     (store_for_base_path ~base_path ~keeper_name)
     (event_queue_reaction_json ~keeper_name ~reaction_kind stimulus)
+;;
+
+let record_event_queue_reaction ~base_path ~keeper_name ~reaction_kind stimulus =
+  match
+    record_event_queue_reaction_result ~base_path ~keeper_name ~reaction_kind stimulus
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 ;;
 
 let cursor_json { cursor_ts; post_id } =
@@ -257,7 +285,7 @@ let cursor_json { cursor_ts; post_id } =
     ]
 ;;
 
-let record_board_cursor_ack
+let record_board_cursor_ack_result
       ~base_path
       ~keeper_name
       ?stimulus_id
@@ -293,9 +321,23 @@ let record_board_cursor_ack
                ; "source", `String "keeper_world_observation.board_cursor"
                ; "cursor_acked", `Bool true
                ] )
-         ])
+        ])
   in
-  Dated_jsonl.append (store_for_base_path ~base_path ~keeper_name) json
+  Dated_jsonl.append_result (store_for_base_path ~base_path ~keeper_name) json
+;;
+
+let record_board_cursor_ack ~base_path ~keeper_name ?stimulus_id ~cursor_ts ~post_id () =
+  match
+    record_board_cursor_ack_result
+      ~base_path
+      ~keeper_name
+      ?stimulus_id
+      ~cursor_ts
+      ~post_id
+      ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 ;;
 
 let receipt_reaction_kind ~terminal_reason_code =
@@ -305,7 +347,7 @@ let receipt_reaction_kind ~terminal_reason_code =
   else Terminal_reason
 ;;
 
-let record_execution_receipt_reaction
+let record_execution_receipt_reaction_result
       config
       ~keeper_name
       ~trace_id
@@ -353,9 +395,38 @@ let record_execution_receipt_reaction
                ; "terminal_reason_code", `String terminal_reason_code
                ; "receipt", receipt_json
                ] )
-         ])
+        ])
   in
-  Dated_jsonl.append (store_for_config config ~keeper_name) json
+  Dated_jsonl.append_result (store_for_config config ~keeper_name) json
+;;
+
+let record_execution_receipt_reaction
+      config
+      ~keeper_name
+      ~trace_id
+      ?turn_count
+      ~current_task_id
+      ~goal_ids
+      ~outcome
+      ~terminal_reason_code
+      ~receipt_json
+      ()
+  =
+  match
+    record_execution_receipt_reaction_result
+      config
+      ~keeper_name
+      ~trace_id
+      ?turn_count
+      ~current_task_id
+      ~goal_ids
+      ~outcome
+      ~terminal_reason_code
+      ~receipt_json
+      ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 ;;
 
 let read_recent_for_keeper ~base_path ~keeper_name ~limit =
@@ -528,6 +599,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let stimulus_count = ref 0 in
   let reaction_count = ref 0 in
   let turn_started_count = ref 0 in
+  let stimulus_consumed_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let execution_receipt_count = ref 0 in
   let terminal_reason_count = ref 0 in
@@ -618,6 +690,7 @@ let summarize_rows ~keeper_name ~limit rows =
     | Some raw ->
       (match reaction_kind_of_string raw with
        | Turn_started -> incr turn_started_count
+       | Stimulus_consumed -> incr stimulus_consumed_count
        | Cursor_ack -> incr cursor_ack_count
        | Execution_receipt -> incr execution_receipt_count
        | Terminal_reason -> incr terminal_reason_count
@@ -670,7 +743,7 @@ let summarize_rows ~keeper_name ~limit rows =
           강제한다 (catch-all 금지). *)
        | Some
            ( Board_signal | Bootstrap | No_progress_recovery | Fusion_completed
-           | Bg_completed | Connector_attention | Hitl_resolved )
+           | Bg_completed | Schedule_signal | Connector_attention | Hitl_resolved )
          -> ())
   in
   let note_payload_parse_error row =
@@ -764,7 +837,7 @@ let summarize_rows ~keeper_name ~limit rows =
         | Some No_progress_recovery -> true
         | Some
             ( Board_signal | Bootstrap | Fusion_completed | Bg_completed
-            | Connector_attention | Hitl_resolved )
+            | Schedule_signal | Connector_attention | Hitl_resolved )
         | None ->
           false)
       pending_stimulus_ids
@@ -794,6 +867,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "stimulus_count", `Int !stimulus_count
     ; "reaction_count", `Int !reaction_count
     ; "turn_started_count", `Int !turn_started_count
+    ; "stimulus_consumed_count", `Int !stimulus_consumed_count
     ; "cursor_ack_count", `Int !cursor_ack_count
     ; "execution_receipt_count", `Int !execution_receipt_count
     ; "terminal_reason_count", `Int !terminal_reason_count
@@ -842,6 +916,7 @@ let error_summary ~keeper_name ~limit error =
     ; "stimulus_count", `Int 0
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
+    ; "stimulus_consumed_count", `Int 0
     ; "cursor_ack_count", `Int 0
     ; "execution_receipt_count", `Int 0
     ; "terminal_reason_count", `Int 0
@@ -887,6 +962,46 @@ let summary_read_error_count json =
   match assoc_field "read_error" json with
   | Some (`String _) -> 1
   | _ -> 0
+;;
+
+let fleet_summary_read_error_json ~limit_per_keeper ~source ~error =
+  `Assoc
+    [ "schema", `String fleet_summary_schema
+    ; "status", `String "unknown"
+    ; "operator_action_required", `Bool true
+    ; "keeper_count_known", `Bool false
+    ; "keeper_count", `Int 0
+    ; "keeper_names", `List []
+    ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
+    ; "row_count", `Int 0
+    ; "stimulus_count", `Int 0
+    ; "reaction_count", `Int 0
+    ; "turn_started_count", `Int 0
+    ; "stimulus_consumed_count", `Int 0
+    ; "cursor_ack_count", `Int 0
+    ; "execution_receipt_count", `Int 0
+    ; "terminal_reason_count", `Int 0
+    ; "operator_escalation_count", `Int 0
+    ; "supervisor_recovery_requested_count", `Int 0
+    ; "completion_contract_attention_count", `Int 0
+    ; "completion_contract_passive_only_count", `Int 0
+    ; "completion_contract_attention_by_keeper", `List []
+    ; "completion_contract_unknown_result_count", `Int 0
+    ; "completion_contract_unknown_results_by_keeper", `List []
+    ; "unsupported_stimulus_count", `Int 0
+    ; "payload_parse_error_count", `Int 0
+    ; "unknown_reaction_count", `Int 0
+    ; "cursor_swept_stimulus_count", `Int 0
+    ; "legacy_cursor_swept_stimulus_count", `Int 0
+    ; "pending_stimulus_count", `Int 0
+    ; "pending_no_progress_recovery_count", `Int 0
+    ; "pending_by_keeper", `List []
+    ; "pending_no_progress_recovery_by_keeper", `List []
+    ; "read_error_count", `Int 1
+    ; "read_error", `String error
+    ; "read_error_source", `String source
+    ; "keepers", `List []
+    ]
 ;;
 
 let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
@@ -1028,6 +1143,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
            || completion_contract_unknown_result_count > 0
            || unsupported_stimulus_count > 0
            || payload_parse_error_count > 0) )
+    ; "keeper_count_known", `Bool true
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
     ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
@@ -1035,6 +1151,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "stimulus_count", `Int (total_int "stimulus_count")
     ; "reaction_count", `Int (total_int "reaction_count")
     ; "turn_started_count", `Int (total_int "turn_started_count")
+    ; "stimulus_consumed_count", `Int (total_int "stimulus_consumed_count")
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "execution_receipt_count", `Int (total_int "execution_receipt_count")
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")
@@ -1061,6 +1178,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; ( "pending_no_progress_recovery_by_keeper"
       , `List pending_no_progress_recovery_by_keeper )
     ; "read_error_count", `Int read_error_count
+    ; "read_error", `Null
     ; "keepers", `List summaries
     ]
 ;;

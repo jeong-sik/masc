@@ -302,13 +302,9 @@ let record_pre_dispatch_terminal_observation
         ])
     Keeper_runtime_manifest.Pre_dispatch_blocked;
   let receipt_append_ok =
-    try
-      Keeper_execution_receipt.append config receipt;
-      true
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      let error = Printexc.to_string exn in
+    match Keeper_execution_receipt.append_result config receipt with
+    | Ok () -> true
+    | Error error ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[ "keeper", meta.name; "phase", "receipt_append" ]

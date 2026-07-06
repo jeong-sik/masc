@@ -123,6 +123,11 @@ let make_test_ctx_with_agent agent_name =
 
 let make_test_ctx () = make_test_ctx_with_agent "test-agent"
 
+let corrupt_goal_store config =
+  Fs_compat.save_file (Goal_store.goals_path config) "{not-json";
+  Fs_compat.save_file (Goal_store.goals_path config ^ ".last-good") "{not-json"
+;;
+
 let make_temp_dir prefix =
   incr test_counter;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -179,6 +184,42 @@ let verifier_transition_action_denylist =
       "release";
       "submit_for_verification";
     ]
+
+let () =
+  test "transition_action_denylist fails closed on meta read failure" (fun () ->
+      let agent_name = "policy-read-error-agent" in
+      let keeper_name =
+        match Keeper_identity.canonical_keeper_name agent_name with
+        | Some name -> name
+        | None -> failwith "expected canonical keeper name for policy read error test"
+      in
+      let ctx = make_test_ctx_with_agent agent_name in
+      let meta_path =
+        Keeper_types_profile.keeper_meta_path ctx.Task.Tool.config keeper_name
+      in
+      let rec mkdir_p path =
+        if path = "" || path = "." || path = "/" then ()
+        else if Sys.file_exists path then ()
+        else (
+          mkdir_p (Filename.dirname path);
+          Unix.mkdir path 0o755)
+      in
+      mkdir_p (Filename.dirname meta_path);
+      let oc = open_out meta_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc "{not-json");
+      let denylist =
+        Keeper_task_owner_backend.transition_action_denylist
+          ctx.Task.Tool.config
+          ~agent_name
+      in
+      let expected =
+        Masc_domain.valid_task_action_strings
+        |> List.map Task.Handlers.transition_action_denylist_entry
+        |> List.sort String.compare
+      in
+      assert (List.sort String.compare denylist = expected))
 
 let register_test_keeper ?(tool_denylist = []) ctx ~keeper_name ~agent_name =
   match
@@ -2482,6 +2523,118 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
       (Printf.sprintf
          "expected exactly 3 persisted tasks (4th rejected), got %d"
          (List.length backlog.tasks)))
+
+let () = test "handle_add_task_reports_goal_store_read_failure" (fun () ->
+  let ctx = make_test_ctx () in
+  corrupt_goal_store ctx.config;
+  let result =
+    Task.Tool.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc
+        [ "title", `String "Goal store read failure"
+        ; "goal_id", `String "goal-corrupt"
+        ])
+  in
+  if Tool_result.is_success result
+  then failwith "expected goal store read failure to reject add_task";
+  if Tool_result.failure_class result <> Some Tool_result.Runtime_failure
+  then failwith "expected runtime_failure for goal store read failure";
+  if not (str_contains (Tool_result.message result) "Goal store read failed:")
+  then failwith ("unexpected message: " ^ Tool_result.message result))
+
+let () = test "handle_add_task_validates_title_before_goal_store_read" (fun () ->
+  let ctx = make_test_ctx () in
+  corrupt_goal_store ctx.config;
+  let result =
+    Task.Tool.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "title", `String " "; "goal_id", `String "goal-corrupt" ])
+  in
+  if Tool_result.is_success result
+  then failwith "expected blank title to reject add_task";
+  if Tool_result.failure_class result <> Some Tool_result.Workflow_rejection
+  then failwith "expected workflow_rejection for blank title";
+  if str_contains (Tool_result.message result) "Goal store read failed:"
+  then failwith ("goal store was consulted before title validation: " ^ Tool_result.message result))
+
+let () = test "handle_set_goal_reports_goal_store_read_failure" (fun () ->
+  let ctx = make_test_ctx () in
+  let created =
+    Task.Tool.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "title", `String "Task before corrupt goals" ])
+  in
+  if not (Tool_result.is_success created)
+  then failwith ("expected seed task creation to succeed: " ^ Tool_result.message created);
+  corrupt_goal_store ctx.config;
+  let result =
+    Task.Tool.handle_set_goal
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "task_id", `String "task-001"; "goal_id", `String "goal-corrupt" ])
+  in
+  if Tool_result.is_success result
+  then failwith "expected goal store read failure to reject set_goal";
+  if Tool_result.failure_class result <> Some Tool_result.Runtime_failure
+  then failwith "expected runtime_failure for set_goal read failure";
+  if not (str_contains (Tool_result.message result) "failed to read goal store:")
+  then failwith ("unexpected message: " ^ Tool_result.message result))
+
+let () = test "handle_batch_add_tasks_reports_goal_store_read_failure" (fun () ->
+  let ctx = make_test_ctx () in
+  corrupt_goal_store ctx.config;
+  let result =
+    Task.Tool.handle_batch_add_tasks
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc
+        [ ( "tasks"
+          , `List
+              [ `Assoc
+                  [ "title", `String "Batch goal read failure"
+                  ; "goal_id", `String "goal-corrupt"
+                  ]
+              ] )
+        ])
+  in
+  if Tool_result.is_success result
+  then failwith "expected goal store read failure to reject batch add";
+  if Tool_result.failure_class result <> Some Tool_result.Runtime_failure
+  then failwith "expected runtime_failure for batch goal store read failure";
+  if not (str_contains (Tool_result.message result) "Goal store read failed:")
+  then failwith ("unexpected message: " ^ Tool_result.message result))
+
+let () = test "handle_batch_add_tasks_rejects_unknown_goal_id_as_workflow" (fun () ->
+  let ctx = make_test_ctx () in
+  let result =
+    Task.Tool.handle_batch_add_tasks
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc
+        [ ( "tasks"
+          , `List
+              [ `Assoc
+                  [ "title", `String "Batch unknown goal"
+                  ; "goal_id", `String "goal-missing"
+                  ]
+              ] )
+        ])
+  in
+  if Tool_result.is_success result
+  then failwith "expected unknown batch goal_id to reject batch add";
+  if Tool_result.failure_class result <> Some Tool_result.Workflow_rejection
+  then failwith "expected workflow_rejection for unknown batch goal_id";
+  if not (str_contains (Tool_result.message result) "Unknown goal_id 'goal-missing'")
+  then failwith ("unexpected message: " ^ Tool_result.message result))
 
 (* RFC-0034.v2 Test 2: Task.Dispatch.add_task — orphan-only path today.
    Pins that the [reject_if] guard is wired AND non-blocking for orphan

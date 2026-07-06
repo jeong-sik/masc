@@ -17,8 +17,16 @@ type store_error =
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Grant_validation_failed of Schedule_domain.grant_error
+  | Recurrence_calculation_failed of Schedule_domain.due_calculation_error
   | Persistence_failed of string
+  | Audit_append_failed of string
   | Corrupt_ledger of
+      { primary_err : string
+      ; recovery_err : string option
+      }
+
+type read_error =
+  | Corrupt_read_ledger of
       { primary_err : string
       ; recovery_err : string option
       }
@@ -74,8 +82,17 @@ let store_error_to_string = function
   | Schedule_not_running -> "schedule is not running"
   | Grant_validation_failed err ->
     "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
+  | Recurrence_calculation_failed err ->
+    "recurrence calculation failed: "
+    ^ Schedule_domain.due_calculation_error_to_string err
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
+  | Audit_append_failed msg -> "schedule audit append failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
+    corrupt_message ~primary_err ~recovery_err
+;;
+
+let read_error_to_string = function
+  | Corrupt_read_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
 ;;
 
@@ -86,6 +103,8 @@ let now () = Unix.gettimeofday ()
 let schedules_path config =
   Filename.concat (Workspace_utils.masc_dir config) "schedules.json"
 ;;
+
+let audit_path = Schedule_audit_log.path
 
 let recovery_path config = schedules_path config ^ ".last-good"
 
@@ -208,11 +227,18 @@ let load config : load_outcome =
    empty default (correct for an uninitialised store); [Corrupt] raises rather
    than returning an empty list, so a corrupt ledger is operator-visible instead
    of masquerading as "no schedules". Does not write to disk. *)
-let read_state config =
+let read_state_result config =
   match load config with
-  | Loaded state -> state
-  | Fresh -> default_state ()
+  | Loaded state -> Ok state
+  | Fresh -> Ok (default_state ())
   | Corrupt { primary_err; recovery_err } ->
+    Error (Corrupt_read_ledger { primary_err; recovery_err })
+;;
+
+let read_state config =
+  match read_state_result config with
+  | Ok state -> state
+  | Error (Corrupt_read_ledger { primary_err; recovery_err }) ->
     raise (Corrupt_ledger_exn { primary_err; recovery_err })
 ;;
 
@@ -255,6 +281,47 @@ let write_state config state =
 let bump_state state ~schedules ~grants ~executions =
   { version = state.version + 1; updated_at = now (); schedules; grants; executions }
 ;;
+
+let audit_event
+      state
+      ~action
+      ?previous
+      ~current
+      ?actor
+      ?detail
+      ()
+  =
+  Schedule_audit_log.make
+    ~recorded_at:state.updated_at
+    ~state_version:state.version
+    ~action
+    ?previous
+    ~current
+    ?actor
+    ?detail
+    ()
+;;
+
+let append_audit_events config events =
+  match Schedule_audit_log.append_many config events with
+  | Ok () -> Ok ()
+  | Error msg -> Error (Audit_append_failed msg)
+;;
+
+let write_state_with_audit config state events =
+  let* () = write_state config state in
+  append_audit_events config events
+;;
+
+let grant_action (grant : Schedule_domain.execution_grant) =
+  match grant.decision with
+  | Approve -> Schedule_audit_log.Grant_approved
+  | Reject _ -> Schedule_audit_log.Grant_rejected
+;;
+
+let json_fields fields = `Assoc fields
+
+let string_detail name value = json_fields [ name, `String value ]
 
 let find_schedule state schedule_id =
   List.find_opt
@@ -363,6 +430,16 @@ let last_execution_for_schedule state ~schedule_id =
   | execution :: _ -> Some execution
 ;;
 
+let latest_execution_id executions ~schedule_id =
+  executions
+  |> List.filter (fun (execution : execution_record) ->
+    String.equal execution.schedule_id schedule_id)
+  |> List.sort compare_execution_desc
+  |> function
+  | [] -> None
+  | execution :: _ -> Some execution.execution_id
+;;
+
 let update_latest_running_execution executions ~schedule_id update =
   let rec loop acc = function
     | [] ->
@@ -409,7 +486,16 @@ let insert_request config (request : Schedule_domain.schedule_request) =
         bump_state state ~schedules ~grants:state.grants
           ~executions:state.executions
       in
-      let* () = write_state config next_state in
+      let event =
+        audit_event next_state
+          ~action:Schedule_audit_log.Request_created
+          ~current:request
+          ~actor:request.scheduled_by
+          ~detail:
+            (json_fields [ "requested_by", Schedule_domain.actor_to_yojson request.requested_by ])
+          ()
+      in
+      let* () = write_state_with_audit config next_state [ event ] in
       Ok request)
 ;;
 
@@ -430,11 +516,26 @@ let record_grant config (grant : Schedule_domain.execution_grant) =
           let next_state =
             bump_state state ~schedules ~grants ~executions:state.executions
           in
-          let* () = write_state config next_state in
+          let event =
+            audit_event next_state
+              ~action:(grant_action grant)
+              ~previous:request
+              ~current:updated_request
+              ~actor:grant.approved_by
+              ~detail:(json_fields [ "grant_id", `String grant.grant_id ])
+              ()
+          in
+          let* () = write_state_with_audit config next_state [ event ] in
           Ok updated_request))
 ;;
 
-let cancel_request config ~schedule_id =
+let cancel_detail ~reason =
+  match reason with
+  | None -> None
+  | Some reason -> Some (json_fields [ "reason", `String reason ])
+;;
+
+let cancel_request config ?cancelled_by ?reason ~schedule_id =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -454,32 +555,65 @@ let cancel_request config ~schedule_id =
           bump_state state ~schedules ~grants:state.grants
             ~executions:state.executions
         in
-        let* () = write_state config next_state in
+        let event =
+          audit_event next_state
+            ~action:Schedule_audit_log.Request_cancelled
+            ~previous:request
+            ~current:updated_request
+            ?actor:cancelled_by
+            ?detail:(cancel_detail ~reason)
+            ()
+        in
+        let* () = write_state_with_audit config next_state [ event ] in
         Ok updated_request)
 ;;
 
 let refresh_due config ~now =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let changed = ref 0 in
-    let schedules =
-      List.map
-        (fun request ->
-          let updated = Schedule_domain.mark_due ~now request in
-          if updated.Schedule_domain.status <> request.Schedule_domain.status then
-            incr changed;
-          updated)
+    let schedules, transitions =
+      List.fold_right
+        (fun request (schedules, transitions) ->
+           let updated = Schedule_domain.mark_due ~now request in
+           if updated.Schedule_domain.status <> request.Schedule_domain.status
+           then updated :: schedules, (request, updated) :: transitions
+           else request :: schedules, transitions)
         state.schedules
+        ([], [])
     in
-    if !changed = 0 then
-      Ok (state, 0)
-    else (
+    match transitions with
+    | [] -> Ok (state, 0)
+    | _ ->
       let next_state =
         bump_state state ~schedules ~grants:state.grants
           ~executions:state.executions
       in
-      let* () = write_state config next_state in
-      Ok (next_state, !changed)))
+      let rec audit_events acc = function
+        | [] -> Ok (List.rev acc)
+        | (previous, current) :: rest ->
+          let action =
+            match current.Schedule_domain.status with
+            | Due -> Ok Schedule_audit_log.Request_marked_due
+            | Expired -> Ok Schedule_audit_log.Request_expired
+            | Pending_approval
+            | Scheduled
+            | Running
+            | Succeeded
+            | Failed
+            | Rejected
+            | Cancelled ->
+              Error
+                (Invalid_status_transition
+                   "refresh_due produced an unexpected non-due/non-expired \
+                    status transition")
+          in
+          let* action = action in
+          let event = audit_event next_state ~action ~previous ~current () in
+          audit_events (event :: acc) rest
+      in
+      let* events = audit_events [] transitions in
+      let* () = write_state_with_audit config next_state events in
+      Ok (next_state, List.length transitions))
 ;;
 
 let reschedule_due_recurring config ~now ~schedule_ids =
@@ -487,29 +621,38 @@ let reschedule_due_recurring config ~now ~schedule_ids =
     let* state = load_for_mutation config in
     let ids = Hashtbl.create (List.length schedule_ids) in
     List.iter (fun schedule_id -> Hashtbl.replace ids schedule_id ()) schedule_ids;
-    let changed = ref 0 in
-    let schedules =
-      List.map
-        (fun (request : schedule_request) ->
-          if not (Hashtbl.mem ids request.schedule_id) then
-            request
-          else
-            match Schedule_domain.reschedule_after_due_signal ~now request with
-            | None -> request
-            | Some updated ->
-              incr changed;
-              updated)
-        state.schedules
+    let rec collect schedules transitions = function
+      | [] -> Ok (List.rev schedules, List.rev transitions)
+      | (request : schedule_request) :: rest ->
+        if not (Hashtbl.mem ids request.schedule_id)
+        then collect (request :: schedules) transitions rest
+        else (
+          match Schedule_domain.reschedule_after_due_signal_result ~now request with
+          | Error err -> Error (Recurrence_calculation_failed err)
+          | Ok None -> collect (request :: schedules) transitions rest
+          | Ok (Some updated) ->
+            collect (updated :: schedules) ((request, updated) :: transitions) rest)
     in
-    if !changed = 0 then
-      Ok (state, 0)
-    else (
+    let* schedules, transitions = collect [] [] state.schedules in
+    match transitions with
+    | [] -> Ok (state, 0)
+    | _ ->
       let next_state =
         bump_state state ~schedules ~grants:state.grants
           ~executions:state.executions
       in
-      let* () = write_state config next_state in
-      Ok (next_state, !changed)))
+      let events =
+        List.map
+          (fun (previous, current) ->
+             audit_event next_state
+               ~action:Schedule_audit_log.Request_rescheduled
+               ~previous
+               ~current
+               ())
+          transitions
+      in
+      let* () = write_state_with_audit config next_state events in
+      Ok (next_state, List.length transitions))
 ;;
 
 let start_due_candidate config ~now ~schedule_id =
@@ -523,9 +666,18 @@ let start_due_candidate config ~now ~schedule_id =
       else
         let updated = { request with status = Running } in
         let schedules = replace_schedule state.schedules updated in
-        let executions = make_execution_record ~now request :: state.executions in
+        let execution = make_execution_record ~now request in
+        let executions = execution :: state.executions in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        let* () = write_state config next_state in
+        let event =
+          audit_event next_state
+            ~action:Schedule_audit_log.Execution_started
+            ~previous:request
+            ~current:updated
+            ~detail:(json_fields [ "execution_id", `String execution.execution_id ])
+            ()
+        in
+        let* () = write_state_with_audit config next_state [ event ] in
         Ok updated)
 ;;
 
@@ -538,8 +690,12 @@ let complete_running config ~now ~schedule_id ?detail () =
       if request.status <> Running then
         Error Schedule_not_running
       else
+        let* next_due_at =
+          Schedule_domain.next_due_after_result ~now request
+          |> Result.map_error (fun err -> Recurrence_calculation_failed err)
+        in
         let updated =
-          match Schedule_domain.next_due_after ~now request with
+          match next_due_at with
           | Some due_at -> { request with status = Scheduled; due_at }
           | None -> { request with status = Succeeded }
         in
@@ -555,7 +711,25 @@ let complete_running config ~now ~schedule_id ?detail () =
                })
         in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        let* () = write_state config next_state in
+        let detail =
+          latest_execution_id executions ~schedule_id
+          |> Option.map (fun execution_id ->
+            json_fields
+              (("execution_id", `String execution_id)
+               ::
+               match detail with
+               | None -> []
+               | Some consumer_detail -> [ "consumer_detail", consumer_detail ]))
+        in
+        let event =
+          audit_event next_state
+            ~action:Schedule_audit_log.Execution_succeeded
+            ~previous:request
+            ~current:updated
+            ?detail
+            ()
+        in
+        let* () = write_state_with_audit config next_state [ event ] in
         Ok updated)
 ;;
 
@@ -581,7 +755,22 @@ let fail_running config ~now ~schedule_id ~error =
                })
         in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        let* () = write_state config next_state in
+        let detail =
+          match latest_execution_id executions ~schedule_id with
+          | None -> string_detail "error" error
+          | Some execution_id ->
+            json_fields
+              [ "execution_id", `String execution_id; "error", `String error ]
+        in
+        let event =
+          audit_event next_state
+            ~action:Schedule_audit_log.Execution_failed
+            ~previous:request
+            ~current:updated
+            ~detail
+            ()
+        in
+        let* () = write_state_with_audit config next_state [ event ] in
         Ok updated)
 ;;
 
@@ -605,7 +794,19 @@ let fail_due_candidate config ~now ~schedule_id ~error =
         let schedules = replace_schedule state.schedules updated in
         let executions = execution :: state.executions in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        let* () = write_state config next_state in
+        let event =
+          audit_event next_state
+            ~action:Schedule_audit_log.Due_candidate_failed
+            ~previous:request
+            ~current:updated
+            ~detail:
+              (json_fields
+                 [ "execution_id", `String execution.execution_id
+                 ; "error", `String error
+                 ])
+            ()
+        in
+        let* () = write_state_with_audit config next_state [ event ] in
         Ok updated)
 ;;
 

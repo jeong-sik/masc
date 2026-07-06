@@ -118,17 +118,41 @@ let with_keeper_slot ~sem ~name f =
 
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 let degraded_keeper_snapshot_row = Operator_control_snapshot_trust.degraded_keeper_snapshot_row
+
+type keeper_name_scan = {
+  names : string list;
+  names_known : bool;
+  read_errors : Yojson.Safe.t list;
+}
+
+let keeper_name_read_error_json error =
+  `Assoc [ "source", `String "keeper_names_result"; "error", `String error ]
+
+let scan_keeper_names config =
+  match Keeper_meta_store.keeper_names_result config with
+  | Ok names -> { names; names_known = true; read_errors = [] }
+  | Error error ->
+    {
+      names = [];
+      names_known = false;
+      read_errors = [ keeper_name_read_error_json error ];
+    }
+
+let empty_keeper_name_scan =
+  { names = []; names_known = true; read_errors = [] }
+
 let keepers_json
-      ?keeper_names
+      ?keeper_name_scan
       ?(include_recent_activity = false)
       ?(lightweight = false)
       config
   =
-  let names =
-    match keeper_names with
-    | Some n -> n
-    | None -> Keeper_meta_store.keeper_names config
+  let keeper_name_scan =
+    match keeper_name_scan with
+    | Some scan -> scan
+    | None -> scan_keeper_names config
   in
+  let names = keeper_name_scan.names in
   (* Parallel keeper I/O with concurrency cap: at most
      _keeper_snapshot_max_concurrency fibers run simultaneously.
      Without this cap, 9+ keepers doing concurrent file I/O + JSON
@@ -339,6 +363,15 @@ let keepers_json
                     let tool_audit_at =
                       Json_util.get_string audit_json "tool_audit_at"
                     in
+                    let tool_audit_read_errors =
+                      match
+                        Json_util.assoc_member_opt
+                          "tool_audit_read_errors"
+                          audit_json
+                      with
+                      | Some (`List errors) -> errors
+                      | Some _ | None -> []
+                    in
                     dt_audit := Time_compat.now () -. t_audit;
                     let surface_status =
                       if not agent_exists
@@ -382,10 +415,13 @@ let keepers_json
                         | Some p -> `String (Keeper_state_machine.phase_to_string p)
                         | None -> `Null
                     in
-                    let context_snapshot =
+                    let context_snapshot, context_read_errors =
                       if lightweight
-                      then fallback_keeper_context_snapshot meta
-                      else keeper_context_snapshot_of_meta config meta
+                      then fallback_keeper_context_snapshot meta, []
+                      else
+                        keeper_context_snapshot_of_meta_with_read_errors
+                          config
+                          meta
                     in
                     let runtime_trust =
                       let t_trust = Time_compat.now () in
@@ -401,6 +437,58 @@ let keepers_json
                       in
                       dt_trust := Time_compat.now () -. t_trust;
                       result
+                    in
+                    let recent_activity, recent_activity_read_errors =
+                      let t_act = Time_compat.now () in
+                      let result =
+                        if include_recent_activity
+                        then (
+                          let store =
+                            Keeper_types_support.keeper_metrics_store config name
+                          in
+                          let lines, line_path =
+                            let dated = Dated_jsonl.read_recent_lines store 5 in
+                            if dated <> []
+                            then dated, Dated_jsonl.base_dir store
+                            else (
+                              let metrics_path =
+                                Keeper_types_support.keeper_metrics_path config name
+                              in
+                              match
+                                Keeper_memory.read_file_tail_lines_result
+                                  metrics_path
+                                  ~max_bytes:8000
+                                  ~max_lines:5
+                              with
+                              | Ok lines -> lines, metrics_path
+                              | Error exn_class ->
+                                  Keeper_memory.record_memory_recall_read_error
+                                    ~site:"operator_recent_activity_metrics"
+                                    metrics_path
+                                    exn_class;
+                                  [], metrics_path)
+                          in
+                          let parsed, parse_errors =
+                            Keeper_status_metrics.parse_metrics_json_lines lines
+                          in
+                          let read_errors =
+                            List.map
+                              (Keeper_status_metrics.metrics_json_line_parse_error_to_json
+                                 ~source:"operator_recent_activity_metrics_jsonl"
+                                 ~keeper:name
+                                 ~path:line_path)
+                              parse_errors
+                          in
+                          `List parsed, read_errors)
+                        else `List [], []
+                      in
+                      dt_activity := Time_compat.now () -. t_act;
+                      result
+                    in
+                    let row_read_errors =
+                      tool_audit_read_errors
+                      @ recent_activity_read_errors
+                      @ context_read_errors
                     in
                     let row =
                       `Assoc
@@ -467,6 +555,18 @@ let keepers_json
                              , Json_util.string_opt_to_json latest_action_source )
                            ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
                            ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
+                           ; ( "tool_audit_read_error_count"
+                             , `Int (List.length tool_audit_read_errors) )
+                           ; ( "tool_audit_read_errors"
+                             , `List tool_audit_read_errors )
+                           ; ( "recent_activity_read_error_count"
+                             , `Int (List.length recent_activity_read_errors) )
+                           ; ( "recent_activity_read_errors"
+                             , `List recent_activity_read_errors )
+                           ; ( "context_read_error_count"
+                             , `Int (List.length context_read_errors) )
+                           ; "context_read_errors", `List context_read_errors
+                           ; "read_errors", `List row_read_errors
                            ; "proactive_enabled", `Bool meta.proactive.enabled
                            ; "proactive_idle_sec", `Int meta.proactive.idle_sec
                            ; "proactive_cooldown_sec", `Int meta.proactive.cooldown_sec
@@ -490,45 +590,7 @@ let keepers_json
                                | None -> `Null )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
-                           ; ( "recent_activity"
-                             , let t_act = Time_compat.now () in
-                               let result =
-                                 if include_recent_activity
-                                 then (
-                                   let store =
-                                     Keeper_types_support.keeper_metrics_store config name
-                                   in
-                                   let lines =
-                                     let dated = Dated_jsonl.read_recent_lines store 5 in
-                                     if dated <> []
-                                     then dated
-                                     else (
-                                       let metrics_path =
-                                         Keeper_types_support.keeper_metrics_path config name
-                                       in
-                                       match
-                                         Keeper_memory.read_file_tail_lines_result
-                                           metrics_path
-                                           ~max_bytes:8000
-                                           ~max_lines:5
-                                       with
-                                       | Ok lines -> lines
-                                       | Error exn_class ->
-                                           Keeper_memory.record_memory_recall_read_error
-                                             ~site:"operator_recent_activity_metrics"
-                                             metrics_path exn_class;
-                                           [])
-                                   in
-                                   `List
-                                     (List.filter_map
-                                        (fun line ->
-                                           try Some (Yojson.Safe.from_string line) with
-                                           | Yojson.Json_error _ -> None)
-                                        lines))
-                                 else `List []
-                               in
-                               dt_activity := Time_compat.now () -. t_act;
-                               result )
+                           ; "recent_activity", recent_activity
                            ]
                          @ keeper_context_snapshot_fields context_snapshot
                          @ Keeper_status_bridge.runtime_blocker_fields_json config meta
@@ -547,7 +609,26 @@ let keepers_json
                 None)))
        names);
   let rows = Array.to_list results |> List.filter_map Fun.id in
-  `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
+  let read_errors =
+    rows
+    |> List.fold_left
+         (fun acc row ->
+            match Json_util.assoc_member_opt "read_errors" row with
+            | Some (`List errors) -> List.rev_append errors acc
+            | Some _ | None -> acc)
+         []
+    |> List.rev
+  in
+  let read_errors = keeper_name_scan.read_errors @ read_errors in
+  `Assoc
+    [ "count", `Int (List.length rows)
+    ; "keeper_names_known", `Bool keeper_name_scan.names_known
+    ; ( "keeper_name_discovery_read_error_count"
+      , `Int (List.length keeper_name_scan.read_errors) )
+    ; "keeper_name_discovery_read_errors", `List keeper_name_scan.read_errors
+    ; "read_errors", `List read_errors
+    ; "items", `List rows
+    ]
 ;;
 
 let persistent_agents_json = Operator_control_snapshot_persistent_agents.persistent_agents_json
@@ -586,21 +667,35 @@ let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_o
 include Operator_control_snapshot_cache
 let namespace_scope_cache_segment (_config : Workspace_utils.config) = "default"
 
-let snapshot_json
+let pending_confirm_scope_cache_segment (confirm_scope : pending_confirm_scope) =
+  let json =
+    `Assoc
+      [
+        ( "actor_filter",
+          Json_util.string_option_to_yojson confirm_scope.actor_filter );
+        ( "all_entries",
+          `List (List.map pending_confirm_to_yojson confirm_scope.all_entries) );
+      ]
+  in
+  Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
+
+let snapshot_json_unchecked
       ?actor
       ?view
       ?(include_messages = true)
       ?(include_keepers = true)
       ?(include_summary_fields = true)
       ?(lightweight_summary = false)
+      ~(confirm_scope : pending_confirm_scope)
       (ctx : 'a context)
   : Yojson.Safe.t
   =
   let cache_key =
     Printf.sprintf
-      "%s|%s|%s|%s|%b|%b|%b|%b"
+      "%s|%s|%s|%s|%s|%b|%b|%b|%b"
       ctx.config.base_path
       (namespace_scope_cache_segment ctx.config)
+      (pending_confirm_scope_cache_segment confirm_scope)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
       include_messages
@@ -657,7 +752,8 @@ let snapshot_json
           | Sessions | Keepers | Messages -> false
         then (
           let workspace_attention =
-            build_workspace_attention_items config |> List.sort compare_attention
+            build_workspace_attention_items_of_pending confirm_scope.all_entries
+            |> List.sort compare_attention
           in
           let workspace_recommendation_items = workspace_recommendations config in
           [ "attention_summary", summary_of_attention_items workspace_attention
@@ -666,9 +762,11 @@ let snapshot_json
           ])
         else [])
     in
-    let keeper_names =
-      if initialized && include_keepers then Keeper_meta_store.keeper_names config else []
+    let keeper_name_scan =
+      if initialized && include_keepers then scan_keeper_names config
+      else empty_keeper_name_scan
     in
+    let keeper_names = keeper_name_scan.names in
     let persistent_keeper_names =
       if initialized && include_keepers
       then Keeper_meta_store.persistent_agent_names config
@@ -700,7 +798,7 @@ let snapshot_json
                       if initialized && include_keepers
                       then
                         keepers_json
-                          ~keeper_names
+                          ~keeper_name_scan
                           ~lightweight:lightweight_summary
                           ~include_recent_activity:(not lightweight_summary)
                           config
@@ -734,9 +832,7 @@ let snapshot_json
                then recent_messages_json config
                else `List [] )
            ]
-         @ (let confirm_scope =
-              timed "pending_confirms" (fun () -> pending_confirm_scope ?actor config)
-            in
+         @ (let confirm_scope = timed "pending_confirms" (fun () -> confirm_scope) in
             [ ( "pending_confirms"
               , `List (List.map pending_confirm_to_yojson confirm_scope.visible_entries) )
             ; ( "pending_confirm_envelope"
@@ -774,3 +870,48 @@ let snapshot_json
   let ttl = Env_config_governance.Operator.cache_ttl_sec in
   get_or_compute cache_key ~ttl compute_snapshot
 ;;
+
+let snapshot_error_json message =
+  `Assoc
+    [
+      ("ok", `Bool false);
+      ("error", `String message);
+      ("failure_class", `String "runtime_failure");
+      ("source", `String "operator_snapshot");
+    ]
+
+let snapshot_json_result
+      ?actor
+      ?view
+      ?(include_messages = true)
+      ?(include_keepers = true)
+      ?(include_summary_fields = true)
+      ?(lightweight_summary = false)
+      (ctx : 'a context)
+  =
+  match pending_confirm_scope_result ?actor ctx.config with
+  | Error msg ->
+      Error (Printf.sprintf "operator snapshot pending confirms read failed: %s" msg)
+  | Ok confirm_scope ->
+      Ok
+        (snapshot_json_unchecked ?actor ?view ~include_messages ~include_keepers
+           ~include_summary_fields ~lightweight_summary ~confirm_scope ctx)
+
+let snapshot_json
+      ?actor
+      ?view
+      ?(include_messages = true)
+      ?(include_keepers = true)
+      ?(include_summary_fields = true)
+      ?(lightweight_summary = false)
+      (ctx : 'a context)
+  : Yojson.Safe.t
+  =
+  match
+    snapshot_json_result ?actor ?view ~include_messages ~include_keepers
+      ~include_summary_fields ~lightweight_summary ctx
+  with
+  | Ok json -> json
+  | Error msg ->
+      Log.Dashboard.warn "%s" msg;
+      snapshot_error_json msg

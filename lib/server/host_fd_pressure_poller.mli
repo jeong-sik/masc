@@ -29,12 +29,33 @@ type state_file_resolution =
   ; source : state_file_source
   }
 
+type parsed =
+  { level : Keeper_fd_pressure.external_level
+  ; ts : float
+  ; reason : string
+  }
+
+type state_line_parse_error =
+  | State_line_json_parse_error of string
+  | State_line_expected_object of { received : string }
+  | State_line_missing_or_invalid_field of
+      { field : string
+      ; received : string option
+      }
+  | State_line_unknown_level of string
+  | State_line_invalid_timestamp of string
+
+val state_line_parse_error_to_string : state_line_parse_error -> string
+
 val resolve_state_file_path : base_path:string -> unit -> state_file_resolution
 (** Resolve the state-file path. Explicit env overrides win; otherwise the
     default state file lives under [<base_path>/.masc]. *)
 
 val state_file_env_conflict : unit -> (string * string) option
 (** [Some (canonical, legacy)] when both env vars are set to different paths. *)
+
+val parse_state_line_result : string -> (parsed, state_line_parse_error) result
+(** Parse one sysmon state-file line with typed failure visibility. *)
 
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start ~sw ~clock ~base_path] forks the poller fiber under [sw]. Wired from

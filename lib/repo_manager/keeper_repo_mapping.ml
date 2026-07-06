@@ -589,7 +589,12 @@ let normalize_lexical_path path =
   let body = String.concat "/" normalized in
   if absolute then "/" ^ body else body
 
-let gitdir_config_path ~repo_root gitdir =
+type git_config_path_lookup =
+  | Git_config_path of string
+  | Git_config_absent
+  | Git_config_error of string
+
+let gitdir_config_path_result ~repo_root gitdir =
   let gitdir =
     if Filename.is_relative gitdir then Filename.concat repo_root gitdir
     else gitdir
@@ -599,22 +604,35 @@ let gitdir_config_path ~repo_root gitdir =
   match (safe_realpath repo_lane, safe_realpath gitdir_lexical) with
   | Some repo_lane_real, Some gitdir_real -> (
       match relative_under ~root:repo_lane_real gitdir_real with
-      | None -> None
+      | None ->
+        Git_config_error
+          (Printf.sprintf
+             "gitdir %s escapes repository lane %s"
+             gitdir_lexical
+             repo_lane_real)
       | Some _ ->
-          if
-            safe_is_directory gitdir_real
-            && not (safe_is_symlink gitdir_lexical)
-          then Some (Filename.concat gitdir_real "config")
-          else None)
-  | _ -> None
+        if not (safe_is_directory gitdir_real)
+        then
+          Git_config_error
+            (Printf.sprintf "gitdir %s is not a directory" gitdir_real)
+        else if safe_is_symlink gitdir_lexical
+        then
+          Git_config_error
+            (Printf.sprintf "gitdir %s is a symlink" gitdir_lexical)
+        else Git_config_path (Filename.concat gitdir_real "config"))
+  | _ ->
+    Git_config_error
+      (Printf.sprintf "gitdir %s could not be resolved" gitdir_lexical)
 
-let git_config_path_of_repo_root repo_root =
+let git_config_path_of_repo_root_result repo_root =
   let dot_git = Filename.concat repo_root ".git" in
   if safe_file_exists dot_git && safe_is_directory dot_git then
-    Some (Filename.concat dot_git "config")
+    Git_config_path (Filename.concat dot_git "config")
   else if safe_file_exists dot_git then
     match read_git_probe_file_opt dot_git with
-    | None -> None
+    | None ->
+      Git_config_error
+        (Printf.sprintf ".git marker %s is unreadable or unsupported" dot_git)
     | Some content ->
         content
         |> String.split_on_char '\n'
@@ -625,38 +643,46 @@ let git_config_path_of_repo_root repo_root =
                  String.sub line 7 (String.length line - 7)
                  |> String.trim
                in
-               gitdir_config_path ~repo_root gitdir
+               Some (gitdir_config_path_result ~repo_root gitdir)
              else None)
+        |> Option.value
+             ~default:
+               (Git_config_error
+                  (Printf.sprintf ".git marker %s has no gitdir entry" dot_git))
   else
-    None
+    Git_config_absent
 
-let remote_origin_url_of_repo_root repo_root =
-  match git_config_path_of_repo_root repo_root with
-  | None -> None
-  | Some config_path -> (
-      match read_git_probe_file_opt config_path with
-      | None -> None
-      | Some content ->
-          let rec loop in_origin = function
-            | [] -> None
-            | line :: rest ->
-                let line = String.trim line in
-                if String.starts_with ~prefix:"[" line then
-                  loop (String.equal line {|[remote "origin"]|}) rest
-                else if in_origin && String.starts_with ~prefix:"url" line then
-                  (match String.index_opt line '=' with
-                   | None -> loop in_origin rest
-                   | Some idx ->
-                       let value =
-                         String.sub line (idx + 1)
-                           (String.length line - idx - 1)
-                         |> String.trim
-                       in
-                       if value = "" then loop in_origin rest else Some value)
-                else
-                  loop in_origin rest
-          in
-          loop false (String.split_on_char '\n' content))
+let remote_origin_url_of_repo_root_result repo_root =
+  match git_config_path_of_repo_root_result repo_root with
+  | Git_config_absent -> Ok None
+  | Git_config_error msg -> Error msg
+  | Git_config_path config_path -> (
+    match read_git_probe_file_opt config_path with
+    | None ->
+      Error
+        (Printf.sprintf
+           "git config %s is unreadable, unsupported, or too large"
+           config_path)
+    | Some content ->
+      let rec loop in_origin = function
+        | [] -> Ok None
+        | line :: rest ->
+          let line = String.trim line in
+          if String.starts_with ~prefix:"[" line
+          then loop (String.equal line {|[remote "origin"]|}) rest
+          else if in_origin && String.starts_with ~prefix:"url" line
+          then (
+            match String.index_opt line '=' with
+            | None -> loop in_origin rest
+            | Some idx ->
+              let value =
+                String.sub line (idx + 1) (String.length line - idx - 1)
+                |> String.trim
+              in
+              if value = "" then loop in_origin rest else Ok (Some value))
+          else loop in_origin rest
+      in
+      loop false (String.split_on_char '\n' content))
 
 let repository_identity_tokens (repo : repository) =
   repo.id :: repo.name :: repo.aliases
@@ -688,6 +714,19 @@ type repository_identity_mismatch = {
   segment : string;
   repo_root : string option;
 }
+
+type repository_origin_read_error =
+  { segment : string
+  ; repo_root : string
+  ; error : string
+  }
+
+let repository_origin_read_error_message { segment; repo_root; error } =
+  Printf.sprintf
+    "Repository origin read failed for playground repo segment %S at %s: %s"
+    segment
+    repo_root
+    error
 
 let repository_identity_mismatch ?repo_root ~segment repo =
   let url_basename = repository_url_basename repo.url in
@@ -763,6 +802,7 @@ type repository_resolution =
   | No_repository
   | Repository of repository_id
   | Repository_identity_mismatch of repository_identity_mismatch
+  | Repository_origin_read_error of repository_origin_read_error
   | Repository_store_error of string
 
 let repository_resolution_of_repo ?repo_root ~segment repo =
@@ -796,9 +836,13 @@ let resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment rep
   match List.find_opt (repository_matches_token ~base_path segment) repos with
   | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
   | None -> (
-      match Option.bind repo_root remote_origin_url_of_repo_root with
+      match repo_root with
       | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
-      | Some remote_url -> (
+      | Some repo_root -> (
+        match remote_origin_url_of_repo_root_result repo_root with
+        | Error error -> Repository_origin_read_error { segment; repo_root; error }
+        | Ok None -> unresolved_repository_segment_resolution ~repo_root ~segment repos
+        | Ok (Some remote_url) -> (
           match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
           | Some repo -> Repository repo.id
           | None -> (
@@ -813,7 +857,7 @@ let resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment rep
                   | Some mismatch -> Repository_identity_mismatch mismatch
                   | None ->
                     unresolved_repository_segment_resolution ?repo_root
-                      ~segment repos))))
+                      ~segment repos)))))
 ;;
 
 let resolve_repository_id_segment ~base_path ?repo_root segment =
@@ -873,7 +917,10 @@ let repository_resolution_of_path ~base_path ~path =
 let repository_id_of_path ~base_path ~path =
   match repository_resolution_of_path ~base_path ~path with
   | Repository repo_id -> Some repo_id
-  | No_repository | Repository_identity_mismatch _ | Repository_store_error _ -> None
+  | No_repository
+  | Repository_identity_mismatch _
+  | Repository_origin_read_error _
+  | Repository_store_error _ -> None
 
 (** [validate_path_access ~keeper_id ~base_path ~path] checks whether
     [keeper_id] is allowed to access the repository that contains [path].
@@ -886,6 +933,8 @@ let validate_path_access ~keeper_id ~base_path ~path =
   | Repository repo_id -> validate_access ~keeper_id ~repository_id:repo_id ~base_path
   | Repository_identity_mismatch mismatch ->
       Error (repository_identity_mismatch_message mismatch)
+  | Repository_origin_read_error error ->
+      Error (repository_origin_read_error_message error)
   | Repository_store_error msg ->
       Error
         (Printf.sprintf

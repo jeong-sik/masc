@@ -97,20 +97,42 @@ let add_json_marker_fields ?(trusted_route_fields = true) json markers =
   markers
 ;;
 
-let tool_exec_result_markers ~(input : Yojson.Safe.t) ~(output : string) : string list =
-  let markers = add_json_marker_fields ~trusted_route_fields:false input [] in
-  let markers =
-    try
-      let json = Yojson.Safe.from_string output in
+type output_marker_parse_error =
+  | Output_marker_json_decode_error of string
+
+type tool_exec_result_marker_report =
+  { markers : string list
+  ; output_parse_error : output_marker_parse_error option
+  }
+
+let output_marker_parse_error_to_string = function
+  | Output_marker_json_decode_error message ->
+      Printf.sprintf "tool output marker JSON decode failed: %s" message
+
+let output_marker_fields_result ~markers output =
+  match Yojson.Safe.from_string output with
+  | json ->
       let markers = add_json_marker_fields json markers in
-      match json with
-      | `Assoc fields ->
-        (match List.assoc_opt "result" fields with
-         | Some result -> add_json_marker_fields result markers
-         | None -> markers)
-      | _ -> markers
-    with
-    | Yojson.Json_error _ -> markers
-  in
-  List.rev markers
+      let markers =
+        match json with
+        | `Assoc fields -> (
+            match List.assoc_opt "result" fields with
+            | Some result -> add_json_marker_fields result markers
+            | None -> markers)
+        | _ -> markers
+      in
+      Ok markers
+  | exception Yojson.Json_error message ->
+      Error (Output_marker_json_decode_error message)
+
+let tool_exec_result_marker_report ~(input : Yojson.Safe.t) ~(output : string)
+    : tool_exec_result_marker_report =
+  let markers = add_json_marker_fields ~trusted_route_fields:false input [] in
+  match output_marker_fields_result ~markers output with
+  | Ok markers -> { markers = List.rev markers; output_parse_error = None }
+  | Error error ->
+      { markers = List.rev markers; output_parse_error = Some error }
+
+let tool_exec_result_markers ~(input : Yojson.Safe.t) ~(output : string) =
+  (tool_exec_result_marker_report ~input ~output).markers
 ;;

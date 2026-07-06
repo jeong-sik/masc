@@ -20,6 +20,12 @@ let result_of = function
 let result_t = testable (Fmt.of_to_string result_of) ( = )
 let validate name = Routes.validate_name name
 
+let schema_field_types_failure_metric error_kind =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_sidecar_schema_field_types_failures
+    ~labels:[ ("error_kind", error_kind) ]
+    ()
+
 let unix_of_iso_exn value =
   match Types_core.parse_iso8601_opt value with
   | Some unix -> unix
@@ -455,8 +461,8 @@ let test_desired_store_increments_generation () =
         ~updated_by:"test"
         Routes.Desired_stopped
     in
-    match first, second, Routes.read_desired_record ~base_path "discord" with
-    | Ok first, Ok second, Some persisted ->
+    match first, second, Routes.read_desired_record_result ~base_path "discord" with
+    | Ok first, Ok second, Ok (Some persisted) ->
       check int "first generation" 1 first.generation;
       check int "second generation" 2 second.generation;
       check int "persisted generation" 2 persisted.generation;
@@ -466,6 +472,71 @@ let test_desired_store_increments_generation () =
         "stopped"
         (Routes.desired_state_to_string persisted.desired_state)
     | _ -> failf "desired writes should succeed and persist")
+;;
+
+let malformed_desired_state_json =
+  {|{"connector_id":"discord","desired_state":"sideways","generation":1,"updated_by":"test","updated_at":"2026-01-01T00:00:00Z"}|}
+;;
+
+let test_read_desired_record_result_reports_semantic_corruption () =
+  with_temp_dir "sidecar-desired-corrupt-read" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "discord" in
+    write_file path malformed_desired_state_json;
+    match Routes.read_desired_record_result ~base_path "discord" with
+    | Error msg ->
+      check bool "mentions field" true (contains_substring msg "desired_state");
+      check bool "mentions bad value" true (contains_substring msg "sideways")
+    | Ok None -> failf "corrupt persisted desired state must not look absent"
+    | Ok (Some _) -> failf "corrupt persisted desired state should not decode")
+;;
+
+let test_status_json_surfaces_invalid_desired_state () =
+  with_temp_dir "sidecar-desired-corrupt-status" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "discord" in
+    write_file path malformed_desired_state_json;
+    let json = Routes.read_status_json ~base_path "discord" in
+    let open Yojson.Safe.Util in
+    let lifecycle = json |> member "sidecar_lifecycle" in
+    check
+      bool
+      "desired_state remains absent"
+      true
+      (match lifecycle |> member "desired_state" with
+       | `Null -> true
+       | _ -> false);
+    let error =
+      match lifecycle |> member "desired_read_error" with
+      | `String msg -> msg
+      | other -> failf "expected desired_read_error string, got %s" (Yojson.Safe.to_string other)
+    in
+    check bool "mentions field" true (contains_substring error "desired_state");
+    check bool "mentions bad value" true (contains_substring error "sideways"))
+;;
+
+let test_write_desired_record_refuses_corrupt_prior_state () =
+  with_temp_dir "sidecar-desired-corrupt-write" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "discord" in
+    write_file path malformed_desired_state_json;
+    (match
+       Routes.write_desired_record
+         ~updated_at:"2026-01-01T00:00:01Z"
+         ~base_path
+         ~id:"discord"
+         ~updated_by:"test"
+         Routes.Desired_running
+     with
+     | Error msg ->
+       check bool "mentions field" true (contains_substring msg "desired_state");
+       check bool "mentions bad value" true (contains_substring msg "sideways")
+     | Ok record ->
+       failf
+         "write should fail before overwriting corrupt prior state, got generation %d"
+         record.generation);
+    check
+      string
+      "corrupt desired record is not overwritten"
+      malformed_desired_state_json
+      (Routes.read_file path))
 ;;
 
 let test_reconcile_stale_generation_does_not_start () =
@@ -728,6 +799,37 @@ let test_status_json_exposes_dashboard_provenance () =
        | _ -> false))
 ;;
 
+let test_status_json_surfaces_malformed_status_file () =
+  with_env "MASC_SIDECAR_ROOT" None @@ fun () ->
+  with_env "DISCORD_STATUS_PATH" None @@ fun () ->
+  with_env "discord_status_path" None @@ fun () ->
+  with_temp_dir "sidecar-status-malformed" (fun base_path ->
+    let path = Routes.status_file ~base_path "discord" in
+    write_file path {|{"pid":|};
+    let json = Routes.read_status_json ~base_path "discord" in
+    let open Yojson.Safe.Util in
+    check bool "status file remains available" true (json |> member "available" |> to_bool);
+    check
+      bool
+      "status payload is null on parse error"
+      true
+      (match json |> member "status" with
+       | `Null -> true
+       | _ -> false);
+    check
+      string
+      "status_read_error_kind"
+      "json_malformed"
+      (json |> member "status_read_error_kind" |> to_string);
+    let error =
+      match json |> member "status_read_error" with
+      | `String msg -> msg
+      | other -> failf "expected status_read_error string, got %s" (Yojson.Safe.to_string other)
+    in
+    check bool "error mentions status path" true (contains_substring error path);
+    check bool "error mentions malformed JSON" true (contains_substring error "malformed"))
+;;
+
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
 let test_escape_quotes_and_backslash () =
@@ -930,7 +1032,7 @@ let test_isoish_lexical_matches_chronological () =
 (* ── retry_backoff_active (#8930 / #22246) ─────────────────────────────
    [retry_backoff_active] parses [now] at the boundary and delegates the
    deadline check to [Attempt_state.is_backoff_active]. Malformed persisted
-   [next_retry_at] values are rejected by [attempt_record_of_json] instead
+   [next_retry_at] values are rejected by [attempt_record_of_json_result] instead
    of entering the in-memory state. *)
 
 let make_attempt ~next_retry_at =
@@ -985,8 +1087,7 @@ let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
      failf
        "unexpected decode error: %s"
        (Routes.attempt_record_decode_error_to_string error)
-   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary");
-  check bool "compat option wrapper still rejects" true (Routes.attempt_record_of_json json = None)
+   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary")
 ;;
 
 let test_read_attempt_record_result_reports_semantic_corruption () =
@@ -1092,7 +1193,7 @@ let test_reconcile_start_process_exception_propagates () =
   | Failure msg -> check string "exception propagates unchanged" "process failed" msg
 ;;
 
-let test_fetch_schema_error_on_nonzero_exit () =
+let with_schema_fail_sidecar f =
   with_temp_dir "sidecar-schema-fail" (fun base_path ->
     let sidecar_dir = Filename.concat base_path "sidecars/discord-bot" in
     (* [Routes.python_argv_for] looks for [.venv/bin/python] (dotted venv) before
@@ -1105,6 +1206,11 @@ let test_fetch_schema_error_on_nonzero_exit () =
     write_file python_bin "#!/bin/sh\nexit 1\n";
     Unix.chmod python_bin 0o755;
     Routes.reset_schema_cache ();
+    f base_path)
+;;
+
+let test_fetch_schema_error_on_nonzero_exit () =
+  with_schema_fail_sidecar (fun base_path ->
     match Routes.fetch_schema ~base_path "discord" with
     | Ok _ -> failf "expected Error when python exits non-zero"
     | Error msg ->
@@ -1113,6 +1219,30 @@ let test_fetch_schema_error_on_nonzero_exit () =
         "error mentions schema_dump failure"
         true
         (contains_substring msg "schema_dump failed"))
+;;
+
+let test_schema_field_types_result_surfaces_fetch_error () =
+  with_schema_fail_sidecar (fun base_path ->
+    match Routes.schema_field_types_result ~base_path "discord" with
+    | Error (Routes.Schema_fetch_error msg) ->
+      check
+        bool
+        "error mentions schema_dump failure"
+        true
+        (contains_substring msg "schema_dump failed")
+    | Error error -> fail (Routes.schema_field_types_error_to_string error)
+    | Ok fields ->
+      failf "expected schema field type fetch error, got %d field(s)" (List.length fields))
+;;
+
+let test_schema_field_types_facade_observes_fetch_error () =
+  with_schema_fail_sidecar (fun base_path ->
+    let error_kind = Routes.schema_field_types_error_kind (Routes.Schema_fetch_error "") in
+    let before = schema_field_types_failure_metric error_kind in
+    check int "legacy facade fields" 0
+      (List.length (Routes.schema_field_types ~base_path "discord"));
+    let after = schema_field_types_failure_metric error_kind in
+    check (float 0.0001) "fetch error metric increments" (before +. 1.0) after)
 ;;
 
 let () =
@@ -1187,6 +1317,18 @@ let () =
             `Quick
             test_desired_store_increments_generation
         ; test_case
+            "malformed persisted desired → read error"
+            `Quick
+            test_read_desired_record_result_reports_semantic_corruption
+        ; test_case
+            "malformed persisted desired → status error"
+            `Quick
+            test_status_json_surfaces_invalid_desired_state
+        ; test_case
+            "malformed persisted desired blocks overwrite"
+            `Quick
+            test_write_desired_record_refuses_corrupt_prior_state
+        ; test_case
             "stale generation reconcile does not start"
             `Quick
             test_reconcile_stale_generation_does_not_start
@@ -1211,6 +1353,10 @@ let () =
             "status JSON exposes dashboard provenance"
             `Quick
             test_status_json_exposes_dashboard_provenance
+        ; test_case
+            "malformed status file surfaces read error"
+            `Quick
+            test_status_json_surfaces_malformed_status_file
         ] )
     ; ( "config_write_helpers"
       , [ test_case "escape: quotes + backslash" `Quick test_escape_quotes_and_backslash
@@ -1305,6 +1451,14 @@ let () =
             "fetch_schema returns Error on non-zero python exit"
             `Quick
             test_fetch_schema_error_on_nonzero_exit
+        ; test_case
+            "schema_field_types_result surfaces fetch error"
+            `Quick
+            test_schema_field_types_result_surfaces_fetch_error
+        ; test_case
+            "schema_field_types facade observes fetch error"
+            `Quick
+            test_schema_field_types_facade_observes_fetch_error
         ] )
     ]
 ;;

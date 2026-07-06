@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034
 
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
 : "${CURL_RETRY_COUNT:=4}"
@@ -249,7 +250,6 @@ mcp_jsonrpc_call() {
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
     stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
     resp_file="$(mcp_mktemp_file "masc-jsonrpc-resp" ".json")"
-    trap 'rm -f "$body_file" "$stderr_file" "$resp_file" "$auth_header_file"' RETURN
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(
@@ -284,12 +284,13 @@ mcp_jsonrpc_call() {
     MCP_LAST_TIME_TOTAL="$cumulative_time"
     stderr_text="$(cat "$stderr_file" 2>/dev/null || true)"
     raw="$(cat "$resp_file" 2>/dev/null || true)"
-    rm -f "$body_file" "$stderr_file" "$resp_file" "$auth_header_file"
+    rm -f "$body_file" "$stderr_file" "$resp_file"
 
     if [[ "$status" -eq 0 ]]; then
       local normalized
       normalized="$(jsonrpc_normalize_response "$raw" "$id")"
       if printf '%s' "$normalized" | jq -e . >/dev/null 2>&1; then
+        rm -f "$auth_header_file"
         printf '%s' "$normalized"
         return 0
       fi
@@ -298,6 +299,7 @@ mcp_jsonrpc_call() {
         stderr_text="MCP SSE response did not contain JSON-RPC data"
         status=28
       else
+        rm -f "$auth_header_file"
         printf '%s' "$normalized"
         return 0
       fi
@@ -315,11 +317,13 @@ mcp_jsonrpc_call() {
         attempt=$((attempt + 1))
         ;;
       *)
+        rm -f "$auth_header_file"
         break
         ;;
     esac
   done
 
+  rm -f "$auth_header_file"
   _mcp_build_transport_error \
     "curl failed after ${attempt}/${max_attempts} attempts" \
     "$endpoint" \

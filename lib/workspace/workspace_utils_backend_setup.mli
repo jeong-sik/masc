@@ -18,6 +18,7 @@ val with_domain_local_pg_backend :
   mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   config ->
   config option
+val read_git_file_result : string -> (string option, string) result
 val read_git_file : string -> string option
 val parse_gitdir_to_main_root : string -> string option
 val find_git_root : string -> string option

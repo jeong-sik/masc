@@ -187,9 +187,10 @@ let test_interval_recurrence_next_due () =
       ()
   in
   check bool "is recurring" true (is_recurring req.recurrence);
-  match next_due_after ~now:201.0 req with
-  | None -> fail "expected next interval due"
-  | Some due_at -> check (float 0.001) "next due" 260.0 due_at
+  match next_due_after_result ~now:201.0 req with
+  | Ok (Some due_at) -> check (float 0.001) "next due" 260.0 due_at
+  | Ok None -> fail "expected next interval due"
+  | Error err -> fail (due_calculation_error_to_string err)
 ;;
 
 let test_daily_recurrence_next_due_uses_fixed_offset_alias () =
@@ -199,9 +200,10 @@ let test_daily_recurrence_next_due_uses_fixed_offset_alias () =
         (Daily { hour = 9; minute = 0; second = 0; timezone = "Asia/Seoul" })
       ()
   in
-  match next_due_after ~now:1.0 req with
-  | None -> fail "expected next daily due"
-  | Some due_at -> check (float 0.001) "next KST 09:00" 86400.0 due_at
+  match next_due_after_result ~now:1.0 req with
+  | Ok (Some due_at) -> check (float 0.001) "next KST 09:00" 86400.0 due_at
+  | Ok None -> fail "expected next daily due"
+  | Error err -> fail (due_calculation_error_to_string err)
 ;;
 
 let test_daily_recurrence_next_due_accepts_explicit_fixed_offset () =
@@ -211,9 +213,10 @@ let test_daily_recurrence_next_due_accepts_explicit_fixed_offset () =
         (Daily { hour = 9; minute = 0; second = 0; timezone = "+09:00" })
       ()
   in
-  match next_due_after ~now:1.0 req with
-  | None -> fail "expected next daily due"
-  | Some due_at -> check (float 0.001) "next +09:00 09:00" 86400.0 due_at
+  match next_due_after_result ~now:1.0 req with
+  | Ok (Some due_at) -> check (float 0.001) "next +09:00 09:00" 86400.0 due_at
+  | Ok None -> fail "expected next daily due"
+  | Error err -> fail (due_calculation_error_to_string err)
 ;;
 
 let test_daily_recurrence_rejects_dst_iana_timezone () =
@@ -240,9 +243,10 @@ let test_cron_recurrence_next_due_weekdays () =
       ()
   in
   check bool "is recurring" true (is_recurring req.recurrence);
-  match next_due_after ~now:32400.0 req with
-  | None -> fail "expected next cron due"
-  | Some due_at -> check (float 0.001) "next weekday 09:00" 118800.0 due_at
+  match next_due_after_result ~now:32400.0 req with
+  | Ok (Some due_at) -> check (float 0.001) "next weekday 09:00" 118800.0 due_at
+  | Ok None -> fail "expected next cron due"
+  | Error err -> fail (due_calculation_error_to_string err)
 ;;
 
 let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
@@ -251,9 +255,10 @@ let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
       ~recurrence:(Cron { expression = "*/30 9-10 * * 7"; timezone = "UTC" })
       ()
   in
-  match next_due_after ~now:259199.0 req with
-  | None -> fail "expected next Sunday cron due"
-  | Some due_at -> check (float 0.001) "Sunday 09:00" 291600.0 due_at
+  match next_due_after_result ~now:259199.0 req with
+  | Ok (Some due_at) -> check (float 0.001) "Sunday 09:00" 291600.0 due_at
+  | Ok None -> fail "expected next Sunday cron due"
+  | Error err -> fail (due_calculation_error_to_string err)
 ;;
 
 let test_cron_recurrence_rejects_invalid_expression () =
@@ -268,6 +273,45 @@ let test_cron_recurrence_rejects_invalid_expression () =
   | Ok _ -> fail "expected invalid cron rejection"
   | Error msg ->
     check string "cron error" "recurrence.cron.minute step must be positive" msg
+;;
+
+let test_first_due_after_result_keeps_non_calendar_as_none () =
+  match first_due_after_result ~now:1.0 (Interval { interval_sec = 60 }) with
+  | Ok None -> ()
+  | Ok (Some due_at) ->
+    failf "interval first_due_after_result unexpectedly returned %f" due_at
+  | Error err -> fail (due_calculation_error_to_string err)
+;;
+
+let test_next_due_after_result_reports_invalid_direct_daily_time () =
+  let req =
+    { (request ~risk_class:Read_only ())
+      with
+      recurrence =
+        Daily { hour = 24; minute = 0; second = 0; timezone = "UTC" }
+    }
+  in
+  match next_due_after_result ~now:1.0 req with
+  | Error (Due_invalid_daily_time { hour; minute; second }) ->
+    check int "hour" 24 hour;
+    check int "minute" 0 minute;
+    check int "second" 0 second
+  | Error err -> fail (due_calculation_error_to_string err)
+  | Ok _ -> fail "expected invalid daily time error"
+;;
+
+let test_next_due_after_result_reports_invalid_direct_cron_expression () =
+  let req =
+    { (request ~risk_class:Read_only ())
+      with
+      recurrence = Cron { expression = "*/0 9 * * 1-5"; timezone = "UTC" }
+    }
+  in
+  match next_due_after_result ~now:1.0 req with
+  | Error (Due_invalid_cron_expression msg) ->
+    check string "cron error" "recurrence.cron.minute step must be positive" msg
+  | Error err -> fail (due_calculation_error_to_string err)
+  | Ok _ -> fail "expected invalid cron expression error"
 ;;
 
 let test_schedule_roundtrip () =
@@ -399,6 +443,12 @@ let () =
             test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
           test_case "cron recurrence rejects invalid expression" `Quick
             test_cron_recurrence_rejects_invalid_expression;
+          test_case "first due result keeps non-calendar recurrence as none" `Quick
+            test_first_due_after_result_keeps_non_calendar_as_none;
+          test_case "next due result reports direct invalid daily time" `Quick
+            test_next_due_after_result_reports_invalid_direct_daily_time;
+          test_case "next due result reports direct invalid cron expression" `Quick
+            test_next_due_after_result_reports_invalid_direct_cron_expression;
         ] );
       ( "grant",
         [

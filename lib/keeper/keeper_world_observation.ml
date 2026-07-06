@@ -44,6 +44,8 @@ type pending_board_event =
   ; new_external_since : int
   ; latest_external_author : string option
   ; latest_external_preview : string option
+  ; post_read_error : string option
+  ; comment_read_error : string option
   ; provenance : observation_provenance
       (* RFC-0247: computed at construction; drives trusted-vs-observational split *)
   }
@@ -60,8 +62,13 @@ type scheduled_automation_item =
   ; keeper_next_action : string
   }
 
+type scheduled_automation_read_status =
+  | Schedule_observation_ok
+  | Schedule_observation_read_error of string
+
 type scheduled_automation_observation =
-  { active_count : int
+  { read_status : scheduled_automation_read_status
+  ; active_count : int
   ; due_ready_count : int
   ; blocked_approval_count : int
   ; next_due_at : float option
@@ -69,12 +76,23 @@ type scheduled_automation_observation =
   }
 
 let empty_scheduled_automation_observation =
-  { active_count = 0
+  { read_status = Schedule_observation_ok
+  ; active_count = 0
   ; due_ready_count = 0
   ; blocked_approval_count = 0
   ; next_due_at = None
   ; items = []
   }
+;;
+
+let scheduled_automation_counts_known = function
+  | { read_status = Schedule_observation_ok; _ } -> true
+  | { read_status = Schedule_observation_read_error _; _ } -> false
+;;
+
+let scheduled_automation_read_error = function
+  | { read_status = Schedule_observation_ok; _ } -> None
+  | { read_status = Schedule_observation_read_error msg; _ } -> Some msg
 ;;
 
 type world_observation =
@@ -170,7 +188,6 @@ module Board_signal = Keeper_world_observation_board_signal
 type board_signal_match = Board_signal.match_result =
   { explicit_mention : bool
   ; matched_targets : string list
-  ; score : int
   }
 
 module Message_scope = Keeper_world_observation_message_scope
@@ -233,12 +250,15 @@ let read_continuity_summary = Continuity.read_continuity_summary
 let scheduled_automation_item_limit = 5
 
 let schedule_payload_kind (request : Schedule_domain.schedule_request) =
-  match Schedule_domain.payload_to_yojson request.payload with
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String kind) -> Some kind
-     | _ -> None)
-  | _ -> None
+  match Schedule_payload_projection.kind_result request with
+  | Ok kind -> Some kind
+  | Error msg ->
+    Log.Keeper.warn
+      "scheduled automation observation: payload kind projection failed \
+       schedule_id=%s: %s"
+      request.schedule_id
+      msg;
+    None
 ;;
 
 let schedule_effectively_expired ~now (request : Schedule_domain.schedule_request) =
@@ -309,33 +329,36 @@ let next_active_schedule_due_at ~now schedules =
        None
 ;;
 
-let schedule_query_failure_message = function
-  | Schedule_store.Corrupt_ledger_exn { primary_err; recovery_err } ->
-    (match recovery_err with
-     | None ->
-       Printf.sprintf
-         "schedule ledger corrupt while reading keeper observation: %s"
-         primary_err
-     | Some recovery_err ->
-       Printf.sprintf
-         "schedule ledger corrupt while reading keeper observation: %s; recovery: %s"
-         primary_err
-         recovery_err)
-  | exn -> Printexc.to_string exn
+let schedule_visible_to_keeper ?keeper_name (request : Schedule_domain.schedule_request) =
+  match keeper_name with
+  | None -> true
+  | Some keeper_name ->
+    (match request.scheduled_by.kind with
+     | Schedule_domain.Automated_actor ->
+       String.equal request.scheduled_by.id keeper_name
+     | Human_operator | System -> false)
 ;;
 
-let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
-  try
-    let state = Schedule_store.read_state config in
+let schedule_read_failure_message err =
+  "schedule store read failed while reading keeper observation: "
+  ^ Schedule_store.read_error_to_string err
+;;
+
+let read_scheduled_automation_observation ~(config : Workspace.config) ?keeper_name ~now =
+  match Schedule_store.read_state_result config with
+  | Ok state ->
+    let visible_schedules =
+      List.filter (schedule_visible_to_keeper ?keeper_name) state.schedules
+    in
     let due_ready =
       Schedule_store.due_execution_candidates state
-      |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
+      |> List.filter (fun request ->
+        schedule_visible_to_keeper ?keeper_name request
+        && not (schedule_effectively_expired ~now request))
     in
-    let blocked =
-      state.schedules |> List.filter (schedule_blocked_approval ~now state)
-    in
+    let blocked = visible_schedules |> List.filter (schedule_blocked_approval ~now state) in
     let active_count =
-      state.schedules
+      visible_schedules
       |> List.fold_left
            (fun count request ->
               if schedule_effectively_active ~now request then count + 1 else count)
@@ -349,18 +372,17 @@ let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
         (schedule_attention_item Schedule_projection.Approve_or_reject)
         blocked
     in
-    { active_count
+    { read_status = Schedule_observation_ok
+    ; active_count
     ; due_ready_count = List.length due_ready
     ; blocked_approval_count = List.length blocked
-    ; next_due_at = next_active_schedule_due_at ~now state.schedules
+    ; next_due_at = next_active_schedule_due_at ~now visible_schedules
     ; items =
         due_items @ blocked_items
         |> List.sort compare_schedule_attention_item
         |> take scheduled_automation_item_limit
     }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  | Error err ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
@@ -368,8 +390,11 @@ let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
           , Runtime_observation_query_operation.(to_label Scheduled_automation) )
         ]
       ();
-    Log.Keeper.warn "%s" (schedule_query_failure_message exn);
-    empty_scheduled_automation_observation
+    let message = schedule_read_failure_message err in
+    Log.Keeper.warn "%s" message;
+    { empty_scheduled_automation_observation with
+      read_status = Schedule_observation_read_error message
+    }
 ;;
 
 (** Board event cursor bootstrap window (seconds). *)
@@ -384,10 +409,14 @@ let pending_board_event_of_board_signal
   =
   let self_ids = self_ids meta in
   let matched = board_signal_match ~continuity_summary ~meta ~signal in
-  let post_snapshot =
+  let post_snapshot, post_read_error =
     match Board_dispatch.get_post ~post_id:signal.post_id with
-    | Ok post -> Some post
-    | Error _ -> None
+    | Ok post -> Some post, None
+    | Error err ->
+      ( None
+      , Some
+          ("board post read failed while enriching keeper board signal: "
+           ^ Board.show_board_error err) )
   in
   let title, preview, hearth, post_kind, updated_at =
     match post_snapshot with
@@ -404,16 +433,31 @@ let pending_board_event_of_board_signal
       , Board.Human_post
       , arrived_at )
   in
-  let self_commented, new_external_since, latest_external_author, latest_external_preview =
+  let ( self_commented
+      , new_external_since
+      , latest_external_author
+      , latest_external_preview
+      , comment_read_error )
+    =
     match signal.kind with
-    | Board_dispatch.Board_post_created -> false, 0, None, None
+    | Board_dispatch.Board_post_created -> false, 0, None, None, None
     | Board_dispatch.Board_comment_added ->
       (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-       | `New_external (count, author, preview) -> true, count, Some author, Some preview
+       | `New_external (count, author, preview) ->
+         true, count, Some author, Some preview, None
        | `No_new_external ->
-         true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
+         ( true
+         , 0
+         , Some signal.author
+         , Some (short_preview ~max_len:60 signal.content)
+         , None )
        | `Never ->
-         false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content))
+         ( false
+         , 1
+         , Some signal.author
+         , Some (short_preview ~max_len:60 signal.content)
+         , None )
+       | `Comment_read_error error -> false, 0, None, None, Some error)
   in
   { post_id = signal.post_id
   ; author = signal.author
@@ -428,6 +472,8 @@ let pending_board_event_of_board_signal
   ; new_external_since
   ; latest_external_author
   ; latest_external_preview
+  ; post_read_error
+  ; comment_read_error
   ; provenance = provenance_of ~self_ids post_kind ~author:signal.author
   }
 ;;
@@ -475,6 +521,8 @@ let pending_board_event_of_fusion_completion
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
+  ; post_read_error = None
+  ; comment_read_error = None
   ; provenance = provenance_of ~self_ids Board.System_post ~author:meta.name
   }
 ;;
@@ -521,6 +569,8 @@ let pending_board_event_of_bg_job_completion
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
+  ; post_read_error = None
+  ; comment_read_error = None
   ; provenance = provenance_of ~self_ids Board.System_post ~author:meta.name
   }
 ;;
@@ -569,6 +619,8 @@ let pending_board_event_of_external_attention
   ; new_external_since = 1
   ; latest_external_author = Some actor
   ; latest_external_preview = Some (short_preview ~max_len:80 item.content_preview)
+  ; post_read_error = None
+  ; comment_read_error = None
   ; provenance = Unknown
   }
 ;;
@@ -594,12 +646,14 @@ let pending_board_event_of_stimulus
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
+  | Keeper_event_queue.Schedule_signal _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
-       fires via the trigger itself; [Hitl_resolved] carries no observation to
-       inject — the keeper resumes on its own state once the approval is gone
-       from the queue. *)
+       fires via the trigger itself. [Schedule_signal] is a durable pointer to
+       the schedule store; [Hitl_resolved] carries no observation to inject —
+       the keeper resumes on its own state once the approval is gone from the
+       queue. *)
     None
 ;;
 
@@ -640,18 +694,18 @@ let collect_board_events_with_cursor_policy
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
+    let target_ids = Keeper_lane_mentions.target_ids_of targets in
     let mention_count =
       List.length
         (List.filter
            (fun (p : Board.post) ->
-              let haystack =
-                String.lowercase_ascii (p.title ^ " " ^ p.body ^ " " ^ p.content)
+              let mentions =
+                p.mention_ids
+                |> List.filter_map (fun mention_id ->
+                  Keeper_identity.Keeper_id.of_string
+                    (Board.Mention_id.to_string mention_id))
               in
-              List.exists
-                (fun target ->
-                   let needle = "@" ^ String.lowercase_ascii target in
-                   String_util.contains_substring haystack needle)
-                targets)
+              Keeper_lane_mentions.ids_match ~target_ids mentions)
            recent)
     in
     let rec consume_posts last_cursor acc = function
@@ -673,6 +727,7 @@ let collect_board_events_with_cursor_policy
              ; author = Board.Agent_id.to_string p.author
              ; title = p.title
              ; content = p.content
+             ; mention_ids = p.mention_ids
              ; hearth = p.hearth
              ; updated_at = Some p.updated_at
              }
@@ -702,23 +757,62 @@ let collect_board_events_with_cursor_policy
                 ; new_external_since = 0
                 ; latest_external_author = None
                 ; latest_external_preview = None
+                ; post_read_error = None
+                ; comment_read_error = None
                 ; provenance =
                     provenance_of ~self_ids p.post_kind
                       ~author:(Board.Agent_id.to_string p.author)
                 }
                 :: acc)
                rest
+         | `Comment_read_error error ->
+           let signal : Board_dispatch.board_signal =
+             { kind = Board_dispatch.Board_post_created
+             ; post_id
+             ; author = Board.Agent_id.to_string p.author
+             ; title = p.title
+             ; content = p.content
+             ; mention_ids = p.mention_ids
+             ; hearth = p.hearth
+             ; updated_at = Some p.updated_at
+             }
+           in
+           let matched = board_signal_match ~continuity_summary ~meta ~signal in
+           consume_posts
+             (Some next_cursor)
+             ({ post_id
+              ; author = Board.Agent_id.to_string p.author
+              ; title = p.title
+              ; preview = short_preview ~max_len:80 p.content
+              ; hearth = p.hearth
+              ; post_kind = p.post_kind
+              ; updated_at = p.updated_at
+              ; explicit_mention = matched.explicit_mention
+              ; matched_targets = matched.matched_targets
+              ; self_commented = false
+              ; new_external_since = 0
+              ; latest_external_author = None
+              ; latest_external_preview = None
+              ; post_read_error = None
+              ; comment_read_error = Some error
+              ; provenance =
+                  provenance_of ~self_ids p.post_kind
+                    ~author:(Board.Agent_id.to_string p.author)
+              }
+              :: acc)
+             rest
          | `New_external (count, ext_author, ext_preview) ->
            (
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
                ; post_id
-               ; author = Board.Agent_id.to_string p.author
-               ; title = p.title
-               ; content = p.content
-               ; hearth = p.hearth
-               ; updated_at = Some p.updated_at
-               }
+              ; author = Board.Agent_id.to_string p.author
+              ; title = p.title
+              ; content = p.content
+              ; mention_ids = p.mention_ids
+              ; hearth = p.hearth
+              ; updated_at = Some p.updated_at
+              }
              in
              let matched = board_signal_match ~continuity_summary ~meta ~signal in
              consume_posts
@@ -737,6 +831,8 @@ let collect_board_events_with_cursor_policy
                 ; new_external_since = count
                 ; latest_external_author = Some ext_author
                 ; latest_external_preview = Some ext_preview
+                ; post_read_error = None
+                ; comment_read_error = None
                 ; provenance =
                     provenance_of ~self_ids p.post_kind
                       ~author:(Board.Agent_id.to_string p.author)
@@ -753,14 +849,25 @@ let collect_board_events_with_cursor_policy
                (ts, post_id)
                (fst base_cursor, Option.value ~default:"" (snd base_cursor))
              > 0 ->
-        Keeper_reaction_ledger.record_board_cursor_ack
-          ~base_path
-          ~keeper_name:meta.name
-          ~stimulus_id:(Keeper_reaction_ledger.board_stimulus_id ~post_id)
-          ~cursor_ts:ts
-          ~post_id:(Some post_id)
-          ();
-        Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
+        (match
+           Keeper_reaction_ledger.record_board_cursor_ack_result
+             ~base_path
+             ~keeper_name:meta.name
+             ~stimulus_id:(Keeper_reaction_ledger.board_stimulus_id ~post_id)
+             ~cursor_ts:ts
+             ~post_id:(Some post_id)
+             ()
+         with
+         | Ok () ->
+           Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
+         | Error error ->
+           Log.Keeper.warn
+             "board cursor ack append failed for %s post_id=%s cursor_ts=%f; cursor \
+              not advanced: %s"
+             meta.name
+             post_id
+             ts
+             error)
       | Some (ts, post_id) ->
         Log.Keeper.debug
           "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"
@@ -843,7 +950,10 @@ let observe
   let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~config
+      ~keeper_name:meta.name
+      ~now:(Time_compat.now ())
   in
   (* Defer the checkpoint load (file read + Yojson parse + sanitize + O(n)
      tool-pair repair) out of [observe]. Most cycles are no-op skips where
@@ -897,7 +1007,10 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
   in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~config
+      ~keeper_name:meta.name
+      ~now:(Time_compat.now ())
   in
   { pending_mentions = []
   ; pending_board_events = []
@@ -977,7 +1090,10 @@ let durable_signal_present
       events
   in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~config
+      ~keeper_name:meta.name
+      ~now:(Time_compat.now ())
   in
   pending_mentions <> []
   || pending_board_events <> []

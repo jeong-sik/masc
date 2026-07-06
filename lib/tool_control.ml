@@ -50,25 +50,35 @@ let handle_pause ~tool_name ~start_time ctx args : Tool_result.result =
 ;;
 
 let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
-  match Workspace.resume ctx.config ~by:ctx.agent_name with
-  | `Resumed ->
+  match Workspace.resume_result ctx.config ~by:ctx.agent_name with
+  | Error msg ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time
+      (Printf.sprintf "Resume failed: %s" msg)
+  | Ok `Resumed ->
     text_ok ~tool_name ~start_time
       (Printf.sprintf "Resumed by %s" ctx.agent_name)
-  | `Already_running ->
+  | Ok `Already_running ->
     text_ok ~tool_name ~start_time "Default project scope is not paused"
 ;;
 
 let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
+  let workspace_initialized = Workspace.is_initialized ctx.config in
   let keeper_pause =
-    if not (Workspace.is_initialized ctx.config)
+    if not workspace_initialized
     then
       `Assoc
         [
           ("paused", `Null);
+          ("keeper_names_known", `Null);
           ("paused_count", `Null);
           ("paused_names", `List []);
           ("meta_paused_count", `Null);
           ("phase_paused_count", `Null);
+          ("keeper_name_discovery_read_error_count", `Int 0);
+          ("keeper_name_discovery_read_errors", `List []);
           ("read_errors", `List []);
         ]
     else Pause_status_backend.keeper_pause_status_json ctx.config
@@ -81,14 +91,24 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
       | _ -> false)
     | _ -> false
   in
-  let pause_state =
-    if not (Workspace.is_initialized ctx.config) then `Initializing
+  let pause_state_result =
+    if not workspace_initialized then Ok `Initializing
     else
-      let state = Workspace.read_state ctx.config in
-      if state.paused then
-        `Paused (state.paused_by, state.pause_reason, state.paused_at)
-      else `Running
+      match Workspace.read_state_result ctx.config with
+      | Error error -> Error (Workspace.read_state_error_to_string error)
+      | Ok state ->
+        if state.paused then
+          Ok (`Paused (state.paused_by, state.pause_reason, state.paused_at))
+        else Ok `Running
   in
+  match pause_state_result with
+  | Error msg ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time
+      (Printf.sprintf "Pause status failed: %s" msg)
+  | Ok pause_state ->
   let payload =
     match pause_state with
     | `Paused (by, reason, at) ->

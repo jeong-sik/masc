@@ -120,27 +120,27 @@ let remove_stimuli queue stimuli =
     |> List.filter (fun stimulus -> not (remove stimulus))
     |> queue_of_list
 
-let load_from_path ~keeper_name path =
+let load_from_path_result ~keeper_name path =
   if not (Sys.file_exists path)
-  then Keeper_event_queue.empty
+  then Ok Keeper_event_queue.empty
   else (
     match Safe_ops.read_json_file_safe path with
     | Error msg ->
-      Log.Keeper.warn
-        "event_queue_snapshot: failed to read keeper=%s path=%s: %s"
-        keeper_name
-        path
-        msg;
-      Keeper_event_queue.empty
+      Error
+        (Printf.sprintf
+           "failed to read keeper=%s path=%s: %s"
+           keeper_name
+           path
+           msg)
     | Ok json ->
       (match Keeper_event_queue.queue_of_yojson json with
        | Error msg ->
-         Log.Keeper.warn
-           "event_queue_snapshot: failed to parse keeper=%s path=%s: %s"
-           keeper_name
-           path
-           msg;
-         Keeper_event_queue.empty
+         Error
+           (Printf.sprintf
+              "failed to parse keeper=%s path=%s: %s"
+              keeper_name
+              path
+              msg)
        | Ok queue ->
          let deduped = Keeper_event_queue.dedup_by_identity queue in
          let dropped =
@@ -159,20 +159,52 @@ let load_from_path ~keeper_name path =
              "event_queue_snapshot: restored %s for keeper=%s"
              (Keeper_event_queue.summary deduped)
              keeper_name;
-         deduped))
+         Ok deduped))
 
-let load_unlocked ~base_path ~keeper_name =
-  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
-  | Error msg, _ | _, Error msg ->
+let load_from_path ~keeper_name path =
+  match load_from_path_result ~keeper_name path with
+  | Ok queue -> queue
+  | Error msg ->
     Log.Keeper.warn "event_queue_snapshot: %s" msg;
     Keeper_event_queue.empty
-  | Ok pending_path, Ok inflight_path ->
-    let pending = load_from_path ~keeper_name pending_path in
-    let inflight = load_from_path ~keeper_name inflight_path in
-    prepend_missing pending (Keeper_event_queue.to_list inflight)
+
+let load_pending_unlocked ~base_path ~keeper_name =
+  match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Error msg
+  | Ok path -> load_from_path_result ~keeper_name path
+
+let load_inflight_unlocked ~base_path ~keeper_name =
+  match inflight_path ~base_path ~keeper_name with
+  | Error msg -> Error msg
+  | Ok path -> load_from_path_result ~keeper_name path
+
+let load_unlocked_result ~base_path ~keeper_name =
+  match
+    ( load_pending_unlocked ~base_path ~keeper_name
+    , load_inflight_unlocked ~base_path ~keeper_name )
+  with
+  | Error msg, _ | _, Error msg -> Error msg
+  | Ok pending, Ok inflight ->
+    Ok (prepend_missing pending (Keeper_event_queue.to_list inflight))
+
+let load_unlocked ~base_path ~keeper_name =
+  match load_unlocked_result ~base_path ~keeper_name with
+  | Ok queue -> queue
+  | Error msg ->
+    Log.Keeper.warn "event_queue_snapshot: %s" msg;
+    Keeper_event_queue.empty
 
 let load ~base_path ~keeper_name =
   with_write_lock (fun () -> load_unlocked ~base_path ~keeper_name)
+
+let load_result ~base_path ~keeper_name =
+  with_write_lock (fun () -> load_unlocked_result ~base_path ~keeper_name)
+
+let load_pending ~base_path ~keeper_name =
+  with_write_lock (fun () -> load_pending_unlocked ~base_path ~keeper_name)
+
+let load_inflight ~base_path ~keeper_name =
+  with_write_lock (fun () -> load_inflight_unlocked ~base_path ~keeper_name)
 
 let persist_to_path_result ~keeper_name path queue =
   match save_json_atomic path (Keeper_event_queue.queue_to_yojson queue) with
@@ -190,96 +222,129 @@ let persist_to_path ~keeper_name path queue =
   | Ok () -> ()
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
 
-let persist ~base_path ~keeper_name queue =
+let persist_result ~base_path ~keeper_name queue =
   match snapshot_path ~base_path ~keeper_name with
-  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Error msg -> Error msg
   | Ok path ->
     (try
-       with_write_lock (fun () -> persist_to_path ~keeper_name path queue)
+       with_write_lock (fun () -> persist_to_path_result ~keeper_name path queue)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "event_queue_snapshot: persist raised keeper=%s path=%s: %s"
-         keeper_name
-         path
-         (Printexc.to_string exn))
+       Error
+         (Printf.sprintf
+            "persist raised keeper=%s path=%s: %s"
+            keeper_name
+            path
+            (Printexc.to_string exn)))
+
+let persist ~base_path ~keeper_name queue =
+  match persist_result ~base_path ~keeper_name queue with
+  | Ok () -> ()
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+
+let persist_snapshot_result ~base_path ~keeper_name snapshot =
+  match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Error msg
+  | Ok path ->
+    (try
+       with_write_lock (fun () -> persist_to_path_result ~keeper_name path (snapshot ()))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "persist_snapshot raised keeper=%s path=%s: %s"
+            keeper_name
+            path
+            (Printexc.to_string exn)))
 
 let persist_snapshot ~base_path ~keeper_name snapshot =
-  match snapshot_path ~base_path ~keeper_name with
+  match persist_snapshot_result ~base_path ~keeper_name snapshot with
+  | Ok () -> ()
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+
+let update_result ~base_path ~keeper_name f =
+  match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Error msg
   | Ok path ->
     (try
-       with_write_lock (fun () -> persist_to_path ~keeper_name path (snapshot ()))
+       with_write_lock (fun () ->
+         match load_from_path_result ~keeper_name path with
+         | Error _ as err -> err
+         | Ok cur -> persist_to_path_result ~keeper_name path (f cur))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "event_queue_snapshot: persist_snapshot raised keeper=%s path=%s: %s"
-         keeper_name
-         path
-         (Printexc.to_string exn))
+       Error
+         (Printf.sprintf
+            "update raised keeper=%s path=%s: %s"
+            keeper_name
+            path
+            (Printexc.to_string exn)))
 
 let update ~base_path ~keeper_name f =
-  match snapshot_path ~base_path ~keeper_name with
+  match update_result ~base_path ~keeper_name f with
+  | Ok () -> ()
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
-  | Ok path ->
-    (try
-       with_write_lock (fun () ->
-         let cur = load_from_path ~keeper_name path in
-         persist_to_path ~keeper_name path (f cur))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Keeper.warn
-         "event_queue_snapshot: update raised keeper=%s path=%s: %s"
-         keeper_name
-         path
-         (Printexc.to_string exn))
 
-let record_inflight ~base_path ~keeper_name stimuli =
+let record_inflight_result ~base_path ~keeper_name stimuli =
   match stimuli with
-  | [] -> ()
+  | [] -> Ok ()
   | _ -> (
   match inflight_path ~base_path ~keeper_name with
-  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Error msg -> Error msg
   | Ok path ->
     (try
        with_write_lock (fun () ->
-         let cur = load_from_path ~keeper_name path in
-         persist_to_path ~keeper_name path (append_missing cur stimuli))
+         match load_from_path_result ~keeper_name path with
+         | Error _ as err -> err
+         | Ok cur -> persist_to_path_result ~keeper_name path (append_missing cur stimuli))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "event_queue_snapshot: record_inflight raised keeper=%s path=%s: %s"
-         keeper_name
-         path
-         (Printexc.to_string exn)))
+       Error
+         (Printf.sprintf
+            "record_inflight raised keeper=%s path=%s: %s"
+            keeper_name
+            path
+            (Printexc.to_string exn))))
 
-let ack_inflight ~base_path ~keeper_name stimuli =
+let record_inflight ~base_path ~keeper_name stimuli =
+  match record_inflight_result ~base_path ~keeper_name stimuli with
+  | Ok () -> ()
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+
+let ack_inflight_result ~base_path ~keeper_name stimuli =
   (* [ack_inflight] clears the inflight file ONLY. It is used after
      [requeue_front] has put the lease back into the pending snapshot, so the
      stimulus MUST remain pending. Genuine consumed-ack uses [ack_consumed],
      which updates pending and inflight under one lock. *)
   match stimuli with
-  | [] -> ()
+  | [] -> Ok ()
   | _ -> (
   match inflight_path ~base_path ~keeper_name with
-  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Error msg -> Error msg
   | Ok path ->
     (try
        with_write_lock (fun () ->
-         let cur = load_from_path ~keeper_name path in
-         persist_to_path ~keeper_name path (remove_stimuli cur stimuli))
+         match load_from_path_result ~keeper_name path with
+         | Error _ as err -> err
+         | Ok cur -> persist_to_path_result ~keeper_name path (remove_stimuli cur stimuli))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "event_queue_snapshot: ack_inflight raised keeper=%s path=%s: %s"
-         keeper_name
-         path
-         (Printexc.to_string exn)))
+       Error
+         (Printf.sprintf
+            "ack_inflight raised keeper=%s path=%s: %s"
+            keeper_name
+            path
+            (Printexc.to_string exn))))
+
+let ack_inflight ~base_path ~keeper_name stimuli =
+  match ack_inflight_result ~base_path ~keeper_name stimuli with
+  | Ok () -> ()
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
 
 let ack_consumed ~base_path ~keeper_name stimuli =
   (* Genuine consumed-ack must remove stimuli from both durable snapshots as one
@@ -293,13 +358,17 @@ let ack_consumed ~base_path ~keeper_name stimuli =
   | Ok pending_path, Ok inflight_path ->
     (try
        with_write_lock (fun () ->
-         let pending = load_from_path ~keeper_name pending_path in
-         let inflight = load_from_path ~keeper_name inflight_path in
-         let pending' = remove_stimuli pending stimuli in
-         let inflight' = remove_stimuli inflight stimuli in
-         match persist_to_path_result ~keeper_name pending_path pending' with
+         match load_from_path_result ~keeper_name pending_path with
          | Error _ as err -> err
-         | Ok () -> persist_to_path_result ~keeper_name inflight_path inflight')
+         | Ok pending ->
+           (match load_from_path_result ~keeper_name inflight_path with
+            | Error _ as err -> err
+            | Ok inflight ->
+              let pending' = remove_stimuli pending stimuli in
+              let inflight' = remove_stimuli inflight stimuli in
+              (match persist_to_path_result ~keeper_name pending_path pending' with
+               | Error _ as err -> err
+               | Ok () -> persist_to_path_result ~keeper_name inflight_path inflight')))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -317,17 +386,21 @@ let drop_by_post_id ~base_path ~keeper_name ~post_id =
   | Ok pending_path, Ok inflight_path ->
     (try
        with_write_lock (fun () ->
-         let pending = load_from_path ~keeper_name pending_path in
-         let inflight = load_from_path ~keeper_name inflight_path in
-         let removed, pending', inflight' =
-           Keeper_event_queue.remove_by_post_id_pair post_id pending inflight
-         in
-         match persist_to_path_result ~keeper_name pending_path pending' with
+         match load_from_path_result ~keeper_name pending_path with
          | Error _ as err -> err
-         | Ok () ->
-           (match persist_to_path_result ~keeper_name inflight_path inflight' with
+         | Ok pending ->
+           (match load_from_path_result ~keeper_name inflight_path with
             | Error _ as err -> err
-            | Ok () -> Ok removed))
+            | Ok inflight ->
+              let removed, pending', inflight' =
+                Keeper_event_queue.remove_by_post_id_pair post_id pending inflight
+              in
+              (match persist_to_path_result ~keeper_name pending_path pending' with
+               | Error _ as err -> err
+               | Ok () ->
+                 (match persist_to_path_result ~keeper_name inflight_path inflight' with
+                  | Error _ as err -> err
+                  | Ok () -> Ok removed))))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

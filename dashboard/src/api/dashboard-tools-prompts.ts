@@ -57,8 +57,8 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
 
 export interface DashboardScheduledAutomationFsm {
   state: string
-  active_count: number
-  terminal_count: number
+  active_count: number | null
+  terminal_count: number | null
   next_due_at?: string | null
 }
 
@@ -95,6 +95,33 @@ export interface DashboardScheduledAutomationActor {
   display_name?: string | null
 }
 
+export interface DashboardScheduledAutomationLifecycleEvent {
+  schema?: string
+  schema_version?: number
+  event_id: string
+  recorded_at?: number
+  action: string
+  schedule_id: string
+  state_version?: number
+  previous_status?: string | null
+  current_status: string
+  payload_digest?: string
+  due_at?: number
+  actor?: DashboardScheduledAutomationActor | null
+  detail?: unknown | null
+}
+
+export interface DashboardScheduledAutomationLifecycleAudit {
+  source: string
+  status: 'ok' | 'read_error' | string
+  limit: number
+  event_count?: number
+  coverage?: 'events_recorded' | 'no_lifecycle_events' | 'read_error' | string
+  backfill_policy?: 'not_synthesized_from_schedule_snapshot' | string
+  events: DashboardScheduledAutomationLifecycleEvent[]
+  error?: string | null
+}
+
 export interface DashboardScheduledAutomationSignal {
   signal_id: string
   kind: string
@@ -107,6 +134,11 @@ export interface DashboardScheduledAutomationSignal {
   risk_class: string
   payload_digest?: string
   payload_kind?: string | null
+}
+
+export interface DashboardScheduledAutomationSignalError {
+  ordinal: number
+  error: string
 }
 
 export interface DashboardScheduledAutomationRequest {
@@ -144,37 +176,141 @@ export interface DashboardScheduledAutomationRequest {
   payload_digest?: string
   payload_kind?: string | null
   payload_support?: 'supported' | 'unsupported' | 'unknown'
+  payload_dispatch_tool?: string | null
   payload_target?: string | null
   payload_summary?: string | null
   recurrence_summary?: string | null
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
+  lifecycle_audit?: DashboardScheduledAutomationLifecycleAudit | null
+}
+
+export interface DashboardScheduledAutomationPayloadContract {
+  kind: string
+  schema_versions?: number[]
+  dispatch_tool?: string
+  side_effecting_risk_required?: boolean
+  creation_contract?: string
+  dispatch_contract?: string
 }
 
 export interface DashboardScheduledAutomationPayloadSupport {
   supported_kinds?: string[]
+  supported_contracts?: DashboardScheduledAutomationPayloadContract[]
   unsupported_request_count?: number
   unsupported_kinds?: Array<{ kind: string; count: number }>
   unknown_request_count?: number
 }
 
+export interface DashboardScheduledAutomationRunnerCounts {
+  due_changed?: number
+  emitted?: number
+  rescheduled?: number
+  dispatch_succeeded?: number
+  dispatch_failed?: number
+  dispatch_unsupported?: number
+  dispatch_start_rejected?: number
+  wake_enqueued?: number
+  wake_skipped_no_keeper?: number
+  wake_skipped_missing_schedule?: number
+  wake_skipped_non_keeper_actor?: number
+  wake_skipped_unregistered_keeper?: number
+  wake_failed?: number
+}
+
+export interface DashboardScheduledAutomationRunnerStatus {
+  schema?: string
+  status: string
+  tick_in_flight?: boolean
+  tick_count?: number
+  success_count?: number
+  failure_count?: number
+  crash_count?: number
+  last_tick_started_at?: number | null
+  last_tick_finished_at?: number | null
+  last_success_at?: number | null
+  last_error_at?: number | null
+  last_error?: string | null
+  last_duration_sec?: number | null
+  last_counts?: DashboardScheduledAutomationRunnerCounts | null
+  stale_after_sec?: number | null
+  last_tick_age_sec?: number | null
+  last_success_age_sec?: number | null
+  last_error_age_sec?: number | null
+}
+
 export interface DashboardScheduledAutomation {
+  schema?: string
+  status?: 'ok' | 'unknown' | string
+  source?: string
+  generated_at?: string
+  schedule_store_known?: boolean
+  schedule_store_read_error?: string | null
+  request_count: number | null
+  request_limit: number
+  truncated: boolean | null
+  signal_source?: string
+  signal_count?: number
+  signal_error_count?: number
+  signal_limit?: number
+  signals?: DashboardScheduledAutomationSignal[]
+  signal_errors?: DashboardScheduledAutomationSignalError[]
+  counts?: Record<string, number> | null
+  derived_counts?: Record<string, number | null>
+  payload_support?: DashboardScheduledAutomationPayloadSupport | null
+  runner_status?: DashboardScheduledAutomationRunnerStatus
+  fsm: DashboardScheduledAutomationFsm
+  requests: DashboardScheduledAutomationRequest[]
+}
+
+export interface DashboardKeeperWaitingRow {
+  keeper_name?: string | null
+  source: string
+  waiting_on: string
+  wake_producer?: string | null
+  since?: number | null
+  since_iso?: string | null
+  due_at?: number | null
+  due_at_iso?: string | null
+  next_action: string
+  detail?: unknown
+}
+
+export interface DashboardKeeperWaitingKeeper {
+  keeper_name: string
+  state: 'idle' | 'busy' | 'waiting' | 'deferred' | string
+  waiting_on: DashboardKeeperWaitingRow[]
+  waiting_count: number
+  sources?: Record<string, number>
+  since?: number | null
+  since_iso?: string | null
+  due_at?: number | null
+  due_at_iso?: string | null
+  next_action?: string | null
+}
+
+export interface DashboardKeeperWaitingInventory {
   schema?: string
   source?: string
   generated_at?: string
-  request_count: number
-  request_limit: number
-  truncated: boolean
-  signal_source?: string
-  signal_count?: number
-  signal_limit?: number
-  signals?: DashboardScheduledAutomationSignal[]
-  counts: Record<string, number>
-  derived_counts?: Record<string, number>
-  payload_support?: DashboardScheduledAutomationPayloadSupport
-  fsm: DashboardScheduledAutomationFsm
-  requests: DashboardScheduledAutomationRequest[]
+  supported_states?: string[]
+  keeper_count_known?: boolean
+  keeper_count: number
+  waiting_keeper_count: number
+  row_count: number
+  global_row_count?: number
+  global_pending_confirm_count_known?: boolean
+  global_pending_confirm_count?: number
+  source_counts?: Record<string, number>
+  keepers: DashboardKeeperWaitingKeeper[]
+  global_waiting_on?: DashboardKeeperWaitingRow[]
+}
+
+export interface DashboardScheduleToolContract {
+  schema?: string
+  source?: string
+  public_schedule_tools: string[]
 }
 
 export interface DashboardToolsResponse {
@@ -184,9 +320,11 @@ export interface DashboardToolsResponse {
   stale_reason?: string | null
   config_resolution?: DashboardConfigResolution
   runtime_resolution?: DashboardRuntimeResolution
+  schedule_tool_contract?: DashboardScheduleToolContract
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
   scheduled_automation?: DashboardScheduledAutomation
+  keeper_waiting_inventory?: DashboardKeeperWaitingInventory
 }
 
 // --- Runtime probe (KV-cache / model load probe) ---

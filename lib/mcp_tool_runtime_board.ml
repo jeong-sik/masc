@@ -43,21 +43,55 @@ let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
       Log.Misc.warn "activity emit failed (%s): %s" kind
         (Stdlib.Printexc.to_string exn)
 
-let extract_board_post_id (message : string) =
-  match String.index_opt message '{' with
-  | None -> None
-  | Some idx ->
-      try
-        let json =
-          Yojson.Safe.from_string
-            (String.sub message idx (String.length message - idx))
-        in
-        match Json_util.assoc_member_opt "id" json with
-        | Some (`String id) when not (String.equal (String.trim id) "") -> Some id
-        | _ -> None
-      with
-      | Invalid_argument _
-      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+type board_post_id_extract_error =
+  | Board_post_id_payload_not_object of { received_kind : string }
+  | Board_post_id_missing_id
+  | Board_post_id_id_not_string of { received_kind : string }
+  | Board_post_id_blank_id
+
+let board_post_id_extract_error_to_string = function
+  | Board_post_id_payload_not_object { received_kind } ->
+      Printf.sprintf
+        "board post Tool_result.data must be a JSON object, got %s"
+        received_kind
+  | Board_post_id_missing_id -> "board post Tool_result.data is missing id"
+  | Board_post_id_id_not_string { received_kind } ->
+      Printf.sprintf "board post Tool_result.data id must be string, got %s"
+        received_kind
+  | Board_post_id_blank_id -> "board post Tool_result.data id is blank"
+
+let board_post_id_extract_error_reason = function
+  | Board_post_id_payload_not_object _ -> "payload_not_object"
+  | Board_post_id_missing_id -> "missing_id"
+  | Board_post_id_id_not_string _ -> "id_not_string"
+  | Board_post_id_blank_id -> "blank_id"
+
+let extract_board_post_id_from_data_result (data : Yojson.Safe.t) =
+  match data with
+  | `Assoc _ -> (
+      match Json_util.assoc_member_opt "id" data with
+      | None -> Error Board_post_id_missing_id
+      | Some (`String id) ->
+          if String.equal (String.trim id) "" then
+            Error Board_post_id_blank_id
+          else Ok id
+      | Some json ->
+          Error
+            (Board_post_id_id_not_string
+               { received_kind = Json_util.kind_name json }))
+  | json ->
+      Error
+        (Board_post_id_payload_not_object
+           { received_kind = Json_util.kind_name json })
+
+let extract_board_post_id_from_data data =
+  match extract_board_post_id_from_data_result data with
+  | Ok id -> Some id
+  | Error (Board_post_id_payload_not_object _)
+  | Error Board_post_id_missing_id
+  | Error (Board_post_id_id_not_string _)
+  | Error Board_post_id_blank_id ->
+      None
 
 let json_upsert_assoc_field name value fields =
   (name, value) :: List.filter (fun (k, _) -> not (String.equal k name)) fields
@@ -86,6 +120,9 @@ let json_upsert_meta_string_field name value fields =
 let board_actor_identity_spoof_metric =
   "masc_board_actor_identity_spoof_total"
 
+let board_post_id_extract_failure_metric =
+  "masc_board_post_id_extract_failure_total"
+
 let () =
   Otel_metric_store.register_counter
     ~name:board_actor_identity_spoof_metric
@@ -97,6 +134,15 @@ let () =
        [meta.<field>_caller_claim]; this counter surfaces the rewrite \
        so operators can rate-alert on identity drift. \
        Labels: [tool, field]."
+    ();
+  Otel_metric_store.register_counter
+    ~name:board_post_id_extract_failure_metric
+    ~help:
+      "Total successful masc_board_post dispatches whose structured \
+       Tool_result.data did not contain a usable string id. The dispatcher \
+       emits the board notification with post_id=unknown but records this \
+       counter and a warning so post-id projection drift is observable. \
+       Labels: [reason]."
     ()
 
 let canonical_board_author raw =
@@ -232,7 +278,18 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
-        let post_id = extract_board_post_id (Tool_result.message result_tr) in
+        let post_id =
+          match extract_board_post_id_from_data_result (Tool_result.data result_tr) with
+          | Ok id -> Some id
+          | Error error ->
+              Otel_metric_store.inc_counter board_post_id_extract_failure_metric
+                ~labels:
+                  [ ("reason", board_post_id_extract_error_reason error) ]
+                ();
+              Log.Misc.warn "masc_board_post post_id extraction failed: %s"
+                (board_post_id_extract_error_to_string error);
+              None
+        in
         (* Record board activity as a fitness metric so board-active agents
            appear in agent_fitness queries (Issue #1861). *)
         (try

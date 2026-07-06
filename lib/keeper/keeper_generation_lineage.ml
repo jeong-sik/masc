@@ -225,19 +225,21 @@ let record_handoff_artifacts
   match
     Fs_compat.save_file_atomic manifest_path (Yojson.Safe.pretty_to_string manifest)
   with
-  | Ok () ->
-      (try
-         Keeper_types_support.append_jsonl_line index_path index_entry
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string GenerationLineageFailures)
-             ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Index_append))]
-             ();
-           Log.Keeper.warn ~keeper_name:child.name
-             "failed to append generation index %s: %s"
-             index_path (Printexc.to_string exn))
+  | Ok () -> (
+      match Keeper_types_support.append_jsonl_line_result index_path index_entry with
+      | Ok () -> ()
+      | Error msg ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string GenerationLineageFailures)
+          ~labels:
+            [
+              ("keeper", child.name);
+              ("site", Keeper_generation_lineage_failure_site.(to_label Index_append));
+            ]
+          ();
+        Log.Keeper.warn ~keeper_name:child.name
+          "failed to append generation index %s: %s"
+          index_path msg)
   | Error err ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GenerationLineageFailures)
@@ -275,16 +277,53 @@ let load_json_file_opt path =
     | exn ->
         report_drop
           ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-          ~detail:(Printexc.to_string exn);
+        ~detail:(Printexc.to_string exn);
         None
 
-let load_jsonl_file path =
-  if not (Fs_compat.file_exists path) then []
+type jsonl_file_read_error =
+  { path : string
+  ; detail : string
+  }
+
+let jsonl_file_read_error_to_json error =
+  `Assoc [ "path", `String error.path; "detail", `String error.detail ]
+
+let load_jsonl_file_result path =
+  if not (Fs_compat.file_exists path) then Ok []
   else
-    try Fs_compat.load_jsonl path
+    let surface = "keeper_generation_lineage_index" in
+    let report_drop ~detail =
+      Safe_ops.report_persistence_read_drop
+        ~on_drop:(fun () ->
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_persistence_read_drops
+            ~labels:
+              [ ( "surface", surface )
+              ; ( "reason", Safe_ops.persistence_read_drop_reason_entry_load_error )
+              ]
+            ())
+        ~surface
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail
+    in
+    try Ok (Fs_compat.load_jsonl path)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> []
+    | exn ->
+      let detail = Printexc.to_string exn in
+      report_drop ~detail;
+      Error { path; detail }
+
+let load_jsonl_file path =
+  match load_jsonl_file_result path with
+  | Ok rows -> rows
+  | Error { path; detail } ->
+    Log.Keeper.warn
+      "keeper_generation_lineage: failed to load JSONL index %s: %s"
+      path
+      detail;
+    []
 
 let rec take n xs =
   if n <= 0 then []
@@ -298,7 +337,11 @@ let surface_json (config : Workspace.config) (meta : keeper_meta) ~recent_limit 
   let manifest_path = Keeper_types_support.keeper_generation_manifest_path config trace_id in
   let index_path = Keeper_types_support.keeper_generation_index_path config meta.name in
   let manifest = load_json_file_opt manifest_path in
-  let index_entries = load_jsonl_file index_path in
+  let index_entries, index_read_error =
+    match load_jsonl_file_result index_path with
+    | Ok rows -> rows, None
+    | Error error -> [], Some error
+  in
   let recent =
     index_entries |> List.rev |> take (max 0 recent_limit)
   in
@@ -315,6 +358,10 @@ let surface_json (config : Workspace.config) (meta : keeper_meta) ~recent_limit 
       ("trace_history_count", `Int (List.length meta.runtime.trace_history));
       ("manifest_path", `String manifest_path);
       ("index_path", `String index_path);
+      ( "index_read_error",
+        match index_read_error with
+        | None -> `Null
+        | Some error -> jsonl_file_read_error_to_json error );
       ("manifest_available", `Bool (Option.is_some manifest));
       ("manifest", Json_util.option_to_yojson Fun.id manifest);
       ("recent_count", `Int (List.length index_entries));

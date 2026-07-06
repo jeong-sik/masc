@@ -63,9 +63,34 @@ let accumulator_size acc =
   Stdlib.Mutex.unlock acc.mutex;
   n
 
-let try_parse (s : string) : Yojson.Safe.t option =
-  try Some (Yojson.Safe.from_string s)
-  with Yojson.Json_error _ -> None
+type tool_output_parse_error =
+  | Tool_output_json_parse_error of string
+
+let tool_output_parse_error_to_string = function
+  | Tool_output_json_parse_error message -> "json_parse_error: " ^ message
+
+let tool_output_parse_error_kind = function
+  | Tool_output_json_parse_error _ -> "json_parse_error"
+
+let parse_tool_output_json (s : string) :
+    (Yojson.Safe.t, tool_output_parse_error) result =
+  match Yojson.Safe.from_string s with
+  | json -> Ok json
+  | exception Yojson.Json_error message ->
+    Error (Tool_output_json_parse_error message)
+
+let record_parse_failure acc error =
+  match acc.keeper_name with
+  | None -> ()
+  | Some name ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ToolEmissionParseFailures)
+      ~labels:
+        [
+          ("keeper", name);
+          ("error_kind", tool_output_parse_error_kind error);
+        ]
+      ()
 
 let make_post_tool_use_hook (acc : accumulator) : Agent_sdk.Hooks.hook =
   fun event ->
@@ -74,9 +99,9 @@ let make_post_tool_use_hook (acc : accumulator) : Agent_sdk.Hooks.hook =
        | Agent_sdk.Hooks.PostToolUse { output; _ } -> (
            match output with
            | Ok { content; _ } -> (
-               match try_parse content with
-               | Some json -> push acc json
-               | None -> ())
+               match parse_tool_output_json content with
+               | Ok json -> push acc json
+               | Error error -> record_parse_failure acc error)
            | Error _ -> ())
        | _ -> ());
     Agent_sdk.Hooks.Continue

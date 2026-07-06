@@ -332,12 +332,22 @@ let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
 (* Record writing                                                    *)
 (* ================================================================ *)
 
-let record_verdict
+let emit_harness_verdict_callback record = function
+  | Some cb ->
+      (try cb (to_harness_verdict record) with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Harness.warn
+             "[eval_calibration] on_harness_verdict callback failed: %s"
+             (Printexc.to_string exn))
+  | None -> ()
+
+let record_verdict_result
     ~(task_id : string)
     ~(req : Task.Anti_rationalization.review_request)
     ~(result : Task.Anti_rationalization.review_result)
     ?(on_harness_verdict : (Agent_sdk.Harness.verdict -> unit) option)
-    () : unit =
+    () : (unit, string) result =
   let hash = notes_hash ~task_title:req.task_title ~notes:req.completion_notes in
   let record = {
     record_type = Verdict_record;
@@ -352,20 +362,27 @@ let record_verdict
     fallback_reason = result.fallback_reason;
     timestamp = Unix.gettimeofday ();
   } in
-  Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
-  match on_harness_verdict with
-  | Some cb ->
-    (try cb (to_harness_verdict record)
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Harness.warn "[eval_calibration] on_harness_verdict callback failed: %s"
-         (Printexc.to_string exn))
-  | None -> ()
+  match Dated_jsonl.append_result (get_store ()) (verdict_record_to_json record) with
+  | Error error -> Error error
+  | Ok () ->
+      emit_harness_verdict_callback record on_harness_verdict;
+      Ok ()
 
-let record_human_label
+let record_verdict
+    ~(task_id : string)
+    ~(req : Task.Anti_rationalization.review_request)
+    ~(result : Task.Anti_rationalization.review_result)
+    ?on_harness_verdict
+    () : unit =
+  match record_verdict_result ~task_id ~req ~result ?on_harness_verdict () with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+
+let record_human_label_result
     ~(notes_hash : string)
     ~(human_verdict : label_verdict)
     ~(labeler : string)
-    ~(reason : string) : unit =
+    ~(reason : string) : (unit, string) result =
   let record = {
     record_type = Label_record;
     notes_hash;
@@ -374,7 +391,16 @@ let record_human_label
     reason;
     timestamp = Unix.gettimeofday ();
   } in
-  Dated_jsonl.append (get_store ()) (label_record_to_json record)
+  Dated_jsonl.append_result (get_store ()) (label_record_to_json record)
+
+let record_human_label
+    ~(notes_hash : string)
+    ~(human_verdict : label_verdict)
+    ~(labeler : string)
+    ~(reason : string) : unit =
+  match record_human_label_result ~notes_hash ~human_verdict ~labeler ~reason with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 (* ================================================================ *)
 (* JSON deserialization (for analysis)                                *)

@@ -74,6 +74,22 @@ let test_decode_cursor_empty () =
   | None -> ()
   | Some _ -> fail "expected None"
 
+let test_decode_cursor_result_reports_base64_error () =
+  match Graphql_api.decode_cursor_result ~kind:"task" "not_base64!!!" with
+  | Ok _ -> fail "expected Error"
+  | Error (Graphql_api.Cursor_base64_decode_error { kind; message }) ->
+      check string "kind" "task" kind;
+      check bool "message present" true (String.length message > 0)
+  | Error (Graphql_api.Cursor_kind_mismatch _) -> fail "expected base64 error"
+
+let test_decode_cursor_result_reports_kind_mismatch () =
+  let encoded = Graphql_api.encode_cursor ~kind:"task" "123" in
+  match Graphql_api.decode_cursor_result ~kind:"agent" encoded with
+  | Ok _ -> fail "expected Error"
+  | Error (Graphql_api.Cursor_kind_mismatch { expected_kind }) ->
+      check string "expected kind" "agent" expected_kind
+  | Error (Graphql_api.Cursor_base64_decode_error _) -> fail "expected kind mismatch"
+
 (* ============================================================
    clamp_first Tests
    ============================================================ *)
@@ -156,6 +172,8 @@ let () =
       test_case "wrong kind" `Quick test_decode_cursor_wrong_kind;
       test_case "invalid" `Quick test_decode_cursor_invalid;
       test_case "empty" `Quick test_decode_cursor_empty;
+      test_case "result reports base64 error" `Quick test_decode_cursor_result_reports_base64_error;
+      test_case "result reports kind mismatch" `Quick test_decode_cursor_result_reports_kind_mismatch;
     ];
     "clamp_first", [
       test_case "none" `Quick test_clamp_first_none;

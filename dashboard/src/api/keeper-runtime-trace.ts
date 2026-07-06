@@ -110,6 +110,8 @@ export interface KeeperRuntimeLensClaimScopeAxis {
   excluded_count: number | null
   claimed_task_id: string | null
   claimed_goal_id: string | null
+  read_error_source?: string | null
+  read_error?: string | null
 }
 
 export interface KeeperRuntimeLensConfigDriftAxis {
@@ -500,6 +502,8 @@ function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimSco
     excluded_count: nullableNumberField(obj, 'excluded_count'),
     claimed_task_id: nullableStringField(obj, 'claimed_task_id'),
     claimed_goal_id: nullableStringField(obj, 'claimed_goal_id'),
+    read_error_source: nullableStringField(obj, 'read_error_source'),
+    read_error: nullableStringField(obj, 'read_error'),
   }
 }
 

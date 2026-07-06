@@ -117,6 +117,7 @@ val summary_status_to_yojson : summary_status -> Yojson.Safe.t
 val approval_rule_of_yojson_with_error :
   Yojson.Safe.t -> (approval_rule, string) Stdlib.result
 (** Parse an approval rule, returning the first validation failure reason.
-    The legacy {!approval_rule_of_yojson} variant silently discards the reason. *)
+    The legacy {!approval_rule_of_yojson} variant logs the reason before its
+    compatibility [None] fallback. *)
 
 val approval_rule_of_yojson : Yojson.Safe.t -> approval_rule option

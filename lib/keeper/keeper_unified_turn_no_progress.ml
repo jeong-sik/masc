@@ -42,19 +42,19 @@ let clear_for_operator_resume ~base_path meta =
   in
   List.iter
     (fun stimulus ->
-      try
-        Keeper_reaction_ledger.record_event_queue_reaction
+      match
+        Keeper_reaction_ledger.record_event_queue_reaction_result
           ~base_path
           ~keeper_name
           ~reaction_kind:Keeper_reaction_ledger.Operator_escalation
           stimulus
       with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
+      | Ok () -> ()
+      | Error error ->
         Log.Keeper.warn
           "%s: failed to persist operator-resume no-progress recovery reaction: %s"
           keeper_name
-          (Printexc.to_string exn))
+          error)
     dropped_recovery_stimuli;
   let cleared_failure_reason =
     match Keeper_registry.get ~base_path keeper_name with

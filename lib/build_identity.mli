@@ -15,13 +15,14 @@ type t = {
         when available.  This is runtime repo truth, not binary truth. *)
   commit : string option;
     (** Backwards-compatible identity field.  Uses [binary_commit] when
-        [MASC_BUILD_GIT_COMMIT] is set, otherwise falls back to
-        [repo_head_commit].  Inspect [commit_source] before using this as
-        deploy proof. *)
+        [MASC_BUILD_GIT_COMMIT] or a valid executable stamp supplies it,
+        otherwise falls back to [repo_head_commit].  Inspect [commit_source]
+        before using this as deploy proof. *)
   commit_source : string option;
     (** [Some "env:MASC_BUILD_GIT_COMMIT"] when [commit] came from the
-        build env override, [Some "runtime_repo_head"] when it came from
-        probing the current checkout, [None] when unknown. *)
+        build env override, [Some "executable_build_commit_stamp"] when it
+        came from the executable stamp, [Some "runtime_repo_head"] when it
+        came from probing the current checkout, [None] when unknown. *)
   commit_unix_ts : float option;
     (** Unix timestamp of [commit].  Kept for compatibility; prefer the
         source-specific timestamp fields below. *)
@@ -29,9 +30,10 @@ type t = {
     (** Age of [commit_unix_ts].  Kept for compatibility; prefer
         [binary_commit_age_seconds] for binary freshness. *)
   binary_commit : string option;
-    (** Commit supplied by [MASC_BUILD_GIT_COMMIT], when available.  This is
-        the only commit field that operators should use as binary-build
-        identity in this module. *)
+    (** Commit supplied by [MASC_BUILD_GIT_COMMIT], when available, otherwise
+        by the executable's adjacent [.build-commit] stamp when that stamp is
+        not older than the executable. This is the only commit field that
+        operators should use as binary-build identity in this module. *)
   binary_commit_source : string option;
   binary_commit_unix_ts : float option;
   binary_commit_age_seconds : int option;
@@ -83,7 +85,10 @@ type commit_resolution = {
 }
 
 val resolve_commit_details :
-  env_value:string option -> probe:(unit -> string option) -> commit_resolution
+  ?stamp_value:string option ->
+  env_value:string option ->
+  probe:(unit -> string option) ->
+  commit_resolution
 (** Resolve the compatibility [commit] plus the source-specific binary/env
     and runtime repo-head fields.  Exposed for testing. *)
 
@@ -105,4 +110,5 @@ module For_testing : sig
   val observe_probe_failure : site:string -> exn -> unit
   val probe_commit_unix_ts : string option -> float option
   val runtime_cwd : unit -> string
+  val stamp_commit_exists_in_runtime_repo_roots : string -> bool
 end

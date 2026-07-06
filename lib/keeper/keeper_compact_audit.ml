@@ -228,33 +228,19 @@ let effective_days_of_outcome
 
 let persist_start ~base_path ~retention_days (r : start_record) :
   (unit, write_error) result =
-  let json =
-    try Ok (start_to_json r)
-    with e -> Error (Serialize_failure (Printexc.to_string e))
-  in
-  match json with
-  | Error _ as e -> e
-  | Ok j ->
-    (try
-       Dated_jsonl.append (get_store base_path) j;
-       prune_best_effort base_path ~retention_days;
-       Ok ()
-     with e -> Error (Io_failure (Printexc.to_string e)))
+  match Dated_jsonl.append_result (get_store base_path) (start_to_json r) with
+  | Error error -> Error (Io_failure error)
+  | Ok () ->
+    prune_best_effort base_path ~retention_days;
+    Ok ()
 
 let persist_complete ~base_path ~retention_days (r : complete_record) :
   (unit, write_error) result =
-  let json =
-    try Ok (complete_to_json r)
-    with e -> Error (Serialize_failure (Printexc.to_string e))
-  in
-  match json with
-  | Error _ as e -> e
-  | Ok j ->
-    (try
-       Dated_jsonl.append (get_store base_path) j;
-       prune_best_effort base_path ~retention_days;
-       Ok ()
-     with e -> Error (Io_failure (Printexc.to_string e)))
+  match Dated_jsonl.append_result (get_store base_path) (complete_to_json r) with
+  | Error error -> Error (Io_failure error)
+  | Ok () ->
+    prune_best_effort base_path ~retention_days;
+    Ok ()
 
 (* ── Retention ─────────────────────────────────────────────────── *)
 

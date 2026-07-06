@@ -131,6 +131,62 @@ let test_load_records_malformed_row_drops () =
         1.0
         (drop_value invalid_payload -. before_invalid_payload))
 
+let test_load_records_malformed_attachments_are_reported () =
+  let base_dir = temp_base_path "keeper-chat-store-attachment-drops" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-attachment-drop" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before_invalid_payload = drop_value invalid_payload in
+      write_file path
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ ("role", `String "user")
+              ; ("content", `String "see attachments")
+              ; ("ts", `Float 1.0)
+              ; ( "attachments"
+                , `List
+                    [ `Assoc [ ("id", `String "missing-data") ]
+                    ; `String "not-an-attachment-object"
+                    ; `Assoc
+                        [ ("id", `String "valid-attachment")
+                        ; ("type", `String "image")
+                        ; ("name", `String "screen.png")
+                        ; ("size", `Int 12)
+                        ; ("mime_type", `String "image/png")
+                        ; ("data", `String "masc://attachment/valid/ref")
+                        ]
+                    ] )
+              ])
+        ^ "\n");
+      match K.load ~base_dir ~keeper_name with
+      | [ message ] ->
+          Alcotest.(check string)
+            "row survives malformed attachment entries"
+            "see attachments"
+            message.content;
+          (match message.attachments with
+           | Some [ attachment ] ->
+               Alcotest.(check string)
+                 "valid attachment survives"
+                 "valid-attachment"
+                 attachment.K.id
+           | Some attachments ->
+               Alcotest.failf
+                 "expected one valid attachment, got %d"
+                 (List.length attachments)
+           | None -> Alcotest.fail "expected valid attachment to survive");
+          Alcotest.(check (float 0.001))
+            "malformed attachments increment invalid payload"
+            2.0
+            (drop_value invalid_payload -. before_invalid_payload)
+      | messages ->
+          Alcotest.failf
+            "expected one chat row, got %d"
+            (List.length messages))
+
 let roles messages =
   List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
 
@@ -1620,6 +1676,8 @@ let () =
         [
           Alcotest.test_case "malformed rows increment drop metrics" `Quick
             test_load_records_malformed_row_drops;
+          Alcotest.test_case "malformed attachments increment drop metrics" `Quick
+            test_load_records_malformed_attachments_are_reported;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
           Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick

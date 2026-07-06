@@ -791,23 +791,26 @@ let load_history_user_messages_result
     Checkpoint messages are prioritized (recent context), history.jsonl
     provides cross-generation recall for older conversations. Deduplication
     uses exact string match on the first 100 characters. *)
-let recall_candidates_with_history
+type recall_candidates_with_history_outcome = {
+  candidates: string list;
+  history_read_error: Keeper_memory_recall_exn_class.t option;
+}
+
+let recall_candidates_with_history_outcome
     ~(checkpoint_messages : Agent_sdk.Types.message list)
     ~(history_path : string)
     ~(max_checkpoint : int)
-    ~(max_history : int) : string list =
+    ~(max_history : int) : recall_candidates_with_history_outcome =
   let from_checkpoint = recent_user_messages checkpoint_messages ~max_n:max_checkpoint in
   (* RFC-0149 §3.1 closeout — aggregation site.  History read failure
-     is elided to [[]] so the checkpoint matches still surface; the
-     bounded [exn_class] counter emitted by
-     [load_history_user_messages_result] is the informational signal for
-     the failure. *)
-  let from_history =
+     must not erase checkpoint matches. Keep the read error in the typed
+     outcome while preserving the legacy candidate list. *)
+  let from_history, history_read_error =
     match
       load_history_user_messages_result ~path:history_path ~max_n:max_history
     with
-    | Ok msgs -> msgs
-    | Error _ -> []
+    | Ok msgs -> msgs, None
+    | Error exn_class -> [], Some exn_class
   in
   (* Deduplicate: checkpoint messages take priority *)
   let key_of s =
@@ -822,7 +825,18 @@ let recall_candidates_with_history
   let unique_history =
     List.filter (fun s -> not (SS.mem (key_of s) seen)) from_history
   in
-  from_checkpoint @ unique_history
+  { candidates = from_checkpoint @ unique_history; history_read_error }
+
+let recall_candidates_with_history
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
+    ~(history_path : string)
+    ~(max_checkpoint : int)
+    ~(max_history : int) : string list =
+  (recall_candidates_with_history_outcome
+     ~checkpoint_messages
+     ~history_path
+     ~max_checkpoint
+     ~max_history).candidates
 
 type memory_recall_eval = {
   performed: bool;

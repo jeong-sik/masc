@@ -133,56 +133,79 @@ let parse_declared_type json : declared_type option =
   | _ -> None
 ;;
 
-let schema_field_types ?base_path id : (string * declared_type) list =
+type schema_field_types_error =
+  | Schema_fetch_error of string
+  | Schema_json_parse_error of { message : string; body_preview : string }
+  | Schema_unexpected_error of { message : string; body_preview : string }
+
+let schema_field_types_error_kind = function
+  | Schema_fetch_error _ -> "fetch_schema_error"
+  | Schema_json_parse_error _ -> "json_parse_error"
+  | Schema_unexpected_error _ -> "other"
+;;
+
+let schema_field_types_error_to_string = function
+  | Schema_fetch_error message -> message
+  | Schema_json_parse_error { message; body_preview } ->
+    Printf.sprintf "json_parse_error: %s (body_preview=%S)" message body_preview
+  | Schema_unexpected_error { message; body_preview } ->
+    Printf.sprintf "other: %s (body_preview=%S)" message body_preview
+;;
+
+let body_preview json_str =
+  let preview_len = min 200 (String.length json_str) in
+  String.sub json_str 0 preview_len
+;;
+
+let schema_field_types_of_json json =
+  match Json_util.assoc_member_opt "properties" json with
+  | Some (`Assoc assoc) ->
+    List.filter_map
+      (fun (k, v) -> Option.map (fun typ -> k, typ) (parse_declared_type v))
+      assoc
+  | _ -> []
+;;
+
+let schema_field_types_result ?base_path id : ((string * declared_type) list, schema_field_types_error) result =
   match fetch_schema ?base_path id with
-  | Error _ -> []
+  | Error message -> Error (Schema_fetch_error message)
   | Ok json_str ->
     (match Yojson.Safe.from_string json_str with
-     | j ->
-       (match Json_util.assoc_member_opt "properties" j with
-        | Some (`Assoc assoc) ->
-          List.filter_map
-            (fun (k, v) -> Option.map (fun typ -> k, typ) (parse_declared_type v))
-            assoc
-        | _ -> [])
-     (* Iter 31 (silent-drop visibility): previously a catch-all
-        [exception _ -> []] swallowed any Yojson failure. Returning []
-        here is a silent type-validation bypass — downstream callers
-        (e.g. [coerce_value] in TOML sidecar handlers) accept untyped
-        raw values. Behavior is preserved (we still return []); the
-        counter + warn now distinguish "schema present but malformed"
-        from "schema missing". [Eio.Cancel.Cancelled] is re-raised so
-        cancellation semantics are preserved. Closed error_kind vocab
-        keeps Otel_metric_store label cardinality bounded.
-        Same pattern as iter 28 (#15820, mcp-ws transport) and iter 29
-        (#15840, runtime_http_probe). *)
+     | json -> Ok (schema_field_types_of_json json)
      | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
      | exception Yojson.Json_error msg ->
-       let preview_len = min 200 (String.length json_str) in
-       Log.Server.warn
-         "[sidecar.schema_field_types] id=%s json_parse_error: %s \
-          (body_preview=%S)"
-         id
-         msg
-         (String.sub json_str 0 preview_len);
-       Otel_metric_store.inc_counter
-         Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
-         ~labels:[ "error_kind", "json_parse_error" ]
-         ();
-       []
+       Error (Schema_json_parse_error { message = msg; body_preview = body_preview json_str })
      | exception exn ->
-       let preview_len = min 200 (String.length json_str) in
-       Log.Server.warn
-         "[sidecar.schema_field_types] id=%s other: %s \
-          (body_preview=%S)"
-         id
-         (Printexc.to_string exn)
-         (String.sub json_str 0 preview_len);
-       Otel_metric_store.inc_counter
-         Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
-         ~labels:[ "error_kind", "other" ]
-         ();
-       [])
+       Error
+         (Schema_unexpected_error
+            { message = Printexc.to_string exn; body_preview = body_preview json_str }))
+;;
+
+let observe_schema_field_types_error ~id error =
+  let error_kind = schema_field_types_error_kind error in
+  Log.Server.warn
+    "[sidecar.schema_field_types] id=%s %s"
+    id
+    (schema_field_types_error_to_string error);
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_sidecar_schema_field_types_failures
+    ~labels:[ "error_kind", error_kind ]
+    ();
+  (match error with
+   | Schema_json_parse_error _ | Schema_unexpected_error _ ->
+     Otel_metric_store.inc_counter
+       Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
+       ~labels:[ "error_kind", error_kind ]
+       ()
+   | Schema_fetch_error _ -> ())
+;;
+
+let schema_field_types ?base_path id : (string * declared_type) list =
+  match schema_field_types_result ?base_path id with
+  | Ok fields -> fields
+  | Error error ->
+    observe_schema_field_types_error ~id error;
+    []
 ;;
 
 let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) result =

@@ -2,6 +2,10 @@
 
 type board_persist_surface =
   | Board_post_meta_json
+  | Board_post_kind
+  | Board_post_mention_ids
+  | Board_comment_mention_ids
+  | Board_sub_board_member_ids
 
 type flusher_outcome =
   | Switch_finished
@@ -14,8 +18,6 @@ type observer =
   ; inc_vote_fixture_detected : count:int -> unit
   ; inc_persistence_read_drop :
       surface:board_persist_surface -> reason:Read_drop_reason.t -> unit
-  ; inc_legacy_migrate_post_kind :
-      author:string -> automation_label:Board_types.automation_label -> unit
   }
 
 val set_observer : observer -> unit
@@ -25,5 +27,3 @@ val inc_dispatch_flusher_start_outcome : outcome:flusher_outcome -> unit
 val inc_vote_fixture_detected : count:int -> unit
 val inc_persistence_read_drop :
   surface:board_persist_surface -> reason:Read_drop_reason.t -> unit
-val inc_legacy_migrate_post_kind :
-  author:string -> automation_label:Board_types.automation_label -> unit

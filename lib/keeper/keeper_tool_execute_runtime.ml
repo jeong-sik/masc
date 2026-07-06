@@ -236,7 +236,10 @@ let pre_dispatch_path_missing ~cwd ir =
          let resolved =
            if Filename.is_relative p then Filename.concat cwd p else p
          in
-         try not (Sys.file_exists resolved) with _ -> true
+         match Sys.file_exists resolved with
+         | exists -> not exists
+         | exception Sys_error _ -> true
+         | exception Unix.Unix_error _ -> true
        ) args
      | `Audited | `Privileged -> None)
   | Masc_exec.Shell_ir.Pipeline _ -> None
@@ -423,20 +426,16 @@ let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Keeper_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
-let typed_input_shell_ir_unvalidated input =
-  match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated input with
-  | Error _ -> None
-  | Ok ir -> Some ir
+let typed_input_shell_ir_unvalidated_result input =
+  Keeper_tool_execute_typed_input.to_shell_ir_unvalidated input
 
-let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd = function
-  | None -> cwd, None
-  | Some ir ->
-    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
-      ~config
-      ~meta
-      ~cwd
-      ~cmd
-      ir
+let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ir =
+  Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
+    ~config
+    ~meta
+    ~cwd
+    ~cmd
+    ir
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -489,7 +488,23 @@ let handle_tool_execute_typed
            error_json ~fields (typed_validation_error_text e)
          | Ok () ->
         let cmd = typed_input_command_text input in
-        let input_ir = typed_input_shell_ir_unvalidated input in
+        match typed_input_shell_ir_unvalidated_result input with
+        | Error e ->
+          let alts =
+            Keeper_tool_execute_typed_input.validation_error_alternatives e
+          in
+          let fields =
+            [ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+            @ execution_location_fields cwd
+            @ typed_validation_deterministic_retry_fields e
+            @ typed_validation_recovery_fields e
+            @
+            (match alts with
+             | [] -> []
+             | _ -> [ "alternatives", `List (List.map (fun s -> `String s) alts) ])
+          in
+          error_json ~fields (typed_validation_error_text e)
+        | Ok input_ir ->
         let cwd, root_git_cwd_error =
           resolve_typed_git_cwd
             ~config
@@ -501,8 +516,7 @@ let handle_tool_execute_typed
         let root_git_cwd_error =
           match root_git_cwd_error with
           | Some e -> Some e
-          | None ->
-            Option.bind input_ir Keeper_tool_execute_command_semantics.misuse_error
+          | None -> Keeper_tool_execute_command_semantics.misuse_error input_ir
         in
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in

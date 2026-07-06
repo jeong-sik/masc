@@ -77,14 +77,54 @@ let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   |> Json_util.dedupe_keep_order
 ;;
 
+let memory_os_fact_parse_error_summary errors =
+  match errors with
+  | [] -> None
+  | first :: _ ->
+    Some
+      (Printf.sprintf
+         "fact JSONL parse errors count=%d first=%s"
+         (List.length errors)
+         (Keeper_memory_os_io.fact_jsonl_parse_error_to_string first))
+;;
+
+let memory_os_episode_parse_error_summary errors =
+  match errors with
+  | [] -> None
+  | first :: _ ->
+    Some
+      (Printf.sprintf
+         "episode read errors count=%d first=%s"
+         (List.length errors)
+         (Keeper_memory_os_io.episode_parse_error_to_string first))
+;;
+
 let memory_os_read_episodes ~keeper_id ~n =
-  try Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n, None with
+  try
+    let
+      { Keeper_memory_os_io.episodes
+      ; episode_parse_errors
+      }
+      =
+      Keeper_memory_os_io.read_episodes_tail_with_errors ~keeper_id ~n
+    in
+    episodes, memory_os_episode_parse_error_summary episode_parse_errors
+  with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> [], Some (Printexc.to_string exn)
 ;;
 
 let memory_os_read_facts ~keeper_id ~n =
-  try Keeper_memory_os_io.read_facts_tail ~keeper_id ~n, None with
+  try
+    let
+      { Keeper_memory_os_io.facts
+      ; parse_errors
+      }
+      =
+      Keeper_memory_os_io.read_facts_tail_with_errors ~keeper_id ~n
+    in
+    facts, memory_os_fact_parse_error_summary parse_errors
+  with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> [], Some (Printexc.to_string exn)
 ;;
@@ -182,10 +222,10 @@ let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit
   { keeper_scope = keeper_id
   ; shared_scope =
       (if has_shared_tier then Some Keeper_memory_os_types.shared_store_id else None)
-  ; facts_source = "Keeper_memory_os_io.read_facts_tail"
+  ; facts_source = "Keeper_memory_os_io.read_facts_tail_with_errors"
   ; shared_facts_source =
-      (if has_shared_tier then Some "Keeper_memory_os_io.read_facts_all" else None)
-  ; episodes_source = "Keeper_memory_os_io.read_episodes_tail"
+      (if has_shared_tier then Some "Keeper_memory_os_io.read_facts_all_with_errors" else None)
+  ; episodes_source = "Keeper_memory_os_io.read_episodes_tail_with_errors"
   ; dashboard_fact_tail_limit = fact_tail_limit
   ; dashboard_episode_tail_limit = recent_episode_limit
   ; recall_private_fact_limit = Keeper_memory_os_policy.recall_default_max_facts

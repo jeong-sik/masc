@@ -1818,6 +1818,21 @@ let test_extract_visible_reply_drops_empty_structured_envelope () =
   check bool "structured envelope parsed" true (Option.is_some payload_json_opt);
   check string "empty reply does not fall back to envelope" "" visible_reply
 
+let test_extract_visible_reply_observes_payload_parse_error () =
+  let body = {|{"reply":|} in
+  let payload_decode, visible_reply =
+    Server_routes_http_keeper_stream.For_testing.extract_visible_reply_with_decode
+      body
+  in
+  (match payload_decode with
+   | Server_routes_http_keeper_stream.Keeper_reply_payload_parse_error
+       { detail } ->
+       check bool "parse detail captured" true (String.length detail > 0)
+   | Server_routes_http_keeper_stream.Keeper_reply_payload_json _ ->
+       fail "expected malformed direct-reply payload to decode as parse error");
+  check string "malformed payload still uses raw visible fallback" body
+    visible_reply
+
 let test_extract_visible_reply_uses_typed_reply_field_only () =
   let body =
     Yojson.Safe.to_string
@@ -2711,6 +2726,8 @@ let () =
             test_keeper_chat_user_only_persists_attachment_refs_not_raw_media;
           test_case "visible reply drops empty structured envelope" `Quick
             test_extract_visible_reply_drops_empty_structured_envelope;
+          test_case "visible reply observes payload parse error" `Quick
+            test_extract_visible_reply_observes_payload_parse_error;
           test_case "visible reply uses typed reply field only" `Quick
             test_extract_visible_reply_uses_typed_reply_field_only;
           test_case "tool failure log details include error body and failure_class"

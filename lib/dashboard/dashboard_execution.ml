@@ -2,9 +2,34 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
+type workspace_status_state_projection =
+  | Workspace_status_uninitialized
+  | Workspace_status_snapshot of Workspace.read_state_snapshot
+
+let workspace_status_state_projection_status = function
+  | Workspace_status_uninitialized -> "uninitialized"
+  | Workspace_status_snapshot snapshot ->
+      Workspace.read_state_status_to_string snapshot.status
+;;
+
+let workspace_status_state_projection_errors = function
+  | Workspace_status_uninitialized -> []
+  | Workspace_status_snapshot snapshot -> snapshot.read_errors
+;;
+
 let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
+  let workspace_state_projection =
+    if Workspace.is_initialized config
+    then Workspace_status_snapshot (Workspace.read_state_snapshot config)
+    else Workspace_status_uninitialized
+  in
   let workspace_state_opt =
-    if Workspace.is_initialized config then Some (Workspace.read_state config) else None
+    match workspace_state_projection with
+    | Workspace_status_uninitialized -> None
+    | Workspace_status_snapshot snapshot -> Some snapshot.state
+  in
+  let workspace_state_read_errors =
+    workspace_status_state_projection_errors workspace_state_projection
   in
   let project =
     match workspace_state_opt with
@@ -23,6 +48,11 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "cluster", `String (Env_config_core.cluster_name ())
     ; "project", `String project
+    ; ( "workspace_state_status"
+      , `String (workspace_status_state_projection_status workspace_state_projection) )
+    ; "workspace_state_read_error_count", `Int (List.length workspace_state_read_errors)
+    ; ( "workspace_state_read_errors"
+      , `List (List.map (fun error -> `String error) workspace_state_read_errors) )
     ; "tempo_interval_s", `Float tempo.current_interval_s
     ; "paused", `Bool paused
     ; "version", `String Version.version
@@ -552,7 +582,7 @@ let task_canonical_goal_id goal_task_index (task : Masc_domain.task) =
     Some goal_id
 ;;
 
-let task_json ~goal_task_index (task : Masc_domain.task) =
+let task_json ~goal_task_index ?goal_id_read_error (task : Masc_domain.task) =
   let fields =
     match Masc_domain.task_to_yojson task with
     | `Assoc assoc -> assoc
@@ -568,6 +598,12 @@ let task_json ~goal_task_index (task : Masc_domain.task) =
       fields
       "goal_id"
       (Json_util.string_opt_to_json (task_canonical_goal_id goal_task_index task))
+  in
+  let fields =
+    assoc_upsert
+      fields
+      "goal_id_read_error"
+      (Json_util.string_opt_to_json goal_id_read_error)
   in
   let fields =
     match task_completed_at task with
@@ -594,6 +630,8 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.ag
     ; "capabilities", `List (List.map (fun value -> `String value) agent.capabilities)
     ; "emoji", `String profile.emoji
     ; "koreanName", `String profile.korean_name
+    ; "profile_errors", agent_profile_errors_json profile
+    ; "profile_error_count", `Int (List.length profile.profile_errors)
     ; "model", model_value
     ]
 ;;
@@ -711,7 +749,16 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let tasks = tasks_safe config in
     (* RFC-0267 Phase 1: build the task→goals index once; task_json projects the
        canonical goal_id per task from it (registry is SSOT for the linkage). *)
-    let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
+    let goal_task_index, goal_task_links_read_error =
+      match Workspace_goal_index.build_task_goal_index_for_config_result config with
+      | Ok index -> index, None
+      | Error msg ->
+        let message = Workspace_goal_index.goal_task_links_read_failed_message msg in
+        Log.Dashboard.warn
+          "[dashboard_execution] goal-task link registry read failed: %s"
+          message;
+        Hashtbl.create 0, Some message
+    in
     let operation_contexts = build_operation_contexts ~tasks in
     let session_contexts = [] in
     let execution_queue = build_execution_queue session_contexts operation_contexts in
@@ -844,7 +891,15 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          number. The raw list is surfaced instead; frontend paginates. *)
     let all_visible = active_tasks @ recent_done in
     let task_fields =
-      [ "tasks", `List (List.map (task_json ~goal_task_index) all_visible)
+      [ ( "tasks"
+        , `List
+            (List.map
+               (task_json ~goal_task_index ?goal_id_read_error:goal_task_links_read_error)
+               all_visible) )
+      ; ( "goal_task_links_known"
+        , `Bool (Option.is_none goal_task_links_read_error) )
+      ; ( "goal_task_links_read_error"
+        , Json_util.string_opt_to_json goal_task_links_read_error )
       ; ( "task_counts"
         , `Assoc
             [ "active", `Int (List.length active_tasks)

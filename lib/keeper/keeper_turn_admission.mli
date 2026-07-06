@@ -67,6 +67,12 @@ val chat_waiting : base_path:string -> keeper_name:string -> bool
     admitted (in-flight) turn — an admitted chat holds the slot and is no
     longer waiting. *)
 
+val chat_waiting_since : base_path:string -> keeper_name:string -> float option
+(** Unix epoch seconds for the first currently parked chat waiter, if any.
+    Returns [None] when [chat_waiting] is false or the keeper has no slot. This
+    timestamp is observability-only; admission decisions still use the typed
+    waiter count, not elapsed time. *)
+
 val run_serialized
   :  base_path:string
   -> keeper_name:string

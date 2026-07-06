@@ -218,6 +218,19 @@ val snapshot_json :
     {!Operator_control} re-exposes it via the
     runtime-include of this module. *)
 
+val snapshot_json_result :
+  ?actor:string ->
+  ?view:string ->
+  ?include_messages:bool ->
+  ?include_keepers:bool ->
+  ?include_summary_fields:bool ->
+  ?lightweight_summary:bool ->
+  'a context ->
+  (Yojson.Safe.t, string) result
+(** Result-returning variant of {!snapshot_json}. Read/decode failures in
+    authoritative operator projection inputs are returned as [Error] instead of
+    being represented as empty sections. *)
+
 val recent_actions_json : Workspace.config -> Yojson.Safe.t
 (** Returns the most recent operator-action log entries
     as a [`List].  Returns [`List []] when the log file

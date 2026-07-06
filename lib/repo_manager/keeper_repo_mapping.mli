@@ -97,18 +97,26 @@ val apply_mapping :
     Mapping load failures still return no repositories. *)
 
 type repository_identity_mismatch
+type repository_origin_read_error
+
+val repository_origin_read_error_message :
+  repository_origin_read_error -> string
+(** Render the operator-facing fail-closed explanation for a playground
+    repository whose git origin could not be read. *)
 
 type repository_resolution =
   | No_repository
   | Repository of repository_id
   | Repository_identity_mismatch of repository_identity_mismatch
+  | Repository_origin_read_error of repository_origin_read_error
   | Repository_store_error of string
 
 val repository_resolution_of_path :
   base_path:string -> path:string -> repository_resolution
 (** [repository_resolution_of_path ~base_path ~path] returns the repository
     resolution for [path]. Use this for access decisions so identity mismatches
-    and repository-store load failures stay explicit and fail closed. *)
+    repository-origin read failures, and repository-store load failures stay
+    explicit and fail closed. *)
 
 val repository_resolution_of_path_from_catalog :
   base_path:string -> path:string -> repository list -> repository_resolution
@@ -124,7 +132,7 @@ val repository_id_of_path :
     registered repository or the registered repository has an identity
     mismatch. Compatibility wrapper only; do not use for access decisions
     because [None] collapses [No_repository], [Repository_identity_mismatch],
-    and [Repository_store_error]. *)
+    [Repository_origin_read_error], and [Repository_store_error]. *)
 
 val validate_path_access :
   keeper_id:string -> base_path:string -> path:string -> (unit, string) result

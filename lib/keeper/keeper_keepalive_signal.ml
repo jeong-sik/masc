@@ -265,10 +265,30 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
     when a @mention targets a running keeper.
 
     When [?stimulus] is provided, the stimulus is appended to the keeper's
-    Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
-    flag flips. This is RFC-0020 Rule 1 (enqueue is independent of policy)
-    + the data-channel half of the layer split — [fiber_wakeup] remains the
-    hint signal, the queue is the authoritative payload. *)
+    Event Layer queue before the wakeup flag flips. Result-aware producers use
+    [enqueue_stimulus_and_wakeup_hint_result] so a failed durable enqueue does
+    not become a false wake success. This is RFC-0020 Rule 1 (enqueue is
+    independent of policy) + the data-channel half of the layer split —
+    [fiber_wakeup] remains the hint signal, the queue is the authoritative
+    payload. *)
+let enqueue_stimulus_and_wakeup_hint_result ~base_path ~keeper_name stimulus =
+  match Keeper_registry_event_queue.enqueue_result ~base_path keeper_name stimulus with
+  | Error _ as error -> error
+  | Ok delivery ->
+    Keeper_registry.wakeup ~base_path keeper_name;
+    Ok delivery
+;;
+
+let enqueue_stimulus_and_wakeup_hint ~base_path ~keeper_name stimulus =
+  match enqueue_stimulus_and_wakeup_hint_result ~base_path ~keeper_name stimulus with
+  | Ok _ -> ()
+  | Error msg ->
+    Log.Keeper.warn
+      "event-layer wake hint suppressed after durable enqueue failure keeper=%s: %s"
+      keeper_name
+      msg
+;;
+
 let wakeup_keeper ?base_path ?stimulus name =
   Keeper_registry.all ?base_path ()
   |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
@@ -276,11 +296,13 @@ let wakeup_keeper ?base_path ?stimulus name =
     then
       if entry.phase = Keeper_state_machine.Running
       then begin
-        Option.iter
-          (fun s ->
-            Keeper_registry_event_queue.enqueue ~base_path:entry.base_path name s)
-          stimulus;
-        Keeper_registry.wakeup ~base_path:entry.base_path name
+        match stimulus with
+        | Some s ->
+          enqueue_stimulus_and_wakeup_hint
+            ~base_path:entry.base_path
+            ~keeper_name:name
+            s
+        | None -> Keeper_registry.wakeup ~base_path:entry.base_path name
       end
       else
         (* 비-Running 키퍼로의 stimulus는 배달하지 않는다(보수적 기본값 유지 —
@@ -313,11 +335,6 @@ let wakeup_all_keepers ?base_path () =
 (* ── Board-reactive policy constants ── *)
 
 let board_reactive_debounce_sec = 60.0
-
-let board_reactive_wakeup_max =
-  Keeper_config.int_of_env_default
-    "MASC_KEEPER_BOARD_WAKEUP_MAX" ~default:4 ~min_v:1 ~max_v:64
-;;
 
 (* RFC-0239 R4: collapse runs of whitespace and lowercase so trivial spacing
    or case differences do not split a re-post into a fresh dedup key. *)
@@ -391,38 +408,16 @@ let connector_reactive_wakeup_allowed ~base_path ~keeper_name ~channel_id =
     ~debounce_sec:connector_reactive_debounce_sec
 ;;
 
-let take = List.take
-
 (* RFC-0020: select which keepers wake for a board signal from typed
-   [Board_wake.wake_reason] candidates. Explicit mentions short-circuit and
-   wake unconditionally; every other reason competes for [total_limit] slots
-   in candidate order. [None] reasons are dropped (the relevance pipeline
-   found nothing for that keeper). The prior generic ["board_activity"]
-   throttle bucket is gone: the producer never emitted it, so it never fired —
-   typing the carrier made that dead branch unrepresentable. *)
-let select_board_wakeup_candidates
-    ?(total_limit = board_reactive_wakeup_max)
-    candidates =
-  let explicit =
+   [Board_wake.wake_reason] candidates. [None] reasons are dropped (the
+   relevance pipeline found nothing for that keeper); every typed reason is
+   delivered in candidate order. The prior generic ["board_activity"] throttle
+   bucket is gone: the producer never emitted it, so it never fired — typing
+   the carrier made that dead branch unrepresentable. *)
+let select_board_wakeup_candidates candidates =
+  List.filter_map
+    (fun (item, reason) -> match reason with None -> None | Some r -> Some (item, r))
     candidates
-    |> List.filter_map (fun (item, reason) ->
-      match reason with
-      | Some Board_wake.Explicit_mention -> Some (item, Board_wake.Explicit_mention)
-      | Some (Board_wake.Stigmergy _ | Board_wake.Thread_reply_after_self_comment)
-      | None -> None)
-  in
-  match explicit with
-  | _ :: _ -> explicit, 0
-  | [] ->
-    let non_explicit =
-      List.filter_map
-        (fun (item, reason) ->
-          match reason with None -> None | Some r -> Some (item, r))
-        candidates
-    in
-    let selected = take total_limit non_explicit in
-    let dropped = List.length non_explicit - List.length selected in
-    selected, dropped
 ;;
 
 (* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
@@ -443,6 +438,7 @@ let board_signal_stimulus
       ; author = signal.author
       ; title = signal.title
       ; content = signal.content
+      ; mention_ids = List.map Board.Mention_id.to_string signal.mention_ids
       ; hearth = signal.hearth
       ; updated_at = signal.updated_at
       }
@@ -451,7 +447,8 @@ let board_signal_stimulus
   ; urgency =
       (match reason with
        | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
-       | Board_wake.Stigmergy _ | Board_wake.Thread_reply_after_self_comment ->
+       | Board_wake.Thread_reply_after_self_comment
+       | Board_wake.Board_comment_read_error _ ->
          Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
   ; payload
@@ -490,12 +487,18 @@ let board_signal_wake_paused_keeper
       ~base_path:config.base_path
       resumed_meta.name
       Keeper_state_machine.Operator_resume;
-    Keeper_registry_event_queue.enqueue
-      ~base_path:config.base_path
-      resumed_meta.name
-      stimulus;
-    Keeper_registry.wakeup ~base_path:config.base_path resumed_meta.name;
-    Ok ()
+    (match
+       enqueue_stimulus_and_wakeup_hint_result
+         ~base_path:config.base_path
+         ~keeper_name:resumed_meta.name
+         stimulus
+     with
+     | Ok _ -> Ok ()
+     | Error err ->
+       Error
+         (Printf.sprintf
+            "failed to enqueue board wake stimulus after auto-resume: %s"
+            err))
   | Error err ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
@@ -517,8 +520,15 @@ let board_signal_wake_keeper
     then board_signal_wake_paused_keeper ~config ~stimulus meta
     else Ok ()
   else (
-    wakeup_keeper ~base_path:config.base_path ~stimulus meta.name;
-    Ok ())
+    match
+      enqueue_stimulus_and_wakeup_hint_result
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+        stimulus
+    with
+    | Ok _ -> Ok ()
+    | Error err ->
+      Error (Printf.sprintf "failed to enqueue board wake stimulus: %s" err))
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
@@ -601,28 +611,12 @@ let wakeup_relevant_keeper_for_board_signal
           signal.post_id
           err)
   in
-  let selected, dropped = select_board_wakeup_candidates candidates in
+  let selected = select_board_wakeup_candidates candidates in
   let yield_meter = Eio_guard.create_yield_meter ~interval:1 () in
   selected
   |> List.iter (fun (meta, reason) ->
          wake_meta meta reason;
-         Eio_guard.yield_step yield_meter);
-  if dropped > 0 then begin
-    (* Counter tracks wakeups dropped by the cap, not capped events; under
-       high fanout [dropped] can be >1 per signal, so add the actual amount
-       (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
-      ~labels:[("kind", signal_kind_label)]
-      ~delta:(float_of_int dropped)
-      ();
-    Log.Keeper.info
-      "board signal wakeup capped by configured fanout: dropped=%d post=%s \
-       total_limit=%d"
-      dropped
-      signal.post_id
-      board_reactive_wakeup_max
-  end
+         Eio_guard.yield_step yield_meter)
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

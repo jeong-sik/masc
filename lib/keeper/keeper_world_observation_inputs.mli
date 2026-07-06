@@ -9,10 +9,17 @@ val backlog_updated_since_last_scheduled_autonomous
   -> backlog:Masc_domain.backlog
   -> bool
 
+type backlog_counts = int * int * int * int * bool
+
+val read_backlog_counts_result
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> (backlog_counts, string) result
+
 val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> int * int * int * int * bool
+  -> backlog_counts
 
 val count_running_keeper_fibers : config:Workspace.config -> int
 (** Count live keeper fibers for [config.base_path].

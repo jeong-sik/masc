@@ -25,6 +25,14 @@ val record_task_transition :
   details:Yojson.Safe.t ->
   unit
 
+val record_task_transition_result :
+  Workspace_query.config ->
+  agent_name:string ->
+  task_id:string ->
+  transition:Masc_domain.task_action ->
+  details:Yojson.Safe.t ->
+  (unit, string) result
+
 val record_completion_claim :
   Workspace_query.config ->
   keeper_name:string ->
@@ -39,6 +47,21 @@ val record_completion_claim :
   strong_evidence_refs:string list ->
   unit ->
   unit
+
+val record_completion_claim_result :
+  Workspace_query.config ->
+  keeper_name:string ->
+  agent_name:string ->
+  trace_id:string ->
+  turn_number:int ->
+  subject:string ->
+  ?task_id:string ->
+  ?evidence_refs:string list ->
+  ?surface:string ->
+  strong_evidence:bool ->
+  strong_evidence_refs:string list ->
+  unit ->
+  (unit, string) result
 
 val accountability_summary_json :
   Workspace_query.config ->
@@ -76,7 +99,6 @@ val attribution_from_status :
   claim_status ->
   evidence:Yojson.Safe.t ->
   ?resolution_reason:string ->
-  ?evidence_refs_count:int ->
   unit ->
   Attribution.t option
 (** Mapping:
@@ -85,9 +107,10 @@ val attribution_from_status :
                         (uses [resolution_reason] if given, else default)
     - [Expired]      → [Attribution.Policy_failed { reason = "expired" }]
     - [Partial]      → [Attribution.Partial_pass { score; rationale }]
-                        (score = clamp 0.5 + 0.1 × [evidence_refs_count]
-                         at 1.0; rationale from [resolution_reason] or
-                         default)
+                        (legacy [score] scalar is [0.0] because accountability
+                         partial status is categorical unless an upstream
+                         judge supplies a scored verdict; rationale from
+                         [resolution_reason] or default)
     - [Pending]      → [None] (no verdict yet — consistent with verification)
 
     Returns [None] only for [Pending]. All other statuses yield [Some]. *)

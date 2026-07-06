@@ -134,3 +134,14 @@ val build_agent_briefs :
 
     Returns a JSON list, one entry per active / archived agent,
     sorted for dashboard display. *)
+
+val build_agent_briefs_with_read_errors :
+  Workspace.config ->
+  session_context list ->
+  attention_context list ->
+  Yojson.Safe.t ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t list * Yojson.Safe.t list
+(** [build_agent_briefs_with_read_errors] returns the same agent brief list as
+    {!build_agent_briefs}, plus row-indexed read errors observed while scanning
+    archived workspace-event metadata. *)

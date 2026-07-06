@@ -21,17 +21,55 @@ open Masc_domain
 open Workspace_utils
 
 (** Read the current task status directly from the backlog (snapshot read,
-    no write lock).  Returns [None] when the task is absent or the backlog
-    cannot be read. *)
+    no write lock).  [Ok None] means the backlog was read and the task was
+    absent.  [Error _] means the status is unknown because the backlog could
+    not be read/decoded. *)
+let fresh_task_status_result config ~(task_id : string)
+    : (Masc_domain.task_status option, string) result =
+  match Workspace_backlog.read_backlog_r config with
+  | Error msg ->
+      Error
+        (Printf.sprintf
+           "task_cache_invariant backlog read failed for task_id=%s: %s"
+           task_id msg)
+  | Ok backlog ->
+      Ok
+        (List.find_opt
+           (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+           backlog.tasks
+         |> Option.map (fun (t : Masc_domain.task) -> t.task_status))
+
+(** Compatibility wrapper for legacy option callers.  Returns [None] when the
+    task is absent or status is unreadable, but read failure is no longer
+    silent. *)
 let fresh_task_status config ~(task_id : string)
     : Masc_domain.task_status option =
-  match Workspace_backlog.read_backlog_r config with
-  | Error _ -> None
-  | Ok backlog ->
-      List.find_opt
-        (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-        backlog.tasks
-      |> Option.map (fun (t : Masc_domain.task) -> t.task_status)
+  match fresh_task_status_result config ~task_id with
+  | Ok status -> status
+  | Error msg ->
+      Log.Misc.warn "task_cache_invariant: %s" msg;
+      None
+
+let report_status_read_error config ~agent_name ~task_id ~module_name error =
+  Log.Misc.warn
+    "task_cache_invariant: status read failed module=%s agent=%s task=%s: %s"
+    module_name agent_name task_id error;
+  try
+    log_event config
+      (`Assoc
+         [ ("type", `String "cache_desync.read_failed")
+         ; ("module", `String module_name)
+         ; ("agent", `String agent_name)
+         ; ("task_id", `String task_id)
+         ; ("error", `String error)
+         ; ("ts", `String (now_iso ()))
+         ])
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Misc.warn
+        "task_cache_invariant: read-failure event failed (%s %s): %s"
+        module_name task_id (Printexc.to_string exn)
 
 (** [is_terminal status] returns [true] iff the status is [Done _] or
     [Cancelled _].  SSOT: [Masc_domain.task_status_is_terminal]. *)
@@ -58,7 +96,7 @@ let clear_stale_agent_task
           let updated =
             { agent with status = Masc_domain.Active; current_task = None }
           in
-          write_json config agent_file (agent_to_yojson updated)
+          write_agent config agent_file updated
       | Ok _ -> ()
       | Error msg ->
           Log.Misc.warn
@@ -117,7 +155,13 @@ let clear_stale_agent_task_for_task
                         ~task_id
                         ~status
                         ~module_name
-                  | Ok _ | Error _ -> ())))
+                  | Ok _ -> ()
+                  | Error msg ->
+                      Log.Misc.warn
+                        "task_cache_invariant: agent parse failed during scan (%s %s): %s"
+                        module_name
+                        name
+                        msg)))
          agent_files
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
@@ -147,6 +191,27 @@ let clear_stale_agent_task_for_task
 
     @param module_name  Short ASCII label for the diagnostic log,
     e.g. ["taskmaster.broadcast"] or ["mention_tracker.emit"]. *)
+let with_fresh_task_status_result
+      config
+      ~(agent_name : string)
+      ~(task_id : string)
+      ~(module_name : string)
+      (f : Masc_domain.task_status -> 'a)
+    : ('a option, string) result =
+  match fresh_task_status_result config ~task_id with
+  | Error _ as error -> error
+  | Ok (Some status) when is_terminal status ->
+      clear_stale_agent_task config ~agent_name ~task_id ~status ~module_name;
+      Ok None
+  | Ok (Some status) ->
+      Ok (Some (f status))
+  | Ok None ->
+      (* Task not found in backlog — conservative: return None so the caller
+         treats it as though suppressed.  Callers that need to distinguish
+         "terminal" from "absent" should use [fresh_task_status_result]
+         directly. *)
+      Ok None
+
 let with_fresh_task_status
       config
       ~(agent_name : string)
@@ -154,14 +219,8 @@ let with_fresh_task_status
       ~(module_name : string)
       (f : Masc_domain.task_status -> 'a)
     : 'a option =
-  match fresh_task_status config ~task_id with
-  | Some status when is_terminal status ->
-      clear_stale_agent_task config ~agent_name ~task_id ~status ~module_name;
-      None
-  | Some status ->
-      Some (f status)
-  | None ->
-      (* Task not found in backlog — conservative: return None so the caller
-         treats it as though suppressed.  Callers that need to distinguish
-         "terminal" from "absent" should use [fresh_task_status] directly. *)
+  match with_fresh_task_status_result config ~agent_name ~task_id ~module_name f with
+  | Ok value -> value
+  | Error msg ->
+      report_status_read_error config ~agent_name ~task_id ~module_name msg;
       None

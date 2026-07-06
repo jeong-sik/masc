@@ -144,6 +144,7 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Board_signal _
       | Keeper_event_queue.Fusion_completed _
       | Keeper_event_queue.Bg_completed _
+      | Keeper_event_queue.Schedule_signal _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.No_progress_recovery
       | Keeper_event_queue.Hitl_resolved _ ->
@@ -435,20 +436,36 @@ let run_keepalive_unified_turn
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name
             (connector_attention_event_ids_of_stimuli !consumed_stimuli))
-        else
-          Keeper_registry_event_queue.requeue_front
-            ~base_path:ctx.config.base_path
-            meta_after_triage.name
-            !consumed_stimuli;
+        else (
+          match
+            Keeper_registry_event_queue.requeue_front_result
+              ~base_path:ctx.config.base_path
+              meta_after_triage.name
+              !consumed_stimuli
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Log.Keeper.warn
+              "%s: failed to requeue consumed stimuli after skipped turn: %s"
+              meta_after_triage.name
+              msg);
       { meta = meta_after_cycle; cycle_crashed = false }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
-      Keeper_registry_event_queue.requeue_front
-        ~base_path:ctx.config.base_path
-        meta_after_triage.name
-        !consumed_stimuli;
+      (match
+         Keeper_registry_event_queue.requeue_front_result
+           ~base_path:ctx.config.base_path
+           meta_after_triage.name
+           !consumed_stimuli
+       with
+       | Ok () -> ()
+       | Error msg ->
+         Log.Keeper.warn
+           "%s: failed to requeue consumed stimuli after crashed turn: %s"
+           meta_after_triage.name
+           msg);
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)

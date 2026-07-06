@@ -62,6 +62,11 @@ val validate_mcp_session_profile :
   profile:tool_profile -> string -> (unit, string) result
 val validate_mcp_session_delete_profile :
   profile:tool_profile -> string -> (unit, string) result
+type method_from_body_error =
+  | Method_body_json_parse_error of string
+
+val method_from_body_error_to_string : method_from_body_error -> string
+val method_from_body_result : string -> (string option, method_from_body_error) result
 val method_from_body : string -> string option
 val inject_agent_name_into_body :
   ?rewrite_existing:bool ->
@@ -86,6 +91,12 @@ val is_known_session : string -> bool
 val ensure_sse_backing_session_for_known_transport_session :
   transport_session_id:string -> sse_session_id:string -> unit
 
+type body_tools_call_name_error =
+  | Body_tools_call_name_parse_error of string
+
+val body_tools_call_name_error_to_string : body_tools_call_name_error -> string
+val body_tools_call_name_result :
+  string -> (string option, body_tools_call_name_error) result
 val body_tools_call_name : string -> string option
 val protocol_version_from_body : string -> string option
 val get_session_id_query : string -> string option

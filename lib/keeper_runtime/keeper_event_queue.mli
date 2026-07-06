@@ -40,6 +40,7 @@ type board_stimulus = {
   author : string;
   title : string;
   content : string;
+  mention_ids : string list;
   hearth : string option;
   updated_at : float option;
 }
@@ -57,13 +58,19 @@ type stimulus_payload =
   | No_progress_recovery
   | Fusion_completed of fusion_completion
   | Bg_completed of bg_job_completion
+  | Schedule_signal of schedule_signal
+      (** A schedule runner signal for a keeper-owned schedule. This carries the
+          durable schedule signal identity and schedule id, not the payload
+          body, so the keeper turn can re-read current schedule state instead
+          of acting on a duplicated snapshot. *)
   | Connector_attention of connector_attention
       (** RFC-connector-ambient-attention-wake: an ambient connector message
           recorded as [Keeper_external_attention]. Carries the [event_id]
           pointer into that durable store (not the content), so the wake reads
           content on the turn path and there is no payload duplication.
           Edge-triggered: dequeued once, re-armed only by a new ambient
-          message. Dormant until [handle_ambient] enqueues it (P3). *)
+          message. The Discord ambient producer enqueues this when the
+          registry flag enables ambient connector wakes. *)
   | Hitl_resolved of hitl_resolution
       (** A HITL approval this keeper enqueued — and skipped cycles on via
           [has_pending_for_keeper -> Skip Approval_pending] — was resolved.
@@ -109,6 +116,22 @@ and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
 
+and schedule_signal_kind =
+  | Schedule_due_candidate
+  | Schedule_due_blocked_approval
+
+and schedule_signal = {
+  schedule_signal_id : string;
+  schedule_signal_kind : schedule_signal_kind;
+  schedule_id : string;
+  due_at : float;
+  payload_digest : string;
+}
+(** Payload for [Schedule_signal]: the runner noticed a due keeper-owned
+    schedule or a due schedule blocked on approval. [schedule_signal_id] is the
+    id from [Schedule_runner.wake_signal]; [payload_digest] lets the keeper
+    correlate with the schedule ledger without embedding payload content. *)
+
 and hitl_resolution_decision =
   | Hitl_approved
   | Hitl_rejected
@@ -142,6 +165,13 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)
+
+val schedule_signal_post_id : schedule_signal -> post_id
+(** Dedup/correlation id for [Schedule_signal]:
+    ["schedule-signal:<schedule_signal_id>"]. *)
+
+val schedule_signal_kind_to_string : schedule_signal_kind -> string
+(** Stable wire/log label for a schedule runner signal kind. *)
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

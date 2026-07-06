@@ -139,12 +139,12 @@ let tally_of_records (records : record list) : tally =
 
 let record ~(config : Workspace.config) (r : record) : (unit, [ `Io of string ]) result =
   let path = Keeper_types_support.keeper_feedback_log_path config r.keeper_id in
-  (* append_jsonl_line shares the .policy/.decisions writer (rotation included).
-     append_file raises Sys_error on IO fault — caught here, surfaced as `Io,
-     never silently dropped. *)
-  match Keeper_types_support.append_jsonl_line path (to_json r) with
-  | () -> Ok ()
-  | exception Sys_error msg -> Error (`Io msg)
+  (* The feedback log shares the .policy/.decisions writer family (rotation
+     included), but uses the Result boundary so every write failure is returned
+     as [`Io] rather than depending on per-caller exception shape. *)
+  match Keeper_types_support.append_jsonl_line_result path (to_json r) with
+  | Ok () -> Ok ()
+  | Error msg -> Error (`Io msg)
 
 let read_tally ~(config : Workspace.config) ~keeper_id : (tally, [ `Io of string ]) result =
   let path = Keeper_types_support.keeper_feedback_log_path config keeper_id in

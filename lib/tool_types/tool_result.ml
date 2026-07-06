@@ -85,51 +85,120 @@ let classify_from_exception (exn : exn) : tool_failure_class =
   | _ -> Runtime_failure
 ;;
 
-let classify_from_structured_failure_message message =
-  try
-    match Yojson.Safe.from_string message with
-    | `Assoc fields ->
-      (match List.assoc_opt "failure_class" fields with
-       | Some (`String value) -> tool_failure_class_of_string value
-       | _ -> None)
-    | _ -> None
-  with
-  | Yojson.Json_error _ -> None
+type structured_payload_location =
+  | Complete_message
+  | Message_suffix of { byte_offset : int }
+
+type structured_payload_decode_error =
+  | Structured_payload_json_error of
+      { location : structured_payload_location
+      ; message : string
+      }
+
+type structured_payload_decode_report =
+  { payload : Yojson.Safe.t option
+  ; errors : structured_payload_decode_error list
+  }
+
+let structured_payload_location_to_string = function
+  | Complete_message -> "complete_message"
+  | Message_suffix { byte_offset } -> Printf.sprintf "message_suffix:%d" byte_offset
+;;
+
+let structured_payload_decode_error_to_string = function
+  | Structured_payload_json_error { location; message } ->
+    Printf.sprintf
+      "%s: %s"
+      (structured_payload_location_to_string location)
+      message
+;;
+
+let json_payload_candidate raw =
+  match String.length raw with
+  | 0 -> false
+  | _ ->
+    (match raw.[0] with
+     | '{' | '[' -> true
+     | _ -> false)
+;;
+
+let ensure_structured_payload = function
+  | `Assoc _ as obj -> Some obj
+  | `List _ as arr -> Some (`Assoc [ "items", arr ])
+  | _ -> None
+;;
+
+let parse_structured_payload_candidate ~location raw =
+  try Ok (Yojson.Safe.from_string raw |> ensure_structured_payload) with
+  | Yojson.Json_error message ->
+    Error (Structured_payload_json_error { location; message })
+;;
+
+let structured_payload_of_message_report
+      (message : string)
+  : structured_payload_decode_report
+  =
+  let trimmed = String.trim message in
+  let len = String.length message in
+  let rec scan_suffixes errors from =
+    match String.index_from_opt message from '\n' with
+    | None -> { payload = None; errors = List.rev errors }
+    | Some newline_idx ->
+      let suffix_start = newline_idx + 1 in
+      let suffix = String.sub message suffix_start (len - suffix_start) |> String.trim in
+      if String.equal suffix ""
+      then scan_suffixes errors suffix_start
+      else (
+        match json_payload_candidate suffix with
+        | false -> scan_suffixes errors suffix_start
+        | true ->
+          (match
+             parse_structured_payload_candidate
+               ~location:(Message_suffix { byte_offset = suffix_start })
+               suffix
+           with
+           | Ok (Some payload) -> { payload = Some payload; errors = List.rev errors }
+           | Ok None -> scan_suffixes errors suffix_start
+           | Error error -> scan_suffixes (error :: errors) suffix_start))
+  in
+  let scan_after_complete errors = scan_suffixes errors 0 in
+  if json_payload_candidate trimmed
+  then (
+    match parse_structured_payload_candidate ~location:Complete_message trimmed with
+    | Ok (Some payload) -> { payload = Some payload; errors = [] }
+    | Ok None -> scan_after_complete []
+    | Error error -> scan_after_complete [ error ])
+  else scan_after_complete []
+;;
+
+let log_structured_payload_decode_errors errors =
+  List.iter
+    (fun error ->
+       Log.Misc.warn
+         "tool_result structured payload decode failed: %s"
+         (structured_payload_decode_error_to_string error))
+    errors
 ;;
 
 let structured_payload_of_message (message : string) : Yojson.Safe.t option =
-  let parse_json raw =
-    try Some (Yojson.Safe.from_string raw) with
-    | Yojson.Json_error _ -> None
-  in
-  let trimmed = String.trim message in
-  let ensure_object = function
-    | `Assoc _ as obj -> Some obj
-    | `List _ as arr -> Some (`Assoc [ "items", arr ])
-    | _ -> None
-  in
-  match parse_json trimmed with
-  | Some json -> ensure_object json
-  | None ->
-    let len = String.length message in
-    let rec loop from =
-      match String.index_from_opt message from '\n' with
-      | None -> None
-      | Some newline_idx ->
-        let suffix =
-          String.sub message (newline_idx + 1) (len - newline_idx - 1) |> String.trim
-        in
-        if String.equal suffix ""
-        then loop (newline_idx + 1)
-        else (
-          match suffix.[0] with
-          | '{' | '[' ->
-            (match parse_json suffix with
-             | Some json -> ensure_object json
-             | None -> loop (newline_idx + 1))
-          | _ -> loop (newline_idx + 1))
-    in
-    loop 0
+  let report = structured_payload_of_message_report message in
+  log_structured_payload_decode_errors report.errors;
+  report.payload
+;;
+
+let structured_payload_or_string report message =
+  log_structured_payload_decode_errors report.errors;
+  match report.payload with
+  | Some json -> json
+  | None -> `String message
+;;
+
+let failure_class_of_structured_payload = function
+  | `Assoc fields ->
+    (match List.assoc_opt "failure_class" fields with
+     | Some (`String value) -> tool_failure_class_of_string value
+     | _ -> None)
+  | `List _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ -> None
 ;;
 
 (** Payload carried by a successful tool invocation. *)
@@ -220,27 +289,21 @@ let is_success : result -> bool = function
 let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let data =
-    match structured_payload_of_message message_str with
-    | Some json -> json
-    | None -> `String message_str
-  in
+  let payload_report = structured_payload_of_message_report message_str in
+  let data = structured_payload_or_string payload_report message_str in
   Ok { data; tool_name; duration_ms }
 ;;
 
 let error ?(failure_class = None) ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let data =
-    match structured_payload_of_message message_str with
-    | Some json -> json
-    | None -> `String message_str
-  in
+  let payload_report = structured_payload_of_message_report message_str in
+  let data = structured_payload_or_string payload_report message_str in
   let class_ =
     match failure_class with
     | Some cls -> cls
     | None ->
-      (match classify_from_structured_failure_message message_str with
+      (match Option.bind payload_report.payload failure_class_of_structured_payload with
        | Some cls -> cls
        | None -> Runtime_failure)
   in

@@ -3,13 +3,16 @@
 
    Pins the wake decision plumbing: a Connector_attention_stimulus event-queue
    trigger yields a Run { Connector_attention_pending } reactive decision, the
-   same path Mention_pending / Bootstrap_stimulus take. Dormant in production —
-   nothing enqueues this stimulus yet (P3 wires handle_ambient) — so this is a
-   pure decision-layer test with no I/O. *)
+   same path Mention_pending / Bootstrap_stimulus take. The Discord ambient
+   producer is pinned below through Server_discord_in_process_gateway.For_testing,
+   so this file covers both the producer and the decision-layer intake. *)
 
 open Alcotest
 module WO = Masc.Keeper_world_observation
 module A = Masc.Keeper_external_attention
+module Q = Keeper_event_queue
+module Gateway = Server_discord_in_process_gateway
+module Discord_state = Channel_gate_discord_state
 
 let contains ~needle haystack =
   let nl = String.length needle in
@@ -53,6 +56,57 @@ let init_runtime_default_for_tests () =
   match Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let rm_rf path =
+  let rec loop path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path
+        |> Array.iter (fun name -> loop (Filename.concat path name));
+        Unix.rmdir path
+      end
+      else Sys.remove path
+  in
+  loop path
+
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
+
+let with_discord_paths dir f =
+  with_env "MASC_DISCORD_STATUS_PATH" (Some (Filename.concat dir "status.json"))
+  @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_STORE_PATH"
+    (Some (Filename.concat dir "bindings.json"))
+  @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
+    (Some (Filename.concat dir "audit.jsonl"))
+  @@ fun () ->
+  with_env "MASC_DISCORD_NAMES_PATH" (Some (Filename.concat dir "names.json")) f
+
+let with_boot_override name value f =
+  let saved = Config_boot_overrides.get_opt name in
+  Config_boot_overrides.set name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match saved with
+      | Some prior -> Config_boot_overrides.set name prior
+      | None -> Config_boot_overrides.clear name)
+    f
 
 let make_meta name =
   let json =
@@ -161,7 +215,6 @@ let test_no_stimulus_no_connector_reason () =
 (* The Connector_attention payload persists to / replays from the per-keeper
    event-queue snapshot, so its JSON codec must round-trip the event_id pointer. *)
 let test_connector_attention_codec_roundtrips () =
-  let module Q = Keeper_event_queue in
   let s =
     { Q.post_id = "evt-77"
     ; urgency = Q.Normal
@@ -176,6 +229,49 @@ let test_connector_attention_codec_roundtrips () =
       check string "event_id survives the JSON round-trip" "evt-77" event_id
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
+
+let test_discord_ambient_producer_enqueues_connector_attention () =
+  Eio_main.run @@ fun _env ->
+  with_temp_dir "connector-attention-producer" @@ fun dir ->
+  with_discord_paths dir @@ fun () ->
+  with_env "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED" (Some "true") @@ fun () ->
+  with_boot_override "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED" "true" @@ fun () ->
+  let base_path = Filename.concat dir "base" in
+  Unix.mkdir base_path 0o755;
+  let keeper_name = "conn-keeper" in
+  let meta = make_meta keeper_name in
+  Masc.Keeper_registry.clear ();
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_registry.clear ())
+    (fun () ->
+      let entry = Masc.Keeper_registry.register ~base_path keeper_name meta in
+      (match
+         Discord_state.bind ~channel_id:"chan-1" ~keeper_name
+           ~actor_name:"test"
+       with
+       | Ok _ -> ()
+       | Error msg -> fail ("discord bind failed: " ^ msg));
+      Gateway.For_testing.handle_ambient
+        ~base_dir:base_path
+        ~channel_id:"chan-1"
+        ~guild_id:(Some "guild-1")
+        ~message_id:"msg-ambient-1"
+        ~author_id:"user-1"
+        ~author_name:(Some "Alex")
+        ~content:"ambient TOKEN-456";
+      check bool "ambient wake flips keeper wake hint" true
+        (Atomic.get entry.fiber_wakeup);
+      let queue =
+        Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name
+        |> Q.to_list
+      in
+      check int "one connector attention stimulus enqueued" 1
+        (List.length queue);
+      match queue with
+      | [ { Q.payload = Q.Connector_attention { event_id }; post_id; urgency; _ } ] ->
+        check string "post id carries event id" event_id post_id;
+        check bool "ambient urgency is low" true (urgency = Q.Low)
+      | _ -> fail "expected a single Connector_attention stimulus")
 
 let test_external_attention_projects_to_prompt_event () =
   let meta = make_meta "conn-keeper" in
@@ -206,6 +302,10 @@ let () =
     ; ( "codec",
         [ test_case "Connector_attention payload JSON round-trips" `Quick
             test_connector_attention_codec_roundtrips
+        ] )
+    ; ( "producer",
+        [ test_case "Discord ambient message enqueues Connector_attention" `Quick
+            test_discord_ambient_producer_enqueues_connector_attention
         ] )
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick

@@ -27,6 +27,19 @@ let dedupe_sorted_strings values =
 
 let take = List.take
 
+type requested_name_scan = {
+  names : string list;
+  keeper_names_known : bool;
+  read_errors : Yojson.Safe.t list;
+}
+
+let keeper_names_read_error_json message =
+  `Assoc
+    [
+      ("source", `String "keeper_names_result");
+      ("message", `String message);
+    ]
+
 let requested_names ~(config : Workspace.config) args =
   let explicit_names =
     let names = get_string_list args "names" in
@@ -35,14 +48,25 @@ let requested_names ~(config : Workspace.config) args =
      | None -> names)
     |> dedupe_sorted_strings
   in
-  if Stdlib.List.length explicit_names > 0 then explicit_names
+  if Stdlib.List.length explicit_names > 0 then
+    { names = explicit_names; keeper_names_known = true; read_errors = [] }
   else
     let registry_names =
       Keeper_registry.all ~base_path:config.base_path ()
       |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
     in
-    registry_names @ configured_keeper_names config @ keeper_names config
-    |> dedupe_sorted_strings
+    let persisted_names, keeper_names_known, read_errors =
+      match keeper_names_result config with
+      | Ok names -> names, true, []
+      | Error msg -> [], false, [ keeper_names_read_error_json msg ]
+    in
+    {
+      names =
+        (registry_names @ configured_keeper_names config @ persisted_names
+        |> dedupe_sorted_strings);
+      keeper_names_known;
+      read_errors;
+    }
 
 let status ~(config : Workspace.config) (meta : keeper_meta) =
   let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
@@ -320,7 +344,7 @@ let item ~(config : Workspace.config) requested_name =
       ("ok", `Bool (Stdlib.List.length issues = 0));
     ]
 
-let summary items =
+let summary ~keeper_names_known ~read_errors items =
   let issue_list item =
     match Option.value ~default:(`Null) (Json_util.assoc_member_opt "issues" item) with
     | `List issues ->
@@ -357,6 +381,8 @@ let summary items =
   `Assoc
     [
       ("total", `Int (List.length items));
+      ("keeper_names_known", `Bool keeper_names_known);
+      ("read_errors", `List read_errors);
       ("ok", `Int ok_count);
       ("with_issues", `Int (List.length items - ok_count));
       ("missing_keeper_toml", `Int (count_issue "missing_keeper_toml"));
@@ -374,7 +400,8 @@ let summary items =
     ]
 
 let handle ~(config : Workspace.config) args : tool_result =
-  let names = requested_names ~config args in
+  let name_scan = requested_names ~config args in
+  let names = name_scan.names in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
     tool_result_error
@@ -413,7 +440,13 @@ let handle ~(config : Workspace.config) args : tool_result =
       [
         ("tool", `String "masc_keeper_persona_audit");
         ("roots", roots);
-        ("summary", summary audited_items);
+        ("keeper_names_known", `Bool name_scan.keeper_names_known);
+        ("read_errors", `List name_scan.read_errors);
+        ( "summary",
+          summary
+            ~keeper_names_known:name_scan.keeper_names_known
+            ~read_errors:name_scan.read_errors
+            audited_items );
         ("returned_count", `Int (List.length returned_items));
         ("items", `List returned_items);
       ]

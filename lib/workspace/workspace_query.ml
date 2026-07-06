@@ -14,9 +14,10 @@ let update_priority config ~task_id ~priority =
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
-    try
-      let backlog = read_backlog config in
-
+    match read_backlog_r config with
+    | Error msg -> Printf.sprintf "Error: workspace backlog read failed: %s" msg
+    | Ok backlog ->
+      (try
       let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
 
       match task_opt with
@@ -46,46 +47,102 @@ let update_priority config ~task_id ~priority =
           (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
 
           Printf.sprintf "Task %s priority: P%d → P%d" task_id old_priority priority
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Printf.sprintf "Error: %s" (Printexc.to_string e)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | e ->
+         Printf.sprintf "Error: %s" (Printexc.to_string e))
   )
 
 (** Get raw task list (for orchestrator).
     Requires initialization. *)
-let get_tasks_raw config =
+let get_tasks_raw_result config =
   ensure_initialized config;
-  (read_backlog config).tasks
+  read_backlog_r config |> Result.map (fun backlog -> backlog.tasks)
+
+let get_tasks_raw config =
+  match get_tasks_raw_result config with
+  | Ok tasks -> tasks
+  | Error msg ->
+    Log.Workspace.warn "get_tasks_raw: backlog read failed: %s" msg;
+    []
 
 (** Like [get_tasks_raw] but returns [[]] when MASC is not
     initialized — safe for dashboard and display contexts.
     Replaces the former [get_tasks_raw_in_workspace]. *)
+let get_tasks_safe_result config =
+  if not (root_is_initialized config) then Ok []
+  else read_backlog_r config |> Result.map (fun backlog -> backlog.tasks)
+
 let get_tasks_safe config =
-  if not (root_is_initialized config) then []
-  else (read_backlog config).tasks
+  match get_tasks_safe_result config with
+  | Ok tasks -> tasks
+  | Error msg ->
+    Log.Workspace.warn "get_tasks_safe: backlog read failed: %s" msg;
+    []
 
 let safe_yield () =
   Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 
 let take_first = List.take
 
-let list_leaf_json_names config dir =
-  list_dir config dir
-  |> List.filter (fun name ->
-         name <> ""
-         && not (String.contains name '/')
-         && Filename.check_suffix name ".json")
+type 'a read_report =
+  { values : 'a list
+  ; read_errors : string list
+  }
+
+let read_report_to_result ~context report =
+  match report.read_errors with
+  | [] -> Ok report.values
+  | errors -> Error (Printf.sprintf "%s: %s" context (String.concat "; " errors))
+
+let list_leaf_json_names_result config dir =
+  match list_dir_result config dir with
+  | Error err -> Error err
+  | Ok names ->
+    Ok
+      (names
+       |> List.filter (fun name ->
+              name <> ""
+              && not (String.contains name '/')
+              && Filename.check_suffix name ".json")
+       |> List.sort String.compare)
+
+let load_agents_from_dir_report config dir ~include_inactive =
+  match list_leaf_json_names_result config dir with
+  | Error err -> { values = []; read_errors = [ err ] }
+  | Ok names ->
+    let values, read_errors =
+      List.fold_left
+        (fun (agents, errors) name ->
+           safe_yield ();
+           let path = Filename.concat dir name in
+           match read_agent_with_repair config path with
+           | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
+             (agent :: agents, errors)
+           | Ok _ -> (agents, errors)
+           | Error err ->
+             ( agents
+             , Printf.sprintf "failed to read agent file %s: %s" path err
+               :: errors ))
+        ([], [])
+        names
+    in
+    { values = List.rev values; read_errors = List.rev read_errors }
+
+let load_agents_from_dir_result config dir ~include_inactive =
+  load_agents_from_dir_report config dir ~include_inactive
+  |> read_report_to_result ~context:"load_agents_from_dir"
 
 let load_agents_from_dir config dir ~include_inactive =
-  list_leaf_json_names config dir
-  |> List.filter_map (fun name ->
-         safe_yield ();
-         let path = Filename.concat dir name in
-         match read_agent_with_repair config path with
-         | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
-             Some agent
-         | Ok _ | Error _ -> None)
+  let report = load_agents_from_dir_report config dir ~include_inactive in
+  (match report.read_errors with
+   | [] -> ()
+   | errors ->
+     Log.Workspace.warn
+       "load_agents_from_dir: partial read failure for %s: %s"
+       dir
+       (String.concat "; " errors));
+  report.values
 
 let agent_type_of_state_agent_name name =
   if Workspace_resilience.Zombie.is_keeper_name name
@@ -120,9 +177,23 @@ let state_backed_agent state (name : string) : Masc_domain.agent =
   ; meta = Some meta
   }
 
+let state_backed_active_agents_result config =
+  let snapshot = read_state_snapshot config in
+  match snapshot.status with
+  | State_default_from_read_error ->
+    Error (String.concat "; " snapshot.read_errors)
+  | State_authoritative | State_recovered_unpersisted ->
+    Ok
+      (snapshot.state.active_agents
+       |> normalized_string_list
+       |> List.map (state_backed_agent snapshot.state))
+
 let state_backed_active_agents config =
-  let state = read_state config in
-  state.active_agents |> normalized_string_list |> List.map (state_backed_agent state)
+  match state_backed_active_agents_result config with
+  | Ok agents -> agents
+  | Error msg ->
+    Log.Workspace.warn "state_backed_active_agents: state read failed: %s" msg;
+    []
 
 let runtime_agents config =
   try (Atomic.get Workspace_hooks.runtime_agents_fn) config with
@@ -191,42 +262,58 @@ let get_all_agents config =
     rather than by the keeper-shaped name pattern, so a keeper-shaped
     non-keeper worker does not inherit the longer grace. A live keeper that has
     gone quiet between heartbeats (but within its grace) is therefore not
-    classified as inactive, so its own claimed/in-progress task is not
-    mis-reported as an orphan at the source. *)
-let audit_orphan_tasks config : (Masc_domain.task * string) list =
-  if not (is_initialized config) then []
+   classified as inactive, so its own claimed/in-progress task is not
+   mis-reported as an orphan at the source. *)
+let audit_orphan_tasks_result config : ((Masc_domain.task * string) list, string) result =
+  if not (is_initialized config) then Ok []
   else
     (* Read agent files from the same path that cleanup_zombies and session binding use *)
     let agents_path = agents_dir config in
-    let active_names =
-      load_agents_from_dir config agents_path ~include_inactive:false
-      |> List.filter (fun (agent : Masc_domain.agent) ->
-          not
-            (Workspace_resilience.Zombie.is_zombie_for_agent
-               ~agent_type:agent.agent_type
-               ?agent_meta:agent.meta
-               ~agent_name:agent.name
-               agent.last_seen))
-      |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
-    in
-    let is_active_agent assignee =
-      List.mem assignee active_names
-      || let prefix = assignee ^ "-" in
-         List.exists (fun name ->
-           String.length name > String.length prefix
-           && String.starts_with name ~prefix
-         ) active_names
-    in
-    let backlog = read_backlog config in
-    List.filter_map (fun (task : Masc_domain.task) ->
-      match task.task_status with
-      | Masc_domain.Claimed { assignee; _ }
-      | Masc_domain.InProgress { assignee; _ }
-      | Masc_domain.AwaitingVerification { assignee; _ } ->
-          if is_active_agent assignee then None
-          else Some (task, assignee)
-      | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
-    ) backlog.tasks
+    match load_agents_from_dir_result config agents_path ~include_inactive:false with
+    | Error err -> Error (Printf.sprintf "active agent read failed: %s" err)
+    | Ok agents ->
+      let active_names =
+        agents
+        |> List.filter (fun (agent : Masc_domain.agent) ->
+               not
+                 (Workspace_resilience.Zombie.is_zombie_for_agent
+                    ~agent_type:agent.agent_type
+                    ?agent_meta:agent.meta
+                    ~agent_name:agent.name
+                    agent.last_seen))
+        |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
+      in
+      let is_active_agent assignee =
+        List.mem assignee active_names
+        ||
+        let prefix = assignee ^ "-" in
+        List.exists
+          (fun name ->
+             String.length name > String.length prefix
+             && String.starts_with name ~prefix)
+          active_names
+      in
+      (match read_backlog_r config with
+       | Error err -> Error (Printf.sprintf "backlog read failed: %s" err)
+       | Ok backlog ->
+         Ok
+           (List.filter_map
+              (fun (task : Masc_domain.task) ->
+                 match task.task_status with
+                 | Masc_domain.Claimed { assignee; _ }
+                 | Masc_domain.InProgress { assignee; _ }
+                 | Masc_domain.AwaitingVerification { assignee; _ } ->
+                   if is_active_agent assignee then None else Some (task, assignee)
+                 | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
+                   None)
+              backlog.tasks))
+
+let audit_orphan_tasks config : (Masc_domain.task * string) list =
+  match audit_orphan_tasks_result config with
+  | Ok tasks -> tasks
+  | Error msg ->
+    Log.TaskState.warn "audit_orphan_tasks: %s" msg;
+    []
 
 (* RFC-0294 PR-4: the single typed source of truth for "is this status
    orphan-eligible, and under which gauge class". EXHAUSTIVE over [task_status]
@@ -412,10 +499,17 @@ let get_all_messages_raw config ~since_seq =
       loop [] names
 
 (** List tasks *)
-let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status config =
+let list_tasks_result
+      ?(include_done = false)
+      ?(include_cancelled = false)
+      ?status
+      config
+  =
   ensure_initialized config;
 
-  let backlog = read_backlog config in
+  match read_backlog_r config with
+  | Error msg -> Error msg
+  | Ok backlog ->
   let tasks =
     match status with
     | Some status_filter ->
@@ -456,6 +550,13 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
 
     Buffer.contents buf
   end
+
+let list_tasks ?include_done ?include_cancelled ?status config =
+  match list_tasks_result ?include_done ?include_cancelled ?status config with
+  | Ok result -> result
+  | Error msg ->
+    Log.Workspace.warn "list_tasks: backlog read failed: %s" msg;
+    Printf.sprintf "Error: workspace backlog read failed: %s" msg
 
 (** Get recent messages *)
 let get_messages config ~since_seq ~limit =

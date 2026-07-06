@@ -339,6 +339,16 @@ let append_inner t json = ignore (append_unlocked t json : bool)
 let append t json =
   (Atomic.get append_guard) (fun () -> append_inner t json)
 
+let append_result t json =
+  try
+    append t json;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+
 let append_if_current_file_fits t ~max_current_file_bytes json =
   let appended = ref false in
   (Atomic.get append_guard) (fun () ->

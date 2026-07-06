@@ -912,70 +912,94 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
       (emit_operator_broadcast_event config receipt ~disposition ~reason)
 ;;
 
-let append (config : Workspace.config) (receipt : t) =
+let format_unix_error err fn arg =
+  let message = Unix.error_message err in
+  match fn, arg with
+  | "", "" -> message
+  | _, "" -> Printf.sprintf "%s: %s" fn message
+  | "", _ -> Printf.sprintf "%s: %s" arg message
+  | _, _ -> Printf.sprintf "%s(%s): %s" fn arg message
+;;
+
+let emit_operator_broadcast_result config receipt ~disposition ~reason =
+  try Ok (emit_operator_broadcast config receipt ~disposition ~reason) with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) -> Error (format_unix_error err fn arg)
+;;
+
+let append_result (config : Workspace.config) (receipt : t) =
   let store =
     Keeper_types_support.keeper_execution_receipt_store config receipt.keeper_name
   in
   let receipt_json = to_json receipt in
-  Dated_jsonl.append store receipt_json;
-  (try
-     Keeper_reaction_ledger.record_execution_receipt_reaction
-       config
-       ~keeper_name:receipt.keeper_name
-       ~trace_id:receipt.trace_id
-       ?turn_count:receipt.turn_count
-       ~current_task_id:receipt.current_task_id
-       ~goal_ids:receipt.goal_ids
-       ~outcome:(outcome_kind_to_tla_receipt receipt.outcome)
-       ~terminal_reason_code:receipt.terminal_reason_code
-       ~receipt_json
-       ()
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Keeper.warn
-       ~keeper_name:receipt.keeper_name
-       "%s: reaction ledger receipt append failed trace_id=%s: %s"
-       receipt.keeper_name
-       receipt.trace_id
-       (Printexc.to_string exn));
-  let disposition, reason = operator_disposition receipt in
-  if needs_operator_broadcast disposition
-  then (
-    let disposition_s = operator_disposition_kind_to_string disposition in
-    let reason_s = operator_disposition_reason_to_string reason in
-    (try
-       match emit_operator_broadcast config receipt ~disposition ~reason with
-       | Broadcast_dedupe.Emitted _ -> ()
-       | Broadcast_dedupe.Duplicate ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string OperatorBroadcastSuppressed)
-           ~labels:[ "keeper", receipt.keeper_name; "reason", reason_s ]
-           ();
-         Log.Keeper.info
-           ~keeper_name:receipt.keeper_name
-           "%s: operator_broadcast_required suppressed duplicate disposition=%s reason=%s turn=%s"
-           receipt.keeper_name
-           disposition_s
-           reason_s
-           (operator_broadcast_turn_key receipt.turn_count)
+  match Dated_jsonl.append_result store receipt_json with
+  | Error msg -> Error msg
+  | Ok () ->
+    (match
+       Keeper_reaction_ledger.record_execution_receipt_reaction_result
+         config
+         ~keeper_name:receipt.keeper_name
+         ~trace_id:receipt.trace_id
+         ?turn_count:receipt.turn_count
+         ~current_task_id:receipt.current_task_id
+         ~goal_ids:receipt.goal_ids
+         ~outcome:(outcome_kind_to_tla_receipt receipt.outcome)
+         ~terminal_reason_code:receipt.terminal_reason_code
+         ~receipt_json
+         ()
      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        (* fail-closed: log loud, do not silently swallow. The append itself
-           has already persisted the receipt; the broadcast failure is its
-           own diagnostic that watchdogs/log alerts will pick up. *)
+     | Ok () -> ()
+     | Error error ->
+       Log.Keeper.warn
+         ~keeper_name:receipt.keeper_name
+         "%s: reaction ledger receipt append failed trace_id=%s: %s"
+         receipt.keeper_name
+         receipt.trace_id
+         error);
+    let disposition, reason = operator_disposition receipt in
+    if needs_operator_broadcast disposition
+    then (
+      let disposition_s = operator_disposition_kind_to_string disposition in
+      let reason_s = operator_disposition_reason_to_string reason in
+      match emit_operator_broadcast_result config receipt ~disposition ~reason with
+      | Ok (Broadcast_dedupe.Emitted _) -> ()
+      | Ok Broadcast_dedupe.Duplicate ->
         Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string ExecutionReceiptFailures)
-          ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
+          Keeper_metrics.(to_string OperatorBroadcastSuppressed)
+          ~labels:[ "keeper", receipt.keeper_name; "reason", reason_s ]
           ();
-        Log.Keeper.error
+        Log.Keeper.info
           ~keeper_name:receipt.keeper_name
-          "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s exn=%s"
+          "%s: operator_broadcast_required suppressed duplicate disposition=%s reason=%s turn=%s"
           receipt.keeper_name
           disposition_s
           reason_s
-          (Printexc.to_string exn)))
+          (operator_broadcast_turn_key receipt.turn_count)
+      | Error error ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string ExecutionReceiptFailures)
+           ~labels:
+             [
+               "keeper", receipt.keeper_name;
+               ( "site",
+                 Keeper_execution_receipt_failure_site.(to_label Emit_failed) );
+             ]
+           ();
+         Log.Keeper.error
+           ~keeper_name:receipt.keeper_name
+           "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s error=%s"
+           receipt.keeper_name
+           disposition_s
+           reason_s
+           error);
+    Ok ()
+;;
+
+let append config receipt =
+  match append_result config receipt with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
 ;;
 
 (* Watchdog-driven broadcast (#fleet-stall 2026-04-26 Step 3): emitted by a
@@ -1166,7 +1190,8 @@ let emit_stale_keeper_broadcast
                ()))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Error exn
+    | Sys_error msg -> Error msg
+    | Unix.Unix_error (err, fn, arg) -> Error (format_unix_error err fn arg)
   in
   match emit_result with
   | Ok (Broadcast_dedupe.Emitted event) ->
@@ -1193,21 +1218,18 @@ let emit_stale_keeper_broadcast
       keeper_name
       (stale_turn_bucket stale_seconds)
       runtime_id_string
-  | Error exn ->
+  | Error error ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ExecutionReceiptFailures)
       ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
       ();
-    (* Activity_graph.emit currently raises exceptions rather than returning a
-       typed error; Cancelled is re-raised above, and this string is operator
-       evidence for the graph emit boundary only. *)
     Log.Keeper.error
       ~keeper_name
-      "%s: stale_keeper_broadcast EMIT FAILED bucket=%s runtime=%s exn=%s"
+      "%s: stale_keeper_broadcast EMIT FAILED bucket=%s runtime=%s error=%s"
       keeper_name
       (stale_turn_bucket stale_seconds)
       runtime_id_string
-      (Printexc.to_string exn)
+      error
 ;;
 
 let latest_json (config : Workspace.config) keeper_name =

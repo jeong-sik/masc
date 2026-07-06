@@ -8,12 +8,7 @@ open Workspace_utils
 open Workspace_state
 open Workspace_backlog
 
-(** Get project status *)
-let status config =
-  ensure_initialized config;
-
-  let state = read_state config in
-  let backlog = read_backlog config in
+let render_status config state backlog =
   let active_task_assignees =
     Workspace_task_schedule.active_task_assignees_by_task_id backlog
   in
@@ -132,3 +127,22 @@ let status config =
     Buffer.add_string buf "\nMessages: 0\n";
 
   Buffer.contents buf
+
+(** Get project status *)
+let status_result config =
+  ensure_initialized config;
+  let state_snapshot = read_state_snapshot config in
+  match state_snapshot.status with
+  | State_default_from_read_error ->
+    Error (Printf.sprintf "state read failed: %s" (String.concat "; " state_snapshot.read_errors))
+  | State_authoritative | State_recovered_unpersisted ->
+    (match read_backlog_r config with
+     | Error msg -> Error (Printf.sprintf "backlog read failed: %s" msg)
+     | Ok backlog -> Ok (render_status config state_snapshot.state backlog))
+
+let status config =
+  match status_result config with
+  | Ok output -> output
+  | Error msg ->
+    Log.Workspace.warn "status: %s" msg;
+    Printf.sprintf "Error: workspace status read failed: %s" msg

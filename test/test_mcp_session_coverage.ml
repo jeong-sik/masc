@@ -324,6 +324,14 @@ let () =
       test_case "invalid json" `Quick (fun () ->
         check (option string) "returns None" None
           (Http_transport.method_from_body "not json"));
+      test_case "invalid json result" `Quick (fun () ->
+        match Http_transport.method_from_body_result "not json" with
+        | Error (Http_transport.Method_body_json_parse_error message) ->
+            check bool "parse detail present" true (String.length message > 0)
+        | Ok _ -> fail "expected JSON parse error");
+      test_case "no method field result" `Quick (fun () ->
+        check (result (option string) reject) "returns Ok None" (Ok None)
+          (Http_transport.method_from_body_result {|{"jsonrpc":"2.0","id":1}|}));
       test_case "no method field" `Quick (fun () ->
         check (option string) "returns None" None
           (Http_transport.method_from_body {|{"jsonrpc":"2.0","id":1}|}));

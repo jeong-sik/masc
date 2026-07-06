@@ -9,6 +9,8 @@ type link_goalless_task_to_goal_error =
   | Already_linked_to_goals of string list
   | Link_write_failed of goal_task_links_write_error
 
+val goal_task_links_read_failed_prefix : string
+val goal_task_links_read_failed_message : string -> string
 val goal_task_links_write_error_to_string : goal_task_links_write_error -> string
 
 val link_goalless_task_to_goal_error_to_string :
@@ -53,6 +55,11 @@ val build_task_goal_index
 
 (** Path to the persistent goal-task link registry. *)
 val goal_task_links_path : Workspace_utils_backend_setup.config -> string
+
+(** Path to the verified recovery copy of the persistent goal-task link
+    registry. *)
+val goal_task_links_recovery_path :
+  Workspace_utils_backend_setup.config -> string
 
 (** Read the persistent goal-task link registry. Missing registry files are
     treated as an empty link set. *)
@@ -131,10 +138,19 @@ val link_tasks_to_goals_result :
   (unit, goal_task_links_write_error) result
 
 (** Build indexes using the persistent link registry for [config]. *)
+val build_goal_task_index_for_config_result :
+  Workspace_utils_backend_setup.config ->
+  Masc_domain.task list ->
+  ((string, Masc_domain.task list) Hashtbl.t, string) result
+
 val build_goal_task_index_for_config :
   Workspace_utils_backend_setup.config ->
   Masc_domain.task list ->
   (string, Masc_domain.task list) Hashtbl.t
+
+val build_task_goal_index_for_config_result :
+  Workspace_utils_backend_setup.config ->
+  ((string, string list) Hashtbl.t, string) result
 
 val build_task_goal_index_for_config :
   Workspace_utils_backend_setup.config -> (string, string list) Hashtbl.t

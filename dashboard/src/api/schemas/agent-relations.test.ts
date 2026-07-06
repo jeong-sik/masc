@@ -65,6 +65,33 @@ describe('parseAgentRelationsResponse', () => {
     expect(out.agent_name).toBe('new-agent')
   })
 
+  it('preserves read-error state for unknown relation sections', () => {
+    const out = parseAgentRelationsResponse(
+      validResponse({
+        collaborators_known: false,
+        interests_known: true,
+        relations_known: false,
+        collaborators: [],
+        relations: [],
+        read_errors: [
+          {
+            source: 'agentCollaborationNetworkByName',
+            message: 'GraphQL error: unavailable',
+          },
+          {
+            source: 'agent.relations',
+            message: 'HTTP 503',
+          },
+        ],
+      }),
+    )
+    expect(out.collaborators_known).toBe(false)
+    expect(out.interests_known).toBe(true)
+    expect(out.relations_known).toBe(false)
+    expect(out.read_errors).toHaveLength(2)
+    expect(out.read_errors?.[0]?.source).toBe('agentCollaborationNetworkByName')
+  })
+
   it('accepts unknown relation type values', () => {
     const out = parseAgentRelationsResponse(
       validResponse({

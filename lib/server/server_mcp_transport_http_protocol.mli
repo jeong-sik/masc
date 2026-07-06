@@ -51,11 +51,22 @@ type deps = Server_mcp_transport_http_types.deps = {
 
 (** {1 Body parsing} *)
 
+type method_from_body_error =
+  | Method_body_json_parse_error of string
+
+val method_from_body_error_to_string : method_from_body_error -> string
+
+val method_from_body_result : string -> (string option, method_from_body_error) result
+(** [method_from_body_result body_str] extracts the JSON-RPC [method] field
+    while preserving JSON parse failures. Invalid JSON returns
+    [Error (Method_body_json_parse_error _)]. Valid non-object bodies or
+    objects without a string [method] return [Ok None]. *)
+
 val method_from_body : string -> string option
 (** [method_from_body body_str] extracts the JSON-RPC [method] field
     from a request body.  Returns [None] when:
 
-    - The body is not valid JSON ([Yojson.Json_error] is caught).
+    - The body is not valid JSON (the parse failure is logged).
     - The root is not [\`Assoc].
     - The [method] field is missing or not [\`String _].
 

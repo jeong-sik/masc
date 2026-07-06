@@ -1,3 +1,5 @@
+open Yojson.Safe.Util
+
 let temp_dir prefix =
   Filename.temp_dir prefix ""
 
@@ -10,10 +12,39 @@ let rec rm_rf path =
       Unix.rmdir path)
     else Unix.unlink path
 
+let replace_path_with_directory path =
+  if Sys.file_exists path then rm_rf path;
+  Unix.mkdir path 0o755
+
+let save_text path text =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc text)
+
+let read_text path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
     "event-queue.json"
+
+let inflight_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue-inflight.json"
+
+let metric_value name ~labels =
+  Masc.Otel_metric_store.metric_value_or_zero name ~labels ()
+
+let assert_counter_delta name ~labels ~before ~delta =
+  let after = metric_value name ~labels in
+  assert (Float.equal after (before +. delta))
 
 let () =
   let open Keeper_event_queue in
@@ -23,6 +54,7 @@ let () =
       ; author = "a"
       ; title = "t"
       ; content = "c"
+      ; mention_ids = []
       ; hearth = None
       ; updated_at = None
       }
@@ -85,6 +117,28 @@ let () =
          })
       "bg-run:bg-2");
 
+  let bg_stim =
+    { post_id = "post-2"; urgency = Normal; arrived_at = 2.0; payload = bg_payload () }
+  in
+
+  let schedule_signal_payload =
+    { schedule_signal_id = "sig-1"
+    ; schedule_signal_kind = Schedule_due_candidate
+    ; schedule_id = "sched-1"
+    ; due_at = 123.5
+    ; payload_digest = "sha256:abc"
+    }
+  in
+  assert (not (is_board_signal (Schedule_signal schedule_signal_payload)));
+  assert (
+    String.equal
+      (payload_kind_label (Schedule_signal schedule_signal_payload))
+      "schedule_signal");
+  assert (
+    String.equal
+      (schedule_signal_post_id schedule_signal_payload)
+      "schedule-signal:sig-1");
+
   (* RFC-0290: Bg_completed survives the stimulus codec round-trip, preserving
      the outcome variant ([Bg_failed]) and empty board post id. *)
   (match
@@ -112,6 +166,27 @@ let () =
         assert (String.equal bg_board_post_id "")
       | _ -> Alcotest.fail "Bg_completed codec round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("Bg_completed stimulus round-trip failed: " ^ msg));
+
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = schedule_signal_post_id schedule_signal_payload
+          ; urgency = Normal
+          ; arrived_at = 3.5
+          ; payload = Schedule_signal schedule_signal_payload
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Schedule_signal signal ->
+        assert (String.equal signal.schedule_signal_id "sig-1");
+        assert (signal.schedule_signal_kind = Schedule_due_candidate);
+        assert (String.equal signal.schedule_id "sched-1");
+        assert (Float.equal signal.due_at 123.5);
+        assert (String.equal signal.payload_digest "sha256:abc");
+        assert (String.equal s.post_id "schedule-signal:sig-1")
+      | _ -> Alcotest.fail "Schedule_signal codec round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("Schedule_signal stimulus round-trip failed: " ^ msg));
 
   (* Hitl_resolved survives the codec round-trip: the wake is persisted for
      replay when the target keeper is not registered yet, so approval_id and
@@ -148,6 +223,13 @@ let () =
   in
   let ghost_stim =
     { post_id = "ghost"; urgency = Low; arrived_at = 0.0; payload = No_progress_recovery }
+  in
+  let connector_stim =
+    { post_id = "connector-event-1"
+    ; urgency = Low
+    ; arrived_at = 0.0
+    ; payload = Connector_attention { event_id = "connector-event-1" }
+    }
   in
   let q = empty in
   assert (is_empty q);
@@ -311,7 +393,11 @@ let () =
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name duplicated;
       let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
       assert (length restored = 1);
-      let only, rest = Option.get (dequeue restored) in
+      let only, rest =
+        match dequeue restored with
+        | Some value -> value
+        | None -> Alcotest.fail "deduplicated queue should keep one stimulus"
+      in
       assert (String.equal only.post_id "bootstrap");
       assert (is_empty rest));
 
@@ -362,6 +448,33 @@ let () =
          after the fix the pending snapshot is drained. *)
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
+  let base_path = temp_dir "keeper-event-queue-bg-consumed-receipt" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-bg-consumed-receipt-test" in
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bg_stim;
+      let pending_summary =
+        Masc.Keeper_reaction_ledger.summary_for_keeper
+          ~base_path
+          ~keeper_name
+          ~limit:10
+      in
+      assert (pending_summary |> member "stimulus_count" |> to_int = 1);
+      assert (pending_summary |> member "pending_stimulus_count" |> to_int = 1);
+      Masc.Keeper_registry_event_queue.ack_consumed
+        ~base_path
+        keeper_name
+        [ bg_stim ];
+      let consumed_summary =
+        Masc.Keeper_reaction_ledger.summary_for_keeper
+          ~base_path
+          ~keeper_name
+          ~limit:10
+      in
+      assert (consumed_summary |> member "pending_stimulus_count" |> to_int = 0);
+      assert (consumed_summary |> member "stimulus_consumed_count" |> to_int = 1));
+
   (* --- Genuine consumed-ack handles the realistic mixed state: pending can
          contain duplicates while inflight still carries the consumed lease.
          A partial ack removes all matching consumed copies from both snapshots,
@@ -388,6 +501,13 @@ let () =
         keeper_name
         [ board_stim; ghost_stim ];
       let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      let receipt_summary =
+        Masc.Keeper_reaction_ledger.summary_for_keeper
+          ~base_path
+          ~keeper_name
+          ~limit:10
+      in
+      assert (receipt_summary |> member "stimulus_consumed_count" |> to_int = 1);
       assert (length restored = 1);
       let remaining, rest =
         match dequeue restored with
@@ -396,6 +516,57 @@ let () =
       in
       assert (String.equal remaining.post_id "bootstrap");
       assert (is_empty rest));
+
+  (* --- Consumed ack refuses corrupt snapshots instead of replacing the broken
+         pending file with an empty queue and acknowledging a false drain. --- *)
+  let base_path = temp_dir "keeper-event-queue-ack-corrupt-pending" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-ack-corrupt-pending-test" in
+      Keeper_event_queue_persistence.record_inflight
+        ~base_path
+        ~keeper_name
+        [ board_stim ];
+      save_text (snapshot_path ~base_path ~keeper_name) "{not-json";
+      (match
+         Keeper_event_queue_persistence.ack_consumed
+           ~base_path
+           ~keeper_name
+           [ board_stim ]
+       with
+       | Ok () -> Alcotest.fail "ack_consumed accepted corrupt pending snapshot"
+       | Error msg -> assert (String.length msg > 0)));
+
+  let base_path = temp_dir "keeper-event-queue-load-corrupt-pending" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-load-corrupt-pending-test" in
+      save_text (snapshot_path ~base_path ~keeper_name) "{not-json";
+      (match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+       | Ok _ -> Alcotest.fail "load_result accepted corrupt pending snapshot"
+       | Error msg -> assert (String.length msg > 0)));
+
+  (* --- Drop-by-post-id has the same corruption boundary as consumed ack. --- *)
+  let base_path = temp_dir "keeper-event-queue-drop-corrupt-pending" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-drop-corrupt-pending-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        (enqueue empty board_stim);
+      save_text (snapshot_path ~base_path ~keeper_name) "{not-json";
+      (match
+         Keeper_event_queue_persistence.drop_by_post_id
+           ~base_path
+           ~keeper_name
+           ~post_id:board_stim.post_id
+       with
+       | Ok _ -> Alcotest.fail "drop_by_post_id accepted corrupt pending snapshot"
+       | Error msg -> assert (String.length msg > 0)));
 
   let meta_for_keeper keeper_name trace_id =
     match
@@ -412,6 +583,22 @@ let () =
     | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)
   in
 
+  (* --- Registry registration must not overwrite a corrupt durable replay
+         snapshot with an empty queue while installing the live entry. --- *)
+  let base_path = temp_dir "keeper-event-queue-register-corrupt-pending" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-register-corrupt-pending-test" in
+      let pending_path = snapshot_path ~base_path ~keeper_name in
+      save_text pending_path "{not-json";
+      let meta = meta_for_keeper keeper_name "trace-event-queue-register-corrupt" in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      assert (String.equal (read_text pending_path) "{not-json"));
+
   (* --- registry integration: CAS-successful enqueue persists and register reloads --- *)
   let base_path = temp_dir "keeper-event-queue-registry" in
   Fun.protect
@@ -421,10 +608,50 @@ let () =
     (fun () ->
       let keeper_name = "keeper-event-queue-registry-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-registry-test" in
+      let enqueue_queued_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "queued" ]
+      in
+      let enqueue_duplicate_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "duplicate" ]
+      in
+      let consume_completed_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "completed" ]
+      in
+      let delay_labels = [ "keeper", keeper_name; "source", "board_signal" ] in
+      let enqueue_queued_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+          ~labels:enqueue_queued_labels
+      in
+      let enqueue_duplicate_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+          ~labels:enqueue_duplicate_labels
+      in
+      let consume_completed_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_consume_total
+          ~labels:consume_completed_labels
+      in
+      let delay_count_before =
+        metric_value
+          (Masc.Otel_metric_store.metric_keeper_wake_delay_seconds ^ "_count")
+          ~labels:delay_labels
+      in
       Masc.Keeper_registry.clear ();
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+        ~labels:enqueue_queued_labels
+        ~before:enqueue_queued_before
+        ~delta:1.0;
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+        ~labels:enqueue_duplicate_labels
+        ~before:enqueue_duplicate_before
+        ~delta:1.0;
       assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       Masc.Keeper_registry.clear ();
@@ -438,10 +665,89 @@ let () =
       in
       assert (String.equal replayed.post_id "p1");
       Masc.Keeper_registry_event_queue.ack_consumed ~base_path keeper_name [ replayed ];
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_consume_total
+        ~labels:consume_completed_labels
+        ~before:consume_completed_before
+        ~delta:1.0;
+      assert_counter_delta
+        (Masc.Otel_metric_store.metric_keeper_wake_delay_seconds ^ "_count")
+        ~labels:delay_labels
+        ~before:delay_count_before
+        ~delta:1.0;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
-  (* --- registry unavailable window: enqueue persists before register --- *)
-  let base_path = temp_dir "keeper-event-queue-unregistered" in
+	  (* --- signal helper: durable enqueue and wake hint stay paired --- *)
+	  let base_path = temp_dir "keeper-event-queue-wakeup-hint" in
+	  Fun.protect
+	    ~finally:(fun () ->
+	      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-wakeup-hint-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-wakeup-hint-test" in
+      let enqueue_queued_labels =
+        [ "keeper", keeper_name; "source", "connector_attention"; "outcome", "queued" ]
+      in
+      let enqueue_queued_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+          ~labels:enqueue_queued_labels
+      in
+      Masc.Keeper_registry.clear ();
+      let entry = Masc.Keeper_registry.register ~base_path keeper_name meta in
+      assert (not (Atomic.get entry.fiber_wakeup));
+      Masc.Keeper_keepalive_signal.enqueue_stimulus_and_wakeup_hint
+        ~base_path
+        ~keeper_name
+        connector_stim;
+	      assert (Atomic.get entry.fiber_wakeup);
+	      assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+	      assert_counter_delta
+	        Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+	        ~labels:enqueue_queued_labels
+	        ~before:enqueue_queued_before
+	        ~delta:1.0);
+
+	  (* --- signal helper: durable enqueue failure suppresses the wake hint. --- *)
+	  let base_path = temp_dir "keeper-event-queue-wakeup-hint-persist-failed" in
+	  Fun.protect
+	    ~finally:(fun () ->
+	      Masc.Keeper_registry.clear ();
+	      rm_rf base_path)
+	    (fun () ->
+	      let keeper_name = "keeper-event-queue-wakeup-hint-persist-failed-test" in
+	      let meta =
+	        meta_for_keeper keeper_name "trace-event-queue-wakeup-hint-persist-failed-test"
+	      in
+	      let persist_failed_labels =
+	        [ "keeper", keeper_name; "source", "connector_attention"; "outcome", "persist_failed" ]
+	      in
+	      let persist_failed_before =
+	        metric_value
+	          Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+	          ~labels:persist_failed_labels
+	      in
+	      Masc.Keeper_registry.clear ();
+	      let entry = Masc.Keeper_registry.register ~base_path keeper_name meta in
+	      replace_path_with_directory (snapshot_path ~base_path ~keeper_name);
+	      (match
+	         Masc.Keeper_keepalive_signal.enqueue_stimulus_and_wakeup_hint_result
+	           ~base_path
+	           ~keeper_name
+	           connector_stim
+	       with
+	       | Ok _ -> Alcotest.fail "wake hint result hid durable enqueue failure"
+	       | Error msg -> assert (String.length msg > 0));
+	      assert (not (Atomic.get entry.fiber_wakeup));
+	      assert_counter_delta
+	        Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+	        ~labels:persist_failed_labels
+	        ~before:persist_failed_before
+	        ~delta:1.0);
+
+	  (* --- registry unavailable window: enqueue persists before register --- *)
+	  let base_path = temp_dir "keeper-event-queue-unregistered" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_registry.clear ();
@@ -449,9 +755,22 @@ let () =
     (fun () ->
       let keeper_name = "keeper-event-queue-unregistered-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
+      let persisted_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "persisted" ]
+      in
+      let persisted_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+          ~labels:persisted_labels
+      in
       Masc.Keeper_registry.clear ();
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+        ~labels:persisted_labels
+        ~before:persisted_before
+        ~delta:1.0;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
       Masc.Keeper_registry_event_queue.enqueue
         ~base_path
@@ -482,6 +801,218 @@ let () =
         keeper_name
         [ first; second ];
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- Persistence failures are explicit: an unregistered enqueue must not
+         record a false durable "persisted" receipt when the snapshot write
+         fails before it reaches disk. --- *)
+  let base_path = temp_dir "keeper-event-queue-persist-failed" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-persist-failed-test" in
+      let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+      Unix.mkdir (Filename.dirname keepers_dir) 0o755;
+      let oc = open_out keepers_dir in
+      close_out oc;
+      (match
+         Keeper_event_queue_persistence.update_result
+           ~base_path
+           ~keeper_name
+           (fun q -> enqueue q board_stim)
+       with
+       | Ok () -> Alcotest.fail "event queue persistence failure returned Ok"
+       | Error msg -> assert (String.length msg > 0));
+      let persisted_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "persisted" ]
+      in
+      let failed_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "persist_failed" ]
+      in
+      let persisted_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+          ~labels:persisted_labels
+      in
+      let failed_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+          ~labels:failed_labels
+      in
+      Masc.Keeper_registry.clear ();
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_result
+           ~base_path
+           keeper_name
+           board_stim
+       with
+       | Ok _ -> Alcotest.fail "registry enqueue_result hid persistence failure"
+       | Error msg -> assert (String.length msg > 0));
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+        ~labels:failed_labels
+        ~before:failed_before
+        ~delta:1.0;
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_enqueue_total
+        ~labels:persisted_labels
+        ~before:persisted_before
+        ~delta:0.0);
+
+  (* --- Dequeue is fail-closed when the in-flight lease cannot be recorded:
+         the live queue must still contain the stimulus and the keeper must not
+         process a wake that has no durable replay lease. --- *)
+  let base_path = temp_dir "keeper-event-queue-dequeue-lease-failed" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-dequeue-lease-failed-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-dequeue-lease-failed-test" in
+      let lease_failed_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "lease_failed" ]
+      in
+      let lease_failed_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_consume_total
+          ~labels:lease_failed_labels
+      in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      Unix.mkdir (inflight_path ~base_path ~keeper_name) 0o755;
+      (match Masc.Keeper_registry_event_queue.dequeue_result ~base_path keeper_name with
+       | Ok _ -> Alcotest.fail "dequeue without durable inflight lease returned Ok"
+       | Error msg -> assert (String.length msg > 0));
+      assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_consume_total
+        ~labels:lease_failed_labels
+        ~before:lease_failed_before
+        ~delta:1.0);
+
+  (* --- Dequeue is not successful unless both halves of the durable transition
+         complete: in-flight lease plus pending snapshot update. --- *)
+  let base_path = temp_dir "keeper-event-queue-dequeue-pending-persist-failed" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-dequeue-pending-persist-failed-test" in
+      let meta =
+        meta_for_keeper keeper_name "trace-event-queue-dequeue-pending-persist-failed-test"
+      in
+      let pending_failed_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "pending_persist_failed" ]
+      in
+      let pending_failed_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_consume_total
+          ~labels:pending_failed_labels
+      in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      replace_path_with_directory (snapshot_path ~base_path ~keeper_name);
+      (match Masc.Keeper_registry_event_queue.dequeue_result ~base_path keeper_name with
+       | Ok _ -> Alcotest.fail "dequeue with failed pending snapshot persist returned Ok"
+       | Error msg -> assert (String.length msg > 0));
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_consume_total
+        ~labels:pending_failed_labels
+        ~before:pending_failed_before
+        ~delta:1.0);
+
+  (* --- Board drain has the same durable-transition boundary as dequeue. --- *)
+  let base_path = temp_dir "keeper-event-queue-drain-pending-persist-failed" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-drain-pending-persist-failed-test" in
+      let meta =
+        meta_for_keeper keeper_name "trace-event-queue-drain-pending-persist-failed-test"
+      in
+      let pending_failed_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "pending_persist_failed" ]
+      in
+      let pending_failed_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_consume_total
+          ~labels:pending_failed_labels
+      in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      replace_path_with_directory (snapshot_path ~base_path ~keeper_name);
+      (match Masc.Keeper_registry_event_queue.drain_board_result ~base_path keeper_name with
+       | Ok _ -> Alcotest.fail "drain_board with failed pending snapshot persist returned Ok"
+       | Error msg -> assert (String.length msg > 0));
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_consume_total
+        ~labels:pending_failed_labels
+        ~before:pending_failed_before
+        ~delta:1.0);
+
+  (* --- Requeue is not counted as requeued when the in-flight ack half of the
+         durable transition fails. --- *)
+  let base_path = temp_dir "keeper-event-queue-requeue-ack-failed" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-requeue-ack-failed-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-requeue-ack-failed-test" in
+      let requeued_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "requeued" ]
+      in
+      let requeue_failed_labels =
+        [ "keeper", keeper_name; "source", "board_signal"; "outcome", "requeue_failed" ]
+      in
+      let requeued_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_consume_total
+          ~labels:requeued_labels
+      in
+      let requeue_failed_before =
+        metric_value
+          Masc.Otel_metric_store.metric_keeper_wake_consume_total
+          ~labels:requeue_failed_labels
+      in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      let consumed =
+        match Masc.Keeper_registry_event_queue.dequeue_result ~base_path keeper_name with
+        | Ok (Some stim) -> stim
+        | Ok None -> Alcotest.fail "dequeue_result unexpectedly returned None"
+        | Error msg -> Alcotest.fail ("dequeue_result unexpectedly failed: " ^ msg)
+      in
+      Sys.remove (inflight_path ~base_path ~keeper_name);
+      Unix.mkdir (inflight_path ~base_path ~keeper_name) 0o755;
+      (match
+         Masc.Keeper_registry_event_queue.requeue_front_result
+           ~base_path
+           keeper_name
+           [ consumed ]
+       with
+       | Ok () -> Alcotest.fail "requeue with failed inflight ack returned Ok"
+       | Error msg -> assert (String.length msg > 0));
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_consume_total
+        ~labels:requeue_failed_labels
+        ~before:requeue_failed_before
+        ~delta:1.0;
+      assert_counter_delta
+        Masc.Otel_metric_store.metric_keeper_wake_consume_total
+        ~labels:requeued_labels
+        ~before:requeued_before
+        ~delta:0.0);
 
   (* --- crash recovery: consumed stimuli can be put back for replay --- *)
   let base_path = temp_dir "keeper-event-queue-requeue-front" in

@@ -54,6 +54,53 @@ let write_legacy_judgment ~base_path json =
       output_string oc (Yojson.Safe.to_string json);
       output_char oc '\n')
 
+let write_legacy_judgments_raw ~base_path lines =
+  let masc = Filename.concat base_path Common.masc_dirname in
+  let governance = Filename.concat masc "governance" in
+  Fs_compat.mkdir_p masc;
+  Fs_compat.mkdir_p governance;
+  let path = Filename.concat governance "judgments.jsonl" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+           output_string oc line;
+           output_char oc '\n')
+        lines)
+
+let write_dated_judgments_raw ~base_path lines =
+  let masc = Filename.concat base_path Common.masc_dirname in
+  let governance = Filename.concat masc "governance" in
+  let judgments = Filename.concat governance "judgments" in
+  let dated = Jsonl_writer.dated_path_now ~base_dir:judgments in
+  Fs_compat.mkdir_p (Filename.dirname dated.path);
+  let oc = open_out dated.path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+           output_string oc line;
+           output_char oc '\n')
+        lines)
+
+let active_judgment_line ~now ~target_id ~summary =
+  `Assoc
+    [
+      ("target_kind", `String "agent_health");
+      ("target_id", `String target_id);
+      ("status", `String "active");
+      ("summary", `String summary);
+      ("confidence", `Float 0.75);
+      ("generated_at", `String (iso8601_of_unix now));
+      ("expires_at", `String (iso8601_of_unix (now +. 3600.0)));
+      ("model_used", `String "llama:test");
+      ("keeper_name", `String Dashboard_governance_judge.keeper_name);
+    ]
+  |> Yojson.Safe.to_string
+
 let with_test_fs env f =
   let previous_fs = Fs_compat.get_fs_opt () in
   Fun.protect
@@ -245,6 +292,84 @@ let test_runtime_status_and_judgments_are_live () =
         (first |> member "target_id" |> to_string);
       check string "judgment tool" "masc_operator_confirm"
         (first |> member "recommended_action" |> member "resolved_tool" |> to_string))
+
+let test_legacy_judgment_parse_errors_are_visible () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let now = Unix.gettimeofday () in
+      let valid_judgment =
+        active_judgment_line
+          ~now
+          ~target_id:"parse-visible"
+          ~summary:"legacy parse error visibility"
+      in
+      write_legacy_judgments_raw ~base_path:dir
+        [ "{not-json"; valid_judgment; "[]" ];
+      let json =
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let judgments = json |> member "judgments" |> to_list in
+      check int "valid legacy judgment still surfaces" 1 (List.length judgments);
+      check string "valid judgment target id" "parse-visible"
+        (List.hd judgments |> member "target_id" |> to_string);
+      let judge = json |> member "judge" in
+      check int "legacy parse error count" 2
+        (judge |> member "judgment_read_error_count" |> to_int);
+      let errors = judge |> member "judgment_read_errors" |> to_list in
+      check int "legacy parse errors" 2 (List.length errors);
+      match errors with
+      | first :: _ ->
+        check
+          string
+          "legacy parse error source"
+          "dashboard_governance_legacy_judgments_jsonl"
+          (first |> member "source" |> to_string)
+      | [] -> fail "expected judgment read error")
+
+let test_dated_judgment_parse_errors_are_visible () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let now = Unix.gettimeofday () in
+      let valid_judgment =
+        active_judgment_line
+          ~now
+          ~target_id:"dated-parse-visible"
+          ~summary:"dated parse error visibility"
+      in
+      write_dated_judgments_raw ~base_path:dir
+        [ "{not-json"; valid_judgment; "[]" ];
+      let json =
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let judgments = json |> member "judgments" |> to_list in
+      check int "valid dated judgment still surfaces" 1 (List.length judgments);
+      check string "valid dated judgment target id" "dated-parse-visible"
+        (List.hd judgments |> member "target_id" |> to_string);
+      let judge = json |> member "judge" in
+      check int "dated parse error count" 2
+        (judge |> member "judgment_read_error_count" |> to_int);
+      let errors = judge |> member "judgment_read_errors" |> to_list in
+      check int "dated parse errors" 2 (List.length errors);
+      match errors with
+      | first :: _ ->
+        check
+          string
+          "dated parse error source"
+          "dashboard_governance_judgments_jsonl"
+          (first |> member "source" |> to_string)
+      | [] -> fail "expected dated judgment read error")
 
 let test_empty_judgment_disk_scan_uses_cooldown () =
   let dir = test_dir () in
@@ -1122,6 +1247,10 @@ let () =
             test_dashboard_surfaces_lenient_fallback_metrics;
           test_case "runtime status and judgments are live" `Quick
             test_runtime_status_and_judgments_are_live;
+          test_case "legacy judgment parse errors are visible" `Quick
+            test_legacy_judgment_parse_errors_are_visible;
+          test_case "dated judgment parse errors are visible" `Quick
+            test_dated_judgment_parse_errors_are_visible;
           test_case "empty judgment disk scan uses cooldown" `Quick
             test_empty_judgment_disk_scan_uses_cooldown;
           test_case "runtime timestamps fallback to unix values" `Quick

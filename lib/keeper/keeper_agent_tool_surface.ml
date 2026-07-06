@@ -156,6 +156,9 @@ let has_task_claim_affordance = has_turn_affordance Task_claim
 let owned_active_task_id_for_meta =
   Keeper_current_task_reconcile.owned_active_task_id_for_meta
 
+let owned_active_task_id_result_for_meta =
+  Keeper_current_task_reconcile.owned_active_task_id_result_for_meta
+
 let merge_current_task_id =
   Keeper_current_task_reconcile.merge_current_task_id
 

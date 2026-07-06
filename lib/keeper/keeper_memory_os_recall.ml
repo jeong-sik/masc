@@ -52,10 +52,14 @@ let sanitize_atom text =
 
 type unavailable_reason =
   | Read_error
+  | Fact_store_parse_error
+  | Episode_store_parse_error
   | Prompt_render_error
 
 let unavailable_reason_to_label = function
   | Read_error -> "read_error"
+  | Fact_store_parse_error -> "fact_store_parse_error"
+  | Episode_store_parse_error -> "episode_store_parse_error"
   | Prompt_render_error -> "prompt_render_error"
 ;;
 
@@ -174,6 +178,28 @@ let render_unavailable_context reason =
     Printf.sprintf
       "--- Memory OS Recall ---\nMemory recall unavailable (reason=%s)."
       reason
+;;
+
+let record_fact_store_parse_errors ~keeper_id errors =
+  match errors with
+  | [] -> ()
+  | first :: _ ->
+    Log.Keeper.warn
+      "memory os recall fact store parse errors keeper=%s count=%d first=%s"
+      keeper_id
+      (List.length errors)
+      (Keeper_memory_os_io.fact_jsonl_parse_error_to_string first)
+;;
+
+let record_episode_store_parse_errors ~keeper_id errors =
+  match errors with
+  | [] -> ()
+  | first :: _ ->
+    Log.Keeper.warn
+      "memory os recall episode store parse errors keeper=%s count=%d first=%s"
+      keeper_id
+      (List.length errors)
+      (Keeper_memory_os_io.episode_parse_error_to_string first)
 ;;
 
 let render_nonempty_section key variable lines =
@@ -297,17 +323,24 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
      facts. RFC-0247: order by the structural truth anchor (most-recently-verified
      first); the composite score, lexical seed-rerank, and spreading-activation
      reranking were all removed in the purge. *)
-  let facts, private_keys, shared_facts, n_facts_in_store =
+  let facts, private_keys, shared_facts, n_facts_in_store, fact_parse_errors =
     let fact_store_ids =
       if String.equal keeper_id shared_store_id
       then [ keeper_id ]
       else [ keeper_id; shared_store_id ]
     in
     with_fact_store_locks fact_store_ids (fun () ->
-      let all_facts =
-        Keeper_memory_os_io.read_facts_tail
+      let private_read =
+        Keeper_memory_os_io.read_facts_tail_with_errors
           ~keeper_id
           ~n:Keeper_memory_os_io.fact_store_max
+      in
+      let
+        { Keeper_memory_os_io.facts = all_facts
+        ; parse_errors = private_parse_errors
+        }
+        =
+        private_read
       in
       let n_facts_in_store = List.length all_facts in
       let facts = all_facts |> facts_recency_ranked ~now |> take max_facts in
@@ -320,50 +353,92 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
          and does not apply [fact_store_max], so recall must scan every shared
          fact before ranking and taking the small communal slice. *)
       let private_keys = List.map (fun f -> claim_identity f) facts in
-      let shared_facts =
+      let shared_facts, shared_parse_errors =
         if String.equal keeper_id shared_store_id
-        then []
+        then [], []
         else
-          Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
-          |> facts_recency_ranked ~now
-          |> List.filter (fun f -> not (List.mem (claim_identity f) private_keys))
-          |> take default_max_shared_facts
+          let shared_read =
+            Keeper_memory_os_io.read_facts_all_with_errors
+              ~keeper_id:shared_store_id
+          in
+          let
+            { Keeper_memory_os_io.facts = shared_all_facts
+            ; parse_errors = shared_parse_errors
+            }
+            =
+            shared_read
+          in
+          ( shared_all_facts
+            |> facts_recency_ranked ~now
+            |> List.filter (fun f -> not (List.mem (claim_identity f) private_keys))
+            |> take default_max_shared_facts
+          , shared_parse_errors )
       in
-      facts, private_keys, shared_facts, n_facts_in_store)
-  in
-  let episodes =
-    Keeper_memory_os_io.read_episodes_tail
-      ~keeper_id
-      ~n:(max max_episodes episode_tail_scan)
-    |> List.filter (episode_is_current ~now)
-    |> List.filter episode_prompt_recallable
-    |> take max_episodes
-  in
-  let injected_fact_keys =
-    private_keys @ List.map (fun f -> claim_identity f) shared_facts
-  in
-  let injected_episode_keys =
-    List.map
-      (fun (e : episode) -> Printf.sprintf "%s:g%d" e.trace_id e.generation)
-      episodes
+      ( facts
+      , private_keys
+      , shared_facts
+      , n_facts_in_store
+      , private_parse_errors @ shared_parse_errors ))
   in
   let block, injected_fact_keys, injected_episode_keys, failure_reason =
-    match facts, shared_facts, episodes with
-    | [], [], [] -> "", [], [], None
-    | _ ->
-      let fact_lines =
-        List.map (render_fact ~now) facts
-        @ List.map (render_shared_fact ~now) shared_facts
+    match fact_parse_errors with
+    | _ :: _ ->
+      record_fact_store_parse_errors ~keeper_id fact_parse_errors;
+      ( render_unavailable_context Fact_store_parse_error
+      , []
+      , []
+      , Some Fact_store_parse_error )
+    | [] ->
+      let episode_read =
+        Keeper_memory_os_io.read_episodes_tail_with_errors
+          ~keeper_id
+          ~n:(max max_episodes episode_tail_scan)
       in
-      let episode_lines = List.map render_episode episodes in
-      (match render_recall_context ~fact_lines ~episode_lines with
-       | Ok context -> context, injected_fact_keys, injected_episode_keys, None
-       | Error msg ->
-         Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-         ( render_unavailable_context Prompt_render_error
+      let
+        { Keeper_memory_os_io.episodes = all_episodes
+        ; episode_parse_errors
+        }
+        =
+        episode_read
+      in
+      (match episode_parse_errors with
+       | _ :: _ ->
+         record_episode_store_parse_errors ~keeper_id episode_parse_errors;
+         ( render_unavailable_context Episode_store_parse_error
          , []
          , []
-         , Some Prompt_render_error ))
+         , Some Episode_store_parse_error )
+       | [] ->
+         let episodes =
+           all_episodes
+           |> List.filter (episode_is_current ~now)
+           |> List.filter episode_prompt_recallable
+           |> take max_episodes
+         in
+         let injected_fact_keys =
+           private_keys @ List.map (fun f -> claim_identity f) shared_facts
+         in
+         let injected_episode_keys =
+           List.map
+             (fun (e : episode) -> Printf.sprintf "%s:g%d" e.trace_id e.generation)
+             episodes
+         in
+         (match facts, shared_facts, episodes with
+          | [], [], [] -> "", [], [], None
+          | _ ->
+            let fact_lines =
+              List.map (render_fact ~now) facts
+              @ List.map (render_shared_fact ~now) shared_facts
+            in
+            let episode_lines = List.map render_episode episodes in
+            (match render_recall_context ~fact_lines ~episode_lines with
+             | Ok context -> context, injected_fact_keys, injected_episode_keys, None
+             | Error msg ->
+               Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
+               ( render_unavailable_context Prompt_render_error
+               , []
+               , []
+               , Some Prompt_render_error ))))
   in
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;

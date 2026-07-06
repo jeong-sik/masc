@@ -33,6 +33,7 @@ let target_files =
 let status_detail_file = "lib/keeper/keeper_status_detail.ml"
 let keeper_up_update_file = "lib/keeper/keeper_turn_up_update.ml"
 let heartbeat_presence_file = "lib/keeper/keeper_heartbeat_loop_presence.ml"
+let dashboard_execution_helpers_file = "lib/dashboard/dashboard_execution_helpers.ml"
 
 let metric_name = "Keeper_metrics.(to_string PausedStatePersistErrors)"
 
@@ -365,6 +366,67 @@ let test_heartbeat_presence_uses_cas_retry_merge () =
   check int "plain heartbeat write_meta call removed" 0
     (count_occurrences ~needle:"match write_meta ctx.config synced" src)
 
+let test_directive_meta_cluster_scan_failure_fail_closed () =
+  let src = load_source "lib/keeper/keeper_keepalive.ml" in
+  check bool "directive meta path resolver is Result-returning" true
+    (count_occurrences ~needle:"directive_meta_persist_path_result" src >= 2);
+  check bool "cluster scan error is explicitly labelled" true
+    (count_occurrences
+       ~needle:"clusters_dir_read_error while resolving directive meta path"
+       src
+     >= 1);
+  check bool "path resolution failure uses directive persist failure channel" true
+    (count_occurrences ~needle:"directive_meta_persist_error entry msg" src >= 1);
+  check int "cluster scan failure is not collapsed to empty path list" 0
+    (count_occurrences ~needle:"| Error _ -> []" src)
+
+let test_dashboard_agent_profile_read_error_observable () =
+  let helper_src = load_source dashboard_execution_helpers_file in
+  let builder_src = load_source "lib/dashboard/dashboard_execution_builders.ml" in
+  let dashboard_src = load_source "lib/dashboard/dashboard_execution.ml" in
+  let keeper_src = load_source "lib/dashboard/dashboard_http_keeper.ml" in
+  let core_entities_src =
+    load_source "lib/server/server_dashboard_http_core_entities.ml"
+  in
+  check bool "persona profile lookup has explicit read-error variant" true
+    (count_occurrences ~needle:"Persona_profile_read_error" helper_src >= 3);
+  check int "persona profile read failure is not collapsed to None" 0
+    (count_occurrences ~needle:"| Error _ -> None" helper_src);
+  check bool "agent profile carries profile_errors" true
+    (count_occurrences ~needle:"profile_errors : agent_profile_error list" helper_src
+     >= 1);
+  check bool "execution builders emit profile_errors" true
+    (count_occurrences ~needle:"(\"profile_errors\", agent_profile_errors_json profile)" builder_src
+     >= 2);
+  check bool "dashboard agent JSON emits profile_errors" true
+    (count_occurrences ~needle:"\"profile_errors\", agent_profile_errors_json profile" dashboard_src
+     >= 1);
+  check bool "keeper dashboard emits profile_errors" true
+    (count_occurrences
+       ~needle:
+         "(\"profile_errors\", Dashboard_execution_helpers.agent_profile_errors_json profile)"
+       keeper_src
+     >= 1);
+  check bool "core entity JSON emits profile_errors" true
+    (count_occurrences
+       ~needle:
+       "\"profile_errors\", Dashboard_execution_helpers.agent_profile_errors_json profile"
+       core_entities_src
+     >= 1)
+
+let test_composite_claim_output_parse_failure_observable () =
+  let src = load_source "lib/server/server_dashboard_http_composite_claims.ml" in
+  check bool "claim output parse has typed error variant" true
+    (count_occurrences ~needle:"Tool_call_output_parse_error" src >= 4);
+  check int "claim output parse error is not collapsed to None" 0
+    (count_occurrences ~needle:"| Error _ -> None" src);
+  check bool "claim output parse status is projected" true
+    (count_occurrences ~needle:"\"output_parse_status\"" src >= 2);
+  check bool "claim output parse error detail is projected" true
+    (count_occurrences ~needle:"\"output_error\"" src >= 2);
+  check bool "parse-error status is explicit" true
+    (count_occurrences ~needle:"\"parse_error\"" src >= 2)
+
 let () =
   run "keeper_pause_silent_failure_source"
     [ ( "issue-8391-high-1"
@@ -395,5 +457,11 @@ let () =
             test_keeper_status_disposition_mirrors_runtime_trust
         ; test_case "heartbeat presence uses CAS retry merge" `Quick
             test_heartbeat_presence_uses_cas_retry_merge
+        ; test_case "directive meta cluster scan failure fail-closed" `Quick
+            test_directive_meta_cluster_scan_failure_fail_closed
+        ; test_case "dashboard agent profile read errors observable" `Quick
+            test_dashboard_agent_profile_read_error_observable
+        ; test_case "composite claim output parse errors observable" `Quick
+            test_composite_claim_output_parse_failure_observable
         ] )
     ]

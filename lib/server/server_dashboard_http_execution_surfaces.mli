@@ -61,7 +61,7 @@
     [_transport_health_cache],
     [keeper_agent_status_opt] / [patched_keeper_status],
     [patch_keeper_rows] SSE-event row patcher helper,
-    [running_keeper_names],
+    [running_keeper_scan],
     [patchexecution_cache_for_keeper] /
     [patch_operator_snapshot_cache_for_keeper],
     [transport_health_cache_diagnostics]). *)

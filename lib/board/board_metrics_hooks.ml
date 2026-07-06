@@ -5,16 +5,18 @@
 
     Label dimensions are typed closed sums so the compiler checks every label
     value at each call site. The variant -> Otel_metric_store label string mapping
-    lives only in the adapter (board_metric_hooks_adapter.ml). [author] on
-    {!inc_legacy_migrate_post_kind} is deliberately left as [string]: it is an
-    unbounded external-identity label (a raw actor name), out of scope for this
-    closed-sum pass. *)
+    lives only in the adapter (board_metric_hooks_adapter.ml). *)
 
-(** Persistence surface that recorded a read drop. Single value today; the
-    sum keeps the dimension typed and adding a surface a compile obligation.
+(** Persistence surface that recorded a read drop. The closed sum keeps the
+    dimension typed and adding a surface a compile obligation.
     This is a board-persistence-row surface, unrelated to the deleted
     Tool-layer [surface] type (#19854). *)
-type board_persist_surface = Board_post_meta_json
+type board_persist_surface =
+  | Board_post_meta_json
+  | Board_post_kind
+  | Board_post_mention_ids
+  | Board_comment_mention_ids
+  | Board_sub_board_member_ids
 
 (** Outcome of an attempt to start the board dispatch flusher actor. *)
 type flusher_outcome =
@@ -28,8 +30,6 @@ type observer = {
   inc_vote_fixture_detected : count:int -> unit;
   inc_persistence_read_drop :
     surface:board_persist_surface -> reason:Read_drop_reason.t -> unit;
-  inc_legacy_migrate_post_kind :
-    author:string -> automation_label:Board_types.automation_label -> unit;
 }
 
 let noop_observer = {
@@ -38,8 +38,6 @@ let noop_observer = {
   inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ());
   inc_vote_fixture_detected = (fun ~count:_ -> ());
   inc_persistence_read_drop = (fun ~surface:_ ~reason:_ -> ());
-  inc_legacy_migrate_post_kind =
-    (fun ~author:_ ~automation_label:_ -> ());
 }
 
 let observer = Atomic.make noop_observer
@@ -60,6 +58,3 @@ let inc_vote_fixture_detected ~count =
 
 let inc_persistence_read_drop ~surface ~reason =
   (Atomic.get observer).inc_persistence_read_drop ~surface ~reason
-
-let inc_legacy_migrate_post_kind ~author ~automation_label =
-  (Atomic.get observer).inc_legacy_migrate_post_kind ~author ~automation_label

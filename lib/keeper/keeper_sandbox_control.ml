@@ -360,6 +360,8 @@ let playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
     Error
       (`Identity_mismatch
         "repository identity mismatch; access is denied fail-closed")
+  | Keeper_repo_mapping.Repository_origin_read_error error ->
+    Error (`Store_error (Keeper_repo_mapping.repository_origin_read_error_message error))
   | Keeper_repo_mapping.Repository_store_error msg -> Error (`Store_error msg))
 
 let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
@@ -541,32 +543,127 @@ let playground_repo_entry_json ~(source : string) ~(repo_name : string)
   |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
   |> fun fields -> `Assoc fields
 
-let cached_playground_repo_entries playground_abs =
+type playground_repo_read_error_source =
+  | Playground_repo_cache_state
+  | Playground_repo_filesystem_scan
+
+let playground_repo_read_error_source_to_string = function
+  | Playground_repo_cache_state -> "cache_state"
+  | Playground_repo_filesystem_scan -> "filesystem_scan"
+
+type playground_repo_read_error =
+  { source : playground_repo_read_error_source
+  ; path : string
+  ; error : string
+  }
+
+let playground_repo_read_error_json { source; path; error } =
+  let observed_at_unix = Time_compat.now () in
+  `Assoc
+    [ "source", `String "read_error"
+    ; ( "read_error_source"
+      , `String (playground_repo_read_error_source_to_string source) )
+    ; "read_error", `Bool true
+    ; "path", `String path
+    ; "error", `String error
+    ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
+    ; "observed_at_unix", `Float observed_at_unix
+    ]
+
+let playground_repo_stat_result path =
+  try Ok (Some (Unix.stat path).Unix.st_kind) with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
+  | Unix.Unix_error (err, _, _) ->
+    Error
+      (Printf.sprintf
+         "playground repo path stat failed at %s: %s"
+         path
+         (Unix.error_message err))
+  | Sys_error msg ->
+    Error
+      (Printf.sprintf "playground repo path stat failed at %s: %s" path msg)
+
+let playground_repo_path_exists_result path =
+  match playground_repo_stat_result path with
+  | Ok None -> Ok false
+  | Ok (Some _) -> Ok true
+  | Error _ as err -> err
+
+let playground_repo_has_git_result repo_path =
+  match playground_repo_stat_result repo_path with
+  | Ok (Some Unix.S_DIR) ->
+    playground_repo_path_exists_result (Filename.concat repo_path ".git")
+  | Ok (Some _) | Ok None -> Ok false
+  | Error _ as err -> err
+
+let cached_playground_repo_entries_result playground_abs =
   let cache_path = Filename.concat playground_abs ".playground_state.json" in
-  try
+  match playground_repo_path_exists_result cache_path with
+  | Error _ as err -> err
+  | Ok false -> Ok []
+  | Ok true ->
+    try
     match Yojson.Safe.from_file cache_path with
     | `Assoc _ as json -> (
         match Json_util.assoc_member_opt "repos" json with
-        | Some (`List repos) -> repos
-        | _ -> [])
-    | _ -> []
-  with
-  | Sys_error _ | Yojson.Json_error _ -> []
+        | None -> Ok []
+        | Some (`List repos) -> Ok repos
+        | Some other ->
+          Error
+            (Printf.sprintf
+               "playground state field %S must be list, got %s"
+               "repos"
+               (Json_util.kind_name other)))
+    | other ->
+      Error
+        (Printf.sprintf
+           "playground state must be object, got %s"
+           (Json_util.kind_name other))
+    with
+    | Sys_error msg ->
+      Error
+        (Printf.sprintf
+           "playground state read failed at %s: %s"
+           cache_path
+           msg)
+    | Yojson.Json_error msg ->
+      Error
+        (Printf.sprintf
+           "playground state JSON parse failed at %s: %s"
+           cache_path
+           msg)
 
-let filesystem_playground_repo_names playground_abs =
+let filesystem_playground_repo_names_result playground_abs =
   let repos_dir = Filename.concat playground_abs "repos" in
-  if not (safe_is_dir repos_dir) then []
-  else
+  let collect_repo_names names =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | name :: rest ->
+        let repo_path = Filename.concat repos_dir name in
+        (match playground_repo_has_git_result repo_path with
+         | Ok true -> loop (name :: acc) rest
+         | Ok false -> loop acc rest
+         | Error _ as err -> err)
+    in
+    loop [] names
+  in
+  match playground_repo_stat_result repos_dir with
+  | Error _ as err -> err
+  | Ok None -> Ok []
+  | Ok (Some kind) when kind <> Unix.S_DIR ->
+    Error
+      (Printf.sprintf "playground repos path must be directory at %s" repos_dir)
+  | Ok (Some Unix.S_DIR) ->
     try
       Sys.readdir repos_dir
       |> Array.to_list
-      |> List.filter (fun name ->
-        let repo_path = Filename.concat repos_dir name in
-        safe_is_dir repo_path
-        && safe_file_exists (Filename.concat repo_path ".git"))
-      |> List.sort String.compare
+      |> collect_repo_names
+      |> Result.map (List.sort String.compare)
     with
-    | Sys_error _ -> []
+    | Sys_error msg ->
+      Error
+        (Printf.sprintf "playground repos directory read failed at %s: %s" repos_dir msg)
+  | Ok (Some _) -> Ok []
 
 let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let playground_abs =
@@ -579,32 +676,68 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   in
   let repo_catalog = Repo_store.load_all ~base_path:config.base_path in
   let live_enriched_count = ref 0 in
-  let cached =
-    cached_playground_repo_entries playground_abs
-    |> List.map (fun repo ->
+  let cached_raw, cache_read_errors =
+    match cached_playground_repo_entries_result playground_abs with
+    | Ok repos -> repos, []
+    | Error error ->
+      ( []
+      , [ { source = Playground_repo_cache_state
+          ; path = Filename.concat playground_abs ".playground_state.json"
+          ; error
+          }
+        ] )
+  in
+  let cached, cached_live_read_errors =
+    cached_raw
+    |> List.fold_left
+         (fun (entries, errors) repo ->
       match repo_name_of_json repo with
       | Some name ->
           let repo_path = Filename.concat repos_dir name in
-          if safe_is_dir repo_path
-             && safe_file_exists (Filename.concat repo_path ".git")
-             && !live_enriched_count < max_live_git_enrichment_repos
-          then
-            (incr live_enriched_count;
-            enrich_playground_repo_from_git ~source:"git" ~repo_name:name
-              ~repo_path repo
-            |> with_playground_repo_policy_fields ~base_path:config.base_path
-                 ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
-                 ~repo_path)
-          else
+          let cache_entry =
             playground_repo_entry_json ~source:"cache" ~repo_name:name repo
             |> with_playground_repo_policy_fields ~base_path:config.base_path
                  ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
                  ~repo_path
-      | None -> repo)
+          in
+          let entry, errors =
+            match playground_repo_has_git_result repo_path with
+            | Ok true when !live_enriched_count < max_live_git_enrichment_repos ->
+              incr live_enriched_count;
+              ( enrich_playground_repo_from_git ~source:"git" ~repo_name:name
+                  ~repo_path repo
+                |> with_playground_repo_policy_fields ~base_path:config.base_path
+                     ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
+                     ~repo_path
+              , errors )
+            | Ok true | Ok false -> cache_entry, errors
+            | Error error ->
+              ( cache_entry
+              , { source = Playground_repo_filesystem_scan
+                ; path = repo_path
+                ; error
+                }
+                :: errors )
+          in
+          entry :: entries, errors
+      | None -> repo :: entries, errors)
+         ([], [])
+    |> fun (entries, errors) -> List.rev entries, List.rev errors
   in
   let cached_names = List.filter_map repo_name_of_json cached in
+  let filesystem_names, filesystem_read_errors =
+    match filesystem_playground_repo_names_result playground_abs with
+    | Ok names -> names, []
+    | Error error ->
+      ( []
+      , [ { source = Playground_repo_filesystem_scan
+          ; path = repos_dir
+          ; error
+          }
+        ] )
+  in
   let fs_entries =
-    filesystem_playground_repo_names playground_abs
+    filesystem_names
     |> List.filter (fun name -> not (List.mem name cached_names))
     |> List.map (fun name ->
       playground_repo_entry_json ~source:"filesystem" ~repo_name:name
@@ -613,7 +746,12 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
            ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
            ~repo_path:(Filename.concat repos_dir name))
   in
-  `List (cached @ fs_entries)
+  let read_errors =
+    List.map
+      playground_repo_read_error_json
+      (cache_read_errors @ cached_live_read_errors @ filesystem_read_errors)
+  in
+  `List (cached @ fs_entries @ read_errors)
 
 let preflight_status_json ~timeout_sec =
   Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()

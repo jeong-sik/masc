@@ -1,5 +1,11 @@
 open Masc
 
+let meta_read_failure_count ~keeper ~site =
+  Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string MetaReadFailures)
+    ~labels:[ "keeper", keeper; "site", site ]
+    ()
+
 let () =
   (* Test 1: Seed round-trip — minimal JSON should parse + serialize *)
   let seed = Yojson.Safe.from_string {|
@@ -76,4 +82,56 @@ let () =
    | Error msg ->
      Printf.printf "FAIL test3: parse: %s\n" msg; exit 1);
 
-  Printf.printf "\nAll 3 tests PASSED\n"
+  (* Test 4: malformed optional persisted ids degrade to None, but are
+     observable through the existing meta-read failure metric. *)
+  let keeper = "meta-optional-id-observability" in
+  let current_task_site = "current_task_id_parse" in
+  let keeper_id_site = "keeper_id_parse" in
+  let before_current_task =
+    meta_read_failure_count ~keeper ~site:current_task_site
+  in
+  let before_keeper_id = meta_read_failure_count ~keeper ~site:keeper_id_site in
+  let existing =
+    Yojson.Safe.from_string
+      {|
+{"name": "meta-optional-id-observability",
+ "agent_name": "keeper-meta-optional-id-observability",
+ "trace_id": "trace-meta-optional-id-observability",
+ "tool_access": [],
+ "current_task_id": "",
+ "keeper_id": "not-a-keeper-uid"}
+|}
+  in
+  (match Keeper_meta_json_parse.meta_of_json existing with
+   | Error msg ->
+     Printf.printf "FAIL test4: parse: %s\n" msg;
+     exit 1
+   | Ok meta ->
+     if Option.is_some meta.current_task_id then begin
+       Printf.printf "FAIL test4: malformed current_task_id survived\n";
+       exit 1
+     end;
+     if Option.is_some meta.keeper_id then begin
+       Printf.printf "FAIL test4: malformed keeper_id survived\n";
+       exit 1
+     end;
+     let after_current_task =
+       meta_read_failure_count ~keeper ~site:current_task_site
+     in
+     let after_keeper_id = meta_read_failure_count ~keeper ~site:keeper_id_site in
+     if after_current_task <> before_current_task +. 1.0 then begin
+       Printf.printf
+         "FAIL test4: current_task_id metric delta expected 1.0, got %.1f\n"
+         (after_current_task -. before_current_task);
+       exit 1
+     end;
+     if after_keeper_id <> before_keeper_id +. 1.0 then begin
+       Printf.printf
+         "FAIL test4: keeper_id metric delta expected 1.0, got %.1f\n"
+         (after_keeper_id -. before_keeper_id);
+       exit 1
+     end;
+     Printf.printf
+       "test4: PASS — malformed optional ids are dropped with metrics\n");
+
+  Printf.printf "\nAll 4 tests PASSED\n"

@@ -48,7 +48,7 @@ let read_file path =
     (fun () -> really_input_string ic (in_channel_length ic))
 ;;
 
-(* ---------- Triage tests ---------- *)
+(* ---------- Shared fixtures ---------- *)
 
 let base_obs =
   D.empty_world_observation ~keeper_name:"test-keeper"
@@ -71,95 +71,6 @@ let json_string_field key json =
 let json_list_items label = function
   | `List items -> items
   | _ -> fail ("expected JSON list for " ^ label)
-
-let test_triage_skip_on_empty_observation () =
-  let result = D.triage base_obs in
-  match result with
-  | D.Skip _ -> ()
-  | D.Triggered _ ->
-      fail "expected Skip for empty observation, got Triggered"
-
-let test_triage_direct_mention () =
-  let obs = { base_obs with direct_mention = true } in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for direct mention"
-  | D.Triggered triggers ->
-      check bool "contains DirectMention" true
-        (List.mem D.DirectMention triggers)
-
-let test_triage_unclaimed_task () =
-  let obs = { base_obs with unclaimed_task_count = 3 } in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for unclaimed tasks"
-  | D.Triggered triggers ->
-      check bool "contains NewUnclaimedTask" true
-        (List.mem D.NewUnclaimedTask triggers)
-
-(* RFC-keeper-proactive-wake-actionability-invariant: failed_task (orphan) must NOT be an actionable triage trigger —
-   Task_audit is read-only, so waking on it cannot clear it (the executor
-   livelock).  An orphan-only observation yields no trigger. *)
-let test_triage_failed_task_is_not_a_trigger () =
-  let obs = { base_obs with failed_task_count = 1 } in
-  match D.triage obs with
-  | D.Skip _ -> ()
-  | D.Triggered triggers ->
-      check bool "failed_task must NOT be a trigger" false
-        (List.mem D.FailedTask triggers)
-
-let test_triage_keeper_fiber_count_change () =
-  let obs = { base_obs with keeper_fiber_count_changed = true } in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for keeper fiber count change"
-  | D.Triggered triggers ->
-      check bool "contains KeeperFiberStartedOrStopped" true
-        (List.mem D.KeeperFiberStartedOrStopped triggers)
-
-let test_triage_board_mention () =
-  let obs = { base_obs with board_mention_count = 2 } in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for board mention"
-  | D.Triggered triggers ->
-      let has_board_activity =
-        List.exists
-          (function D.BoardActivity _ -> true | _ -> false)
-          triggers
-      in
-      check bool "contains BoardActivity" true has_board_activity
-
-let test_triage_idle_with_goals () =
-  let obs =
-    { base_obs with idle_seconds = 600; idle_gate = 300; active_goal_count = 2 }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for idle timeout with goals"
-  | D.Triggered triggers ->
-      check bool "contains IdleTimeout" true
-        (List.mem D.IdleTimeout triggers)
-
-let test_triage_idle_without_goals_skips () =
-  let obs =
-    { base_obs with idle_seconds = 600; idle_gate = 300; active_goal_count = 0 }
-  in
-  match D.triage obs with
-  | D.Skip _ -> ()
-  | D.Triggered _ ->
-      fail "idle without goals should not trigger"
-
-let test_triage_multiple_triggers () =
-  let obs =
-    { base_obs with
-      direct_mention = true;
-      unclaimed_task_count = 1;
-      failed_task_count = 1;
-      keeper_fiber_count_changed = true;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected multiple triggers"
-  | D.Triggered triggers ->
-      check bool "at least 3 triggers" true (List.length triggers >= 3);
-      check bool "failed_task is not actionable in multi-trigger triage" false
-        (List.mem D.FailedTask triggers)
 
 (* ---------- Action type tests ---------- *)
 
@@ -300,29 +211,6 @@ let test_keeper_meta_deliberation_fields_default () =
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
       check string "name preserved" "test-keeper-2" meta.name
-
-(* ---------- Triage result JSON ---------- *)
-
-let test_triage_result_skip_json () =
-  let json = D.triage_result_to_json (D.Skip "quiet workspace") in
-  let decision =
-    Yojson.Safe.Util.member "decision" json |> Yojson.Safe.Util.to_string
-  in
-  check string "skip decision" "skip" decision
-
-let test_triage_result_triggered_json () =
-  let json =
-    D.triage_result_to_json
-      (D.Triggered [ D.DirectMention; D.NewUnclaimedTask ])
-  in
-  let decision =
-    Yojson.Safe.Util.member "decision" json |> Yojson.Safe.Util.to_string
-  in
-  let triggers =
-    Yojson.Safe.Util.member "triggers" json |> Yojson.Safe.Util.to_list
-  in
-  check string "triggered decision" "triggered" decision;
-  check int "trigger count" 2 (List.length triggers)
 
 (* ---------- World observation JSON ---------- *)
 
@@ -977,90 +865,6 @@ let test_daily_budget_live_env_custom () =
        Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "");
   check (float 0.001) "custom env budget" 0.50 budget
 
-(* ================================================================ *)
-(* Phase 5: L2 Proactive and L3 Strategic tests                     *)
-(* ================================================================ *)
-
-(* ---------- L2 Proactive triage: GoalDeadline trigger ---------- *)
-
-let test_triage_goal_deadline () =
-  (* GoalDeadline fires when active_goal_count > 0 AND idle_seconds > idle_gate * 2 *)
-  let obs =
-    { base_obs with
-      active_goal_count = 1;
-      idle_seconds = 700;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected GoalDeadline trigger"
-  | D.Triggered triggers ->
-      check bool "contains GoalDeadline" true
-        (List.mem D.GoalDeadline triggers)
-
-let test_triage_goal_deadline_not_triggered_below_threshold () =
-  (* idle_seconds (500) is NOT > idle_gate * 2 (600) *)
-  let obs =
-    { base_obs with
-      active_goal_count = 2;
-      idle_seconds = 500;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> ()
-  | D.Triggered triggers ->
-      (* IdleTimeout may fire (500 > 300) but GoalDeadline should not *)
-      check bool "GoalDeadline should not trigger" false
-        (List.mem D.GoalDeadline triggers)
-
-let test_triage_goal_deadline_no_goals () =
-  (* No active goals, so GoalDeadline should not fire even with high idle *)
-  let obs =
-    { base_obs with
-      active_goal_count = 0;
-      idle_seconds = 1000;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> () (* expected: no goals, no triggers *)
-  | D.Triggered triggers ->
-      check bool "GoalDeadline should not trigger without goals" false
-        (List.mem D.GoalDeadline triggers)
-
-(* ---------- L2 Proactive triage: StrategicReview trigger ---------- *)
-
-let test_triage_strategic_review () =
-  (* StrategicReview fires when idle_seconds > idle_gate * 5 AND active_goal_count > 0 *)
-  let obs =
-    { base_obs with
-      active_goal_count = 1;
-      idle_seconds = 1600;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected StrategicReview trigger"
-  | D.Triggered triggers ->
-      check bool "contains StrategicReview" true
-        (List.mem D.StrategicReview triggers)
-
-let test_triage_strategic_review_not_triggered_below_threshold () =
-  (* idle_seconds (1400) is NOT > idle_gate * 5 (1500) *)
-  let obs =
-    { base_obs with
-      active_goal_count = 1;
-      idle_seconds = 1400;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> () (* could skip entirely or trigger other things *)
-  | D.Triggered triggers ->
-      check bool "StrategicReview should not trigger" false
-        (List.mem D.StrategicReview triggers)
-
 (* ---------- L3 Strategic: multi_step parse ---------- *)
 
 let test_parse_multi_step_action () =
@@ -1173,197 +977,28 @@ let test_removed_persona_profile_path_rejected () =
            true
          with Not_found -> false)
 
-let test_idle_gate_drives_idle_timeout () =
-  let obs = { base_obs with
-    active_goal_count = 1;
-    idle_seconds = 120;
-    idle_gate = 60;
-  } in
-  match D.triage obs with
-  | D.Skip _ -> fail "should trigger IdleTimeout with custom idle_gate=60"
-  | D.Triggered triggers ->
-    check bool "has idle_timeout" true
-      (List.exists (fun t -> t = D.IdleTimeout) triggers)
+(* ---------- Board-post legality tests ---------- *)
 
-(* ---------- L3 Self-directed trigger tests ---------- *)
-
-let test_triage_self_directed_explore () =
-  (* SelfDirectedExplore fires when active_goal_count = 0 AND idle_seconds > idle_gate * 4 *)
-  let obs =
-    { base_obs with
-      active_goal_count = 0;
-      idle_seconds = 1300;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected SelfDirectedExplore trigger"
-  | D.Triggered triggers ->
-      check bool "contains SelfDirectedExplore" true
-        (List.mem D.SelfDirectedExplore triggers)
-
-let test_triage_self_directed_not_with_goals () =
-  (* SelfDirectedExplore should NOT fire when active_goal_count > 0 *)
-  let obs =
-    { base_obs with
-      active_goal_count = 1;
-      idle_seconds = 1300;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> ()
-  | D.Triggered triggers ->
-      check bool "SelfDirectedExplore should not trigger with goals" false
-        (List.mem D.SelfDirectedExplore triggers)
-
-let test_triage_self_directed_not_below_threshold () =
-  (* SelfDirectedExplore should NOT fire when idle_seconds < idle_gate * 4 *)
-  let obs =
-    { base_obs with
-      active_goal_count = 0;
-      idle_seconds = 1100;  (* < 300 * 4 = 1200 *)
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> ()
-  | D.Triggered triggers ->
-      check bool "SelfDirectedExplore should not trigger below threshold" false
-        (List.mem D.SelfDirectedExplore triggers)
-
-let test_triage_board_new_posts_without_mention () =
-  (* BoardActivity "new_posts" fires when board_new_post_count > 0
-     AND idle_seconds >= idle_gate / 2 AND board_mention_count = 0 *)
-  let obs =
-    { base_obs with
-      board_new_post_count = 3;
-      board_mention_count = 0;
-      idle_seconds = 200;   (* >= 300 / 2 = 150 *)
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected BoardActivity trigger for new posts"
-  | D.Triggered triggers ->
-      let has_new_posts =
-        List.exists
-          (function D.BoardActivity "new_posts" -> true | _ -> false)
-          triggers
-      in
-      check bool "contains BoardActivity new_posts" true has_new_posts
-
-let test_triage_board_new_posts_suppressed_by_mention () =
-  (* When board_mention_count > 0, the new_posts trigger is suppressed
-     (the mention trigger handles it instead) *)
-  let obs =
-    { base_obs with
-      board_new_post_count = 3;
-      board_mention_count = 1;
-      idle_seconds = 200;
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected BoardActivity trigger (from mention)"
-  | D.Triggered triggers ->
-      let has_new_posts =
-        List.exists
-          (function D.BoardActivity "new_posts" -> true | _ -> false)
-          triggers
-      in
-      check bool "new_posts suppressed by mention" false has_new_posts;
-      let has_mention =
-        List.exists
-          (function D.BoardActivity "mentioned_in_post" -> true | _ -> false)
-          triggers
-      in
-      check bool "mention trigger present" true has_mention
-
-let test_triage_board_new_posts_too_soon () =
-  (* new_posts trigger should NOT fire when idle_seconds < idle_gate / 2 *)
-  let obs =
-    { base_obs with
-      board_new_post_count = 3;
-      board_mention_count = 0;
-      idle_seconds = 100;   (* < 300 / 2 = 150 *)
-      idle_gate = 300;
-    }
-  in
-  match D.triage obs with
-  | D.Skip _ -> ()
-  | D.Triggered triggers ->
-      let has_new_posts =
-        List.exists
-          (function D.BoardActivity "new_posts" -> true | _ -> false)
-          triggers
-      in
-      check bool "new_posts should not fire too soon" false has_new_posts
-
-(* ---------- Self-directed legality tests ---------- *)
-
-let test_legality_self_directed_allows_board_post () =
-  (* Self-directed context (no goals, long idle) should allow board_post *)
-  let obs =
-    { base_obs with
-      active_goal_count = 0;
-      idle_seconds = 1300;
-      idle_gate = 300;
-    }
-  in
-  match D.legality_verdict obs
-    (D.BoardPost { content = "Sharing an observation"; hearth = None }) with
+let test_legality_goal_allows_board_post () =
+  let obs = { base_obs with active_goal_count = 1 } in
+  match
+    D.legality_verdict obs
+      (D.BoardPost { content = "Sharing an observation"; hearth = None })
+  with
   | D.Legal -> ()
-  | D.Illegal msg -> fail ("board_post should be legal in self-directed: " ^ msg)
+  | D.Illegal msg -> fail ("board_post should be legal with active goal: " ^ msg)
 
-let test_legality_not_self_directed_rejects_board_post () =
-  (* Without self-directed context (idle too short), board_post is still illegal *)
-  let obs =
-    { base_obs with
-      active_goal_count = 0;
-      idle_seconds = 500;  (* < 300 * 4 = 1200 *)
-      idle_gate = 300;
-    }
-  in
-  match D.legality_verdict obs
-    (D.BoardPost { content = "test"; hearth = None }) with
-  | D.Legal -> fail "board_post should be illegal without self-directed context"
+let test_legality_without_goal_or_board_rejects_board_post () =
+  let obs = { base_obs with active_goal_count = 0; board_new_post_count = 0; board_mention_count = 0 } in
+  match
+    D.legality_verdict obs (D.BoardPost { content = "test"; hearth = None })
+  with
+  | D.Legal -> fail "board_post should be illegal without board activity or active goal"
   | D.Illegal _ -> ()
 
 let () =
   run "Keeper_deliberation"
     [
-      ( "triage",
-        [
-          test_case "skip on empty observation" `Quick
-            test_triage_skip_on_empty_observation;
-          test_case "direct mention triggers" `Quick
-            test_triage_direct_mention;
-          test_case "unclaimed task triggers" `Quick
-            test_triage_unclaimed_task;
-          test_case "failed task is NOT a trigger (RFC-keeper-proactive-wake-actionability-invariant)" `Quick
-            test_triage_failed_task_is_not_a_trigger;
-          test_case "keeper fiber count change triggers" `Quick
-            test_triage_keeper_fiber_count_change;
-          test_case "board mention triggers" `Quick
-            test_triage_board_mention;
-          test_case "idle with goals triggers" `Quick
-            test_triage_idle_with_goals;
-          test_case "idle without goals skips" `Quick
-            test_triage_idle_without_goals_skips;
-          test_case "multiple triggers" `Quick
-            test_triage_multiple_triggers;
-          test_case "goal deadline triggers" `Quick
-            test_triage_goal_deadline;
-          test_case "goal deadline not triggered below threshold" `Quick
-            test_triage_goal_deadline_not_triggered_below_threshold;
-          test_case "goal deadline no goals" `Quick
-            test_triage_goal_deadline_no_goals;
-          test_case "strategic review triggers" `Quick
-            test_triage_strategic_review;
-          test_case "strategic review not triggered below threshold" `Quick
-            test_triage_strategic_review_not_triggered_below_threshold;
-        ] );
       ( "actions",
         [
           test_case "noop to policy label" `Quick
@@ -1403,11 +1038,6 @@ let () =
             test_keeper_meta_deliberation_fields_roundtrip;
           test_case "deliberation fields default" `Quick
             test_keeper_meta_deliberation_fields_default;
-        ] );
-      ( "triage_result_json",
-        [
-          test_case "skip json" `Quick test_triage_result_skip_json;
-          test_case "triggered json" `Quick test_triage_result_triggered_json;
         ] );
       ( "world_observation",
         [
@@ -1529,29 +1159,12 @@ let () =
             test_removed_initiative_field_rejected;
           test_case "persona profile path rejected" `Quick
             test_removed_persona_profile_path_rejected;
-          test_case "idle_gate drives idle timeout" `Quick
-            test_idle_gate_drives_idle_timeout;
         ] );
-      ( "self_directed_triggers",
+      ( "board_post_legality",
         [
-          test_case "self-directed explore fires" `Quick
-            test_triage_self_directed_explore;
-          test_case "self-directed not with goals" `Quick
-            test_triage_self_directed_not_with_goals;
-          test_case "self-directed not below threshold" `Quick
-            test_triage_self_directed_not_below_threshold;
-          test_case "board new posts without mention" `Quick
-            test_triage_board_new_posts_without_mention;
-          test_case "board new posts suppressed by mention" `Quick
-            test_triage_board_new_posts_suppressed_by_mention;
-          test_case "board new posts too soon" `Quick
-            test_triage_board_new_posts_too_soon;
-        ] );
-      ( "self_directed_legality",
-        [
-          test_case "self-directed allows board_post" `Quick
-            test_legality_self_directed_allows_board_post;
-          test_case "not self-directed rejects board_post" `Quick
-            test_legality_not_self_directed_rejects_board_post;
+          test_case "active goal allows board_post" `Quick
+            test_legality_goal_allows_board_post;
+          test_case "no goal or board signal rejects board_post" `Quick
+            test_legality_without_goal_or_board_rejects_board_post;
         ] );
     ]

@@ -24,7 +24,8 @@ let workspace_json config =
       ; "project", `String (Filename.basename config.base_path)
       ]
   else (
-    let state = Workspace.read_state config in
+    let state_snapshot = Workspace.read_state_snapshot config in
+    let state = state_snapshot.state in
     let tempo = Tempo.get_tempo config in
     let tasks = Workspace.get_tasks_raw config in
     let agents = Workspace.get_agents_raw config in
@@ -32,6 +33,11 @@ let workspace_json config =
       [ "initialized", `Bool true
       ; "cluster", `String (Env_config_core.cluster_name ())
       ; "project", `String state.project
+      ; ( "workspace_state_status"
+        , `String (Workspace.read_state_status_to_string state_snapshot.status) )
+      ; "workspace_state_read_error_count", `Int (List.length state_snapshot.read_errors)
+      ; ( "workspace_state_read_errors"
+        , `List (List.map (fun error -> `String error) state_snapshot.read_errors) )
       ; "paused", `Bool state.paused
       ; "pause_reason", Json_util.string_opt_to_json state.pause_reason
       ; "paused_by", Json_util.string_opt_to_json state.paused_by

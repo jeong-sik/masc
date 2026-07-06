@@ -28,14 +28,25 @@ let should_sync repo ~now =
     let elapsed = Int64.sub now repo.updated_at in
     Int64.to_int elapsed >= repo.sync_interval
 
+type sync_failure =
+  { repo_id : string
+  ; error : string
+  }
+
+let sync_failure_to_string { repo_id; error } =
+  Printf.sprintf "repository %s sync failed: %s" repo_id error
+
 let sync_all ~base_path ~now : (repository list, string) result =
   let* repos = Repo_store.load_all ~base_path in
   let due = List.filter (fun r -> should_sync r ~now) repos in
-  let rec loop synced = function
-    | [] -> Ok (List.rev synced)
+  let rec loop synced failures = function
+    | [] ->
+      (match failures with
+       | [] -> Ok (List.rev synced)
+       | _ -> Error (String.concat "; " (List.rev_map sync_failure_to_string failures)))
     | repo :: rest -> (
         match sync_repository ~base_path repo with
-        | Error _ -> loop synced rest
-        | Ok () -> loop (repo :: synced) rest)
+        | Error error -> loop synced ({ repo_id = repo.id; error } :: failures) rest
+        | Ok () -> loop (repo :: synced) failures rest)
   in
-  loop [] due
+  loop [] [] due

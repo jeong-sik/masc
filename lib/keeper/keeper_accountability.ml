@@ -13,6 +13,7 @@ type decision_activity =
   { decision_signal_count : int
   ; latest_decision_at : string option
   ; latest_decision_age_s : float option
+  ; decision_read_errors : Yojson.Safe.t list
   }
 
 let decision_ts_unix_opt json =
@@ -40,55 +41,174 @@ let keeper_decision_log_path (config : Workspace_query.config) name =
   Filename.concat keepers_dir (name ^ ".decisions.jsonl")
 ;;
 
-let tail_decision_log_lines_or_empty path ~max_bytes ~max_lines =
-  if max_lines <= 0 || (not (Sys.file_exists path)) || Sys.is_directory path
-  then []
-  else (
-    try
-      let size =
-        match (Unix.stat path).Unix.st_size with
-        | size when size > 0 -> size
-        | _ -> 0
-      in
-      let start = max 0 (size - max_bytes) in
+type decision_log_line =
+  { decision_log_path : string
+  ; decision_log_line_index : int
+  ; decision_log_line : string
+  }
+
+type decision_log_item =
+  | Decision_log_line of decision_log_line
+  | Decision_log_read_error of Yojson.Safe.t
+
+type decision_log_read_error_kind =
+  | Decision_log_json_error
+  | Decision_log_row_not_object
+  | Decision_log_path_is_directory
+  | Decision_log_io_error of Keeper_memory_recall_exn_class.t
+
+let decision_log_read_error_kind_to_string = function
+  | Decision_log_json_error -> "json_error"
+  | Decision_log_row_not_object -> "row_not_object"
+  | Decision_log_path_is_directory -> "path_is_directory"
+  | Decision_log_io_error exn_class -> Keeper_memory_recall_exn_class.to_label exn_class
+;;
+
+let decision_log_read_error_json
+      ~keeper_name
+      ~path
+      ?line_index
+      ~kind
+      ~message
+      ()
+  =
+  let line_index_field =
+    match line_index with
+    | Some index -> [ "line_index", `Int index ]
+    | None -> []
+  in
+  `Assoc
+    ([ "source", `String "keeper_accountability_decision_log_jsonl"
+     ; "keeper", `String keeper_name
+     ; "path", `String path
+     ]
+     @ line_index_field
+     @ [ "kind", `String (decision_log_read_error_kind_to_string kind)
+       ; "message", `String message
+       ])
+;;
+
+let decision_log_file_read_error_json ~keeper_name ~path exn_class =
+  Keeper_memory.record_memory_recall_read_error
+    ~site:"keeper_accountability_decision_log"
+    path
+    exn_class;
+  decision_log_read_error_json
+    ~keeper_name
+    ~path
+    ~kind:(Decision_log_io_error exn_class)
+    ~message:"keeper decision log read failed"
+    ()
+;;
+
+let decision_log_path_is_directory_json ~keeper_name ~path =
+  Keeper_memory.record_memory_recall_read_error
+    ~site:"keeper_accountability_decision_log"
+    path
+    Keeper_memory_recall_exn_class.Io_error;
+  decision_log_read_error_json
+    ~keeper_name
+    ~path
+    ~kind:Decision_log_path_is_directory
+    ~message:"keeper decision log path is a directory"
+    ()
+;;
+
+let read_decision_log_file_items ~keeper_name ~path =
+  try
+    if not (Sys.file_exists path)
+    then []
+    else if Sys.is_directory path
+    then [ Decision_log_read_error (decision_log_path_is_directory_json ~keeper_name ~path) ]
+    else (
       let ic = open_in_bin path in
       Eio_guard.protect
         ~finally:(fun () -> close_in_noerr ic)
         (fun () ->
-           seek_in ic start;
-           if start > 0
-           then (
+           let rec loop line_index items_rev =
              match input_line ic with
-             | _partial_prefix -> ()
-             | exception End_of_file -> ());
-           let lines = ref [] in
-           (try
-              while true do
-                lines := input_line ic :: !lines
-              done
-            with
-            | End_of_file -> ());
-           !lines |> List.filteri (fun idx _ -> idx < max_lines) |> List.rev)
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> [])
+             | decision_log_line ->
+               loop
+                 (line_index + 1)
+                 (Decision_log_line
+                    { decision_log_path = path
+                    ; decision_log_line_index = line_index
+                    ; decision_log_line
+                    }
+                  :: items_rev)
+             | exception End_of_file -> List.rev items_rev
+           in
+           loop 0 [])
+    )
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    let exn_class = Keeper_memory_recall_exn_class.classify exn in
+    [ Decision_log_read_error
+        (decision_log_file_read_error_json ~keeper_name ~path exn_class)
+    ]
+;;
+
+let recent_decision_log_items config ~keeper_name =
+  candidate_decision_keeper_names keeper_name
+  |> List.fold_left
+       (fun items_rev candidate ->
+          let path = keeper_decision_log_path config candidate in
+          read_decision_log_file_items ~keeper_name ~path
+          |> fun items -> List.rev_append items items_rev)
+       []
+  |> List.rev
+;;
+
+let parse_decision_timestamp_record ~keeper_name record =
+  match Yojson.Safe.from_string record.decision_log_line with
+  | `Assoc _ as json -> Ok (decision_ts_unix_opt json)
+  | other ->
+    Error
+      (decision_log_read_error_json
+         ~keeper_name
+         ~path:record.decision_log_path
+         ~line_index:record.decision_log_line_index
+         ~kind:Decision_log_row_not_object
+         ~message:
+           (Printf.sprintf
+              "keeper decision JSONL row must be object, got %s"
+              (Json_util.kind_name other))
+         ())
+  | exception Yojson.Json_error message ->
+    Error
+      (decision_log_read_error_json
+         ~keeper_name
+         ~path:record.decision_log_path
+         ~line_index:record.decision_log_line_index
+         ~kind:Decision_log_json_error
+         ~message
+         ())
 ;;
 
 let recent_decision_timestamps config ~keeper_name ~now =
   let cutoff = now -. (float_of_int summary_window_days *. Masc_time_constants.day) in
-  candidate_decision_keeper_names keeper_name
-  |> List.concat_map (fun candidate ->
-    let path = keeper_decision_log_path config candidate in
-    tail_decision_log_lines_or_empty path ~max_bytes:500000 ~max_lines:128)
-  |> List.filter_map (fun line ->
-    try Yojson.Safe.from_string line |> decision_ts_unix_opt with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Yojson.Json_error _ -> None)
-  |> List.filter (fun ts -> ts >= cutoff && ts <= now +. 60.0)
+  let timestamps_rev, read_errors_rev =
+    recent_decision_log_items config ~keeper_name
+    |> List.fold_left
+         (fun (timestamps, read_errors) item ->
+            match item with
+            | Decision_log_read_error read_error -> timestamps, read_error :: read_errors
+            | Decision_log_line record ->
+            (match parse_decision_timestamp_record ~keeper_name record with
+            | Ok (Some ts) when ts >= cutoff && ts <= now +. 60.0 ->
+              ts :: timestamps, read_errors
+            | Ok (Some _) | Ok None -> timestamps, read_errors
+            | Error read_error -> timestamps, read_error :: read_errors))
+         ([], [])
+  in
+  List.rev timestamps_rev, List.rev read_errors_rev
 ;;
 
 let decision_activity_for_keeper config ~keeper_name ~now =
-  let timestamps = recent_decision_timestamps config ~keeper_name ~now in
+  let timestamps, decision_read_errors =
+    recent_decision_timestamps config ~keeper_name ~now
+  in
   let latest =
     List.fold_left
       (fun acc ts ->
@@ -101,6 +221,7 @@ let decision_activity_for_keeper config ~keeper_name ~now =
   { decision_signal_count = List.length timestamps
   ; latest_decision_at = Option.map Masc_domain.iso8601_of_unix_seconds latest
   ; latest_decision_age_s = Option.map (fun ts -> Float.max 0.0 (now -. ts)) latest
+  ; decision_read_errors
   }
 ;;
 
@@ -185,12 +306,27 @@ let make_claim_id ~agent_name ~kind ~subject ~task_id ~created_at =
   "acct-" ^ String.sub digest 0 12
 ;;
 
-let append_claim (config : Workspace_query.config) (event : claim_event) =
-  Dated_jsonl.append (get_store config) (claim_event_to_json event)
+let append_claim_result (config : Workspace_query.config) (event : claim_event) =
+  Dated_jsonl.append_result (get_store config) (claim_event_to_json event)
 ;;
 
-let append_resolution (config : Workspace_query.config) (event : resolution_event) =
-  Dated_jsonl.append (get_store config) (resolution_event_to_json event)
+let append_claim config event =
+  match append_claim_result config event with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+;;
+
+let append_resolution_result
+      (config : Workspace_query.config)
+      (event : resolution_event)
+  =
+  Dated_jsonl.append_result (get_store config) (resolution_event_to_json event)
+;;
+
+let append_resolution config event =
+  match append_resolution_result config event with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 ;;
 
 let resolution_for_claim
@@ -219,7 +355,7 @@ let task_title_for_id (config : Workspace_query.config) task_id =
   |> Option.map (fun (task : Masc_domain.task) -> task.title)
 ;;
 
-let create_task_commitment config ~agent_name ~task_id ~surface =
+let create_task_commitment_result config ~agent_name ~task_id ~surface =
   let now = Time_compat.now () in
   let title = Option.value ~default:task_id (task_title_for_id config task_id) in
   let snapshots = materialize_claims (read_window_entries config) in
@@ -233,10 +369,10 @@ let create_task_commitment config ~agent_name ~task_id ~surface =
       ~task_id:(Some task_id)
       ~max_age_sec:task_commitment_expiry_sec
   with
-  | Some _ -> ()
+  | Some _ -> Ok ()
   | None ->
     let created_at = Masc_domain.now_iso () in
-    append_claim
+    append_claim_result
       config
       { claim_id =
           make_claim_id
@@ -259,7 +395,13 @@ let create_task_commitment config ~agent_name ~task_id ~surface =
       }
 ;;
 
-let resolve_recent_task_commitment
+let create_task_commitment config ~agent_name ~task_id ~surface =
+  match create_task_commitment_result config ~agent_name ~task_id ~surface with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+;;
+
+let resolve_recent_task_commitment_result
       config
       ~agent_name
       ~task_id
@@ -282,13 +424,43 @@ let resolve_recent_task_commitment
       ~max_age_sec
   with
   | Some snapshot ->
-    append_resolution
+    append_resolution_result
       config
       (resolution_for_claim snapshot.claim ~status ?reason ~evidence_refs)
-  | None -> ()
+  | None -> Ok ()
 ;;
 
-let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_refs =
+let resolve_recent_task_commitment
+      config
+      ~agent_name
+      ~task_id
+      ~status
+      ~reason
+      ~evidence_refs
+      ~max_age_sec
+  =
+  match
+    resolve_recent_task_commitment_result
+      config
+      ~agent_name
+      ~task_id
+      ~status
+      ~reason
+      ~evidence_refs
+      ~max_age_sec
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+;;
+
+let ( let* ) = Result.bind
+
+let maybe_support_recent_completion_claim_result
+      config
+      ~agent_name
+      ~task_id
+      ~evidence_refs
+  =
   let now = Time_compat.now () in
   let title = Option.value ~default:task_id (task_title_for_id config task_id) in
   let snapshots = materialize_claims (read_window_entries config) in
@@ -303,7 +475,7 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
       ~max_age_sec:completion_claim_expiry_sec
   with
   | Some snapshot ->
-    append_resolution
+    append_resolution_result
       config
       (resolution_for_claim
          snapshot.claim
@@ -335,8 +507,8 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
       ; synthetic = true
       }
     in
-    append_claim config claim;
-    append_resolution
+    let* () = append_claim_result config claim in
+    append_resolution_result
       config
       (resolution_for_claim
          claim
@@ -346,13 +518,25 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
          ~evidence_refs)
 ;;
 
+let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_refs =
+  match
+    maybe_support_recent_completion_claim_result
+      config
+      ~agent_name
+      ~task_id
+      ~evidence_refs
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+;;
+
 (* #8605 family: exhaustive on [Masc_domain.task_action]. The previous
    string match silently no-oped for typos and any future transition
    string. With the variant the compiler now forces a deliberate
    decision for every task_action constructor; verification-related
    actions explicitly produce no commitment side effects -- their
    accountability tracking lives in [record_completion_claim]. *)
-let record_task_transition
+let record_task_transition_result
       (config : Workspace_query.config)
       ~agent_name
       ~task_id
@@ -362,22 +546,29 @@ let record_task_transition
   if not (is_keeper_agent_name agent_name)
   then
     (* #10314: drop is now visible. *)
-    record_emit_skip ~kind:"task_transition" ~reason:"not_keeper_agent_name"
+    (record_emit_skip ~kind:"task_transition" ~reason:"not_keeper_agent_name";
+     Ok ())
   else (
     match transition with
     | Masc_domain.Claim | Masc_domain.Start ->
-      create_task_commitment config ~agent_name ~task_id ~surface:"task_transition"
-    | Masc_domain.Done_action ->
-      let base_refs = [ "task:" ^ task_id ] in
-      resolve_recent_task_commitment
+      create_task_commitment_result
         config
         ~agent_name
         ~task_id
-        ~status:Supported
-        ~reason:(Some "task_done")
-        ~evidence_refs:base_refs
-        ~max_age_sec:task_commitment_expiry_sec;
-      maybe_support_recent_completion_claim
+        ~surface:"task_transition"
+    | Masc_domain.Done_action ->
+      let base_refs = [ "task:" ^ task_id ] in
+      let* () =
+        resolve_recent_task_commitment_result
+          config
+          ~agent_name
+          ~task_id
+          ~status:Supported
+          ~reason:(Some "task_done")
+          ~evidence_refs:base_refs
+          ~max_age_sec:task_commitment_expiry_sec
+      in
+      maybe_support_recent_completion_claim_result
         config
         ~agent_name
         ~task_id
@@ -392,7 +583,7 @@ let record_task_transition
           else Some (Masc_domain.task_action_to_string transition)
         | None -> Some (Masc_domain.task_action_to_string transition)
       in
-      resolve_recent_task_commitment
+      resolve_recent_task_commitment_result
         config
         ~agent_name
         ~task_id
@@ -402,7 +593,15 @@ let record_task_transition
         ~max_age_sec:task_commitment_expiry_sec
     | Masc_domain.Submit_for_verification
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification -> ())
+    | Masc_domain.Reject_verification -> Ok ())
+;;
+
+let record_task_transition config ~agent_name ~task_id ~transition ~details =
+  match
+    record_task_transition_result config ~agent_name ~task_id ~transition ~details
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 ;;
 
 let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
@@ -410,7 +609,7 @@ let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
     (("turn:" ^ trace_id ^ ":" ^ string_of_int turn_number) :: strong_evidence_refs)
 ;;
 
-let record_completion_claim
+let record_completion_claim_result
       (config : Workspace_query.config)
       ~keeper_name
       ~agent_name
@@ -427,7 +626,8 @@ let record_completion_claim
   if not (is_keeper_agent_name agent_name)
   then
     (* #10314: drop is now visible. *)
-    record_emit_skip ~kind:"completion_claim" ~reason:"not_keeper_agent_name"
+    (record_emit_skip ~kind:"completion_claim" ~reason:"not_keeper_agent_name";
+     Ok ())
   else (
     let subject = String.trim subject in
     if subject = ""
@@ -435,7 +635,8 @@ let record_completion_claim
       (* #10314: empty subject is a separate failure mode — agent
          called but produced no claim text. Distinct reason so
          operators can split the diagnosis. *)
-      record_emit_skip ~kind:"completion_claim" ~reason:"empty_subject"
+      (record_emit_skip ~kind:"completion_claim" ~reason:"empty_subject";
+       Ok ())
     else (
       let now = Time_compat.now () in
       let snapshots = materialize_claims (read_window_entries config) in
@@ -456,9 +657,9 @@ let record_completion_claim
           ~task_id:normalized_task_id
           ~max_age_sec:dedupe_window_sec
       in
-      let resolution_claim =
+      let resolution_claim_result =
         match recent_existing with
-        | Some snapshot -> snapshot.claim
+        | Some snapshot -> Ok snapshot.claim
         | None ->
           let created_at = Masc_domain.now_iso () in
           let claim_id =
@@ -484,19 +685,54 @@ let record_completion_claim
             ; synthetic = false
             }
           in
-          append_claim config claim;
-          claim
+          let* () = append_claim_result config claim in
+          Ok claim
       in
+      let* resolution_claim = resolution_claim_result in
       if strong_evidence
       then
-        append_resolution
+        append_resolution_result
           config
           (resolution_for_claim
              resolution_claim
              ~status:Supported
              ~reason:"same_turn_evidence"
              ~evidence_refs:
-               (supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs))))
+               (supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs))
+      else Ok ()))
+;;
+
+let record_completion_claim
+      config
+      ~keeper_name
+      ~agent_name
+      ~trace_id
+      ~turn_number
+      ~subject
+      ?task_id
+      ?evidence_refs
+      ?surface
+      ~strong_evidence
+      ~strong_evidence_refs
+      ()
+  =
+  match
+    record_completion_claim_result
+      config
+      ~keeper_name
+      ~agent_name
+      ~trace_id
+      ~turn_number
+      ~subject
+      ?task_id
+      ?evidence_refs
+      ?surface
+      ~strong_evidence
+      ~strong_evidence_refs
+      ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 ;;
 
 let risk_band_of_metrics
@@ -700,6 +936,8 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
     ; "decision_signal_count", `Int decision_activity.decision_signal_count
     ; ( "latest_decision_at", Json_util.string_opt_to_json decision_activity.latest_decision_at )
     ; ( "latest_decision_age_s", Json_util.float_opt_to_json decision_activity.latest_decision_age_s )
+    ; "decision_read_error_count", `Int (List.length decision_activity.decision_read_errors)
+    ; "decision_read_errors", `List decision_activity.decision_read_errors
     ; "coverage_routing_hint", `String coverage_routing_hint
     ]
   in
@@ -838,11 +1076,12 @@ let accountability_risk_is_high config ~keeper_name ~agent_name =
    function of snapshot + time. The claim_snapshot type stays private to
    this module; callers provide their own evidence payload. *)
 
+let unscored_partial_attribution_score = 0.0
+
 let attribution_from_status
       (status : claim_status)
       ~evidence
       ?resolution_reason
-      ?(evidence_refs_count = 0)
       ()
   : Attribution.t option
   =
@@ -858,16 +1097,12 @@ let attribution_from_status
     let reason = Option.value resolution_reason ~default:"claim expired" in
     Some (Attribution.policy_failed ~origin:Det ~gate:"accountability" ~evidence ~reason)
   | Partial ->
-    (* Score from evidence_refs_count: heuristic 0.5 baseline, +0.1 per
-       evidence ref up to 1.0. No domain-specific normalization available
-       here — dashboard aggregates the raw count separately. *)
-    let score = Float.min 1.0 (0.5 +. (0.1 *. Float.of_int evidence_refs_count)) in
     let rationale = Option.value resolution_reason ~default:"claim partially supported" in
     Some
       (Attribution.partial_pass
          ~origin:Det
          ~gate:"accountability"
          ~evidence
-         ~score
+         ~score:unscored_partial_attribution_score
          ~rationale)
 ;;

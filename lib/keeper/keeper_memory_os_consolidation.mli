@@ -51,13 +51,6 @@ val plan_of_json : Yojson.Safe.t -> consolidation_plan
 val plan_result_of_string :
   string -> (consolidation_plan, output_rejection_reason) result
 
-(** [plan_of_string raw] is [None] only when [raw] is not an exact JSON object.
-    Rejections emit a warning with a bounded reason label and byte count so
-    model-provider contract regressions are observable without logging raw
-    provider text. A parseable-but-empty/garbled object returns [Some
-    empty_plan]-equivalent. *)
-val plan_of_string : string -> consolidation_plan option
-
 (** Apply a plan to a keeper's facts, returning the new fact list. Each group of
     >= 2 in-range, not-yet-consumed members collapses into one consolidated fact
     (claim/category from the plan; provenance — earliest source/first_seen, union

@@ -108,8 +108,13 @@ export {
   fetchDashboardMemory,
 } from './dashboard-execution'
 
-export type { DashboardScheduleDecision, DashboardScheduleResolveResponse } from './dashboard-governance'
+export type {
+  DashboardScheduleApprovalDecision,
+  DashboardScheduleDecision,
+  DashboardScheduleResolveResponse,
+} from './dashboard-governance'
 export {
+  cancelSchedule,
   fetchDashboardGovernance,
   resolveGovernanceApproval,
   deleteGovernanceApprovalRule,
@@ -184,10 +189,16 @@ export type {
   DashboardScheduledAutomationExecution,
   DashboardScheduledAutomationKeeperToolStatus,
   DashboardScheduledAutomationActor,
+  DashboardScheduledAutomationLifecycleAudit,
+  DashboardScheduledAutomationLifecycleEvent,
   DashboardScheduledAutomationSignal,
+  DashboardScheduledAutomationSignalError,
   DashboardScheduledAutomationRequest,
   DashboardScheduledAutomationPayloadSupport,
   DashboardScheduledAutomation,
+  DashboardKeeperWaitingRow,
+  DashboardKeeperWaitingKeeper,
+  DashboardKeeperWaitingInventory,
   DashboardToolsResponse,
 } from './dashboard-tools-prompts'
 

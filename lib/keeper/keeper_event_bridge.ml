@@ -671,16 +671,16 @@ let deliver_pending ?store_ref (pending : pending_relay) =
     | Some store_ref ->
       fun json ->
         let store = !store_ref in
-        (try Dated_jsonl.append store json with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
+        (match Dated_jsonl.append_result store json with
+         | Ok () -> ()
+         | Error msg ->
            let retention_days = oas_event_retention_days () in
            store_ref :=
              Dated_jsonl.create
                ~base_dir:(Dated_jsonl.base_dir store)
                ?retention_days
                ();
-           raise exn)
+           raise (Sys_error msg))
   in
   try deliver_pending_with ~append_json ~broadcast_json:broadcast_relay_json pending with
   | Eio.Cancel.Cancelled _ as e -> raise e

@@ -6,6 +6,19 @@
 
 open Masc
 
+let temp_dir prefix =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  path
+
+let config_with_masc_file prefix =
+  let base_path = temp_dir prefix in
+  let masc_path = Filename.concat base_path ".masc" in
+  let oc = open_out masc_path in
+  close_out oc;
+  Workspace.default_config base_path
+
 let () =
   let open Alcotest in
   run "governance_yojson_roundtrip"
@@ -160,5 +173,40 @@ let () =
                   Alcotest.(check bool) "audit" false g.audit_enabled
               | Error msg ->
                   Alcotest.failf "should ignore extra keys: %s" msg);
+          test_case "save_governance_result reports write failure" `Quick (fun () ->
+              let config = config_with_masc_file "governance-save-result-" in
+              let g : Mcp_server_eio_governance.governance_config =
+                {
+                  level = "production";
+                  audit_enabled = true;
+                  anomaly_detection = false;
+                }
+              in
+              match Mcp_server_eio_governance.save_governance_result config g with
+              | Ok () -> Alcotest.fail "save_governance_result hid write failure"
+              | Error msg ->
+                  Alcotest.(check bool)
+                    "write failure has diagnostic"
+                    true
+                    (String.length msg > 0));
+          test_case "save_mcp_sessions_result reports write failure" `Quick (fun () ->
+              let config = config_with_masc_file "mcp-sessions-save-result-" in
+              let session : Mcp_server_eio_governance.mcp_session_record =
+                {
+                  id = "sess-write-failure";
+                  agent_name = Some "codex";
+                  created_at = 1711234567.0;
+                  last_seen = 1711234890.0;
+                }
+              in
+              match
+                Mcp_server_eio_governance.save_mcp_sessions_result config [ session ]
+              with
+              | Ok () -> Alcotest.fail "save_mcp_sessions_result hid write failure"
+              | Error msg ->
+                  Alcotest.(check bool)
+                    "write failure has diagnostic"
+                    true
+                    (String.length msg > 0));
         ] );
     ]

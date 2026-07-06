@@ -681,6 +681,387 @@ goal = "missing sandbox profile"
              (List.mem_assoc "effective_meta_error" fields)
        | _ -> Alcotest.fail "expected object row")
 
+let test_keeper_list_dispatch_surfaces_effective_meta_errors () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "badprofile-dispatch" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+goal = "missing sandbox profile"
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ctx : _ Keeper_tool_surface.context =
+    {
+      config;
+      agent_name = "test-agent";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = None;
+      net = None;
+    }
+  in
+  match
+    Keeper_tool_surface.dispatch
+      ctx
+      ~name:"masc_keeper_list"
+      ~args:(`Assoc [ ("detailed", `Bool true) ])
+  with
+  | None -> Alcotest.fail "keeper list tool was not dispatched"
+  | Some result ->
+      if not (Profile.tool_result_success result) then
+        Alcotest.failf "keeper list failed: %s" (Profile.tool_result_body result);
+      let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
+      Alcotest.(check (option bool))
+        "keeper names discovery is known"
+        (Some true)
+        (json_bool_field "keeper_names_known" json);
+      let rows =
+        match json_field "keepers" json with
+        | Some (`List rows) -> rows
+        | _ -> Alcotest.fail "keeper list response missing keepers"
+      in
+      let row =
+        match
+          List.find_opt
+            (fun item -> json_string_field "name" item = Some name)
+            rows
+        with
+        | Some row -> row
+        | None -> Alcotest.fail "expected bad keeper error row in keeper list"
+      in
+      Alcotest.(check (option string))
+        "list row status is error"
+        (Some "error")
+        (json_string_field "status" row);
+      let error_json = json_assoc_field "effective_meta_error" row in
+      Alcotest.(check (option string))
+        "list row terminal reason is typed"
+        (Some "effective_meta_read_failed")
+        (json_string_field "terminal_reason" error_json)
+
+let test_keeper_list_dispatch_surfaces_metrics_parse_errors () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "metrics-parse-list" in
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  let metrics_path = Masc.Keeper_types_support.keeper_metrics_path config name in
+  mkdir_p (Filename.dirname metrics_path);
+  let valid_metrics =
+    `Assoc
+      [ ("ts_unix", `Float (Unix.gettimeofday ()))
+      ; ("skill_primary", `String "review")
+      ; ("skill_secondary", `List [ `String "repair" ])
+      ; ("skill_reason", `String "valid row survives malformed neighbor")
+      ]
+    |> Yojson.Safe.to_string
+  in
+  write_file metrics_path ("{not-json\n" ^ valid_metrics ^ "\n");
+  Masc.Keeper_registry.clear ();
+  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+  Fun.protect
+    ~finally:Masc.Keeper_registry.clear
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_tool_surface.context =
+        {
+          config;
+          agent_name = "test-agent";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+          net = None;
+        }
+      in
+      match
+        Keeper_tool_surface.dispatch
+          ctx
+          ~name:"masc_keeper_list"
+          ~args:(`Assoc [ ("detailed", `Bool true) ])
+      with
+      | None -> Alcotest.fail "keeper list tool was not dispatched"
+      | Some result ->
+          if not (Profile.tool_result_success result) then
+            Alcotest.failf "keeper list failed: %s" (Profile.tool_result_body result);
+          let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
+          let rows =
+            match json_field "keepers" json with
+            | Some (`List rows) -> rows
+            | _ -> Alcotest.fail "keeper list response missing keepers"
+          in
+          let row =
+            match
+              List.find_opt
+                (fun item -> json_string_field "name" item = Some name)
+                rows
+            with
+            | Some row -> row
+            | None -> Alcotest.fail "expected keeper row in keeper list"
+          in
+          Alcotest.(check (option int))
+            "row metrics parse error count"
+            (Some 1)
+            (json_int_field "metrics_parse_error_count" row);
+          let skill_route = json_assoc_field "skill_route" row in
+          Alcotest.(check (option string))
+            "valid skill route survives"
+            (Some "review")
+            (json_string_field "primary" skill_route);
+          let read_errors =
+            match json_field "read_errors" json with
+            | Some (`List errors) -> errors
+            | _ -> Alcotest.fail "keeper list response missing read_errors"
+          in
+          let has_metrics_parse_error =
+            List.exists
+              (fun error ->
+                json_string_field "source" error
+                = Some "keeper_list_skill_route_metrics_parse")
+              read_errors
+          in
+          Alcotest.(check bool)
+            "top-level read errors include metrics parse"
+            true
+            has_metrics_parse_error)
+
+let test_status_detail_surfaces_metrics_parse_errors () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "metrics-parse-detail" in
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let metrics_path = Masc.Keeper_types_support.keeper_metrics_path config name in
+  mkdir_p (Filename.dirname metrics_path);
+  let valid_metrics =
+    `Assoc
+      [ ("ts_unix", `Float (Unix.gettimeofday ()))
+      ; ("context_ratio", `Float 0.5)
+      ; ("context_tokens", `Int 128)
+      ; ("context_max", `Int 512)
+      ; ("message_count", `Int 4)
+      ; ("skill_primary", `String "status-review")
+      ; ("skill_secondary", `List [ `String "repair" ])
+      ; ("skill_reason", `String "valid row survives malformed neighbor")
+      ]
+    |> Yojson.Safe.to_string
+  in
+  write_file metrics_path ("{not-json\n" ^ valid_metrics ^ "\n");
+  let result =
+    Status_detail.handle_keeper_status_config
+      ~config
+      ~agent_name:"test-agent"
+      (`Assoc
+        [ ("name", `String name)
+        ; ("fast", `Bool false)
+        ; ("include_metrics_overview", `Bool true)
+        ; ("tail_turns", `Int 8)
+        ])
+  in
+  if not (Profile.tool_result_success result) then
+    Alcotest.failf "status detail failed: %s" (Profile.tool_result_body result);
+  let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
+  Alcotest.(check (option int))
+    "detail metrics parse error count"
+    (Some 1)
+    (json_int_field "metrics_parse_error_count" json);
+  let read_errors =
+    match json_field "read_errors" json with
+    | Some (`List errors) -> errors
+    | _ -> Alcotest.fail "status detail response missing read_errors"
+  in
+  let has_metrics_parse_error =
+    List.exists
+      (fun error ->
+        json_string_field "source" error
+        = Some "keeper_status_detail_metrics_parse")
+      read_errors
+  in
+  Alcotest.(check bool)
+    "detail read errors include metrics parse"
+    true
+    has_metrics_parse_error;
+  let skill_route = json_assoc_field "skill_route" json in
+  Alcotest.(check (option string))
+    "valid skill route survives"
+    (Some "status-review")
+    (json_string_field "primary" skill_route);
+  let metrics_tail =
+    match json_field "metrics_tail" json with
+    | Some (`List rows) -> rows
+    | _ -> Alcotest.fail "status detail response missing metrics_tail"
+  in
+  Alcotest.(check int)
+    "metrics tail keeps only valid rows"
+    1
+    (List.length metrics_tail);
+  let metrics_overview = json_assoc_field "metrics_overview" json in
+  Alcotest.(check (option int))
+    "metrics overview counts valid rows"
+    (Some 1)
+    (json_int_field "sample_points" metrics_overview)
+
+let test_status_detail_surfaces_history_parse_errors () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "history-parse-detail" in
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let trace_id = "trace-" ^ name in
+  let history_path = Masc.Keeper_types_support.keeper_history_path config trace_id in
+  let metrics_path = Masc.Keeper_types_support.keeper_metrics_path config name in
+  mkdir_p (Filename.dirname history_path);
+  mkdir_p (Filename.dirname metrics_path);
+  let valid_history =
+    `Assoc
+      [ ("role", `String "user")
+      ; ("source", `String "direct_user")
+      ; ("content", `String "valid history survives malformed neighbor")
+      ; ("ts_unix", `Float (Unix.gettimeofday ()))
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let valid_compaction =
+    `Assoc
+      [ ("ts_unix", `Float (Unix.gettimeofday ()))
+      ; ("trace_id", `String trace_id)
+      ; ("generation", `Int 1)
+      ; ("channel", `String "turn")
+      ; ("compacted", `Bool true)
+      ; ("compaction_before_tokens", `Int 100)
+      ; ("compaction_after_tokens", `Int 40)
+      ]
+    |> Yojson.Safe.to_string
+  in
+  write_file history_path ("{not-json\n" ^ valid_history ^ "\n");
+  write_file metrics_path ("{not-json\n" ^ valid_compaction ^ "\n");
+  let result =
+    Status_detail.handle_keeper_status_config
+      ~config
+      ~agent_name:"test-agent"
+      (`Assoc
+        [ ("name", `String name)
+        ; ("fast", `Bool true)
+        ; ("include_history_tail", `Bool true)
+        ; ("include_compaction_history", `Bool true)
+        ; ("include_metrics_overview", `Bool false)
+        ; ("tail_messages", `Int 8)
+        ; ("tail_compactions", `Int 8)
+        ])
+  in
+  if not (Profile.tool_result_success result) then
+    Alcotest.failf "status detail failed: %s" (Profile.tool_result_body result);
+  let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
+  Alcotest.(check (option int))
+    "history parse error count"
+    (Some 1)
+    (json_int_field "history_parse_error_count" json);
+  Alcotest.(check (option int))
+    "compaction history parse error count"
+    (Some 1)
+    (json_int_field "compaction_history_parse_error_count" json);
+  let read_errors =
+    match json_field "read_errors" json with
+    | Some (`List errors) -> errors
+    | _ -> Alcotest.fail "status detail response missing read_errors"
+  in
+  let has_source source =
+    List.exists
+      (fun error -> json_string_field "source" error = Some source)
+      read_errors
+  in
+  Alcotest.(check bool)
+    "read errors include history parse"
+    true
+    (has_source "keeper_status_detail_history_parse");
+  Alcotest.(check bool)
+    "read errors include compaction history parse"
+    true
+    (has_source "keeper_status_detail_compaction_history_parse");
+  Alcotest.(check (option int))
+    "valid history row survives"
+    (Some 1)
+    (json_int_field "history_raw_count" json);
+  let history_tail =
+    match json_field "history_tail" json with
+    | Some (`List rows) -> rows
+    | _ -> Alcotest.fail "status detail response missing history_tail"
+  in
+  Alcotest.(check int) "history tail keeps valid row" 1 (List.length history_tail);
+  let compaction_tail =
+    match json_field "compaction_history_tail" json with
+    | Some (`List rows) -> rows
+    | _ -> Alcotest.fail "status detail response missing compaction_history_tail"
+  in
+  Alcotest.(check int)
+    "compaction history keeps valid event"
+    1
+    (List.length compaction_tail);
+  Alcotest.(check (option int))
+    "compaction history count keeps valid event"
+    (Some 1)
+    (json_int_field "compaction_history_count" json)
+
+let test_persona_audit_surfaces_keeper_name_read_error () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let config = Workspace.default_config base in
+  let keeper_dir = Profile.keeper_dir config in
+  rm_rf keeper_dir;
+  mkdir_p (Filename.dirname keeper_dir);
+  write_file keeper_dir "not a keeper directory";
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ctx : _ Keeper_tool_surface.context =
+    {
+      config;
+      agent_name = "test-agent";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = None;
+      net = None;
+    }
+  in
+  match
+    Keeper_tool_surface.dispatch
+      ctx
+      ~name:"masc_keeper_persona_audit"
+      ~args:(`Assoc [])
+  with
+  | None -> Alcotest.fail "persona audit tool was not dispatched"
+  | Some result ->
+      if not (Profile.tool_result_success result) then
+        Alcotest.failf "persona audit failed: %s" (Profile.tool_result_body result);
+      let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
+      Alcotest.(check (option bool))
+        "keeper names discovery is unknown"
+        (Some false)
+        (json_bool_field "keeper_names_known" json);
+      let read_errors =
+        match json_field "read_errors" json with
+        | Some (`List errors) -> errors
+        | _ -> Alcotest.fail "persona audit response missing read_errors"
+      in
+      Alcotest.(check int)
+        "top-level read error"
+        1
+        (List.length read_errors);
+      let summary = json_assoc_field "summary" json in
+      Alcotest.(check (option bool))
+        "summary keeper names discovery is unknown"
+        (Some false)
+        (json_bool_field "keeper_names_known" summary);
+      let summary_read_errors =
+        match json_field "read_errors" summary with
+        | Some (`List errors) -> errors
+        | _ -> Alcotest.fail "persona audit summary missing read_errors"
+      in
+      Alcotest.(check int)
+        "summary read error"
+        1
+        (List.length summary_read_errors)
+
 let test_keeper_list_error_row_preserves_keepalive_state () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile-running" in
@@ -805,6 +1186,21 @@ let () =
             test_status_surfaces_chat_queue_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"
             `Quick test_keeper_list_row_surfaces_effective_meta_errors;
+          Alcotest.test_case
+            "keeper list dispatch surfaces effective meta errors"
+            `Quick test_keeper_list_dispatch_surfaces_effective_meta_errors;
+          Alcotest.test_case
+            "keeper list dispatch surfaces metrics parse errors"
+            `Quick test_keeper_list_dispatch_surfaces_metrics_parse_errors;
+          Alcotest.test_case
+            "status detail surfaces metrics parse errors"
+            `Quick test_status_detail_surfaces_metrics_parse_errors;
+          Alcotest.test_case
+            "status detail surfaces history parse errors"
+            `Quick test_status_detail_surfaces_history_parse_errors;
+          Alcotest.test_case
+            "persona audit surfaces keeper-name read error"
+            `Quick test_persona_audit_surfaces_keeper_name_read_error;
           Alcotest.test_case
             "keeper list error row preserves keepalive state"
             `Quick test_keeper_list_error_row_preserves_keepalive_state;

@@ -33,26 +33,24 @@ type 'a context = 'a Tool_operator.context
    payload first-class.
 
    Failure: wrapped through [Tool_args.error_response] (the legacy
-   JSON envelope shape). Class is [Workflow_rejection] — the
-   operator control plane rejects caller-side input (unknown
-   action, target not found, schema violation). When
-   [Operator_control] later distinguishes runtime / transient
-   failures via a typed Error variant, the construction site here
-   gets the appropriate class at that time. *)
+   JSON envelope shape). The default class is [Workflow_rejection] —
+   the operator control plane rejects caller-side input (unknown
+   action, target not found, schema violation). Call sites that cross
+   a runtime/persistence boundary pass a stricter class explicitly. *)
 
 let envelope_data envelope : Yojson.Safe.t =
   match Tool_result.structured_payload_of_message envelope with
   | Some json -> json
   | None -> `String envelope
 
-let result_of_json ~tool_name ~start_time = function
+let result_of_json ?(failure_class = Tool_result.Workflow_rejection) ~tool_name ~start_time = function
   | Ok json ->
       Tool_result.make_ok ~tool_name ~start_time ~data:json ()
   | Error message ->
       let envelope = Tool_args.error_response message in
       Tool_result.make_err
         ~tool_name
-        ~class_:Tool_result.Workflow_rejection
+        ~class_:failure_class
         ~start_time
         ~data:(envelope_data envelope)
         envelope
@@ -288,8 +286,9 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       let include_messages = get_bool args "include_messages" true in
       let include_keepers = get_bool args "include_keepers" true in
       Some
-        (json_ok ~tool_name:name ~start_time:start
-           (Operator_control.snapshot_json ?actor ?view ~include_messages
+        (result_of_json ~failure_class:Tool_result.Runtime_failure ~tool_name:name
+           ~start_time:start
+           (Operator_control.snapshot_json_result ?actor ?view ~include_messages
               ~include_keepers control_ctx))
   | "masc_operator_digest" ->
       let actor = get_string_opt args "actor" in

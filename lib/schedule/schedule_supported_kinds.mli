@@ -6,6 +6,9 @@
     full design rationale. Neither layer reaches across the
     [lib/tool] <-> [lib/server] boundary. *)
 
+val board_post : string
+(** Schedule payload kind for creating a board post. *)
+
 val supported : string list
 (** Dispatchable side-effecting payload kinds the production consumer can run.
     This is the consumer's dispatch set and the allow-list in

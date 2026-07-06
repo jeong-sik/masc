@@ -30,44 +30,114 @@ let split_csv value =
 
 let ice_server_urls (server : Webrtc.Ice.ice_server) = server.Webrtc.Ice.urls
 
-let parse_ice_servers_json raw =
-  let parse_server json =
-    let urls =
-      match Json_util.assoc_member_opt "urls" json with
-      | Some (`String value) -> split_csv value
-      | Some (`List values) ->
-        values
-        |> List.filter_map (fun value ->
-             try (match value with `String s -> s | other -> raise (Yojson.Safe.Util.Type_error ("expected string", other))) |> String_util.trim_nonempty
-             with Yojson.Safe.Util.Type_error _ -> None)
-      | _ -> []
+type ice_server_parse_error =
+  | Ice_servers_json_parse_error of string
+  | Ice_server_expected_object of { received : string }
+  | Ice_server_missing_urls
+  | Ice_server_urls_expected_string_or_list of { received : string }
+  | Ice_server_url_expected_string of { index : int; received : string }
+  | Ice_server_empty_urls
+  | Ice_server_optional_field_expected_string of
+      { field : string
+      ; received : string
+      }
+
+type ice_server_parse_report =
+  { servers : Webrtc.Ice.ice_server list
+  ; errors : ice_server_parse_error list
+  }
+
+let ice_server_parse_error_to_string = function
+  | Ice_servers_json_parse_error message -> "json_parse_error: " ^ message
+  | Ice_server_expected_object { received } ->
+    Printf.sprintf "ice server entry must be an object, received %s" received
+  | Ice_server_missing_urls -> "ice server entry missing urls field"
+  | Ice_server_urls_expected_string_or_list { received } ->
+    Printf.sprintf "ice server urls must be a string or list, received %s" received
+  | Ice_server_url_expected_string { index; received } ->
+    Printf.sprintf "ice server urls[%d] must be a string, received %s" index received
+  | Ice_server_empty_urls -> "ice server entry has no non-empty urls"
+  | Ice_server_optional_field_expected_string { field; received } ->
+    Printf.sprintf "ice server optional field %s must be a string, received %s" field received
+
+let parse_urls_field = function
+  | None -> [], [ Ice_server_missing_urls ]
+  | Some (`String value) -> split_csv value, []
+  | Some (`List values) ->
+    let urls, errors =
+      values
+      |> List.mapi (fun index value ->
+        match value with
+        | `String s -> String_util.trim_nonempty s, []
+        | other ->
+          None, [ Ice_server_url_expected_string
+                    { index; received = Json_util.kind_name other } ])
+      |> List.fold_left
+           (fun (urls, errors) (url, item_errors) ->
+              Option.to_list url @ urls, List.rev_append item_errors errors)
+           ([], [])
     in
-    if urls = [] then
-      None
-    else
-      let opt name =
-        match Json_util.assoc_member_opt name json with
-        | Some (`String value) -> String_util.trim_nonempty value
-        | _ -> None
-      in
-      Some
-        {
-          Webrtc.Ice.urls;
-          username = opt "username";
-          credential = opt "credential";
-          tls_ca = opt "tls_ca";
-        }
-  in
-  try
-    match Yojson.Safe.from_string raw with
-    | `List servers -> List.filter_map parse_server servers
-    | json -> List.filter_map parse_server [ json ]
-  with Yojson.Json_error _ -> []
+    List.rev urls, List.rev errors
+  | Some other ->
+    [], [ Ice_server_urls_expected_string_or_list
+            { received = Json_util.kind_name other } ]
+
+let optional_string_field field kvs =
+  match List.assoc_opt field kvs with
+  | None -> None, []
+  | Some (`String value) -> String_util.trim_nonempty value, []
+  | Some other ->
+    None, [ Ice_server_optional_field_expected_string
+              { field; received = Json_util.kind_name other } ]
+
+let parse_ice_server_entry json =
+  match json with
+  | `Assoc kvs ->
+    let urls, url_errors = parse_urls_field (List.assoc_opt "urls" kvs) in
+    let username, username_errors = optional_string_field "username" kvs in
+    let credential, credential_errors = optional_string_field "credential" kvs in
+    let tls_ca, tls_ca_errors = optional_string_field "tls_ca" kvs in
+    let errors =
+      List.concat [ url_errors; username_errors; credential_errors; tls_ca_errors ]
+    in
+    if urls = []
+    then None, Ice_server_empty_urls :: errors
+    else Some { Webrtc.Ice.urls; username; credential; tls_ca }, errors
+  | other ->
+    None, [ Ice_server_expected_object { received = Json_util.kind_name other } ]
+
+let parse_ice_servers_json_report raw =
+  match Yojson.Safe.from_string raw with
+  | `List servers ->
+    let servers, errors =
+      servers
+      |> List.map parse_ice_server_entry
+      |> List.fold_left
+           (fun (servers, errors) (server, server_errors) ->
+              Option.to_list server @ servers, List.rev_append server_errors errors)
+           ([], [])
+    in
+    { servers = List.rev servers; errors = List.rev errors }
+  | json ->
+    let server, errors = parse_ice_server_entry json in
+    { servers = Option.to_list server; errors }
+  | exception Yojson.Json_error message ->
+    { servers = []; errors = [ Ice_servers_json_parse_error message ] }
+
+let log_ice_server_parse_errors errors =
+  List.iter
+    (fun error ->
+      Log.Server.warn
+        "webrtc ICE server JSON parse warning: %s"
+        (ice_server_parse_error_to_string error))
+    errors
 
 let configured_ice_servers () =
   match getenv_nonempty "MASC_WEBRTC_ICE_SERVERS_JSON" with
   | Some raw -> (
-      match parse_ice_servers_json raw with
+      let report = parse_ice_servers_json_report raw in
+      log_ice_server_parse_errors report.errors;
+      match report.servers with
       | [] -> Webrtc.Webrtc_eio.default_ice_config.Webrtc.Ice.ice_servers
       | servers -> servers)
   | None -> (
@@ -476,4 +546,3 @@ let () =
     ~live_count:live_webrtc_count
     ~channels_count:connected_channel_count
     ~ice_servers_urls:configured_ice_server_urls
-

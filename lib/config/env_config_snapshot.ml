@@ -416,46 +416,6 @@ let internal_timer_entries =
       "Stalled session threshold (seconds, 5 min)";
   ]
 
-let keeper_alert_entries =
-  [
-    entry ~default:"60.0" "MASC_ALERT_DEDUP_WINDOW_SEC"
-      "Alert dedup window (seconds, floor 5)";
-    entry ~default:"(none)" "MASC_KEEPER_ALERT_BOARD_ENABLED"
-      "Board fanout for keeper alerts (feature flag)";
-    entry ~default:"keeper-alert-bot" "MASC_KEEPER_ALERT_BOARD_AUTHOR"
-      "Board alert author name";
-    entry ~default:"keeper-alert" "MASC_KEEPER_ALERT_BOARD_HEARTH"
-      "Board alert hearth name";
-    entry ~default:"internal" "MASC_KEEPER_ALERT_BOARD_VISIBILITY"
-      "Board alert visibility level";
-    entry ~default:"(none)" "MASC_KEEPER_ALERT_ENABLED"
-      "Master switch for keeper alert detection/fanout (feature flag)";
-    entry ~default:"(none)" "MASC_KEEPER_ALERT_GITHUB_ENABLED"
-      "GitHub issue fanout (feature flag)";
-    entry ~default:"keeper-alert" "MASC_KEEPER_ALERT_GITHUB_LABEL"
-      "GitHub label for alert issues";
-    entry ~default:"0.85" "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
-      "Minimum score for GitHub issue fanout";
-    entry ~default:"(none)" "MASC_KEEPER_ALERT_GITHUB_REPO"
-      "GitHub repo for alert issues (empty=disabled)";
-    entry ~default:"1200" "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
-      "Maximum alert body chars for external fanout";
-    entry ~default:"2" "MASC_KEEPER_ALERT_MAX_RETRIES"
-      "Retry count for each fanout channel";
-    entry ~default:"0.70" "MASC_KEEPER_ALERT_MIN_SCORE"
-      "Minimum score to trigger alert fanout";
-    entry ~default:"250" "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
-      "Base retry delay in milliseconds (exponential backoff)";
-    entry ~default:"(none)" "MASC_KEEPER_ALERT_SLACK_DM_ENABLED"
-      "Slack DM fanout (feature flag)";
-    entry ~default:"(none)" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
-      "Slack DM target user ID (empty=disabled)";
-    entry ~default:"(none)" "MASC_KEEPER_ALERT_SLACK_ENABLED"
-      "Slack webhook fanout (feature flag)";
-    entry ~sensitive:true ~default:"(none)" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
-      "Slack webhook URL for alerts (empty=disabled)";
-  ]
-
 let keeper_bootstrap_entries =
   [
     entry ~default:"10000" "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
@@ -891,10 +851,8 @@ let all_categories () =
       (inference_entries @ model_routing_entries @ oas_sse_entries
        @ local_runtime_entries);
     category "keeper"
-      (keeper_entries @ keeper_alert_entries @ keeper_bootstrap_entries
-       @ keeper_keepalive_entries @ keeper_metrics_entries
-       @ docker_playground_entries
-       @ keeper_sandbox_entries);
+      (keeper_entries @ keeper_bootstrap_entries @ keeper_keepalive_entries
+       @ keeper_metrics_entries @ docker_playground_entries @ keeper_sandbox_entries);
     category "keeper_execution"
       (keeper_execution_entries @ compaction_entries @ decision_entries
        @ keeper_tool_entries @ keeper_runtime_entries

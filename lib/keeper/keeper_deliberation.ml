@@ -1,10 +1,6 @@
 (** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, triage logic, and MODEL-driven deliberation
+    world observation builder, and MODEL-driven deliberation
     for the keeper deliberation engine.
-
-    Phase 1: Pure heuristic triage (no MODEL calls).
-    Phase 2: MODEL-driven deliberation (L1 Reactive) — when triage detects
-    triggers, call an MODEL to decide what action to take.
 
     @since 2.90.0 *)
 
@@ -134,7 +130,7 @@ let rec deliberation_action_to_json = function
           ("steps", `List (List.map deliberation_action_to_json actions));
         ]
 
-(* ---------- World observation: enriched snapshot for triage ---------- *)
+(* ---------- World observation: enriched snapshot for model deliberation ---------- *)
 
 type world_observation = {
   keeper_name: string;
@@ -186,79 +182,6 @@ let world_observation_to_json (obs : world_observation) : Yojson.Safe.t =
       ("board_new_post_count", `Int obs.board_new_post_count);
       ("board_mention_count", `Int obs.board_mention_count);
     ]
-
-(* ---------- Triage result ---------- *)
-
-type triage_result =
-  | Skip of string
-  | Triggered of deliberation_trigger list
-
-let triage_result_to_json = function
-  | Skip reason ->
-      `Assoc [ ("decision", `String "skip"); ("reason", `String reason) ]
-  | Triggered triggers ->
-      `Assoc
-        [
-          ("decision", `String "triggered");
-          ( "triggers",
-            `List (List.map deliberation_trigger_to_json triggers) );
-        ]
-
-(* ---------- Triage function: cheap gate before deliberation ---------- *)
-
-(** Evaluate a world observation and return triggers that warrant action.
-    Returns [Skip _] when nothing interesting happened,
-    [Triggered triggers] when the keeper should evaluate further. *)
-let triage (obs : world_observation) : triage_result =
-  let triggers = ref [] in
-  let add t = triggers := t :: !triggers in
-
-  (* L1 Reactive triggers *)
-  if obs.direct_mention then add DirectMention;
-  if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
-  (* RFC-keeper-proactive-wake-actionability-invariant: failed_task (orphan) is NOT an actionable trigger.  Its only
-     affordance, Task_audit, is read-only, so the keeper cannot clear the
-     signal; waking on it produced the executor livelock.  Orphan resolution is
-     the GC/supervisor's job and visibility is the orphan surfacer's — not a
-     proactive wake.  Mirrors [affordance_can_mutate Task_audit = false] in
-     keeper_world_observation.  (The [FailedTask] variant is retained for the
-     Broadcast/ProposeSpawn legality gates below: communicating ABOUT an orphan
-     is a deliberate action, distinct from being woken by it.) *)
-  if obs.keeper_fiber_count_changed then add KeeperFiberStartedOrStopped;
-
-  (* L2 Proactive triggers — goal-directed *)
-  if obs.board_mention_count > 0 then
-    add (BoardActivity "mentioned_in_post");
-  if obs.idle_seconds > obs.idle_gate && obs.active_goal_count > 0 then
-    add IdleTimeout;
-  if obs.active_goal_count > 0
-     && obs.idle_seconds > obs.idle_gate * 2 then
-    add GoalDeadline;
-  if obs.idle_seconds > obs.idle_gate * 5
-     && obs.active_goal_count > 0 then
-    add StrategicReview;
-
-  (* L3 Self-directed triggers — no goal requirement.
-     Deterministic gates with longer cooldowns to prevent noise.
-
-     Board-reactive: engage with new posts after idle_gate/2 cooldown.
-     Enables community participation without requiring @mention.
-     Gate: idle_seconds >= idle_gate/2 prevents every heartbeat from triggering.
-
-     Self-directed explore: keepers without explicit goals can still act.
-     4x idle_gate (~20min) provides generous cooldown.
-     Allows curiosity-driven behavior: board posts, discussions, findings.
-     Ref: Deepset "spectrum" — self-directed at the autonomy end. *)
-  if obs.board_new_post_count > 0 && obs.idle_seconds >= obs.idle_gate / 2
-     && obs.board_mention_count = 0 then
-    add (BoardActivity "new_posts");
-  if obs.active_goal_count = 0
-     && obs.idle_seconds > obs.idle_gate * 4 then
-    add SelfDirectedExplore;
-
-  match List.rev !triggers with
-  | [] -> Skip "no triggers detected"
-  | ts -> Triggered ts
 
 (* ---------- Deliberation meta: tracking fields for keeper_meta ---------- *)
 
@@ -438,20 +361,11 @@ let has_operational_signal (obs : world_observation) =
   || obs.keeper_fiber_count_changed
   || has_board_signal obs
 
-(** Self-directed context: keeper is idle with no goals.
-    Deterministic predicate — same conditions as the L3 SelfDirectedExplore
-    trigger in [triage]. Used in [legality_error] to relax action gates
-    for keepers exploring autonomously.
-    Ref: CSA autonomy Level 2-3 — human monitors, agent acts. *)
-let is_self_directed (obs : world_observation) =
-  obs.active_goal_count = 0 && obs.idle_seconds > obs.idle_gate * 4
-
 let rec legality_error (obs : world_observation) = function
   | Noop _ -> None
   | BoardPost _ ->
-      if has_board_signal obs || obs.active_goal_count > 0
-         || is_self_directed obs then None
-      else Some "board_post requires board activity, active goals, or self-directed context"
+      if has_board_signal obs || obs.active_goal_count > 0 then None
+      else Some "board_post requires board activity or active goals"
   | BoardComment _ ->
       if has_board_signal obs then None
       else Some "board_comment requires board activity"
@@ -657,21 +571,21 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
                 parse_action_from_json step_json)
               truncated
           in
-          let errors =
-            List.filter_map
-              (function Error e -> Some e | Ok _ -> None)
+          let actions_rev, errors_rev =
+            List.fold_left
+              (fun (actions, errors) -> function
+                | Ok action -> (action :: actions, errors)
+                | Error error -> (actions, error :: errors))
+              ([], [])
               results
           in
+          let errors = List.rev errors_rev in
           if errors <> [] then
             Error
               (Printf.sprintf "multi_step contains invalid actions: %s"
                  (String.concat "; " errors))
           else
-            let actions =
-              List.filter_map
-                (function Ok a -> Some a | Error _ -> None)
-                results
-            in
+            let actions = List.rev actions_rev in
             (* Reject nested multi_step *)
             let has_nested =
               List.exists

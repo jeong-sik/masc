@@ -220,7 +220,7 @@ let default_config_hash ~profile ~tool_list ~allow_set ~deny_set =
 
 (* ── Public API ───────────────────────────────────────── *)
 
-let emit_assigned
+let emit_assigned_result
     ~agent_id
     ~profile
     ~tool_list
@@ -228,7 +228,7 @@ let emit_assigned
     ?(deny_set = [])
     ?config_hash
     ?(reason = "")
-    () : assignment_id =
+    () : (assignment_id, string) result =
   let assignment_id =
     with_rng (fun rng -> Uuidm.(v4_gen rng () |> to_string))
   in
@@ -251,23 +251,48 @@ let emit_assigned
       }
   in
   let store = get_or_create_store () in
-  Dated_jsonl.append store (event_to_json event);
-  Eio_guard.with_mutex index_mu (fun () ->
-    Hashtbl.replace agent_index agent_id assignment_id);
-  assignment_id
+  match Dated_jsonl.append_result store (event_to_json event) with
+  | Error error -> Error error
+  | Ok () ->
+      Eio_guard.with_mutex index_mu (fun () ->
+        Hashtbl.replace agent_index agent_id assignment_id);
+      Ok assignment_id
 
-let emit_called
+let emit_assigned
+    ~agent_id
+    ~profile
+    ~tool_list
+    ?allow_set
+    ?deny_set
+    ?config_hash
+    ?reason
+    () : assignment_id =
+  match
+    emit_assigned_result
+      ~agent_id
+      ~profile
+      ~tool_list
+      ?allow_set
+      ?deny_set
+      ?config_hash
+      ?reason
+      ()
+  with
+  | Ok assignment_id -> assignment_id
+  | Error error -> raise (Sys_error error)
+
+let emit_called_result
     ~agent_id
     ~tool_name
     ?(arguments_hash = "")
     ~source
-    () : assignment_id option =
+    () : (assignment_id option, string) result =
   let assignment_id_opt =
     Eio_guard.with_mutex_ro index_mu (fun () ->
       Hashtbl.find_opt agent_index agent_id)
   in
   match assignment_id_opt with
-  | None -> None
+  | None -> Ok None
   | Some assignment_id ->
       let event =
         Called
@@ -279,16 +304,27 @@ let emit_called
           }
       in
       let store = get_or_create_store () in
-      Dated_jsonl.append store (event_to_json event);
-      Some assignment_id
+      (match Dated_jsonl.append_result store (event_to_json event) with
+       | Error error -> Error error
+       | Ok () -> Ok (Some assignment_id))
 
-let emit_completed
+let emit_called
+    ~agent_id
+    ~tool_name
+    ?arguments_hash
+    ~source
+    () : assignment_id option =
+  match emit_called_result ~agent_id ~tool_name ?arguments_hash ~source () with
+  | Ok assignment_id -> assignment_id
+  | Error error -> raise (Sys_error error)
+
+let emit_completed_result
     ~assignment_id
     ~tool_name
     ~success
     ~duration_ms
     ?error_kind
-    () : unit =
+    () : (unit, string) result =
   let event =
     Completed
       { assignment_id
@@ -300,7 +336,20 @@ let emit_completed
       }
   in
   let store = get_or_create_store () in
-  Dated_jsonl.append store (event_to_json event)
+  Dated_jsonl.append_result store (event_to_json event)
+
+let emit_completed ~assignment_id ~tool_name ~success ~duration_ms ?error_kind () : unit =
+  match
+    emit_completed_result
+      ~assignment_id
+      ~tool_name
+      ~success
+      ~duration_ms
+      ?error_kind
+      ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 let find_latest_assignment_id ~agent_id : assignment_id option =
   Eio_guard.with_mutex_ro index_mu (fun () ->

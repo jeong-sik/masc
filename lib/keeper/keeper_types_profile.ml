@@ -310,12 +310,30 @@ let keeper_toml_unknown_keys_to_json
 let keeper_name_of_toml_path path =
   Filename.basename path |> Filename.remove_extension
 
+let observe_keeper_toml_unknown_key_scan_failure ~path ~error =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ProfileLoadFailures)
+    ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Toml_skip) ]
+    ();
+  Log.Keeper.warn
+    "keeper TOML unknown-key scan failed path=%s: %s"
+    path
+    error
+
 let keeper_toml_unknown_keys_of_path path =
   match Safe_ops.read_file_safe path with
-  | Error _ -> None
+  | Error error ->
+      observe_keeper_toml_unknown_key_scan_failure
+        ~path
+        ~error:(Printf.sprintf "read failed: %s" error);
+      None
   | Ok content -> (
       match Keeper_toml_loader.parse_toml content with
-      | Error _ -> None
+      | Error error ->
+          observe_keeper_toml_unknown_key_scan_failure
+            ~path
+            ~error:(Printf.sprintf "parse failed: %s" error);
+          None
       | Ok doc -> (
           match detect_unknown_keeper_toml_keys doc with
           | [] -> None

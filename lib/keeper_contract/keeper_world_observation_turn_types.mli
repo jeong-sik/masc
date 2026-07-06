@@ -10,7 +10,8 @@ type event_queue_trigger =
   | Connector_attention_stimulus
       (** RFC-connector-ambient-attention-wake P1: ambient connector message
           recorded as external attention; edge-triggered, carries an event_id
-          pointer. Dormant until a producer enqueues it (P3). *)
+          pointer. The Discord ambient producer enqueues it when the registry
+          flag enables ambient connector wakes. *)
 
 type turn_reason =
   | Mention_pending

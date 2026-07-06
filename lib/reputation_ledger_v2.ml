@@ -170,36 +170,63 @@ let ledger_event_of_json json : ledger_event option =
 
 (** {1 Emitters} *)
 
-let append_event (config : Workspace.config) (event : ledger_event) =
-  Dated_jsonl.append (get_store config) (ledger_event_to_json event)
+let append_event_result (config : Workspace.config) (event : ledger_event) =
+  Dated_jsonl.append_result (get_store config) (ledger_event_to_json event)
 
-let emit_tool_outcome config ~agent_id ~tool_name ~success
-    ?error_kind ?raw_trace_run_id () =
-  if String.trim agent_id = "" then ()
+let emit_tool_outcome_result config ~agent_id ~tool_name ~success ?error_kind
+    ?raw_trace_run_id () =
+  if String.trim agent_id = "" then Ok ()
   else
     let ts = Time_compat.now () in
-    append_event config
+    append_event_result config
       (Tool_outcome { agent_id; tool_name; success; error_kind;
                       raw_trace_run_id; timestamp = ts })
 
-let emit_goal_completion config ~agent_id ~task_id ~task_title
+let emit_tool_outcome config ~agent_id ~tool_name ~success ?error_kind
+    ?raw_trace_run_id () =
+  match
+    emit_tool_outcome_result config ~agent_id ~tool_name ~success ?error_kind
+      ?raw_trace_run_id ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+
+let emit_goal_completion_result config ~agent_id ~task_id ~task_title
     ~completed_within_budget ~on_topic ?raw_trace_run_id () =
-  if String.trim agent_id = "" then ()
+  if String.trim agent_id = "" then Ok ()
   else
     let ts = Time_compat.now () in
-    append_event config
+    append_event_result config
       (Goal_completion { agent_id; task_id; task_title;
                          completed_within_budget; on_topic;
                          raw_trace_run_id; timestamp = ts })
 
-let emit_safety_violation config ~agent_id ~violation_kind
-    ?tool_name ?raw_trace_run_id () =
-  if String.trim agent_id = "" then ()
+let emit_goal_completion config ~agent_id ~task_id ~task_title
+    ~completed_within_budget ~on_topic ?raw_trace_run_id () =
+  match
+    emit_goal_completion_result config ~agent_id ~task_id ~task_title
+      ~completed_within_budget ~on_topic ?raw_trace_run_id ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+
+let emit_safety_violation_result config ~agent_id ~violation_kind ?tool_name
+    ?raw_trace_run_id () =
+  if String.trim agent_id = "" then Ok ()
   else
     let ts = Time_compat.now () in
-    append_event config
+    append_event_result config
       (Safety_violation { agent_id; violation_kind; tool_name;
                           raw_trace_run_id; timestamp = ts })
+
+let emit_safety_violation config ~agent_id ~violation_kind ?tool_name
+    ?raw_trace_run_id () =
+  match
+    emit_safety_violation_result config ~agent_id ~violation_kind ?tool_name
+      ?raw_trace_run_id ()
+  with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 (** {1 Readers} *)
 

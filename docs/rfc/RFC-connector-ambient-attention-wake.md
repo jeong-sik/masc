@@ -175,15 +175,14 @@ delivers it — the symmetric outbound to the dispatched fix, no new transport.
 
 Ambient messages are precisely the ones the trigger policy filtered out. Waking a
 full LLM turn on every line in a chatty bound channel is the opposite of intent
-and burns tokens. Gate by urgency + debounce, reusing the board precedent
-(`board_reactive_debounce_sec = 60`, `board_reactive_wakeup_max`,
-`lib/keeper/keeper_keepalive_signal.ml:299`):
+and burns tokens. Gate by urgency + debounce, reusing the board debounce
+precedent (`board_reactive_debounce_sec = 60`,
+`lib/keeper/keeper_keepalive_signal.ml`):
 
 - `Mention` / `Direct_message` urgency: wake promptly (these are addressed to the
   keeper).
-- `Ambient` urgency: debounced + capped — batch ambient lines and wake at most
-  once per window, or require N accumulated before waking. Tunable; conservative
-  default biases toward *not* waking.
+- `Ambient` urgency: debounced by channel — batch ambient lines and wake at most
+  once per window. Typed direct attention is not dropped by a fanout cap.
 
 ### 3.7 Per-cycle cost bound
 

@@ -163,7 +163,7 @@ let merge_group_of_json json =
    object are dropped individually (defensive degrade) and emit a warning with
    dropped/total counts, never aborting the whole plan. The provider output
    itself must be an exact JSON object; prose, markdown fences, and substring
-   salvage are rejected at [plan_of_string]. *)
+   salvage are rejected at [plan_result_of_string]. *)
 let log_dropped_groups ~dropped ~total =
   if dropped > 0
   then
@@ -217,12 +217,6 @@ let plan_result_of_string raw =
   | Error reason ->
     log_rejected_output ~reason ~raw;
     Error reason
-;;
-
-let plan_of_string raw =
-  match plan_result_of_string raw with
-  | Ok plan -> Some plan
-  | Error _ -> None
 ;;
 
 (* ---------- Apply (pure, deterministic) ---------- *)

@@ -104,6 +104,11 @@ let seed_backlog config task =
   in
   Workspace_backlog.write_backlog config backlog
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc content)
+
 let test_fresh_status_done () =
   with_temp_config (fun config ->
     let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
@@ -128,6 +133,33 @@ let test_fresh_status_missing () =
     seed_backlog config (make_task ~id:"task-001" ~status:T.Todo);
     let result = TCI.fresh_task_status config ~task_id:"task-999" in
     check bool "absent task returns None" true (Option.is_none result))
+
+let test_fresh_status_result_reports_unreadable_backlog () =
+  with_temp_config (fun config ->
+    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
+    seed_backlog config (make_task ~id:"task-040" ~status:status_claimed);
+    write_file (Workspace_backlog.backlog_path config) "{\n  \"tasks\": [\n";
+    write_file
+      (Workspace_backlog.backlog_recovery_path config)
+      "{\n  \"tasks\": [\n";
+    (match TCI.fresh_task_status_result config ~task_id:"task-040" with
+     | Ok _ -> Alcotest.fail "expected unreadable backlog error"
+     | Error msg ->
+         check bool "error mentions task id" true
+           (String.starts_with
+              ~prefix:"task_cache_invariant backlog read failed for task_id=task-040"
+              msg));
+    check bool "compatibility wrapper returns None" true
+      (Option.is_none (TCI.fresh_task_status config ~task_id:"task-040"));
+    match
+      TCI.with_fresh_task_status_result config
+        ~agent_name:"keeper-bob-agent"
+        ~task_id:"task-040"
+        ~module_name:"test.unreadable"
+        (fun _ -> `should_not_run)
+    with
+    | Ok _ -> Alcotest.fail "expected with_fresh_task_status_result error"
+    | Error _ -> ())
 
 let test_with_fresh_terminal_returns_none () =
   with_temp_config (fun config ->
@@ -181,6 +213,8 @@ let () =
             test_fresh_status_active
         ; test_case "absent task returns None" `Quick
             test_fresh_status_missing
+        ; test_case "unreadable backlog returns Result error" `Quick
+            test_fresh_status_result_reports_unreadable_backlog
         ] )
     ; ( "with_fresh_task_status"
       , [ test_case "terminal task returns None (skip)" `Quick

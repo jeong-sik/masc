@@ -17,6 +17,7 @@ let board_payload ?updated_at ~post_id:(_ : string) () :
     ; author = "operator"
     ; title = "Ship reaction ledger"
     ; content = "Please react"
+    ; mention_ids = []
     ; hearth = None
     ; updated_at
     }
@@ -75,7 +76,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   Keeper_reaction_ledger.record_event_queue_reaction
     ~base_path
     ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    ~reaction_kind:Keeper_reaction_ledger.Stimulus_consumed
     stimulus;
   let rows =
     Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:10
@@ -464,8 +465,8 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
     (reacted_summary |> member "operator_action_required" |> to_bool);
   check int "reacted pending stimulus count" 0
     (reacted_summary |> member "pending_stimulus_count" |> to_int);
-  check int "turn started count" 1
-    (reacted_summary |> member "turn_started_count" |> to_int)
+  check int "stimulus consumed count" 1
+    (reacted_summary |> member "stimulus_consumed_count" |> to_int)
 ;;
 
 let test_summary_cursor_ack_sweeps_covered_board_stimuli () =
@@ -842,6 +843,9 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.No_progress_recovery
     ; Keeper_reaction_ledger.Fusion_completed
     ; Keeper_reaction_ledger.Bg_completed
+    ; Keeper_reaction_ledger.Schedule_signal
+    ; Keeper_reaction_ledger.Connector_attention
+    ; Keeper_reaction_ledger.Hitl_resolved
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
@@ -862,6 +866,7 @@ let test_reaction_kind_string_roundtrip () =
     (fun k ->
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
+    ; Keeper_reaction_ledger.Stimulus_consumed
     ; Keeper_reaction_ledger.Execution_receipt
     ; Keeper_reaction_ledger.Terminal_reason
     ; Keeper_reaction_ledger.Cursor_ack
@@ -871,6 +876,34 @@ let test_reaction_kind_string_roundtrip () =
   check string "unknown reaction string preserved as Unknown_reaction" "legacy_custom"
     (Keeper_reaction_ledger.reaction_kind_to_string
        (Keeper_reaction_ledger.reaction_kind_of_string "legacy_custom"))
+;;
+
+let test_fleet_summary_read_error_keeps_unknown_keeper_count () =
+  let json =
+    Keeper_reaction_ledger.fleet_summary_read_error_json
+      ~limit_per_keeper:20
+      ~source:"keeper_meta_store"
+      ~error:"failed to list keeper directory"
+  in
+  check_member_string "read error fleet status" "unknown" "status" json;
+  check bool "read error requires operator action" true
+    (json |> member "operator_action_required" |> to_bool);
+  check bool "keeper count is unknown" false
+    (json |> member "keeper_count_known" |> to_bool);
+  check int "compat keeper count remains zero" 0
+    (json |> member "keeper_count" |> to_int);
+  check int "fleet read error counted" 1
+    (json |> member "read_error_count" |> to_int);
+  check_member_string
+    "fleet read error source"
+    "keeper_meta_store"
+    "read_error_source"
+    json;
+  check_member_string
+    "fleet read error detail"
+    "failed to list keeper directory"
+    "read_error"
+    json
 ;;
 
 let () =
@@ -953,6 +986,10 @@ let () =
             "reaction_kind string round-trip drift guard"
             `Quick
             test_reaction_kind_string_roundtrip
+        ; test_case
+            "fleet read error keeps keeper count unknown"
+            `Quick
+            test_fleet_summary_read_error_keeps_unknown_keeper_count
         ] )
     ]
 ;;

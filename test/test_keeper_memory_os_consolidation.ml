@@ -431,31 +431,47 @@ let test_render_numbered_facts_keeps_one_fact_per_line () =
     (String.split_on_char '\n' rendered)
 ;;
 
+let plan_or_fail label raw =
+  match Consolidation.plan_result_of_string raw with
+  | Ok plan -> plan
+  | Error reason ->
+    Alcotest.failf
+      "%s: expected the plan to parse, got %s"
+      label
+      (Consolidation.output_rejection_reason_to_string reason)
+;;
+
+let expect_plan_rejection label expected raw =
+  match Consolidation.plan_result_of_string raw with
+  | Error actual ->
+    Alcotest.(check string)
+      label
+      (Consolidation.output_rejection_reason_to_string expected)
+      (Consolidation.output_rejection_reason_to_string actual)
+  | Ok _ -> Alcotest.failf "%s: expected provider output rejection" label
+;;
+
 let test_parse_plan_json () =
   let raw =
     {|{"groups":[{"member_indices":[0,2],"consolidated_claim":"merged","category":"lesson"}],"drop_indices":[3]}|}
   in
-  match Consolidation.plan_of_string raw with
-  | None -> Alcotest.fail "expected the plan to parse"
-  | Some plan ->
-    Alcotest.(check int) "one group" 1 (List.length plan.Consolidation.groups);
-    let g = List.hd plan.Consolidation.groups in
-    Alcotest.(check (list int)) "member indices" [ 0; 2 ] g.Consolidation.member_indices;
-    Alcotest.(check string) "consolidated claim" "merged" g.Consolidation.consolidated_claim;
-    Alcotest.(check bool) "category parsed to Lesson" true (g.Consolidation.category = Types.Lesson);
-    Alcotest.(check (list int)) "drop indices" [ 3 ] plan.Consolidation.drop_indices
+  let plan = plan_or_fail "valid plan JSON" raw in
+  Alcotest.(check int) "one group" 1 (List.length plan.Consolidation.groups);
+  let g = List.hd plan.Consolidation.groups in
+  Alcotest.(check (list int)) "member indices" [ 0; 2 ] g.Consolidation.member_indices;
+  Alcotest.(check string) "consolidated claim" "merged" g.Consolidation.consolidated_claim;
+  Alcotest.(check bool) "category parsed to Lesson" true (g.Consolidation.category = Types.Lesson);
+  Alcotest.(check (list int)) "drop indices" [ 3 ] plan.Consolidation.drop_indices
 ;;
 
 let test_parse_rejects_fractional_indices () =
   let raw =
     {|{"groups":[{"member_indices":[0,1.5],"consolidated_claim":"merged","category":"fact"}],"drop_indices":[2.1,3]}|}
   in
-  match Consolidation.plan_of_string raw with
-  | None -> Alcotest.fail "expected the plan to parse"
-  | Some plan ->
-    let g = List.hd plan.Consolidation.groups in
-    Alcotest.(check (list int)) "fractional member ignored" [ 0 ] g.Consolidation.member_indices;
-    Alcotest.(check (list int)) "fractional drop ignored" [ 3 ] plan.Consolidation.drop_indices
+  let plan = plan_or_fail "fractional-index plan JSON" raw in
+  let g = List.hd plan.Consolidation.groups in
+  Alcotest.(check (list int)) "fractional member ignored" [ 0 ] g.Consolidation.member_indices;
+  Alcotest.(check (list int)) "fractional drop ignored" [ 3 ] plan.Consolidation.drop_indices
 ;;
 
 let test_parse_rejects_wrapped_json () =
@@ -469,9 +485,7 @@ let test_parse_rejects_wrapped_json () =
   ; "thinking leak", Printf.sprintf "<think>merge these</think>\n%s" json
   ]
   |> List.iter (fun (label, raw) ->
-    match Consolidation.plan_of_string raw with
-    | None -> ()
-    | Some _ -> Alcotest.failf "%s wrapped plan should be rejected" label)
+    expect_plan_rejection label Consolidation.Non_json raw)
 ;;
 
 (* A garbled group is dropped individually; the rest of the plan stands. *)
@@ -479,35 +493,14 @@ let test_parse_degrades_garbled_group () =
   let raw =
     {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"ok","category":"fact"},{"consolidated_claim":""}],"drop_indices":[]}|}
   in
-  match Consolidation.plan_of_string raw with
-  | None -> Alcotest.fail "expected the plan to parse"
-  | Some plan -> Alcotest.(check int) "only the valid group survives" 1 (List.length plan.Consolidation.groups)
-;;
-
-let test_parse_non_json_is_none () =
-  Alcotest.(check bool) "non-JSON yields None" true (Consolidation.plan_of_string "not json {{{" = None);
-  Alcotest.(check bool)
-    "JSON string yields None"
-    true
-    (Consolidation.plan_of_string {|"not an object"|} = None);
-  Alcotest.(check bool) "JSON array yields None" true (Consolidation.plan_of_string "[]" = None)
+  let plan = plan_or_fail "garbled-group plan JSON" raw in
+  Alcotest.(check int) "only the valid group survives" 1 (List.length plan.Consolidation.groups)
 ;;
 
 let test_parse_result_reports_rejection_reason () =
-  Alcotest.(check bool)
-    "non-JSON result"
-    true
-    (match Consolidation.plan_result_of_string "not json {{{" with
-     | Error Consolidation.Non_json -> true
-     | Ok _
-     | Error Consolidation.Non_object_json -> false);
-  Alcotest.(check bool)
-    "non-object result"
-    true
-    (match Consolidation.plan_result_of_string {|"not an object"|} with
-     | Error Consolidation.Non_object_json -> true
-     | Ok _
-     | Error Consolidation.Non_json -> false)
+  expect_plan_rejection "non-JSON result" Consolidation.Non_json "not json {{{";
+  expect_plan_rejection "JSON string result" Consolidation.Non_object_json {|"not an object"|};
+  expect_plan_rejection "JSON array result" Consolidation.Non_object_json "[]"
 ;;
 
 let () =
@@ -549,7 +542,6 @@ let () =
 	        ; Alcotest.test_case "rejects fractional indices" `Quick test_parse_rejects_fractional_indices
         ; Alcotest.test_case "rejects wrapped JSON" `Quick test_parse_rejects_wrapped_json
         ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group
-        ; Alcotest.test_case "non-JSON is None" `Quick test_parse_non_json_is_none
         ; Alcotest.test_case
             "result reports rejection reason"
             `Quick

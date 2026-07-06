@@ -59,15 +59,32 @@ let classify_mcp_accept (request : Httpun.Request.t) =
   Http_negotiation.classify_mcp_accept
     (Httpun.Headers.get request.headers "accept")
 
-let body_jsonrpc_method body_str =
+type body_jsonrpc_method_error =
+  | Body_jsonrpc_method_parse_error of string
+
+let body_jsonrpc_method_error_to_string = function
+  | Body_jsonrpc_method_parse_error message -> "json_parse_error: " ^ message
+;;
+
+let body_jsonrpc_method_result body_str =
   try
     match Yojson.Safe.from_string body_str with
     | `Assoc fields -> (
         match List.assoc_opt "method" fields with
-        | Some (`String method_) -> Some (method_, List.mem_assoc "id" fields)
-        | _ -> None)
-    | _ -> None
-  with Yojson.Json_error _ -> None
+        | Some (`String method_) -> Ok (Some (method_, List.mem_assoc "id" fields))
+        | _ -> Ok None)
+    | _ -> Ok None
+  with
+  | Yojson.Json_error message -> Error (Body_jsonrpc_method_parse_error message)
+
+let body_jsonrpc_method body_str =
+  match body_jsonrpc_method_result body_str with
+  | Ok method_ -> method_
+  | Error error ->
+      Log.Server.warn
+        "mcp-http body_jsonrpc_method failed: %s"
+        (body_jsonrpc_method_error_to_string error);
+      None
 
 let body_jsonrpc_method_only body_str =
   match body_jsonrpc_method body_str with
@@ -94,7 +111,14 @@ let request_uses_stateless_protocol request body_str =
       true
   | _ -> Mcp_transport_protocol.body_uses_stateless_protocol body_str
 
-let body_required_name_for_method body_str method_ =
+type body_required_name_error =
+  | Body_required_name_parse_error of string
+
+let body_required_name_error_to_string = function
+  | Body_required_name_parse_error message -> "json_parse_error: " ^ message
+;;
+
+let body_required_name_for_method_result body_str method_ =
   let field_name =
     match method_ with
     | "tools/call" | "prompts/get" -> Some "name"
@@ -102,7 +126,7 @@ let body_required_name_for_method body_str method_ =
     | _ -> None
   in
   match field_name with
-  | None -> None
+  | None -> Ok None
   | Some key -> (
       try
         match Yojson.Safe.from_string body_str with
@@ -110,11 +134,21 @@ let body_required_name_for_method body_str method_ =
             match List.assoc_opt "params" fields with
             | Some (`Assoc params) -> (
                 match List.assoc_opt key params with
-                | Some (`String value) -> Some value
-                | _ -> None)
-            | _ -> None)
-        | _ -> None
-      with Yojson.Json_error _ -> None)
+                | Some (`String value) -> Ok (Some value)
+                | _ -> Ok None)
+            | _ -> Ok None)
+        | _ -> Ok None
+      with
+      | Yojson.Json_error message -> Error (Body_required_name_parse_error message))
+
+let body_required_name_for_method body_str method_ =
+  match body_required_name_for_method_result body_str method_ with
+  | Ok value -> value
+  | Error error ->
+      Log.Server.warn
+        "mcp-http body_required_name_for_method failed: %s"
+        (body_required_name_error_to_string error);
+      None
 
 let header_mismatch msg = Error ("HeaderMismatch: " ^ msg)
 

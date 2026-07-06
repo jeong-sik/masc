@@ -162,7 +162,17 @@ let format_board_event_text
          | _ -> "")
     else ""
   in
-  Printf.sprintf "- [%s] post_id=%s title=%S author=%s%s%s%s preview: %s"
+  let post_read_error_note =
+    match event.post_read_error with
+    | None -> ""
+    | Some error -> Printf.sprintf " [post read error: %s]" error
+  in
+  let comment_read_error_note =
+    match event.comment_read_error with
+    | None -> ""
+    | Some error -> Printf.sprintf " [comment read error: %s]" error
+  in
+  Printf.sprintf "- [%s] post_id=%s title=%S author=%s%s%s%s%s preview: %s"
     kind
     event.post_id
     (Keeper_types_profile.short_preview ~max_len:80 event.title)
@@ -170,6 +180,7 @@ let format_board_event_text
     hearth_note
     mention_note
     self_note
+    (post_read_error_note ^ comment_read_error_note)
     event.preview
 ;;
 
@@ -214,6 +225,13 @@ let format_scheduled_automation_summary
     (summary : Keeper_world_observation.scheduled_automation_observation)
   : string option
   =
+  match Keeper_world_observation.scheduled_automation_read_error summary with
+  | Some error ->
+    Some
+      (Printf.sprintf
+         "### Scheduled Automation\n- Status: unknown\n- Read error: %s\n"
+         error)
+  | None ->
   let actionable =
     summary.due_ready_count > 0 || summary.blocked_approval_count > 0
   in

@@ -141,6 +141,11 @@ val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
     records. Used by the runtime-lens response builders. *)
 
 val tool_call_output_text_opt : Yojson.Safe.t -> string option
+val parse_tool_output_json_result :
+  Yojson.Safe.t -> (Yojson.Safe.t option, string) result
+(** [Ok None] means the tool-call row has no textual output payload.
+    [Error] means an output payload exists but is malformed JSON. *)
+
 val parse_tool_output_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
 val tool_call_runtime_contract : Yojson.Safe.t -> Yojson.Safe.t
 

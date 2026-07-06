@@ -96,6 +96,16 @@ type keeper_chat_stream_request = {
     connector context is supplied; [channel_user_id] and
     [channel_user_name] are optional. *)
 
+type keeper_reply_payload_parse_error = { detail : string }
+(** Observable parse failure for the direct-reply JSON envelope returned by
+    [masc_keeper_msg].  Consumers may still fall back to the raw visible reply,
+    but the parse failure is no longer collapsed into payload absence. *)
+
+type keeper_reply_payload_decode =
+  | Keeper_reply_payload_json of Yojson.Safe.t
+  | Keeper_reply_payload_parse_error of keeper_reply_payload_parse_error
+(** Typed decode result for the direct-reply payload envelope. *)
+
 (** {1 Parsing} *)
 
 val parse_keeper_chat_stream_request :
@@ -205,6 +215,8 @@ module For_testing : sig
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
   val modalities_for_request : keeper_chat_stream_request -> string list
+  val extract_visible_reply_with_decode :
+    string -> keeper_reply_payload_decode * string
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val direct_reply_terminal_error :
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option

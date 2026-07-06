@@ -211,10 +211,14 @@ val events_path : Workspace_utils.config -> string
 (** {1 State I/O} *)
 
 val read_state : Workspace_utils.config -> state
-(** Reads {!requests_path}; returns the empty default state
-    if the file does not exist or fails to parse.  Parse
-    errors are silently absorbed — the JSONL events file is
-    the durable history if recovery is needed. *)
+(** Compatibility wrapper around {!read_state_result}. Returns the empty
+    default state when the file is missing or unreadable/corrupt after logging
+    the failure. Mutating call sites should use {!read_state_result}. *)
+
+val read_state_result : Workspace_utils.config -> (state, string) result
+(** Reads {!requests_path}. Missing state is treated as the empty default
+    state; unreadable or corrupt primary+recovery state is returned as
+    [Error]. *)
 
 (** {1 Effective policy resolution} *)
 
@@ -266,9 +270,15 @@ val create_request :
 
 val find_request :
   Workspace_utils.config -> request_id:string -> goal_verification_request option
-(** Lock-free lookup.  Caller is expected to treat the result
-    as a snapshot; for mutation use {!submit_vote} or
-    {!cancel_request}. *)
+(** Compatibility wrapper around {!find_request_result}. Logs read failure and
+    returns [None]. Caller is expected to treat the result as a snapshot; for
+    mutation use {!submit_vote} or {!cancel_request}. *)
+
+val find_request_result :
+  Workspace_utils.config ->
+  request_id:string ->
+  (goal_verification_request option, string) result
+(** Lock-free lookup with explicit state read failure. *)
 
 val count_votes :
   decision:vote_decision -> goal_verification_request -> int

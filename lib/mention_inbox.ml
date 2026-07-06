@@ -81,13 +81,21 @@ let append_mention ?task_id (config : Workspace.config) (record : mention_record
     match task_id with
     | None -> false
     | Some tid ->
-        (match Task_cache_invariant.fresh_task_status config ~task_id:tid with
-         | Some status when Task_cache_invariant.is_terminal status ->
+        (match Task_cache_invariant.fresh_task_status_result config ~task_id:tid with
+         | Ok (Some status) when Task_cache_invariant.is_terminal status ->
              Task_cache_invariant.clear_stale_agent_task config
                ~agent_name:record.source_agent ~task_id:tid ~status
                ~module_name:"mention_inbox.append_mention";
              true
-         | _ -> false)
+         | Error msg ->
+             Task_cache_invariant.report_status_read_error
+               config
+               ~agent_name:record.source_agent
+               ~task_id:tid
+               ~module_name:"mention_inbox.append_mention"
+               msg;
+             false
+         | Ok None | Ok (Some _) -> false)
   in
   if not skip then (
     let path = inbox_path config in

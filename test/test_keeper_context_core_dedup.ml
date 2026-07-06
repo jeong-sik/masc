@@ -11,6 +11,7 @@
        inlining the full [Yojson.Safe.to_string] output. *)
 
 module C = Masc.Keeper_context_core
+module H = Masc.Keeper_context_core_history
 module T = Agent_sdk.Types
 
 (* --- message_to_json: no flat [content] field --- *)
@@ -98,6 +99,22 @@ let test_history_jsonl_text_empty_when_neither () =
   let empty : Yojson.Safe.t = `Assoc [ ("role", `String "user") ] in
   let text = C.text_of_history_jsonl_json empty in
   Alcotest.(check string) "empty when neither field" "" text
+
+let test_classify_history_jsonl_line_result_surfaces_malformed_json () =
+  match H.classify_history_jsonl_line_result "{not-json" with
+  | Error (H.History_jsonl_malformed_json message) ->
+      Alcotest.(check bool) "message is non-empty" true (String.length message > 0)
+  | Error other ->
+      Alcotest.failf
+        "expected malformed-json error, got %s"
+        (H.history_jsonl_line_error_to_string other)
+  | Ok _ -> Alcotest.fail "malformed JSON classified as a valid history line"
+
+let test_classify_history_jsonl_line_projection_preserves_none () =
+  Alcotest.(check bool)
+    "legacy option projection stays None"
+    true
+    (Option.is_none (H.classify_history_jsonl_line "{not-json"))
 
 (* --- tool_result_text_of_block: escape-bomb cap --- *)
 
@@ -292,6 +309,13 @@ let () =
             test_history_jsonl_text_uses_blocks_first;
           Alcotest.test_case "empty when neither" `Quick
             test_history_jsonl_text_empty_when_neither;
+        ] );
+      ( "history_jsonl_classification",
+        [
+          Alcotest.test_case "malformed JSON returns typed error" `Quick
+            test_classify_history_jsonl_line_result_surfaces_malformed_json;
+          Alcotest.test_case "legacy projection preserves None" `Quick
+            test_classify_history_jsonl_line_projection_preserves_none;
         ] );
       ( "tool_result_text_of_block",
         [

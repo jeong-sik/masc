@@ -397,21 +397,18 @@ let list_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
            "docker inspect failed while listing keeper sandbox containers: %s"
            (Exec_policy.truncate_for_log out))
     else (
-      let parsed = nonempty_lines out |> List.map parse_live_container_line in
-      let errors =
-        parsed
-        |> List.filter_map (function
-          | Error err -> Some err
-          | Ok _ -> None)
+      let containers, errors =
+        nonempty_lines out
+        |> List.fold_left
+             (fun (containers, errors) line ->
+                match parse_live_container_line line with
+                | Ok item -> item :: containers, errors
+                | Error err -> containers, err :: errors)
+             ([], [])
       in
       if errors <> []
-      then Error (String.concat "; " errors)
-      else
-        Ok
-          (parsed
-           |> List.filter_map (function
-             | Ok item -> Some item
-             | Error _ -> None)))
+      then Error (String.concat "; " (List.rev errors))
+      else Ok (List.rev containers))
 ;;
 
 let option_string_field name = function

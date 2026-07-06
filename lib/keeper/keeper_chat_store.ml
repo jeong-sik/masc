@@ -55,6 +55,49 @@ type attachment = {
   data : string;
 }
 
+type attachment_parse_error =
+  | Attachment_not_object
+  | Attachment_missing_required_string of string
+
+let attachment_parse_error_to_string = function
+  | Attachment_not_object -> "attachment entry is not an object"
+  | Attachment_missing_required_string key ->
+      Printf.sprintf "attachment field %S must be a non-empty string" key
+;;
+
+let attachment_string_field ~default key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> value
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+  | None -> default
+;;
+
+let attachment_size_field fields =
+  match List.assoc_opt "size" fields with
+  | Some (`Int size) -> size
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `Null | `String _)
+  | None -> 0
+;;
+
+let attachment_of_json_result = function
+  | `Assoc fields ->
+      let id = attachment_string_field ~default:"" "id" fields in
+      let data = attachment_string_field ~default:"" "data" fields in
+      if id = "" then Error (Attachment_missing_required_string "id")
+      else if data = "" then Error (Attachment_missing_required_string "data")
+      else
+        Ok
+          { id
+          ; att_type = attachment_string_field ~default:"" "type" fields
+          ; name = attachment_string_field ~default:"" "name" fields
+          ; size = attachment_size_field fields
+          ; mime_type = attachment_string_field ~default:"" "mime_type" fields
+          ; data
+          }
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error Attachment_not_object
+;;
+
 type tool_call = {
   call_id : string;
   call_name : string;
@@ -789,22 +832,20 @@ let parse_line ~file_path (line : string) : chat_message option =
     let attachments =
       match Json_util.assoc_member_opt "attachments" json with
       | Some (`List att_list) ->
-          let atts = List.filter_map (fun att_json ->
-            match att_json with
-            | `Assoc _ ->
-                (try
-                  let id = Json_util.get_string_with_default att_json ~key:"id" ~default:"" in
-                  let att_type = Json_util.get_string_with_default att_json ~key:"type" ~default:"" in
-                  let name = Json_util.get_string_with_default att_json ~key:"name" ~default:"" in
-                  let size = (match Json_util.assoc_member_opt "size" att_json with
-                    | Some (`Int i) -> i | _ -> 0) in
-                  let mime_type = Json_util.get_string_with_default att_json ~key:"mime_type" ~default:"" in
-                  let data = Json_util.get_string_with_default att_json ~key:"data" ~default:"" in
-                  if id = "" || data = "" then None
-                  else Some { id; att_type; name; size; mime_type; data }
-                with _ -> None)
-            | _ -> None
-          ) att_list in
+          let atts =
+            List.filter_map
+              (fun att_json ->
+                match attachment_of_json_result att_json with
+                | Ok attachment -> Some attachment
+                | Error error ->
+                    report_persistence_read_drop
+                      ~reason:
+                        Safe_ops.persistence_read_drop_reason_invalid_payload
+                      ~path:file_path
+                      ~detail:(attachment_parse_error_to_string error);
+                    None)
+              att_list
+          in
           if atts = [] then None else Some atts
       | _ -> None
     in

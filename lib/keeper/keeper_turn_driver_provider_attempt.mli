@@ -18,6 +18,21 @@ val sdk_error_runtime_fallback_class :
 val provider_attempt_status_of_result :
   ('a, Agent_sdk.Error.sdk_error) result -> string
 
+type provider_attempt_exception_kind_absence =
+  | Provider_attempt_succeeded
+  | Provider_attempt_unclassified_sdk_error
+
+type provider_attempt_exception_kind_projection =
+  | Provider_attempt_exception_kind of string
+  | Provider_attempt_exception_kind_absent of provider_attempt_exception_kind_absence
+
+val provider_attempt_exception_kind_projection_of_result :
+  ('a, Agent_sdk.Error.sdk_error) result ->
+  provider_attempt_exception_kind_projection
+
+val provider_attempt_exception_kind_to_option :
+  provider_attempt_exception_kind_projection -> string option
+
 val provider_attempt_exception_kind_of_result :
   ('a, Agent_sdk.Error.sdk_error) result -> string option
 

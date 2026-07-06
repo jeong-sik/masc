@@ -26,7 +26,7 @@
     accumulator helpers consumed only inside
     [tool_audit_snapshot] / [skill_route_summary_of_keeper]
     /
-    [load_persona_profile] / [extract_persona_name] /
+    [load_persona_profile] / [resolve_persona_name] /
     [merge_profiles] / [lookup_neo4j_profile] /
     [is_keeper_offline] / [is_health_at_risk] /
     [is_session_terminal] / [option_or_else] /
@@ -128,11 +128,25 @@ type agent_profile = {
   interests : string list;
   activity_level : float option;
   primary_value : string option;
+  profile_errors : agent_profile_error list;
 }
+
+and agent_profile_error = {
+  source : agent_profile_error_source;
+  path : string option;
+  detail : string;
+}
+
+and agent_profile_error_source =
+  | Profile_identity_normalization
+  | Persona_profile_file
 
 val get_agent_profile : string -> agent_profile
 (** Resolves the agent's profile through the persona
     file → Neo4j cache → fallback chain. *)
+
+val agent_profile_errors_json : agent_profile -> Yojson.Safe.t
+(** Serializes profile lookup errors carried by {!agent_profile}. *)
 
 (** {1 JSON envelope helpers} *)
 

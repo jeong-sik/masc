@@ -215,7 +215,12 @@ val log_event :
   config -> event_type:event_type -> agent:string ->
   payload:Yojson.Safe.t -> event
 
-(** Retrieve an event by sequence number, or [None] if missing. *)
+(** Retrieve an event by sequence number. [Ok None] means the event key is
+    absent; [Error] means the stored event could not be read or decoded. *)
+val get_event_result : config -> seq:int -> (Yojson.Safe.t option, string) result
+
+(** Compatibility wrapper around {!get_event_result}. Logs read/decode
+    failures before projecting them to [None]. *)
 val get_event : config -> seq:int -> Yojson.Safe.t option
 
 (** Retrieve the [limit] most recent events. *)

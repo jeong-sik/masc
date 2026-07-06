@@ -1,7 +1,23 @@
 (** Pause-status projection for workspace/tool surfaces. *)
 
+let keeper_name_discovery_read_error_json error =
+  `Assoc [ "source", `String "keeper_names_result"; "error", `String error ]
+
+let keeper_meta_read_error_json (name, error) =
+  `Assoc
+    [
+      "source", `String "read_meta";
+      "name", `String name;
+      "error", `String error;
+    ]
+
 let keeper_pause_status_json config =
-  let names = Keeper_meta_store.keeper_names config in
+  let names, keeper_names_known, keeper_name_discovery_read_errors =
+    match Keeper_meta_store.keeper_names_result config with
+    | Ok names -> (names, true, [])
+    | Error error ->
+      ([], false, [ keeper_name_discovery_read_error_json error ])
+  in
   let read_errors_rev, paused_by_meta_rev, paused_by_phase_rev =
     List.fold_left
       (fun (errs, by_meta, by_phase) name ->
@@ -28,15 +44,18 @@ let keeper_pause_status_json config =
   in
   `Assoc
     [ "paused", `Bool (paused_names <> [])
+    ; "keeper_names_known", `Bool keeper_names_known
     ; "paused_count", `Int (List.length paused_names)
     ; "paused_names", `List (List.map (fun name -> `String name) paused_names)
     ; "meta_paused_count", `Int (List.length meta_paused_names)
     ; "phase_paused_count", `Int (List.length phase_paused_names)
+    ; ( "keeper_name_discovery_read_error_count"
+      , `Int (List.length keeper_name_discovery_read_errors) )
+    ; ( "keeper_name_discovery_read_errors"
+      , `List keeper_name_discovery_read_errors )
     ; ( "read_errors"
       , `List
-          (List.rev_map
-             (fun (name, error) ->
-                `Assoc [ "name", `String name; "error", `String error ])
-             read_errors_rev) )
+          (keeper_name_discovery_read_errors
+           @ List.rev_map keeper_meta_read_error_json read_errors_rev) )
     ]
 ;;

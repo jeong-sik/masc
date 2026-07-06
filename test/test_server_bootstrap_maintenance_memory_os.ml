@@ -63,6 +63,49 @@ let with_temp_keepers f =
   Io.For_testing.with_keepers_dir marker f
 ;;
 
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+;;
+
+let with_file_shaped_keepers_config f =
+  let base = Filename.temp_file "consolidation-tick-config-" ".tmp" in
+  Sys.remove base;
+  Unix.mkdir base 0o755;
+  let config_dir = Filename.concat base "config" in
+  Unix.mkdir config_dir 0o755;
+  let keepers_path = Filename.concat config_dir "keepers" in
+  write_file keepers_path "not a keepers directory";
+  let previous = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" previous;
+      Config_dir_resolver.reset ();
+      rm_rf base)
+    (fun () ->
+       Unix.putenv "MASC_CONFIG_DIR" config_dir;
+       Config_dir_resolver.reset ();
+       f ~keepers_path)
+;;
+
 let with_prompts f =
   let root =
     match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -204,6 +247,23 @@ let test_parallel_timeout_per_keeper () =
           Alcotest.(check int) "fast keeper unchanged" fast_count_before fast_count_after))))
 ;;
 
+let test_fact_store_discovery_failure_is_typed_for_tick () =
+  with_file_shaped_keepers_config (fun ~keepers_path ->
+    match
+      Server_bootstrap_maintenance.For_testing.memory_os_fact_store_keeper_ids_for_tick
+        ~site:"unit-test"
+    with
+    | Ok keeper_ids ->
+      Alcotest.failf
+        "expected keeper discovery failure, got %d keeper ids"
+        (List.length keeper_ids)
+    | Error error ->
+      Alcotest.(check bool)
+        "error mentions keepers path"
+        true
+        (String_util.contains_substring_ci error keepers_path))
+;;
+
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -220,6 +280,10 @@ let () =
             "parallel per-keeper timeout"
             `Quick
             test_parallel_timeout_per_keeper
+        ; Alcotest.test_case
+            "fact-store discovery failure is typed for tick"
+            `Quick
+            test_fact_store_discovery_failure_is_typed_for_tick
         ] )
     ]
 ;;

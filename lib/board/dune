@@ -18,6 +18,7 @@
   board_curation
   board_dispatch
   board_effect_hooks
+  board_mention_backfill
   board_metrics_hooks
   board_moderation
   board_paths

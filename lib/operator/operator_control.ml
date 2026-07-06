@@ -103,10 +103,11 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
         (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
       let* () = validate_target_type "workspace" request in
-      let status =
-        match Workspace.resume ctx.config ~by:request.actor with
-        | `Resumed -> "resumed"
-        | `Already_running -> "already_running"
+      let* status =
+        Workspace.resume_result ctx.config ~by:request.actor
+        |> Result.map (function
+          | `Resumed -> "resumed"
+          | `Already_running -> "already_running")
       in
       workspace_action_result request (`Assoc [ ("status", `String status) ])
   | "social_sweep" ->
@@ -467,10 +468,8 @@ let confirm_json ?actor_hint (ctx : _ context) args :
   match get_string_opt args "confirm_token" with
   | None -> Error "confirm_token is required"
   | Some confirm_token -> (
-      match
-        raw_pending_confirms ctx.config
-        |> List.find_opt (fun entry -> String.equal entry.token confirm_token)
-      with
+      let* pending_confirms = raw_pending_confirms_result ctx.config in
+      match List.find_opt (fun entry -> String.equal entry.token confirm_token) pending_confirms with
       | None -> Error "pending confirmation not found"
       | Some entry when pending_confirm_expired entry ->
           let* () = remove_pending_confirm ctx.config confirm_token in

@@ -24,10 +24,16 @@ val supervise_keepalive :
 
 (** {1 Sweep and Recovery} *)
 
-val pending_hitl_approval_keeper_names : Workspace.config -> string list
+val pending_hitl_approval_keeper_names_result :
+  Workspace.config -> (string list, string) result
 (** Return persisted keeper names that currently have a pending HITL
-    approval. Used by [sweep_and_recover] to surface otherwise silent
-    chat stalls without changing approval/resume behavior. *)
+    approval, or the keeper-name discovery read error. Used by
+    [sweep_and_recover] to surface otherwise silent chat stalls without
+    changing approval/resume behavior. *)
+
+val pending_hitl_approval_keeper_names : Workspace.config -> string list
+(** Compatibility wrapper around {!pending_hitl_approval_keeper_names_result}.
+    Logs discovery failure and returns [[]] for legacy list callers. *)
 
 val sweep_and_recover :
      load_or_materialize_keeper_meta:

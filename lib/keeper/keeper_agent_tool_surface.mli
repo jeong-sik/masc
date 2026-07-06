@@ -70,6 +70,13 @@ val owned_active_task_id_for_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
 
+val owned_active_task_id_result_for_meta :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (Keeper_id.Task_id.t option, string) result
+(** Result-returning variant for callers where an unreadable backlog must not
+    be interpreted as "no active task". *)
+
 (** Field-level merge for [write_meta_with_merge]. *)
 val merge_current_task_id :
   latest:Keeper_meta_contract.keeper_meta ->

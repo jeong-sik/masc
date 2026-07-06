@@ -228,9 +228,10 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
 ;;
 
 let append_to_store (entry : append_entry) =
-  try Dated_jsonl.append entry.store entry.json with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  match Dated_jsonl.append_result entry.store entry.json with
+  | Ok () -> ()
+  | Error msg ->
+    let exn = Sys_error msg in
     let trace_id = entry.trace_id in
     Keeper_fd_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
     Keeper_disk_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
@@ -238,7 +239,7 @@ let append_to_store (entry : append_entry) =
       "keeper_tool_call_log: append failed for %s/%s: %s"
       entry.keeper_name
       entry.tool_name
-      (Printexc.to_string exn);
+      msg;
     record_append_coverage_gap
       ~store:entry.store
       ~keeper_name:entry.keeper_name

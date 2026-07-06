@@ -72,6 +72,17 @@ val emit_assigned :
   unit ->
   assignment_id
 
+val emit_assigned_result :
+  agent_id:string ->
+  profile:string ->
+  tool_list:string list ->
+  ?allow_set:string list ->
+  ?deny_set:string list ->
+  ?config_hash:string ->
+  ?reason:string ->
+  unit ->
+  (assignment_id, string) result
+
 (** Emit a [Called] event linked to the agent's latest assignment.
     Returns [None] when no assignment exists for the agent. *)
 val emit_called :
@@ -81,6 +92,14 @@ val emit_called :
   source:string ->
   unit ->
   assignment_id option
+
+val emit_called_result :
+  agent_id:string ->
+  tool_name:string ->
+  ?arguments_hash:string ->
+  source:string ->
+  unit ->
+  (assignment_id option, string) result
 
 (** Emit a [Completed] event. The caller must supply the [assignment_id]
     (from [emit_called] or direct context). *)
@@ -92,6 +111,15 @@ val emit_completed :
   ?error_kind:error_kind ->
   unit ->
   unit
+
+val emit_completed_result :
+  assignment_id:assignment_id ->
+  tool_name:string ->
+  success:bool ->
+  duration_ms:float ->
+  ?error_kind:error_kind ->
+  unit ->
+  (unit, string) result
 
 (** Look up the most recent [assignment_id] for an agent. *)
 val find_latest_assignment_id : agent_id:string -> assignment_id option

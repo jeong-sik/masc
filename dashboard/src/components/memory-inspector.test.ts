@@ -44,8 +44,8 @@ function turnRecordsPayload() {
       selection_policy: {
         keeper_scope: 'masc-improver',
         shared_scope: '_shared',
-        facts_source: 'Keeper_memory_os_io.read_facts_tail',
-        shared_facts_source: 'Keeper_memory_os_io.read_facts_all',
+        facts_source: 'Keeper_memory_os_io.read_facts_tail_with_errors',
+        shared_facts_source: 'Keeper_memory_os_io.read_facts_all_with_errors',
         episodes_source: 'Keeper_memory_os_io.read_episodes_tail',
         dashboard_fact_tail_limit: 384,
         dashboard_episode_tail_limit: 12,
@@ -356,8 +356,8 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('masc-improver + _shared')
     expect(container.textContent).toContain('private + shared recall tiers')
     expect(container.textContent).toContain('800B memory_os_recall')
-    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_tail')
-    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_all')
+    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_tail_with_errors')
+    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_all_with_errors')
     expect(container.textContent).toContain('dashboard 384 · prompt 8')
     expect(container.textContent).toContain('_shared · prompt 4')
     expect(container.textContent).toContain('dashboard 12 · prompt 2')

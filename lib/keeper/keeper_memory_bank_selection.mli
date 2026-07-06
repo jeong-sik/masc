@@ -1,28 +1,5 @@
 val state_start_re : Re.re
 val state_end_re : Re.re
-type alert_channel_result =
-  Keeper_memory_policy.alert_channel_result = {
-  channel : string;
-  attempted : bool;
-  success : bool;
-  attempts : int;
-  detail : string option;
-}
-type interesting_alert_result =
-  Keeper_memory_policy.interesting_alert_result = {
-  enabled : bool;
-  triggered : bool;
-  score : float;
-  threshold : float;
-  reasons : string list;
-  keywords : string list;
-  alert_id : string option;
-  channels : alert_channel_result list;
-  retry_queued : bool;
-  deadlettered : bool;
-}
-val empty_interesting_alert_result : interesting_alert_result
-val alert_channel_result_to_json : alert_channel_result -> Yojson.Safe.t
 type keeper_state_snapshot =
   Keeper_memory_policy.keeper_state_snapshot = {
   priority : int option;

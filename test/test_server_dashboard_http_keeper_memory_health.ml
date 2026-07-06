@@ -58,6 +58,12 @@ let int_field name json =
   | _ -> Alcotest.failf "expected int field %S" name
 ;;
 
+let bool_field name json =
+  match assoc_field name json with
+  | Some (`Bool value) -> value
+  | _ -> Alcotest.failf "expected bool field %S" name
+;;
+
 let float_field name json =
   match assoc_field name json with
   | Some (`Float f) -> f
@@ -310,6 +316,16 @@ let test_empty_store_has_no_keepers_and_zero_totals () =
   let base = fresh_dir "masc-memory-health-empty" in
   let json = Health.keeper_memory_health_http_json ~base_path:base in
   Alcotest.(check (list string)) "no keepers" [] (keeper_ids json);
+  Alcotest.(check bool) "keeper ids known" true (bool_field "keeper_ids_known" json);
+  Alcotest.(check int)
+    "no keeper id discovery read errors"
+    0
+    (int_field "keeper_id_discovery_read_error_count" json);
+  Alcotest.(check int)
+    "no keeper read errors"
+    0
+    (int_field "keeper_read_error_count" json);
+  Alcotest.(check int) "no read errors" 0 (int_field "read_error_count" json);
   Alcotest.(check int) "totals.facts zero" 0 (int_field "facts" (totals json));
   Alcotest.(check int) "totals.facts_bytes zero" 0 (int_field "facts_bytes" (totals json))
 ;;
@@ -324,8 +340,6 @@ let test_skips_corrupt_jsonl_keeper () =
     ~keepers_dir
     ~keeper_id:"good"
     [ fact ~now "valid durable row" ];
-  (* A malformed facts.jsonl makes the strict GC read raise; the route must skip
-     that keeper rather than abort the whole snapshot (the documented behavior). *)
   let broken_path = Io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id:"broken" in
   Out_channel.with_open_text broken_path (fun oc ->
     Out_channel.output_string oc "{ this is not valid json\n");
@@ -334,6 +348,59 @@ let test_skips_corrupt_jsonl_keeper () =
     "corrupt keeper skipped, valid one kept"
     [ "good" ]
     (keeper_ids json)
+  ;
+  Alcotest.(check int)
+    "one keeper read error"
+    1
+    (int_field "keeper_read_error_count" json);
+  Alcotest.(check int) "one combined read error" 1 (int_field "read_error_count" json);
+  let errors = list_field "keeper_read_errors" json in
+  (match errors with
+   | [ error ] ->
+     Alcotest.(check string) "read error keeper" "broken" (string_field "keeper_id" error);
+     Alcotest.(check string)
+       "read error source"
+       "fact_store_parse"
+       (string_field "source" error);
+     Alcotest.(check string) "read error path" broken_path (string_field "path" error);
+     Alcotest.(check int) "read error line" 1 (int_field "line_index" error)
+   | _ -> Alcotest.fail "expected one keeper read error");
+  Alcotest.(check int)
+    "combined read errors mirror keeper read errors"
+    1
+    (List.length (list_field "read_errors" json))
+;;
+
+let test_surfaces_keeper_id_discovery_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = fresh_dir "masc-memory-health-keeper-id-failure" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let masc_dir = Filename.dirname keepers_dir in
+  if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o755;
+  Out_channel.with_open_text keepers_dir (fun oc ->
+    Out_channel.output_string oc "not a keepers directory\n");
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  Alcotest.(check (list string)) "no keepers on discovery failure" [] (keeper_ids json);
+  Alcotest.(check bool) "keeper ids unknown" false (bool_field "keeper_ids_known" json);
+  Alcotest.(check int)
+    "one discovery read error"
+    1
+    (int_field "keeper_id_discovery_read_error_count" json);
+  Alcotest.(check int)
+    "no keeper read errors"
+    0
+    (int_field "keeper_read_error_count" json);
+  Alcotest.(check int) "one combined read error" 1 (int_field "read_error_count" json);
+  let errors = list_field "keeper_id_discovery_read_errors" json in
+  match errors with
+  | [ error ] ->
+    Alcotest.(check string)
+      "read error source"
+      "list_fact_store_keeper_ids_for_keepers_dir"
+      (string_field "source" error);
+    Alcotest.(check string) "read error path" keepers_dir (string_field "path" error)
+  | _ -> Alcotest.fail "expected one keeper id discovery read error"
 ;;
 
 let () =
@@ -370,5 +437,9 @@ let () =
             "skips a keeper with a corrupt facts.jsonl"
             `Quick
             test_skips_corrupt_jsonl_keeper
+        ; Alcotest.test_case
+            "surfaces keeper id discovery failure"
+            `Quick
+            test_surfaces_keeper_id_discovery_failure
         ] )
     ]

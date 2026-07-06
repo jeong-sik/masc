@@ -894,6 +894,8 @@ let assert_dashboard_runtime_probe_reachable runtime =
     Yojson.Safe.Util.(member "http_status" reachable_provider |> to_int);
   check int "model count" 1
     Yojson.Safe.Util.(member "model_count" reachable_provider |> to_int);
+  check string "model count parse status" "parsed"
+    Yojson.Safe.Util.(member "model_count_parse_status" reachable_provider |> to_string);
   let () =
     check bool "payload redacts inline token" false
       (String_util.contains_substring
@@ -901,6 +903,31 @@ let assert_dashboard_runtime_probe_reachable runtime =
          "rp-test-token")
   in
   ()
+
+let assert_dashboard_runtime_probe_surfaces_model_count_parse_error runtime =
+  let reachable_json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+         Ok (200, [ "content-type", "application/json" ], "{not-json"))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let reachable_provider = first_provider_probe reachable_json in
+  check string "provider still reports HTTP reachability" "reachable"
+    Yojson.Safe.Util.(member "status" reachable_provider |> to_string);
+  check bool "provider reachable" true
+    Yojson.Safe.Util.(member "reachable" reachable_provider |> to_bool);
+  check bool "probe still reached HTTP endpoint" true
+    Yojson.Safe.Util.(member "probe_ok" reachable_json |> to_bool);
+  check bool "model count is unknown after parse failure" true
+    (Yojson.Safe.Util.member "model_count" reachable_provider = `Null);
+  check string "model count parse status" "parse_error"
+    Yojson.Safe.Util.(member "model_count_parse_status" reachable_provider |> to_string);
+  let parse_error =
+    Yojson.Safe.Util.(member "model_count_parse_error" reachable_provider |> to_string)
+  in
+  check bool "parse error detail is present" true (String.length parse_error > 0)
 
 let assert_dashboard_runtime_probe_missing_auth runtime =
   dashboard_probe_missing_auth_calls := 0;
@@ -955,6 +982,7 @@ let assert_dashboard_runtime_probe_redacts_url_credentials () =
 let test_dashboard_runtime_probe_reachability_contracts () =
   let runtime = runtime_or_fail () in
   assert_dashboard_runtime_probe_reachable runtime;
+  assert_dashboard_runtime_probe_surfaces_model_count_parse_error runtime;
   assert_dashboard_runtime_probe_redacts_url_credentials ();
   let env_key = "MASC_TEST_RUNTIME_PROBE_TOKEN_MISSING_6F4C1D7A" in
   Unix.putenv env_key "";

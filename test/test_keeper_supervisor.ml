@@ -555,8 +555,40 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       in
       submit blocked.name;
       submit "not-persisted";
+      (match Sup.pending_hitl_approval_keeper_names_result config with
+       | Ok names ->
+         check (list string)
+           "result only persisted pending keeper is surfaced"
+           [ blocked.name ]
+           names
+       | Error err -> fail err);
       check (list string) "only persisted pending keeper is surfaced"
         [ blocked.name ]
+        (Sup.pending_hitl_approval_keeper_names config))
+
+let test_pending_hitl_approval_keeper_names_reports_discovery_failure () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _workspace =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      let keeper_dir = Keeper_types_profile.keeper_dir config in
+      cleanup_dir keeper_dir;
+      write_file keeper_dir "not a keeper directory";
+      (match Sup.pending_hitl_approval_keeper_names_result config with
+       | Ok names ->
+         failf
+           "expected keeper-name discovery failure, got %d names"
+           (List.length names)
+       | Error err ->
+         check bool "discovery failure is surfaced" true
+           (String_util.contains_substring err "failed to list keeper directory"));
+      check (list string)
+        "compatibility wrapper returns empty list"
+        []
         (Sup.pending_hitl_approval_keeper_names config))
 
 (* Sweep paths that resolve a keeper's runtime id reach
@@ -3547,6 +3579,8 @@ let () =
     "reconcile_gate_recovery", [
       test_case "pending HITL approval names include only persisted keepers" `Quick
         test_pending_hitl_approval_keeper_names_filters_persisted_pending;
+      test_case "pending HITL approval names report discovery failure" `Quick
+        test_pending_hitl_approval_keeper_names_reports_discovery_failure;
       test_case "sweep restores reconcile gate for paused keeper" `Quick
         test_sweep_restores_reconcile_gate_for_paused_keeper;
       test_case "sweep warns for pending HITL approval" `Quick

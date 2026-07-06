@@ -79,17 +79,24 @@ let task_context config ~task_id acc =
       let acc = note acc (Printf.sprintf "task %s not found" task_id) in
       `Assoc [ "task_id", `String task_id; "found", `Bool false ], acc
     | Some task ->
-      let task_goal_id =
-        let index = Workspace_goal_index.build_task_goal_index_for_config config in
-        match Hashtbl.find_opt index task_id with
-        | Some (g :: _) -> Some g
-        | Some [] | None -> None
+      let task_goal_id, goal_id_read_error, acc =
+        match Workspace_goal_index.build_task_goal_index_for_config_result config with
+        | Ok index ->
+          ( (match Hashtbl.find_opt index task_id with
+             | Some (g :: _) -> Some g
+             | Some [] | None -> None)
+          , None
+          , acc )
+        | Error msg ->
+          let message = Workspace_goal_index.goal_task_links_read_failed_message msg in
+          None, Some message, note acc message
       in
       `Assoc
         [ "task_id", `String task_id
         ; "title", `String task.title
         ; "status", `String (Masc_domain.task_status_to_string task.task_status)
         ; "goal_id", Json_util.string_opt_to_json task_goal_id
+        ; "goal_id_read_error", Json_util.string_opt_to_json goal_id_read_error
         ; "found", `Bool true
         ], acc
   with

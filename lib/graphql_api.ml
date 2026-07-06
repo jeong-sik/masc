@@ -30,6 +30,7 @@ type 'a connection = {
   edges: 'a edge list;
   page_info: page_info;
   total_count: int;
+  read_errors: string list;
 }
 
 type task_status_info = {
@@ -50,16 +51,36 @@ let default_first = 50
 let encode_cursor ~kind value =
   Base64.encode_string (kind ^ ":" ^ value)
 
-let decode_cursor ~kind cursor =
+type cursor_decode_error =
+  | Cursor_base64_decode_error of { kind : string; message : string }
+  | Cursor_kind_mismatch of { expected_kind : string }
+
+let cursor_decode_error_to_string = function
+  | Cursor_base64_decode_error { kind; message } ->
+      Printf.sprintf "invalid %s cursor: base64 decode failed: %s" kind message
+  | Cursor_kind_mismatch { expected_kind } ->
+      Printf.sprintf
+        "invalid %s cursor: decoded cursor kind did not match expected kind"
+        expected_kind
+
+let decode_cursor_result ~kind cursor =
   match Base64.decode cursor with
   | Ok decoded ->
       let prefix = kind ^ ":" in
       let prefix_len = String.length prefix in
       if String.starts_with decoded ~prefix then
-        Some (String.sub decoded prefix_len (String.length decoded - prefix_len))
+        Ok (String.sub decoded prefix_len (String.length decoded - prefix_len))
       else
-        None
-  | Error _ -> None
+        Error (Cursor_kind_mismatch { expected_kind = kind })
+  | Error (`Msg message) -> Error (Cursor_base64_decode_error { kind; message })
+
+let decode_cursor ~kind cursor =
+  match decode_cursor_result ~kind cursor with
+  | Ok value -> Some value
+  | Error err ->
+      Log.Misc.warn "graphql cursor decode failed: %s"
+        (cursor_decode_error_to_string err);
+      None
 
 let clamp_first = function
   | None -> default_first
@@ -81,6 +102,28 @@ let drop_after_id id_of items after_id =
         | _ :: xs -> loop xs
       in
       loop items
+
+let decode_after_cursor ~kind after =
+  match after with
+  | None -> (None, [])
+  | Some cursor -> (
+      match decode_cursor_result ~kind cursor with
+      | Ok value -> (Some value, [])
+      | Error err -> (None, [ cursor_decode_error_to_string err ]))
+
+let decode_message_after_cursor after =
+  match decode_after_cursor ~kind:"message" after with
+  | None, errors -> (None, errors)
+  | Some raw_seq, [] -> (
+      match int_of_string_opt raw_seq with
+      | Some seq when seq >= 0 -> (Some seq, [])
+      | Some _ ->
+          ( None
+          , [ "invalid message cursor: decoded sequence must be non-negative" ] )
+      | None ->
+          (None, [ "invalid message cursor: decoded value must be an integer" ])
+      )
+  | Some _, errors -> (None, errors)
 
 let task_status_info_of_task (task : Masc_domain.task) =
   let status = Masc_domain.task_status_to_string task.task_status in
@@ -356,6 +399,12 @@ let message_typ =
         ~resolve:(fun _ (message : Masc_domain.message) -> message.relevance);
     ]
 
+let read_errors_field () =
+  Schema.field "readErrors"
+    ~typ:(Schema.non_null (Schema.list (Schema.non_null Schema.string)))
+    ~args:Arg.[]
+    ~resolve:(fun _ conn -> conn.read_errors)
+
 let workspace_state_typ =
   Schema.obj "WorkspaceState"
     ~fields:[
@@ -451,6 +500,7 @@ let task_connection_typ =
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
         ~resolve:(fun _ conn -> conn.total_count);
+      read_errors_field ();
     ]
 
 let agent_connection_typ =
@@ -468,6 +518,7 @@ let agent_connection_typ =
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
         ~resolve:(fun _ conn -> conn.total_count);
+      read_errors_field ();
     ]
 
 let message_connection_typ =
@@ -485,6 +536,7 @@ let message_connection_typ =
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
         ~resolve:(fun _ conn -> conn.total_count);
+      read_errors_field ();
     ]
 
 let graphql_error message =
@@ -523,34 +575,62 @@ let variables_of_yojson = function
       List.map (fun (k, v) -> (k, const_value_of_yojson v)) fields
   | Some _ -> []
 
-let get_agents config : Masc_domain.agent list =
+let get_agents config : Masc_domain.agent list * string list =
   let dir = Workspace_utils.agents_dir config in
-  Workspace_utils.list_dir config dir
-  |> List.filter (fun name -> Filename.check_suffix name ".json")
-  |> List.filter_map (fun name ->
-      let path = Filename.concat dir name in
-      let json = Workspace_utils.read_json config path in
-      match Masc_domain.agent_of_yojson json with
-      | Ok agent -> Some agent
-      | Error e ->
-          Log.Workspace.debug "get_agents: skipping invalid agent file %s: %s" name e;
-          None)
-  |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) -> String.compare a.name b.name)
+  match Workspace_utils.list_dir_result config dir with
+  | Error err -> ([], [err])
+  | Ok names ->
+      let agents, errors =
+        names
+        |> List.filter (fun name -> Filename.check_suffix name ".json")
+        |> List.sort String.compare
+        |> List.fold_left
+             (fun (agents, errors) name ->
+                let path = Filename.concat dir name in
+                match Workspace_utils.read_json_result config path with
+                | Error err -> (agents, err :: errors)
+                | Ok json ->
+                    (match Masc_domain.agent_of_yojson json with
+                     | Ok agent -> (agent :: agents, errors)
+                     | Error err ->
+                         ( agents
+                         , Printf.sprintf "invalid agent file %s: %s" path err :: errors )))
+             ([], [])
+      in
+      ( List.sort
+          (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
+             String.compare a.name b.name)
+          agents
+      , List.rev errors )
 
-let get_messages config : Masc_domain.message list =
+let get_messages config : Masc_domain.message list * string list =
   let dir = Workspace_utils.messages_dir config in
-  Workspace_utils.list_dir config dir
-  |> List.filter Workspace.is_valid_filename
-  |> List.filter (fun name -> Filename.check_suffix name ".json")
-  |> List.filter_map (fun name ->
-      let path = Filename.concat dir name in
-      let json = Workspace_utils.read_json config path in
-      match Masc_domain.message_of_yojson json with
-      | Ok msg -> Some msg
-      | Error e ->
-          Log.Workspace.debug "get_messages: skipping invalid message file %s: %s" name e;
-          None)
-  |> List.sort (fun (a : Masc_domain.message) (b : Masc_domain.message) -> compare a.seq b.seq)
+  match Workspace_utils.list_dir_result config dir with
+  | Error err -> ([], [err])
+  | Ok names ->
+      let messages, errors =
+        names
+        |> List.filter Workspace.is_valid_filename
+        |> List.filter (fun name -> Filename.check_suffix name ".json")
+        |> List.sort String.compare
+        |> List.fold_left
+             (fun (messages, errors) name ->
+                let path = Filename.concat dir name in
+                match Workspace_utils.read_json_result config path with
+                | Error err -> (messages, err :: errors)
+                | Ok json ->
+                    (match Masc_domain.message_of_yojson json with
+                     | Ok msg -> (msg :: messages, errors)
+                     | Error err ->
+                         ( messages
+                         , Printf.sprintf "invalid message file %s: %s" path err :: errors )))
+             ([], [])
+      in
+      ( List.sort
+          (fun (a : Masc_domain.message) (b : Masc_domain.message) ->
+             compare a.seq b.seq)
+          messages
+      , List.rev errors )
 
 let tasks_connection config first after =
   let tasks : Masc_domain.task list =
@@ -559,7 +639,7 @@ let tasks_connection config first after =
     else
       []
   in
-  let after_id = Option.bind after (decode_cursor ~kind:"task") in
+  let after_id, cursor_read_errors = decode_after_cursor ~kind:"task" after in
   let cursor_of (task : Masc_domain.task) = encode_cursor ~kind:"task" task.id in
   let items_after = drop_after_id (fun (t : Masc_domain.task) -> t.id) tasks after_id in
   let first = clamp_first first in
@@ -571,16 +651,21 @@ let tasks_connection config first after =
     | [] -> None
     | edge :: _ -> Some edge.cursor
   in
-  { edges; page_info = { has_next_page; end_cursor }; total_count = List.length tasks }
+  {
+    edges;
+    page_info = { has_next_page; end_cursor };
+    total_count = List.length tasks;
+    read_errors = cursor_read_errors;
+  }
 
 let agents_connection config first after =
-  let agents : Masc_domain.agent list =
+  let agents, read_errors =
     if Workspace_utils.is_initialized config then
       get_agents config
     else
-      []
+      ([], [])
   in
-  let after_id = Option.bind after (decode_cursor ~kind:"agent") in
+  let after_id, cursor_read_errors = decode_after_cursor ~kind:"agent" after in
   let cursor_of (agent : Masc_domain.agent) = encode_cursor ~kind:"agent" agent.name in
   let items_after = drop_after_id (fun (a : Masc_domain.agent) -> a.name) agents after_id in
   let first = clamp_first first in
@@ -592,19 +677,21 @@ let agents_connection config first after =
     | [] -> None
     | edge :: _ -> Some edge.cursor
   in
-  { edges; page_info = { has_next_page; end_cursor }; total_count = List.length agents }
+  {
+    edges;
+    page_info = { has_next_page; end_cursor };
+    total_count = List.length agents;
+    read_errors = read_errors @ cursor_read_errors;
+  }
 
 let messages_connection config first after =
-  let messages : Masc_domain.message list =
+  let messages, read_errors =
     if Workspace_utils.is_initialized config then
       get_messages config
     else
-      []
+      ([], [])
   in
-  let after_seq =
-    Option.bind after (fun cursor ->
-      Option.bind (decode_cursor ~kind:"message" cursor) int_of_string_opt)
-  in
+  let after_seq, cursor_read_errors = decode_message_after_cursor after in
   let messages_after =
     match after_seq with
     | None -> messages
@@ -623,7 +710,12 @@ let messages_connection config first after =
     | [] -> None
     | edge :: _ -> Some edge.cursor
   in
-  { edges; page_info = { has_next_page; end_cursor }; total_count = List.length messages }
+  {
+    edges;
+    page_info = { has_next_page; end_cursor };
+    total_count = List.length messages;
+    read_errors = read_errors @ cursor_read_errors;
+  }
 
 let schema =
   Schema.schema [

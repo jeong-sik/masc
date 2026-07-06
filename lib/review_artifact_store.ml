@@ -29,12 +29,9 @@ let write_file path content =
 ;;
 
 let append_index index_path event =
-  try
-    Keeper_types_support.append_jsonl_line index_path event;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
+  match Keeper_types_support.append_jsonl_line_result index_path event with
+  | Ok () -> Ok ()
+  | Error msg -> Error (Printf.sprintf "%s: %s" index_path msg)
 ;;
 
 let ( let* ) = Result.bind

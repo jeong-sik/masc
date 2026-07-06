@@ -409,7 +409,7 @@ let test_board_auto_resume_allows_auto_paused_keeper () =
     (KKS.paused_meta_allows_board_auto_resume meta)
 
 let test_board_wakeup_selection_keeps_explicit_mentions () =
-  let selected, dropped =
+  let selected =
     KKS.select_board_wakeup_candidates
       [
         "a", Some KWOBS.Thread_reply_after_self_comment;
@@ -417,46 +417,65 @@ let test_board_wakeup_selection_keeps_explicit_mentions () =
         "c", Some KWOBS.Explicit_mention;
       ]
   in
-  (* Explicit mentions short-circuit: they wake unconditionally, the
-     non-explicit candidate is excluded, and there are no cap drops. *)
+  (* Explicit mentions keep their typed reason, and other typed reasons are
+     still delivered. A typed wake reason is not suppressed by fanout ordering. *)
   check (list (pair string string)) "selected explicit wakeups"
-    [ "b", "explicit_mention"; "c", "explicit_mention" ]
-    (labeled selected);
-  check int "no drops when explicit present" 0 dropped
+    [
+      "a", "thread_reply_after_self_comment";
+      "b", "explicit_mention";
+      "c", "explicit_mention";
+    ]
+    (labeled selected)
 
 let test_board_wakeup_selection_drops_none_reasons () =
-  let selected, dropped =
+  let selected =
     KKS.select_board_wakeup_candidates
       [
         "a", Some KWOBS.Thread_reply_after_self_comment;
         "b", None;
-        "c", Some (KWOBS.Stigmergy { score = 10 });
+        "c", Some (KWOBS.Board_comment_read_error "comments unavailable");
       ]
   in
   (* [None] reasons (no relevance match) are dropped; real reasons survive in
-     candidate order and the stigmergy score is carried end-to-end. *)
+     candidate order. *)
   check (list (pair string string)) "None dropped, real reasons kept"
-    [ "a", "thread_reply_after_self_comment"; "c", "stigmergy: score=10" ]
-    (labeled selected);
-  check int "no cap drops under total limit" 0 dropped
+    [ "a", "thread_reply_after_self_comment"; "c", "board_comment_read_error" ]
+    (labeled selected)
 
-let test_board_wakeup_selection_caps_total_non_explicit () =
-  let selected, dropped =
+let test_board_wakeup_selection_keeps_comment_read_errors () =
+  let selected =
     KKS.select_board_wakeup_candidates
-      ~total_limit:2
       [
-        "a", Some (KWOBS.Stigmergy { score = 5 });
+        "a", None;
+        "b", Some (KWOBS.Board_comment_read_error "comments unavailable");
+        "c", Some KWOBS.Thread_reply_after_self_comment;
+      ]
+  in
+  check (list (pair string string)) "comment read error remains a wake reason"
+    [
+      "b", "board_comment_read_error";
+      "c", "thread_reply_after_self_comment";
+    ]
+    (labeled selected)
+
+let test_board_wakeup_selection_keeps_all_typed_reasons () =
+  let selected =
+    KKS.select_board_wakeup_candidates
+      [
+        "a", Some (KWOBS.Board_comment_read_error "comments unavailable");
         "b", Some KWOBS.Thread_reply_after_self_comment;
-        "c", Some (KWOBS.Stigmergy { score = 5 });
+        "c", Some (KWOBS.Board_comment_read_error "comments unavailable");
         "d", Some KWOBS.Thread_reply_after_self_comment;
       ]
   in
-  (* Non-explicit reasons compete for [total_limit] slots in candidate order;
-     the overflow is dropped. *)
-  check (list (pair string string)) "first two non-explicit kept in order"
-    [ "a", "stigmergy: score=5"; "b", "thread_reply_after_self_comment" ]
-    (labeled selected);
-  check int "overflow dropped" 2 dropped
+  check (list (pair string string)) "all typed wake reasons kept in order"
+    [
+      "a", "board_comment_read_error";
+      "b", "thread_reply_after_self_comment";
+      "c", "board_comment_read_error";
+      "d", "thread_reply_after_self_comment";
+    ]
+    (labeled selected)
 
 let test_after_wake_idle_woken_continues () =
   let next = Unix.gettimeofday () +. 60.0 in
@@ -612,8 +631,10 @@ let () =
         `Quick test_board_wakeup_selection_keeps_explicit_mentions;
       test_case "None reasons are dropped, real reasons kept"
         `Quick test_board_wakeup_selection_drops_none_reasons;
-      test_case "total non-explicit fanout is capped"
-        `Quick test_board_wakeup_selection_caps_total_non_explicit;
+      test_case "comment read errors remain typed wake reasons"
+        `Quick test_board_wakeup_selection_keeps_comment_read_errors;
+      test_case "all typed reasons are delivered"
+        `Quick test_board_wakeup_selection_keeps_all_typed_reasons;
       test_case "operator pauses are not board-auto-resumed"
         `Quick test_board_auto_resume_rejects_operator_pause;
       test_case "auto-paused keepers can be board-auto-resumed"

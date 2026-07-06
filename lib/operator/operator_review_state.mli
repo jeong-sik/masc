@@ -40,6 +40,11 @@ val compare_review_decision :
 
 (** {1 I/O} *)
 
+(** Read all stored review decisions with explicit read/decode
+    failure. Missing state file means no stored decisions. *)
+val read_review_decisions_result :
+  Workspace_utils.config -> (review_decision list, string) result
+
 (** Read all stored review decisions (raw order, no filtering). *)
 val read_review_decisions :
   Workspace_utils.config -> review_decision list
@@ -56,6 +61,14 @@ val recent_review_decisions :
   Workspace_utils.config ->
   review_decision list
 
+(** Result-returning variant of {!recent_review_decisions}. *)
+val recent_review_decisions_result :
+  ?limit:int ->
+  ?target_type:string ->
+  ?target_id:string ->
+  Workspace_utils.config ->
+  (review_decision list, string) result
+
 (** JSON array of {!recent_review_decisions}. *)
 val recent_review_decisions_json :
   ?limit:int ->
@@ -63,3 +76,11 @@ val recent_review_decisions_json :
   ?target_id:string ->
   Workspace_utils.config ->
   Yojson.Safe.t
+
+(** Result-returning JSON array of {!recent_review_decisions}. *)
+val recent_review_decisions_json_result :
+  ?limit:int ->
+  ?target_type:string ->
+  ?target_id:string ->
+  Workspace_utils.config ->
+  (Yojson.Safe.t, string) result

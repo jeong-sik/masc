@@ -19,51 +19,128 @@ module Float = Stdlib.Float
 
 include Tool_local_runtime_core
 
-let runtime_snapshot_to_yojson ~include_models
+type runtime_status_read_error =
+  | Runtime_model_fetch_error of
+      { base_url : string
+      ; endpoint : string
+      ; message : string
+      }
+  | Runtime_process_discovery_error of string
+
+type runtime_status_with_errors =
+  { status_json : Yojson.Safe.t
+  ; read_errors : runtime_status_read_error list
+  }
+
+type runtime_status_dependencies =
+  { fetch_models_at : string -> (string * string list, string) result
+  ; discover_processes : unit -> (llama_process list, string) result
+  }
+
+let runtime_status_dependencies = ref { fetch_models_at; discover_processes }
+
+module For_testing = struct
+  let with_dependencies ~fetch_models_at ~discover_processes f =
+    let previous = !runtime_status_dependencies in
+    runtime_status_dependencies := { fetch_models_at; discover_processes };
+    Fun.protect
+      ~finally:(fun () -> runtime_status_dependencies := previous)
+      f
+  ;;
+end
+
+let active_fetch_models_at base_url = (!runtime_status_dependencies).fetch_models_at base_url
+
+let active_discover_processes () =
+  (!runtime_status_dependencies).discover_processes ()
+;;
+
+let runtime_status_read_error_to_string = function
+  | Runtime_model_fetch_error { endpoint; message; base_url = _ } ->
+    Printf.sprintf "model_fetch endpoint=%s: %s" endpoint message
+  | Runtime_process_discovery_error message ->
+    Printf.sprintf "process_discovery: %s" message
+;;
+
+let runtime_status_read_error_to_yojson = function
+  | Runtime_model_fetch_error { base_url; endpoint; message } ->
+    `Assoc
+      [ "source", `String "model_fetch"
+      ; "base_url", `String base_url
+      ; "endpoint", `String endpoint
+      ; "message", `String message
+      ]
+  | Runtime_process_discovery_error message ->
+    `Assoc [ "source", `String "process_discovery"; "message", `String message ]
+;;
+
+let warn_runtime_status_read_errors errors =
+  List.iter
+    (fun error ->
+       Log.Misc.warn
+         "tool_local_runtime_status read_error: %s"
+         (runtime_status_read_error_to_string error))
+    errors
+;;
+
+let runtime_snapshot_to_yojson_with_errors ~include_models
     (snapshot : Local_runtime_pool.runtime_snapshot) =
   let endpoint =
     String.trim snapshot.base_url ^ Masc_network_defaults.openai_models_path
   in
-  let fetched_models =
-    if not include_models then []
+  let fetched_models, model_error_fields, read_errors =
+    if not include_models then [], [], []
     else
-      match fetch_models_at snapshot.base_url with
-      | Ok (_, models) -> models
-      | Error _ -> []
+      match active_fetch_models_at snapshot.base_url with
+      | Ok (_, models) -> models, [], []
+      | Error message ->
+        ( []
+        , [ "model_fetch_error", `String message ]
+        , [ Runtime_model_fetch_error { base_url = snapshot.base_url; endpoint; message } ]
+        )
   in
   let base_fields =
     match Local_runtime_pool.snapshot_to_yojson snapshot with
     | `Assoc fields -> fields
     | json -> [ ("snapshot", json) ]
   in
-  `Assoc
-    (base_fields
-    @ [
-        ("endpoint", `String endpoint);
-        ("models", `List (List.map (fun model -> `String model) fetched_models));
-        ("model_count", `Int (List.length fetched_models));
-      ])
+  ( `Assoc
+      (base_fields
+       @ [ "endpoint", `String endpoint
+         ; "models", `List (List.map (fun model -> `String model) fetched_models)
+         ; "model_count", `Int (List.length fetched_models)
+         ]
+       @ model_error_fields)
+  , read_errors
+  )
 
-let runtime_status_json ?(include_models = true) () =
+let runtime_status_json_with_errors ?(include_models = true) () =
   let runtime_snapshots = Local_runtime_pool.snapshots () in
   let runtime_ports =
     runtime_snapshots
     |> List.filter_map (fun (runtime : Local_runtime_pool.runtime_snapshot) ->
            runtime.port)
   in
-  let process_result = discover_processes () in
-  let processes =
+  let process_result = active_discover_processes () in
+  let processes, process_read_errors =
     match process_result with
-    | Ok values -> values
-    | Error _ -> []
+    | Ok values -> values, []
+    | Error message -> [], [ Runtime_process_discovery_error message ]
   in
   let matching_processes =
     List.filter (process_matches_runtime_ports runtime_ports) processes
   in
-  let runtime_json =
+  let runtime_results =
     runtime_snapshots
-    |> List.map (runtime_snapshot_to_yojson ~include_models)
+    |> List.map (runtime_snapshot_to_yojson_with_errors ~include_models)
   in
+  let runtime_json =
+    runtime_results |> List.map fst
+  in
+  let model_read_errors =
+    runtime_results |> List.concat_map snd
+  in
+  let read_errors = process_read_errors @ model_read_errors in
   let models =
     if not include_models then []
     else
@@ -97,6 +174,11 @@ let runtime_status_json ?(include_models = true) () =
            :: items
          else items)
     |> (fun items ->
+         match process_result with
+         | Ok _ -> items
+         | Error message ->
+           Printf.sprintf "Runtime process discovery failed: %s" message :: items)
+    |> (fun items ->
          if List.exists (fun (proc : llama_process) -> proc.slots_enabled) matching_processes then
            "Matched llama-server process has --slots enabled."
            :: items
@@ -110,29 +192,38 @@ let runtime_status_json ?(include_models = true) () =
              :: items)
     |> List.rev
   in
-  `Assoc
-    [
-      ("server_url", `String Env_config.Local_runtime.server_url);
-      ("endpoint",
-       `String
-         (Env_config.Local_runtime.server_url
-          ^ Masc_network_defaults.openai_models_path));
-      ("source", `String "llama.cpp runtime");
-      ("models", `List (List.map (fun model -> `String model) models));
-      ("model_count", `Int (List.length models));
-      ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
-      ("target_parallelism", `Int configured_capacity);
-      ("managed_gap_to_target", `Int 0);
-      ("runtime_count", `Int (List.length runtime_snapshots));
-      ("healthy_runtime_count", `Int healthy_runtime_count);
-      ("configured_capacity", `Int configured_capacity);
-      ("allocated_slots", `Int allocated_slots);
-      ("measured_ceiling", Json_util.int_opt_to_json measured_ceiling);
-      ("process_count", `Int (List.length processes));
-      ("matching_process_count", `Int (List.length matching_processes));
-      ("runtime_config_errors", `List (List.map (fun item -> `String item) parse_errors));
-      ("runtimes", `List runtime_json);
-      ( "processes",
-        `List (List.map process_to_yojson matching_processes) );
-      ("observations", `List (List.map (fun item -> `String item) observations));
-    ]
+  { status_json =
+      `Assoc
+        [ "server_url", `String Env_config.Local_runtime.server_url
+        ; ( "endpoint"
+          , `String
+              (Env_config.Local_runtime.server_url
+               ^ Masc_network_defaults.openai_models_path) )
+        ; "source", `String "llama.cpp runtime"
+        ; "models", `List (List.map (fun model -> `String model) models)
+        ; "model_count", `Int (List.length models)
+        ; "configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models
+        ; "target_parallelism", `Int configured_capacity
+        ; "managed_gap_to_target", `Int 0
+        ; "runtime_count", `Int (List.length runtime_snapshots)
+        ; "healthy_runtime_count", `Int healthy_runtime_count
+        ; "configured_capacity", `Int configured_capacity
+        ; "allocated_slots", `Int allocated_slots
+        ; "measured_ceiling", Json_util.int_opt_to_json measured_ceiling
+        ; "process_count", `Int (List.length processes)
+        ; "matching_process_count", `Int (List.length matching_processes)
+        ; "runtime_config_errors", `List (List.map (fun item -> `String item) parse_errors)
+        ; "runtime_status_read_error_count", `Int (List.length read_errors)
+        ; ( "runtime_status_read_errors"
+          , `List (List.map runtime_status_read_error_to_yojson read_errors) )
+        ; "runtimes", `List runtime_json
+        ; "processes", `List (List.map process_to_yojson matching_processes)
+        ; "observations", `List (List.map (fun item -> `String item) observations)
+        ]
+  ; read_errors
+  }
+
+let runtime_status_json ?include_models () =
+  let result = runtime_status_json_with_errors ?include_models () in
+  warn_runtime_status_read_errors result.read_errors;
+  result.status_json

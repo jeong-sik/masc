@@ -84,11 +84,10 @@ val record : config:Workspace.config -> record -> (unit, [ `Io of string ]) resu
 (** Append [r] to its keeper's feedback log
     ({!Keeper_types_support.keeper_feedback_log_path}, derived from
     [r.keeper_id]) via the sibling-family writer
-    {!Keeper_types_support.append_jsonl_line} — so the feedback log shares the
+    {!Keeper_types_support.append_jsonl_line_result} — so the feedback log shares the
     .policy/.decisions log family: identical JSONL format and the same
-    size-threshold rotation. [append_jsonl_line]'s underlying [append_file]
-    raises [Sys_error] on an IO fault; it is caught here and returned as [`Io],
-    so a write is never silently dropped. *)
+    size-threshold rotation while returning write failures as [`Io], so a
+    failed write is never silently dropped. *)
 
 val read_tally :
   config:Workspace.config -> keeper_id:string -> (tally, [ `Io of string ]) result

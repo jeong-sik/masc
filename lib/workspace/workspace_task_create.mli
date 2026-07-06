@@ -30,6 +30,7 @@ type add_task_success =
 
 type add_task_error =
   | Backlog_read_failed of string
+  | Archive_read_failed of string
   | Rejected of string
   | Duplicate of { title : string; existing_id : string }
   | Goal_link_write_failed of string
@@ -44,6 +45,7 @@ type batch_add_tasks_success =
 
 type batch_add_tasks_error =
   | Batch_backlog_read_failed of string
+  | Batch_archive_read_failed of string
   | Batch_goal_link_write_failed of string
   | Batch_backlog_write_failed of string
   | Batch_unexpected_error of string

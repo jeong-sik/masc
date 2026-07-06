@@ -161,6 +161,8 @@ let () =
   (match Ledger.record_of_json_result round_trip with
    | Ok record ->
      check "typed decoder preserves keeper_id" (record.keeper_id = "alpha");
+     check "typed decoder preserves trace_id" (record.trace_id = "trace-1");
+     check "typed decoder preserves turn" (record.turn = 3);
      check
        "typed decoder preserves fact keys"
        (record.injected_fact_keys = [ "fact one"; "fact two" ])
@@ -179,6 +181,18 @@ let () =
    | Error (`Invalid_field "injected_fact_keys") ->
      check "invalid fact key list is visible" true
    | _ -> check "invalid fact key list is visible" false);
+  (match
+     Ledger.record_of_json_result
+       (`Assoc
+         [ "keeper_id", `String "alpha"
+         ; "trace_id", `String ""
+         ; "turn", `Int 7
+         ; "injected_fact_keys", `List []
+         ; "injected_episode_keys", `List []
+         ])
+   with
+   | Error (`Invalid_field "trace_id") -> check "empty trace_id is visible" true
+   | _ -> check "empty trace_id is visible" false);
   check
     "known recall failure label stays stable"
     (Ledger.bounded_failure_reason_label "prompt_render_error"

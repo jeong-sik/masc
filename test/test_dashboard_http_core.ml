@@ -76,6 +76,10 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let replace_path_with_file path content =
+  if Sys.file_exists path then cleanup_dir path;
+  write_file path content
+
 let rec mkdir_p path =
   if Sys.file_exists path then ()
   else begin
@@ -83,6 +87,62 @@ let rec mkdir_p path =
     if not (String.equal parent path) then mkdir_p parent;
     Unix.mkdir path 0o755
   end
+
+let test_runtime_trace_receipt_reader_surfaces_parse_errors () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let path = Filename.concat dir "receipts.jsonl" in
+      write_file
+        path
+        (String.concat
+           "\n"
+           [ {|{"keeper_name":"alpha","trace_id":"trace-1","outcome":"receipt_done"}|}
+           ; "{not-json"
+           ; {|["not-object"]|}
+           ]
+         ^ "\n");
+      let rows, read_errors =
+        Server_dashboard_http_keeper_api_scan_summary.read_receipt_rows_with_read_errors
+          ~keeper_name:"alpha"
+          ~trace_id:"trace-1"
+          [ path ]
+      in
+      check int "matching receipt rows" 1 (List.length rows);
+      check int "receipt read errors" 2 (List.length read_errors);
+      let open Yojson.Safe.Util in
+      match read_errors with
+      | [ json_error; row_error ] ->
+        check string "json error source" "runtime_trace_execution_receipt_jsonl"
+          (json_error |> member "source" |> to_string);
+        check string "json error path" path (json_error |> member "path" |> to_string);
+        check int "json error line" 2 (json_error |> member "line_index" |> to_int);
+        check string "json error kind" "json_error"
+          (json_error |> member "kind" |> to_string);
+        check int "row error line" 3 (row_error |> member "line_index" |> to_int);
+        check string "row error kind" "row_not_object"
+          (row_error |> member "kind" |> to_string)
+      | _ -> Alcotest.fail "expected two receipt read errors")
+
+let test_bulk_wakeup_result_surfaces_meta_read_error () =
+  let row =
+    Server_dashboard_http_keeper_api_post.For_testing
+    .bulk_directive_meta_read_error_result_json
+      ~name:"sangsu"
+      ~ok:true
+      ~meta_read_error:"malformed keeper meta"
+      ()
+  in
+  let open Yojson.Safe.Util in
+  check string "keeper name" "sangsu" (row |> member "name" |> to_string);
+  check bool "wakeup still succeeds" true (row |> member "ok" |> to_bool);
+  check string "meta read status" "read_error"
+    (row |> member "meta_read_status" |> to_string);
+  check string "meta read error" "malformed keeper meta"
+    (row |> member "meta_read_error" |> to_string);
+  check bool "best-effort wakeup has no terminal error field" true
+    (row |> member "error" = `Null)
 
 let with_cached_surface_success
       (surface : Server_dashboard_http_cache.cached_surface)
@@ -743,6 +803,165 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
+let test_dashboard_planning_http_json_reports_goal_store_read_failure () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  ignore
+    (Workspace.add_task config ~title:"Planning task" ~priority:3 ~description:"");
+  write_file (Goal_store.goals_path config) "{not-json";
+  write_file (Goal_store.goals_path config ^ ".last-good") "{not-json";
+  let json = Server_dashboard_http.dashboard_planning_http_json ~config in
+  let open Yojson.Safe.Util in
+  check bool "goal store marked unknown" false
+    (json |> member "goal_store_known" |> to_bool);
+  check bool "goal store read error names goals.json" true
+    (contains_substring
+       (json |> member "goal_store_read_error" |> to_string)
+       "goals.json");
+  check int "goals hidden while store unreadable" 0
+    (json |> member "goals" |> to_list |> List.length);
+  check int "task backlog remains observable" 1
+    (json |> member "task_backlog" |> member "todo" |> to_int)
+
+let dashboard_keeper_meta ?(active_goal_ids = []) name trace_id =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String name
+        ; "trace_id", `String trace_id
+        ; "goal", `String "dashboard keeper goal"
+        ; ( "active_goal_ids"
+          , `List (List.map (fun goal_id -> `String goal_id) active_goal_ids)
+          )
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta fixture failed: " ^ err)
+
+let corrupt_goal_store config =
+  write_file (Goal_store.goals_path config) "{not-json";
+  write_file (Goal_store.goals_path config ^ ".last-good") "{not-json"
+
+let test_keeper_config_json_reports_goal_store_read_failure () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let meta =
+    dashboard_keeper_meta
+      ~active_goal_ids:[ "goal-unreadable" ]
+      "keeper-config-goal-store-error"
+      "trace-keeper-config-goal-store-error"
+  in
+  (match Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  corrupt_goal_store config;
+  let status, json = Dashboard_http_keeper.keeper_config_json config meta.name in
+  check bool "keeper config is present" true (status = `OK);
+  let open Yojson.Safe.Util in
+  let workspace = json |> member "workspace" in
+  check bool "active goals marked unknown" false
+    (workspace |> member "active_goals_known" |> to_bool);
+  check bool "active goals read error names goals.json" true
+    (contains_substring
+       (workspace |> member "active_goals_read_error" |> to_string)
+       "goals.json");
+  check int "configured active goal count is retained" 1
+    (workspace |> member "active_goal_count" |> to_int);
+  check int "active goals are not forged from unreadable store" 0
+    (workspace |> member "active_goals" |> to_list |> List.length);
+  check int "missing active goals are unknown, not inferred" 0
+    (workspace |> member "missing_active_goal_ids" |> to_list |> List.length)
+
+let test_keeper_dashboard_json_reports_active_goal_store_read_failure () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let meta =
+    dashboard_keeper_meta
+      ~active_goal_ids:[ "goal-unreadable" ]
+      "keeper-dashboard-goal-store-error"
+      "trace-keeper-dashboard-goal-store-error"
+  in
+  (match Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  corrupt_goal_store config;
+  let json = Dashboard_http_keeper.keepers_dashboard_json config in
+  let open Yojson.Safe.Util in
+  let keeper =
+    match json |> member "keepers" |> to_list with
+    | [ row ] -> row
+    | rows -> failf "expected one keeper row, got %d" (List.length rows)
+  in
+  let tree = keeper |> member "active_goals_tree" in
+  check bool "goal store marked unknown" false
+    (tree |> member "goal_store_known" |> to_bool);
+  check bool "goal store read error names goals.json" true
+    (contains_substring
+       (tree |> member "goal_store_read_error" |> to_string)
+       "goals.json");
+  check bool "goal-task links not evaluated without goals" false
+    (tree |> member "goal_task_links_known" |> to_bool);
+  check bool "goal-task link error is not forged" true
+    (tree |> member "goal_task_links_read_error" = `Null);
+  check int "nodes hidden while goal store unreadable" 0
+    (tree |> member "nodes" |> to_list |> List.length)
+
+let test_dashboard_execution_running_keeper_scan_reports_keeper_name_failure () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  replace_path_with_file
+    (Keeper_types_profile.keeper_dir config)
+    "not a keeper directory";
+  let json =
+    Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+      config
+      (`Assoc [ "keepers", `List [] ])
+  in
+  let open Yojson.Safe.Util in
+  check bool "running keeper names marked unknown" false
+    (json |> member "running_keeper_names_known" |> to_bool);
+  check int "one running keeper read error" 1
+    (json |> member "running_keeper_read_error_count" |> to_int);
+  let read_errors = json |> member "running_keeper_read_errors" |> to_list in
+  check int "running keeper read error length" 1 (List.length read_errors);
+  (match read_errors with
+   | [ error ] ->
+     check string "read error source" "keeper_names_result"
+       (error |> member "source" |> to_string);
+     check bool "read error mentions keepers path" true
+       (contains_substring (error |> member "message" |> to_string) "keepers")
+   | _ -> fail "expected one running keeper read error");
+  check int "keeper rows still empty" 0
+    (json |> member "keepers" |> to_list |> List.length)
+
+let test_dashboard_execution_running_keeper_scan_reports_meta_read_failure () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let keepers_dir = Keeper_types_profile.keeper_dir config in
+  mkdir_p keepers_dir;
+  write_file (Filename.concat keepers_dir "broken.json") "{not-json";
+  let json =
+    Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+      config
+      (`Assoc [ "keepers", `List [] ])
+  in
+  let open Yojson.Safe.Util in
+  check bool "running keeper names remain known" true
+    (json |> member "running_keeper_names_known" |> to_bool);
+  check int "one running keeper meta read error" 1
+    (json |> member "running_keeper_read_error_count" |> to_int);
+  let read_errors = json |> member "running_keeper_read_errors" |> to_list in
+  match read_errors with
+  | [ error ] ->
+    check string "read error source" "read_meta"
+      (error |> member "source" |> to_string);
+    check string "read error keeper" "broken"
+      (error |> member "keeper" |> to_string);
+    check bool "read error message present" true
+      (String.length (error |> member "message" |> to_string) > 0)
+  | _ -> fail "expected one running keeper meta read error"
+
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -796,7 +1015,9 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
   let auth = json |> member "auth" in
   check bool "token_valid false" false (auth |> member "token_valid" |> to_bool);
   check string "missing token code surfaced" "missing_token"
-    (auth |> member "auth_error_code" |> to_string)
+    (auth |> member "auth_error_code" |> to_string);
+  check string "missing token effective role error code surfaced" "missing_token"
+    (auth |> member "effective_role_error_code" |> to_string)
 
 let test_dashboard_shell_auth_json_rejects_stale_token_actor_hint () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -823,6 +1044,10 @@ let test_dashboard_shell_auth_json_rejects_stale_token_actor_hint () =
     (match auth |> member "effective_agent" with `Null -> true | _ -> false);
   check bool "effective role unavailable" true
     (match auth |> member "effective_role" with `Null -> true | _ -> false);
+  check string "effective actor failure code surfaced" "invalid_token"
+    (auth |> member "effective_agent_error_code" |> to_string);
+  check string "effective role failure code surfaced" "invalid_token"
+    (auth |> member "effective_role_error_code" |> to_string);
   check string "invalid token code surfaced" "invalid_token"
     (auth |> member "auth_error_code" |> to_string);
   check bool "keeper message blocked" false
@@ -1141,6 +1366,24 @@ let test_dashboard_fleet_composite_envelope_is_cached () =
     "second fleet-composite poll hits cache (identical generated_at)"
     true (gen1 = gen2)
 
+let test_composite_tool_call_output_parse_failure_is_typed () =
+  let malformed_call = `Assoc [ ("output", `String "{not-json") ] in
+  (match
+     Server_dashboard_http_composite_claims.parse_tool_call_output malformed_call
+   with
+   | Server_dashboard_http_composite_claims.Tool_call_output_parse_error detail ->
+       check bool "parse error detail is preserved" true (String.length detail > 0)
+   | Server_dashboard_http_composite_claims.Tool_call_output_missing ->
+       fail "malformed output must not be reported as missing"
+   | Server_dashboard_http_composite_claims.Tool_call_output_json _ ->
+       fail "malformed output must not be reported as parsed JSON");
+  match Server_dashboard_http_composite_claims.parse_tool_call_output (`Assoc []) with
+  | Server_dashboard_http_composite_claims.Tool_call_output_missing -> ()
+  | Server_dashboard_http_composite_claims.Tool_call_output_parse_error _ ->
+      fail "missing output must not be parse_error"
+  | Server_dashboard_http_composite_claims.Tool_call_output_json _ ->
+      fail "missing output must not be parsed JSON"
+
 let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1193,6 +1436,80 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         3
         (json |> member "configured_keepers" |> to_int))
 
+let test_dashboard_shell_surfaces_persisted_keeper_discovery_failure () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  replace_path_with_file
+    (Keeper_types_profile.keeper_dir config)
+    "not a keeper directory";
+  let json = Server_dashboard_http_core.dashboard_shell_http_json ~light:true config in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int)
+    "persisted keeper count remains zero lower bound"
+    0
+    (json |> member "persisted_keepers" |> to_int);
+  Alcotest.(check bool)
+    "persisted keeper count marked unknown"
+    false
+    (json |> member "persisted_keepers_known" |> to_bool);
+  Alcotest.(check bool)
+    "counts persisted keeper count marked unknown"
+    false
+    (json |> member "counts" |> member "persisted_keepers_known" |> to_bool);
+  Alcotest.(check int)
+    "one keeper count read error"
+    1
+    (json |> member "keeper_count_read_error_count" |> to_int);
+  let read_errors = json |> member "keeper_count_read_errors" |> to_list in
+  Alcotest.(check int) "read error length" 1 (List.length read_errors);
+  match read_errors with
+  | [ error ] ->
+    Alcotest.(check string)
+      "read error source"
+      "keeper_names_result"
+      (error |> member "source" |> to_string);
+    Alcotest.(check bool)
+      "read error mentions keepers path"
+      true
+      (contains_substring (error |> member "message" |> to_string) "keepers")
+  | _ -> Alcotest.fail "expected one keeper count read error"
+
+let test_running_keeper_count_scan_surfaces_meta_read_failure () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let keepers_dir = Keeper_types_profile.keeper_dir config in
+  mkdir_p keepers_dir;
+  write_file (Filename.concat keepers_dir "broken.json") "{not-json";
+  let scan = Dashboard_http_keeper.running_keeper_count_scan config in
+  Alcotest.(check int)
+    "running count remains zero lower bound"
+    0
+    scan.running_keeper_count;
+  Alcotest.(check bool)
+    "running count marked unknown"
+    false
+    scan.running_keeper_count_known;
+  Alcotest.(check int)
+    "one running count read error"
+    1
+    (List.length scan.running_keeper_count_read_errors);
+  let open Yojson.Safe.Util in
+  match scan.running_keeper_count_read_errors with
+  | [ error ] ->
+    Alcotest.(check string)
+      "read error source"
+      "read_meta"
+      (error |> member "source" |> to_string);
+    Alcotest.(check string)
+      "read error keeper"
+      "broken"
+      (error |> member "keeper" |> to_string);
+    Alcotest.(check bool)
+      "read error message present"
+      true
+      (String.length (error |> member "message" |> to_string) > 0)
+  | _ -> Alcotest.fail "expected one running count read error"
+
 let test_dashboard_shell_light_counts_agents_from_summary_fields () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1223,6 +1540,60 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
     "light shell counts active non-keeper agents from summary fields"
     1
     (json |> member "counts" |> member "agents" |> to_int)
+
+let checkpoint_inventory_meta name trace_id =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String name
+         ; "agent_name", `String name
+         ; "trace_id", `String trace_id
+         ; "goal", `String "checkpoint inventory test"
+         ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta fixture failed: " ^ err)
+
+let test_keeper_checkpoint_inventory_reports_current_read_error () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let keeper_name = "checkpoint-read-error" in
+  let trace_id = "trace-checkpoint-read-error" in
+  let meta = checkpoint_inventory_meta keeper_name trace_id in
+  (match Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  mkdir_p session_dir;
+  let checkpoint_path =
+    Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:trace_id
+  in
+  write_file checkpoint_path "{";
+  let status, json =
+    Server_dashboard_http_keeper_api_checkpoints.inventory_json config keeper_name
+  in
+  let open Yojson.Safe.Util in
+  check bool "keeper exists" true (status = `OK);
+  check string "current status" "read_error" (json |> member "current_status" |> to_string);
+  check bool "current is null on read error" true (json |> member "current" = `Null);
+  check int "one read error" 1 (json |> member "read_error_count" |> to_int);
+  let read_error =
+    match json |> member "read_errors" |> to_list with
+    | [ row ] -> row
+    | rows -> fail (Printf.sprintf "expected one read error, got %d" (List.length rows))
+  in
+  check string
+    "read error source"
+    "oas_current"
+    (read_error |> member "source_kind" |> to_string);
+  check string
+    "read error snapshot"
+    (Filename.basename checkpoint_path)
+    (read_error |> member "snapshot_id" |> to_string);
+  check string
+    "read error path"
+    checkpoint_path
+    (read_error |> member "path" |> to_string)
 
 (* RFC-0138 Phase 3 Step 2 — /tools and /telemetry/summary wire tests.
 
@@ -1536,6 +1907,16 @@ let () =
             test_dashboard_bootstrap_omits_eager_goal_tree;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
+          test_case "planning payload reports goal store read failure" `Quick
+            test_dashboard_planning_http_json_reports_goal_store_read_failure;
+          test_case "keeper config reports goal store read failure" `Quick
+            test_keeper_config_json_reports_goal_store_read_failure;
+          test_case "keeper dashboard reports active goal store read failure" `Quick
+            test_keeper_dashboard_json_reports_active_goal_store_read_failure;
+          test_case "execution patch reports keeper-name discovery failure" `Quick
+            test_dashboard_execution_running_keeper_scan_reports_keeper_name_failure;
+          test_case "execution patch reports keeper meta read failure" `Quick
+            test_dashboard_execution_running_keeper_scan_reports_meta_read_failure;
           test_case "shell auth canonicalizes token owner" `Quick
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick
@@ -1564,8 +1945,18 @@ let () =
             test_dashboard_shell_light_includes_runtime_health_ssot;
           test_case "shell separates configured and persisted keeper counts" `Quick
             test_dashboard_shell_separates_configured_and_persisted_keeper_counts;
+          test_case "shell surfaces persisted keeper discovery failure" `Quick
+            test_dashboard_shell_surfaces_persisted_keeper_discovery_failure;
+          test_case "running keeper count scan surfaces meta read failure" `Quick
+            test_running_keeper_count_scan_surfaces_meta_read_failure;
           test_case "light shell counts agents from summary fields" `Quick
             test_dashboard_shell_light_counts_agents_from_summary_fields;
+          test_case "checkpoint inventory reports current read error" `Quick
+            test_keeper_checkpoint_inventory_reports_current_read_error;
+          test_case "runtime trace receipt reader surfaces parse errors" `Quick
+            test_runtime_trace_receipt_reader_surfaces_parse_errors;
+          test_case "bulk wakeup result surfaces meta read errors" `Quick
+            test_bulk_wakeup_result_surfaces_meta_read_error;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
@@ -1578,6 +1969,8 @@ let () =
             test_telemetry_n_default_is_bounded;
           test_case "fleet-composite envelope is cached across polls" `Quick
             test_dashboard_fleet_composite_envelope_is_cached;
+          test_case "composite claim output parse failure is typed" `Quick
+            test_composite_tool_call_output_parse_failure_is_typed;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick

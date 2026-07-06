@@ -180,54 +180,97 @@ let write_json_local path json =
   Fs_compat.save_file_atomic path content
 
 (* Root-scoped JSON helpers for shared root metadata. *)
-let read_json_root config path =
+let read_json_root_result config path =
   match root_key_of_path config path with
-  | Some key -> begin
+  | Some key -> (
       match config.backend with
-      | FileSystem _ when Sys.file_exists path -> read_json_local path
+      | FileSystem _ when Sys.file_exists path -> read_json_local_result path
       | Memory _ | FileSystem _ ->
-      match backend_get config ~key with
-      | Ok (Some content) ->
-          (let trimmed = String.trim content in
-           if trimmed = "" then `Assoc []
-           else match Safe_ops.parse_json_safe ~context:"read_json_root" trimmed with
-           | Ok json -> json
-           | Error msg ->
-             Log.Misc.warn "[read_json_root] %s" msg;
-             `Assoc [])
-      | Ok None -> `Assoc []
-      | Error e ->
-        Log.Misc.warn "[read_json_root] backend_get failed for %s: %s" key (Backend_types.show_error e);
-        `Assoc []
-    end
-  | None -> read_json_local path
+        let* content_opt =
+          backend_get config ~key
+          |> Result.map_error (fun e ->
+               Printf.sprintf
+                 "[read_json_root_result] backend_get failed for %s: %s"
+                 key
+                 (Backend_types.show_error e))
+        in
+        (match content_opt with
+         | Some content ->
+             parse_json_content_result ~context:"read_json_root_result" content
+         | None -> Ok (`Assoc [])))
+  | None -> read_json_local_result path
 
-let write_json_root config path json =
+let read_json_root config path =
+  match read_json_root_result config path with
+  | Ok json -> json
+  | Error msg ->
+      Log.Misc.warn "[read_json_root] %s" msg;
+      `Assoc []
+
+let write_json_root_result config path json =
   match root_key_of_path config path with
   | Some key ->
       let content = json_to_pretty_utf8 json in
-      backend_set config ~key ~value:content
-      |> Result.iter_error (fun e ->
-           Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      write_json_local path json
-      |> Result.iter_error (fun msg ->
-           Log.Misc.warn "write_json_root: local mirror write failed for %s: %s" path msg)
+      let backend_result =
+        backend_set config ~key ~value:content
+        |> Result.map_error (fun e ->
+             Printf.sprintf
+               "write_json_root backend_set failed for %s: %s"
+               key
+               (Backend_types.show_error e))
+      in
+      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data. *)
+      let mirror_result =
+        write_json_local path json
+        |> Result.map_error (fun msg ->
+             Printf.sprintf "write_json_root local mirror write failed for %s: %s" path msg)
+      in
+      (match backend_result, mirror_result with
+       | Ok (), Ok () -> Ok ()
+       | Error msg, Ok () | Ok (), Error msg -> Error msg
+       | Error backend_msg, Error mirror_msg ->
+           Error (backend_msg ^ "; " ^ mirror_msg))
   | None ->
       write_json_local path json
-      |> Result.iter_error (fun msg ->
-           Log.Misc.warn "write_json_root: local write failed for %s: %s" path msg)
+      |> Result.map_error (fun msg ->
+           Printf.sprintf "write_json_root local write failed for %s: %s" path msg)
 
-let delete_path_root config path =
+let write_json_root config path json =
+  match write_json_root_result config path json with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
+
+let remove_existing_local_path path =
+  try
+    if Sys.file_exists path then Sys.remove path;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg -> Error msg
+
+let delete_path_root_result config path =
   match root_key_of_path config path with
   | Some key ->
-      backend_delete config ~key
-      |> Result.fold
-           ~ok:(fun _ -> try Sys.remove path with Sys_error _ -> ())
-           ~error:(fun e ->
-             Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key
+      let backend_result =
+        backend_delete config ~key
+        |> Result.map_error (fun e ->
+             Printf.sprintf
+               "delete_path_root backend_delete failed for %s: %s"
+               key
                (Backend_types.show_error e))
-  | None -> if Sys.file_exists path then Sys.remove path
+      in
+      let local_result = remove_existing_local_path path in
+      (match backend_result, local_result with
+       | Ok (), Ok () -> Ok ()
+       | Error msg, Ok () | Ok (), Error msg -> Error msg
+       | Error backend_msg, Error local_msg ->
+           Error (backend_msg ^ "; " ^ local_msg))
+  | None -> remove_existing_local_path path
+
+let delete_path_root config path =
+  match delete_path_root_result config path with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
 
 let path_exists_root config path =
   match root_key_of_path config path with
@@ -339,6 +382,14 @@ let write_json config path json =
          | None -> path)
         msg
 
+let write_agent_result config path agent =
+  write_json_result config path (Masc_domain.agent_to_yojson agent)
+
+let write_agent config path agent =
+  match write_agent_result config path agent with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
+
 let write_text_local path content =
   mkdir_p (Filename.dirname path);
   let tmp_path = path ^ ".tmp" in
@@ -350,34 +401,66 @@ let write_text_local path content =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
-let write_text config path content =
+let write_text_result config path content =
   match key_of_path config path with
   | Some key ->
-      backend_set config ~key ~value:content
-      |> Result.iter_error (fun e ->
-           Log.Misc.warn "write_text backend_set failed for %s: %s" key
-             (Backend_types.show_error e));
-      if should_dual_write_local config then
-        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
-        write_text_local path content
-        |> Result.iter_error (fun msg ->
-             Log.Misc.warn "write_text: local mirror write failed for %s: %s" path msg)
+      let backend_result =
+        backend_set config ~key ~value:content
+        |> Result.map_error (fun e ->
+             Printf.sprintf
+               "write_text backend_set failed for %s: %s"
+               key
+               (Backend_types.show_error e))
+      in
+      let mirror_result =
+        if should_dual_write_local config then
+          (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
+          write_text_local path content
+          |> Result.map_error (fun msg ->
+               Printf.sprintf "write_text local mirror write failed for %s: %s" path msg)
+        else Ok ()
+      in
+      (match backend_result, mirror_result with
+       | Ok (), Ok () -> Ok ()
+       | Error msg, Ok () | Ok (), Error msg -> Error msg
+       | Error backend_msg, Error mirror_msg ->
+           Error (backend_msg ^ "; " ^ mirror_msg))
   | None ->
       write_text_local path content
-      |> Result.iter_error (fun msg ->
-           Log.Misc.warn "write_text: local write failed for %s: %s" path msg)
+      |> Result.map_error (fun msg ->
+           Printf.sprintf "write_text local write failed for %s: %s" path msg)
 
-let delete_path config path =
+let write_text config path content =
+  match write_text_result config path content with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
+
+let delete_path_result config path =
   match key_of_path config path with
   | Some key ->
-      backend_delete config ~key
-      |> Result.fold
-           ~ok:(fun _ ->
-             if should_dual_write_local config then try Sys.remove path with Sys_error _ -> ())
-           ~error:(fun e ->
-             Log.Misc.error "delete_path: backend_delete failed for %s: %s" key
+      let backend_result =
+        backend_delete config ~key
+        |> Result.map_error (fun e ->
+             Printf.sprintf
+               "delete_path backend_delete failed for %s: %s"
+               key
                (Backend_types.show_error e))
-  | None -> if Sys.file_exists path then Sys.remove path
+      in
+      let local_result =
+        if should_dual_write_local config then remove_existing_local_path path
+        else Ok ()
+      in
+      (match backend_result, local_result with
+       | Ok (), Ok () -> Ok ()
+       | Error msg, Ok () | Ok (), Error msg -> Error msg
+       | Error backend_msg, Error local_msg ->
+           Error (backend_msg ^ "; " ^ local_msg))
+  | None -> remove_existing_local_path path
+
+let delete_path config path =
+  match delete_path_result config path with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
 
 let path_exists config path =
   match key_of_path config path with
@@ -387,48 +470,69 @@ let path_exists config path =
        | Memory _ -> backend_exists config ~key)
   | None -> Sys.file_exists path
 
-let append_text config path content =
+let append_text_local_result path content =
+  try
+    mkdir_p (Filename.dirname path);
+    Fs_compat.append_file path content;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
+
+let append_text_result config path content =
   match key_of_path config path with
   | Some key ->
-      let existing =
+      let* existing =
         backend_get config ~key
-        |> Result.fold
-             ~ok:(function Some value -> value | None -> "")
-             ~error:(fun e ->
-               Log.Misc.warn "[append_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
-               "")
+        |> Result.map_error (fun e ->
+             Printf.sprintf
+               "append_text backend_get failed for %s: %s"
+               key
+               (Backend_types.show_error e))
       in
-      backend_set config ~key ~value:(existing ^ content)
-      |> Result.iter_error (fun e ->
-           Log.Misc.warn "append_text backend_set failed for %s: %s" key
+      backend_set config ~key ~value:(Option.value existing ~default:"" ^ content)
+      |> Result.map_error (fun e ->
+           Printf.sprintf
+             "append_text backend_set failed for %s: %s"
+             key
              (Backend_types.show_error e))
   | None ->
-      mkdir_p (Filename.dirname path);
-      Fs_compat.append_file path content
+      append_text_local_result path content
 
-let read_json_opt config path =
+let append_text config path content =
+  match append_text_result config path content with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
+
+let read_json_opt_result config path =
   match key_of_path config path with
   | Some key -> (
-      backend_get config ~key
-      |> Result.fold
-           ~ok:(function
-             | Some content ->
-                 let trimmed = String.trim content in
-                 if trimmed = "" then None
-                 else
-                   Safe_ops.parse_json_safe ~context:"read_json_opt" trimmed
-                   |> Result.fold
-                        ~ok:(fun json -> Some json)
-                        ~error:(fun msg ->
-                          Log.Misc.warn "[read_json_opt] %s" msg;
-                          None)
-             | None -> None)
-           ~error:(fun e ->
-             Log.Misc.warn "[read_json_opt] backend_get failed for %s: %s" key (Backend_types.show_error e);
-             None))
+      let* content_opt =
+        backend_get config ~key
+        |> Result.map_error (fun e ->
+             Printf.sprintf
+               "[read_json_opt_result] backend_get failed for %s: %s"
+               key
+               (Backend_types.show_error e))
+      in
+      match content_opt with
+      | None -> Ok None
+      | Some content ->
+          let trimmed = String.trim content in
+          if trimmed = "" then Ok None
+          else
+            parse_json_content_result ~context:"read_json_opt_result" trimmed
+            |> Result.map (fun json -> Some json))
   | None ->
-      if Sys.file_exists path then Some (read_json_local path)
-      else None
+      if Sys.file_exists path then read_json_local_result path |> Result.map (fun json -> Some json)
+      else Ok None
+
+let read_json_opt config path =
+  match read_json_opt_result config path with
+  | Ok json_opt -> json_opt
+  | Error msg ->
+      Log.Misc.warn "[read_json_opt] %s" msg;
+      None
 
 let agent_json_needs_repair = function
   | `Assoc fields -> (
@@ -499,7 +603,14 @@ let read_agent_with_repair_result config path =
     Log.Workspace.warn
       "agent state repair: repaired agent JSON and rewrote canonical state for %s"
       path;
-    write_json config path (Masc_domain.agent_to_yojson agent));
+    let* () =
+      write_agent_result config path agent
+      |> Result.map_error (fun msg ->
+           Agent_read_error
+             (Printf.sprintf "agent repair write failed for %s: %s" path msg))
+    in
+    Ok agent)
+  else
   Ok agent
 
 let read_agent_with_repair config path =

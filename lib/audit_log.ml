@@ -295,9 +295,14 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   Dated_jsonl.read_recent store n |> parse_entries
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
-let append_entry (config : config) (entry : audit_entry) =
+let append_entry_result (config : config) (entry : audit_entry) =
   let store = get_audit_store config in
-  Dated_jsonl.append store (entry_to_json entry)
+  Dated_jsonl.append_result store (entry_to_json entry)
+
+let append_entry (config : config) (entry : audit_entry) =
+  match append_entry_result config entry with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 (** {1 Logging API} *)
 
@@ -478,6 +483,28 @@ let audit_event_json (entry : audit_entry) =
   in
   `Assoc fields
 
+type action_filter =
+  | Exact_action_wire of string
+  | Tool_call_family
+  | Governance_decision_family
+  | Custom_family
+
+let action_filter_of_kind value =
+  match String.trim value with
+  | "" -> None
+  | "tool_call" -> Some Tool_call_family
+  | "governance_decision" -> Some Governance_decision_family
+  | "custom" -> Some Custom_family
+  | wire -> Some (Exact_action_wire wire)
+
+let action_matches_filter filter action =
+  match filter, action with
+  | Tool_call_family, ToolCall _ -> true
+  | Governance_decision_family, GovernanceDecision _ -> true
+  | Custom_family, Custom _ -> true
+  | Exact_action_wire wire, action -> String.equal (action_to_string action) wire
+  | (Tool_call_family | Governance_decision_family | Custom_family), _ -> false
+
 let audit_events_response_json ?actor ?kind ?severity ?since ?until ~limit
     (entries : audit_entry list) =
   let filtered =
@@ -490,9 +517,11 @@ let audit_events_response_json ?actor ?kind ?severity ?since ?until ~limit
     |> (match kind with
         | None -> Fun.id
         | Some value ->
-            let kind = String.trim value in
-            List.filter (fun entry ->
-                String.starts_with ~prefix:kind (action_to_string entry.action)))
+            (match action_filter_of_kind value with
+             | None -> Fun.id
+             | Some filter ->
+                 List.filter (fun entry ->
+                     action_matches_filter filter entry.action)))
     |> (match since with
         | None -> Fun.id
         | Some value -> List.filter (fun entry -> entry.timestamp >= value))

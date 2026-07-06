@@ -88,28 +88,62 @@ let post_sse_keepalive_interval_s = Float.max 0.1 sse_ping_interval_s
 
 let get_last_event_id = Server_mcp_transport_http_headers.get_last_event_id
 
-let body_jsonrpc_id body_str =
+type body_jsonrpc_id_error =
+  | Body_jsonrpc_id_parse_error of string
+
+let body_jsonrpc_id_error_to_string = function
+  | Body_jsonrpc_id_parse_error message -> "json_parse_error: " ^ message
+;;
+
+let body_jsonrpc_id_result body_str =
   try
     match Yojson.Safe.from_string body_str with
-    | `Assoc fields -> List.assoc_opt "id" fields
-    | _ -> None
-  with Yojson.Json_error _ -> None
+    | `Assoc fields -> Ok (List.assoc_opt "id" fields)
+    | _ -> Ok None
+  with
+  | Yojson.Json_error message -> Error (Body_jsonrpc_id_parse_error message)
+
+let body_jsonrpc_id body_str =
+  match body_jsonrpc_id_result body_str with
+  | Ok id -> id
+  | Error error ->
+      Log.Server.warn
+        "mcp-http body_jsonrpc_id failed: %s"
+        (body_jsonrpc_id_error_to_string error);
+      None
 
 (* RFC-0100 PR-3: extract [params.name] from a [tools/call] body for
    streaming-registry lookup. Returns [None] when the body is malformed,
    not a [tools/call], or missing [params.name]. *)
-let body_tools_call_name body_str =
+type body_tools_call_name_error =
+  | Body_tools_call_name_parse_error of string
+
+let body_tools_call_name_error_to_string = function
+  | Body_tools_call_name_parse_error message -> "json_parse_error: " ^ message
+;;
+
+let body_tools_call_name_result body_str =
   try
     match Yojson.Safe.from_string body_str with
-    | `Assoc fields -> (
-        match List.assoc_opt "params" fields with
-        | Some (`Assoc params) -> (
-            match List.assoc_opt "name" params with
-            | Some (`String name) -> Some name
-            | _ -> None)
-        | _ -> None)
-    | _ -> None
-  with Yojson.Json_error _ -> None
+    | `Assoc fields ->
+      (match List.assoc_opt "params" fields with
+       | Some (`Assoc params) ->
+         (match List.assoc_opt "name" params with
+          | Some (`String name) -> Ok (Some name)
+          | _ -> Ok None)
+       | _ -> Ok None)
+    | _ -> Ok None
+  with
+  | Yojson.Json_error message -> Error (Body_tools_call_name_parse_error message)
+
+let body_tools_call_name body_str =
+  match body_tools_call_name_result body_str with
+  | Ok name -> name
+  | Error error ->
+      Log.Server.warn
+        "mcp-http body_tools_call_name failed: %s"
+        (body_tools_call_name_error_to_string error);
+      None
 
 let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
 
@@ -286,6 +320,10 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             body_str
         with
         | Ok decision -> Ok decision
+        | Error (Server_mcp_request_context.Parse_error msg) ->
+            respond_mcp_error ~code:Mcp_error_code.Parse_error ~deps request
+              reqd ~session_id ~protocol_version msg;
+            Error ()
         | Error (Server_mcp_request_context.Session_required msg) ->
             let body =
               Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg

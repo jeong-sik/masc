@@ -4,6 +4,7 @@
     so the Lab surface can explain what the harness is watching. *)
 
 type rail_status =
+  | Unknown
   | Healthy
   | Warning
   | Stale
@@ -79,6 +80,12 @@ type handoff_event =
   ; to_model : string option
   }
 
+type handoff_events_snapshot =
+  { events : handoff_event list
+  ; keeper_names_known : bool
+  ; read_errors : Yojson.Safe.t list
+  }
+
 let max_runtime_events = 12
 let max_recent_verdicts = 8
 let max_signal_scan = 500
@@ -100,6 +107,7 @@ let wake_payload_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let wake_payload_store_mu = Eio.Mutex.create ()
 
 let status_to_string = function
+  | Unknown -> "unknown"
   | Healthy -> "healthy"
   | Warning -> "warning"
   | Stale -> "stale"
@@ -134,14 +142,14 @@ let get_or_create_store ~store_ref ~store_mu base_dir_fn =
 ;;
 
 let append_store_json_fail_open ~store_ref ~store_name get_store json =
-  try Dated_jsonl.append (get_store ()) json with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
+  match Dated_jsonl.append_result (get_store ()) json with
+  | Ok () -> ()
+  | Error msg ->
     (* Health/event persistence is observability only. If the backing JSONL
          append fails, drop the poisoned store so the next call can recreate
          it instead of leaking Eio_mutex.Poisoned into keeper control flow. *)
     Atomic.set store_ref None;
-    Log.Harness.warn "[%s] append failed: %s" store_name (Printexc.to_string exn)
+    Log.Harness.warn "[%s] append failed: %s" store_name msg
 ;;
 
 let get_pre_compact_store () =
@@ -501,24 +509,50 @@ let read_keeper_metric_records ?since ?until (config : Workspace.config) keeper_
   | None, None -> Dated_jsonl.read_recent store max_signal_scan
 ;;
 
-let read_handoff_events ?since ?until (config : Workspace.config) =
-  let events =
-    Keeper_meta_store.keeper_names config
-    |> List.concat_map (fun keeper_name ->
-      read_keeper_metric_records ?since ?until config keeper_name
-      |> List.filter_map handoff_event_of_metrics_json)
-  in
-  List.sort
-    (fun (left : handoff_event) (right : handoff_event) ->
-       Float.compare right.timestamp left.timestamp)
-    events
+let keeper_names_read_error_json message =
+  `Assoc
+    [ "source", `String "keeper_meta_store"
+    ; "reader", `String "keeper_names_result"
+    ; "message", `String message
+    ]
 ;;
 
-let has_any_handoff_events (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
-  |> List.exists (fun keeper_name ->
+let read_handoff_events_snapshot ?since ?until (config : Workspace.config) =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error err ->
+    { events = []
+    ; keeper_names_known = false
+    ; read_errors = [ keeper_names_read_error_json err ]
+    }
+  | Ok keeper_names ->
+    let events =
+      keeper_names
+      |> List.concat_map (fun keeper_name ->
+      read_keeper_metric_records ?since ?until config keeper_name
+      |> List.filter_map handoff_event_of_metrics_json)
+      |> List.sort
+           (fun (left : handoff_event) (right : handoff_event) ->
+              Float.compare right.timestamp left.timestamp)
+    in
+    { events; keeper_names_known = true; read_errors = [] }
+;;
+
+let read_handoff_events ?since ?until (config : Workspace.config) =
+  (read_handoff_events_snapshot ?since ?until config).events
+;;
+
+let has_any_handoff_events_snapshot (config : Workspace.config) =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error err ->
+    false, false, [ keeper_names_read_error_json err ]
+  | Ok keeper_names ->
+    let has_any =
+      keeper_names
+      |> List.exists (fun keeper_name ->
     read_keeper_metric_records config keeper_name
     |> List.exists (fun json -> Option.is_some (handoff_event_of_metrics_json json)))
+    in
+    has_any, true, []
 ;;
 
 let empty_reason ~has_any ?since ?until () =
@@ -546,10 +580,12 @@ let pre_compact_status (latest_event : pre_compact_event option) =
     else Healthy
 ;;
 
-let handoff_status (latest_event : handoff_event option) =
-  match latest_event with
-  | None -> Idle
-  | Some event ->
+let handoff_status ~keeper_names_known (latest_event : handoff_event option) =
+  match keeper_names_known, latest_event with
+  | false, None -> Unknown
+  | false, Some _ -> Warning
+  | true, None -> Idle
+  | true, Some event ->
     if is_stale ~threshold_s:runtime_stale_after_s event.timestamp
     then Stale
     else if
@@ -601,6 +637,7 @@ let overview_json
       ~(recent_verdicts : harness_verdict_item list)
       ~(latest_pre_compact : pre_compact_event option)
       ~(latest_handoff : handoff_event option)
+      ~handoff_keeper_names_known
   =
   let verdict_last = latest_timestamp_of_verdicts recent_verdicts in
   let pre_compact_last = Option.map pre_compact_timestamp latest_pre_compact in
@@ -635,7 +672,13 @@ let overview_json
       , `String (status_to_string (evaluator_status ~calibration verdict_last)) )
     ; ( "pre_compact_status"
       , `String (status_to_string (pre_compact_status latest_pre_compact)) )
-    ; "handoff_status", `String (status_to_string (handoff_status latest_handoff))
+    ; ( "handoff_status"
+      , `String
+          (status_to_string
+             (handoff_status
+                ~keeper_names_known:handoff_keeper_names_known
+                latest_handoff)) )
+    ; "handoff_keeper_names_known", `Bool handoff_keeper_names_known
     ; "last_signal_at", Json_util.float_opt_to_json last_signal_at
     ; "evaluator_last_event_at", Json_util.float_opt_to_json verdict_last
     ; "pre_compact_last_event_at", Json_util.float_opt_to_json pre_compact_last
@@ -815,6 +858,8 @@ let recent_handoffs_json
       ?since
       ?until
       ~has_any
+      ~keeper_names_known
+      ~read_errors
       ~(latest : handoff_event option)
       ~(events : handoff_event list)
       ()
@@ -831,7 +876,10 @@ let recent_handoffs_json
     ; ( "empty_reason"
       , match recent_events with
         | _ :: _ -> `Null
+        | [] when not keeper_names_known -> `String "keeper_names_read_failed"
         | [] -> Json_util.string_opt_to_json (empty_reason ~has_any ?since ?until ()) )
+    ; "keeper_names_known", `Bool keeper_names_known
+    ; "read_errors", `List read_errors
     ; "recent_events", `List (List.map handoff_event_json recent_events)
     ; "total_recent", `Int (List.length events)
     ]
@@ -854,15 +902,20 @@ let json ~(config : Workspace.config) ?since ?until () =
   let pre_compact_has_any =
     if has_window then has_any_records pre_compact_store else pre_compact_events <> []
   in
-  let handoff_events = read_handoff_events ?since ?until config in
+  let handoff_snapshot = read_handoff_events_snapshot ?since ?until config in
+  let handoff_events = handoff_snapshot.events in
   let latest_handoff : handoff_event option =
     latest_by_timestamp handoff_timestamp handoff_events
   in
-  let handoff_has_any =
+  let handoff_has_any, handoff_keeper_names_known, handoff_read_errors =
     match handoff_events with
-    | _ :: _ -> true
-    | [] when has_window -> has_any_handoff_events config
-    | [] -> false
+    | _ :: _ ->
+      true, handoff_snapshot.keeper_names_known, handoff_snapshot.read_errors
+    | [] when has_window && handoff_snapshot.keeper_names_known ->
+      let has_any, names_known, read_errors = has_any_handoff_events_snapshot config in
+      has_any, names_known, handoff_snapshot.read_errors @ read_errors
+    | [] ->
+      false, handoff_snapshot.keeper_names_known, handoff_snapshot.read_errors
   in
   `Assoc
     [ "generated_at", `Float (Time_compat.now ())
@@ -872,7 +925,12 @@ let json ~(config : Workspace.config) ?since ?until () =
            rails, so these signals are not a direct keep/discard judge for generator \
            iterations." )
     ; ( "overview"
-      , overview_json ~calibration ~recent_verdicts ~latest_pre_compact ~latest_handoff )
+      , overview_json
+          ~calibration
+          ~recent_verdicts
+          ~latest_pre_compact
+          ~latest_handoff
+          ~handoff_keeper_names_known )
     ; "calibration", calibration
     ; "recent_verdicts", `List (List.map verdict_item_json recent_verdicts)
     ; ( "pre_compact"
@@ -888,6 +946,8 @@ let json ~(config : Workspace.config) ?since ?until () =
           ?since
           ?until
           ~has_any:handoff_has_any
+          ~keeper_names_known:handoff_keeper_names_known
+          ~read_errors:handoff_read_errors
           ~latest:latest_handoff
           ~events:handoff_events
           () )

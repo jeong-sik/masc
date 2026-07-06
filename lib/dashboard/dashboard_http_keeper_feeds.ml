@@ -1,6 +1,44 @@
 open Dashboard_http_helpers
 open Dashboard_http_keeper_types
 
+type feed_json_line_parse_error =
+  { line_index : int
+  ; message : string
+  }
+
+let parse_jsonl_object_lines lines =
+  let parse_line line_index line =
+    match Yojson.Safe.from_string line with
+    | `Assoc _ as json -> Ok json
+    | other ->
+      Error
+        { line_index
+        ; message =
+            Printf.sprintf
+              "dashboard feed JSONL row must be object, got %s"
+              (Json_util.kind_name other)
+        }
+    | exception Yojson.Json_error message -> Error { line_index; message }
+  in
+  let rec loop line_index parsed errors = function
+    | [] -> List.rev parsed, List.rev errors
+    | line :: rest ->
+      (match parse_line line_index line with
+       | Ok json -> loop (line_index + 1) (json :: parsed) errors rest
+       | Error error -> loop (line_index + 1) parsed (error :: errors) rest)
+  in
+  loop 0 [] [] lines
+
+let feed_json_line_parse_error_to_json ~source ~keeper ~path
+    { line_index; message } =
+  `Assoc
+    [ "source", `String source
+    ; "keeper", `String keeper
+    ; "path", `String path
+    ; "line_index", `Int line_index
+    ; "message", `String message
+    ]
+
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 
     Reads each keeper's metrics JSONL, extracts cost_usd / latency_ms /
@@ -17,20 +55,33 @@ let keeper_cost_aggregates_json
   let now_ts = Unix.gettimeofday () in
   let window_sec = float_of_int window_minutes *. 60.0 in
   let start_ts = now_ts -. window_sec in
-  let keeper_items =
+  let keeper_results =
     List.map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-        let all_metrics_lines =
+        let all_metrics_lines, metrics_path =
           let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
           if dated <> []
-          then dated
+          then dated, Dated_jsonl.base_dir metrics_store
           else (
             let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
-            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_cost_metrics"
-              metrics_path
-              ~max_bytes:200000
-              ~max_lines:500)
+            ( Dashboard_http_helpers.keeper_tail_lines_or_empty
+                ~site:"dashboard_keeper_cost_metrics"
+                metrics_path
+                ~max_bytes:200000
+                ~max_lines:500
+            , metrics_path ))
+        in
+        let parsed_metrics, parse_errors =
+          Keeper_status_metrics.parse_metrics_json_lines all_metrics_lines
+        in
+        let read_errors =
+          List.map
+            (Keeper_status_metrics.metrics_json_line_parse_error_to_json
+               ~source:"dashboard_keeper_cost_metrics_jsonl"
+               ~keeper:m.name
+               ~path:metrics_path)
+            parse_errors
         in
         let costs_rev = ref [] in
         let latencies_rev = ref [] in
@@ -40,50 +91,46 @@ let keeper_cost_aggregates_json
         let runtime_costs : (string, float) Hashtbl.t = Hashtbl.create 8 in
         let sample_count = ref 0 in
         List.iter
-          (fun line ->
-            try
-              let j = Yojson.Safe.from_string line in
-              let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-              if ts_unix >= start_ts
+          (fun j ->
+            let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+            if ts_unix >= start_ts
+            then (
+              let cost =
+                match Safe_ops.json_float_opt "cost_usd" j with
+                | Some value -> value
+                | None -> 0.0
+              in
+              let latency_ms = Safe_ops.json_int ~default:0 "latency_ms" j in
+              let input_t =
+                match int_member_fallback "input_tokens" j with
+                | Some value -> value
+                | None -> 0
+              in
+              let output_t =
+                match int_member_fallback "output_tokens" j with
+                | Some value -> value
+                | None -> 0
+              in
+              let total_t =
+                match int_member_fallback "total_tokens" j with
+                | Some value -> value
+                | None -> 0
+              in
+              if keeper_cost_metric_row_is_event j && (cost > 0.0 || latency_ms > 0)
               then (
-                let cost =
-                  match Safe_ops.json_float_opt "cost_usd" j with
-                  | Some value -> value
-                  | None -> 0.0
+                costs_rev := cost :: !costs_rev;
+                latencies_rev := float_of_int latency_ms :: !latencies_rev;
+                input_tokens := !input_tokens + input_t;
+                output_tokens := !output_tokens + output_t;
+                total_tokens := !total_tokens + total_t;
+                let prev =
+                  Option.value
+                    ~default:0.0
+                    (Hashtbl.find_opt runtime_costs "runtime")
                 in
-                let latency_ms = Safe_ops.json_int ~default:0 "latency_ms" j in
-                let input_t =
-                  match int_member_fallback "input_tokens" j with
-                  | Some value -> value
-                  | None -> 0
-                in
-                let output_t =
-                  match int_member_fallback "output_tokens" j with
-                  | Some value -> value
-                  | None -> 0
-                in
-                let total_t =
-                  match int_member_fallback "total_tokens" j with
-                  | Some value -> value
-                  | None -> 0
-                in
-                if keeper_cost_metric_row_is_event j && (cost > 0.0 || latency_ms > 0)
-                then (
-                  costs_rev := cost :: !costs_rev;
-                  latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                  input_tokens := !input_tokens + input_t;
-                  output_tokens := !output_tokens + output_t;
-                  total_tokens := !total_tokens + total_t;
-                  let prev =
-                    Option.value
-                      ~default:0.0
-                      (Hashtbl.find_opt runtime_costs "runtime")
-                  in
-                  Hashtbl.replace runtime_costs "runtime" (prev +. cost);
-                  incr sample_count))
-            with
-            | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
-          all_metrics_lines;
+                Hashtbl.replace runtime_costs "runtime" (prev +. cost);
+                incr sample_count)))
+          parsed_metrics;
         let total_cost = List.fold_left ( +. ) 0.0 !costs_rev in
         let latency_arr =
           let arr = Array.of_list !latencies_rev in
@@ -118,11 +165,25 @@ let keeper_cost_aggregates_json
           ; "p95_latency_ms", Json_util.float_opt_to_json p95_latency
           ; "sample_count", `Int !sample_count
           ; "model_breakdown", `List runtime_breakdown_json
-          ])
+          ; "metrics_parse_error_count", `Int (List.length read_errors)
+          ; "metrics_parse_errors", `List read_errors
+          ; "read_errors", `List read_errors
+          ]
+        , read_errors)
       keepers
+  in
+  let keeper_items = List.map fst keeper_results in
+  let read_errors =
+    keeper_results
+    |> List.fold_left
+         (fun acc (_, errors) -> List.rev_append errors acc)
+         []
+    |> List.rev
   in
   `Assoc
     [ "keepers", `List keeper_items
+    ; "read_error_count", `Int (List.length read_errors)
+    ; "read_errors", `List read_errors
     ; "window_minutes", `Int window_minutes
     ; "generated_at", `Float now_ts
     ]
@@ -141,12 +202,12 @@ let keeper_decisions_json
   : Yojson.Safe.t =
   let limit = k2_feed_limit limit in
   let per_keeper_limit = limit * 2 in
-  let all_events =
-    List.concat_map
+  let keeper_results =
+    List.map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
-        then []
+        then [], []
         else (
           let lines =
             Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_decisions"
@@ -154,10 +215,18 @@ let keeper_decisions_json
               ~max_bytes:500_000
               ~max_lines:per_keeper_limit
           in
-          List.filter_map
-            (fun line ->
-              try
-                let json = Yojson.Safe.from_string line in
+          let parsed_rows, parse_errors = parse_jsonl_object_lines lines in
+          let read_errors =
+            List.map
+              (feed_json_line_parse_error_to_json
+                 ~source:"dashboard_keeper_decisions_jsonl"
+                 ~keeper:m.name
+                 ~path)
+              parse_errors
+          in
+          let events =
+            List.map
+              (fun json ->
                 let ts =
                   match Json_util.assoc_member_opt "ts_unix" json with
                   | Some (`Float f) -> f
@@ -174,11 +243,25 @@ let keeper_decisions_json
                   | Some (`String s) -> s
                   | _ -> m.name
                 in
-                Some (ts, json, event_type, keeper_name)
-              with
-              | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
-            lines))
+                ts, json, event_type, keeper_name)
+              parsed_rows
+          in
+          events, read_errors))
       keepers
+  in
+  let all_events =
+    keeper_results
+    |> List.fold_left
+         (fun acc (events, _) -> List.rev_append events acc)
+         []
+    |> List.rev
+  in
+  let read_errors =
+    keeper_results
+    |> List.fold_left
+         (fun acc (_, errors) -> List.rev_append errors acc)
+         []
+    |> List.rev
   in
   let sorted = List.sort (fun (ta, _, _, _) (tb, _, _, _) -> compare tb ta) all_events in
   let rec take n = function
@@ -300,6 +383,8 @@ let keeper_decisions_json
       , keeper_decisions_retention_json
           ~per_keeper_limit
           ~keeper_count:(List.length keepers) )
+    ; "read_error_count", `Int (List.length read_errors)
+    ; "read_errors", `List read_errors
     ; "events", `List items
     ; "limit", `Int limit
     (* NDT-OK: K2 feed metadata is an observation timestamp only; sorting and
@@ -353,9 +438,7 @@ type decision_event = {
 let normalize_evidence_refs refs =
   refs |> List.map String.trim |> List.filter (fun value -> value <> "")
 
-let parse_decision_event ~keeper_name line : decision_event option =
-  try
-    let json = Yojson.Safe.from_string line in
+let decision_event_of_json ~keeper_name ~raw json : decision_event =
     let str key =
       match Json_util.assoc_member_opt key json with
       | Some (`String s) -> s
@@ -423,20 +506,45 @@ let parse_decision_event ~keeper_name line : decision_event option =
         Json_util.get_string_list json "raw_evidence_refs"
         |> normalize_evidence_refs
     in
-    Some
-      {
-        ts_unix;
-        id;
-        ts;
-        keeper;
-        decision_type;
-        summary;
-        terminal_reason_code;
-        duration_ms;
-        evidence_refs;
+    { ts_unix
+    ; id
+    ; ts
+    ; keeper
+    ; decision_type
+    ; summary
+    ; terminal_reason_code
+    ; duration_ms
+    ; evidence_refs
+    }
+
+let parse_decision_event_result ~keeper_name ~line_index line :
+    (decision_event, feed_json_line_parse_error) result =
+  match Yojson.Safe.from_string line with
+  | exception Yojson.Json_error message -> Error { line_index; message }
+  | `Assoc _ as json ->
+    (match decision_event_of_json ~keeper_name ~raw:line json with
+     | event -> Ok event
+     | exception Yojson.Safe.Util.Type_error (message, _) ->
+       Error { line_index; message })
+  | other ->
+    Error
+      { line_index
+      ; message =
+          Printf.sprintf
+            "dashboard decision log row must be object, got %s"
+            (Json_util.kind_name other)
       }
-  with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+
+let parse_decision_event ~keeper_name line : decision_event option =
+  match parse_decision_event_result ~keeper_name ~line_index:0 line with
+  | Ok event -> Some event
+  | Error { line_index; message } ->
+    Log.Dashboard.warn
+      "dashboard decision event parse failed keeper=%s line_index=%d: %s"
+      keeper_name
+      line_index
+      message;
+    None
 
 let decision_event_to_yojson (e : decision_event) : Yojson.Safe.t =
   `Assoc
@@ -451,8 +559,25 @@ let decision_event_to_yojson (e : decision_event) : Yojson.Safe.t =
     ; "evidence_refs", `List (List.map (fun v -> `String v) e.evidence_refs)
     ]
 
+type decision_feed_projection =
+  { next_line_index : int
+  ; events : (float * Yojson.Safe.t) list
+  ; read_errors : Yojson.Safe.t list
+  }
+
+let empty_decision_feed_projection =
+  { next_line_index = 0; events = []; read_errors = [] }
+
+let keeper_feed_retain_json (items : Yojson.Safe.t list) : Yojson.Safe.t list =
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  take keeper_feed_max_events items
+
 let decisions_feed_cache :
-    (float * Yojson.Safe.t) list Jsonl_incremental_projection.t =
+    decision_feed_projection Jsonl_incremental_projection.t =
   Jsonl_incremental_projection.create ()
 
 let keeper_decisions_log_json
@@ -462,23 +587,59 @@ let keeper_decisions_log_json
     ()
   : Yojson.Safe.t =
   let limit = k2_feed_limit limit in
-  let all_events =
-    List.concat_map
+  let keeper_results =
+    List.map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
-        then []
+        then empty_decision_feed_projection
         else
           Jsonl_incremental_projection.read decisions_feed_cache
-            ~key:path ~path ~empty:[]
+            ~key:path ~path ~empty:empty_decision_feed_projection
             ~initial_tail_bytes:keeper_feed_tail_bytes
             ~add:(fun acc line ->
-              match parse_decision_event ~keeper_name:m.name line with
-              | Some ev ->
-                  keeper_feed_retain
-                    ((ev.ts_unix, decision_event_to_yojson ev) :: acc)
-              | None -> acc))
+              let line_index = acc.next_line_index in
+              let next_line_index = line_index + 1 in
+              match
+                parse_decision_event_result
+                  ~keeper_name:m.name
+                  ~line_index
+                  line
+              with
+              | Ok ev ->
+                { acc with
+                  next_line_index
+                ; events =
+                    keeper_feed_retain
+                      ((ev.ts_unix, decision_event_to_yojson ev) :: acc.events)
+                }
+              | Error parse_error ->
+                { acc with
+                  next_line_index
+                ; read_errors =
+                    keeper_feed_retain_json
+                      (feed_json_line_parse_error_to_json
+                         ~source:"dashboard_keeper_decisions_log_jsonl"
+                         ~keeper:m.name
+                         ~path
+                         parse_error
+                       :: acc.read_errors)
+                }))
       keepers
+  in
+  let all_events =
+    keeper_results
+    |> List.fold_left
+         (fun acc projection -> List.rev_append projection.events acc)
+         []
+    |> List.rev
+  in
+  let read_errors =
+    keeper_results
+    |> List.fold_left
+         (fun acc projection -> List.rev_append projection.read_errors acc)
+         []
+    |> List.rev
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_events in
   let rec take n = function
@@ -489,6 +650,8 @@ let keeper_decisions_log_json
   let items = List.map snd (take limit sorted) in
   `Assoc
     [ "events", `List items
+    ; "read_error_count", `Int (List.length read_errors)
+    ; "read_errors", `List read_errors
     ; "limit", `Int limit
     (* NDT-OK: decision-log feed metadata is wall-clock freshness only;
        event ordering uses per-row ts_unix values. *)
@@ -499,8 +662,17 @@ let keeper_decisions_log_json
 (* Per-keeper memory-bank feed cache, mirroring [decisions_feed_cache]: the
    transformed (ts_unix, entry) list per source file, keyed by
    (path, per_keeper_limit) so output is identical to the uncached path. *)
+type memory_feed_projection =
+  { next_line_index : int
+  ; entries : (float * Yojson.Safe.t) list
+  ; read_errors : Yojson.Safe.t list
+  }
+
+let empty_memory_feed_projection =
+  { next_line_index = 0; entries = []; read_errors = [] }
+
 let memory_feed_cache :
-    (float * Yojson.Safe.t) list Jsonl_incremental_projection.t =
+    memory_feed_projection Jsonl_incremental_projection.t =
   Jsonl_incremental_projection.create ()
 
 let keeper_memory_log_json
@@ -510,20 +682,34 @@ let keeper_memory_log_json
     ()
   : Yojson.Safe.t =
   let limit = k2_feed_limit limit in
-  let all_entries =
-    List.concat_map
+  let keeper_results =
+    List.map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_memory_bank_path config m.name in
         if not (Fs_compat.file_exists path)
-        then []
+        then empty_memory_feed_projection
         else
           Jsonl_incremental_projection.read memory_feed_cache
-            ~key:path ~path ~empty:[]
+            ~key:path ~path ~empty:empty_memory_feed_projection
             ~initial_tail_bytes:keeper_feed_tail_bytes
             ~add:(fun acc line ->
-              match Keeper_memory.parse_memory_bank_row line with
-              | None -> acc
-              | Some (row : Keeper_memory.keeper_memory_row_raw) ->
+              let line_index = acc.next_line_index in
+              let next_line_index = line_index + 1 in
+              match Keeper_memory.parse_memory_bank_row_result line with
+              | Error parse_error ->
+                { acc with
+                  next_line_index
+                ; read_errors =
+                    keeper_feed_retain_json
+                      (Keeper_memory.memory_bank_row_parse_error_to_json
+                         ~source:"dashboard_keeper_memory_log_jsonl"
+                         ~keeper:m.name
+                         ~path
+                         ~line_index
+                         parse_error
+                       :: acc.read_errors)
+                }
+              | Ok (row : Keeper_memory.keeper_memory_row_raw) ->
                 let kind = memory_kind_for_log row.kind in
                 let ts = k2_iso8601_of_unix row.ts_unix in
                 let id =
@@ -533,18 +719,36 @@ let keeper_memory_log_json
                     ~ts_unix:row.ts_unix
                     ~raw:line
                 in
-                keeper_feed_retain
-                  (( row.ts_unix
-                   , `Assoc
-                       [ "id", `String id
-                       ; "ts", `String ts
-                       ; "ts_unix", `Float row.ts_unix
-                       ; "keeper", `String m.name
-                       ; "kind", `String kind
-                       ; "summary", `String row.text
-                       ] )
-                   :: acc)))
+                { acc with
+                  next_line_index
+                ; entries =
+                    keeper_feed_retain
+                      (( row.ts_unix
+                       , `Assoc
+                           [ "id", `String id
+                           ; "ts", `String ts
+                           ; "ts_unix", `Float row.ts_unix
+                           ; "keeper", `String m.name
+                           ; "kind", `String kind
+                           ; "summary", `String row.text
+                           ] )
+                       :: acc.entries)
+                }))
       keepers
+  in
+  let all_entries =
+    keeper_results
+    |> List.fold_left
+         (fun acc projection -> List.rev_append projection.entries acc)
+         []
+    |> List.rev
+  in
+  let read_errors =
+    keeper_results
+    |> List.fold_left
+         (fun acc projection -> List.rev_append projection.read_errors acc)
+         []
+    |> List.rev
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_entries in
   let rec take n = function
@@ -555,6 +759,8 @@ let keeper_memory_log_json
   let items = List.map snd (take limit sorted) in
   `Assoc
     [ "entries", `List items
+    ; "read_error_count", `Int (List.length read_errors)
+    ; "read_errors", `List read_errors
     ; "limit", `Int limit
     (* NDT-OK: memory-log feed metadata is wall-clock freshness only;
        entry ordering uses per-row ts_unix values. *)

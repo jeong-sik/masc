@@ -388,6 +388,39 @@ let test_discover_relative_base_path_keeps_visible_repos () =
                 let repo = List.hd repos in
                 Alcotest.(check string) "id" "project-a" repo.id))
 
+let test_discover_errors_on_corrupt_store () =
+  with_temp_base_path (fun base_path ->
+      write_file
+        (Filename.concat base_path ".masc/config/repositories.toml")
+        "[repository.bad\n";
+      match Repo_store.discover_repositories ~base_path with
+      | Error msg ->
+          Alcotest.(check bool) "mentions store read" true
+            (contains_substring msg "repository store read failed");
+          Alcotest.(check bool) "keeps parse detail" true (String.length msg > 0)
+      | Ok repos ->
+          Alcotest.failf
+            "corrupt repository store must not look like %d discovered repos"
+            (List.length repos))
+
+let test_discover_errors_on_origin_read_failure () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let repo_without_origin = Filename.concat base_path "project-without-origin" in
+        Unix.mkdir repo_without_origin 0o755;
+        ignore (run_git_quiet [ "init"; repo_without_origin ]);
+        match Repo_store.discover_repositories ~base_path with
+        | Error msg ->
+            Alcotest.(check bool) "mentions repo path" true
+              (contains_substring msg (canonical_path repo_without_origin));
+            Alcotest.(check bool) "mentions origin read" true
+              (contains_substring msg "origin read failed")
+        | Ok repos ->
+            Alcotest.failf
+              "git repository without origin must not be silently dropped; got %d repos"
+              (List.length repos))
+
 let test_migration_backward_compat_to_explicit () =
   with_temp_base_path (fun base_path ->
       (* Phase 1: no TOML — backward compat returns default repo *)
@@ -560,6 +593,16 @@ let test_find_url_by_id_unknown () =
     | None -> ()
     | Some s -> Alcotest.fail ("expected None for unknown, got: " ^ s))
 
+let test_find_url_by_id_result_corrupt_store_errors () =
+  with_temp_base_path (fun base_path ->
+    write_file
+      (Filename.concat base_path ".masc/config/repositories.toml")
+      "[repository.bad\n";
+    match Repo_store.find_url_by_id_result ~base_path "masc" with
+    | Error msg ->
+      Alcotest.(check bool) "error detail is preserved" true (String.length msg > 0)
+    | Ok _ -> Alcotest.fail "corrupt repository store must return Error")
+
 let test_find_repo_by_path_prefix_match () =
   with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
     let abs = Filename.concat masc_path "lib/foo.ml" in
@@ -575,6 +618,16 @@ let test_find_repo_by_path_prefix_outside () =
     | None -> ()
     | Some (repo, _) ->
       Alcotest.fail ("unexpected match: " ^ repo.id))
+
+let test_find_repo_by_path_prefix_result_corrupt_store_errors () =
+  with_temp_base_path (fun base_path ->
+    write_file
+      (Filename.concat base_path ".masc/config/repositories.toml")
+      "[repository.bad\n";
+    match Repo_store.find_repo_by_path_prefix_result ~base_path "/tmp/file.ml" with
+    | Error msg ->
+      Alcotest.(check bool) "error detail is preserved" true (String.length msg > 0)
+    | Ok _ -> Alcotest.fail "corrupt repository store must return Error")
 
 let test_find_repo_by_path_prefix_sibling_not_matched () =
   (* Sibling-style collision: /tmp/masc and /tmp/masc-mirror must not
@@ -679,6 +732,10 @@ let () =
             test_discover_ignores_symlink_dirs;
           Alcotest.test_case "relative base path keeps visible repos" `Quick
             test_discover_relative_base_path_keeps_visible_repos;
+          Alcotest.test_case "corrupt store returns discovery error" `Quick
+            test_discover_errors_on_corrupt_store;
+          Alcotest.test_case "origin read failure returns discovery error" `Quick
+            test_discover_errors_on_origin_read_failure;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
         ] );
       ( "migration",
@@ -698,8 +755,12 @@ let () =
         [
           Alcotest.test_case "find_url_by_id known" `Quick test_find_url_by_id_known;
           Alcotest.test_case "find_url_by_id unknown" `Quick test_find_url_by_id_unknown;
+          Alcotest.test_case "find_url_by_id_result corrupt store errors" `Quick
+            test_find_url_by_id_result_corrupt_store_errors;
           Alcotest.test_case "path_prefix match" `Quick test_find_repo_by_path_prefix_match;
           Alcotest.test_case "path_prefix outside" `Quick test_find_repo_by_path_prefix_outside;
+          Alcotest.test_case "path_prefix_result corrupt store errors" `Quick
+            test_find_repo_by_path_prefix_result_corrupt_store_errors;
           Alcotest.test_case "path_prefix sibling-safe" `Quick
             test_find_repo_by_path_prefix_sibling_not_matched;
           Alcotest.test_case "path_prefix at repo root" `Quick test_find_repo_by_path_prefix_root;

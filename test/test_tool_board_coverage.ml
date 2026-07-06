@@ -185,7 +185,7 @@ let test_is_agent () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  (* is_agent uses agent_lookup_hook — returns false when no hook installed *)
+  (* is_agent uses agent_lookup_hook and returns false when no hook is installed. *)
   Alcotest.(check bool) "no hook = not agent" false
     (Board_tool.is_agent "alice");
   (* Install a mock hook that recognises "alice" *)
@@ -561,6 +561,52 @@ let test_inline_board_post_author_accepts_matching_alias () =
   Alcotest.(check bool) "no mismatch claim" true
     Yojson.Safe.Util.(
       normalized |> member "meta" |> member "author_caller_claim" = `Null)
+
+let test_extract_board_post_id_from_structured_data_result () =
+  Alcotest.(check (result string reject)) "extracts id" (Ok "post-1")
+    (Mcp_tool_runtime_board.extract_board_post_id_from_data_result
+       (`Assoc [ ("id", `String "post-1") ]));
+  (match
+     Mcp_tool_runtime_board.extract_board_post_id_from_data_result
+       (`String {|{"id":"post-1"}|})
+   with
+   | Error
+       (Mcp_tool_runtime_board.Board_post_id_payload_not_object
+         { received_kind = "string" }) ->
+       ()
+   | Ok id -> Alcotest.failf "expected non-object error, got Ok %s" id
+   | Error error ->
+       Alcotest.failf "unexpected error: %s"
+         (Mcp_tool_runtime_board.board_post_id_extract_error_to_string error));
+  (match
+     Mcp_tool_runtime_board.extract_board_post_id_from_data_result (`Assoc [])
+   with
+   | Error Mcp_tool_runtime_board.Board_post_id_missing_id -> ()
+   | Ok id -> Alcotest.failf "expected missing-id error, got Ok %s" id
+   | Error error ->
+       Alcotest.failf "unexpected error: %s"
+         (Mcp_tool_runtime_board.board_post_id_extract_error_to_string error));
+  (match
+     Mcp_tool_runtime_board.extract_board_post_id_from_data_result
+       (`Assoc [ ("id", `Int 1) ])
+   with
+   | Error
+       (Mcp_tool_runtime_board.Board_post_id_id_not_string
+         { received_kind = "int" }) ->
+       ()
+   | Ok id -> Alcotest.failf "expected id-not-string error, got Ok %s" id
+   | Error error ->
+       Alcotest.failf "unexpected error: %s"
+         (Mcp_tool_runtime_board.board_post_id_extract_error_to_string error));
+  match
+    Mcp_tool_runtime_board.extract_board_post_id_from_data_result
+      (`Assoc [ ("id", `String " ") ])
+  with
+  | Error Mcp_tool_runtime_board.Board_post_id_blank_id -> ()
+  | Ok id -> Alcotest.failf "expected blank-id error, got Ok %s" id
+  | Error error ->
+      Alcotest.failf "unexpected error: %s"
+        (Mcp_tool_runtime_board.board_post_id_extract_error_to_string error)
 
 (** {2 Group 2: JSON helper functions} *)
 
@@ -2091,6 +2137,8 @@ let () =
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"
             `Quick test_inline_board_post_author_accepts_matching_alias;
+          Alcotest.test_case "MCP runtime board post id extraction is typed"
+            `Quick test_extract_board_post_id_from_structured_data_result;
           Alcotest.test_case "moderation http identity binds to auth source"
             `Quick test_moderation_http_identity_bound_to_auth_source;
         ] );
@@ -2227,7 +2275,7 @@ let () =
         ] );
       ( "post_kind_registry",
         [
-          Alcotest.test_case "no hook: defaults to direct" `Quick (fun () ->
+          Alcotest.test_case "missing post_kind is rejected" `Quick (fun () ->
             with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
@@ -2236,36 +2284,60 @@ let () =
               ("title", `String "test"); ("content", `String "hello");
               ("author", `String "claude-agent")
             ]) in
-            Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check string) "classified as direct" "direct"
-              Yojson.Safe.Util.(
-                parse_create_response_json msg |> member "post_kind" |> to_string));
-          Alcotest.test_case "with hook: agent classified as automation" `Quick (fun () ->
+            Alcotest.(check bool) "post rejected" false ok;
+            Alcotest.(check bool) "required post_kind surfaced" true
+              (contains_substring msg "post_kind is required"));
+          Alcotest.test_case "explicit direct is preserved" `Quick (fun () ->
             with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.set_agent_lookup (fun name -> name = "claude-agent");
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "claude-agent")
+              ("author", `String "claude-agent");
+              ("post_kind", `String "direct")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check string) "classified as automation" "automation"
+            Alcotest.(check string) "classified as direct" "direct"
               Yojson.Safe.Util.(
                 parse_create_response_json msg |> member "post_kind" |> to_string));
-          Alcotest.test_case "with hook: non-agent stays direct" `Quick (fun () ->
+          Alcotest.test_case "explicit automation is preserved" `Quick (fun () ->
             with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.set_agent_lookup (fun _name -> false);
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "sangsu")
+              ("author", `String "sangsu");
+              ("post_kind", `String "automation")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check string) "classified as direct" "direct"
+            Alcotest.(check string) "classified as automation" "automation"
               Yojson.Safe.Util.(
                 parse_create_response_json msg |> member "post_kind" |> to_string));
+          Alcotest.test_case "create rejects unknown visibility" `Quick (fun () ->
+            with_eio @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            let (ok, msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "sangsu");
+              ("post_kind", `String "direct");
+              ("visibility", `String "sideways")
+            ]) in
+            Alcotest.(check bool) "post rejected" false ok;
+            Alcotest.(check bool) "unknown visibility surfaced" true
+              (contains_substring msg "unknown visibility: sideways"));
+          Alcotest.test_case "list rejects unknown visibility" `Quick (fun () ->
+            with_eio @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            let (ok, msg) = dispatch "masc_board_list" (make_args [
+              ("visibility", `String "sideways")
+            ]) in
+            Alcotest.(check bool) "list rejected" false ok;
+            Alcotest.(check bool) "unknown visibility surfaced" true
+              (contains_substring msg "unknown visibility: sideways"));
           Alcotest.test_case "human post_kind alias is rejected" `Quick (fun () ->
             with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2279,6 +2351,95 @@ let () =
             Alcotest.(check bool) "post rejected" false ok;
             Alcotest.(check bool) "unknown post_kind surfaced" true
               (contains_substring msg "unknown post_kind: human"));
+        ] );
+      ( "sub_board_contract",
+        [
+          Alcotest.test_case "create rejects missing name" `Quick (fun () ->
+            with_eio @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            let (ok, msg) =
+              dispatch
+                "masc_board_sub_board_create"
+                (make_args
+                   [ ("slug", `String "ops")
+                   ; ("description", `String "Operations board")
+                   ; ("owner", `String "owner-agent")
+                   ])
+            in
+            Alcotest.(check bool) "create rejected" false ok;
+            Alcotest.(check bool) "missing name surfaced" true
+              (contains_substring msg "name is required"));
+          Alcotest.test_case "create rejects unknown access" `Quick (fun () ->
+            with_eio @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            let (ok, msg) =
+              dispatch
+                "masc_board_sub_board_create"
+                (make_args
+                   [ ("slug", `String "ops")
+                   ; ("name", `String "Ops")
+                   ; ("description", `String "Operations board")
+                   ; ("owner", `String "owner-agent")
+                   ; ("access", `String "secret")
+                   ])
+            in
+            Alcotest.(check bool) "create rejected" false ok;
+            Alcotest.(check bool) "unknown access surfaced" true
+              (contains_substring msg "unknown sub_board access: secret"));
+          Alcotest.test_case "update rejects unknown access" `Quick (fun () ->
+            with_eio @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            let (created, create_msg) =
+              dispatch
+                "masc_board_sub_board_create"
+                (make_args
+                   [ ("slug", `String "ops")
+                   ; ("name", `String "Ops")
+                   ; ("description", `String "Operations board")
+                   ; ("owner", `String "owner-agent")
+                   ])
+            in
+            Alcotest.(check bool) create_msg true created;
+            let (ok, msg) =
+              dispatch
+                "masc_board_sub_board_update"
+                (make_args
+                   [ ("sub_board_id", `String "ops")
+                   ; ("access", `String "secret")
+                   ])
+            in
+            Alcotest.(check bool) "update rejected" false ok;
+            Alcotest.(check bool) "unknown access surfaced" true
+              (contains_substring msg "unknown sub_board access: secret"));
+          Alcotest.test_case "update rejects invalid member id" `Quick (fun () ->
+            with_eio @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            let (created, create_msg) =
+              dispatch
+                "masc_board_sub_board_create"
+                (make_args
+                   [ ("slug", `String "ops")
+                   ; ("name", `String "Ops")
+                   ; ("description", `String "Operations board")
+                   ; ("owner", `String "owner-agent")
+                   ])
+            in
+            Alcotest.(check bool) create_msg true created;
+            let (ok, msg) =
+              dispatch
+                "masc_board_sub_board_update"
+                (make_args
+                   [ ("sub_board_id", `String "ops")
+                   ; ("members", `List [ `String "invalid member" ])
+                   ])
+            in
+            Alcotest.(check bool) "update rejected" false ok;
+            Alcotest.(check bool) "invalid member surfaced" true
+              (contains_substring msg "Invalid ID"));
         ] );
       ( "board_list_cache",
         [

@@ -654,22 +654,44 @@ let path_for_trace config ~keeper_name ~trace_id =
 
 include Keeper_runtime_manifest_housekeeping
 
-let append_to_path path manifest =
+let append_io_error_to_string = function
+  | Sys_error msg -> Some msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Some (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+  | _ -> None
+
+let note_append_to_path_failure msg =
+  let exn = Sys_error msg in
+  Keeper_fd_pressure.note_exception
+    ~site:"keeper_runtime_manifest.append_to_path"
+    exn;
+  Keeper_disk_pressure.note_exception
+    ~site:"keeper_runtime_manifest.append_to_path"
+    exn
+
+let ensure_append_dir path =
   try
     let dir = Filename.dirname path in
     let (_ : string) = Keeper_fs.ensure_dir dir in
-    Keeper_types_support.append_jsonl_line path (to_json manifest);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Keeper_fd_pressure.note_exception
-      ~site:"keeper_runtime_manifest.append_to_path"
-      exn;
-    Keeper_disk_pressure.note_exception
-      ~site:"keeper_runtime_manifest.append_to_path"
-      exn;
-    Error (Printexc.to_string exn)
+  | exn -> (
+    match append_io_error_to_string exn with
+    | Some msg -> Error msg
+    | None -> raise exn)
+
+let append_to_path path manifest =
+  match ensure_append_dir path with
+  | Error msg ->
+    note_append_to_path_failure msg;
+    Error msg
+  | Ok () -> (
+    match Keeper_types_support.append_jsonl_line_result path (to_json manifest) with
+    | Ok () -> Ok ()
+    | Error msg ->
+      note_append_to_path_failure msg;
+      Error msg)
 
 let append config manifest =
   let base_dir = base_dir config ~keeper_name:manifest.keeper_name in

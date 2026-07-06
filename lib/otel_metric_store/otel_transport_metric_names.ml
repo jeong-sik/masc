@@ -42,6 +42,10 @@ let metric_sidecar_schema_field_types_json_parse_failures =
   Otel_metric_store_core.declare_counter "masc_sidecar_schema_field_types_json_parse_failures_total"
 ;;
 
+let metric_sidecar_schema_field_types_failures =
+  Otel_metric_store_core.declare_counter "masc_sidecar_schema_field_types_failures_total"
+;;
+
 let metric_ws_bytes_cache_hits = Otel_metric_store_core.declare_counter "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = Otel_metric_store_core.declare_counter "masc_ws_bytes_cache_misses_total"
 let metric_ws_dashboard_hello_latency_seconds = "masc_ws_dashboard_hello_latency_seconds"

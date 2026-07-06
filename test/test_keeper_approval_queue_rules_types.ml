@@ -231,6 +231,12 @@ let test_approval_rule_error_reasons () =
     (valid_rule_json () |> without_field "id")
 ;;
 
+let test_approval_rule_legacy_fallback_keeps_typed_reason_available () =
+  let json = valid_rule_json () |> without_field "id" in
+  check (option reject) "legacy fallback" None (Q.approval_rule_of_yojson json);
+  check_parse_error "typed reason" "id must be a non-blank string" json
+;;
+
 let test_request_fingerprint_preview_fallback () =
   match
     Q.approval_rule_of_yojson_with_error
@@ -268,6 +274,10 @@ let () =
             "approval rule error reasons"
             `Quick
             test_approval_rule_error_reasons
+        ; test_case
+            "approval rule legacy fallback keeps typed reason available"
+            `Quick
+            test_approval_rule_legacy_fallback_keeps_typed_reason_available
         ; test_case
             "request fingerprint preview fallback"
             `Quick

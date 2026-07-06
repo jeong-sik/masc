@@ -57,6 +57,38 @@ type state = {
   goals : goal list;
 }
 
+type recovery_error =
+  | Recovery_absent
+  | Recovery_read_failed of string
+  | Recovery_decode_failed of string
+
+type read_error =
+  | Primary_read_failed of
+      { primary_err : string
+      ; recovery_err : recovery_error
+      }
+  | Primary_decode_failed of
+      { primary_err : string
+      ; recovery_err : recovery_error
+      }
+
+let recovery_error_to_string = function
+  | Recovery_absent -> "recovery goals.json.last-good absent"
+  | Recovery_read_failed msg -> "recovery goals.json.last-good unreadable: " ^ msg
+  | Recovery_decode_failed msg -> "recovery goals.json.last-good corrupt: " ^ msg
+
+let read_error_to_string = function
+  | Primary_read_failed { primary_err; recovery_err } ->
+      Printf.sprintf
+        "primary goals.json unreadable (%s); %s"
+        primary_err
+        (recovery_error_to_string recovery_err)
+  | Primary_decode_failed { primary_err; recovery_err } ->
+      Printf.sprintf
+        "primary goals.json corrupt (%s); %s"
+        primary_err
+        (recovery_error_to_string recovery_err)
+
 let rec state_to_yojson (state : state) =
   `Assoc
     [
@@ -266,67 +298,61 @@ let ensure_dirs config =
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
 
-let read_state config =
+let normalize_state state =
+  { state with goals = List.map normalize_goal state.goals }
+
+let read_recovery_result config =
+  let recovery = goals_recovery_path config in
+  if not (Workspace_utils.path_exists config recovery)
+  then Error Recovery_absent
+  else
+    match Workspace_utils.read_json_result config recovery with
+    | Error msg -> Error (Recovery_read_failed msg)
+    | Ok recovery_json ->
+      (match state_of_yojson recovery_json with
+       | Ok state ->
+         Log.Misc.warn "goal_store: recovered from %s" recovery;
+         Ok (normalize_state state)
+       | Error msg -> Error (Recovery_decode_failed msg))
+
+let read_state_result config =
   ensure_dirs config;
   let path = goals_path config in
-  if Workspace_utils.path_exists config path then
+  if Workspace_utils.path_exists config path
+  then
     match Workspace_utils.read_json_result config path with
     | Ok json ->
-        (match state_of_yojson json with
-         | Ok state -> { state with goals = List.map normalize_goal state.goals }
-         | Error primary_msg ->
-             let recovery = goals_recovery_path config in
-             if Workspace_utils.path_exists config recovery then
-               match Workspace_utils.read_json_result config recovery with
-               | Ok recovery_json ->
-                   (match state_of_yojson recovery_json with
-                    | Ok state ->
-                        Log.Misc.warn
-                          "goal_store: primary goals.json corrupt (%s), recovered from %s"
-                          primary_msg recovery;
-                        { state with goals = List.map normalize_goal state.goals }
-                    | Error recovery_msg ->
-                        Log.Misc.error
-                          "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
-                          primary_msg recovery_msg;
-                        default_state ())
-               | Error recovery_read_msg ->
-                   Log.Misc.warn
-                     "goal_store: goals.json corrupt (%s), recovery read failed: %s"
-                     primary_msg recovery_read_msg;
-                   default_state ()
-             else
-               (Log.Misc.warn
-                  "goal_store: goals.json corrupt (%s), no .last-good available"
-                  primary_msg;
-                default_state ()))
+      (match state_of_yojson json with
+       | Ok state -> Ok (normalize_state state)
+       | Error primary_msg ->
+         (match read_recovery_result config with
+          | Ok state ->
+            Log.Misc.warn
+              "goal_store: primary goals.json corrupt (%s), recovered from %s"
+              primary_msg
+              (goals_recovery_path config);
+            Ok state
+          | Error recovery_err ->
+            Error (Primary_decode_failed { primary_err = primary_msg; recovery_err })))
     | Error primary_msg ->
-        let recovery = goals_recovery_path config in
-        if Workspace_utils.path_exists config recovery then
-          match Workspace_utils.read_json_result config recovery with
-          | Ok recovery_json ->
-              (match state_of_yojson recovery_json with
-               | Ok state ->
-                   Log.Misc.warn
-                     "goal_store: primary goals.json unreadable (%s), recovered from %s"
-                     primary_msg recovery;
-                   { state with goals = List.map normalize_goal state.goals }
-               | Error recovery_msg ->
-                   Log.Misc.error
-                     "goal_store: primary unreadable (%s), recovery corrupt (%s)"
-                     primary_msg recovery_msg;
-                   default_state ())
-          | Error recovery_msg ->
-              Log.Misc.error
-                "goal_store: primary unreadable (%s), recovery unreadable (%s)"
-                primary_msg recovery_msg;
-              default_state ()
-        else
-          (Log.Misc.warn
-             "goal_store: goals.json unreadable (%s), no .last-good available"
-             primary_msg;
-           default_state ())
+      (match read_recovery_result config with
+       | Ok state ->
+         Log.Misc.warn
+           "goal_store: primary goals.json unreadable (%s), recovered from %s"
+           primary_msg
+           (goals_recovery_path config);
+         Ok state
+       | Error recovery_err ->
+         Error (Primary_read_failed { primary_err = primary_msg; recovery_err }))
   else
+    Ok (default_state ())
+
+let read_state config =
+  match read_state_result config with
+  | Ok state -> state
+  | Error error ->
+    Log.Misc.warn "goal_store.read_state defaulted after read failure: %s"
+      (read_error_to_string error);
     default_state ()
 
 let write_state_result config state =
@@ -366,18 +392,29 @@ let replace_goal goals updated =
 let update_state config f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+    match read_state_result config with
+    | Error error -> Error (read_error_to_string error)
+    | Ok state ->
       let next_state = f state in
       let* () = write_state_result config next_state in
       Ok next_state)
 
+let get_goal_result config ~goal_id =
+  match read_state_result config with
+  | Error error -> Error (read_error_to_string error)
+  | Ok state -> Ok (find_goal state.goals goal_id)
+
 let get_goal config ~goal_id =
-  read_state config |> fun state -> find_goal state.goals goal_id
+  match get_goal_result config ~goal_id with
+  | Ok goal -> goal
+  | Error msg ->
+    Log.Misc.warn "goal_store.get_goal defaulted after read failure: %s" msg;
+    None
 
 let update_goal config ~goal_id f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+      let* state = read_state_result config |> Result.map_error read_error_to_string in
       match find_goal state.goals goal_id with
       | None -> Error "goal not found"
       | Some goal ->
@@ -408,7 +445,11 @@ let delete_goal_error_to_string = function
 let delete_goal config ~goal_id =
   let deleted =
     Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      let state = read_state config in
+      let* state =
+        read_state_result config
+        |> Result.map_error (fun error ->
+          Persistence_failed (read_error_to_string error))
+      in
       if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
         Error (Unknown_goal "Goal not found")
       else (
@@ -460,18 +501,30 @@ let sort_goals goals =
         String.compare right.updated_at left.updated_at)
     goals
 
+let list_goals_result config ?status ?phase () =
+  match read_state_result config with
+  | Error error -> Error (read_error_to_string error)
+  | Ok state ->
+    let goals =
+      state.goals
+      |> List.filter (fun goal ->
+        match status with
+        | None -> true
+        | Some status -> goal.status = status)
+      |> List.filter (fun goal ->
+        match phase with
+        | None -> true
+        | Some phase -> goal.phase = phase)
+      |> sort_goals
+    in
+    Ok goals
+
 let list_goals config ?status ?phase () =
-  read_state config
-  |> fun state -> state.goals
-  |> List.filter (fun goal ->
-         match status with
-         | None -> true
-         | Some status -> goal.status = status)
-  |> List.filter (fun goal ->
-         match phase with
-         | None -> true
-         | Some phase -> goal.phase = phase)
-  |> sort_goals
+  match list_goals_result config ?status ?phase () with
+  | Ok goals -> goals
+  | Error msg ->
+    Log.Misc.warn "goal_store.list_goals defaulted after read failure: %s" msg;
+    []
 
 let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
   (* Cannot be own parent *)
@@ -525,28 +578,30 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
         (* Validate parent_goal_id before acquiring the write lock *)
         let parent_validation =
-          let current_goals = (read_state config).goals in
-          match find_goal current_goals resolved_id with
-          | Some existing ->
-              (* Existing goal: validate only if parent is being changed *)
-              (match parent_goal_id with
-               | Some new_pid ->
-                   (match existing.parent_goal_id with
-                    | Some old_pid when String.equal old_pid new_pid ->
-                        Ok () (* no change, skip validation *)
-                    | _ ->
-                        validate_parent_goal_id current_goals
-                          ~goal_id:resolved_id
-                          ~parent_goal_id:new_pid)
-               | None -> Ok ())
-          | None ->
-              (* New goal: validate any provided parent_goal_id *)
-              (match parent_goal_id with
-               | Some pid ->
-                   validate_parent_goal_id current_goals
-                     ~goal_id:resolved_id
-                     ~parent_goal_id:pid
-               | None -> Ok ())
+          match read_state_result config with
+          | Error error -> Error (read_error_to_string error)
+          | Ok state ->
+            let current_goals = state.goals in
+            (match find_goal current_goals resolved_id with
+             | Some existing ->
+               (* Existing goal: validate only if parent is being changed *)
+               (match parent_goal_id with
+                | Some new_pid ->
+                  (match existing.parent_goal_id with
+                   | Some old_pid when String.equal old_pid new_pid ->
+                     Ok () (* no change, skip validation *)
+                   | _ ->
+                     validate_parent_goal_id
+                       current_goals
+                       ~goal_id:resolved_id
+                       ~parent_goal_id:new_pid)
+                | None -> Ok ())
+             | None ->
+               (* New goal: validate any provided parent_goal_id *)
+               (match parent_goal_id with
+                | Some pid ->
+                  validate_parent_goal_id current_goals ~goal_id:resolved_id ~parent_goal_id:pid
+                | None -> Ok ()))
         in
         (match parent_validation with
          | Error msg -> Error msg

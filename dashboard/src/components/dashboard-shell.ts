@@ -374,6 +374,7 @@ function reactionLedgerHealthChip(
   const legacySwept = ledgerCount(ledger.legacy_cursor_swept_stimulus_count)
   const readErrors = ledgerCount(ledger.read_error_count)
   const cursorAck = ledgerCount(ledger.cursor_ack_count)
+  const stimulusConsumed = ledgerCount(ledger.stimulus_consumed_count)
   const status = ledger.status ?? 'unknown'
   const requiresAction = ledger.operator_action_required === true
   const totalSwept = cursorSwept + legacySwept
@@ -399,6 +400,7 @@ function reactionLedgerHealthChip(
       `cursor_swept=${cursorSwept}`,
       `legacy_swept=${legacySwept}`,
       `cursor_ack=${cursorAck}`,
+      `stimulus_consumed=${stimulusConsumed}`,
       `read_errors=${readErrors}`,
     ].join(', '),
     tone,

@@ -27,6 +27,8 @@ val base_dir : masc_root:string -> string
 
 type record =
   { keeper_id : string
+  ; trace_id : string
+  ; turn : int
   ; injected_fact_keys : string list
   ; injected_episode_keys : string list
   ; failure_reason : string option
@@ -44,15 +46,15 @@ type decode_error =
     drift instead of silently dropping malformed rows. *)
 
 val record_of_json_result : Yojson.Safe.t -> (record, decode_error) result
-val record_of_json : Yojson.Safe.t -> record option
-(** Compatibility wrapper over {!record_of_json_result}. New read paths that need
-    observability should use the result-returning decoder. *)
+val decode_error_to_string : decode_error -> string
 
 val failure_reason_unknown_label : string
 val bounded_failure_reason_label : string -> string
 (** Collapse recall failure labels to the bounded producer set. Unknown producer
-    strings are grouped as {!failure_reason_unknown_label} to avoid high-cardinality
-    dashboard output. *)
+    strings are grouped as {!failure_reason_unknown_label} to avoid
+    high-cardinality dashboard output. The bounded producer set is the Memory OS
+    recall unavailable reasons: [read_error], [fact_store_parse_error],
+    [episode_store_parse_error], and [prompt_render_error]. *)
 
 val to_json
   :  ?failure_reason:string

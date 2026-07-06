@@ -1,4 +1,5 @@
 open Alcotest
+module Profile = Masc.Mcp_server_eio_tool_profile
 
 let contains_substring haystack needle =
   let hlen = String.length haystack in
@@ -48,6 +49,56 @@ let json_string_field key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
   | other -> failf "field %s was %s" key (Yojson.Safe.to_string other)
+;;
+
+let test_decode_cursor_result_reports_base64_error () =
+  match
+    Profile.decode_cursor_result ~kind:"tools" "not-base64"
+  with
+  | Ok _ -> fail "expected base64 decode error"
+  | Error (Profile.Cursor_base64_decode_error { kind; message }) ->
+      check string "kind" "tools" kind;
+      check bool "message present" true (String.length message > 0)
+  | Error _ -> fail "expected Cursor_base64_decode_error"
+;;
+
+let test_decode_cursor_result_reports_kind_mismatch () =
+  let cursor = Base64.encode_string "resources:1" in
+  match Profile.decode_cursor_result ~kind:"tools" cursor with
+  | Ok _ -> fail "expected kind mismatch"
+  | Error (Profile.Cursor_kind_mismatch { expected_kind }) ->
+      check string "expected kind" "tools" expected_kind
+  | Error _ -> fail "expected Cursor_kind_mismatch"
+;;
+
+let test_decode_cursor_result_reports_non_integer_offset () =
+  let cursor = Base64.encode_string "tools:not-an-int" in
+  match Profile.decode_cursor_result ~kind:"tools" cursor with
+  | Ok _ -> fail "expected offset parse error"
+  | Error (Profile.Cursor_offset_parse_error { kind; raw_offset }) ->
+      check string "kind" "tools" kind;
+      check string "raw offset" "not-an-int" raw_offset
+  | Error _ -> fail "expected Cursor_offset_parse_error"
+;;
+
+let test_decode_cursor_result_reports_negative_offset () =
+  let cursor = Base64.encode_string "tools:-1" in
+  match Profile.decode_cursor_result ~kind:"tools" cursor with
+  | Ok _ -> fail "expected negative offset"
+  | Error (Profile.Cursor_negative_offset { kind; offset }) ->
+      check string "kind" "tools" kind;
+      check int "offset" (-1) offset
+  | Error _ -> fail "expected Cursor_negative_offset"
+;;
+
+let test_page_items_with_cursor_preserves_invalid_cursor_contract () =
+  match
+    Profile.page_items_with_cursor ~kind:"tools" [ "a"; "b" ] (Some "not-base64")
+  with
+  | Ok _ -> fail "expected invalid cursor error"
+  | Error msg ->
+      check bool "contract label" true (contains_substring msg "Invalid params: cursor");
+      check bool "received cursor present" true (contains_substring msg "not-base64")
 ;;
 
 let test_annotations_do_not_invent_read_only () =
@@ -254,6 +305,28 @@ let () =
             "default-instructions-pin-start-transition-workflow"
             `Quick
             test_default_instructions_pin_start_transition_workflow
+        ] )
+    ; ( "pagination-cursor"
+      , [ test_case
+            "decode-cursor-result-reports-base64-error"
+            `Quick
+            test_decode_cursor_result_reports_base64_error
+        ; test_case
+            "decode-cursor-result-reports-kind-mismatch"
+            `Quick
+            test_decode_cursor_result_reports_kind_mismatch
+        ; test_case
+            "decode-cursor-result-reports-non-integer-offset"
+            `Quick
+            test_decode_cursor_result_reports_non_integer_offset
+        ; test_case
+            "decode-cursor-result-reports-negative-offset"
+            `Quick
+            test_decode_cursor_result_reports_negative_offset
+        ; test_case
+            "page-items-preserves-invalid-cursor-contract"
+            `Quick
+            test_page_items_with_cursor_preserves_invalid_cursor_contract
         ] )
     ]
 ;;

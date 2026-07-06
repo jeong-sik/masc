@@ -126,6 +126,7 @@ let test_typed_payload_surface () =
            ; author = "alice"
            ; title = "t"
            ; content = "c"
+           ; mention_ids = []
            ; hearth = None
            ; updated_at = None
            })

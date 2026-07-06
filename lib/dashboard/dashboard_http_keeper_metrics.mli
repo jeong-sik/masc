@@ -114,7 +114,9 @@ val keeper_metrics_24h_json :
 (** [keeper_metrics_24h_json ~metrics_lines ~now_ts] aggregates
     metrics from the past 24 hours (window = [now_ts - 86400] to
     [now_ts]) into a 2-tuple of JSON payloads (per-keeper +
-    fleet-wide).  Used by the keeper-detail dashboard endpoint. *)
+    fleet-wide). The summary JSON includes row-indexed [read_errors]
+    for malformed metrics JSONL rows. Used by the keeper-detail
+    dashboard endpoint. *)
 
 val keeper_history_summary_json :
   all_keeper_names:string list ->
@@ -129,6 +131,17 @@ val keeper_history_summary_json :
        compaction_count, handoff_count)].  The 6-tuple shape is
     operator-visible in the dashboard and pinned at the contract
     seam. *)
+
+val keeper_history_summary_json_with_read_errors :
+  all_keeper_names:string list ->
+  keeper_name:string ->
+  history_path:string ->
+  filter_fragments:bool ->
+  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int
+  * Yojson.Safe.t list
+(** [keeper_history_summary_json_with_read_errors] is the read-error-aware
+    form of {!keeper_history_summary_json}. The final list contains
+    row-indexed keeper history JSONL read errors. *)
 
 (** {1 Test-visible helpers}
     Pinned for behaviour-tests under {!test/test_dashboard_keeper_metrics_10286}. *)

@@ -31,15 +31,136 @@ let receipt_row_matches ?turn_id keeper_name trace_id json =
   keeper_matches && (trace_matches || turn_matches)
 ;;
 
+type receipt_read_error_kind =
+  | Receipt_json_error
+  | Receipt_row_not_object
+  | Receipt_path_is_directory
+  | Receipt_io_error
+
+let receipt_read_error_kind_to_string = function
+  | Receipt_json_error -> "json_error"
+  | Receipt_row_not_object -> "row_not_object"
+  | Receipt_path_is_directory -> "path_is_directory"
+  | Receipt_io_error -> "io_error"
+;;
+
+let receipt_read_error_to_json ~path ?line_index ~kind ~message () =
+  let line_index_field =
+    match line_index with
+    | Some index -> [ "line_index", `Int index ]
+    | None -> []
+  in
+  `Assoc
+    ([ "source", `String "runtime_trace_execution_receipt_jsonl"
+     ; "path", `String path
+     ]
+     @ line_index_field
+     @ [ "kind", `String (receipt_read_error_kind_to_string kind)
+       ; "message", `String message
+       ])
+;;
+
+let read_receipt_rows_from_path_with_read_errors
+      ~keeper_name
+      ~trace_id
+      ?turn_id
+      path
+  =
+  try
+    if not (Sys.file_exists path)
+    then [], []
+    else if Sys.is_directory path
+    then
+      ( []
+      , [ receipt_read_error_to_json
+            ~path
+            ~kind:Receipt_path_is_directory
+            ~message:"execution receipt path is a directory"
+            ()
+        ] )
+    else (
+      let input = open_in_bin path in
+      Eio_guard.protect
+        ~finally:(fun () -> close_in_noerr input)
+        (fun () ->
+           let rec loop line_index rows read_errors =
+             match input_line input with
+             | line ->
+               let trimmed = String.trim line in
+               if String.equal trimmed ""
+               then loop (line_index + 1) rows read_errors
+               else (
+                 match Yojson.Safe.from_string trimmed with
+                 | `Assoc _ as json ->
+                   let rows =
+                     if receipt_row_matches ?turn_id keeper_name trace_id json
+                     then json :: rows
+                     else rows
+                   in
+                   loop (line_index + 1) rows read_errors
+                 | other ->
+                   loop
+                     (line_index + 1)
+                     rows
+                     (receipt_read_error_to_json
+                        ~path
+                        ~line_index
+                        ~kind:Receipt_row_not_object
+                        ~message:
+                          (Printf.sprintf
+                             "execution receipt JSONL row must be object, got %s"
+                             (Json_util.kind_name other))
+                        ()
+                      :: read_errors)
+                 | exception Yojson.Json_error message ->
+                   loop
+                     (line_index + 1)
+                     rows
+                     (receipt_read_error_to_json
+                        ~path
+                        ~line_index
+                        ~kind:Receipt_json_error
+                        ~message
+                        ()
+                      :: read_errors))
+             | exception End_of_file -> List.rev rows, List.rev read_errors
+           in
+           loop 1 [] [])
+    )
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    ( []
+    , [ receipt_read_error_to_json
+          ~path
+          ~kind:Receipt_io_error
+          ~message:(Printexc.to_string exn)
+          ()
+      ] )
+;;
+
+let read_receipt_rows_with_read_errors ~keeper_name ~trace_id ?turn_id paths =
+  let rows_rev, read_errors_rev =
+    paths
+    |> List.fold_left
+         (fun (rows_rev, read_errors_rev) path ->
+            let rows, read_errors =
+              read_receipt_rows_from_path_with_read_errors
+                ~keeper_name
+                ~trace_id
+                ?turn_id
+                path
+            in
+            List.rev_append rows rows_rev, List.rev_append read_errors read_errors_rev)
+         ([], [])
+  in
+  List.rev rows_rev, List.rev read_errors_rev
+;;
+
 let read_receipt_rows ~keeper_name ~trace_id ?turn_id paths =
   paths
-  |> List.concat_map (fun path ->
-    Fs_compat.fold_jsonl_lines
-      ~init:[]
-      ~f:(fun acc ~line_no:_ json ->
-        if receipt_row_matches ?turn_id keeper_name trace_id json then json :: acc else acc)
-      path
-    |> List.rev)
+  |> read_receipt_rows_with_read_errors ~keeper_name ~trace_id ?turn_id
+  |> fst
 ;;
 
 let unique_ints values = values |> List.sort_uniq Int.compare

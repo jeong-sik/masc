@@ -32,7 +32,18 @@
     reaches unqualified must be exposed here. *)
 
 val keeper_count : Workspace.config -> int
-(** Total keepers visible in [config.base_path] meta. *)
+(** Compatibility count of keepers visible in [config.base_path] meta.  Use
+    {!keeper_count_scan} when the caller must surface discovery failures. *)
+
+type keeper_count_scan = {
+  keeper_count : int;
+  keeper_count_known : bool;
+  keeper_count_read_errors : Yojson.Safe.t list;
+}
+
+val keeper_count_scan : Workspace.config -> keeper_count_scan
+(** Counts keepers visible in [config.base_path] meta and preserves the
+    keeper-name discovery read errors that make the count non-authoritative. *)
 
 val configured_keeper_count : Workspace.config -> int
 (** Total materializable declarative runtime keeper profiles discovered from
@@ -43,9 +54,20 @@ val keeper_names : Workspace.config -> string list
 (** Keeper names visible in [config.base_path] meta. *)
 
 val running_keeper_count : Workspace.config -> int
-(** Counts keepers whose meta indicates an active
-    keep-alive runtime.  Used by the dashboard fleet
-    summary on the runtime consumer side. *)
+(** Compatibility count of keepers whose meta indicates an active keep-alive
+    runtime.  Use {!running_keeper_count_scan} when the caller must surface
+    unreadable keeper meta. *)
+
+type running_keeper_count_scan = {
+  running_keeper_count : int;
+  running_keeper_count_known : bool;
+  running_keeper_count_read_errors : Yojson.Safe.t list;
+}
+
+val running_keeper_count_scan : Workspace.config -> running_keeper_count_scan
+(** Counts keepers whose meta indicates an active keep-alive runtime and
+    reports name-discovery or per-keeper meta read errors instead of collapsing
+    them into an authoritative zero. *)
 
 (** {1 Outcomes rollup} *)
 

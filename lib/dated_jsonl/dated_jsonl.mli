@@ -29,6 +29,11 @@ val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
 
+val append_result : t -> Yojson.Safe.t -> (unit, string) result
+(** Result-returning variant of {!append}. Filesystem append/prune failures are
+    returned as [Error]; cancellation and non-IO invariant failures are not
+    converted. *)
+
 val append_if_current_file_fits :
   t -> max_current_file_bytes:int -> Yojson.Safe.t -> bool
 (** Append [json] only when today's current [DD.jsonl] would remain at or

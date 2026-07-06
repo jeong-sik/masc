@@ -34,21 +34,21 @@ let record_recovery_stimulus_turn_started
       ~keeper_name
       (stimulus : Keeper_event_queue.stimulus)
   =
-  try
-    Keeper_reaction_ledger.record_event_queue_reaction
+  match
+    Keeper_reaction_ledger.record_event_queue_reaction_result
       ~base_path:ctx.config.base_path
       ~keeper_name
       ~reaction_kind:Keeper_reaction_ledger.Turn_started
       stimulus
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
+  | Ok () -> ()
+  | Error error ->
     Log.Keeper.error
       "turn entry: failed to persist recovery stimulus reaction post_id=%s \
        (keeper=%s): %s"
       stimulus.post_id
       keeper_name
-      (Printexc.to_string exn)
+      error
 ;;
 
 type heartbeat_event_intake = {
@@ -81,6 +81,7 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
+  | Keeper_event_queue.Schedule_signal _
   | Keeper_event_queue.Hitl_resolved _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle. Once the resolved
@@ -132,6 +133,18 @@ let consume_single_heartbeat_stimulus
        | Keeper_event_queue.Bg_failed _ -> false)
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Schedule_signal signal ->
+    (* Schedule signals are durable pointers only. They wake the keeper lane;
+       schedule payload/state must be re-read from the schedule store during
+       the cycle instead of injected from a copied payload snapshot. *)
+    Log.Keeper.info
+      "turn entry: schedule signal consumed signal_id=%s kind=%s schedule_id=%s \
+       (keeper=%s)"
+      signal.schedule_signal_id
+      (Keeper_event_queue.schedule_signal_kind_to_string signal.schedule_signal_kind)
+      signal.schedule_id
+      meta_after_triage.name;
+    []
   | Keeper_event_queue.Bootstrap ->
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
@@ -234,22 +247,34 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
   (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
      per turn. Board signals are coalesced by the default debounce
      window in {!Keeper_event_queue.drain_board_window} (2 s). *)
-  let board_batch =
-    Keeper_registry_event_queue.drain_board
-      ~base_path:ctx.config.base_path
-      meta_after_triage.name
-  in
   let queued_observations, consumed_stimuli =
-    match board_batch with
-    | [] ->
+    match
+      Keeper_registry_event_queue.drain_board_result
+        ~base_path:ctx.config.base_path
+        meta_after_triage.name
+    with
+    | Error msg ->
+      Log.Keeper.warn
+        "turn entry: board stimulus drain failed (keeper=%s): %s"
+        meta_after_triage.name
+        msg;
+      [], []
+    | Ok [] ->
       (match
-         Keeper_registry_event_queue.dequeue
+         Keeper_registry_event_queue.dequeue_result
            ~base_path:ctx.config.base_path
            meta_after_triage.name
        with
-       | None -> [], []
-       | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, [ stim ])
-    | batch -> consume_board_stimulus_batch ~meta_after_triage batch, batch
+       | Error msg ->
+         Log.Keeper.warn
+           "turn entry: stimulus dequeue failed (keeper=%s): %s"
+           meta_after_triage.name
+           msg;
+         [], []
+       | Ok None -> [], []
+       | Ok (Some stim) ->
+         consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, [ stim ])
+    | Ok batch -> consume_board_stimulus_batch ~meta_after_triage batch, batch
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in

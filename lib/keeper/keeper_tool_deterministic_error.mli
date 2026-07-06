@@ -69,6 +69,8 @@ type classification =
   ; source : classification_source
   }
 
+type raw_payload_parse_error = Raw_payload_malformed_json of string
+
 (** Classify a raw tool-result JSON payload (as returned by
     [Keeper_tool_dispatch_runtime]) into a [deterministic_reason] only when the
     payload carries an explicit typed marker: [deterministic_retry],
@@ -95,11 +97,22 @@ val classify_with_source : Yojson.Safe.t -> classification option
     [error] string fallbacks. *)
 val deterministic_retry_fields : deterministic_reason -> (string * Yojson.Safe.t) list
 
-(** Convenience wrapper: parse [raw] as JSON then [classify]. Returns
-    [None] when [raw] is not valid JSON. *)
+(** Parse [raw] as JSON then [classify], preserving malformed JSON as a typed
+    parse error instead of conflating it with an unclassified valid payload. *)
+val classify_raw_result :
+  string -> (deterministic_reason option, raw_payload_parse_error) result
+
+val classify_raw_with_source_result :
+  string -> (classification option, raw_payload_parse_error) result
+
+(** Compatibility wrapper around {!classify_raw_result}. Returns [None] for
+    both malformed JSON and valid-but-unclassified payloads. New code that needs
+    to distinguish those cases should use {!classify_raw_result}. *)
 val classify_raw : string -> deterministic_reason option
 
 val classify_raw_with_source : string -> classification option
+
+val raw_payload_parse_error_to_string : raw_payload_parse_error -> string
 
 (** Stable lowercase identifier used for telemetry / log labels.
     Format: [deterministic_error_<reason>]. *)

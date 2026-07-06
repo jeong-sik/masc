@@ -42,46 +42,53 @@ let run
      Uses meta-based fallback when [STATE] parsing fails.
      See RFC #3646 Section 3: Det/NonDet boundary. *)
   let memory_series () =
-  (try
-     let notes_written, kinds_written =
-       Memory.append_from_reply
-         config
-         meta
-         ~snapshot:state_snapshot
-         ~state_snapshot_source
-         ~turn
-         ~reply:response_text
-         ()
-     in
-     let tool_result_notes_written =
-       match tool_results_snapshot with
-       | Some tool_results ->
-         Memory.append_from_tool_results config meta ~turn ~results:tool_results
-       | None -> 0
-     in
-     let notes_written = notes_written + tool_result_notes_written in
-     let kinds_written =
-       if
-         tool_result_notes_written > 0
-         && not (List.mem "long_term" kinds_written)
-       then kinds_written @ [ "long_term" ]
-       else kinds_written
-     in
-     if notes_written > 0
-     then
-       Keeper_turn_telemetry.log_keeper_memory_write
-         ~keeper_name:meta.name
-         ~notes_written
-         ~kinds_written
-   with
-   | exn ->
-     Log.Keeper.error ~keeper_name:meta.name
-       "memory_write failed: %s"
-       (Printexc.to_string exn);
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string MemoryWriteFailures)
-       ~labels:[ "keeper", meta.name ]
-       ());
+    let memory_write =
+      match
+        Memory.append_from_reply_result
+          config
+          meta
+          ~snapshot:state_snapshot
+          ~state_snapshot_source
+          ~turn
+          ~reply:response_text
+          ()
+      with
+      | Error msg -> Error msg
+      | Ok (notes_written, kinds_written) -> (
+        match tool_results_snapshot with
+        | None -> Ok (notes_written, kinds_written)
+        | Some tool_results -> (
+          match
+            Memory.append_from_tool_results_result config meta ~turn ~results:tool_results
+          with
+          | Error msg -> Error msg
+          | Ok tool_result_notes_written ->
+            let notes_written = notes_written + tool_result_notes_written in
+            let kinds_written =
+              if
+                tool_result_notes_written > 0
+                && not (List.mem "long_term" kinds_written)
+              then kinds_written @ [ "long_term" ]
+              else kinds_written
+            in
+            Ok (notes_written, kinds_written)))
+    in
+    (match memory_write with
+     | Ok (notes_written, kinds_written) ->
+       if notes_written > 0
+       then
+         Keeper_turn_telemetry.log_keeper_memory_write
+           ~keeper_name:meta.name
+           ~notes_written
+           ~kinds_written
+     | Error msg ->
+       Log.Keeper.error ~keeper_name:meta.name
+         "memory_write failed: %s"
+         msg;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string MemoryWriteFailures)
+         ~labels:[ "keeper", meta.name ]
+         ());
 
   (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. *)
   let librarian_input : Keeper_librarian.input =
@@ -294,11 +301,20 @@ let run
                ]
              | None -> []))
      in
-     Keeper_types_support.append_jsonl_line
-       (Keeper_types_support.keeper_decision_log_path
-          config
-          meta.name)
-       eval_json
+     (match
+        Keeper_types_support.append_jsonl_line_result
+          (Keeper_types_support.keeper_decision_log_path config meta.name)
+          eval_json
+      with
+      | Ok () -> ()
+      | Error msg ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string DispatchEventFailures)
+          ~labels:[ "keeper", meta.name; "site", "post_turn_eval" ]
+          ();
+        Log.Keeper.warn ~keeper_name:meta.name
+          "post_turn_eval jsonl append failed: %s"
+          msg)
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->

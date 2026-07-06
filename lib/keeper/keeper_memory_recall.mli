@@ -221,6 +221,18 @@ val load_history_user_messages_result :
 
     @since RFC-0149 §3.1 *)
 
+type recall_candidates_with_history_outcome = {
+  candidates : string list;
+  history_read_error : Keeper_memory_recall_exn_class.t option;
+}
+
+val recall_candidates_with_history_outcome :
+  checkpoint_messages:Agent_sdk.Types.message list ->
+  history_path:string ->
+  max_checkpoint:int ->
+  max_history:int ->
+  recall_candidates_with_history_outcome
+
 val recall_candidates_with_history :
   checkpoint_messages:Agent_sdk.Types.message list ->
   history_path:string ->

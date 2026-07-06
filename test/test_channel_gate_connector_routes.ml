@@ -1,6 +1,7 @@
 open Alcotest
 
 module Routes = Server_routes_http_routes_channel_gate
+module Sidecar_paths = Server_routes_http_sidecar_paths
 module U = Yojson.Safe.Util
 
 let with_env name value f =
@@ -36,6 +37,12 @@ let with_temp_dir f =
       in
       rm_rf base)
     (fun () -> f base)
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
 
 let with_sidecar_paths prefix dir f =
   let status_path = Filename.concat dir (prefix ^ "-status.json") in
@@ -73,6 +80,15 @@ let test_gate_time_parser_accepts_python_utc_isoformat () =
   check bool "non-UTC offset remains rejected" true
     (Option.is_none
        (Gate_time_util.parse_iso8601_opt "2026-06-06T00:00:00+09:00"))
+
+let test_sidecar_toml_lookup_result_surfaces_parse_error () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "bad-runtime.toml" in
+  write_file path "[broken\n";
+  match Sidecar_paths.toml_lookup_result path [ "status_path" ] with
+  | Error msg ->
+    check bool "parse error message surfaced" true (String.trim msg <> "")
+  | Ok _ -> fail "expected TOML parse error"
 
 let test_slack_bind_persists_binding_and_audit () =
   with_temp_dir @@ fun dir ->
@@ -141,6 +157,8 @@ let () =
         [
           test_case "gate time parses python UTC isoformat" `Quick
             test_gate_time_parser_accepts_python_utc_isoformat;
+          test_case "sidecar TOML lookup surfaces parse errors" `Quick
+            test_sidecar_toml_lookup_result_surfaces_parse_error;
           test_case "slack bind persists binding and audit" `Quick
             test_slack_bind_persists_binding_and_audit;
           test_case "telegram connector json reads runtime status" `Quick

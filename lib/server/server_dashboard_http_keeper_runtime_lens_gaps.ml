@@ -40,6 +40,16 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
        else gaps)
   |> (fun gaps ->
        match claim_status with
+       | Some "read_error" | Some "invalid_output_shape" ->
+         add
+           { code = "claim_scope_read_error"
+           ; severity = "bad"
+           ; lane = "keeper"
+           ; detail =
+               Json_util.get_string claim_scope "read_error"
+               |> Option.map (Printf.sprintf "keeper_task_claim output unreadable: %s")
+           }
+           gaps
        | Some "no_eligible" ->
          add
            { code = "claim_scope_no_eligible"

@@ -151,6 +151,98 @@ let test_peek_returns_last_projection () =
     | None -> Alcotest.fail "peek returned None after a successful read")
 ;;
 
+let test_tool_name_parser_surfaces_malformed_rows () =
+  let lines =
+    [
+      "{not-json";
+      {|{"tools_used":["masc_status"]}|};
+      "[]";
+    ]
+  in
+  let names, errors =
+    Masc.Operator_control_snapshot_tool_names.collect_recent_tool_names_with_errors
+      lines
+  in
+  Alcotest.(check (list string))
+    "valid tool names survive malformed neighbors"
+    [ "masc_status" ]
+    names;
+  Alcotest.(check int) "malformed rows are reported" 2 (List.length errors);
+  let error_json =
+    match errors with
+    | first :: _ ->
+      Masc.Operator_control_snapshot_tool_names.recent_tool_name_parse_error_to_json
+        ~source:"operator_tool_audit_decisions_jsonl"
+        ~keeper:"audit-probe"
+        ~path:"/tmp/decision-log.jsonl"
+        first
+    | [] -> Alcotest.fail "expected parse errors"
+  in
+  Alcotest.(check string)
+    "parse error source"
+    "operator_tool_audit_decisions_jsonl"
+    Yojson.Safe.Util.(error_json |> member "source" |> to_string);
+  Alcotest.(check string)
+    "parse error keeper"
+    "audit-probe"
+    Yojson.Safe.Util.(error_json |> member "keeper" |> to_string)
+;;
+
+let test_context_metrics_parser_surfaces_malformed_rows () =
+  let valid_context =
+    `Assoc
+      [
+        ("snapshot_source", `String "keeper_context_status");
+        ("context_ratio", `Float 0.5);
+        ("context_tokens", `Int 128);
+        ("context_max", `Int 512);
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let rows, errors =
+    Masc.Keeper_status_metrics.parse_metrics_json_lines
+      [ "{not-json"; valid_context; "[]" ]
+  in
+  Alcotest.(check int) "valid metrics rows survive" 1 (List.length rows);
+  Alcotest.(check int) "malformed metrics rows are reported" 2 (List.length errors);
+  let snapshots =
+    List.filter_map
+      Masc.Operator_control_context_snapshot.keeper_context_snapshot_from_metrics_json
+      rows
+  in
+  let snapshot =
+    match snapshots with
+    | [ snapshot ] -> snapshot
+    | _ -> Alcotest.fail "expected exactly one context snapshot"
+  in
+  Alcotest.(check (option string))
+    "context source survives malformed neighbors"
+    (Some "keeper_context_status")
+    snapshot.context_source;
+  Alcotest.(check (option int))
+    "context tokens survive malformed neighbors"
+    (Some 128)
+    snapshot.context_tokens;
+  let error_json =
+    match errors with
+    | first :: _ ->
+      Masc.Keeper_status_metrics.metrics_json_line_parse_error_to_json
+        ~source:"operator_context_snapshot_metrics_jsonl"
+        ~keeper:"context-probe"
+        ~path:"/tmp/metrics.jsonl"
+        first
+    | [] -> Alcotest.fail "expected parse errors"
+  in
+  Alcotest.(check string)
+    "context parse error source"
+    "operator_context_snapshot_metrics_jsonl"
+    Yojson.Safe.Util.(error_json |> member "source" |> to_string);
+  Alcotest.(check string)
+    "context parse error keeper"
+    "context-probe"
+    Yojson.Safe.Util.(error_json |> member "keeper" |> to_string)
+;;
+
 let () =
   Alcotest.run "audit_projection"
     [ ( "recent_lines_vs_tail"
@@ -168,6 +260,14 @@ let () =
             test_blank_lines_filtered
         ; Alcotest.test_case "peek returns last projection" `Quick
             test_peek_returns_last_projection
+        ] )
+    ; ( "tool_name_diagnostics"
+      , [ Alcotest.test_case "malformed rows are surfaced" `Quick
+            test_tool_name_parser_surfaces_malformed_rows
+        ] )
+    ; ( "context_metrics_diagnostics"
+      , [ Alcotest.test_case "malformed rows are surfaced" `Quick
+            test_context_metrics_parser_surfaces_malformed_rows
         ] )
     ]
 ;;

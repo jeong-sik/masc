@@ -8,7 +8,61 @@ let record_post_meta_json_read_drop () =
     ~reason:Read_drop_reason.Invalid_payload
 ;;
 
+let record_post_kind_read_drop () =
+  Board_metrics_hooks.inc_persistence_read_drop
+    ~surface:Board_metrics_hooks.Board_post_kind
+    ~reason:Read_drop_reason.Invalid_payload
+;;
+
+let record_mention_ids_read_drop ~surface =
+  Board_metrics_hooks.inc_persistence_read_drop
+    ~surface
+    ~reason:Read_drop_reason.Invalid_payload
+;;
+
+type post_meta_json_string_parse_error =
+  | Post_meta_json_string_json_decode_error of string
+
+let post_meta_json_string_parse_error_to_string = function
+  | Post_meta_json_string_json_decode_error message ->
+    Printf.sprintf "post meta_json string is not valid JSON: %s" message
+;;
+
+let parse_post_meta_json_string_result raw =
+  match Yojson.Safe.from_string raw with
+  | json -> Ok json
+  | exception Yojson.Json_error message ->
+    Error (Post_meta_json_string_json_decode_error message)
+;;
+
+let parse_post_meta_json_string raw =
+  match parse_post_meta_json_string_result raw with
+  | Ok json -> Some json
+  | Error (Post_meta_json_string_json_decode_error _) -> None
+;;
+
 let visibility_of_string = Board_core_classify.visibility_of_string
+
+let mention_ids_of_yojson ~surface json =
+  match Safe_ops.json_member_opt "mention_ids" json with
+  | None -> []
+  | Some (`List items) ->
+    items
+    |> List.filter_map (function
+      | `String value ->
+        (match Mention_id.of_string value with
+         | Some mention_id -> Some mention_id
+         | None ->
+           record_mention_ids_read_drop ~surface;
+           None)
+      | _ ->
+        record_mention_ids_read_drop ~surface;
+        None)
+    |> List.sort_uniq Mention_id.compare
+  | Some _ ->
+    record_mention_ids_read_drop ~surface;
+    []
+;;
 
 (* RFC-0233 §7: decode the typed post origin. Parse, don't repair — an absent
    [origin], a non-object value, or a malformed sub-field all degrade to [None]
@@ -56,14 +110,24 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
     let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
     let reply_count = Safe_ops.json_int ~default:0 "reply_count" json in
+    let mention_ids =
+      mention_ids_of_yojson ~surface:Board_metrics_hooks.Board_post_mention_ids json
+    in
     let hearth = Safe_ops.json_string_opt "hearth" json in
     let thread_id = Safe_ops.json_string_opt "thread_id" json in
     (* Missing on legacy rows persisted before the pin field existed -> default false. *)
     let pinned = Safe_ops.json_bool ~default:false "pinned" json in
     let post_kind_opt =
       match Safe_ops.json_string_opt "post_kind" json with
-      | Some raw -> post_kind_of_string raw
-      | None -> None
+      | Some raw ->
+        (match post_kind_of_string raw with
+         | Some kind -> Some kind
+         | None ->
+           record_post_kind_read_drop ();
+           None)
+      | None ->
+        record_post_kind_read_drop ();
+        None
     in
     let meta_json =
       match Safe_ops.json_member_opt "meta" json with
@@ -71,8 +135,9 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
       | Some _ | None ->
         (match Safe_ops.json_string_opt "meta_json" json with
          | Some raw ->
-           (try Some (Yojson.Safe.from_string raw) with
-            | Yojson.Json_error _ ->
+           (match parse_post_meta_json_string_result raw with
+            | Ok meta -> Some meta
+            | Error (Post_meta_json_string_json_decode_error _) ->
               record_post_meta_json_read_drop ();
               None)
          | None -> None)
@@ -85,20 +150,10 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     (match
        ( Post_id.of_string id_str
        , Agent_id.of_string author_str
-       , visibility_of_string vis_str )
+       , visibility_of_string vis_str
+       , post_kind_opt )
      with
-     | Ok id, Ok author, Some visibility ->
-       let resolved_kind =
-         match post_kind_opt with
-         | Some kind -> kind
-         | None ->
-           legacy_migrate_post_kind
-             ~author:author_str
-             ~meta_json
-             ~visibility
-             ~expires_at
-             ~hearth
-       in
+     | Ok id, Ok author, Some visibility, Some resolved_kind ->
        (match
           normalize_post_payload
             ~content
@@ -123,6 +178,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
             ; title
             ; body
             ; content = body
+            ; mention_ids
             ; post_kind
             ; meta_json
             ; visibility
@@ -159,6 +215,9 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
     let parent_id_opt = Safe_ops.json_string_opt "parent_id" json in
     let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
     let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
+    let mention_ids =
+      mention_ids_of_yojson ~surface:Board_metrics_hooks.Board_comment_mention_ids json
+    in
     (match
        ( Comment_id.of_string id_str
        , Post_id.of_string post_id_str
@@ -179,6 +238,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
          ; parent_id
          ; author
          ; content
+         ; mention_ids
          ; created_at
          ; expires_at
          ; votes_up

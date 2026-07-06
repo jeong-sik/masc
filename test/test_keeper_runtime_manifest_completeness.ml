@@ -108,6 +108,41 @@ let test_is_complete_turn () =
   Alcotest.(check bool) "finished+receipt+checkpoint is complete" true
     (M.is_complete_turn complete)
 
+let cleanup_dir dir =
+  match Sys.file_exists dir with
+  | false -> ()
+  | true -> (
+      try Unix.rmdir dir with
+      | Unix.Unix_error (err, fn, arg) ->
+        prerr_endline
+          (Printf.sprintf "cleanup_dir failed: %s(%s): %s" fn arg
+             (Unix.error_message err)))
+  | exception Sys_error msg ->
+    prerr_endline (Printf.sprintf "cleanup_dir stat failed: %s" msg)
+
+let temp_dir () =
+  let path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-runtime-manifest-%d-%.0f" (Unix.getpid ())
+         (Unix.gettimeofday () *. 1_000_000.))
+  in
+  Unix.mkdir path 0o755;
+  path
+
+let test_append_to_path_returns_error_for_directory () =
+  let dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let row =
+      manifest ~event:M.Turn_started
+        ~decision:(clock_refs [ ("edge_id", `String "e1"); ("lane", `String "L1") ])
+        ~links:(links ())
+    in
+    match M.append_to_path dir row with
+    | Ok () -> Alcotest.fail "append_to_path must fail when target path is a directory"
+    | Error msg ->
+      Alcotest.(check bool)
+        "append_to_path returns an explicit error" true (String.length msg > 0))
+
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"
     [ ( "completeness"
@@ -120,5 +155,7 @@ let () =
         ; Alcotest.test_case "is_finished_turn" `Quick test_is_finished_turn
         ; Alcotest.test_case "is_complete_turn" `Quick
             test_is_complete_turn
+        ; Alcotest.test_case "append_to_path returns error" `Quick
+            test_append_to_path_returns_error_for_directory
         ] )
     ]

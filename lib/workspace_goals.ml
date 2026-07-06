@@ -41,6 +41,14 @@ let error_result_typed ~tool_name ~start_time ~code msg : Tool_result.result =
     (error_response_typed ~code msg)
 ;;
 
+let runtime_error_result ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time
+    (error_response_typed ~code:Internal_error msg)
+;;
+
 let validation_error_result
       ~tool_name
       ~start_time
@@ -400,51 +408,50 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
+let validate_goal_completion_ready_with_index index ~goal_id =
+  let linked_tasks = Workspace_goal_index.tasks_for_goal index ~goal_id in
+  let open_count =
+    linked_tasks
+    |> List.filter (fun (task : Masc_domain.task) ->
+           not (Masc_domain.task_status_is_terminal task.task_status))
+    |> List.length
+  in
+  let done_count =
+    linked_tasks
+    |> List.filter (fun (task : Masc_domain.task) ->
+           Masc_domain.task_status_is_done task.task_status)
+    |> List.length
+  in
+  if
+    match linked_tasks with
+    | [] -> true
+    | _ -> false
+  then
+    Error
+      "goal completion requires at least one linked task; provide override_note to force"
+  else if open_count > 0
+  then
+    Error
+      (Printf.sprintf
+         "goal completion blocked: %d linked task(s) are still open; provide \
+          override_note to force"
+         open_count)
+  else if done_count = 0
+  then
+    Error
+      "goal completion blocked: linked tasks are terminal but none are done; provide \
+       override_note to force"
+  else Ok ()
+;;
+
 let validate_goal_completion_ready config ~goal_id ~override_note =
   match override_note with
   | Some note when not (String.equal (String.trim note) "") -> Ok ()
   | _ ->
-    let index =
-      Workspace_goal_index.build_goal_task_index_for_config
-        config
-        (Workspace_query.get_tasks_safe config)
-    in
-    let linked_tasks =
-      Workspace_goal_index.tasks_for_goal index ~goal_id
-    in
-    let open_count =
-      linked_tasks
-      |> List.filter (fun (task : Masc_domain.task) ->
-        not (Masc_domain.task_status_is_terminal task.task_status))
-      |> List.length
-    in
-    let done_count =
-      linked_tasks
-      |> List.filter (fun (task : Masc_domain.task) ->
-        Masc_domain.task_status_is_done task.task_status)
-      |> List.length
-    in
-    if
-      match linked_tasks with
-      | [] -> true
-      | _ -> false
-    then
-      Error
-        "goal completion requires at least one linked task; provide override_note to \
-         force"
-    else if open_count > 0
-    then
-      Error
-        (Printf.sprintf
-           "goal completion blocked: %d linked task(s) are still open; provide \
-            override_note to force"
-           open_count)
-    else if done_count = 0
-    then
-      Error
-        "goal completion blocked: linked tasks are terminal but none are done; provide \
-         override_note to force"
-    else Ok ()
+    let tasks = Workspace_query.get_tasks_safe config in
+    (match Workspace_goal_index.build_goal_task_index_for_config_result config tasks with
+     | Ok index -> validate_goal_completion_ready_with_index index ~goal_id
+     | Error msg -> Error (Workspace_goal_index.goal_task_links_read_failed_message msg))
 ;;
 
 let parse_optional_string_list args field =
@@ -526,16 +533,18 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
   | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok (), Ok phase ->
-    let goals = Goal_store.list_goals ctx.config ?phase () in
-    let rollup = Goal_store.compute_rollup goals in
-    ok_result
-      ~tool_name
-      ~start_time
-      [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "count", `Int (List.length goals)
-      ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
-      ; "rollup", Goal_store.rollup_to_yojson rollup
-      ]
+    (match Goal_store.list_goals_result ctx.config ?phase () with
+     | Error msg -> runtime_error_result ~tool_name ~start_time msg
+     | Ok goals ->
+       let rollup = Goal_store.compute_rollup goals in
+       ok_result
+         ~tool_name
+         ~start_time
+         [ "generated_at", `String (Masc_domain.now_iso ())
+         ; "count", `Int (List.length goals)
+         ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
+         ; "rollup", Goal_store.rollup_to_yojson rollup
+         ])
 ;;
 
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
@@ -638,9 +647,10 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
     let actor = canonical_principal_for_authenticated_caller ctx in
     let note = get_string_opt args "note" in
     let override_note = get_string_opt args "override_note" in
-    (match Goal_store.get_goal ctx.config ~goal_id with
-      | None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-      | Some goal ->
+    (match Goal_store.get_goal_result ctx.config ~goal_id with
+      | Error msg -> runtime_error_result ~tool_name ~start_time msg
+      | Ok None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
+      | Ok (Some goal) ->
         (match
            if action = Goal_phase.Request_complete
            then validate_goal_completion_ready ctx.config ~goal_id ~override_note
@@ -648,14 +658,18 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
          with
          | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
          | Ok () ->
-           let goals = Goal_store.list_goals ctx.config () in
            let effective_policy =
-             Goal_verification.effective_policy_for_nodes
-               ~goals:(goal_policy_nodes goals)
-               ~goal_id
+             match Goal_store.list_goals_result ctx.config () with
+             | Error msg -> Error (`Runtime msg)
+             | Ok goals ->
+               Goal_verification.effective_policy_for_nodes
+                 ~goals:(goal_policy_nodes goals)
+                 ~goal_id
+               |> Result.map_error (fun msg -> `Validation msg)
            in
            (match effective_policy with
-            | Error msg ->
+            | Error (`Runtime msg) -> runtime_error_result ~tool_name ~start_time msg
+            | Error (`Validation msg) ->
               error_result_typed ~tool_name ~start_time ~code:Validation_error msg
             | Ok effective_policy ->
               let has_effective_verifier_policy = Option.is_some effective_policy in
@@ -1012,9 +1026,10 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
     let note = get_string_opt args "note" in
     let evidence_refs = Option.value evidence_refs ~default:[] in
     let request_id = get_string_opt args "request_id" in
-    (match Goal_store.get_goal ctx.config ~goal_id with
-     | None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-     | Some goal ->
+    (match Goal_store.get_goal_result ctx.config ~goal_id with
+     | Error msg -> runtime_error_result ~tool_name ~start_time msg
+     | Ok None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
+     | Ok (Some goal) ->
        let request_id =
          match request_id with
          | Some request_id -> Some request_id
@@ -1052,7 +1067,9 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
              with
            | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
            | Ok (request, quorum_result) ->
-             let goals = Goal_store.list_goals ctx.config () in
+             (match Goal_store.list_goals_result ctx.config () with
+              | Error msg -> runtime_error_result ~tool_name ~start_time msg
+              | Ok goals ->
              let effective_policy =
                Goal_verification.effective_policy_for_nodes
                  ~goals:(goal_policy_nodes goals)
@@ -1161,7 +1178,7 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                    result)
                 else finalize ~phase:Goal_phase.Completed ~event_status:"approved"
               | Goal_verification.Failed ->
-                finalize ~phase:Goal_phase.Executing ~event_status:"rejected"))))
+                finalize ~phase:Goal_phase.Executing ~event_status:"rejected")))))
   | Ok _, Ok None, _, _ ->
     validation_error_result
       ~tool_name

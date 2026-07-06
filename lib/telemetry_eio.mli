@@ -153,6 +153,10 @@ val calculate_error_rate : event_record list -> float
 
 (** {1 Convenience emitters} *)
 
+val track_result : ?fs:'a -> config -> event -> (unit, string) result
+(** Result-returning base emitter for callers that need explicit persistence
+    failure handling. *)
+
 val track_agent_session_bound :
   ?fs:'a ->
   config ->

@@ -193,7 +193,17 @@ type attempt_record_decode_error =
       value : string;
     }
 
+type desired_record_decode_error =
+  | Desired_record_not_object of string
+  | Desired_record_invalid_field of {
+      field : string;
+      expected : string;
+      actual : string;
+    }
+  | Desired_record_unknown_state of string
+
 val attempt_record_decode_error_to_string : attempt_record_decode_error -> string
+val desired_record_decode_error_to_string : desired_record_decode_error -> string
 
 val desired_state_to_string : desired_state -> string
 val desired_state_of_string : string -> desired_state option
@@ -203,16 +213,16 @@ val reconcile_result_to_string : reconcile_result -> string
 val attempt_record_json : attempt_record -> Yojson.Safe.t
 val attempt_record_of_json_result :
   Yojson.Safe.t -> (attempt_record, attempt_record_decode_error) result
-val attempt_record_of_json : Yojson.Safe.t -> attempt_record option
 val desired_record_json : desired_record -> Yojson.Safe.t
-val desired_record_of_json : Yojson.Safe.t -> desired_record option
+val desired_record_of_json_result :
+  Yojson.Safe.t -> (desired_record, desired_record_decode_error) result
 
 val sidecar_desired_path : base_path:string -> string -> string
 val sidecar_attempt_path : base_path:string -> string -> string
-val read_desired_record : base_path:string -> string -> desired_record option
+val read_desired_record_result :
+  base_path:string -> string -> (desired_record option, string) result
 val read_attempt_record_result :
   base_path:string -> string -> (attempt_record option, string) result
-val read_attempt_record : base_path:string -> string -> attempt_record option
 
 val ensure_parent_dir : string -> unit
 (** Create the parent directory of [path] if missing. *)

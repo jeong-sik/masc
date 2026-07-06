@@ -249,9 +249,14 @@ let event_to_json event =
 
 (** Track an event - appends to date-split telemetry store.
     Thread-safe via Dated_jsonl internal mutex. *)
-let track ?fs:_ config event : unit =
+let track_result ?fs:_ config event =
   let store = get_telemetry_store config in
-  Dated_jsonl.append store (event_to_json event)
+  Dated_jsonl.append_result store (event_to_json event)
+
+let track ?fs config event : unit =
+  match track_result ?fs config event with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 (** Read all events.
     Tries date-split store first; falls back to legacy single file. *)

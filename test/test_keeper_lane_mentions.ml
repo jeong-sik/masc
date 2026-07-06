@@ -219,22 +219,43 @@ let test_pre_p4_row_reads_empty () =
 (* ── 4. Backfill ── *)
 
 let test_backfill_line () =
-  check (option string) "legacy user row with mention is stamped"
-    (Some
-       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0,\"mentions\":[\"alice\"]}")
-    (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0}");
-  check (option string) "mention-free row untouched" None
-    (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"no tokens\",\"ts\":2.0}");
-  check (option string) "already-stamped row untouched" None
-    (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"@alice x\",\"ts\":2.0,\"mentions\":[]}");
-  check (option string) "assistant row untouched" None
-    (Backfill.backfill_line
-       "{\"role\":\"assistant\",\"content\":\"@alice x\",\"ts\":2.0}");
-  check (option string) "garbage line untouched" None
-    (Backfill.backfill_line "not json at all")
+  (match
+     Backfill.backfill_line
+       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0}"
+   with
+   | Backfill.Line_rewritten line ->
+     check string "legacy user row with mention is stamped"
+       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0,\"mentions\":[\"alice\"]}"
+       line
+   | Backfill.Line_unchanged -> fail "legacy user row was not stamped"
+   | Backfill.Line_error message -> fail ("unexpected line error: " ^ message));
+  (match
+     Backfill.backfill_line
+       "{\"role\":\"user\",\"content\":\"no tokens\",\"ts\":2.0}"
+   with
+   | Backfill.Line_unchanged -> ()
+   | Backfill.Line_rewritten _ -> fail "mention-free row rewritten"
+   | Backfill.Line_error message -> fail ("unexpected line error: " ^ message));
+  (match
+     Backfill.backfill_line
+       "{\"role\":\"user\",\"content\":\"@alice x\",\"ts\":2.0,\"mentions\":[]}"
+   with
+   | Backfill.Line_unchanged -> ()
+   | Backfill.Line_rewritten _ -> fail "already-stamped row rewritten"
+   | Backfill.Line_error message -> fail ("unexpected line error: " ^ message));
+  (match
+     Backfill.backfill_line
+       "{\"role\":\"assistant\",\"content\":\"@alice x\",\"ts\":2.0}"
+   with
+   | Backfill.Line_unchanged -> ()
+   | Backfill.Line_rewritten _ -> fail "assistant row rewritten"
+   | Backfill.Line_error message -> fail ("unexpected line error: " ^ message));
+  match Backfill.backfill_line "not json at all" with
+  | Backfill.Line_error message ->
+    check bool "garbage line reports invalid json" true
+      (String.length message > 0)
+  | Backfill.Line_unchanged -> fail "garbage line reported unchanged"
+  | Backfill.Line_rewritten _ -> fail "garbage line rewritten"
 
 let test_backfill_file_idempotent () =
   with_base "lane-mentions-backfill" (fun base ->
@@ -249,9 +270,19 @@ let test_backfill_file_idempotent () =
         "{\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
       output_string oc "{\"role\":\"assistant\",\"content\":\"hi\",\"ts\":3.0}\n";
       close_out oc;
-      let dry = Backfill.backfill_file ~dry_run:true path in
+      let dry =
+        match Backfill.backfill_file ~dry_run:true path with
+        | Ok report -> report
+        | Error errors ->
+          failf "dry-run backfill failed with %d error(s)" (List.length errors)
+      in
       check int "dry-run counts" 1 dry.rewritten;
-      let wet = Backfill.backfill_file ~dry_run:false path in
+      let wet =
+        match Backfill.backfill_file ~dry_run:false path with
+        | Ok report -> report
+        | Error errors ->
+          failf "wet backfill failed with %d error(s)" (List.length errors)
+      in
       check int "stamped" 1 wet.rewritten;
       (* The stamped row now registers as a pending mention through the
          normal load path. *)
@@ -260,8 +291,35 @@ let test_backfill_file_idempotent () =
            check ids "stamped row reads back" [ "alice" ]
              (message_mentions legacy)
        | other -> failf "expected 3 lane lines, got %d" (List.length other));
-      let again = Backfill.backfill_file ~dry_run:false path in
+      let again =
+        match Backfill.backfill_file ~dry_run:false path with
+        | Ok report -> report
+        | Error errors ->
+          failf "second backfill failed with %d error(s)" (List.length errors)
+      in
       check int "idempotent" 0 again.rewritten)
+
+let test_backfill_file_reports_invalid_json () =
+  with_base "lane-mentions-backfill-invalid" (fun base ->
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
+        ~content:"seed" ();
+      let dir =
+        Filename.concat (Filename.concat base ".masc") "keeper_chat"
+      in
+      let path = Filename.concat dir "alice.jsonl" in
+      let oc = open_out_gen [ Open_append ] 0o644 path in
+      output_string oc
+        "{\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
+      output_string oc "not json at all\n";
+      close_out oc;
+      match Backfill.backfill_file ~dry_run:false path with
+      | Ok _ -> fail "invalid JSON row did not fail the file backfill"
+      | Error [ error ] ->
+        check int "line number" 3 error.Backfill.line_no;
+        check bool "path retained" true (String.equal path error.Backfill.path);
+        check bool "message retained" true (String.length error.Backfill.message > 0)
+      | Error errors ->
+        failf "expected one file error, got %d" (List.length errors))
 
 let () =
   Random.self_init ();
@@ -283,5 +341,7 @@ let () =
           test_case "line" `Quick test_backfill_line;
           test_case "file + idempotence" `Quick
             test_backfill_file_idempotent;
+          test_case "file reports invalid JSON" `Quick
+            test_backfill_file_reports_invalid_json;
         ] );
     ]

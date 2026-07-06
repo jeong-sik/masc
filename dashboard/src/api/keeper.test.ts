@@ -619,6 +619,13 @@ describe('keeper runtime trace', () => {
             finished_count: 1,
             terminal_status: 'timeout',
           },
+          claim_scope: {
+            present: true,
+            source: 'keeper_task_claim_tool_call',
+            status: 'read_error',
+            read_error_source: 'runtime_lens.tool_output',
+            read_error: 'runtime_lens.tool_output: malformed JSON',
+          },
         },
         swimlanes: {
           provider: {
@@ -694,6 +701,13 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.turn_clock.terminal_event_present).toBe(false)
     expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
     expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
+    expect(result.runtime_lens.axes.claim_scope.status).toBe('read_error')
+    expect(result.runtime_lens.axes.claim_scope.read_error_source).toBe(
+      'runtime_lens.tool_output',
+    )
+    expect(result.runtime_lens.axes.claim_scope.read_error).toBe(
+      'runtime_lens.tool_output: malformed JSON',
+    )
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
     expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-provider-start')

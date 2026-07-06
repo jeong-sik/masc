@@ -1690,11 +1690,13 @@ let internal_descriptors : t list =
       "Transition a goal status." ~readonly:false
   ; masc_workspace_descriptor "goal_verify" "masc_goal_verify"
       "Verify goal completion criteria." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
+  (* ── RFC-0182 §3.1 — masc_misc_* cluster ─────────────────────── *)
   ; masc_misc_descriptor "config" "masc_config"
       "Read workspace configuration." ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
       "Read workspace dashboard summary." ~readonly:true
+  ; masc_misc_descriptor "keeper_waiting_inventory" "masc_keeper_waiting_inventory"
+      "Read keeper waiting inventory." ~readonly:true
   ; masc_misc_descriptor "cleanup_zombies" "masc_cleanup_zombies"
       "Reap orphan / zombie workspace state." ~readonly:false
   ; masc_misc_descriptor "tool_stats" "masc_tool_stats"

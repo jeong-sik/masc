@@ -172,6 +172,7 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=%%s\n' "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM:-}"
+  printf 'MASC_BUILD_GIT_COMMIT=%%s\n' "${MASC_BUILD_GIT_COMMIT:-}"
   printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
@@ -307,6 +308,63 @@ printf 'dune-local %%s DUNE_JOBS=%%s DUNE_LOCAL_JOBS=%%s DUNE_CACHE=%%s\n' "$*" 
 exec dune "$@"
 |}
        (quote log_file))
+
+let write_fake_git_with_head ?(dirty = false) ~path ~repo_root ~head =
+  write_executable path
+    (Printf.sprintf
+       {|
+#!/bin/sh
+set -eu
+repo=%s
+head=%s
+dirty=%s
+if [ "${1:-}" = "-C" ]; then
+  shift 2
+fi
+case "$*" in
+  "rev-parse --git-common-dir") printf '%%s/.git\n' "$repo" ;;
+  "rev-parse --git-dir") printf '%%s/.git\n' "$repo" ;;
+  "rev-parse --show-toplevel") printf '%%s\n' "$repo" ;;
+  "rev-parse --verify HEAD^{commit}") printf '%%s\n' "$head" ;;
+  "status --porcelain")
+    if [ "$dirty" = "1" ]; then
+      printf ' M lib/changed.ml\n'
+    fi
+    ;;
+  *) exit 1 ;;
+esac
+|}
+       (quote repo_root)
+       (quote head)
+       (if dirty then "1" else "0"))
+
+let write_fake_dune_success_with_eio_exe ~path =
+  write_executable path
+    {|
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  build)
+    mkdir -p _build/default/bin
+    cat > _build/default/bin/main_eio.exe <<'EXE'
+#!/bin/sh
+set -eu
+{
+  printf 'FAKE_EXE_MARKER=eio-build-success\n'
+  printf 'MASC_BUILD_GIT_COMMIT=%s\n' "${MASC_BUILD_GIT_COMMIT:-}"
+  printf 'PWD=%s\n' "$(pwd)"
+  printf 'ARGS=%s\n' "$*"
+} >"${FAKE_CAPTURE_FILE:?}"
+exit 0
+EXE
+    chmod +x _build/default/bin/main_eio.exe
+    ;;
+  *)
+    echo "unexpected dune command: $*" >&2
+    exit 2
+    ;;
+esac
+|}
 
 let make_fake_stdio_eio_exe repo_root =
   let exe_path =
@@ -841,6 +899,110 @@ let test_grpc_direct_banner_is_preserved_in_stderr () =
       check bool "other stderr preserved" true
         (contains_substring stderr "stderr-keep"))
 
+let test_build_writes_binary_commit_stamp_without_env_export () =
+  with_temp_dir "start-masc-script-build-commit" (fun dir ->
+      with_temp_dir "start-masc-build-commit-fake-bin" (fun fake_bin ->
+          let script = Filename.concat dir "start-masc.sh" in
+          let scripts_dir = Filename.concat dir "scripts" in
+          let dune_local_log = Filename.concat dir "dune-local-calls.txt" in
+          let capture = Filename.concat dir "captured-build-commit.txt" in
+          let expected_commit = "abc1234def5678abc1234def5678abc1234def56" in
+          let stamp =
+            Filename.concat dir "_build/default/bin/main_eio.exe.build-commit"
+          in
+          copy_script (script_path ()) script;
+          ignore (make_config_root dir);
+          mkdir_p scripts_dir;
+          mkdir_p fake_bin;
+          write_executable (Filename.concat fake_bin "opam")
+            "#!/bin/sh\nexit 0\n";
+          write_fake_git_with_head
+            ~path:(Filename.concat fake_bin "git")
+            ~repo_root:dir
+            ~head:expected_commit;
+          write_fake_dune_success_with_eio_exe
+            ~path:(Filename.concat fake_bin "dune");
+          write_fake_dune_local
+            ~path:(Filename.concat scripts_dir "dune-local.sh")
+            ~log_file:dune_local_log;
+          let code, stdout, stderr =
+            run_script ~cwd:dir script
+              ~env:
+                [
+                  ("FAKE_CAPTURE_FILE", capture);
+                  ("MASC_BASE_PATH", dir);
+                  ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+                ]
+              [ "--http"; "--port"; "9974"; "--base-path"; dir ]
+          in
+          if code <> 0 then
+            failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+              code stdout stderr;
+          let captured = read_file capture in
+          check bool "server started from built executable" true
+            (contains_substring captured "FAKE_EXE_MARKER=eio-build-success");
+          check bool "launcher does not env-export stamp proof" true
+            (contains_substring captured "MASC_BUILD_GIT_COMMIT=\n");
+          check bool "build commit stamp file written" true
+            (Sys.file_exists stamp);
+          check string "build commit stamp content" (expected_commit ^ "\n")
+            (read_file stamp);
+          check bool "stamp write is logged" true
+            (contains_substring stderr
+               ("Stamped main_eio.exe build commit: " ^ expected_commit))))
+
+let test_dirty_build_does_not_export_binary_commit_stamp () =
+  with_temp_dir "start-masc-script-dirty-build-commit" (fun dir ->
+      with_temp_dir "start-masc-dirty-build-commit-fake-bin" (fun fake_bin ->
+          let script = Filename.concat dir "start-masc.sh" in
+          let scripts_dir = Filename.concat dir "scripts" in
+          let dune_local_log = Filename.concat dir "dune-local-calls.txt" in
+          let capture = Filename.concat dir "captured-dirty-build-commit.txt" in
+          let stale_stamp =
+            Filename.concat dir "_build/default/bin/main_eio.exe.build-commit"
+          in
+          copy_script (script_path ()) script;
+          ignore (make_config_root dir);
+          mkdir_p scripts_dir;
+          mkdir_p fake_bin;
+          mkdir_p (Filename.dirname stale_stamp);
+          write_file stale_stamp "stale123\n";
+          write_executable (Filename.concat fake_bin "opam")
+            "#!/bin/sh\nexit 0\n";
+          write_fake_git_with_head
+            ~dirty:true
+            ~path:(Filename.concat fake_bin "git")
+            ~repo_root:dir
+            ~head:"abc1234def5678abc1234def5678abc1234def56";
+          write_fake_dune_success_with_eio_exe
+            ~path:(Filename.concat fake_bin "dune");
+          write_fake_dune_local
+            ~path:(Filename.concat scripts_dir "dune-local.sh")
+            ~log_file:dune_local_log;
+          let code, stdout, stderr =
+            run_script ~cwd:dir script
+              ~env:
+                [
+                  ("FAKE_CAPTURE_FILE", capture);
+                  ("MASC_BASE_PATH", dir);
+                  ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+                ]
+              [ "--http"; "--port"; "9975"; "--base-path"; dir ]
+          in
+          if code <> 0 then
+            failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+              code stdout stderr;
+          let captured = read_file capture in
+          check bool "server still starts from built executable" true
+            (contains_substring captured "FAKE_EXE_MARKER=eio-build-success");
+          check bool "dirty build does not export commit proof" true
+            (contains_substring captured "MASC_BUILD_GIT_COMMIT=\n");
+          check bool "dirty build removes stale stamp" false
+            (Sys.file_exists stale_stamp);
+          check bool "dirty proof refusal is logged" true
+            (contains_substring stderr
+               "refusing to stamp main_eio.exe build commit because")))
+
 let test_stale_dune_artifacts_are_cleaned_and_retried () =
   with_temp_dir "start-masc-script-stale-dune" (fun dir ->
       with_temp_dir "start-masc-stale-dune-fake-bin" (fun fake_bin ->
@@ -1253,6 +1415,10 @@ let () =
             test_explicit_http_port_derives_sidecar_ports;
           test_case "grpc-direct banner is preserved in stderr" `Quick
             test_grpc_direct_banner_is_preserved_in_stderr;
+          test_case "build writes binary commit stamp without env export" `Quick
+            test_build_writes_binary_commit_stamp_without_env_export;
+          test_case "dirty build does not export binary commit stamp" `Quick
+            test_dirty_build_does_not_export_binary_commit_stamp;
           test_case "stale Dune artifacts are cleaned and retried" `Quick
             test_stale_dune_artifacts_are_cleaned_and_retried;
           test_case "Dune cache temp errors retry with cache disabled" `Quick

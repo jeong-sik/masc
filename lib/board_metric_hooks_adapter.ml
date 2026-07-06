@@ -11,21 +11,16 @@
 let board_persist_surface_to_label :
   Board_metrics_hooks.board_persist_surface -> string = function
   | Board_post_meta_json -> "board_post_meta_json"
+  | Board_post_kind -> "board_post_kind"
+  | Board_post_mention_ids -> "board_post_mention_ids"
+  | Board_comment_mention_ids -> "board_comment_mention_ids"
+  | Board_sub_board_member_ids -> "board_sub_board_member_ids"
 
 (* outcome label for masc_board_dispatch_flusher_start_outcomes_total *)
 let flusher_outcome_to_label : Board_metrics_hooks.flusher_outcome -> string =
   function
   | Switch_finished -> "switch_finished"
   | Cas_exhausted -> "cas_exhausted"
-
-(* automation_label label for masc_board_legacy_migrate_post_kind_total *)
-let automation_label_to_label : Board_types.automation_label -> string = function
-  | Auto_prefixed -> "auto-prefix"
-  | Qa_prefixed -> "qa-prefix"
-  | Researcher_named -> "researcher"
-  | Harness_named -> "harness"
-  | Smoke_named -> "smoke"
-  | Probe_named -> "probe"
 
 (* reason label for masc_persistence_read_drops_total; reuses the
    SSOT wire mapping in Read_drop_reason (byte-identical to the old
@@ -66,15 +61,6 @@ let install () =
              ~labels:
                [ ("surface", board_persist_surface_to_label surface)
                ; ("reason", read_drop_reason_to_label reason)
-               ]
-             ());
-      inc_legacy_migrate_post_kind =
-        (fun ~author ~automation_label ->
-           Otel_metric_store.inc_counter
-             "masc_board_legacy_migrate_post_kind_total"
-             ~labels:
-               [ ("author", author)
-               ; ("automation_label", automation_label_to_label automation_label)
                ]
              ());
     }

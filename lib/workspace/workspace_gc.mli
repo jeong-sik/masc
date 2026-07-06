@@ -50,9 +50,12 @@ val cleanup_zombies :
        [tasks-archive.json] back into the live backlog}}
 
     Archived tasks are appended to [tasks-archive.json] via
-    {!Workspace_task_id.append_archive_tasks}; restored tasks are removed from
-    it via {!Workspace_task_id.drop_archive_tasks}.  The backlog is rewritten
-    with [version + 1] when anything changes.  Returns a multi-line summary
-    string. *)
+    {!Workspace_task_id.append_archive_tasks_result} before they are removed
+    from the live backlog; append failure leaves them live and is reported in
+    the summary.  Restored tasks are removed from the archive via
+    {!Workspace_task_id.drop_archive_tasks_result} after the live backlog
+    rewrite; drop failure leaves the duplicate archive copy in place and is
+    reported.  The backlog is rewritten with [version + 1] when anything
+    changes.  Returns a multi-line summary string. *)
 val gc :
   Workspace_utils_backend_setup.config -> ?days:int -> unit -> string

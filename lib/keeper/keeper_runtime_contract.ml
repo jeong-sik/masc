@@ -51,11 +51,43 @@ let task_is_unclaimed_todo (task : Masc_domain.task) =
   | Masc_domain.Cancelled _ ->
     false
 
+type claim_goal_scope_mode =
+  | All_tasks
+  | Active_goal_ids
+  | Empty_goal_scope_fallback_all_tasks
+  | Goal_task_links_read_failed_scope
+
+let claim_goal_scope_mode_to_string = function
+  | All_tasks -> "all_tasks"
+  | Active_goal_ids -> "active_goal_ids"
+  | Empty_goal_scope_fallback_all_tasks -> "empty_goal_scope_fallback_all_tasks"
+  | Goal_task_links_read_failed_scope -> "goal_task_links_read_failed"
+;;
+
+let claim_scope_mode_all_tasks = claim_goal_scope_mode_to_string All_tasks
+let claim_scope_mode_active_goal_ids = claim_goal_scope_mode_to_string Active_goal_ids
+
+let claim_scope_mode_empty_goal_scope_fallback_all_tasks =
+  claim_goal_scope_mode_to_string Empty_goal_scope_fallback_all_tasks
+;;
+
+let claim_scope_mode_goal_task_links_read_failed =
+  claim_goal_scope_mode_to_string Goal_task_links_read_failed_scope
+
+type claim_goal_scope_read_error =
+  | Goal_task_links_read_failed of string
+
+let claim_goal_scope_read_error_to_string = function
+  | Goal_task_links_read_failed msg -> msg
+;;
+
 type claim_goal_scope = {
   task_filter : Masc_domain.task -> bool;
+  scope_mode : claim_goal_scope_mode;
   mode : string;
   effective_goal_ids : string list;
   fallback_reason : string option;
+  read_error : claim_goal_scope_read_error option;
 }
 
 (* Pure in-memory scope derived from [meta] alone — no disk read. The
@@ -65,16 +97,20 @@ let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
   | [] ->
       {
         task_filter = (fun (_task : Masc_domain.task) -> true);
-        mode = "all_tasks";
+        scope_mode = All_tasks;
+        mode = claim_scope_mode_all_tasks;
         effective_goal_ids = [];
         fallback_reason = None;
+        read_error = None;
       }
   | goal_ids ->
       {
         task_filter = task_is_linked_to_keeper_goals ?task_goal_index goal_ids;
-        mode = "active_goal_ids";
+        scope_mode = Active_goal_ids;
+        mode = claim_scope_mode_active_goal_ids;
         effective_goal_ids = goal_ids;
         fallback_reason = None;
+        read_error = None;
       }
 
 (* Resolve the claim filter for a keeper's [active_goal_ids].
@@ -100,26 +136,37 @@ let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) 
   match meta.active_goal_ids with
   | [] -> meta_only_claim_goal_scope meta
   | goal_ids ->
-    let tasks = Workspace.get_tasks_safe config in
-    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
-    let scoped_claimable_exists =
-      List.exists (fun task ->
-             task_is_unclaimed_todo task
-             && task_is_linked_to_keeper_goals ~task_goal_index goal_ids task)
-        tasks
-    in
-    if scoped_claimable_exists then meta_only_claim_goal_scope ~task_goal_index meta
-    else
-      {
-        task_filter = (fun (_task : Masc_domain.task) -> true);
-        (* Reuse the established mode label consumed by
-           [Keeper_tool_task_runtime.claim_scope_context_suffix] rather than
-           minting a new string — a second label for the same concept would
-           drift the two sites apart. *)
-        mode = "empty_goal_scope_fallback_all_tasks";
-        effective_goal_ids = goal_ids;
-        fallback_reason = Some "no_scoped_claimable_tasks";
-      }
+    (match Workspace_goal_index.build_task_goal_index_for_config_result config with
+     | Error msg ->
+       Log.Keeper.warn ~keeper_name:meta.name
+         "goal-task link registry read failed; keeping active-goal claim scope closed: %s"
+         msg;
+       {
+         task_filter = (fun (_task : Masc_domain.task) -> false);
+         scope_mode = Goal_task_links_read_failed_scope;
+         mode = claim_scope_mode_goal_task_links_read_failed;
+         effective_goal_ids = goal_ids;
+         fallback_reason = None;
+         read_error = Some (Goal_task_links_read_failed msg);
+       }
+     | Ok task_goal_index ->
+       let tasks = Workspace.get_tasks_safe config in
+       let scoped_claimable_exists =
+         List.exists (fun task ->
+                task_is_unclaimed_todo task
+                && task_is_linked_to_keeper_goals ~task_goal_index goal_ids task)
+           tasks
+       in
+       if scoped_claimable_exists then meta_only_claim_goal_scope ~task_goal_index meta
+       else
+         {
+           task_filter = (fun (_task : Masc_domain.task) -> true);
+           scope_mode = Empty_goal_scope_fallback_all_tasks;
+           mode = claim_scope_mode_empty_goal_scope_fallback_all_tasks;
+           effective_goal_ids = goal_ids;
+           fallback_reason = Some "no_scoped_claimable_tasks";
+           read_error = None;
+         })
 
 let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
@@ -143,10 +190,30 @@ let task_is_blocked (task : Masc_domain.task) =
   | Masc_domain.Cancelled _ ->
     false
 
+let unknown_goal_progress_json ~active_goal_count ~read_error =
+  `Assoc
+    [
+      ("status", `String "unknown");
+      ("read_error", `String read_error);
+      ("active_goal_count", `Int active_goal_count);
+      ("linked_task_count", `Null);
+      ("done_task_count", `Null);
+      ("open_task_count", `Null);
+      ("blocked_task_count", `Null);
+      ("convergence", `Null);
+    ]
+;;
+
 let goal_progress_json ~(config : Workspace.config) (meta : keeper_meta) =
-      let task_goal_index =
-        Workspace_goal_index.build_task_goal_index_for_config config
-      in
+  match Workspace_goal_index.build_task_goal_index_for_config_result config with
+  | Error msg ->
+    Log.Keeper.warn ~keeper_name:meta.name
+      "goal progress unavailable: goal-task link registry read failed: %s"
+      msg;
+    unknown_goal_progress_json
+      ~active_goal_count:(List.length meta.active_goal_ids)
+      ~read_error:msg
+  | Ok task_goal_index ->
       let tasks =
         Workspace.get_tasks_safe config
         |> List.filter
@@ -359,8 +426,15 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
 
 let runtime_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =
   let goal_progress = goal_progress_json ~config meta in
-  let blocked_task_count =
-    Safe_ops.json_int "blocked_task_count" ~default:0 goal_progress
+  let blocked_task_count_json =
+    Option.value
+      ~default:`Null
+      (Json_util.assoc_member_opt "blocked_task_count" goal_progress)
+  in
+  let blocked_task_count_known =
+    match blocked_task_count_json with
+    | `Int _ -> true
+    | _ -> false
   in
   `Assoc
     [
@@ -368,7 +442,8 @@ let runtime_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yo
       ("goal_id", Json_util.string_opt_to_json (primary_goal_id_opt meta));
       ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
       ("goal_progress", goal_progress);
-      ("blocked_task_count", `Int blocked_task_count);
+      ("blocked_task_count", blocked_task_count_json);
+      ("blocked_task_count_known", `Bool blocked_task_count_known);
       ("approval_policy_effective", approval_policy_effective_json ~base_path:config.base_path meta);
     ]
 

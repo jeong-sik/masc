@@ -173,6 +173,25 @@ let test_parse_structured_reply_accepts_envelope_json_fence () =
         (Some "Parsed from fenced envelope")
         snap.progress
 
+let test_parse_structured_reply_result_surfaces_malformed_json () =
+  match KMP.parse_structured_state_snapshot_from_reply_result "{not-json" with
+  | Error (KMP.Structured_state_snapshot_reply_json_parse_error message) ->
+    Alcotest.(check bool) "message is non-empty" true (String.length message > 0)
+  | Error other ->
+    Alcotest.failf
+      "expected structured reply JSON parse error, got %s"
+      (KMP.structured_state_snapshot_reply_parse_error_to_string other)
+  | Ok _ -> Alcotest.fail "malformed structured reply parsed successfully"
+
+let test_parse_structured_reply_result_surfaces_schema_mismatch () =
+  match KMP.parse_structured_state_snapshot_from_reply_result {|{"progress":[]}|} with
+  | Error KMP.Structured_state_snapshot_reply_schema_mismatch -> ()
+  | Error other ->
+    Alcotest.failf
+      "expected structured reply schema mismatch, got %s"
+      (KMP.structured_state_snapshot_reply_parse_error_to_string other)
+  | Ok _ -> Alcotest.fail "schema-mismatched structured reply parsed successfully"
+
 let test_finalizer_uses_structured_state_source () =
   let raw =
     {|{"progress":"Structured progress","decisions":["No blocker"]}|}
@@ -1299,6 +1318,14 @@ let () =
             "reply parser accepts fenced envelope"
             `Quick
             test_parse_structured_reply_accepts_envelope_json_fence;
+          Alcotest.test_case
+            "reply result surfaces malformed JSON"
+            `Quick
+            test_parse_structured_reply_result_surfaces_malformed_json;
+          Alcotest.test_case
+            "reply result surfaces schema mismatch"
+            `Quick
+            test_parse_structured_reply_result_surfaces_schema_mismatch;
           Alcotest.test_case
             "finalizer keeps structured source"
             `Quick

@@ -205,24 +205,38 @@ export function deleteGovernanceApprovalRule(
   return post('/api/v1/dashboard/governance/approvals/rules/delete', { id })
 }
 
-export type DashboardScheduleDecision = 'approve' | 'reject'
+export type DashboardScheduleApprovalDecision = 'approve' | 'reject'
+export type DashboardScheduleDecision = DashboardScheduleApprovalDecision | 'cancel'
 
 export interface DashboardScheduleResolveResponse {
   ok: boolean
   schedule_id: string
   decision: DashboardScheduleDecision
   approved_by?: unknown
+  cancelled_by?: unknown
+  reason?: string | null
   schedule?: unknown
 }
 
 export function resolveScheduleApproval(
   scheduleId: string,
-  decision: DashboardScheduleDecision,
+  decision: DashboardScheduleApprovalDecision,
   reason?: string,
 ): Promise<DashboardScheduleResolveResponse> {
   return post('/api/v1/dashboard/schedule/resolve', {
     schedule_id: scheduleId,
     decision,
+    reason,
+  })
+}
+
+export function cancelSchedule(
+  scheduleId: string,
+  reason: string,
+): Promise<DashboardScheduleResolveResponse> {
+  return post('/api/v1/dashboard/schedule/resolve', {
+    schedule_id: scheduleId,
+    decision: 'cancel',
     reason,
   })
 }

@@ -86,8 +86,20 @@ val record_handoff_artifacts :
     [None] otherwise. *)
 val load_json_file_opt : string -> Yojson.Safe.t option
 
+type jsonl_file_read_error =
+  { path : string
+  ; detail : string
+  }
+
+val jsonl_file_read_error_to_json :
+  jsonl_file_read_error -> Yojson.Safe.t
+
+val load_jsonl_file_result :
+  string -> (Yojson.Safe.t list, jsonl_file_read_error) result
+
 (** Load a JSONL file as a list of values; returns [[]] when the
-    file is missing or unreadable. *)
+    file is missing or unreadable.  Use {!load_jsonl_file_result} when
+    the caller must distinguish a missing/empty index from read failure. *)
 val load_jsonl_file : string -> Yojson.Safe.t list
 
 (** [take n xs] keeps the first [n] elements of [xs] (or all when

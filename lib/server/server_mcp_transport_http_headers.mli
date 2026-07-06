@@ -26,11 +26,24 @@ val request_runtime_result : deps -> (Server_mcp_transport_http_types.runtime, s
     [deps.get_runtime_result ()] — kept as a binding so the call
     site is greppable across the transport. *)
 
+type body_jsonrpc_method_error =
+  | Body_jsonrpc_method_parse_error of string
+
+val body_jsonrpc_method_error_to_string : body_jsonrpc_method_error -> string
+
+val body_jsonrpc_method_result
+  :  string
+  -> ((string * bool) option, body_jsonrpc_method_error) result
+(** [body_jsonrpc_method_result body_str] parses [body_str] as JSON and
+    returns [Ok (Some (method_, has_id))] for JSON-RPC request/notification
+    objects, [Ok None] for valid JSON without a string [method], and
+    [Error] for invalid JSON. *)
+
 val body_jsonrpc_method : string -> (string * bool) option
 (** [body_jsonrpc_method body_str] parses [body_str] as JSON and
     returns [Some (method_, has_id)] when it is an [`Assoc] with a
-    [method] string field, [None] otherwise (parse failure or
-    non-object body).  [has_id] reports whether the [id] field is
+    [method] string field, [None] otherwise. Invalid JSON is logged before
+    this compatibility fallback. [has_id] reports whether the [id] field is
     present (used to distinguish notifications from requests). *)
 
 val request_protocol_version_header : Httpun.Request.t -> string option
@@ -45,6 +58,21 @@ val request_name_header : Httpun.Request.t -> string option
 val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
 (** [true] iff either the HTTP protocol-version header or body
     per-request [_meta] declares a stateless MCP revision. *)
+
+type body_required_name_error =
+  | Body_required_name_parse_error of string
+
+val body_required_name_error_to_string : body_required_name_error -> string
+
+val body_required_name_for_method_result
+  :  string
+  -> string
+  -> (string option, body_required_name_error) result
+(** [body_required_name_for_method_result body_str method_] extracts the
+    request-name field required by the mirrored-header contract:
+    [params.name] for [tools/call] and [prompts/get], [params.uri] for
+    [resources/read]. Methods without a required name return [Ok None].
+    Invalid JSON returns [Error]. *)
 
 val validate_2026_request_headers :
   Httpun.Request.t -> string -> (unit, string) result

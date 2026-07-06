@@ -363,6 +363,16 @@ let canonical_path raw =
   try Unix.realpath raw
   with Unix.Unix_error _ | Sys_error _ -> normalize_path raw
 
+type discovery_error =
+  | Discovery_origin_read_failed of
+      { local_path : string
+      ; error : string
+      }
+
+let discovery_error_to_string = function
+  | Discovery_origin_read_failed { local_path; error } ->
+    Printf.sprintf "repository %s origin read failed: %s" local_path error
+
 let discover_repositories ~base_path =
   let toml_exists = repositories_toml_exists base_path in
   (* Issue #13188 + #13217 review: [find <base_path>] echoes the
@@ -380,8 +390,8 @@ let discover_repositories ~base_path =
   let existing_paths =
     match load_all ~base_path with
     | Ok repos ->
-        repos
-        |> List.filter (fun (r : repository) ->
+      repos
+      |> List.filter (fun (r : repository) ->
             (* Reviewer #13217: legacy-default detection used to compare
                [local_path r] against [base_path] textually.  When
                [base_path = "."] and [repo.local_path = "."],
@@ -396,10 +406,17 @@ let discover_repositories ~base_path =
               ((not toml_exists)
                && String.equal r.id "default"
                && String.equal r.local_path base_path))
-        |> List.map (fun (r : repository) ->
+      |> List.map (fun (r : repository) ->
             canonical_path (local_path ~base_path:abs_base_path r))
-    | Error _ -> []
+      |> fun paths -> Ok paths
+    | Error msg ->
+      Error
+        (Printf.sprintf
+           "repository store read failed during discovery for base_path=%S: %s"
+           base_path
+           msg)
   in
+  let* existing_paths = existing_paths in
   let git_dirs = discover_git_dirs ~base_path:abs_base_path in
   let has_hidden_segment_under_base path =
     if String.equal path abs_base_path then false
@@ -426,39 +443,50 @@ let discover_repositories ~base_path =
                && (not (String.equal segment "." || String.equal segment ".."))
                && Char.equal segment.[0] '.')
   in
-  let candidates =
-    List.filter_map
-      (fun git_dir ->
+  let rec collect_candidates candidates errors = function
+    | [] ->
+      (match errors with
+       | [] -> Ok (List.rev candidates)
+       | _ ->
+         Error
+           (String.concat
+              "; "
+              (List.rev_map discovery_error_to_string errors)))
+    | git_dir :: rest ->
         (* Canonicalize again here in case find traversed a symlink the
            caller did not anticipate; the existing-repo membership check
            below relies on identical normalized representations. *)
         let abs_repo_dir = canonical_path (Filename.dirname git_dir) in
-        if has_hidden_segment_under_base abs_repo_dir then None
-        else if List.exists (String.equal abs_repo_dir) existing_paths then None
+        if has_hidden_segment_under_base abs_repo_dir
+        then collect_candidates candidates errors rest
+        else if List.exists (String.equal abs_repo_dir) existing_paths
+        then collect_candidates candidates errors rest
         else
           match Repo_git.get_origin_url ~local_path:abs_repo_dir with
           | Ok url ->
-              let name = Filename.basename abs_repo_dir in
-              let id = slugify_id name in
-              Some
-                {
-                  id;
-                  name;
-                  url;
-                  local_path = abs_repo_dir;
-                  aliases = [];
-                  default_branch = "main";
-                  keepers = [];
-                  status = Active;
-                  auto_sync = false;
-                  sync_interval = 0;
-                  created_at = Int64.zero;
-                  updated_at = Int64.zero;
-                }
-          | Error _ -> None)
-      git_dirs
+            let name = Filename.basename abs_repo_dir in
+            let id = slugify_id name in
+            let candidate =
+              { id
+              ; name
+              ; url
+              ; local_path = abs_repo_dir
+              ; aliases = []
+              ; default_branch = "main"
+              ; keepers = []
+              ; status = Active
+              ; auto_sync = false
+              ; sync_interval = 0
+              ; created_at = Int64.zero
+              ; updated_at = Int64.zero
+              }
+            in
+            collect_candidates (candidate :: candidates) errors rest
+          | Error error ->
+            let error = Discovery_origin_read_failed { local_path = abs_repo_dir; error } in
+            collect_candidates candidates (error :: errors) rest
   in
-  Ok candidates
+  collect_candidates [] [] git_dirs
 
 let register_discovered ~base_path =
   let* candidates = discover_repositories ~base_path in
@@ -489,5 +517,7 @@ module Lookup = Repo_store_lookup.Make (struct
   let local_path = local_path
 end)
 
+let find_url_by_id_result = Lookup.find_url_by_id_result
 let find_url_by_id = Lookup.find_url_by_id
+let find_repo_by_path_prefix_result = Lookup.find_repo_by_path_prefix_result
 let find_repo_by_path_prefix = Lookup.find_repo_by_path_prefix

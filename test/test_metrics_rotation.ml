@@ -80,6 +80,25 @@ let test_append_with_rotation () =
     (* Rotated file should have original size *)
     check int ".1 has original size" 10_485_760 (file_size (path ^ ".1")))
 
+let test_append_result_success () =
+  let dir = tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup dir) (fun () ->
+    let path = Filename.concat dir "result.metrics.jsonl" in
+    match
+      Keeper_types_support.append_jsonl_line_result path
+        (`Assoc [ ("test", `String "result") ])
+    with
+    | Ok () -> check bool "result append writes file" true (Sys.file_exists path)
+    | Error msg -> fail ("append_jsonl_line_result failed: " ^ msg))
+
+let test_append_result_error () =
+  let dir = tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup dir) (fun () ->
+    match Keeper_types_support.append_jsonl_line_result dir (`Assoc []) with
+    | Ok () -> fail "append_jsonl_line_result must fail when path is a directory"
+    | Error msg ->
+      check bool "result append returns an explicit error" true (String.length msg > 0))
+
 let () =
   run "Keeper metrics rotation" [
     "rotation", [
@@ -88,5 +107,7 @@ let () =
       test_case "rotation shifts existing backups" `Quick test_rotation_shifts_existing;
       test_case "nonexistent file safe" `Quick test_nonexistent_file;
       test_case "append triggers rotation" `Quick test_append_with_rotation;
+      test_case "append result succeeds" `Quick test_append_result_success;
+      test_case "append result returns error" `Quick test_append_result_error;
     ];
   ]

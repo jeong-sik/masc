@@ -36,6 +36,23 @@ let block_board_masc_dir_with_file () =
   Fs_compat.save_file masc_dir "not a directory";
   base
 
+let block_board_posts_path_with_directory () =
+  let path = Board.persist_path () in
+  Fs_compat.remove_tree path;
+  Fs_compat.mkdir_p path
+
+let block_board_reactions_path_with_directory () =
+  let path = Board.reactions_path () in
+  Fs_compat.remove_tree path;
+  Fs_compat.mkdir_p path
+
+let block_board_vote_log_path_with_directory () =
+  let path = Board.vote_log_path () in
+  Fs_compat.remove_tree path;
+  Fs_compat.mkdir_p path
+
+let mention_strings ids = List.map Board.Mention_id.to_string ids
+
 let seed_legacy_keeper_post () =
   let now = Time_compat.now () in
   let post_id = Printf.sprintf "legacy-keeper-%06x" (Random.bits ()) in
@@ -117,8 +134,120 @@ let test_update_post_by_owner () =
           match Board_dispatch.get_post ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
-              Alcotest.(check string) "edit persisted via get"
-                "edited body after change" fetched.content))
+	          Alcotest.(check string) "edit persisted via get"
+	                "edited body after change" fetched.content))
+
+let test_delete_post_persistence_failure_rolls_back () =
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"delete-persist-fail-author"
+        ~content:"delete persistence failure parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  let comment_id =
+    match
+      Board_dispatch.add_comment
+        ~post_id
+        ~author:"delete-persist-fail-commenter"
+        ~content:"delete persistence failure child"
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok comment -> Board.Comment_id.to_string comment.id
+  in
+  (match Board_dispatch.vote ~voter:"delete-post-voter" ~post_id ~direction:Board.Up with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  (match
+     Board_dispatch.vote_comment
+       ~voter:"delete-comment-voter"
+       ~comment_id
+       ~direction:Board.Down
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  (match
+     Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"delete-post-reactor"
+       ~emoji:"🔥"
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  (match
+     Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_comment
+       ~target_id:comment_id
+       ~user_id:"delete-comment-reactor"
+       ~emoji:"🚀"
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  block_board_posts_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error ~where:"rewrite_posts" (Board_dispatch.delete_post ~post_id);
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post ->
+     Alcotest.(check string)
+       "post restored"
+       "delete persistence failure parent"
+       post.content);
+  (match Board_dispatch.get_comments ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok comments ->
+     Alcotest.(check bool)
+       "comment restored"
+       true
+       (List.exists
+          (fun comment -> String.equal (Board.Comment_id.to_string comment.id) comment_id)
+          comments));
+  (match Board_dispatch.current_vote_for_post ~voter:"delete-post-voter" ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok vote ->
+     Alcotest.(check (option string))
+       "post vote restored"
+       (Some "up")
+       (Option.map Board.vote_direction_to_string vote));
+  (match
+     Board_dispatch.current_vote_for_comment
+       ~voter:"delete-comment-voter"
+       ~comment_id
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok vote ->
+     Alcotest.(check (option string))
+       "comment vote restored"
+       (Some "down")
+       (Option.map Board.vote_direction_to_string vote));
+  (match
+     Board_dispatch.list_reactions
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"delete-post-reactor"
+       ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok summaries -> Alcotest.(check int) "post reaction restored" 1 (List.length summaries));
+  match
+    Board_dispatch.list_reactions
+      ~target_type:Board.Reaction_comment
+      ~target_id:comment_id
+      ~user_id:"delete-comment-reactor"
+      ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok summaries -> Alcotest.(check int) "comment reaction restored" 1 (List.length summaries)
 
 let test_update_post_rejects_non_owner () =
   match
@@ -325,6 +454,79 @@ let test_update_post_lifts_state_block_into_meta () =
           Alcotest.(check bool) "STATE marker stripped from body" false
             (contains_substring ~needle:"[STATE]" updated.body))
 
+let test_update_post_rewrite_failure_rolls_back () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"post-rewrite-fail-author"
+        ~content:"before rewrite failure"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  block_board_posts_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_posts"
+    (Board_dispatch.update_post
+       ~post_id
+       ~editor:"post-rewrite-fail-author"
+       ~content:"after rewrite failure"
+       ());
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok fetched ->
+    Alcotest.(check string) "content rolled back" "before rewrite failure" fetched.content
+
+let test_status_rollup_rewrite_failure_rolls_back () =
+  let task_id = "task-rollup-persist-fail" in
+  let meta_json = `Assoc [ ("task_id", `String task_id) ] in
+  let first =
+    match
+      Board_dispatch.create_post
+        ~author:"rollup-rewrite-fail-author"
+        ~content:"checking task-rollup-persist-fail first pass"
+        ~post_kind:Board.Automation_post
+        ~meta_json
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string first.id in
+  block_board_posts_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_posts"
+    (Board_dispatch.create_post
+       ~author:"rollup-rewrite-fail-author"
+       ~content:"checking task-rollup-persist-fail second pass"
+       ~post_kind:Board.Automation_post
+       ~meta_json
+       ());
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok fetched ->
+     Alcotest.(check string)
+       "rollup content rolled back"
+       "checking task-rollup-persist-fail first pass"
+       fetched.content);
+  Alcotest.(check int)
+    "failed rollup did not create another post"
+    1
+    (List.length (Board_dispatch.list_posts ()))
+
 let test_keeper_signal_hook_failure_does_not_abort_create_post () =
   Board_dispatch.set_board_signal_hook (fun _ ->
       failwith "keeper signal hook failed");
@@ -439,6 +641,42 @@ let test_structured_post_roundtrip () =
           Alcotest.(check string) "roundtrip body" "Visible line" fetched.body;
           Alcotest.(check string) "roundtrip kind" "automation"
             (Board.post_kind_to_string fetched.post_kind)
+
+let test_create_post_persists_mention_ids_and_signal () =
+  let seen_signal = ref None in
+  Board_dispatch.set_board_signal_hook (fun signal -> seen_signal := Some signal);
+  let post =
+    match
+      Board_dispatch.create_post ~author:"mention-writer"
+        ~content:"hello @alice, cc @keeper-sangsu and email@alice.com"
+        ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let expected = [ "alice"; "keeper-sangsu" ] in
+  Alcotest.(check (list string))
+    "post mention ids"
+    expected
+    (mention_strings post.mention_ids);
+  (match !seen_signal with
+   | Some signal ->
+     Alcotest.(check (list string))
+       "post signal mention ids"
+       expected
+       (mention_strings signal.mention_ids)
+   | None -> Alcotest.fail "missing post-created signal");
+  let post_id = Board.Post_id.to_string post.id in
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok fetched ->
+    Alcotest.(check (list string))
+      "post mention ids survive reload"
+      expected
+      (mention_strings fetched.mention_ids)
 
 let test_board_sse_post_created_includes_post_kind () =
   let seen = ref None in
@@ -618,24 +856,27 @@ let test_author_filter_treats_wildcards_literally () =
   Alcotest.(check int) "percent does not match all authors" 0
     (List.length filtered)
 
-let test_reclassify_posts_dry_run_and_apply () =
+let test_reclassify_posts_reports_missing_post_kind () =
   let post_id = seed_legacy_keeper_post () in
   let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
-  Alcotest.(check int) "dry run changed" 1 dry_run.changed;
+  Alcotest.(check int) "dry run changed" 0 dry_run.changed;
+  Alcotest.(check int) "dry run skipped invalid row" 1 dry_run.skipped;
+  Alcotest.(check (list string)) "invalid id reported" [ post_id ]
+    dry_run.invalid_post_ids;
   (match Board_dispatch.get_post ~post_id with
+   | Error (Board.Post_not_found _) -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok fetched ->
-       Alcotest.(check string) "legacy row resolves as automation" "automation"
-         (Board.post_kind_to_string fetched.post_kind));
+   | Ok _ -> Alcotest.fail "legacy row without post_kind must not load");
   let applied = Board_dispatch.reclassify_posts ~dry_run:false () in
-  Alcotest.(check int) "apply changed" 1 applied.changed;
+  Alcotest.(check int) "apply changed" 0 applied.changed;
+  Alcotest.(check (list string)) "apply reports invalid id" [ post_id ]
+    applied.invalid_post_ids;
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
   match Board_dispatch.get_post ~post_id with
+  | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok fetched ->
-      Alcotest.(check string) "persisted as automation" "automation"
-        (Board.post_kind_to_string fetched.post_kind)
+  | Ok _ -> Alcotest.fail "retired reclassify must not synthesize post_kind"
 
 (** {1 Comment Operations} *)
 
@@ -654,6 +895,55 @@ let test_add_and_get_comments () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok comments ->
           Alcotest.(check bool) "has comment" true (List.length comments >= 1)
+
+let test_add_comment_persists_mention_ids_and_signal () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"comment-mention-post"
+        ~content:"post before mentions"
+        ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let seen_signal = ref None in
+  Board_dispatch.set_board_signal_hook (fun signal -> seen_signal := Some signal);
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"comment-mentioner"
+        ~content:"cc @alice, @alicex and email@alice.com" ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok comment -> comment
+  in
+  let expected = [ "alice"; "alicex" ] in
+  Alcotest.(check (list string))
+    "comment mention ids"
+    expected
+    (mention_strings comment.mention_ids);
+  (match !seen_signal with
+   | Some signal ->
+     Alcotest.(check (list string))
+       "comment signal mention ids"
+       expected
+       (mention_strings signal.mention_ids)
+   | None -> Alcotest.fail "missing comment-added signal");
+  match Board_dispatch.get_comments ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok comments ->
+    (match
+       List.find_opt
+         (fun c -> String.equal (Board.Comment_id.to_string c.id)
+             (Board.Comment_id.to_string comment.id))
+         comments
+     with
+     | Some fetched ->
+       Alcotest.(check (list string))
+         "comment mention ids survive get_comments"
+         expected
+         (mention_strings fetched.mention_ids)
+     | None -> Alcotest.fail "comment missing after write")
 
 let test_comment_persists_post_reply_count () =
   let post =
@@ -822,6 +1112,15 @@ let test_get_post_and_comments_missing_post () =
         (Printf.sprintf "expected Post_not_found, got %s"
            (Board.show_board_error e))
 
+let test_get_comments_missing_post () =
+  match Board_dispatch.get_comments ~post_id:"never-existed" with
+  | Ok _ -> Alcotest.fail "expected Post_not_found"
+  | Error (Board.Post_not_found _) -> ()
+  | Error e ->
+      Alcotest.fail
+        (Printf.sprintf "expected Post_not_found, got %s"
+           (Board.show_board_error e))
+
 (** {1 Vote Operations} *)
 
 let test_vote_post () =
@@ -864,6 +1163,147 @@ let test_vote_flip () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok score ->
           Alcotest.(check int) "score after flip" (-1) score
+
+let test_vote_append_failure_rolls_back () =
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"vote-persist-fail-author"
+        ~content:"vote append failure parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  block_board_vote_log_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"append_vote_log"
+    (Board_dispatch.vote
+       ~voter:"vote-persist-fail-voter"
+       ~post_id
+       ~direction:Board.Up);
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match
+     Board_dispatch.current_vote_for_post
+       ~voter:"vote-persist-fail-voter"
+       ~post_id
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok vote -> Alcotest.(check (option string)) "vote row rolled back" None (Option.map Board.vote_direction_to_string vote));
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+    Alcotest.(check int) "upvotes rolled back" 0 post.votes_up;
+    Alcotest.(check int) "downvotes unchanged" 0 post.votes_down
+
+let test_vote_flip_append_failure_rolls_back () =
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"vote-flip-persist-fail-author"
+        ~content:"vote flip append failure parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  (match
+     Board_dispatch.vote
+       ~voter:"vote-flip-persist-fail-voter"
+       ~post_id
+       ~direction:Board.Up
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok score -> Alcotest.(check int) "initial score" 1 score);
+  block_board_vote_log_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"append_vote_log"
+    (Board_dispatch.vote
+       ~voter:"vote-flip-persist-fail-voter"
+       ~post_id
+       ~direction:Board.Down);
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match
+     Board_dispatch.current_vote_for_post
+       ~voter:"vote-flip-persist-fail-voter"
+       ~post_id
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok vote ->
+     Alcotest.(check (option string))
+       "previous vote restored"
+       (Some "up")
+       (Option.map Board.vote_direction_to_string vote));
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+    Alcotest.(check int) "upvotes restored" 1 post.votes_up;
+    Alcotest.(check int) "downvotes rolled back" 0 post.votes_down
+
+let test_comment_vote_append_failure_rolls_back () =
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"comment-vote-persist-fail-author"
+        ~content:"comment vote append failure parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  let comment_id =
+    match
+      Board_dispatch.add_comment
+        ~post_id
+        ~author:"comment-vote-persist-fail-commenter"
+        ~content:"comment vote append failure target"
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok comment -> Board.Comment_id.to_string comment.id
+  in
+  block_board_vote_log_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"append_vote_log"
+    (Board_dispatch.vote_comment
+       ~voter:"comment-vote-persist-fail-voter"
+       ~comment_id
+       ~direction:Board.Up);
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match
+     Board_dispatch.current_vote_for_comment
+       ~voter:"comment-vote-persist-fail-voter"
+       ~comment_id
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok vote -> Alcotest.(check (option string)) "comment vote row rolled back" None (Option.map Board.vote_direction_to_string vote));
+  match Board_dispatch.get_comments ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok comments ->
+    (match
+       List.find_opt
+         (fun comment -> String.equal (Board.Comment_id.to_string comment.id) comment_id)
+         comments
+     with
+     | None -> Alcotest.fail "comment missing"
+     | Some comment ->
+       Alcotest.(check int) "comment upvotes rolled back" 0 comment.votes_up;
+       Alcotest.(check int) "comment downvotes unchanged" 0 comment.votes_down)
 
 let test_current_vote_lookup () =
   let vote_label = Option.map Board.vote_direction_to_string in
@@ -1031,11 +1471,107 @@ let test_reaction_toggle_and_summary () =
            ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok result ->
-           Alcotest.(check bool) "reacted after untoggle" false
-             result.reacted;
-           Alcotest.(check int) "summary empty after untoggle" 0
-             (List.length result.summary))
+	       | Ok result ->
+	           Alcotest.(check bool) "reacted after untoggle" false
+	             result.reacted;
+	           Alcotest.(check int) "summary empty after untoggle" 0
+	             (List.length result.summary))
+
+let test_reaction_add_rewrite_failure_rolls_back_without_sse () =
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"reaction-persist-fail-author"
+        ~content:"reaction add rewrite failure parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  let sse_events = ref 0 in
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Reaction_changed _ -> incr sse_events
+    | _ -> ());
+  block_board_reactions_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_reactions"
+    (Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"reaction-persist-fail-user"
+       ~emoji:"🔥");
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  Alcotest.(check int) "reaction_changed SSE not emitted" 0 !sse_events;
+  match
+    Board_dispatch.list_reactions
+      ~target_type:Board.Reaction_post
+      ~target_id:post_id
+      ~user_id:"reaction-persist-fail-user"
+      ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok summaries ->
+    Alcotest.(check int) "failed add rolled back" 0 (List.length summaries)
+
+let test_reaction_remove_rewrite_failure_rolls_back_without_sse () =
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"reaction-remove-fail-author"
+        ~content:"reaction remove rewrite failure parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  (match
+     Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"reaction-remove-fail-user"
+       ~emoji:"🚀"
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok result -> Alcotest.(check bool) "initial reaction added" true result.reacted);
+  let sse_events = ref 0 in
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Reaction_changed _ -> incr sse_events
+    | _ -> ());
+  block_board_reactions_path_with_directory ();
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_reactions"
+    (Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"reaction-remove-fail-user"
+       ~emoji:"🚀");
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  Alcotest.(check int) "reaction_changed SSE not emitted" 0 !sse_events;
+  match
+    Board_dispatch.list_reactions
+      ~target_type:Board.Reaction_post
+      ~target_id:post_id
+      ~user_id:"reaction-remove-fail-user"
+      ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok summaries ->
+    (match summaries with
+     | summary :: _ ->
+       Alcotest.(check string) "reaction restored" "🚀" summary.emoji;
+       Alcotest.(check int) "restored count" 1 summary.count;
+       Alcotest.(check bool) "restored reacted" true summary.reacted
+     | [] -> Alcotest.fail "expected restored reaction summary")
 
 let test_comment_reaction_survives_restart () =
   match
@@ -1449,6 +1985,106 @@ let test_sub_board_create_delete_persisted_snapshot () =
   Alcotest.(check bool) "deleted slug removed from persisted snapshot" false
     (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()))
 
+let test_sub_board_create_persistence_failure_rolls_back () =
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"append_sub_board"
+    (Board_dispatch.create_sub_board
+       ~slug:"subboard-create-fail"
+       ~name:"CreateFail"
+       ~description:"must not survive failed append"
+       ~owner:"agent-1"
+       ());
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  Alcotest.(check int)
+    "failed create rolled back in-memory sub-board"
+    0
+    (List.length (Board_dispatch.list_sub_boards ()))
+
+let test_sub_board_update_persistence_failure_rolls_back () =
+  let sub_board_id =
+    match
+      Board_dispatch.create_sub_board
+        ~slug:"subboard-update-fail"
+        ~name:"Before"
+        ~description:"before"
+        ~owner:"agent-1"
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_sub_boards"
+    (Board_dispatch.update_sub_board
+       ~sub_board_id
+       ~name:"After"
+       ~description:"after"
+       ~access:Board.Owner_only
+       ());
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  match Board_dispatch.get_sub_board ~sub_board_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok fetched ->
+    Alcotest.(check string) "name rolled back" "Before" fetched.name;
+    Alcotest.(check string) "description rolled back" "before" fetched.description;
+    Alcotest.(check bool) "access rolled back" true (fetched.access = Board.Open)
+
+let test_sub_board_delete_persistence_failure_rolls_back () =
+  let sub_board_id =
+    match
+      Board_dispatch.create_sub_board
+        ~slug:"subboard-delete-fail"
+        ~name:"DeleteFail"
+        ~description:"before"
+        ~owner:"agent-1"
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"agent-1"
+        ~content:"post in sub-board"
+        ~post_kind:Board.Human_post
+        ~hearth:"subboard-delete-fail"
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_sub_boards"
+    (Board_dispatch.delete_sub_board ~sub_board_id);
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_sub_board ~sub_board_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok fetched ->
+     Alcotest.(check string) "sub-board restored" "subboard-delete-fail" fetched.slug);
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok fetched ->
+    Alcotest.(check (option string))
+      "post hearth restored"
+      (Some "subboard-delete-fail")
+      fetched.hearth
+
 let test_sub_board_access_default_open () =
   (match Board_dispatch.create_sub_board ~slug:"open-board" ~name:"Open"
            ~description:"" ~owner:"agent-1" () with
@@ -1467,6 +2103,26 @@ let test_sub_board_members_include_owner () =
        let members = List.map Board.Agent_id.to_string sb.Board.members in
        Alcotest.(check (list string)) "owner first, members deduped"
          ["agent-owner"; "member-a"] members)
+
+let test_sub_board_members_lenient_report_surfaces_invalid_ids () =
+  let owner =
+    match Board.Agent_id.of_string "agent-owner" with
+    | Ok owner -> owner
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let report =
+    Board.parse_sub_board_members_lenient_report
+      ~owner
+      [ "member-a"; "bad/member"; "member-a" ]
+  in
+  let members = List.map Board.Agent_id.to_string report.Board.members in
+  Alcotest.(check (list string))
+    "valid members preserved and deduped"
+    [ "agent-owner"; "member-a" ]
+    members;
+  match report.Board.errors with
+  | [ { Board.member_name = "bad/member"; error = Board.Validation_error _ } ] -> ()
+  | _ -> Alcotest.fail "invalid member id was not surfaced as a typed error"
 
 let test_sub_board_members_only_post_policy () =
   ignore
@@ -1714,6 +2370,12 @@ let () =
         (with_eio test_update_post_with_explicit_title_and_body);
       Alcotest.test_case "update lifts STATE block into meta" `Quick
         (with_eio test_update_post_lifts_state_block_into_meta);
+      Alcotest.test_case "update rewrite failure rolls back" `Quick
+        (with_eio test_update_post_rewrite_failure_rolls_back);
+      Alcotest.test_case "status rollup rewrite failure rolls back" `Quick
+        (with_eio test_status_rollup_rewrite_failure_rolls_back);
+      Alcotest.test_case "delete persistence failure rolls back" `Quick
+        (with_eio test_delete_post_persistence_failure_rolls_back);
       Alcotest.test_case "keeper hook failure does not abort create" `Quick
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
@@ -1723,6 +2385,8 @@ let () =
       Alcotest.test_case "create append failure returns error without fanout" `Quick
         (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
+      Alcotest.test_case "create post persists mention ids and signal" `Quick
+        (with_eio test_create_post_persists_mention_ids_and_signal);
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
@@ -1734,11 +2398,13 @@ let () =
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick
         (with_eio test_author_filter_treats_wildcards_literally);
-      Alcotest.test_case "reclassify dry-run and apply" `Quick
-        (with_eio test_reclassify_posts_dry_run_and_apply);
+      Alcotest.test_case "reclassify reports missing post_kind" `Quick
+        (with_eio test_reclassify_posts_reports_missing_post_kind);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);
+      Alcotest.test_case "add comment persists mention ids and signal" `Quick
+        (with_eio test_add_comment_persists_mention_ids_and_signal);
       Alcotest.test_case "comment persists post reply_count" `Quick
         (with_eio test_comment_persists_post_reply_count);
       Alcotest.test_case "comment append failure rolls back without fanout" `Quick
@@ -1749,11 +2415,19 @@ let () =
         (with_eio test_get_post_and_comments_pagination_clamps);
       Alcotest.test_case "get_post_and_comments missing post" `Quick
         (with_eio test_get_post_and_comments_missing_post);
+      Alcotest.test_case "get_comments missing post" `Quick
+        (with_eio test_get_comments_missing_post);
     ];
     "votes", [
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);
       Alcotest.test_case "dedup" `Quick (with_eio test_vote_dedup);
       Alcotest.test_case "flip" `Quick (with_eio test_vote_flip);
+      Alcotest.test_case "vote append failure rolls back" `Quick
+        (with_eio test_vote_append_failure_rolls_back);
+      Alcotest.test_case "vote flip append failure rolls back" `Quick
+        (with_eio test_vote_flip_append_failure_rolls_back);
+      Alcotest.test_case "comment vote append failure rolls back" `Quick
+        (with_eio test_comment_vote_append_failure_rolls_back);
       Alcotest.test_case "current vote lookup" `Quick
         (with_eio test_current_vote_lookup);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
@@ -1766,6 +2440,10 @@ let () =
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick
         (with_eio test_reaction_toggle_and_summary);
+      Alcotest.test_case "add rewrite failure rolls back without SSE" `Quick
+        (with_eio test_reaction_add_rewrite_failure_rolls_back_without_sse);
+      Alcotest.test_case "remove rewrite failure rolls back without SSE" `Quick
+        (with_eio test_reaction_remove_rewrite_failure_rolls_back_without_sse);
       Alcotest.test_case "comment reaction survives restart" `Quick
         (with_eio test_comment_reaction_survives_restart);
       Alcotest.test_case "summary recent user ids" `Quick
@@ -1805,8 +2483,16 @@ let () =
       Alcotest.test_case "delete" `Quick (with_eio test_sub_board_delete);
       Alcotest.test_case "persisted create/delete snapshot" `Quick
         (with_eio test_sub_board_create_delete_persisted_snapshot);
+      Alcotest.test_case "create persistence failure rolls back" `Quick
+        (with_eio test_sub_board_create_persistence_failure_rolls_back);
+      Alcotest.test_case "update persistence failure rolls back" `Quick
+        (with_eio test_sub_board_update_persistence_failure_rolls_back);
+      Alcotest.test_case "delete persistence failure rolls back" `Quick
+        (with_eio test_sub_board_delete_persistence_failure_rolls_back);
       Alcotest.test_case "default access open" `Quick (with_eio test_sub_board_access_default_open);
       Alcotest.test_case "members include owner" `Quick (with_eio test_sub_board_members_include_owner);
+      Alcotest.test_case "members lenient report surfaces invalid ids" `Quick
+        test_sub_board_members_lenient_report_surfaces_invalid_ids;
       Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);
       Alcotest.test_case "owner-only post policy" `Quick (with_eio test_sub_board_owner_only_post_policy);
       Alcotest.test_case "members-only comment policy" `Quick (with_eio test_sub_board_members_only_comment_policy);

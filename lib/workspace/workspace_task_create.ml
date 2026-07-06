@@ -56,6 +56,7 @@ type add_task_success =
 
 type add_task_error =
   | Backlog_read_failed of string
+  | Archive_read_failed of string
   | Rejected of string
   | Duplicate of { title : string; existing_id : string }
   | Goal_link_write_failed of string
@@ -70,12 +71,14 @@ type batch_add_tasks_success =
 
 type batch_add_tasks_error =
   | Batch_backlog_read_failed of string
+  | Batch_archive_read_failed of string
   | Batch_goal_link_write_failed of string
   | Batch_backlog_write_failed of string
   | Batch_unexpected_error of string
 
 let add_task_error_to_string = function
   | Backlog_read_failed msg -> Printf.sprintf "Error: %s" msg
+  | Archive_read_failed msg -> Printf.sprintf "Error reading task archive: %s" msg
   | Rejected msg -> Printf.sprintf "Error: %s" msg
   | Duplicate { title; existing_id } ->
     Printf.sprintf
@@ -90,6 +93,8 @@ let add_task_error_to_string = function
 
 let batch_add_tasks_error_to_string = function
   | Batch_backlog_read_failed msg -> Printf.sprintf "Error adding batch tasks: %s" msg
+  | Batch_archive_read_failed msg ->
+    Printf.sprintf "Error reading task archive for batch add: %s" msg
   | Batch_goal_link_write_failed msg ->
     Printf.sprintf "Error linking batch tasks to goals: %s" msg
   | Batch_backlog_write_failed msg -> Printf.sprintf "Error writing batch backlog: %s" msg
@@ -157,7 +162,10 @@ let add_task_with_result
          | Some existing_id ->
            Error (Duplicate { title; existing_id })
          | None ->
-           let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+           (match next_task_number_result config backlog with
+            | Error msg -> Error (Archive_read_failed msg)
+            | Ok next_task_number ->
+           let task_id = Printf.sprintf "task-%03d" next_task_number in
            let contract =
              Some
                (Workspace_task_classify.ensure_task_contract_for_verification
@@ -242,6 +250,7 @@ let add_task_with_result
                   in
                   let summary = Printf.sprintf "Added %s: %s" task_id title in
                   Ok { task_id; summary; title; priority; description; goal_id })))))
+        )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
@@ -273,8 +282,11 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
     match read_backlog_r config with
     | Error msg -> Error (Batch_backlog_read_failed msg)
     | Ok backlog ->
-      (try
-         let next_num = ref (next_task_number config backlog) in
+      (match next_task_number_result config backlog with
+       | Error msg -> Error (Batch_archive_read_failed msg)
+       | Ok next_task_number ->
+      try
+         let next_num = ref next_task_number in
          let added_tasks_with_goal_ids =
            List.map
              (fun (title, priority, description, contract, goal_id) ->
@@ -387,7 +399,8 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                 Ok { task_ids; summary; count }))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Error (Batch_unexpected_error (Printexc.to_string e))))
+       | e -> Error (Batch_unexpected_error (Printexc.to_string e)))
+      )
 ;;
 
 let batch_add_tasks_internal ?created_by config tasks =

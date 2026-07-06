@@ -388,9 +388,9 @@ let raise_fs_edit_error ?fields message =
       Counter labelled [reason=unregistered_repo].
 
    The keeper write path is fire-and-forget; this resolver also never
-   raises — failures during [load_all] degrade to [Orphan] silently
-   with the [reason=unregistered_repo] label so the operator can see
-   how often it happens. *)
+   raises. Repository store read/decode failures are reported separately
+   as [repo_store_read_error] / [sandbox_repo_store_read_error] so they do
+   not look like ordinary unregistered repositories. *)
 let resolve_partition_for_write ~base_dir ~kind ~file_path =
   let abs =
     if Filename.is_relative file_path
@@ -427,21 +427,33 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
     Playground_paths.parse_playground_repo_path ~base_path:base_dir ~abs_path:abs
   with
   | Some (repo_id, rel) ->
-    (match Repo_store.find_url_by_id ~base_path:base_dir repo_id with
-     | Some url ->
+    (match Repo_store.find_url_by_id_result ~base_path:base_dir repo_id with
+     | Error msg ->
+       Log.Keeper.warn
+         "filesystem write partition: repository store read failed for sandbox repo_id=%S base=%S: %s"
+         repo_id base_dir msg;
+       bump_orphan ~reason:"sandbox_repo_store_read_error";
+       (Agent_observation.Base_unresolved, file_path)
+     | Ok (Some url) ->
        resolve_by_url
          ~rel
          ~repo_url:url
          ~orphan_reasons:("sandbox_url_unparseable", "sandbox_blank_url")
-     | None ->
+     | Ok None ->
        bump_orphan ~reason:"sandbox_unregistered_repo";
        (Agent_observation.Unmatched, file_path))
   | None ->
-    (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
-     | None ->
+    (match Repo_store.find_repo_by_path_prefix_result ~base_path:base_dir abs with
+     | Error msg ->
+       Log.Keeper.warn
+         "filesystem write partition: repository store read failed for path=%S base=%S: %s"
+         abs base_dir msg;
+       bump_orphan ~reason:"repo_store_read_error";
+       (Agent_observation.Base_unresolved, file_path)
+     | Ok None ->
        bump_orphan ~reason:"unregistered_repo";
        (Agent_observation.Base_unresolved, file_path)
-     | Some (repo, rel) ->
+     | Ok (Some (repo, rel)) ->
        resolve_by_url
          ~rel
          ~repo_url:repo.url

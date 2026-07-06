@@ -126,34 +126,9 @@ let all_flags : flag list = [
     lifecycle = Experimental; since = "2.254.0" };
 
   { env_name = "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED";
-    description = "Wake an idle keeper on an ambient connector message via an external-attention edge stimulus (RFC-connector-ambient-attention-wake). Off until the spurious-wake throttle (P4) lands; enabling without it would run a turn on every ambient line.";
+    description = "Wake an idle keeper on an ambient connector message via an external-attention edge stimulus (RFC-connector-ambient-attention-wake). Default-off operator control remains even with the per-channel wake throttle.";
     default = false; category = "keeper";
     lifecycle = Experimental; since = "2.252.0" };
-
-  { env_name = "MASC_KEEPER_ALERT_ENABLED";
-    description = "Master switch for keeper interesting alert detection";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.150.0" };
-
-  { env_name = "MASC_KEEPER_ALERT_BOARD_ENABLED";
-    description = "Board fanout for keeper alerts";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.150.0" };
-
-  { env_name = "MASC_KEEPER_ALERT_SLACK_ENABLED";
-    description = "Slack webhook fanout for keeper alerts";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.150.0" };
-
-  { env_name = "MASC_KEEPER_ALERT_SLACK_DM_ENABLED";
-    description = "Slack DM fanout for keeper alerts";
-    default = false; category = "keeper";
-    lifecycle = Active; since = "2.150.0" };
-
-  { env_name = "MASC_KEEPER_ALERT_GITHUB_ENABLED";
-    description = "GitHub issue fanout for keeper alerts";
-    default = false; category = "keeper";
-    lifecycle = Active; since = "2.150.0" };
 
   { env_name = "MASC_KEEPER_DEBUG";
     description = "Keeper debug logging";

@@ -23,13 +23,6 @@ let require_clock () =
   | None -> Error "requires Eio clock (not available in keeper context)"
 ;;
 
-(** Helper: get optional proc_mgr via Process_eio fallback. *)
-let get_proc_mgr_opt () =
-  match Process_eio.get_proc_mgr () with
-  | Ok pm -> Some pm
-  | Error _ -> None
-;;
-
 (** Helper: require Eio net, return error if unavailable. *)
 let require_net () =
   match Eio_context.get_net_opt () with

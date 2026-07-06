@@ -47,92 +47,181 @@ let dashboard_retention_json =
           ] );
     ]
 
+type read_error =
+  { source : string
+  ; message : string
+  }
+
+let read_error ~source ~message = { source; message }
+
+let read_error_json err =
+  `Assoc [ "source", `String err.source; "message", `String err.message ]
+
+let collaborator_json edge =
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key edge) in
+  `Assoc
+    [ "name", m "name"
+    ; "collaborations", m "collaborations"
+    ; "last_collab", m "lastCollab"
+    ]
+;;
+
+let collaborators_of_query_result = function
+  | Error message ->
+    ( []
+    , false
+    , [ read_error ~source:"agentCollaborationNetworkByName" ~message ] )
+  | Ok data ->
+    (match Json_util.assoc_member_opt "agentCollaborationNetworkByName" data with
+     | Some (`List items) -> List.map collaborator_json items, true, []
+     | Some _ | None ->
+       ( []
+       , false
+       , [ read_error
+             ~source:"agentCollaborationNetworkByName"
+             ~message:"missing or non-list field"
+         ] ))
+;;
+
+let agent_of_query_result = function
+  | Error message ->
+    None, false, [ read_error ~source:"agent.relations" ~message ]
+  | Ok data ->
+    (match Json_util.assoc_member_opt "agent" data with
+     | Some `Null -> None, true, []
+     | Some agent -> Some agent, true, []
+     | None ->
+       ( None
+       , false
+       , [ read_error ~source:"agent.relations" ~message:"missing agent field" ]
+       ))
+;;
+
+let interests_of_agent ~agent_known agent =
+  if not agent_known
+  then [], false, []
+  else (
+    match agent with
+    | None -> [], true, []
+    | Some agent ->
+      (match Json_util.assoc_member_opt "interests" agent with
+       | Some (`List items) -> items, true, []
+       | Some _ | None ->
+         ( []
+         , false
+         , [ read_error ~source:"agent.interests" ~message:"missing or non-list field"
+           ] )))
+;;
+
+let relation_participants node =
+  match Json_util.assoc_member_opt "participants" node with
+  | Some part ->
+    (match Json_util.assoc_member_opt "edges" part with
+     | Some (`List p_edges) ->
+       p_edges
+       |> List.map (fun p ->
+         let pn =
+           match Json_util.assoc_member_opt "node" p with
+           | Some n -> n
+           | None -> `Null
+         in
+         let pm key =
+           Option.value ~default:`Null (Json_util.assoc_member_opt key pn)
+         in
+         `Assoc
+           [ "kind", pm "kind"
+           ; "display_name", pm "displayName"
+           ; "role", pm "role"
+           ])
+     | _ -> [])
+  | None -> []
+;;
+
+let relation_json edge =
+  let node =
+    match Json_util.assoc_member_opt "node" edge with
+    | Some n -> n
+    | None -> `Null
+  in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key node) in
+  `Assoc
+    [ "type", m "type"
+    ; "category", m "category"
+    ; "confidence", m "confidence"
+    ; "note", m "note"
+    ; "participants", `List (relation_participants node)
+    ]
+;;
+
+let relations_of_agent ~agent_known agent =
+  if not agent_known
+  then [], false, []
+  else (
+    match agent with
+    | None -> [], true, []
+    | Some agent ->
+      (match Json_util.assoc_member_opt "relations" agent with
+       | Some rel ->
+         (match Json_util.assoc_member_opt "edges" rel with
+          | Some (`List edges) -> List.map relation_json edges, true, []
+          | _ ->
+            ( []
+            , false
+            , [ read_error ~source:"agent.relations" ~message:"missing or non-list edges"
+              ] ))
+       | None ->
+         ( []
+         , false
+         , [ read_error ~source:"agent.relations" ~message:"missing relations field"
+           ] )))
+;;
+
+let json_from_query_results
+    ~agent_name
+    ~generated_at_iso
+    ~collaborators_result
+    ~agent_result
+  =
+  let collaborators, collaborators_known, collaborator_errors =
+    collaborators_of_query_result collaborators_result
+  in
+  let agent_data, agent_known, agent_errors = agent_of_query_result agent_result in
+  let interests, interests_known, interest_errors =
+    interests_of_agent ~agent_known agent_data
+  in
+  let relations, relations_known, relation_errors =
+    relations_of_agent ~agent_known agent_data
+  in
+  let read_errors =
+    collaborator_errors @ agent_errors @ interest_errors @ relation_errors
+  in
+  `Assoc
+    [ "dashboard_surface", `String dashboard_surface
+    ; "source", `String dashboard_source
+    ; "retention", dashboard_retention_json
+    ; "generated_at_iso", `String generated_at_iso
+    ; "agent_name", `String agent_name
+    ; "collaborators_known", `Bool collaborators_known
+    ; "interests_known", `Bool interests_known
+    ; "relations_known", `Bool relations_known
+    ; "read_errors", `List (List.map read_error_json read_errors)
+    ; "collaborators", `List collaborators
+    ; "interests", `List interests
+    ; "relations", `List relations
+    ]
+;;
+
 (** Build the JSON response for agent relations.
     Combines collaboration network + trust edges + generic relations. *)
 let json ~agent_name () : Yojson.Safe.t =
-  let collaborators =
-    let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~query:collaborators_query ~variables () with
-    | Ok data ->
-      (match Json_util.assoc_member_opt "agentCollaborationNetworkByName" data with
-       | Some (`List items) -> items
-       | _ -> [])
-      |> List.map (fun edge ->
-        let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key edge) in
-        `Assoc [
-          ("name", m "name");
-          ("collaborations", m "collaborations");
-          ("last_collab", m "lastCollab");
-        ])
-    | Error _ -> []
-  in
-  let agent_data =
-    let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~query:trusts_query ~variables () with
-    | Ok data ->
-      (match Json_util.assoc_member_opt "agent" data with
-       | Some `Null | None -> None
-       | Some agent -> Some agent)
-    | Error _ -> None
-  in
-  let interests = match agent_data with
-    | Some agent ->
-      Safe_ops.protect ~default:[] (fun () ->
-        match Json_util.assoc_member_opt "interests" agent with
-        | Some (`List items) -> items
-        | _ -> [])
-    | None -> []
-  in
-  let relations = match agent_data with
-    | Some agent ->
-      Safe_ops.protect ~default:[] (fun () ->
-        let edges = match Json_util.assoc_member_opt "relations" agent with
-          | Some rel -> (match Json_util.assoc_member_opt "edges" rel with
-            | Some (`List e) -> e
-            | _ -> [])
-          | None -> []
-        in
-        edges |> List.map (fun edge ->
-          let node = match Json_util.assoc_member_opt "node" edge with
-            | Some n -> n
-            | None -> `Null
-          in
-          let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key node) in
-          let participants =
-            let p_edges = match Json_util.assoc_member_opt "participants" node with
-              | Some part -> (match Json_util.assoc_member_opt "edges" part with
-                | Some (`List e) -> e
-                | _ -> [])
-              | None -> []
-            in
-            p_edges |> List.map (fun p ->
-              let pn = match Json_util.assoc_member_opt "node" p with
-                | Some n -> n
-                | None -> `Null
-              in
-              let pm key = Option.value ~default:`Null (Json_util.assoc_member_opt key pn) in
-              `Assoc [
-                ("kind", pm "kind");
-                ("display_name", pm "displayName");
-                ("role", pm "role");
-              ])
-          in
-          `Assoc [
-            ("type", m "type");
-            ("category", m "category");
-            ("confidence", m "confidence");
-            ("note", m "note");
-            ("participants", `List participants);
-          ]))
-    | None -> []
-  in
-  `Assoc [
-    ("dashboard_surface", `String dashboard_surface);
-    ("source", `String dashboard_source);
-    ("retention", dashboard_retention_json);
-    ("generated_at_iso", `String (Masc_domain.now_iso ()));
-    ("agent_name", `String agent_name);
-    ("collaborators", `List collaborators);
-    ("interests", `List interests);
-    ("relations", `List relations);
-  ]
+  let variables = `Assoc [ "name", `String agent_name ] in
+  json_from_query_results
+    ~agent_name
+    ~generated_at_iso:(Masc_domain.now_iso ())
+    ~collaborators_result:(Graphql_client.query ~query:collaborators_query ~variables ())
+    ~agent_result:(Graphql_client.query ~query:trusts_query ~variables ())
+;;
+
+module For_testing = struct
+  let json_from_query_results = json_from_query_results
+end

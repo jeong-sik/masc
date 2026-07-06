@@ -276,7 +276,8 @@ export function App() {
   }, [tweaksVolt.value, tweaksTheme.value])
 
   const approvalsBadge = governanceData.value?.approval_queue?.length ?? 0
-  const scheduleBadge = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
+  const scheduleBadgeValue = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
+  const scheduleBadge = scheduleBadgeValue == null ? undefined : scheduleBadgeValue
 
   // Body grid columns. Desktop: nav rail (58px) + single content column. Mobile:
   // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),

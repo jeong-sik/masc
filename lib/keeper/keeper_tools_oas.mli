@@ -70,6 +70,20 @@ val inject_stale_failure_count_for_test : failure_counts -> string -> int -> uni
     at ERROR. *)
 val reset_tool_retry_dedupe_for_testing : unit -> unit
 
+type structured_error_payload_parse_error =
+  | Structured_error_payload_json_decode_error of string
+  | Structured_error_payload_non_object of { received : string }
+
+val structured_error_payload_parse_error_to_string :
+  structured_error_payload_parse_error -> string
+
+val structured_error_payload_fields_result :
+  string -> ((string * Yojson.Safe.t) list, structured_error_payload_parse_error) result
+(** Parse the nested JSON object sometimes carried in a failed tool result's
+    [error] string. Malformed JSON and non-object JSON are distinct typed
+    errors; callers that only need the legacy normalization fallback can ignore
+    those errors explicitly. *)
+
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →
     [{"ok":false,"error":...,"detail":...}], preserving structured

@@ -127,8 +127,22 @@ let attach_assoc_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: fields)
   | other -> other
 
+type body_json_parse_error = Body_json_parse_error of string
+
+let body_json_parse_error_to_string = function
+  | Body_json_parse_error message ->
+      Printf.sprintf "tool result body is not JSON: %s" message
+
+let json_of_body_result body =
+  match Yojson.Safe.from_string body with
+  | json -> Ok json
+  | exception Yojson.Json_error message -> Error (Body_json_parse_error message)
+
 let json_of_body body =
-  try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+  match json_of_body_result body with
+  | Ok json -> json
+  | Error (Body_json_parse_error _) -> `String body
+
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : keeper_meta) =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
@@ -247,22 +261,15 @@ let keeper_brief_meta_json (meta : keeper_meta) =
       ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
     ]
 
-let keeper_list_effective_meta_error_json name err =
-  `Assoc
-    [
-      ("keeper", `String name);
-      ("message", `String err);
-      ("terminal_reason", `String "effective_meta_read_failed");
-      ("severity", `String "error");
-      ("operator_action_required", `Bool true);
-      ("next_action", `String "fix_keeper_toml_or_persona_profile");
-    ]
+let keeper_list_effective_meta_error_json =
+  Keeper_status_bridge.keeper_list_effective_meta_error_json
 
-let keeper_list_error_row_json ~runtime_class config name err =
-  let persisted_meta =
+let keeper_list_error_row_json ?effective_meta_error ~runtime_class config name err =
+  let persisted_meta, persisted_meta_read_error =
     match read_meta config name with
-    | Ok (Some meta) -> Some meta
-    | Ok None | Error _ -> None
+    | Ok (Some meta) -> Some meta, None
+    | Ok None -> None, None
+    | Error read_err -> None, Some read_err
   in
   let keepalive_running =
     match persisted_meta with
@@ -281,6 +288,7 @@ let keeper_list_error_row_json ~runtime_class config name err =
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("proactive_idle_sec", `Int meta.proactive.idle_sec);
           ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+          ("persisted_meta_read_error", `Null);
         ]
     | None ->
         [
@@ -288,6 +296,8 @@ let keeper_list_error_row_json ~runtime_class config name err =
           ("agent_name", `Null);
           ("created_at", `Null);
           ("updated_at", `Null);
+          ( "persisted_meta_read_error",
+            Json_util.string_opt_to_json persisted_meta_read_error );
         ]
   in
   error_assoc
@@ -295,58 +305,91 @@ let keeper_list_error_row_json ~runtime_class config name err =
        ("runtime_class", `String runtime_class);
        ("name", `String name);
        ("keepalive_running", `Bool keepalive_running);
-       ("effective_meta_error", keeper_list_effective_meta_error_json name err);
+       ( "effective_meta_error",
+         Option.value effective_meta_error
+           ~default:(keeper_list_effective_meta_error_json name err) );
      ]
      @ persisted_fields)
 
-let keeper_list_skill_route_json config (meta : keeper_meta) =
+let keeper_list_skill_route_json_with_errors config (meta : keeper_meta) =
   let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
   let metrics_path = Keeper_types_support.keeper_metrics_path config meta.name in
-  let lines =
+  let lines, metrics_line_path =
     let dated = Dated_jsonl.read_recent_lines metrics_store 50 in
-    if Stdlib.List.length dated > 0 then dated
+    if Stdlib.List.length dated > 0 then dated, None
     else
       match
         Keeper_memory.read_file_tail_lines_result metrics_path
           ~max_bytes:16_000 ~max_lines:50
       with
-      | Ok lines -> lines
+      | Ok lines -> lines, Some metrics_path
       | Error exn_class ->
           Keeper_memory.record_memory_recall_read_error
             ~site:"keeper_tool_surface_ops_skill_route_metrics" metrics_path exn_class;
-          []
+          [], Some metrics_path
+  in
+  let parsed_metrics, parse_error_records =
+    Keeper_status_metrics.parse_metrics_json_lines lines
+  in
+  let parse_errors =
+    List.map
+      (Keeper_status_metrics.metrics_json_line_parse_error_to_json
+         ~source:"keeper_list_skill_route_metrics_jsonl"
+         ~keeper:meta.name
+         ?path:metrics_line_path)
+      parse_error_records
   in
   let rec find_latest = function
     | [] -> `Null
-    | line :: tl -> (
-        try
-          let json = Yojson.Safe.from_string line in
-          match Safe_ops.json_string_opt "skill_primary" json with
-          | Some primary when not (String.equal (String.trim primary) "") ->
-              let secondary =
-                match Json_util.get_array json "skill_secondary" with
-                | Some (`List xs) ->
-                    xs
-                    |> List.filter_map (function
-                         | `String s when not (String.equal (String.trim s) "") -> Some (`String s)
-                         | _ -> None)
-                | _ -> []
-              in
-              `Assoc
-                [
-                  ("primary", `String primary);
-                  ("secondary", `List secondary);
-                  ( "reason",
-                    Json_util.string_opt_to_json (Safe_ops.json_string_opt "skill_reason" json) );
-                ]
-          | _ -> find_latest tl
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
+    | json :: tl -> (
+        match Safe_ops.json_string_opt "skill_primary" json with
+        | Some primary when not (String.equal (String.trim primary) "") ->
+            let secondary =
+              match Json_util.get_array json "skill_secondary" with
+              | Some (`List xs) ->
+                  xs
+                  |> List.filter_map (function
+                       | `String s when not (String.equal (String.trim s) "") ->
+                           Some (`String s)
+                       | _ -> None)
+              | _ -> []
+            in
+            `Assoc
+              [
+                ("primary", `String primary);
+                ("secondary", `List secondary);
+                ( "reason",
+                  Json_util.string_opt_to_json
+                    (Safe_ops.json_string_opt "skill_reason" json) );
+              ]
+        | _ -> find_latest tl)
   in
-  find_latest (List.rev lines)
+  find_latest (List.rev parsed_metrics), parse_errors
+
+let keeper_list_skill_route_json config meta =
+  fst (keeper_list_skill_route_json_with_errors config meta)
+
+let keeper_list_skill_route_read_error_json ~keeper errors =
+  `Assoc
+    [
+      ("source", `String "keeper_list_skill_route_metrics_parse");
+      ("keeper", `String keeper);
+      ("message", `String "keeper list skill-route metrics JSONL contains malformed rows");
+      ("parse_error_count", `Int (List.length errors));
+      ("parse_errors", `List errors);
+    ]
 let keeper_list_row_json ~runtime_class config name =
   match read_effective_meta config name with
   | Error err -> Some (keeper_list_error_row_json ~runtime_class config name err)
-  | Ok None -> None
+  | Ok None ->
+      Some
+        (keeper_list_error_row_json
+           ~effective_meta_error:
+             (Keeper_status_bridge.keeper_list_effective_meta_missing_json name)
+           ~runtime_class
+           config
+           name
+           "effective meta missing after keeper name discovery")
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in
       let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
@@ -367,6 +410,22 @@ let keeper_list_row_json ~runtime_class config name =
       let status =
         Keeper_status_runtime.keeper_surface_status ~agent_status ~diagnostic
       in
+      let skill_route_json, skill_route_parse_errors =
+        keeper_list_skill_route_json_with_errors config meta
+      in
+      let skill_route_parse_error_fields =
+        match skill_route_parse_errors with
+        | [] -> []
+        | errors ->
+            [
+              ("metrics_parse_error_count", `Int (List.length errors));
+              ("metrics_parse_errors", `List errors);
+              ( "read_error",
+                keeper_list_skill_route_read_error_json
+                  ~keeper:meta.name
+                  errors );
+            ]
+      in
       Some
         (`Assoc (
           [
@@ -376,11 +435,12 @@ let keeper_list_row_json ~runtime_class config name =
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("skill_route", keeper_list_skill_route_json config meta);
+            ("skill_route", skill_route_json);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
-          ]))
+          ]
+          @ skill_route_parse_error_fields))
 let invalidate_status_cache name =
   Keeper_status_detail.invalidate_status_cache_for name
 let with_keeper_name args name =
@@ -558,9 +618,24 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
-let direct_reply_visible_text body =
-  try
-    let json = Yojson.Safe.from_string body in
+type direct_reply_payload_decode =
+  | Direct_reply_payload_json of Yojson.Safe.t
+  | Direct_reply_payload_parse_error of string
+
+let direct_reply_payload_decode body =
+  match Yojson.Safe.from_string body with
+  | json -> Direct_reply_payload_json json
+  | exception Yojson.Json_error detail -> Direct_reply_payload_parse_error detail
+;;
+
+let direct_reply_payload_json_opt = function
+  | Direct_reply_payload_json json -> Some json
+  | Direct_reply_payload_parse_error _ -> None
+;;
+
+let direct_reply_visible_text_of_decode = function
+  | Direct_reply_payload_parse_error _ -> None
+  | Direct_reply_payload_json json ->
     match Keeper_turn_outcome.of_reply_payload (Some json) with
     | Keeper_turn_outcome.Continuation_checkpoint -> None
     | Keeper_turn_outcome.No_visible_reply -> None
@@ -575,23 +650,33 @@ let direct_reply_visible_text body =
               |> String.trim
             in
             if visible = "" then None else Some visible)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | Yojson.Json_error _ -> None
+;;
+
+let direct_reply_visible_text body =
+  direct_reply_payload_decode body |> direct_reply_visible_text_of_decode
 ;;
 
 let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args result =
   if get_bool args "direct_reply" false && tool_result_success result then (
     let user_content = get_string args "message" "" |> String.trim in
+    let result_body = tool_result_body result in
+    let payload_decode = direct_reply_payload_decode result_body in
+    (match payload_decode with
+     | Direct_reply_payload_json _ -> ()
+     | Direct_reply_payload_parse_error detail ->
+       Log.Keeper.warn
+         "direct_reply: payload JSON parse failed for keeper=%s; skipping \
+          direct chat append: %s"
+         name
+         detail);
     (* RFC-0233 §7: the join key the keeper minted into the reply payload,
        threaded onto the persisted row of this agent-initiated / connector
        turn (parse, don't repair — absent/malformed reads as None). *)
     let turn_ref =
       Keeper_turn_outcome.turn_ref_of_reply_payload
-        (try Some (Yojson.Safe.from_string (tool_result_body result))
-         with Yojson.Json_error _ -> None)
+        (direct_reply_payload_json_opt payload_decode)
     in
-    match user_content, direct_reply_visible_text (tool_result_body result) with
+    match user_content, direct_reply_visible_text_of_decode payload_decode with
     | "", _ | _, None -> ()
     | _, Some assistant_content ->
         (* Agent-initiated [masc_keeper_msg] path: only the final tool

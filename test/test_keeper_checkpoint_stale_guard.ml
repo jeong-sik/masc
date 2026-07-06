@@ -31,7 +31,14 @@ let cleanup_dir dir =
       else
         Unix.unlink path
   in
-  try rm dir with _ -> ()
+  try rm dir with
+  | Sys_error _ | Unix.Unix_error _ -> ()
+
+let write_text path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc content)
 
 let make_checkpoint ~session_id ~turn_count ~marker =
   let messages = [
@@ -130,6 +137,48 @@ let test_cold_start_backfills_from_disk () =
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:9 ~marker:"v9")
       "forward save after cold start")
 
+let test_cold_start_corrupt_checkpoint_fails_closed () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let sid = "sess-corrupt-cold" in
+    let path =
+      Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid
+    in
+    let corrupt_payload = "{ invalid checkpoint json" in
+    write_text path corrupt_payload;
+    let metric () =
+      Masc.Otel_metric_store.metric_value_or_zero
+        Keeper_metrics.(to_string CheckpointFailures)
+        ~labels:
+          [ "site"
+          , Keeper_checkpoint_store_failure_site.(to_label Oas_watermark_load)
+          ]
+        ()
+    in
+    let before_metric = metric () in
+    (match
+     Keeper_checkpoint_store.save_oas_classified ~session_dir
+       (make_checkpoint ~session_id:sid ~turn_count:9 ~marker:"v9")
+     with
+     | Error error ->
+       check bool "watermark error is populated" true (String.length error > 0)
+     | Ok (Keeper_checkpoint_store.Saved _) ->
+       fail "corrupt checkpoint was overwritten as a cold save"
+     | Ok (Keeper_checkpoint_store.Stale_noop _) ->
+       fail "corrupt checkpoint cannot be classified as stale");
+    check string
+      "corrupt checkpoint remains on disk"
+      corrupt_payload
+      (Fs_compat.load_file path);
+    check (float 0.0001)
+      "watermark load failure metric increments"
+      1.0
+      (metric () -. before_metric))
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -139,5 +188,7 @@ let () =
             test_forward_equal_and_stale;
           test_case "cold start backfills last turn_count from disk" `Quick
             test_cold_start_backfills_from_disk;
+          test_case "cold start corrupt checkpoint fails closed" `Quick
+            test_cold_start_corrupt_checkpoint_fails_closed;
         ] );
     ]

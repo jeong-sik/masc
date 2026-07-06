@@ -12,13 +12,23 @@ module Http = Http_server_eio
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
+let repository_by_id_result ~base_path repo_id =
+  match Repo_store.load_all ~base_path with
+  | Error msg -> Error msg
+  | Ok repos ->
+    Ok
+      (List.find_opt
+         (fun (repo : Repo_manager_types.repository) -> String.equal repo.id repo_id)
+         repos)
+
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
   let config = (Mcp_server.workspace_config state) in
   let lookup_repository repo_id =
-    match Repo_store.find ~base_path:project_base repo_id with
-    | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
-    | Error _ -> None
+    match repository_by_id_result ~base_path:project_base repo_id with
+    | Error msg -> Error msg
+    | Ok repo ->
+      Ok (Option.map (Repo_store.local_path ~base_path:project_base) repo)
   in
   let lookup_playground name =
     match Keeper_meta_store.read_meta config name with
@@ -43,6 +53,7 @@ let resolve_workspace_base ~state ~uri =
      1. [?canonical_url=...] explicit override (re-normalised so a misspelt
         query is [No_canonical_url] rather than silently creating a new bucket).
      2. [?repo_id=...] → lookup repo.url in [Repo_store] → normalise.
+          - repo store read/decode failed → [Base_unresolved]
           - repo_id not found            → [Unmatched]
           - repo found but url blank/    → [No_canonical_url]
             malformed
@@ -65,13 +76,19 @@ let resolve_partition_for_query ~state ~uri =
   | _ ->
     (match Uri.get_query_param uri "repo_id" with
      | Some id when String.trim id <> "" ->
-       (match Repo_store.find_url_by_id ~base_path:project_base id with
-        | Some url ->
+       (match repository_by_id_result ~base_path:project_base id with
+        | Error msg ->
+          Log.Server.warn
+            "IDE partition repository lookup failed: repo_id=%S base=%S error=%s"
+            id project_base msg;
+          Ide_paths.Base_unresolved
+        | Ok (Some repo) when String.trim repo.url <> "" ->
           (* repo found but url blank/malformed → No_canonical_url *)
-          (match Ide_paths.canonical_url_of_remote url with
+          (match Ide_paths.canonical_url_of_remote repo.url with
            | Some slug -> Ide_paths.By_url slug
            | None -> Ide_paths.No_canonical_url)
-        | None -> Ide_paths.Unmatched)
+        | Ok (Some _) -> Ide_paths.No_canonical_url
+        | Ok None -> Ide_paths.Unmatched)
      | _ -> Ide_paths.Legacy_default)
 ;;
 
@@ -193,13 +210,33 @@ let parse_annotation_kind = function
      | None -> Error "Invalid annotation kind")
 ;;
 
-let parse_positive_int_query ?(default = 50) ?(max_value = 200) uri name =
+type positive_int_query_error =
+  | Invalid_positive_int_query of { name : string; value : string }
+
+let positive_int_query_error_to_string = function
+  | Invalid_positive_int_query { name; value } ->
+      Printf.sprintf "query parameter %S must be a positive integer, got %S" name value
+;;
+
+let parse_positive_int_query_result ?(max_value = 200) uri name =
   match Uri.get_query_param uri name with
   | Some s ->
     (match int_of_string_opt s with
-     | Some n when n > 0 -> min n max_value
-     | _ -> default)
-  | None -> default
+     | Some n when n > 0 -> Ok (Some (min n max_value))
+     | _ -> Error (Invalid_positive_int_query { name; value = s }))
+  | None -> Ok None
+;;
+
+let parse_positive_int_query ?(default = 50) ?(max_value = 200) uri name =
+  match parse_positive_int_query_result ~max_value uri name with
+  | Ok (Some value) -> value
+  | Ok None -> default
+  | Error error ->
+      Log.Server.warn
+        "IDE HTTP invalid positive integer query: %s; using default=%d"
+        (positive_int_query_error_to_string error)
+        default;
+      default
 ;;
 
 let parse_non_negative_int_query ?(default = 0) uri name =
@@ -355,11 +392,19 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let config = (Mcp_server.workspace_config state) in
-         let workspace_state = Workspace.read_state config in
+         let workspace_state_snapshot = Workspace.read_state_snapshot config in
+         let workspace_state = workspace_state_snapshot.state in
          let tempo = Tempo.get_tempo config in
          let json = `Assoc [
            "cluster", `String (Env_config_core.cluster_name ());
            "project", `String workspace_state.project;
+           ( "workspace_state_status"
+           , `String
+               (Workspace.read_state_status_to_string workspace_state_snapshot.status) );
+           ( "workspace_state_read_error_count"
+           , `Int (List.length workspace_state_snapshot.read_errors) );
+           ( "workspace_state_read_errors"
+           , `List (List.map (fun error -> `String error) workspace_state_snapshot.read_errors) );
            "tempo_interval_s", `Float tempo.current_interval_s;
            "paused", `Bool workspace_state.paused;
          ] in
@@ -911,11 +956,7 @@ let add_routes router =
            | Some k when k <> "" -> Some k
            | _ -> None
          in
-         let limit =
-           match Uri.get_query_param uri "limit" with
-           | Some s -> (try int_of_string s with _ -> 50)
-           | None -> 50
-         in
+         let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
          (* Memory tiers: retrospective, episode, semantic.
             Currently returns annotation-based memory entries.
             Future: integrate with Neo4j/pgvector for semantic search. *)

@@ -29,6 +29,17 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let replace_path_with_file path content =
+  if Sys.file_exists path then (
+    if Sys.is_directory path then Unix.rmdir path else Sys.remove path);
+  write_file path content
+
 let parse_json_exn body =
   try Yojson.Safe.from_string body
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)

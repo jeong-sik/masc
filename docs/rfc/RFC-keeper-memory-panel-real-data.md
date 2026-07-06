@@ -141,8 +141,8 @@ record (`memory_os_selection_policy`) so the JSON object is not an untyped inlin
 {
   "keeper_scope": "masc-improver",
   "shared_scope": "_shared",
-  "facts_source": "Keeper_memory_os_io.read_facts_tail",
-  "shared_facts_source": "Keeper_memory_os_io.read_facts_all",
+  "facts_source": "Keeper_memory_os_io.read_facts_tail_with_errors",
+  "shared_facts_source": "Keeper_memory_os_io.read_facts_all_with_errors",
   "episodes_source": "Keeper_memory_os_io.read_episodes_tail",
   "dashboard_fact_tail_limit": 384,
   "dashboard_episode_tail_limit": 12,

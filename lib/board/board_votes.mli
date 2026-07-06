@@ -130,10 +130,10 @@ val visibility_of_string : string -> visibility option
 val post_of_yojson : Yojson.Safe.t -> post option
 (** Decodes a single persisted-post JSON row.  Returns
     [None] when any required field is missing or any id /
-    visibility / post-kind parser rejects the value;
-    legacy rows missing [updated_at] / [post_kind] /
-    [hearth] are accepted with the canonical defaults
-    derived via {!legacy_migrate_post_kind}. *)
+    visibility / post-kind parser rejects the value.  Legacy rows
+    missing [updated_at] still default to [created_at]; rows missing
+    [post_kind] are dropped and observed as invalid payload instead of
+    being locally inferred. *)
 
 val comment_of_yojson : Yojson.Safe.t -> comment option
 (** Decodes a single persisted-comment JSON row.  Same
@@ -186,12 +186,13 @@ val reset_global_for_test : unit -> unit
 (** Reinstalls a fresh lazy singleton.  Safe to call only
     from test setup before concurrent fibers exist. *)
 
-val flush_dirty : store -> unit
+val flush_dirty : store -> (unit, board_error) result
 (** Flushes dirty post/comment snapshots to the JSONL files
     with a short in-memory snapshot lock and append-only disk
     writes.  When dirty vote targets exist, compacts the vote
-    log from the same timestamp-preserving in-memory snapshot.
-    Stamps [last_flush] with the wall clock. *)
+    log from the same timestamp-preserving in-memory snapshot.  Persistence
+    failure is returned as [Io_error] and the dirty state is restored so a
+    later flush can retry. *)
 
 (** {1 Karma} *)
 

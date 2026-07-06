@@ -76,13 +76,28 @@ val encode_cursor : kind:string -> string -> string
     type (task / agent / message); reuse across kinds fails via
     {!decode_cursor}. *)
 
+type cursor_decode_error =
+  | Cursor_base64_decode_error of { kind : string; message : string }
+  | Cursor_kind_mismatch of { expected_kind : string }
+(** Structured cursor decode failure. *)
+
+val cursor_decode_error_to_string : cursor_decode_error -> string
+(** Operator-facing message for a cursor decode failure. *)
+
+val decode_cursor_result :
+  kind:string -> string -> (string, cursor_decode_error) result
+(** [decode_cursor_result ~kind cursor] base64-decodes [cursor] and returns
+    [Ok value] only when the decoded cursor has the expected [<kind>:]
+    prefix. *)
+
 val decode_cursor : kind:string -> string -> string option
 (** [decode_cursor ~kind cursor] base64-decodes [cursor] and
     returns [Some value] when the prefix matches [<kind>:],
-    otherwise [None].  Pinned at the contract seam — drift to
-    permissive (kind-agnostic) decoding would re-open
-    cross-resource cursor confusion that the kind binding
-    prevents. *)
+    otherwise logs the structured decode error and returns [None].
+    Pinned at the contract seam — drift to permissive
+    (kind-agnostic) decoding would re-open cross-resource cursor
+    confusion that the kind binding prevents.  New callers should
+    use {!decode_cursor_result}. *)
 
 (** {1 Request entry} *)
 

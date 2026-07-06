@@ -259,9 +259,9 @@ Compaction profile별 gate 기본값:
 
 ### 4.4 Deliberation Pipeline
 
-Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute -> RecordDecision
+TypedObservation -> BudgetTelemetry -> ModelDeliberation -> LegalityCheck -> Execute -> RecordDecision
 
-9가지 triage 트리거: `DirectMention`, `NewUnclaimedTask`, `FailedTask`, `AgentJoinedOrLeft`, `GoalDeadline`, `BoardActivity(string)`, `IdleTimeout`, `MetricsAnomaly(string)`, `StrategicReview`. 트리거가 없으면 Skip.
+Local keyword/threshold triage is retired. Deliberation triggers must enter as typed runtime facts or be selected at an explicit model/Fusion boundary; local code validates typed actions before execution.
 
 ---
 

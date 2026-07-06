@@ -37,10 +37,14 @@ type available_action = {
 val preview_of_pending_confirm : pending_confirm -> Yojson.Safe.t
 val pending_confirm_to_yojson : pending_confirm -> Yojson.Safe.t
 val pending_confirm_of_yojson : Yojson.Safe.t -> (pending_confirm, string) result
+val raw_pending_confirms_result :
+  Workspace.config -> (pending_confirm list, string) result
 val raw_pending_confirms : Workspace.config -> pending_confirm list
 val write_pending_confirms :
   Workspace.config -> pending_confirm list -> (unit, string) result
 val pending_confirm_expired : pending_confirm -> bool
+val read_pending_confirms_result :
+  Workspace.config -> (pending_confirm list, string) result
 val read_pending_confirms : Workspace.config -> pending_confirm list
 val upsert_pending_confirm :
   Workspace.config -> pending_confirm -> (unit, string) result
@@ -49,6 +53,8 @@ val remove_pending_confirms_by_target :
   Workspace.config -> target_type:string -> target_id:string option -> (int, string) result
 val normalize_pending_confirm_actor_filter : string option -> string option
 val pending_confirm_scope_of_entries : ?actor:string -> pending_confirm list -> pending_confirm_scope
+val pending_confirm_scope_result :
+  ?actor:string -> Workspace.config -> (pending_confirm_scope, string) result
 val pending_confirm_scope : ?actor:string -> Workspace.config -> pending_confirm_scope
 val pending_confirms_json : ?actor:string -> Workspace.config -> Yojson.Safe.t
 val available_actions : available_action list

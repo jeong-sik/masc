@@ -22,6 +22,31 @@ let workspace_surface_json (meta : keeper_meta) =
     ]
 ;;
 
+let keeper_list_effective_meta_error_json name err =
+  `Assoc
+    [
+      ("keeper", `String name);
+      ("message", `String err);
+      ("terminal_reason", `String "effective_meta_read_failed");
+      ("severity", `String "error");
+      ("operator_action_required", `Bool true);
+      ("next_action", `String "fix_keeper_toml_or_persona_profile");
+    ]
+;;
+
+let keeper_list_effective_meta_missing_json name =
+  `Assoc
+    [
+      ("keeper", `String name);
+      ( "message",
+        `String "effective meta missing after keeper name discovery" );
+      ("terminal_reason", `String "effective_meta_missing_after_discovery");
+      ("severity", `String "error");
+      ("operator_action_required", `Bool true);
+      ("next_action", `String "inspect_keeper_meta_store");
+    ]
+;;
+
 let effective_declarative_runtime_id
       (_defaults : keeper_profile_defaults)
       (meta : keeper_meta)

@@ -16,10 +16,12 @@ val classify_keeper_query :
 
 (** Pure dispatch logic for repository-aware workspace queries.
     [repo_param] takes precedence over [keeper_param], matching the
-    dashboard IDE repository picker. *)
+    dashboard IDE repository picker. [lookup_repository] returns [Error]
+    only when the repository store itself could not be read/decoded; an
+    absent id is [Ok None]. *)
 val classify_workspace_query :
   project_base:string ->
-  lookup_repository:(string -> string option) ->
+  lookup_repository:(string -> (string option, string) result) ->
   lookup_playground:(string -> string option) ->
   exists_dir:(string -> bool) ->
   repo_param:string option ->
@@ -28,6 +30,7 @@ val classify_workspace_query :
            | `Repository of string
            | `RepositoryMissing of string
            | `RepositoryUnknown of string
+           | `RepositoryLookupError of string * string
            | `Playground of string
            | `PlaygroundMissing of string
            | `KeeperUnknown of string ]
@@ -41,6 +44,7 @@ val source_header :
   | `Repository of string
   | `RepositoryMissing of string
   | `RepositoryUnknown of string
+  | `RepositoryLookupError of string * string
   | `Playground of string
   | `PlaygroundMissing of string
   | `KeeperUnknown of string ] ->

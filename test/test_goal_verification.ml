@@ -157,6 +157,30 @@ let test_create_request_keeps_primary_commit_when_recovery_write_fails () =
   | Some stored -> check string "primary has request" request.id stored.id
   | None -> fail "primary request missing after recovery mirror failure"
 
+let test_read_state_result_reports_corrupt_primary_and_recovery () =
+  with_workspace @@ fun config ->
+  let requested_by = operator "planner" in
+  (match
+     Goal_verification.create_request
+       config
+       ~goal_id:"goal-1"
+       ~requested_by
+       ~policy_snapshot:(request_snapshot ~requested_by)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let write_text path content =
+    Out_channel.with_open_text path (fun oc -> output_string oc content)
+  in
+  write_text (Goal_verification.requests_path config) "{not-json";
+  write_text (requests_recovery_path config) "{not-json";
+  (match Goal_verification.read_state_result config with
+   | Error msg ->
+     check bool "read error reported" true (String.length msg > 0)
+   | Ok _ -> fail "expected corrupt primary/recovery read failure");
+  let legacy = Goal_verification.read_state config in
+  check int "legacy wrapper returns default requests" 0 (List.length legacy.requests)
+
 let () =
   run "Goal_verification"
     [
@@ -170,5 +194,7 @@ let () =
             test_cancel_if_open_reports_already_resolved;
           test_case "recovery mirror write failure preserves primary" `Quick
             test_create_request_keeps_primary_commit_when_recovery_write_fails;
+          test_case "read_state_result reports corrupt primary and recovery" `Quick
+            test_read_state_result_reports_corrupt_primary_and_recovery;
         ] );
     ]

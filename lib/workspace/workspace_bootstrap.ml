@@ -37,12 +37,20 @@ let ensure_workspace_bootstrap config =
       root_tasks_dir;
       root_messages_dir;
     ];
-  if not (path_exists_root config (root_state_path config)) then
-    write_json_root config (root_state_path config)
-      (workspace_state_to_yojson (default_workspace_state config));
-  if not (path_exists_root config root_backlog_path) then
-    write_json_root config root_backlog_path
-      (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 });
+  if not (path_exists_root config (root_state_path config)) then (
+    match
+      write_json_root_result config (root_state_path config)
+        (workspace_state_to_yojson (default_workspace_state config))
+    with
+    | Ok () -> ()
+    | Error error -> raise (Sys_error error));
+  if not (path_exists_root config root_backlog_path) then (
+    match
+      write_json_root_result config root_backlog_path
+        (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 })
+    with
+    | Ok () -> ()
+    | Error error -> raise (Sys_error error));
 
   let scoped_agents = agents_dir config in
   let scoped_tasks = tasks_dir config in
@@ -50,8 +58,13 @@ let ensure_workspace_bootstrap config =
   let scoped_state = state_path config in
   let scoped_backlog = backlog_path config in
   List.iter mkdir_p [ masc_dir config; scoped_agents; scoped_tasks; scoped_messages ];
-  if not (path_exists config scoped_state) then
-    write_json config scoped_state (workspace_state_to_yojson (default_workspace_state config));
+  if not (path_exists config scoped_state) then (
+    match
+      write_json_result config scoped_state
+        (workspace_state_to_yojson (default_workspace_state config))
+    with
+    | Ok () -> ()
+    | Error error -> raise (Sys_error error));
   if not (path_exists config scoped_backlog) then
-    write_json config scoped_backlog
-      (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 })
+    Workspace_backlog.write_backlog config
+      { tasks = []; last_updated = now_iso (); version = 1 }

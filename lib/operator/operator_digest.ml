@@ -67,8 +67,7 @@ let recent_tool_host_failures ~now () =
   Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
   |> dedup [] []
 
-let build_workspace_attention_items config =
-  let pending_confirms = read_pending_confirms config in
+let build_workspace_attention_items_of_pending pending_confirms =
   let pending_items =
     if pending_confirms = [] then []
     else
@@ -89,6 +88,19 @@ let build_workspace_attention_items config =
   List.sort compare_attention
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
     @ pending_items)
+
+let build_workspace_attention_items_result config =
+  match read_pending_confirms_result config with
+  | Error msg ->
+      Error (Printf.sprintf "workspace attention pending confirms read failed: %s" msg)
+  | Ok pending_confirms -> Ok (build_workspace_attention_items_of_pending pending_confirms)
+
+let build_workspace_attention_items config =
+  match build_workspace_attention_items_result config with
+  | Ok items -> items
+  | Error msg ->
+      Log.Misc.warn "[operator_digest] %s" msg;
+      []
 
 let assoc_bool_field ~default key fields =
   match List.assoc_opt key fields with
@@ -272,23 +284,56 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
     in
     Some (attention_item, recommended_action)
 
-let keeper_attention_projection_items config =
-  let keeper_names = Keeper_meta_store.keeper_names config in
+let keeper_attention_projection_items_result config =
+  let* keeper_names =
+    Keeper_meta_store.keeper_names_result config
+    |> Result.map_error (Printf.sprintf "keeper names read failed: %s")
+  in
   let status_attention =
-    keeper_names
-    |> List.filter_map (fun name ->
-      match Keeper_meta_store.read_meta config name with
-      | Ok (Some meta) -> keeper_attention_projection config meta
-      | Ok None | Error _ -> None)
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | name :: rest -> (
+          match Keeper_meta_store.read_meta config name with
+          | Error msg ->
+              Error (Printf.sprintf "keeper meta read failed for %s: %s" name msg)
+          | Ok None -> loop acc rest
+          | Ok (Some meta) -> (
+              match keeper_attention_projection config meta with
+              | None -> loop acc rest
+              | Some item -> loop (item :: acc) rest))
+    in
+    loop [] keeper_names
   in
+  let* status_attention = status_attention in
   let external_attention =
-    keeper_names
-    |> List.concat_map (fun keeper_name ->
-      Keeper_external_attention.pending_for_keeper ~base_path:config.base_path
-        ~keeper_name ~limit:3 ()
-      |> List.map external_attention_projection)
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | keeper_name :: rest -> (
+          match
+            Keeper_external_attention.pending_for_keeper_result
+              ~base_path:config.base_path ~keeper_name ~limit:3 ()
+          with
+          | Error msg ->
+              Error
+                (Printf.sprintf
+                   "external attention read failed for %s: %s"
+                   keeper_name
+                   msg)
+          | Ok pending ->
+              let items = List.map external_attention_projection pending in
+              loop (List.rev_append items acc) rest)
+    in
+    loop [] keeper_names
   in
-  status_attention @ external_attention
+  let* external_attention = external_attention in
+  Ok (status_attention @ external_attention)
+
+let keeper_attention_projection_items config =
+  match keeper_attention_projection_items_result config with
+  | Ok items -> items
+  | Error msg ->
+      Log.Misc.warn "[operator_digest] %s" msg;
+      []
 
 let workspace_recommendations _config =
   dedup_recommendations []
@@ -303,11 +348,18 @@ let workspace_state_json config =
         ("pause_reason", `Null);
       ]
   else
-    let state = Workspace.read_state config in
+    let state_snapshot = Workspace.read_state_snapshot config in
+    let state = state_snapshot.state in
     `Assoc
       [
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
+        ( "workspace_state_status",
+          `String (Workspace.read_state_status_to_string state_snapshot.status) );
+        ( "workspace_state_read_error_count",
+          `Int (List.length state_snapshot.read_errors) );
+        ( "workspace_state_read_errors",
+          `List (List.map (fun error -> `String error) state_snapshot.read_errors) );
         ("paused", `Bool state.paused);
         ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
       ]
@@ -317,7 +369,9 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
   if not (Workspace.is_initialized config) then
-    let recent_reviews = Operator_review_state.recent_review_decisions_json ~limit:12 config in
+    let* recent_reviews =
+      Operator_review_state.recent_review_decisions_json_result ~limit:12 config
+    in
     Ok
       (`Assoc
         [
@@ -348,12 +402,16 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     let workspace_state_json = workspace_state_json config in
     match target_type with
     | "workspace" ->
-        let confirm_scope = pending_confirm_scope ?actor config in
-        let keeper_attention, keeper_recommendations =
-          keeper_attention_projection_items config |> List.split
+        let* confirm_scope = pending_confirm_scope_result ?actor config in
+        let* keeper_projection_items =
+          keeper_attention_projection_items_result config
         in
+        let keeper_attention, keeper_recommendations =
+          keeper_projection_items |> List.split
+        in
+        let* workspace_attention = build_workspace_attention_items_result config in
         let attention_items =
-          build_workspace_attention_items config
+          workspace_attention
           @ keeper_attention
           |> List.sort compare_attention
         in
@@ -369,8 +427,8 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             ~target_id:None ~fallback_recommendations:recommended_actions
             ~fallback_summary:fallback_recommendation_summary
         in
-        let recent_reviews =
-          Operator_review_state.recent_review_decisions_json ~limit:12 config
+        let* recent_reviews =
+          Operator_review_state.recent_review_decisions_json_result ~limit:12 config
         in
         Ok
           (`Assoc

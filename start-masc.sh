@@ -183,6 +183,52 @@ build_dune_target_with_lock() {
     return 0
 }
 
+build_commit_stamp_path() {
+    printf '%s.build-commit\n' "$1"
+}
+
+resolve_source_head_commit() {
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+    git -C "$SCRIPT_DIR" rev-parse --verify 'HEAD^{commit}' 2>/dev/null | tr -d '[:space:]'
+}
+
+source_tree_is_clean() {
+    local status_output
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+    if ! status_output="$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)"; then
+        return 1
+    fi
+    [ -z "$status_output" ]
+}
+
+stamp_build_commit_for_executable() {
+    local exe_path="$1"
+    local label="$2"
+    local commit stamp_path
+    stamp_path="$(build_commit_stamp_path "$exe_path")"
+    if ! source_tree_is_clean; then
+        echo "[startup] Warning: refusing to stamp $label build commit because $SCRIPT_DIR has uncommitted changes." >&2
+        rm -f "$stamp_path"
+        return 0
+    fi
+    commit="$(resolve_source_head_commit || true)"
+    if [ -z "$commit" ]; then
+        echo "[startup] Warning: cannot stamp $label build commit; git HEAD is unavailable for $SCRIPT_DIR." >&2
+        rm -f "$stamp_path"
+        return 0
+    fi
+    if ! printf '%s\n' "$commit" > "$stamp_path"; then
+        echo "[startup] Warning: failed to write $label build commit stamp: $stamp_path" >&2
+        rm -f "$stamp_path"
+        return 0
+    fi
+    echo "[startup] Stamped $label build commit: $commit" >&2
+}
+
 is_truthy() {
     case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
         1|true|yes|y|on) return 0 ;;
@@ -868,6 +914,7 @@ if [ "$HTTP_MODE" = "true" ] && [ -z "$MASC_EIO_EXE" ]; then
     fi
     if [ -x "$LOCAL_EIO_EXE" ]; then
         MASC_EIO_EXE="$LOCAL_EIO_EXE"
+        stamp_build_commit_for_executable "$MASC_EIO_EXE" "main_eio.exe"
     else
         echo "Error: build failed." >&2
         exit 1
@@ -886,8 +933,10 @@ if [ "$HTTP_MODE" = "false" ] && [ -z "$MASC_STDIO_EIO_EXE" ]; then
     fi
     if [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
         MASC_STDIO_EIO_EXE="$LOCAL_STDIO_EIO_EXE"
+        stamp_build_commit_for_executable "$MASC_STDIO_EIO_EXE" "main_stdio_eio.exe"
     elif [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
         MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
+        stamp_build_commit_for_executable "$MASC_STDIO_EIO_EXE" "main_stdio_eio.exe"
     else
         echo "Error: failed to build stdio server." >&2
         exit 1
@@ -908,8 +957,10 @@ if [ "$HTTP_MODE" = "true" ] && [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/
 
         if [ -x "$LOCAL_EIO_EXE" ]; then
             MASC_EIO_EXE="$LOCAL_EIO_EXE"
+            stamp_build_commit_for_executable "$MASC_EIO_EXE" "main_eio.exe"
         elif [ -x "$WORKSPACE_EIO_EXE" ]; then
             MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
+            stamp_build_commit_for_executable "$MASC_EIO_EXE" "main_eio.exe"
         fi
     fi
 fi
@@ -990,8 +1041,10 @@ if [ "$EIO_MODE" = "true" ]; then
         fi
         if [ -x "$WORKSPACE_EIO_EXE" ]; then
             MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
+            stamp_build_commit_for_executable "$MASC_EIO_EXE" "main_eio.exe"
         elif [ -x "$LOCAL_EIO_EXE" ]; then
             MASC_EIO_EXE="$LOCAL_EIO_EXE"
+            stamp_build_commit_for_executable "$MASC_EIO_EXE" "main_eio.exe"
         else
             echo "Error: Failed to build Eio server (main_eio.exe)." >&2
             exit 1

@@ -112,6 +112,14 @@ let write_text_file path contents =
     (fun () -> output_string oc contents)
 ;;
 
+let append_text_file path contents =
+  let (_ : string) = Masc.Keeper_fs.ensure_dir (Filename.dirname path) in
+  let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+;;
+
 let render_if_enabled_for_test ~keeper_id ~now ~masc_root () =
   Recall.render_if_enabled
     ~keeper_id
@@ -1369,11 +1377,31 @@ let test_memory_llm_summary_rejects_invalid_schema_provider () =
 ;;
 
 let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
-  let parse raw =
-    Memory_summary.For_testing.summary_text_of_response (fake_response raw)
-  in
   let parse_result raw =
     Memory_summary.For_testing.summary_text_result_of_response (fake_response raw)
+  in
+  let check_valid label expected raw =
+    match parse_result raw with
+    | Ok summary -> Alcotest.(check string) label expected summary
+    | Error Memory_summary.Empty_summary_response ->
+        Alcotest.failf "%s: expected summary %S, got empty response" label expected
+    | Error (Memory_summary.Invalid_structured_response detail) ->
+        Alcotest.failf
+          "%s: expected summary %S, got invalid structured response: %s"
+          label
+          expected
+          detail
+  in
+  let check_empty label raw =
+    match parse_result raw with
+    | Error Memory_summary.Empty_summary_response -> ()
+    | Ok summary ->
+        Alcotest.failf "%s: expected empty response error, got %S" label summary
+    | Error (Memory_summary.Invalid_structured_response detail) ->
+        Alcotest.failf
+          "%s: expected empty response error, got invalid structured response: %s"
+          label
+          detail
   in
   let check_invalid_structured label = function
     | Error (Memory_summary.Invalid_structured_response _) -> ()
@@ -1381,37 +1409,14 @@ let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
     | Error Memory_summary.Empty_summary_response ->
         Alcotest.failf "%s: expected invalid structured response, got empty response" label
   in
-  Alcotest.(check (option string))
+  check_valid
     "valid summary json"
-    (Some "Remember exact command.")
-    (parse {|{"summary":" Remember exact command.  "}|});
-  (match parse_result {|{"summary":" Remember exact command.  "}|} with
-   | Ok summary ->
-       Alcotest.(check string)
-         "valid summary json result"
-         "Remember exact command."
-         summary
-   | Error _ -> Alcotest.fail "valid summary json result rejected");
-  Alcotest.(check (option string))
-    "plain text rejected"
-    None
-    (parse "Remember exact command.");
+    "Remember exact command."
+    {|{"summary":" Remember exact command.  "}|};
   check_invalid_structured "plain text result" (parse_result "Remember exact command.");
-  Alcotest.(check (option string))
+  check_empty
     "empty summary rejected"
-    None
-    (parse {|{"summary":"   "}|});
-  Alcotest.(check bool)
-    "empty summary result"
-    true
-    (match parse_result {|{"summary":"   "}|} with
-     | Error Memory_summary.Empty_summary_response -> true
-     | Ok _
-     | Error (Memory_summary.Invalid_structured_response _) -> false);
-  Alcotest.(check (option string))
-    "wrong field rejected"
-    None
-    (parse {|{"text":"Remember exact command."}|});
+    {|{"summary":"   "}|};
   check_invalid_structured
     "wrong field result"
     (parse_result {|{"text":"Remember exact command."}|})
@@ -1653,6 +1658,79 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
           (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
         Alcotest.(check int)
           "no fact persisted"
+          0
+          (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
+;;
+
+let test_librarian_runtime_reports_generation_reservation_failure () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "runtime-librarian-corrupt-generation-keeper" in
+        let called = ref false in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          called := true;
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime-corrupt-generation"
+          ; generation = 7
+          ; messages = [ text_message "Please remember generation errors." ]
+          }
+        in
+        let generation_counter =
+          Filename.concat
+            (Memory_io.episodes_dir ~keeper_id)
+            (Printf.sprintf "%s.generation" inp.Librarian.trace_id)
+        in
+        write_text_file generation_counter "not-an-int\n";
+        (match
+           Librarian_runtime.extract_and_append_with_provider_classified
+             ~complete
+             ~clock
+             ~timeout_sec:1.0
+             ~sw
+             ~net
+             ~keeper_id
+             ~provider_cfg:(test_provider_cfg ())
+             inp
+         with
+         | Ok _ -> Alcotest.fail "expected generation reservation failure"
+         | Error (Librarian_runtime.Memory_generation_reservation_failed message as err)
+           ->
+           Alcotest.(check string)
+             "typed generation reservation error"
+             (Printf.sprintf
+                "invalid generation counter %s: %S"
+                generation_counter
+                "not-an-int")
+             message;
+           Alcotest.(check string)
+             "human diagnostic remains explicit"
+             (Printf.sprintf
+                "memory os generation reservation failed: invalid generation counter %s: %S"
+                generation_counter
+                "not-an-int")
+             (Librarian_runtime.extraction_error_to_string err);
+           Alcotest.(check bool)
+             "local generation failures do not defer cadence"
+             false
+             (Librarian_runtime.should_record_cadence_backoff_after_error err)
+         | Error err ->
+           Alcotest.failf
+             "expected Memory_generation_reservation_failed, got %s"
+             (Librarian_runtime.extraction_error_to_string err));
+        Alcotest.(check bool) "provider not called after reservation failure" false !called;
+        Alcotest.(check int)
+          "episode file not persisted"
+          0
+          (json_episode_file_count ~keeper_id);
+        Alcotest.(check int)
+          "event not persisted"
+          0
+          (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
+        Alcotest.(check int)
+          "fact not persisted"
           0
           (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
 ;;
@@ -2032,6 +2110,66 @@ let test_next_generation_reserves_without_episode_file () =
       (Memory_io.next_generation ~keeper_id ~trace_id:"trace-floor"))
 ;;
 
+let test_next_generation_reports_corrupt_counter () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-generation-corrupt-counter-keeper" in
+    let trace_id = "trace-corrupt-counter" in
+    let counter_path =
+      Filename.concat
+        (Memory_io.episodes_dir ~keeper_id)
+        (Printf.sprintf "%s.generation" trace_id)
+    in
+    write_text_file counter_path "not-an-int\n";
+    (match Memory_io.next_generation_result ~keeper_id ~trace_id with
+     | Ok generation ->
+       Alcotest.failf
+         "expected corrupt generation counter error, got generation %d"
+         generation
+     | Error error ->
+       Alcotest.(check bool)
+         "error mentions invalid generation counter"
+         true
+         (contains "invalid generation counter" error);
+       Alcotest.(check bool)
+         "error includes counter path"
+         true
+         (contains counter_path error));
+    Alcotest.check_raises
+      "legacy next_generation fails instead of falling back"
+      (Invalid_argument
+         (Printf.sprintf
+            "invalid generation counter %s: %S"
+            counter_path
+            "not-an-int"))
+      (fun () -> ignore (Memory_io.next_generation ~keeper_id ~trace_id)))
+;;
+
+let test_next_generation_reports_negative_counter () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-generation-negative-counter-keeper" in
+    let trace_id = "trace-negative-counter" in
+    let counter_path =
+      Filename.concat
+        (Memory_io.episodes_dir ~keeper_id)
+        (Printf.sprintf "%s.generation" trace_id)
+    in
+    write_text_file counter_path "-1\n";
+    match Memory_io.next_generation_result ~keeper_id ~trace_id with
+    | Ok generation ->
+      Alcotest.failf
+        "expected negative generation counter error, got generation %d"
+        generation
+    | Error error ->
+      Alcotest.(check bool)
+        "error mentions negative counter"
+        true
+        (contains "negative value" error);
+      Alcotest.(check bool)
+        "error includes counter path"
+        true
+        (contains counter_path error))
+;;
+
 let test_episode_file_tail_uses_created_at_not_filename () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "episode-order-keeper" in
@@ -2302,6 +2440,170 @@ let test_gc_preserves_corrupt_store () =
       (List.length (Memory_io.read_facts_all ~keeper_id))))
 ;;
 
+let test_read_facts_all_with_errors_reports_malformed_rows () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "facts-all-read-errors" in
+    let now = 1_000_000.0 in
+    let valid = { (fact_fixture ~now ()) with Types.claim = "valid fact" } in
+    Memory_io.append_fact ~keeper_id valid;
+    let path = Memory_io.facts_path ~keeper_id in
+    append_text_file path "{ broken json\n";
+    let result = Memory_io.read_facts_all_with_errors ~keeper_id in
+    let { Memory_io.facts; parse_errors } = result in
+    Alcotest.(check int) "valid facts retained" 1 (List.length facts);
+    Alcotest.(check int) "parse errors surfaced" 1 (List.length parse_errors);
+    (match parse_errors with
+     | [ { Memory_io.path = error_path; line_index; scope; message = _ } ] ->
+       Alcotest.(check string) "parse error path" path error_path;
+       Alcotest.(check int) "full-file line index" 2 line_index;
+       Alcotest.(check bool) "full-file scope" true
+         (match scope with
+          | Memory_io.Fact_read_full_file -> true
+          | Memory_io.Fact_read_tail_window -> false)
+     | _ -> Alcotest.fail "expected one fact parse error");
+    Alcotest.(check int)
+      "legacy read keeps valid facts"
+      1
+      (List.length (Memory_io.read_facts_all ~keeper_id)))
+;;
+
+let test_read_facts_tail_with_errors_reports_malformed_rows () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "facts-tail-read-errors" in
+    let now = 1_000_000.0 in
+    let valid = { (fact_fixture ~now ()) with Types.claim = "tail valid fact" } in
+    Memory_io.append_fact ~keeper_id valid;
+    let path = Memory_io.facts_path ~keeper_id in
+    append_text_file path "{ broken json\n";
+    let result = Memory_io.read_facts_tail_with_errors ~keeper_id ~n:2 in
+    let { Memory_io.facts; parse_errors } = result in
+    Alcotest.(check int) "tail valid facts retained" 1 (List.length facts);
+    Alcotest.(check int) "tail parse errors surfaced" 1 (List.length parse_errors);
+    (match parse_errors with
+     | [ { Memory_io.path = error_path; line_index = _; scope; message = _ } ] ->
+       Alcotest.(check string) "tail parse error path" path error_path;
+       Alcotest.(check bool) "tail scope" true
+         (match scope with
+          | Memory_io.Fact_read_tail_window -> true
+          | Memory_io.Fact_read_full_file -> false)
+     | _ -> Alcotest.fail "expected one tail fact parse error");
+    Alcotest.(check int)
+      "legacy tail keeps valid facts"
+      1
+      (List.length (Memory_io.read_facts_tail ~keeper_id ~n:2)))
+;;
+
+let test_read_events_tail_with_errors_reports_malformed_rows () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "events-tail-read-errors" in
+    let valid =
+      episode_fixture
+        ~now:1_000_000.0
+        ~trace_id:"trace-event-parse"
+        ~generation:1
+        ~summary:"valid event episode"
+    in
+    Memory_io.append_event ~keeper_id valid;
+    let path = Memory_io.events_path ~keeper_id in
+    append_text_file path "{ broken json\n";
+    let result = Memory_io.read_events_tail_with_errors ~keeper_id ~n:2 in
+    let { Memory_io.episodes; episode_parse_errors } = result in
+    Alcotest.(check int) "valid events retained" 1 (List.length episodes);
+    Alcotest.(check int) "event parse errors surfaced" 1
+      (List.length episode_parse_errors);
+    (match episode_parse_errors with
+     | [ { Memory_io.episode_parse_path = error_path
+         ; episode_parse_scope = scope
+         ; episode_parse_line_index = line_index
+         ; episode_parse_message = _
+         } ] ->
+       Alcotest.(check string) "event parse error path" path error_path;
+       Alcotest.(check int) "event tail line index" 2 line_index;
+       Alcotest.(check bool) "event-tail scope" true
+         (match scope with
+          | Memory_io.Episode_read_events_tail -> true
+          | Memory_io.Episode_read_episode_dir
+          | Memory_io.Episode_read_episode_file
+          | Memory_io.Episode_read_episode_file_unlink -> false)
+     | _ -> Alcotest.fail "expected one event parse error");
+    Alcotest.(check int)
+      "legacy event tail keeps valid events"
+      1
+      (List.length (Memory_io.read_events_tail ~keeper_id ~n:2)))
+;;
+
+let test_read_episodes_tail_with_errors_reports_malformed_files () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-file-read-errors" in
+    let valid =
+      episode_fixture
+        ~now:1_000_000.0
+        ~trace_id:"trace-file-parse"
+        ~generation:1
+        ~summary:"valid episode file"
+    in
+    Memory_io.append_episode ~keeper_id valid;
+    let invalid_path = Filename.concat (Memory_io.episodes_dir ~keeper_id) "broken.json" in
+    write_text_file invalid_path "{ broken json\n";
+    let result = Memory_io.read_episodes_tail_with_errors ~keeper_id ~n:10 in
+    let { Memory_io.episodes; episode_parse_errors } = result in
+    Alcotest.(check int) "valid episode files retained" 1 (List.length episodes);
+    Alcotest.(check int) "episode-file parse errors surfaced" 1
+      (List.length episode_parse_errors);
+    (match episode_parse_errors with
+     | [ { Memory_io.episode_parse_path = error_path
+         ; episode_parse_scope = scope
+         ; episode_parse_line_index = line_index
+         ; episode_parse_message = _
+         } ] ->
+       Alcotest.(check string) "episode-file parse error path" invalid_path error_path;
+       Alcotest.(check int) "episode-file line index" 1 line_index;
+       Alcotest.(check bool) "episode-file scope" true
+         (match scope with
+          | Memory_io.Episode_read_episode_file -> true
+          | Memory_io.Episode_read_episode_dir
+          | Memory_io.Episode_read_events_tail
+          | Memory_io.Episode_read_episode_file_unlink -> false)
+     | _ -> Alcotest.fail "expected one episode-file parse error");
+    Alcotest.(check int)
+      "legacy episode tail keeps valid files"
+      1
+      (List.length (Memory_io.read_episodes_tail ~keeper_id ~n:10)))
+;;
+
+let test_read_episodes_tail_with_errors_reports_episode_dir_failure () =
+  with_temp_keepers_dir (fun keepers_dir ->
+    let keeper_id = "episode-dir-read-error" in
+    let keeper_dir = Filename.concat keepers_dir keeper_id in
+    let episode_dir_path = Filename.concat keeper_dir "episodes" in
+    write_text_file episode_dir_path "not a directory";
+    let result = Memory_io.read_episodes_tail_with_errors ~keeper_id ~n:10 in
+    let { Memory_io.episodes; episode_parse_errors } = result in
+    Alcotest.(check int) "no episodes from unreadable episode dir" 0
+      (List.length episodes);
+    Alcotest.(check int) "episode-dir read error surfaced" 1
+      (List.length episode_parse_errors);
+    (match episode_parse_errors with
+     | [ { Memory_io.episode_parse_path = error_path
+         ; episode_parse_scope = scope
+         ; episode_parse_line_index = line_index
+         ; episode_parse_message
+         } ] ->
+       Alcotest.(check string) "episode-dir error path" episode_dir_path error_path;
+       Alcotest.(check int) "episode-dir line index" 0 line_index;
+       Alcotest.(check bool) "episode-dir scope" true
+         (match scope with
+          | Memory_io.Episode_read_episode_dir -> true
+          | Memory_io.Episode_read_events_tail
+          | Memory_io.Episode_read_episode_file
+          | Memory_io.Episode_read_episode_file_unlink -> false);
+       Alcotest.(check bool)
+         "episode-dir error message is explicit"
+         true
+         (contains "not a directory" episode_parse_message)
+     | _ -> Alcotest.fail "expected one episode-dir read error"))
+;;
+
 let test_gc_waits_for_fact_writer_lock () =
   with_eio (fun ~sw ~net:_ ~clock ->
   let restore_eio_guard = Eio_guard.is_ready () in
@@ -2478,6 +2780,83 @@ let test_render_if_enabled_surfaces_prompt_render_failure () =
               (Some reason)
               (recent_recall_injection_failure_reason keepers_dir))))
   ;;
+
+let test_render_if_enabled_surfaces_fact_store_parse_error () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun keepers_dir ->
+        let keeper_id = "virtual-memory-keeper" in
+        let now = 1_000_000.0 in
+        let reason = "fact_store_parse_error" in
+        let metric_before = recall_unavailable_metric_value reason in
+        Memory_io.append_fact
+          ~keeper_id
+          { (fact_fixture ~now ()) with Types.claim = "Fact text must not leak" };
+        append_text_file (Memory_io.facts_path ~keeper_id) "{ broken json\n";
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
+        | None -> Alcotest.fail "expected sanitized recall-unavailable block"
+        | Some block ->
+          Alcotest.(check bool)
+            "surfaces unavailable advisory"
+            true
+            (contains "Memory recall unavailable" block);
+          Alcotest.(check bool)
+            "classifies fact store parse failure"
+            true
+            (contains "reason=fact_store_parse_error" block);
+          Alcotest.(check bool)
+            "does not render partial fact text after parse failure"
+            false
+            (contains "Fact text must not leak" block);
+          Alcotest.(check (float 0.001))
+            "increments recall-unavailable metric"
+            (metric_before +. 1.0)
+            (recall_unavailable_metric_value reason);
+          Alcotest.(check (option string))
+            "ledger records failure reason"
+            (Some reason)
+            (recent_recall_injection_failure_reason keepers_dir))))
+;;
+
+let test_render_if_enabled_surfaces_episode_store_parse_error () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun keepers_dir ->
+        let keeper_id = "virtual-memory-keeper" in
+        let now = 1_000_000.0 in
+        let reason = "episode_store_parse_error" in
+        let metric_before = recall_unavailable_metric_value reason in
+        Memory_io.append_fact
+          ~keeper_id
+          { (fact_fixture ~now ()) with Types.claim = "Fact text must not leak" };
+        let invalid_path =
+          Filename.concat (Memory_io.episodes_dir ~keeper_id) "broken.json"
+        in
+        write_text_file invalid_path "{ broken json\n";
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
+        | None -> Alcotest.fail "expected sanitized recall-unavailable block"
+        | Some block ->
+          Alcotest.(check bool)
+            "surfaces unavailable advisory"
+            true
+            (contains "Memory recall unavailable" block);
+          Alcotest.(check bool)
+            "classifies episode store parse failure"
+            true
+            (contains "reason=episode_store_parse_error" block);
+          Alcotest.(check bool)
+            "does not render partial fact text after episode parse failure"
+            false
+            (contains "Fact text must not leak" block);
+          Alcotest.(check (float 0.001))
+            "increments recall-unavailable metric"
+            (metric_before +. 1.0)
+            (recall_unavailable_metric_value reason);
+          Alcotest.(check (option string))
+            "ledger records failure reason"
+            (Some reason)
+            (recent_recall_injection_failure_reason keepers_dir))))
+;;
 
 let test_render_if_enabled_renders_persisted_memory () =
   with_recall_env "true" (fun () ->
@@ -3222,6 +3601,49 @@ let test_cap_episode_files_keeps_recent () =
       (json_episode_file_count ~keeper_id);
     let dropped2 = Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5 in
     Alcotest.(check int) "idempotent: no-op below trigger" 0 dropped2)
+;;
+
+let test_cap_episode_files_reports_unlink_failures () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "virtual-memory-keeper-unlink-failure" in
+    let now = 1_000_000.0 in
+    for i = 1 to 6 do
+      let ep =
+        episode_fixture
+          ~now:(now +. float_of_int i)
+          ~trace_id:"trace-episodes-unlink"
+          ~generation:i
+          ~summary:(Printf.sprintf "epi-unlink-%d" i)
+      in
+      Memory_io.append_episode ~keeper_id ep
+    done;
+    let episode_dir = Memory_io.episodes_dir ~keeper_id in
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod episode_dir 0o755)
+      (fun () ->
+         Unix.chmod episode_dir 0o555;
+         let result =
+           Memory_io.cap_episode_files_with_errors ~keeper_id ~keep:3 ~trigger:5
+         in
+         Alcotest.(check int)
+           "failed unlinks are not counted as dropped"
+           0
+           result.episode_files_dropped;
+         Alcotest.(check int)
+           "unlink errors surfaced"
+           3
+           (List.length result.episode_file_cap_errors);
+         List.iter
+           (fun (error : Memory_io.episode_parse_error) ->
+              Alcotest.(check bool)
+                "unlink error scope"
+                true
+                (match error.episode_parse_scope with
+                 | Memory_io.Episode_read_episode_file_unlink -> true
+                 | Memory_io.Episode_read_events_tail
+                 | Memory_io.Episode_read_episode_dir
+                 | Memory_io.Episode_read_episode_file -> false))
+           result.episode_file_cap_errors))
 ;;
 
 let test_memory_io_caps_run_with_installed_domain_pool () =
@@ -4266,12 +4688,25 @@ let test_librarian_provider_slot_gate_caps_at_capacity () =
       let second =
         Librarian_runtime.with_provider_slot ~keeper_id:"keeper-a" ~clock (fun () -> "ran")
       in
+      let second_result =
+        Librarian_runtime.with_provider_slot_result
+          ~keeper_id:"keeper-a"
+          ~clock
+          (fun () -> "ran")
+      in
       Eio.Promise.resolve resolve_release ();
       wait_for_ref ~clock "first slot holder" first;
       Alcotest.(check (option string))
         "concurrent entrant drops at capacity 1"
         None
         second;
+      Alcotest.(check bool)
+        "typed concurrent entrant reports busy"
+        true
+        (match second_result with
+         | Librarian_runtime.Provider_slot_busy -> true
+         | Librarian_runtime.Provider_slot_acquired _
+         | Librarian_runtime.Provider_slot_acquisition_failed _ -> false);
       Alcotest.(check (option (option string)))
         "slot holder ran"
         (Some (Some "ran"))
@@ -5138,6 +5573,52 @@ let test_dashboard_json_wires_one_fact_item_per_fact () =
       (List.length items))
 ;;
 
+let test_dashboard_json_surfaces_episode_read_errors () =
+  with_temp_keepers_dir (fun _dir ->
+    let keeper_id = "memory-panel-episode-read-error" in
+    let episode =
+      episode_fixture
+        ~now:1_000_000.0
+        ~trace_id:"trace-dashboard-episode-read-error"
+        ~generation:1
+        ~summary:"dashboard valid episode"
+    in
+    Memory_io.append_episode ~keeper_id episode;
+    let invalid_path = Filename.concat (Memory_io.episodes_dir ~keeper_id) "broken.json" in
+    write_text_file invalid_path "{ broken json\n";
+    let top =
+      match Server_dashboard_http_keeper_api.memory_os_dashboard_json ~keeper_id with
+      | `Assoc top -> top
+      | _ -> Alcotest.fail "memory_os_dashboard_json must be a JSON object"
+    in
+    let read_errors =
+      match List.assoc_opt "read_errors" top with
+      | Some (`List errors) -> errors
+      | Some _ -> Alcotest.fail "read_errors must be a JSON list"
+      | None -> Alcotest.fail "read_errors missing"
+    in
+    Alcotest.(check int) "one dashboard read error" 1 (List.length read_errors);
+    (match read_errors with
+     | [ `Assoc fields ] ->
+       (match List.assoc_opt "scope" fields with
+        | Some (`String scope) -> Alcotest.(check string) "error scope" "episodes" scope
+        | _ -> Alcotest.fail "read error scope must be a string");
+       (match List.assoc_opt "error" fields with
+        | Some (`String error) ->
+          Alcotest.(check bool) "error names invalid path" true (contains invalid_path error)
+        | _ -> Alcotest.fail "read error detail must be a string")
+     | _ -> Alcotest.fail "expected one object read error");
+    let episodes =
+      match List.assoc_opt "episodes" top with
+      | Some (`Assoc episodes_obj) -> episodes_obj
+      | Some _ -> Alcotest.fail "episodes must be a JSON object"
+      | None -> Alcotest.fail "episodes missing"
+    in
+    match List.assoc_opt "shown" episodes with
+    | Some (`Int shown) -> Alcotest.(check int) "valid episode still shown" 1 shown
+    | _ -> Alcotest.fail "episodes.shown must be an int")
+;;
+
 let test_dashboard_json_selection_policy_contract () =
   let assoc_field label fields key =
     match List.assoc_opt key fields with
@@ -5172,15 +5653,15 @@ let test_dashboard_json_selection_policy_contract () =
       (string_field "policy" policy "shared_scope");
     Alcotest.(check string)
       "private facts source"
-      "Keeper_memory_os_io.read_facts_tail"
+      "Keeper_memory_os_io.read_facts_tail_with_errors"
       (string_field "policy" policy "facts_source");
     Alcotest.(check string)
       "shared facts source"
-      "Keeper_memory_os_io.read_facts_all"
+      "Keeper_memory_os_io.read_facts_all_with_errors"
       (string_field "policy" policy "shared_facts_source");
     Alcotest.(check string)
       "episodes source"
-      "Keeper_memory_os_io.read_episodes_tail"
+      "Keeper_memory_os_io.read_episodes_tail_with_errors"
       (string_field "policy" policy "episodes_source");
     Alcotest.(check int)
       "dashboard fact bound"
@@ -5667,6 +6148,35 @@ let test_self_observation_excluded_from_user_model () =
       (List.hd model.Keeper_user_model.preferences).Keeper_user_model.claim)
 ;;
 
+let test_user_model_build_result_reports_fact_parse_error () =
+  let now = 1_000_000.0 in
+  with_temp_keepers_dir (fun _marker ->
+    let keeper_id = "keeper-user-model-parse-error" in
+    Memory_io.append_fact
+      ~keeper_id
+      { (fact_fixture ~now ()) with
+        Types.claim = "User prefers concise responses"
+      ; Types.category = Types.Preference
+      };
+    append_text_file (Memory_io.facts_path ~keeper_id) "{ broken json\n";
+    match Keeper_user_model.build_result ~keeper_id ~now () with
+    | Ok model ->
+      Alcotest.failf
+        "expected user model parse error, got %d preferences"
+        (List.length model.Keeper_user_model.preferences)
+    | Error (Keeper_user_model.Fact_store_parse_error errors) ->
+      Alcotest.(check int) "one parse error" 1 (List.length errors);
+      (match errors with
+       | [ { Memory_io.scope = scope; _ } ] ->
+         Alcotest.(check bool)
+           "private fact read scope"
+           true
+           (match scope with
+            | Memory_io.Fact_read_tail_window -> true
+            | Memory_io.Fact_read_full_file -> false)
+       | _ -> Alcotest.fail "expected one user-model parse error"))
+;;
+
 let test_gc_default_on () =
   (* Defaults are module-load constants; env overrides are tested separately. *)
   Alcotest.(check bool) "gc default is true" true Env_config.KeeperMemoryOs.gc_enabled_default
@@ -5784,6 +6294,10 @@ let () =
             `Quick
             test_librarian_runtime_requires_clock_for_provider_call
         ; Alcotest.test_case
+            "librarian runtime reports generation reservation failure"
+            `Quick
+            test_librarian_runtime_reports_generation_reservation_failure
+        ; Alcotest.test_case
             "librarian runtime reports fact upsert failure"
             `Quick
             test_librarian_runtime_reports_fact_upsert_failure
@@ -5807,6 +6321,10 @@ let () =
             "dashboard json wires one facts.items row per persisted fact"
             `Quick
             test_dashboard_json_wires_one_fact_item_per_fact
+        ; Alcotest.test_case
+            "dashboard json surfaces episode read errors"
+            `Quick
+            test_dashboard_json_surfaces_episode_read_errors
         ; Alcotest.test_case
             "dashboard json selection_policy pins recall lineage"
             `Quick
@@ -5860,6 +6378,14 @@ let () =
             `Quick
             test_next_generation_reserves_without_episode_file
         ; Alcotest.test_case
+            "next generation reports corrupt counter"
+            `Quick
+            test_next_generation_reports_corrupt_counter
+        ; Alcotest.test_case
+            "next generation reports negative counter"
+            `Quick
+            test_next_generation_reports_negative_counter
+        ; Alcotest.test_case
             "episode file tail uses created_at"
             `Quick
             test_episode_file_tail_uses_created_at_not_filename
@@ -5887,6 +6413,26 @@ let () =
             "gc preserves a corrupt store instead of erasing it"
             `Quick
             test_gc_preserves_corrupt_store
+        ; Alcotest.test_case
+            "read_facts_all_with_errors reports malformed rows"
+            `Quick
+            test_read_facts_all_with_errors_reports_malformed_rows
+        ; Alcotest.test_case
+            "read_facts_tail_with_errors reports malformed rows"
+            `Quick
+            test_read_facts_tail_with_errors_reports_malformed_rows
+        ; Alcotest.test_case
+            "read_events_tail_with_errors reports malformed rows"
+            `Quick
+            test_read_events_tail_with_errors_reports_malformed_rows
+        ; Alcotest.test_case
+            "read_episodes_tail_with_errors reports malformed files"
+            `Quick
+            test_read_episodes_tail_with_errors_reports_malformed_files
+        ; Alcotest.test_case
+            "read_episodes_tail_with_errors reports episode dir failure"
+            `Quick
+            test_read_episodes_tail_with_errors_reports_episode_dir_failure
         ; Alcotest.test_case
             "gc waits for fact writer lock"
             `Quick
@@ -5921,6 +6467,14 @@ let () =
             "render_if_enabled surfaces prompt render failure"
             `Quick
             test_render_if_enabled_surfaces_prompt_render_failure
+        ; Alcotest.test_case
+            "render_if_enabled surfaces fact store parse error"
+            `Quick
+            test_render_if_enabled_surfaces_fact_store_parse_error
+        ; Alcotest.test_case
+            "render_if_enabled surfaces episode store parse error"
+            `Quick
+            test_render_if_enabled_surfaces_episode_store_parse_error
         ; Alcotest.test_case
             "render_if_enabled renders persisted memory"
             `Quick
@@ -6007,6 +6561,10 @@ let () =
             "cap_episode_files keeps recent (RFC-0272)"
             `Quick
             test_cap_episode_files_keeps_recent
+        ; Alcotest.test_case
+            "cap_episode_files reports unlink failures"
+            `Quick
+            test_cap_episode_files_reports_unlink_failures
         ; Alcotest.test_case
             "cap paths run with installed domain pool (RFC-0302)"
             `Quick
@@ -6173,6 +6731,10 @@ let () =
             "self-observation excluded from user model (P0-2)"
             `Quick
             test_self_observation_excluded_from_user_model
+        ; Alcotest.test_case
+            "user model build_result reports fact parse error"
+            `Quick
+            test_user_model_build_result_reports_fact_parse_error
         ; Alcotest.test_case
             "fact_of_json does not infer external_ref from legacy prose"
             `Quick

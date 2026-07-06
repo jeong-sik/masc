@@ -9,10 +9,14 @@ module Message_scope = Keeper_world_observation_message_scope
 type match_result =
   { explicit_mention : bool
   ; matched_targets : string list
-  ; score : int
   }
 
-type comment_status = [ `Never | `No_new_external | `New_external of int * string * string ]
+type comment_status =
+  [ `Never
+  | `No_new_external
+  | `New_external of int * string * string
+  | `Comment_read_error of string
+  ]
 
 (* RFC-0020: board signals are carried as a typed [Keeper_event_queue.board_stimulus]
    end-to-end. This total conversion rebuilds the [Board_dispatch.board_signal]
@@ -32,6 +36,7 @@ let board_signal_of_board_stimulus
   ; author = bs.author
   ; title = bs.title
   ; content = bs.content
+  ; mention_ids = List.filter_map Board.Mention_id.of_string bs.mention_ids
   ; hearth = bs.hearth
   ; updated_at = bs.updated_at
   }
@@ -78,21 +83,27 @@ let match_signal
   =
   let self_ids = Message_scope.self_ids meta in
   if Message_scope.is_self_author ~self_ids signal.author
-  then { explicit_mention = false; matched_targets = []; score = 0 }
+  then { explicit_mention = false; matched_targets = [] }
   else (
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
-    let haystack = String.lowercase_ascii (text signal) in
+    let mentions =
+      signal.mention_ids
+      |> List.filter_map (fun mention_id ->
+        Keeper_identity.Keeper_id.of_string (Board.Mention_id.to_string mention_id))
+    in
     let matched_targets =
       targets
       |> List.filter (fun target ->
-        let needle = "@" ^ String.lowercase_ascii (String.trim target) in
-        needle <> "@" && String_util.contains_substring haystack needle)
+        match Keeper_identity.Keeper_id.of_string target with
+        | None -> false
+        | Some target_id ->
+          List.exists (Keeper_identity.Keeper_id.equal target_id) mentions)
     in
     if matched_targets <> []
-    then { explicit_mention = true; matched_targets; score = 100 }
-    else { explicit_mention = false; matched_targets = []; score = 0 })
+    then { explicit_mention = true; matched_targets }
+    else { explicit_mention = false; matched_targets = [] })
 ;;
 
 (** Check whether this keeper has commented on a post, and whether new
@@ -102,7 +113,10 @@ let match_signal
     response is only re-evaluated when new external beliefs arrive. *)
 let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
   match Board_dispatch.get_comments ~post_id with
-  | Error _ -> `Never
+  | Error err ->
+    `Comment_read_error
+      ("board comments read failed while checking keeper self-comment status: "
+       ^ Board.show_board_error err)
   | Ok comments ->
     let my_comments =
       List.filter
@@ -147,50 +161,28 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
           , short_preview ~max_len:60 latest.content ))
 ;;
 
-type stigmergy_match_result = { overall_score : int }
-
-let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.board_signal)
-  : stigmergy_match_result
-  =
-  let signal_text = String.lowercase_ascii (text signal) in
-  let goal_keywords =
-    [ meta.goal ]
-    |> List.filter (fun s -> String.trim s <> "")
-    |> List.concat_map (fun g ->
-      String.split_on_char ' ' (String.lowercase_ascii g)
-      |> List.map String.trim
-      |> List.filter (fun s -> String.length s > 3))
-    |> List.sort_uniq String.compare
-  in
-  let score =
-    List.fold_left
-      (fun acc kw -> if String_util.contains_substring signal_text kw then acc + 5 else acc)
-      0
-      goal_keywords
-  in
-  { overall_score = min score 50 }
-;;
-
 (** Why a keeper woke for a board signal. Closed set replacing the prior
     [string option] producer/consumer contract (RFC-0020): the matchers in
     {!wake_reason} are the only producers, so a reason no matcher emits — e.g.
     the previously dead ["board_activity"] generic bucket the consumer used to
-    match — is now unrepresentable rather than a string the consumer guesses
-    at. [None] stays an [option] at the call site: it means the relevance
-    pipeline examined the signal and found nothing for this keeper. *)
+    match — is now unrepresentable rather than a string the consumer guesses at.
+    [None] stays an [option] at the call site: it means the deterministic
+    relevance pipeline examined the signal and found no reason for this keeper.
+    Relatedness/proactive wake requires an explicit LLM/Fusion judgment boundary;
+    local keyword scoring must not produce wake decisions. *)
 type wake_reason =
   | Explicit_mention
       (** The signal mentions one of the keeper's identity targets. *)
-  | Stigmergy of { score : int }
-      (** The signal text overlaps the keeper's goal keywords; [score] is the
-          match strength from {!stigmergy_match}. *)
   | Thread_reply_after_self_comment
       (** A new external comment arrived on a post the keeper had commented on. *)
+  | Board_comment_read_error of string
+      (** The comment stream could not be read, so the keeper is woken to observe
+          the explicit failure instead of treating it as no prior participation. *)
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
-  | Stigmergy { score } -> "stigmergy: score=" ^ string_of_int score
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
+  | Board_comment_read_error _ -> "board_comment_read_error"
 ;;
 
 let wake_reason
@@ -203,15 +195,12 @@ let wake_reason
   if matched.explicit_mention
   then Some Explicit_mention
   else (
-    let stigmergy = stigmergy_match ~meta ~signal in
-    if stigmergy.overall_score > 0
-    then Some (Stigmergy { score = stigmergy.overall_score })
-    else (
-      let self_ids = Message_scope.self_ids meta in
-      match signal.kind with
-      | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-         | `New_external _ -> Some Thread_reply_after_self_comment
-         | `Never | `No_new_external -> None)
-      | Board_dispatch.Board_post_created -> None))
+    let self_ids = Message_scope.self_ids meta in
+    match signal.kind with
+    | Board_dispatch.Board_comment_added ->
+      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+       | `New_external _ -> Some Thread_reply_after_self_comment
+       | `Comment_read_error error -> Some (Board_comment_read_error error)
+       | `Never | `No_new_external -> None)
+    | Board_dispatch.Board_post_created -> None)
 ;;

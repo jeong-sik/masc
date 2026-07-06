@@ -19,6 +19,7 @@ type board_stimulus = {
   author : string;
   title : string;
   content : string;
+  mention_ids : string list;
   hearth : string option;
   updated_at : float option;
 }
@@ -34,13 +35,14 @@ type stimulus_payload =
   | Bg_completed of bg_job_completion
       (* RFC-0290: a generic background job finished. Mirrors [Fusion_completed]
          — wakes the calling keeper so the outcome arrives as actionable turn
-         input. Phase 1 adds the variant only; no producer emits it yet
-         (executor lands in RFC-0290 Phase 3). *)
+         input. *)
+  | Schedule_signal of schedule_signal
+      (* A schedule runner signal for a keeper-owned schedule. Carries schedule
+         ledger pointers only; the keeper turn re-reads current schedule state. *)
   | Connector_attention of connector_attention
       (* RFC-connector-ambient-attention-wake: an ambient connector message
          recorded as external attention. Carries the [event_id] pointer (not
-         content). Dormant — no producer emits it yet (handle_ambient enqueuer
-         lands in P3), same staging as [Bg_completed] above. *)
+         content). *)
   | Hitl_resolved of hitl_resolution
       (* A HITL approval this keeper enqueued — and then skipped cycles on via
          [has_pending_for_keeper -> Skip Approval_pending] — was resolved. Wakes
@@ -89,6 +91,18 @@ and bg_job_outcome =
   | Bg_ok of string  (* result payload *)
   | Bg_failed of string  (* failure label *)
 
+and schedule_signal_kind =
+  | Schedule_due_candidate
+  | Schedule_due_blocked_approval
+
+and schedule_signal = {
+  schedule_signal_id : string;
+  schedule_signal_kind : schedule_signal_kind;
+  schedule_id : string;
+  due_at : float;
+  payload_digest : string;
+}
+
 and connector_attention = { event_id : string }
       (* RFC-connector-ambient-attention-wake: pointer into
          [Keeper_external_attention] for the ambient message; content/surface
@@ -103,6 +117,17 @@ let bg_job_completion_post_id (c : bg_job_completion) =
   else c.bg_board_post_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
+
+let schedule_signal_post_id signal = "schedule-signal:" ^ signal.schedule_signal_id
+
+let schedule_signal_kind_to_string = function
+  | Schedule_due_candidate -> "due_candidate"
+  | Schedule_due_blocked_approval -> "due_blocked_approval"
+
+let schedule_signal_kind_of_string = function
+  | "due_candidate" -> Ok Schedule_due_candidate
+  | "due_blocked_approval" -> Ok Schedule_due_blocked_approval
+  | other -> Error (Printf.sprintf "unknown schedule_signal kind: %s" other)
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -226,13 +251,14 @@ let payload_kind_label = function
   | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed _ -> "fusion_completed"
   | Bg_completed _ -> "bg_completed"
+  | Schedule_signal _ -> "schedule_signal"
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
 
 let is_board_signal = function
   | Board_signal _ -> true
   | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
-  | Connector_attention _ | Hitl_resolved _ ->
+  | Schedule_signal _ | Connector_attention _ | Hitl_resolved _ ->
     false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
@@ -315,6 +341,21 @@ let optional_float_field ~context name fields =
     let* value = float_of_json ~context:(context ^ "." ^ name) json in
     Ok (Some value)
 
+let optional_string_list_field ~context name fields =
+  match optional_field name fields with
+  | None -> Ok []
+  | Some (`List items) ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* value = string_of_json ~context:(context ^ "." ^ name) item in
+        if String.equal (String.trim value) ""
+        then Error (Printf.sprintf "%s.%s must not contain empty strings" context name)
+        else loop (value :: acc) rest
+    in
+    loop [] items
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string list" context name)
+
 let string_field ~context name fields =
   let* json = required_field ~context name fields in
   string_of_json ~context:(context ^ "." ^ name) json
@@ -335,6 +376,7 @@ let payload_to_yojson = function
       ; "author", `String board.author
       ; "title", `String board.title
       ; "content", `String board.content
+      ; "mention_ids", `List (List.map (fun id -> `String id) board.mention_ids)
       ; "hearth", option_json (fun value -> `String value) board.hearth
       ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
       ]
@@ -360,6 +402,15 @@ let payload_to_yojson = function
       ; "payload", `String payload
       ; "board_post_id", `String c.bg_board_post_id
       ]
+  | Schedule_signal signal ->
+    `Assoc
+      [ "kind", `String "schedule_signal"
+      ; "signal_id", `String signal.schedule_signal_id
+      ; "signal_kind", `String (schedule_signal_kind_to_string signal.schedule_signal_kind)
+      ; "schedule_id", `String signal.schedule_id
+      ; "due_at", `Float signal.due_at
+      ; "payload_digest", `String signal.payload_digest
+      ]
   | Connector_attention ca ->
     `Assoc
       [ "kind", `String "connector_attention"
@@ -383,9 +434,10 @@ let payload_of_yojson json =
     let* author = string_field ~context "author" fields in
     let* title = string_field ~context "title" fields in
     let* content = string_field ~context "content" fields in
+    let* mention_ids = optional_string_list_field ~context "mention_ids" fields in
     let* hearth = optional_string_field ~context "hearth" fields in
     let* updated_at = optional_float_field ~context "updated_at_unix" fields in
-    Ok (Board_signal { kind; author; title; content; hearth; updated_at })
+    Ok (Board_signal { kind; author; title; content; mention_ids; hearth; updated_at })
   | "bootstrap" -> Ok Bootstrap
   | "no_progress_recovery" -> Ok No_progress_recovery
   | "fusion_completed" ->
@@ -405,6 +457,21 @@ let payload_of_yojson json =
     Ok
       (Bg_completed
          { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
+  | "schedule_signal" ->
+    let* signal_id = string_field ~context "signal_id" fields in
+    let* signal_kind_s = string_field ~context "signal_kind" fields in
+    let* schedule_signal_kind = schedule_signal_kind_of_string signal_kind_s in
+    let* schedule_id = string_field ~context "schedule_id" fields in
+    let* due_at = float_field ~context "due_at" fields in
+    let* payload_digest = string_field ~context "payload_digest" fields in
+    Ok
+      (Schedule_signal
+         { schedule_signal_id = signal_id
+         ; schedule_signal_kind
+         ; schedule_id
+         ; due_at
+         ; payload_digest
+         })
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
     Ok (Connector_attention { event_id })

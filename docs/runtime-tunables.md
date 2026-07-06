@@ -85,34 +85,16 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 58 | Max age for rate limit entries before cleanup (seconds) |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 44 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
 
-## Env_config_keeper (91 knobs; typed classification 27/78)
+## Env_config_keeper (73 knobs; typed classification 27/65)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_ALERT_DEDUP_WINDOW_SEC` | typed:float | unclassified | unclassified | 599 | Alert dedup window, clamped to >= 5s. Default: 60. |
 | `MASC_CONTEXT_RATIO_HARD_CAP` | typed:float | unclassified | unclassified | 923 | {1 Context Ratio Hard Cap} Absolute ceiling for compaction ratio_gate and handoff threshold after multiplier adjustme... |
 | `MASC_DASHBOARD_HEALTH_CTX_CRITICAL` | typed:float | unclassified | unclassified | 958 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
 | `MASC_DASHBOARD_HEALTH_CTX_WARN` | typed:float | unclassified | unclassified | 959 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
 | `MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL` | typed:float | unclassified | unclassified | 960 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
 | `MASC_DASHBOARD_HEALTH_PENALTY_WARN` | typed:float | unclassified | unclassified | 961 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
 | `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` | typed:float | unclassified | unclassified | 964 |  |
-| `MASC_KEEPER_ALERT_BOARD_AUTHOR` | typed:string | unclassified | unclassified | 148 | Board fanout configuration |
-| `MASC_KEEPER_ALERT_BOARD_ENABLED` | feature_flag | n/a | n/a | 145 | Board fanout configuration |
-| `MASC_KEEPER_ALERT_BOARD_HEARTH` | typed:string | unclassified | unclassified | 151 |  |
-| `MASC_KEEPER_ALERT_BOARD_VISIBILITY` | typed:string | unclassified | unclassified | 154 |  |
-| `MASC_KEEPER_ALERT_ENABLED` | feature_flag | n/a | n/a | 128 | Master switch for keeper interesting alert detection/fanout |
-| `MASC_KEEPER_ALERT_GITHUB_ENABLED` | feature_flag | n/a | n/a | 170 | GitHub issue fanout configuration |
-| `MASC_KEEPER_ALERT_GITHUB_LABEL` | typed:string | unclassified | unclassified | 173 | GitHub issue fanout configuration |
-| `MASC_KEEPER_ALERT_GITHUB_MIN_SCORE` | typed:float | unclassified | unclassified | 174 | GitHub issue fanout configuration |
-| `MASC_KEEPER_ALERT_GITHUB_REPO` | typed:string | unclassified | unclassified | 172 | GitHub issue fanout configuration |
-| `MASC_KEEPER_ALERT_MAX_BODY_CHARS` | typed:int | unclassified | unclassified | 134 | Maximum alert body chars used for external fanout payloads |
-| `MASC_KEEPER_ALERT_MAX_RETRIES` | typed:int | unclassified | unclassified | 137 | Retry count for each fanout channel (in addition to initial attempt) |
-| `MASC_KEEPER_ALERT_MIN_SCORE` | typed:float | unclassified | unclassified | 131 | Minimum score required to trigger alert fanout |
-| `MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS` | typed:int | unclassified | unclassified | 141 | Base retry delay in milliseconds (exponential backoff) |
-| `MASC_KEEPER_ALERT_SLACK_DM_ENABLED` | feature_flag | n/a | n/a | 164 | Slack DM fanout configuration |
-| `MASC_KEEPER_ALERT_SLACK_DM_USER_ID` | typed:string | unclassified | unclassified | 167 |  |
-| `MASC_KEEPER_ALERT_SLACK_ENABLED` | feature_flag | n/a | n/a | 158 | Slack fanout configuration |
-| `MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL` | typed:string | unclassified | unclassified | 160 | Slack fanout configuration |
 | `MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC` | typed:float | unclassified | unclassified | 785 | Deprecated compatibility knob for the removed whole-run attempt watchdog. The keeper runtime must not apply this as a... |
 | `MASC_KEEPER_BODY_TIMEOUT_SEC` | string_literal | n/a | n/a | 837 | Total HTTP body-consumption deadline for non-streaming OAS completion calls. In agent_sdk this wraps [Complete.comple... |
 | `MASC_KEEPER_BOOTSTRAP_ENABLED` | feature_flag | n/a | n/a | 20 | Enable startup keeper bootstrap scan |

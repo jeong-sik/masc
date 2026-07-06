@@ -568,8 +568,9 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  (* Board post kind auto-classification: reads [workspace_config state] so
-     workspace changes via set_workspace are reflected automatically. *)
+  (* Board agent lookup utility: reads [workspace_config state] so workspace
+     changes via set_workspace are reflected automatically. Post kind remains
+     an explicit board-write argument. *)
   Board_tool.set_agent_lookup (fun name ->
     try Workspace.is_agent_session_bound (workspace_config state) ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);

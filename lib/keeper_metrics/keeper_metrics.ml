@@ -50,6 +50,7 @@ type t =
   | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
+  | ToolEmissionParseFailures
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
@@ -76,7 +77,6 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
-  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | MetaJsonFailures
   | ToolsOasFailures
@@ -304,6 +304,7 @@ let to_string = function
   | ToolPairRepair -> "masc_keeper_tool_pair_repair_total"
   | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"
   | ToolEmissionPushes -> "masc_keeper_tool_emission_pushes_total"
+  | ToolEmissionParseFailures -> "masc_keeper_tool_emission_parse_failures_total"
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"
   | ToolUnderusedAllowed -> "masc_keeper_tool_underused_allowed"
   | PathRejection -> "masc_keeper_path_rejection_total"
@@ -331,7 +332,6 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
-  | BoardSignalWakeupCappedTotal -> "masc_keeper_board_signal_wakeup_capped_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | MetaJsonFailures -> "masc_keeper_meta_json_failures_total"
   | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
@@ -546,14 +546,14 @@ let all : t list =
     TurnQueueDepth; SupervisorSweepStarts; SupervisorLastSweepUnixtime; DomainPoolFork;
     TurnHolderBookkeepingFailures; Compactions; CompactionRatioChange; CompactionSavedTokens;
     CompactionPairRepairDrops; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
-    CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
+    CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes; ToolEmissionParseFailures;
     ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
     PathResolverIdentityMismatch; KeeperMetaOverlayDrift; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
     DispatchEventFailures; DirectiveFailures; ToolCallDuration; ToolCallDurationBucket; WriteMetaFailures;
     MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
     CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
     FsFailures; CrashPersistenceFailures; GenerationLineageFailures; KeepaliveSignalFailures;
-    BoardSignalWakeupCappedTotal; BoardSignalNoWakeTotal; MetaJsonFailures; ToolsOasFailures;
+    BoardSignalNoWakeTotal; MetaJsonFailures; ToolsOasFailures;
     ToolsOasDeterministicFailures; TurnUpUpdateFailures; AgentToolDispatchRuntimeFailures; CircuitBreakerTrips;
     PromptFailures; RunContextFailures; SearchFilesFailures; TagDispatchFailures;
     TraceEmitFailures; TransitionAuditFailures; ExecutionReceiptFailures; OperatorBroadcastSuppressed;

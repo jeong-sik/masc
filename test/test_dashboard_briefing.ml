@@ -76,6 +76,25 @@ let write_pending_confirm config _session_id =
           ];
       ])
 
+let append_workspace_event_lines_raw config lines =
+  let events_dir = Filename.concat (Workspace_utils.masc_dir config) "events" in
+  let dated = Jsonl_writer.dated_path_now ~base_dir:events_dir in
+  Workspace_utils.mkdir_p (Filename.dirname dated.path);
+  let oc =
+    open_out_gen
+      [ Open_creat; Open_text; Open_append ]
+      0o644
+      dated.path
+  in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+           output_string oc line;
+           output_char oc '\n')
+        lines)
+
 let seed_workspace config session_id =
   ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
   ignore (Lib.Workspace.bind_session config ~agent_name:"mission-local64-smoke"
@@ -175,6 +194,42 @@ let test_dashboard_briefing_projection () =
         (internal_signals
          |> List.for_all (fun row ->
               row |> member "target_type" |> to_string = "workspace")))
+
+let test_dashboard_briefing_workspace_event_parse_errors_are_visible () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let session_id = "ts-mission-fixture-parse-errors" in
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      seed_workspace config session_id;
+      append_workspace_event_lines_raw config [ "{not-json"; "[]" ];
+      let json =
+        Dashboard_briefing.json
+          ~actor:"test-dashboard-briefing-parse-errors"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      let agent_briefs = json |> member "agent_briefs" |> to_list in
+      check bool "agent briefs still render" true
+        (agent_briefs
+         |> List.exists (fun row ->
+              row |> member "agent_name" |> to_string = "llama-local-alpha"));
+      check int "workspace event read errors" 2
+        (json |> member "read_error_count" |> to_int);
+      let read_errors = json |> member "read_errors" |> to_list in
+      check int "workspace event read error rows" 2 (List.length read_errors);
+      match read_errors with
+      | first :: _ ->
+        check string "workspace event read error source"
+          "dashboard_briefing_workspace_events_jsonl"
+          (first |> member "source" |> to_string)
+      | [] -> fail "expected workspace event read errors")
 
 let test_dashboard_briefing_http_full_contract () =
   let dir = test_dir () in
@@ -436,6 +491,8 @@ let () =
             `Quick test_latest_message_to_empty_name_safe;
           Alcotest.test_case "projection groups root-cause lanes" `Quick
             test_dashboard_briefing_projection;
+          Alcotest.test_case "workspace event parse errors are visible" `Quick
+            test_dashboard_briefing_workspace_event_parse_errors_are_visible;
           Alcotest.test_case "http mission keeps full contract" `Quick
             test_dashboard_briefing_http_full_contract;
           Alcotest.test_case "http mission default bootstraps first success"

@@ -61,6 +61,14 @@ let test_body_tools_call_name_extraction () =
   check (option string) "malformed JSON"
     None
     (Http_transport.body_tools_call_name "not json at all");
+  (match Http_transport.body_tools_call_name_result "not json at all" with
+   | Error (Http_transport.Body_tools_call_name_parse_error message) ->
+       check bool "malformed JSON detail present" true (String.length message > 0)
+   | Ok _ -> fail "expected JSON parse error");
+  check (result (option string) reject) "missing params result"
+    (Ok None)
+    (Http_transport.body_tools_call_name_result
+       {|{"jsonrpc":"2.0","id":1,"method":"tools/call"}|});
   check (option string) "non-tools/call method"
     (Some "init")
     (* RFC-0100 PR-3 body parser is method-agnostic; the gate caller

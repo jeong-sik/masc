@@ -31,11 +31,13 @@ type context = {
   governance_defaults : string -> Mcp_server_eio_governance.governance_config;
       (** Governance helpers passed in to avoid circular deps. *)
   save_governance :
-    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
+    Workspace.config ->
+    Mcp_server_eio_governance.governance_config ->
+    (unit, string) result;
   load_mcp_sessions :
     Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
     Workspace.config ->
     Mcp_server_eio_governance.mcp_session_record list ->
-    unit;
+    (unit, string) result;
 }

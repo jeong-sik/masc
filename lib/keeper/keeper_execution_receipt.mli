@@ -321,6 +321,7 @@ val stale_broadcast_payload
   -> Yojson.Safe.t
 
 val append : Workspace.config -> t -> unit
+val append_result : Workspace.config -> t -> (unit, string) result
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option
 val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.Safe.t) list
 

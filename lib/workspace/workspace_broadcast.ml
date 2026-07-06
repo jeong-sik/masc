@@ -103,8 +103,8 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
         | Ok agent -> (
             match agent.current_task with
             | Some task_id -> (
-                match Task_cache_invariant.fresh_task_status config ~task_id with
-                | Some status when Task_cache_invariant.is_terminal status ->
+                match Task_cache_invariant.fresh_task_status_result config ~task_id with
+                | Ok (Some status) when Task_cache_invariant.is_terminal status ->
                     Task_cache_invariant.clear_stale_agent_task config
                       ~agent_name:from_agent ~task_id ~status
                       ~module_name:"workspace_broadcast";
@@ -128,7 +128,24 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
                           module_name = "workspace_broadcast";
                         };
                       ] )
-                | _ ->
+                | Error msg ->
+                    Task_cache_invariant.report_status_read_error
+                      config
+                      ~agent_name:from_agent
+                      ~task_id
+                      ~module_name:"workspace_broadcast"
+                      msg;
+                    ( Workspace_task_cache_invariant.rewrite_broadcast_content
+                        ~config ~from_agent ~module_name:"workspace_broadcast"
+                        ~content,
+                      msg_type,
+                      [
+                        {
+                          reason = Task_cache_rewrite;
+                          module_name = "workspace_broadcast";
+                        };
+                      ] )
+                | Ok None | Ok (Some _) ->
                     ( Workspace_task_cache_invariant.rewrite_broadcast_content
                         ~config ~from_agent ~module_name:"workspace_broadcast"
                         ~content,
@@ -231,9 +248,12 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
     Filename.concat (messages_dir config)
       (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
   in
-  write_json config msg_file (message_to_yojson msg);
+  let msg_json = message_to_yojson msg in
+  (match write_json_result config msg_file msg_json with
+   | Ok () -> ()
+   | Error error -> raise (Sys_error error));
   (match backend_publish config ~channel:(broadcast_channel config)
-      ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
+      ~message:(Yojson.Safe.to_string msg_json) with
    | Ok _ -> ()
    | Error (Backend_types.BackendNotSupported msg) when String.starts_with ~prefix:"FileSystem backend" msg ->
        Log.Misc.debug "broadcast publish skipped: %s" msg

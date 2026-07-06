@@ -54,6 +54,14 @@ let touch path =
   close_out oc
 ;;
 
+let write_file path content =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
 let test_sandbox_write_joins_with_worktree_read () =
   with_temp_base_dir (fun base_dir ->
     (* 1. Build two clones of the same upstream. *)
@@ -290,6 +298,38 @@ let test_docker_playground_path_also_resolves () =
     | _ -> fail "Docker sandbox path should resolve via repo_id lookup")
 ;;
 
+let test_corrupt_repo_store_lands_in_base_unresolved () =
+  with_temp_base_dir (fun base_dir ->
+    write_file
+      (Filename.concat base_dir ".masc/config/repositories.toml")
+      "[repository.bad\n";
+    let file_path = Filename.concat base_dir "workspace/repo/lib/foo.ml" in
+    let labels = [ "kind", "region"; "reason", "repo_store_read_error" ] in
+    let before =
+      Masc.Otel_metric_store.metric_value_or_zero
+        Keeper_metrics.(to_string IdeOrphanWrites)
+        ~labels
+        ()
+    in
+    let partition, rel =
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
+        ~base_dir
+        ~kind:"region"
+        ~file_path
+    in
+    match partition with
+    | Ide_paths.Base_unresolved ->
+      check string "corrupt repo store keeps original path" file_path rel;
+      let after =
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string IdeOrphanWrites)
+          ~labels
+          ()
+      in
+      check (float 0.0001) "repo_store_read_error increments" (before +. 1.0) after
+    | _ -> fail "corrupt repository store should resolve as Base_unresolved")
+;;
+
 let () =
   run
     "ide_canonical_url_join"
@@ -314,6 +354,10 @@ let () =
             "docker playground path resolves via repo_id (PR-6)"
             `Quick
             test_docker_playground_path_also_resolves
+        ; test_case
+            "corrupt repo store is base_unresolved, not unregistered"
+            `Quick
+            test_corrupt_repo_store_lands_in_base_unresolved
         ] )
     ]
 ;;

@@ -192,43 +192,60 @@ let active_goal_scope_json
 ;;
 
 let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
-  match claim_goal_scope.Keeper_runtime_contract.mode with
-  | "active_goal_ids" ->
-    (match meta.active_goal_ids with
-     | [] -> " in active goal scope"
-     | goal_ids ->
-       Printf.sprintf
-         " within active_goal_ids=[%s]"
-         (String.concat ", " goal_ids))
-  | "all_tasks" -> " across all tasks"
-  | "empty_goal_scope_fallback_all_tasks" ->
-    " after active-goal fallback to all tasks"
-  | mode -> Printf.sprintf " in claim_scope.mode=%s" mode
+  match claim_goal_scope.Keeper_runtime_contract.read_error with
+  | Some _ -> " with unresolved active goal links"
+  | None ->
+    (match claim_goal_scope.Keeper_runtime_contract.scope_mode with
+     | Keeper_runtime_contract.Active_goal_ids ->
+       (match meta.active_goal_ids with
+        | [] -> " in active goal scope"
+        | goal_ids ->
+          Printf.sprintf
+            " within active_goal_ids=[%s]"
+            (String.concat ", " goal_ids))
+     | Keeper_runtime_contract.All_tasks -> " across all tasks"
+     | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks ->
+       " after active-goal fallback to all tasks"
+     | Keeper_runtime_contract.Goal_task_links_read_failed_scope ->
+       " with unresolved active goal links")
 ;;
 
 let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
-  match claim_goal_scope.Keeper_runtime_contract.fallback_reason with
-  | Some _ ->
+  match claim_goal_scope.Keeper_runtime_contract.read_error with
+  | Some read_error ->
     Printf.sprintf
-      "ACTION: Stop scope-lock diagnosis; claim_scope.mode=%s already searched all \
-       tasks; resolve blockers/excluded=%d."
+      "ACTION: Repair goal-task link registry before widening active-goal scope; \
+       claim_scope.mode=%s read_error=%s."
       claim_goal_scope.Keeper_runtime_contract.mode
-      excluded_count
+      (Keeper_runtime_contract.claim_goal_scope_read_error_to_string read_error)
   | None ->
-    let scope_hint =
-      match claim_goal_scope.Keeper_runtime_contract.mode with
-      | "active_goal_ids" ->
-        (* Scope only stays in [active_goal_ids] mode when a Todo task IS linked
-           to the goal (otherwise the resolver falls back to all_tasks). So a
-           no-eligible here means those scoped tasks exist but are blocked /
-           awaiting verification — not a scope lock to clear. *)
-        " Scoped tasks exist but are blocked or awaiting verification; resolve those blockers."
-      | _ -> ""
-    in
-    Printf.sprintf
-      "ACTION: Stop task-checking — blocked/excluded=%d.%s"
-      excluded_count
-      scope_hint
+    let mode = claim_goal_scope.Keeper_runtime_contract.mode in
+    (match claim_goal_scope.Keeper_runtime_contract.fallback_reason with
+     | Some _ ->
+       Printf.sprintf
+         "ACTION: Stop scope-lock diagnosis; claim_scope.mode=%s already searched all \
+          tasks; resolve blockers/excluded=%d."
+         mode
+         excluded_count
+     | None ->
+       let scope_hint =
+         match claim_goal_scope.Keeper_runtime_contract.scope_mode with
+         | Keeper_runtime_contract.Active_goal_ids ->
+           (* Scope only stays in [active_goal_ids] mode when a Todo task IS
+              linked to the goal (otherwise the resolver falls back to
+              all_tasks). So a no-eligible here means those scoped tasks exist
+              but are blocked / awaiting verification — not a scope lock to
+              clear. *)
+           " Scoped tasks exist but are blocked or awaiting verification; resolve those blockers."
+         | Keeper_runtime_contract.All_tasks
+         | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks
+         | Keeper_runtime_contract.Goal_task_links_read_failed_scope ->
+           ""
+       in
+       Printf.sprintf
+         "ACTION: Stop task-checking — blocked/excluded=%d.%s"
+         excluded_count
+         scope_hint)
 ;;
 
 let no_eligible_blocker_summary
@@ -244,25 +261,32 @@ let no_eligible_blocker_summary
 ;;
 
 
-let stale_claim_release_fields releases =
-  match releases with
-  | [] -> []
-  | releases ->
-    [ ( "stale_claim_releases"
-      , `List
-          (List.map
-             (fun (task_id, assignee) ->
-                `Assoc
-                  [ "task_id", `String task_id
-                  ; "assignee", `String assignee
-                  ])
-             releases) )
-    ]
+type stale_claim_release_scan =
+  { releases : (string * string) list
+  ; known : bool
+  ; error : string option
+  }
+
+let stale_claim_release_fields scan =
+  [ "stale_claim_releases_known", `Bool scan.known
+  ; "stale_claim_release_error", Json_util.string_opt_to_json scan.error
+  ; ( "stale_claim_releases"
+    , `List
+        (List.map
+           (fun (task_id, assignee) ->
+              `Assoc
+                [ "task_id", `String task_id
+                ; "assignee", `String assignee
+                ])
+           scan.releases) )
+  ]
 ;;
 
-let find_task_goal_id config task_id =
-  let index = Workspace_goal_index.build_task_goal_index_for_config config in
-  try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
+let find_task_goal_id_result config task_id =
+  match Workspace_goal_index.build_task_goal_index_for_config_result config with
+  | Error msg -> Error msg
+  | Ok index ->
+    Ok (try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None)
 ;;
 
 let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
@@ -426,16 +450,20 @@ let handle_keeper_task_tool
              with a wrong-typed value, which falsely failed keeper_task_create
              and tripped the keeper failure circuit breaker. Same lib, no
              dependency wall; the canonical parser handles [None | Some `Null]. *)
-          (match Task.Args.parse_task_contract args with
-           | Error message -> validation_error_json message
-           | Ok contract ->
-              let capacity_error =
-                let backlog = Workspace.read_backlog config in
-                Workspace_task_capacity.check_for_config config ?goal_id backlog
-              in
-              (match capacity_error with
-               | Some error -> Workspace_task_capacity.error_to_json_string error
-               | None ->
+	          (match Task.Args.parse_task_contract args with
+	           | Error message -> validation_error_json message
+	           | Ok contract ->
+	              let capacity_error =
+	                match Workspace.read_backlog_r config with
+	                | Error msg ->
+	                    Error (Printf.sprintf "keeper_task_create backlog read failed: %s" msg)
+	                | Ok backlog ->
+	                    Workspace_task_capacity.check_for_config_result config ?goal_id backlog
+	              in
+	              (match capacity_error with
+	               | Error msg -> error_json msg
+	               | Ok (Some error) -> Workspace_task_capacity.error_to_json_string error
+	               | Ok None ->
               let result =
                 Workspace_task.add_task
                   ?contract
@@ -463,13 +491,8 @@ let handle_keeper_task_tool
       Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
     in
     let stale_claim_releases =
-      match
-        Workspace.release_stale_claims config
-          ~ttl_seconds:Env_config_runtime.Claim.ttl_seconds
-      with
-      | releases -> Ok releases
-      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-      | exception exn -> Error (Printexc.to_string exn)
+      Workspace.release_stale_claims_result config
+        ~ttl_seconds:Env_config_runtime.Claim.ttl_seconds
     in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
@@ -523,10 +546,10 @@ let handle_keeper_task_tool
                err)
         | Ok _ -> claim_after_stale_release ()
       in
-    let stale_claim_releases =
+    let stale_claim_release_scan =
       match stale_claim_releases with
-      | Ok releases -> releases
-      | Error _ -> []
+      | Ok releases -> { releases; known = true; error = None }
+      | Error err -> { releases = []; known = false; error = Some err }
     in
     let auto_started_ok = ref false in
     let harness_completed = ref false in
@@ -568,7 +591,7 @@ let handle_keeper_task_tool
        end else
          auto_started_ok := true;
        (* RFC-0199 Phase B: deterministic evidence harness. When the claimed
-          task declares typed [evidence_claims] and all are satisfied by a file
+          task declares typed [evidence_claims] and all are satisfied by the
           probe, complete it immediately — no LLM turn. Uses [force_done_task_r]
           so a deterministic check does not route through the non-deterministic
           anti-rationalization gate (force_done is the existing keeper-Done
@@ -584,26 +607,37 @@ let handle_keeper_task_tool
             { contract = Some { evidence_claims = _ :: _ as claims; _ }
             ; task_status = (Masc_domain.Claimed _ | Masc_domain.InProgress _)
             ; _
-            }
-          when Keeper_deterministic_evidence_probe.all_satisfied ~config ~meta
-                 claims ->
-          let summary =
-            claims
-            |> List.map Evidence_claim.to_human_string
-            |> String.concat "; "
+            } -> (
+          let outcome =
+            Keeper_deterministic_evidence_probe.evaluate ~config ~meta claims
           in
-          let notes =
-            Printf.sprintf
-              "RFC-0199 deterministic harness: %d evidence claim(s) satisfied \
-               [%s]"
-              (List.length claims) summary
-          in
-          (match
-             Workspace.force_done_task_r config
-               ~agent_name:(keeper_agent_sender ~meta) ~task_id ~notes ()
-           with
-           | Ok _ -> harness_completed := true
-           | Error _ -> ())
+          match outcome with
+          | Deterministic_evidence_evaluator.Satisfied ->
+            let summary =
+              claims
+              |> List.map Evidence_claim.to_human_string
+              |> String.concat "; "
+            in
+            let notes =
+              Printf.sprintf
+                "RFC-0199 deterministic harness: %d evidence claim(s) \
+                 satisfied [%s]"
+                (List.length claims) summary
+            in
+            (match
+               Workspace.force_done_task_r config
+                 ~agent_name:(keeper_agent_sender ~meta) ~task_id ~notes ()
+             with
+             | Ok _ -> harness_completed := true
+             | Error err ->
+               Log.Keeper.warn ~keeper_name:meta.name
+                 "deterministic evidence force-done failed task=%s: %s" task_id
+                 (Masc_domain.masc_error_to_string err))
+          | Deterministic_evidence_evaluator.Unsatisfied _
+          | Deterministic_evidence_evaluator.Indeterminate _ ->
+            Log.Keeper.debug ~keeper_name:meta.name
+              "deterministic evidence not satisfied task=%s outcome=%s" task_id
+              (Deterministic_evidence_evaluator.outcome_to_string outcome))
         | _ -> ())
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _
@@ -653,7 +687,11 @@ let handle_keeper_task_tool
       match result with
       | Workspace.Claim_next_claimed
           { task_id; title; priority; released_task_id; scope_widened; _ } ->
-          let matched_goal_id = find_task_goal_id config task_id in
+          let matched_goal_id, goal_id_read_error =
+            match find_task_goal_id_result config task_id with
+            | Ok matched_goal_id -> matched_goal_id, None
+            | Error msg -> None, Some msg
+          in
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
@@ -671,6 +709,8 @@ let handle_keeper_task_tool
                     ("priority", `Int priority);
                     ( "goal_id",
                       Json_util.string_opt_to_json matched_goal_id );
+                    ( "goal_id_read_error",
+                      Json_util.string_opt_to_json goal_id_read_error );
                     ( "released_task_id",
                       Json_util.string_opt_to_json released_task_id );
                   ] );
@@ -751,7 +791,7 @@ let handle_keeper_task_tool
               | Some field -> [ field ]
               | None -> [])
            @ claimed_task_fields
-         @ stale_claim_release_fields stale_claim_releases
+         @ stale_claim_release_fields stale_claim_release_scan
            @
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]

@@ -1,12 +1,26 @@
 open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
+module KEH = Masc.Keeper_tools_oas_handler_exec
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
+let test_result_cwd_decode_reports_parse_error () =
+  let module F = KEH.For_testing in
+  (match F.result_cwd_decode {|{"cwd":|} with
+   | F.Result_cwd_parse_error detail ->
+     check bool "parse detail captured" true (String.length detail > 0)
+   | F.Result_cwd_found _
+   | F.Result_cwd_absent
+   | F.Result_cwd_not_object _ ->
+     fail "expected malformed Execute result payload to decode as parse error");
+  check (option string) "legacy cwd projection stays absent" None
+    (F.result_cwd {|{"cwd":|})
 ;;
 
 let temp_dir prefix =
@@ -334,6 +348,12 @@ let counter_for_tool_not_allowed ~keeper ~tool ~reason =
       ; ("reason", reason)
       ; ("tool_type", tool_type)
       ]
+    ()
+
+let tools_oas_failure_metric_value ~tool ~site =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string ToolsOasFailures)
+    ~labels:[ ("tool", tool); ("site", site) ]
     ()
 
 (* #13xxx: tool_not_allowed Otel_metric_store counter *)
@@ -726,6 +746,40 @@ let test_execute_with_outcome_bad_query_is_failure () =
       check string "bad query payload shape" "structured_error"
         (payload_kind result.payload_shape))
 
+let test_default_tool_search_requires_session_index () =
+  with_exec_fixture "keeper_tool_dispatch_runtime_default_tool_search"
+    (fun ~config ~meta ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"keeper_tool_search"
+          ~input:
+            (`Assoc
+              [ ("query", `String "read file")
+              ; ("max_results", `Int 3)
+              ])
+          ()
+      in
+      check string "default search outcome" "failure"
+        (outcome_label result.outcome);
+      check string "default search payload shape" "structured_error"
+        (payload_kind result.payload_shape);
+      let json = parse_json result.raw_output in
+      check bool "default search ok=false" false
+        Yojson.Safe.Util.(member "ok" json |> to_bool);
+      check string "default search error" "tool_search_not_initialized"
+        Yojson.Safe.Util.(member "error" json |> to_string);
+      check int "default search result_count" 0
+        Yojson.Safe.Util.(member "result_count" json |> to_int);
+      check int "default search results empty" 0
+        Yojson.Safe.Util.(member "results" json |> to_list |> List.length);
+      check string "default search source" "uninitialized_tool_searcher"
+        Yojson.Safe.Util.(
+          member "diagnostics" json |> member "source" |> to_string))
+
 let test_public_local_aliases_dispatch_to_runtime_handlers () =
   with_exec_fixture ~process:true "keeper_tool_dispatch_runtime_public_aliases"
     (fun ~config ~meta ~ctx_work ->
@@ -872,6 +926,29 @@ let test_keeper_task_claim_accepts_specific_task_id () =
         check string "assignee" meta.agent_name assignee
       | _ -> fail "requested task should be claimed or auto-started")
 
+let test_keeper_task_claim_surfaces_stale_release_read_error () =
+  with_exec_fixture "keeper_tool_dispatch_claim_stale_release_error"
+    (fun ~config ~meta ~ctx_work ->
+      ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+      write_file (Workspace.backlog_path config) "{\n  \"tasks\": [\n";
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"keeper_task_claim"
+          ~input:(`Assoc [])
+          ()
+      in
+      let json = parse_json result.raw_output in
+      check bool "stale release known is false" false
+        (json_bool_field ~default:true "stale_claim_releases_known" json);
+      check bool "stale release error is surfaced" true
+        (contains_substring
+           (json_string_field ~default:"" "stale_claim_release_error" json)
+           "unreadable backlog"))
+
 let test_glob_unknown_tool_returns_tutor_guidance () =
   with_exec_fixture "keeper_tool_dispatch_runtime_glob_tutor"
     (fun ~config ~meta ~ctx_work ->
@@ -900,6 +977,32 @@ let test_glob_unknown_tool_returns_tutor_guidance () =
            "Glob is not an active MASC keeper tool");
       check bool "tutor names Execute alternative" true
         (contains_substring result.raw_output {|"tool":"Execute"|}))
+
+let test_unknown_tool_uses_search_hint_without_local_suggestions () =
+  with_exec_fixture "keeper_tool_dispatch_runtime_unknown_tool_hint"
+    (fun ~config ~meta ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"keeper_task"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "runtime outcome" "failure" (outcome_label result.outcome);
+      check string "payload shape" "structured_error"
+        (payload_kind result.payload_shape);
+      let json = Yojson.Safe.from_string result.raw_output in
+      check string "unknown tool error" "unknown_tool"
+        Yojson.Safe.Util.(member "error" json |> to_string);
+      check bool "no local did_you_mean suggestions" true
+        (Yojson.Safe.Util.member "did_you_mean" json = `Null);
+      check bool "search hint names keeper_tool_search" true
+        (contains_substring
+           Yojson.Safe.Util.(member "hint" json |> to_string)
+           "keeper_tool_search"))
 
 let test_public_masc_web_search_alias_dispatches_to_misc_runtime () =
   with_exec_fixture "keeper_tool_dispatch_web_search_alias"
@@ -1290,6 +1393,67 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
           check bool "turn switch reaches keeper dispatch" true (Atomic.get saw_turn_sw);
           check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock)))
 
+let test_oas_handler_observes_missing_proc_mgr () =
+  Process_eio.reset_for_testing ();
+  Fun.protect ~finally:Process_eio.reset_for_testing @@ fun () ->
+  let tool_name = "masc_keeper_msg" in
+  let metric_site = "proc_mgr_unavailable" in
+  let before = tools_oas_failure_metric_value ~tool:tool_name ~site:metric_site in
+  let dir = temp_dir "oas-handler-missing-proc-mgr" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let net = Eio.Stdenv.net env in
+      let clock = Eio.Stdenv.clock env in
+      let mono_clock = Eio.Stdenv.mono_clock env in
+      Eio.Switch.run @@ fun root_sw ->
+      Eio_context.with_test_env ~net ~clock ~mono_clock ~sw:root_sw @@ fun () ->
+      Eio.Switch.run @@ fun turn_sw ->
+      Eio_context.with_turn_switch turn_sw @@ fun () ->
+      let config = Workspace.default_config dir in
+      let meta = make_meta ~tool_access:[ tool_name ] () in
+      ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      let previous_dispatch = !(Masc.Keeper_dispatch_ref.dispatch) in
+      let saw_missing_proc_mgr = Atomic.make false in
+      Fun.protect
+        ~finally:(fun () ->
+          Masc.Keeper_dispatch_ref.dispatch := previous_dispatch;
+          Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
+        (fun () ->
+          Masc.Keeper_dispatch_ref.dispatch :=
+            (fun ~config:_ ~agent_name:_ ?sw:_ ?clock:_ ?proc_mgr ?net:_ ?mcp_session_id:_
+                 ~name ~args:_ () ->
+              check string "keeper dispatch tool" tool_name name;
+              Atomic.set saw_missing_proc_mgr (Option.is_none proc_mgr);
+              Some
+                (Tool_result.ok ~tool_name:name ~start_time:0.0
+                   "{\"ok\":true,\"request_id\":\"test-request\"}"));
+          let handler =
+            Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+              ~name:tool_name
+              ~input_schema:(keeper_msg_input_schema ())
+              ~config
+              ~meta
+              ~ctx_snapshot:(make_ctx ())
+              ~exec_cache:None
+              ~failure_counts:(Masc.Keeper_tools_oas.create_failure_counts ())
+              ()
+          in
+          let result =
+            handler
+              (`Assoc
+                [
+                  ("name", `String "keeper-target");
+                  ("message", `String "hello");
+                ])
+          in
+          let after = tools_oas_failure_metric_value ~tool:tool_name ~site:metric_site in
+          check bool "handler succeeds" true (Tool_result.is_success result);
+          check bool "dispatch receives no proc_mgr" true (Atomic.get saw_missing_proc_mgr);
+          check (float 0.0001) "proc_mgr miss metric increments" (before +. 1.0) after))
+
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
 let probe_input_schema =
@@ -1616,12 +1780,18 @@ let () =
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
         test_execute_with_outcome_bad_query_is_failure;
+      test_case "default tool search requires session index" `Quick
+        test_default_tool_search_requires_session_index;
       test_case "public local aliases dispatch to runtime handlers" `Quick
         test_public_local_aliases_dispatch_to_runtime_handlers;
       test_case "keeper_task_claim accepts explicit task_id" `Quick
         test_keeper_task_claim_accepts_specific_task_id;
+      test_case "keeper_task_claim surfaces stale-release read error" `Quick
+        test_keeper_task_claim_surfaces_stale_release_read_error;
       test_case "Glob returns tutor guidance instead of aliasing to rg" `Quick
         test_glob_unknown_tool_returns_tutor_guidance;
+      test_case "unknown tool uses search hint without local suggestions" `Quick
+        test_unknown_tool_uses_search_hint_without_local_suggestions;
       test_case "public WebSearch alias reaches misc runtime" `Quick
         test_public_masc_web_search_alias_dispatches_to_misc_runtime;
       test_case "public WebFetch alias reaches misc runtime" `Quick
@@ -1640,6 +1810,10 @@ let () =
         test_tool_execute_pipe_argv_emits_pipeline_recovery_plan;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick
         test_oas_handler_threads_eio_context_to_keeper_dispatch;
+      test_case "OAS handler observes missing proc_mgr" `Quick
+        test_oas_handler_observes_missing_proc_mgr;
+      test_case "OAS handler Execute result cwd parse error is typed" `Quick
+        test_result_cwd_decode_reports_parse_error;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick

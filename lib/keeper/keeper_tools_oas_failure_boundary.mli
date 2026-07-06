@@ -9,7 +9,18 @@ type t =
   ; is_workflow_rejection : bool
   ; deterministic_classification :
       Keeper_tool_deterministic_error.classification option
+  ; parse_observations : parse_observation list
   }
+
+and parse_observation =
+  | Raw_failure_payload_json_decode_error of string
+  | Structured_error_json_decode_error of string
+  | Structured_error_json_non_object
+
+val parse_observation_kind : parse_observation -> string
+val parse_observation_to_json : parse_observation -> Yojson.Safe.t
+val parse_observations_json : parse_observation list -> Yojson.Safe.t
+val parse_observation_log_fields : t -> (string * Yojson.Safe.t) list
 
 (** Classify a failed raw tool payload.
 

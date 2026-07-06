@@ -109,6 +109,8 @@ Commands:
 ```bash
 scripts/check-oas-pin.sh --local-only
 scripts/oas-drift-check.sh
+scripts/ci/check-masc-oas-boundary.sh
+scripts/lint/masc-domain-boundary-ratchet.sh --fail
 ```
 
 Threshold:
@@ -119,6 +121,7 @@ Threshold:
 | declared OAS SHA | matches local or remote API surface |
 | OAS API fingerprint drift | 0 |
 | MASC-specific semantics added to OAS | 0 |
+| scheduler leaf-domain dependency drift | 0 new entries |
 
 OAS remains the generic runtime/proof layer.  MASC owns keeper runtime evidence,
 operator semantics, and product promotion gates.

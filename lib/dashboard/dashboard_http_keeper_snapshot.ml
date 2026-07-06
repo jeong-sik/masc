@@ -26,15 +26,23 @@ let keeper_config_json (config : Workspace.config) (name : string)
         |> Keeper_types_profile.load_persona_extended
         |> Option.value ~default:""
       in
-      let active_goals =
-        List.filter_map
-          (fun goal_id ->
-             match Goal_store.get_goal config ~goal_id with
-             (* RFC-0294: active_goals tuple dropped its horizon element. *)
-             | Some { Goal_store.id; title; _ } ->
-                 Some (id, title)
-               | None -> None)
-          m.active_goal_ids
+      let active_goals, active_goals_known, active_goals_read_error =
+        match Goal_store.list_goals_result config () with
+        | Error msg -> [], false, Some msg
+        | Ok all_goals ->
+            ( List.filter_map
+                (fun goal_id ->
+                  match
+                    List.find_opt
+                      (fun (goal : Goal_store.goal) -> String.equal goal.id goal_id)
+                      all_goals
+                  with
+                  (* RFC-0294: active_goals tuple dropped its horizon element. *)
+                  | Some { Goal_store.id; title; _ } -> Some (id, title)
+                  | None -> None)
+                m.active_goal_ids,
+              true,
+              None )
       in
       let default_prompt_string default live =
         match default with
@@ -62,9 +70,12 @@ let keeper_config_json (config : Workspace.config) (name : string)
         List.map (fun (id, _) -> id) active_goals
       in
       let missing_active_goal_ids =
-        m.active_goal_ids
-        |> List.filter (fun goal_id ->
-               not (List.mem goal_id resolved_active_goal_ids))
+        if active_goals_known then
+          m.active_goal_ids
+          |> List.filter (fun goal_id ->
+            not (List.mem goal_id resolved_active_goal_ids))
+        else
+          []
       in
       let workspace =
         match workspace_surface_json m with
@@ -74,6 +85,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
                @ [
                    ("active_goal_ids", active_goal_ids_json);
                    ("active_goals", active_goals_json);
+                   ("active_goals_known", `Bool active_goals_known);
+                   ( "active_goals_read_error",
+                     Json_util.string_opt_to_json active_goals_read_error );
                    ("active_goal_count", `Int (List.length m.active_goal_ids));
                    ( "missing_active_goal_ids",
                      `List

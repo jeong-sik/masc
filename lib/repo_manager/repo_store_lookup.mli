@@ -15,7 +15,13 @@ val longest_local_path :
   ('repo * string * 'rel) list -> ('repo * string * 'rel) option
 
 module Make (Store : Store) : sig
+  val find_url_by_id_result :
+    base_path:string -> repository_id -> (string option, string) result
+
   val find_url_by_id : base_path:string -> repository_id -> string option
+
+  val find_repo_by_path_prefix_result :
+    base_path:string -> string -> ((repository * string) option, string) result
 
   val find_repo_by_path_prefix :
     base_path:string -> string -> (repository * string) option

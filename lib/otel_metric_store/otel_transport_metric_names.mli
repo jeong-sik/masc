@@ -45,6 +45,12 @@ val metric_server_mcp_ws_frame_json_parse_failures : string
     Labels: [error_kind = json_parse_error | other]. Iter 31. *)
 val metric_sidecar_schema_field_types_json_parse_failures : string
 
+(** Counter of sidecar HTTP route [schema_field_types] failures before the
+    legacy list facade returns [[]]. Covers schema fetch failures and malformed
+    schema JSON with a bounded error vocabulary.
+    Labels: [error_kind = fetch_schema_error | json_parse_error | other]. *)
+val metric_sidecar_schema_field_types_failures : string
+
 (** Histogram of dashboard/hello JSON-RPC processing latency in seconds.
     Labels: [outcome = success | error]. *)
 val metric_ws_dashboard_hello_latency_seconds : string

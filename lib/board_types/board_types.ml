@@ -120,6 +120,74 @@ end = struct
   let to_string t = t
 end
 
+(** Exact content-mention ids at the board write boundary.
+
+    This parser deliberately knows nothing about keepers.  It extracts the
+    protocol-level ["@name"] token payload and stores that raw, lowercase
+    payload once on the post/comment row.  Keeper-specific canonicalization is
+    applied later by the keeper layer when it compares a board mention id with a
+    keeper's configured identity targets. *)
+module Mention_id : sig
+  type t
+
+  val of_string : string -> t option
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+  val mention_ids_of_content : string -> t list
+  val mention_ids_of_post_fields : title:string -> body:string -> t list
+end = struct
+  type t = string
+
+  let of_string raw =
+    match String.lowercase_ascii (String.trim raw) with
+    | "" -> None
+    | value -> Some value
+
+  let to_string t = t
+  let equal = String.equal
+  let compare = String.compare
+
+  let trim_token_edges s =
+    let is_word c =
+      (c >= 'a' && c <= 'z')
+      || (c >= '0' && c <= '9')
+      || c = '@'
+      || c = '_'
+      || c = '-'
+    in
+    let n = String.length s in
+    let i = ref 0 in
+    let j = ref (n - 1) in
+    while !i < n && not (is_word s.[!i]) do
+      incr i
+    done;
+    while !j >= !i && not (is_word s.[!j]) do
+      decr j
+    done;
+    if !j < !i then "" else String.sub s !i (!j - !i + 1)
+
+  let mention_ids_of_content content =
+    let normalized =
+      String.map
+        (fun c ->
+          match c with
+          | '\t' | '\n' | '\r' -> ' '
+          | _ -> c)
+        (String.lowercase_ascii content)
+    in
+    String.split_on_char ' ' normalized
+    |> List.filter_map (fun token ->
+      let trimmed = trim_token_edges token in
+      if String.length trimmed >= 2 && trimmed.[0] = '@'
+      then of_string (String.sub trimmed 1 (String.length trimmed - 1))
+      else None)
+    |> List.sort_uniq compare
+
+  let mention_ids_of_post_fields ~title ~body =
+    mention_ids_of_content (title ^ " " ^ body)
+end
+
 (** {1 Types with Mandatory TTL} *)
 
 type visibility =
@@ -133,19 +201,6 @@ type post_kind =
   | Automation_post [@tla.symbol "automation_post"]
   | System_post [@tla.symbol "system_post"]
 [@@deriving tla]
-
-(* Closed sum for the legacy automation-author classification. Relocated
-   here from board_core_classify so the board metric hook surface
-   (board_metrics_hooks.ml / board_metric_hooks_adapter.ml) can reference it
-   without a board_core_classify -> board_metrics_hooks -> board_core_classify
-   cycle. board_core_classify re-exports it via [include Board_types]. *)
-type automation_label =
-  | Auto_prefixed       (* "auto-" prefix *)
-  | Qa_prefixed         (* "qa-" prefix *)
-  | Researcher_named    (* contains "researcher" *)
-  | Harness_named       (* contains "harness" *)
-  | Smoke_named         (* contains "smoke" *)
-  | Probe_named         (* contains "probe" *)
 
 (* RFC-0233 §7: typed provenance of a board post — which keeper turn produced
    it and through which channel. Replaces the fusion [meta_json] [run_id]
@@ -182,6 +237,7 @@ type post = {
   title: string;
   body: string;
   content: string;
+  mention_ids: Mention_id.t list;
   post_kind: post_kind;
   meta_json: Yojson.Safe.t option;
   visibility: visibility;
@@ -203,6 +259,7 @@ type comment = {
   parent_id: Comment_id.t option;
   author: Agent_id.t;
   content: string;
+  mention_ids: Mention_id.t list;
   created_at: float;
   expires_at: float;   (* MANDATORY *)
   votes_up: int;

@@ -20,10 +20,13 @@ let repository_root = "/repo/.masc/repos/masc"
 let playground_root = "/playgrounds/<keeper>"
 
 let no_lookup _ = None
+let no_repo_lookup _ = Ok None
+let repo_lookup_error _ = Error "repository store unreadable"
 let always_missing _ = false
 
 let lookup_for known name = if name = known then Some playground_root else None
-let lookup_repo_for known name = if name = known then Some repository_root else None
+let lookup_repo_for known name =
+  Ok (if name = known then Some repository_root else None)
 let exists_only path expected = path = expected
 
 let contains needle haystack =
@@ -187,7 +190,7 @@ let test_repository_unknown_falls_back_to_project () =
   let (base, src) =
     W.classify_workspace_query
       ~project_base:project
-      ~lookup_repository:no_lookup
+      ~lookup_repository:no_repo_lookup
       ~lookup_playground:no_lookup
       ~exists_dir:always_missing
       ~repo_param:(Some "ghost")
@@ -198,6 +201,23 @@ let test_repository_unknown_falls_back_to_project () =
   | `RepositoryUnknown repo_id ->
     Alcotest.(check string) "repo id" "ghost" repo_id
   | _ -> Alcotest.fail "expected `RepositoryUnknown"
+
+let test_repository_lookup_error_falls_back_to_project () =
+  let base, src =
+    W.classify_workspace_query
+      ~project_base:project
+      ~lookup_repository:repo_lookup_error
+      ~lookup_playground:no_lookup
+      ~exists_dir:always_missing
+      ~repo_param:(Some "masc")
+      ~keeper_param:None
+  in
+  Alcotest.(check string) "fallback to project" project base;
+  match src with
+  | `RepositoryLookupError (repo_id, detail) ->
+    Alcotest.(check string) "repo id" "masc" repo_id;
+    Alcotest.(check string) "read error detail" "repository store unreadable" detail
+  | _ -> Alcotest.fail "expected `RepositoryLookupError"
 
 let test_workspace_blank_repo_param_uses_keeper () =
   let (base, src) =
@@ -237,6 +257,16 @@ let test_header_repository_missing () =
 let test_header_repository_unknown () =
   let v = header_value (W.source_header (`RepositoryUnknown "ghost")) in
   Alcotest.(check string) "repository unknown encoding" "repository_unknown:ghost" v
+
+let test_header_repository_lookup_error () =
+  let v =
+    header_value
+      (W.source_header (`RepositoryLookupError ("masc", "repository store unreadable")))
+  in
+  Alcotest.(check string)
+    "repository lookup error encoding"
+    "repository_lookup_error:masc"
+    v
 
 let test_header_playground () =
   let v = header_value (W.source_header (`Playground "alpha")) in
@@ -580,6 +610,8 @@ let () =
         ; Alcotest.test_case "repository"        `Quick test_header_repository
         ; Alcotest.test_case "repository missing" `Quick test_header_repository_missing
         ; Alcotest.test_case "repository unknown" `Quick test_header_repository_unknown
+        ; Alcotest.test_case "repository lookup error" `Quick
+            test_header_repository_lookup_error
         ; Alcotest.test_case "playground"        `Quick test_header_playground
         ; Alcotest.test_case "playground missing" `Quick test_header_playground_missing
         ; Alcotest.test_case "keeper unknown"    `Quick test_header_keeper_unknown
@@ -589,6 +621,8 @@ let () =
         ; Alcotest.test_case "repository param trimmed" `Quick test_repository_param_trimmed
         ; Alcotest.test_case "repository missing" `Quick test_repository_missing_falls_back_to_project
         ; Alcotest.test_case "repository unknown" `Quick test_repository_unknown_falls_back_to_project
+        ; Alcotest.test_case "repository lookup error" `Quick
+            test_repository_lookup_error_falls_back_to_project
         ; Alcotest.test_case "blank repo falls through to keeper" `Quick test_workspace_blank_repo_param_uses_keeper
         ] )
     ; ( "rel_under"

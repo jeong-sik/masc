@@ -59,16 +59,42 @@ let parse_sub_board_members ~owner members =
   loop [] members
 ;;
 
-let parse_sub_board_members_lenient ~owner members =
-  members
-  |> List.filter_map (fun member_name ->
+type sub_board_member_parse_error =
+  { member_name : string
+  ; error : board_error
+  }
+
+type sub_board_members_parse_report =
+  { members : Agent_id.t list
+  ; errors : sub_board_member_parse_error list
+  }
+
+type sub_board_json_report =
+  { sub_board : sub_board option
+  ; member_errors : sub_board_member_parse_error list
+  }
+
+let parse_sub_board_members_lenient_report ~owner members =
+  let parsed_rev, errors_rev =
+    members
+    |> List.fold_left
+         (fun (parsed_rev, errors_rev) member_name ->
     match Agent_id.of_string member_name with
-    | Ok member_id -> Some member_id
-    | Error _ -> None)
-  |> fun parsed -> dedupe_agent_ids (owner :: parsed)
+    | Ok member_id -> member_id :: parsed_rev, errors_rev
+    | Error error ->
+      parsed_rev, { member_name; error } :: errors_rev)
+         ([], [])
+  in
+  { members = dedupe_agent_ids (owner :: List.rev parsed_rev)
+  ; errors = List.rev errors_rev
+  }
 ;;
 
-let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
+let parse_sub_board_members_lenient ~owner members =
+  (parse_sub_board_members_lenient_report ~owner members).members
+;;
+
+let sub_board_of_yojson_report (json : Yojson.Safe.t) : sub_board_json_report =
   let open Safe_ops in
   match json with
   | `Assoc _ ->
@@ -87,9 +113,25 @@ let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
        , sub_board_access_of_string_opt access_s )
      with
      | Ok id, Ok owner, Some access when slug <> "" ->
-       let members = parse_sub_board_members_lenient ~owner member_names in
-       Some
-         { id; slug; name; description; owner; members; access; created_at; post_count }
-     | _ -> None)
-  | _ -> None
+       let report = parse_sub_board_members_lenient_report ~owner member_names in
+       { sub_board =
+           Some
+             { id
+             ; slug
+             ; name
+             ; description
+             ; owner
+             ; members = report.members
+             ; access
+             ; created_at
+             ; post_count
+             }
+       ; member_errors = report.errors
+       }
+     | _ -> { sub_board = None; member_errors = [] })
+  | _ -> { sub_board = None; member_errors = [] }
+;;
+
+let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
+  (sub_board_of_yojson_report json).sub_board
 ;;

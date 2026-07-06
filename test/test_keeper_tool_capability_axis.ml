@@ -6,6 +6,12 @@ module Progress = Masc.Keeper_tool_progress
 module Tool_resolution = Masc.Keeper_tool_resolution
 module Tool_catalog = Tool_catalog
 
+let shell_candidate_failure_metric_value ~tool ~reason =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string ToolExecuteFailures)
+    ~labels:[ ("tool", tool); ("site", "capability_axis"); ("reason", reason) ]
+    ()
+
 let check_support capability name expected =
   check bool name expected (Axis.supports capability name)
 ;;
@@ -85,6 +91,62 @@ let test_polling_read_projection_is_descriptor_read_only () =
     Axis.polling_read_tool_names
 ;;
 
+let test_shell_command_candidates_result_preserves_typed_execute_parse_error () =
+  let input =
+    `Assoc
+      [ "executable", `String "echo"
+      ; "argv", `List [ `Int 1 ]
+      ]
+  in
+  match Axis.shell_command_input_candidates_result "tool_execute" input with
+  | Error (Axis.Tool_execute_input_parse_error detail) ->
+    check bool "parse error detail names argv" true (String.contains detail '[')
+  | Ok candidates ->
+    failf "expected typed Execute parse error, got %d candidate(s)" (List.length candidates)
+;;
+
+let test_shell_command_candidates_legacy_facade_observes_parse_error () =
+  let tool = "tool_execute" in
+  let reason = Axis.command_candidate_error_label (Axis.Tool_execute_input_parse_error "") in
+  let input =
+    `Assoc
+      [ "executable", `String "echo"
+      ; "argv", `List [ `Int 1 ]
+      ]
+  in
+  let before = shell_candidate_failure_metric_value ~tool ~reason in
+  check (list string) "legacy facade returns no candidates" []
+    (Axis.shell_command_input_candidates tool input);
+  let after = shell_candidate_failure_metric_value ~tool ~reason in
+  check (float 0.0001) "legacy facade metric increments" (before +. 1.0) after
+;;
+
+let test_shell_command_candidates_result_extracts_exec_and_pipeline () =
+  (match
+     Axis.shell_command_input_candidates_result
+       "tool_execute"
+       (`Assoc
+         [ "executable", `String "echo"
+         ; "argv", `List [ `String "hello world" ]
+         ])
+   with
+   | Ok candidates -> check (list string) "exec candidate" [ "echo 'hello world'" ] candidates
+   | Error error -> fail (Axis.command_candidate_error_to_string error));
+  match
+    Axis.shell_command_input_candidates_result
+      "tool_execute"
+      (`Assoc
+        [ ( "pipeline"
+          , `List
+              [ `Assoc [ "executable", `String "printf"; "argv", `List [ `String "x" ] ]
+              ; `Assoc [ "executable", `String "wc"; "argv", `List [ `String "-c" ] ]
+              ] )
+        ])
+  with
+  | Ok candidates -> check (list string) "pipeline candidate" [ "printf x | wc -c" ] candidates
+  | Error error -> fail (Axis.command_candidate_error_to_string error)
+;;
+
 let () =
   run
     "keeper_tool_capability_axis"
@@ -109,6 +171,18 @@ let () =
             "polling read projection is descriptor read-only"
             `Quick
             test_polling_read_projection_is_descriptor_read_only
+        ; test_case
+            "shell command candidates preserve typed Execute parse error"
+            `Quick
+            test_shell_command_candidates_result_preserves_typed_execute_parse_error
+        ; test_case
+            "shell command candidates legacy facade observes parse error"
+            `Quick
+            test_shell_command_candidates_legacy_facade_observes_parse_error
+        ; test_case
+            "shell command candidates extract exec and pipeline"
+            `Quick
+            test_shell_command_candidates_result_extracts_exec_and_pipeline
         ] )
     ]
 ;;

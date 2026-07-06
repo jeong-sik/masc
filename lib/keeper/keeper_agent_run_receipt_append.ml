@@ -6,14 +6,11 @@ let append_with_coverage_gap
       ~on_appended
   : (unit, string) result
   =
-  try
-    Keeper_execution_receipt.append config receipt;
+  match Keeper_execution_receipt.append_result config receipt with
+  | Ok () ->
     on_appended ();
     Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    let err_msg = Printexc.to_string exn in
+  | Error err_msg ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", keeper_name; "site", "receipt_append" ]

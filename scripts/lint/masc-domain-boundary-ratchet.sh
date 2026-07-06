@@ -9,6 +9,9 @@
 # Boundaries covered here:
 #   - Goal domain may not learn new Task state coupling. Existing files that
 #     still inspect Masc_domain.task / Workspace_query are baselined debt.
+#   - Schedule domain remains a neutral intent/execution-record domain. It may
+#     carry opaque payload envelopes, but keeper wake, OAS/provider calls,
+#     Fusion judging, and Board writes stay in integration layers.
 #   - Leaf Tool / Turn FSM / Board types / Task transition / Memory JSONL
 #     modules may not learn Keeper, OAS provider/runtime, workspace-task, or
 #     DB/vector persistence concepts.
@@ -62,9 +65,20 @@ file_has_pattern() {
 }
 
 scan_files() {
+  local roots=()
+  local path
+  for path in "$@"; do
+    if [[ -e "${ROOT}/${path}" ]]; then
+      roots+=("$path")
+    fi
+  done
+  if [[ "${#roots[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
   (
     cd "$ROOT"
-    find "$@" -type f \( -name '*.ml' -o -name '*.mli' \) | sort -u
+    find "${roots[@]}" -type f \( -name '*.ml' -o -name '*.mli' \) | sort -u
   )
 }
 
@@ -81,9 +95,11 @@ emit_rule_matches() {
 }
 
 current_entries() {
-  local keeper_pattern oas_provider_pattern workspace_task_pattern db_pattern
+  local keeper_pattern oas_provider_pattern fusion_pattern board_pattern workspace_task_pattern db_pattern
   keeper_pattern='\b(Keeper_[A-Za-z0-9_]+|Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_tool_alias|Keeper_types_profile|Task_keeper_backend)\b'
   oas_provider_pattern='\b(Agent_sdk|Provider_runtime_binding|Provider_kind_resolver|Provider_adapter|Masc_oas_bridge)\b|\bOas\.'
+  fusion_pattern='\b(Fusion|Fusion_[A-Za-z0-9_]+|Fusion_oas|Fusion_panel|Fusion_judge)\b'
+  board_pattern='\b(Board|Board_[A-Za-z0-9_]+|Board_types|Board_core|Board_dispatch|Board_tool|Board_votes|Board_moderation|Board_curation)\b'
   workspace_task_pattern='\b(Workspace_query|Masc_domain\.task)\b'
   db_pattern='(?i)\b(qdrant|pgvector|postgres|postgresql|supabase|sqlite|database)\b'
 
@@ -91,6 +107,12 @@ current_entries() {
     emit_rule_matches "goal_to_task_state" "$workspace_task_pattern" lib/goal
     emit_rule_matches "goal_to_keeper_runtime" "$keeper_pattern" lib/goal
     emit_rule_matches "goal_to_oas_provider" "$oas_provider_pattern" lib/goal
+
+    emit_rule_matches "schedule_to_keeper_runtime" "$keeper_pattern" lib/schedule
+    emit_rule_matches "schedule_to_oas_provider" "$oas_provider_pattern" lib/schedule
+    emit_rule_matches "schedule_to_fusion_runtime" "$fusion_pattern" lib/schedule
+    emit_rule_matches "schedule_to_board_runtime" "$board_pattern" lib/schedule
+    emit_rule_matches "schedule_to_workspace_task" "$workspace_task_pattern" lib/schedule
 
     emit_rule_matches "tool_to_keeper_runtime" "$keeper_pattern" lib/tool
     emit_rule_matches "tool_to_workspace_task" "$workspace_task_pattern" lib/tool
@@ -108,7 +130,7 @@ current_entries() {
     emit_rule_matches "task_transition_to_oas_provider" "$oas_provider_pattern" lib/task_transition_state
 
     emit_rule_matches "leaf_state_to_db_backend" "$db_pattern" \
-      lib/board_types lib/goal lib/task_transition_state
+      lib/board_types lib/goal lib/schedule lib/task_transition_state
   } | sort -u
 }
 

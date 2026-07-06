@@ -119,7 +119,7 @@ let make_primary_goal_task_links_path_unwritable config =
 ;;
 
 let make_goal_task_links_recovery_path_unwritable config =
-  make_path_unwritable (Workspace_goal_index.goal_task_links_path config ^ ".last-good")
+  make_path_unwritable (Workspace_goal_index.goal_task_links_recovery_path config)
 ;;
 
 let make_backlog_path_unwritable config =
@@ -397,6 +397,60 @@ let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
         check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
+       check_no_create_side_effects
+         config
+         ~message_count_before
+         activity_count
+         mutation_count)))
+;;
+
+let test_capacity_rejection_fails_closed_on_goal_link_read_failure () =
+  with_test_env (fun config ->
+    with_activity_counter (fun activity_count ->
+      with_mutation_counter (fun mutation_count ->
+        make_primary_goal_task_links_path_unwritable config;
+        make_goal_task_links_recovery_path_unwritable config;
+        let message_count_before = message_count config in
+        let backlog = Workspace.read_backlog config in
+        (match
+           Workspace_task_capacity.check_for_config_result
+             config
+             ~goal_id:"goal-a"
+             backlog
+         with
+         | Error msg ->
+           check_bool
+             "capacity read failure is typed"
+             true
+             (string_contains
+                ~needle:Workspace_task_capacity.goal_task_links_read_failed_prefix
+                msg)
+         | Ok _ -> Alcotest.fail "expected goal-task link read failure");
+        (match
+           Workspace.add_task_with_result
+             ~goal_id:"goal-a"
+             ~reject_if:
+               (Workspace_task_capacity.rejection_for_add_task_for_config
+                  config
+                  ~goal_id:"goal-a")
+             config
+             ~title:"blocked capacity read task"
+             ~priority:1
+             ~description:""
+         with
+         | Error (Workspace.Rejected msg) ->
+           check_bool
+             "task creation rejects goal-task read failure"
+             true
+             (string_contains
+                ~needle:Workspace_task_capacity.goal_task_links_read_failed_prefix
+                msg)
+         | Error err ->
+           Alcotest.failf
+             "expected Rejected, got %s"
+             (Workspace.add_task_error_to_string err)
+         | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
+        check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_create_side_effects
           config
           ~message_count_before
@@ -575,6 +629,10 @@ let () =
               "single create does not publish when goal link write fails"
               `Quick
               test_add_task_goal_link_write_failure_does_not_publish_task
+          ; test_case
+              "capacity rejects goal link read failure before task publish"
+              `Quick
+              test_capacity_rejection_fails_closed_on_goal_link_read_failure
           ; test_case
               "batch create does not publish when goal link write fails"
               `Quick

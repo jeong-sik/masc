@@ -122,7 +122,13 @@ let init () =
   reg "masc_inference_queue_wait_seconds"
     [ 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ];
   reg "masc_sse_broadcast_duration_seconds"
-    [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0 ]
+    [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0 ];
+  reg "masc_schedule_runner_due_lag_seconds"
+    [ 0.001; 0.01; 0.1; 1.0; 5.0; 30.0; 60.0; 300.0; 1800.0; 3600.0 ];
+  reg "masc_schedule_runner_dispatch_duration_seconds"
+    [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0; 30.0; 60.0 ];
+  reg "masc_keeper_wake_delay_seconds"
+    [ 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 30.0; 60.0; 300.0; 1800.0 ]
 ;;
 
 let () = init ()

@@ -16,10 +16,24 @@ val receipt_row_matches
   -> Yojson.Safe.t
   -> bool
 
+(** [read_receipt_rows_with_read_errors ~keeper_name ~trace_id ?turn_id paths]
+    reads every JSONL receipt under [paths] and returns matching rows plus
+    row-indexed read errors for malformed/non-object rows and file read
+    failures. Result rows remain in file order; subsequent [paths] are
+    concatenated. *)
+val read_receipt_rows_with_read_errors
+  :  keeper_name:string
+  -> trace_id:string
+  -> ?turn_id:int
+  -> string list
+  -> Yojson.Safe.t list * Yojson.Safe.t list
+
 (** [read_receipt_rows ~keeper_name ~trace_id ?turn_id paths] reads
     every JSONL receipt under [paths] and returns the rows that match
-    {!receipt_row_matches}. Result is in file order; subsequent
-    [paths] are concatenated. *)
+    {!receipt_row_matches}. Compatibility wrapper over
+    {!read_receipt_rows_with_read_errors}; use the sibling when the caller can
+    surface degraded read state. Result is in file order; subsequent [paths]
+    are concatenated. *)
 val read_receipt_rows
   :  keeper_name:string
   -> trace_id:string

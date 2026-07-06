@@ -1,3 +1,8 @@
+let append_record_result ~config ~keeper_name record =
+  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Dated_jsonl.append_result store (Turn_record.to_json record)
+;;
+
 let write
       ~config
       ~keeper_name
@@ -37,16 +42,13 @@ let write
     ; ts = Time_compat.now ()
     }
   in
-  try
-    let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-    Dated_jsonl.append store (Turn_record.to_json record)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  match append_record_result ~config ~keeper_name record with
+  | Ok () -> ()
+  | Error error ->
     Log.Keeper.warn
       "turn record append failed: keeper=%s trace=%s turn=%d err=%s"
       keeper_name
       trace_id
       absolute_turn
-      (Printexc.to_string exn)
+      error
 ;;

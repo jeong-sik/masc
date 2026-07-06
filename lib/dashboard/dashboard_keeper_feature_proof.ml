@@ -12,6 +12,12 @@ type keeper_snapshot = {
   read_error : string option;
 }
 
+type keeper_snapshot_scan = {
+  snapshots : keeper_snapshot list;
+  keeper_names_known : bool;
+  read_errors : Yojson.Safe.t list;
+}
+
 module Decision = Dashboard_keeper_decision_log_proof
 
 let status_to_string = function
@@ -47,10 +53,25 @@ let uniq_sorted names =
   |> List.filter (fun name -> String.trim name <> "")
   |> List.sort_uniq String.compare
 
+let keeper_name_discovery_error_json err =
+  `Assoc [
+    ("source", `String "keeper_names_result");
+    ("error", `String err);
+  ]
+
 let load_keeper_snapshots config =
-  Keeper_meta_store.keeper_names config
-  |> uniq_sorted
-  |> List.map (fun keeper_name ->
+  match Keeper_meta_store.keeper_names_result config with
+  | Error err ->
+    {
+      snapshots = [];
+      keeper_names_known = false;
+      read_errors = [ keeper_name_discovery_error_json err ];
+    }
+  | Ok keeper_names ->
+    let snapshots =
+      keeper_names
+      |> uniq_sorted
+      |> List.map (fun keeper_name ->
     match Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> { keeper_name; meta = Some meta; read_error = None }
     | Ok None ->
@@ -65,6 +86,8 @@ let load_keeper_snapshots config =
         meta = None;
         read_error = Some err;
       })
+    in
+    { snapshots; keeper_names_known = true; read_errors = [] }
 
 let keeper_read_errors snapshots =
   snapshots
@@ -174,6 +197,10 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
     |> List.map (fun snapshot ->
       snapshot.keeper_name, Decision.turn_span_stats ~config snapshot.keeper_name)
   in
+  let decision_read_errors =
+    stats
+    |> List.concat_map (fun (_, stat) -> Decision.turn_span_read_errors stat)
+  in
   let stat_for keeper_name =
     match List.assoc_opt keeper_name stats with
     | Some stat -> stat
@@ -228,9 +255,10 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
          `Float Decision.recent_turn_max_age_hours );
        ("observed_keepers", Json_util.json_string_list observed);
        ("missing_keepers", Json_util.json_string_list missing);
-       ("read_errors", `List (keeper_read_errors snapshots));
+       ("read_errors", `List (keeper_read_errors snapshots @ decision_read_errors));
        ("per_keeper", `List per_keeper);
      ]);
+    ("read_errors", `List decision_read_errors);
     ( "evidence_refs",
       `List [
         evidence_ref ~kind:"store" ~id:"keeper_decision_log"
@@ -285,22 +313,26 @@ let timestamp_within_window ?window_hours ~now ts =
   | Some hours -> now -. ts <= hours *. Masc_time_constants.hour
 
 let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
-  let decision_stats =
-    snapshots
-    |> List.map (fun snapshot ->
-      snapshot.keeper_name,
-      Decision.scheduled_stats ~config snapshot.keeper_name)
-  in
-  let decision_stat_for keeper_name =
-    List.assoc_opt keeper_name decision_stats
-    |> Option.value ~default:Decision.empty_scheduled_stat
-  in
   let enabled =
     snapshots
     |> List.filter (fun snapshot ->
       match snapshot.meta with
       | Some meta -> meta.proactive.enabled
       | None -> false)
+  in
+  let decision_stats =
+    enabled
+    |> List.map (fun snapshot ->
+      snapshot.keeper_name,
+      Decision.scheduled_stats ~config snapshot.keeper_name)
+  in
+  let decision_read_errors =
+    decision_stats
+    |> List.concat_map (fun (_, stat) -> Decision.scheduled_read_errors stat)
+  in
+  let decision_stat_for keeper_name =
+    List.assoc_opt keeper_name decision_stats
+    |> Option.value ~default:Decision.empty_scheduled_stat
   in
   let total = keeper_count enabled in
   let has_recent_meta_evidence meta =
@@ -397,9 +429,10 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
        ("meta_count", `Int (count_meta enabled));
        ("observed_keepers", Json_util.json_string_list observed);
        ("missing_keepers", Json_util.json_string_list missing);
-       ("read_errors", `List (keeper_read_errors enabled));
+       ("read_errors", `List (keeper_read_errors enabled @ decision_read_errors));
        ("per_keeper", `List per_keeper);
      ]);
+    ("read_errors", `List decision_read_errors);
     ( "evidence_refs",
       `List [
         keeper_meta_evidence;
@@ -424,6 +457,11 @@ let count_status needle statuses =
   |> List.filter (fun status -> status_rank status = status_rank needle)
   |> List.length
 
+let feature_read_errors json =
+  match Json_util.assoc_member_opt "read_errors" json with
+  | Some (`List errors) -> errors
+  | _ -> []
+
 let json ~config ?window_hours ?now () =
   let now = Option.value ~default:(Unix.gettimeofday ()) now in
   (* Normalize at the public boundary so feature helpers never see a
@@ -436,7 +474,8 @@ let json ~config ?window_hours ?now () =
     | Some h when h > 0.0 -> Some h
     | Some _ | None -> None
   in
-  let snapshots = load_keeper_snapshots config in
+  let snapshot_scan = load_keeper_snapshots config in
+  let snapshots = snapshot_scan.snapshots in
   let features =
     [
       runtime_liveness_feature snapshots;
@@ -446,6 +485,9 @@ let json ~config ?window_hours ?now () =
       scheduled_proactive_feature ~config ?window_hours ~now snapshots;
     ]
   in
+  let read_errors =
+    snapshot_scan.read_errors @ List.concat_map feature_read_errors features
+  in
   let statuses = List.map status_of_feature_json features in
   let overall = overall_status statuses in
   let pass_count = count_status Pass statuses in
@@ -454,6 +496,9 @@ let json ~config ?window_hours ?now () =
   `Assoc [
     ("generated_at", `String (Masc_domain.now_iso ()));
     ("status", `String (status_to_string overall));
+    ("keeper_names_known", `Bool snapshot_scan.keeper_names_known);
+    ("read_error_count", `Int (List.length read_errors));
+    ("read_errors", `List read_errors);
     ("summary",
      `Assoc [
        ("status", `String (status_to_string overall));
@@ -464,6 +509,9 @@ let json ~config ?window_hours ?now () =
        ("gap_count", `Int (warn_count + fail_count));
        ("keeper_count", `Int (keeper_count snapshots));
        ("keeper_meta_count", `Int (count_meta snapshots));
+       ("keeper_names_known", `Bool snapshot_scan.keeper_names_known);
+       ("read_error_count", `Int (List.length read_errors));
+       ("read_errors", `List read_errors);
        ("window_hours",
         (match window_hours with
          | Some hours -> `Float hours

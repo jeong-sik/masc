@@ -98,12 +98,8 @@ let () =
               check bool "handler exists" true (Tool_dispatch.is_registered tool);
               check bool "handler-only mint rejected" true
                 (Result.is_error (Tool_dispatch.mint_token ~name:tool));
-              check bool "handler-only name hidden from suggestions" true
-                (not (List.mem tool (Tool_dispatch.all_registered_names ())));
-              check int "handler-only exact query has no suggestions" 0
-                (List.length
-                   (Tool_dispatch.find_similar_names ~min_score:0.99
-                      ~query:tool ())));
+              check bool "handler-only name hidden from registry names" true
+                (not (List.mem tool (Tool_dispatch.all_registered_names ()))));
         ] );
       ( "replace_semantics",
         [
@@ -210,39 +206,8 @@ let () =
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));
         ] );
-      ( "did_you_mean_9784",
+      ( "registry_introspection",
         [
-          test_case "find_similar_names returns close match" `Quick (fun () ->
-              register_full ~tool_name:"__sim_keeper_task_claim" ~handler:echo_handler ();
-              register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler ();
-              register_full ~tool_name:"__sim_masc_bind" ~handler:echo_handler ();
-              let suggestions =
-                Tool_dispatch.find_similar_names ~limit:10
-                  ~query:"__sim_keeper_task_claem" ()
-              in
-              check bool "non-empty suggestions" true
-                (List.length suggestions >= 1);
-              check bool "includes close task suggestion" true
-                (List.mem "__sim_keeper_task_claim" suggestions));
-          test_case "find_similar_names empty when nothing close" `Quick (fun () ->
-              let suggestions =
-                Tool_dispatch.find_similar_names
-                  ~query:"completely_different_xyzqq_unrelated" ()
-              in
-              check int "no suggestions" 0 (List.length suggestions));
-          test_case "find_similar_names respects limit" `Quick (fun () ->
-              for i = 1 to 5 do
-                register_full
-                  ~tool_name:(Printf.sprintf "__limit_test_tool_%d" i)
-                  ~handler:echo_handler
-                  ()
-              done;
-              let suggestions =
-                Tool_dispatch.find_similar_names ~limit:2
-                  ~query:"__limit_test_tool_1" ()
-              in
-              check bool "at most 2 returned" true
-                (List.length suggestions <= 2));
           test_case "all_registered_names enumerates registry" `Quick (fun () ->
               register_full ~tool_name:"__enum_check_xyz" ~handler:echo_handler ();
               let all = Tool_dispatch.all_registered_names () in

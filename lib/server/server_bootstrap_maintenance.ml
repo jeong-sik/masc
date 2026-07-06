@@ -6,6 +6,270 @@ let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
 let log_server_fiber_crash =
   Server_bootstrap_loops_fiber.log_server_fiber_crash
 
+let schedule_runner_interval_sec = Server_schedule_runner_policy.interval_sec
+let schedule_runner_stale_after_sec = Server_schedule_runner_policy.stale_after_sec
+
+let record_schedule_runner_tick_metric ~result ~duration_sec =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_schedule_runner_tick_total
+    ~labels:[ "result", result ]
+    ();
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_schedule_runner_tick_duration_seconds
+    ~labels:[ "result", result ]
+    (max 0.0 duration_sec)
+;;
+
+let record_schedule_runner_due_lag_metrics signals =
+  List.iter
+    (fun (signal : Schedule_runner.wake_signal) ->
+       Otel_metric_store.observe_histogram
+         Otel_metric_store.metric_schedule_runner_due_lag_seconds
+         ~labels:
+           [ "kind", Schedule_runner.signal_kind_to_string signal.kind
+           ; "risk_class", Schedule_domain.risk_class_to_string signal.risk_class
+           ]
+         (max 0.0 (signal.emitted_at -. signal.due_at)))
+    signals
+;;
+
+let record_schedule_runner_dispatch_metrics dispatches =
+  List.iter
+    (fun (dispatch : Schedule_runner.dispatch_result) ->
+       let status = Schedule_runner.dispatch_status_to_string dispatch.status in
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_schedule_runner_dispatch_total
+         ~labels:[ "status", status ]
+         ();
+       Otel_metric_store.observe_histogram
+         Otel_metric_store.metric_schedule_runner_dispatch_duration_seconds
+         ~labels:[ "status", status ]
+         dispatch.duration_sec)
+    dispatches
+;;
+
+let schedule_runner_tick_span_attrs ~now =
+  [ "schedule.runner.now_unix", `Float now ]
+;;
+
+let schedule_runner_tick_result_attrs (result : Schedule_runner.tick_result) =
+  [ "schedule.runner.result", `String "ok"
+  ; "schedule.runner.due_changed_count", `Int result.due_changed
+  ; "schedule.runner.emitted_count", `Int (List.length result.emitted)
+  ; "schedule.runner.rescheduled_count", `Int result.rescheduled
+  ; "schedule.runner.dispatch_count", `Int (List.length result.dispatches)
+  ]
+;;
+
+let schedule_runner_tick_error_attrs err =
+  [ "schedule.runner.result", `String "error"
+  ; "schedule.runner.error", `String (Schedule_runner.runner_error_to_string err)
+  ]
+;;
+
+let schedule_dispatch_span_attrs (request : Schedule_domain.schedule_request) =
+  [ "schedule.id", `String request.schedule_id
+  ; "schedule.risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
+  ; "schedule.payload_digest", `String (Schedule_domain.payload_digest request.payload)
+  ]
+;;
+
+let schedule_dispatch_result_attrs (result : Schedule_runner.dispatch_result) =
+  [ "schedule.dispatch.status"
+  , `String (Schedule_runner.dispatch_status_to_string result.status)
+  ]
+;;
+
+let schedule_dispatch_wrapper
+      (request : Schedule_domain.schedule_request)
+      (run : unit -> Schedule_runner.dispatch_result)
+  =
+  Otel_spans.with_span
+    ~name:"schedule.dispatch"
+    ~attrs:(schedule_dispatch_span_attrs request)
+    (fun _trace_id ->
+       let result = run () in
+       let result_attrs = schedule_dispatch_result_attrs result in
+       Otel_spans.add_attrs ~attrs:result_attrs ();
+       (match result.Schedule_runner.error with
+        | None -> ()
+        | Some error ->
+          Otel_spans.record_error
+            ~message:error
+            ~error_type:
+              ("schedule_dispatch."
+               ^ Schedule_runner.dispatch_status_to_string result.status)
+            ~attrs:result_attrs
+            ());
+       result)
+;;
+
+let schedule_runner_tick_with_spans config ~now =
+  Otel_spans.with_span
+    ~name:"schedule.runner.tick"
+    ~attrs:(schedule_runner_tick_span_attrs ~now)
+    (fun _trace_id ->
+       match
+         Schedule_runner.tick
+           ~dispatch_wrapper:schedule_dispatch_wrapper
+           ~consumer:Server_schedule_consumers.consumer
+           config
+           ~now
+       with
+       | Ok result as ok ->
+         Otel_spans.add_attrs ~attrs:(schedule_runner_tick_result_attrs result) ();
+         ok
+       | Error err as error ->
+         let attrs = schedule_runner_tick_error_attrs err in
+         Otel_spans.record_error
+           ~message:(Schedule_runner.runner_error_to_string err)
+           ~error_type:"schedule_runner.tick"
+           ~attrs
+           ();
+         error)
+;;
+
+let keeper_schedule_signal_kind = function
+  | Schedule_runner.Due_candidate -> Keeper_event_queue.Schedule_due_candidate
+  | Schedule_runner.Due_blocked_approval ->
+    Keeper_event_queue.Schedule_due_blocked_approval
+;;
+
+let keeper_schedule_signal_urgency = function
+  | Schedule_runner.Due_candidate
+  | Schedule_runner.Due_blocked_approval ->
+    Keeper_event_queue.Normal
+;;
+
+let schedule_signal_stimulus (signal : Schedule_runner.wake_signal) =
+  let schedule_signal : Keeper_event_queue.schedule_signal =
+    { schedule_signal_id = signal.signal_id
+    ; schedule_signal_kind = keeper_schedule_signal_kind signal.kind
+    ; schedule_id = signal.schedule_id
+    ; due_at = signal.due_at
+    ; payload_digest = signal.payload_digest
+    }
+  in
+  { Keeper_event_queue.post_id = Keeper_event_queue.schedule_signal_post_id schedule_signal
+  ; urgency = keeper_schedule_signal_urgency signal.kind
+  ; arrived_at = signal.emitted_at
+  ; payload = Keeper_event_queue.Schedule_signal schedule_signal
+  }
+;;
+
+let schedule_by_id state schedule_id =
+  List.find_opt
+    (fun (request : Schedule_domain.schedule_request) ->
+       String.equal request.schedule_id schedule_id)
+    state.Schedule_store.schedules
+;;
+
+type schedule_signal_owner =
+  | Signal_keeper_owner of string
+  | Signal_missing_schedule
+  | Signal_non_keeper_actor
+  | Signal_unregistered_keeper of string
+
+let keeper_owner_for_schedule_signal ~base_path state signal =
+  match schedule_by_id state signal.Schedule_runner.schedule_id with
+  | None -> Signal_missing_schedule
+  | Some request ->
+    (match request.Schedule_domain.scheduled_by.kind with
+     | Schedule_domain.Automated_actor ->
+       let keeper_name = request.scheduled_by.id in
+       (match Keeper_registry.get ~base_path keeper_name with
+        | Some _ -> Signal_keeper_owner keeper_name
+        | None -> Signal_unregistered_keeper keeper_name)
+     | Human_operator | System -> Signal_non_keeper_actor)
+;;
+
+let enqueue_schedule_signal_for_keeper ~base_path ~keeper_name signal =
+  try
+    match
+      Keeper_keepalive_signal.enqueue_stimulus_and_wakeup_hint_result
+        ~base_path
+        ~keeper_name
+        (schedule_signal_stimulus signal)
+    with
+    | Ok _ -> Ok ()
+    | Error msg ->
+      Error
+        (Printf.sprintf
+           "schedule_signal_wake: enqueue failed signal_id=%s schedule_id=%s keeper=%s: %s"
+           signal.Schedule_runner.signal_id
+           signal.schedule_id
+           keeper_name
+           msg)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "schedule_signal_wake: enqueue failed signal_id=%s schedule_id=%s keeper=%s: %s"
+         signal.Schedule_runner.signal_id
+         signal.schedule_id
+         keeper_name
+         (Printexc.to_string exn))
+;;
+
+let wake_enqueue_failed_all count =
+  { Schedule_runner_status.empty_wake_enqueue_counts with wake_failed = count }
+;;
+
+let record_wake_skip_no_keeper
+      (counts : Schedule_runner_status.wake_enqueue_counts)
+      reason
+  =
+  let counts =
+    { counts with
+      wake_skipped_no_keeper = counts.wake_skipped_no_keeper + 1
+    }
+  in
+  match reason with
+  | Signal_missing_schedule ->
+    { counts with
+      wake_skipped_missing_schedule = counts.wake_skipped_missing_schedule + 1
+    }
+  | Signal_non_keeper_actor ->
+    { counts with
+      wake_skipped_non_keeper_actor = counts.wake_skipped_non_keeper_actor + 1
+    }
+  | Signal_unregistered_keeper _ ->
+    { counts with
+      wake_skipped_unregistered_keeper =
+        counts.wake_skipped_unregistered_keeper + 1
+    }
+  | Signal_keeper_owner _ -> counts
+;;
+
+let enqueue_schedule_signal_keeper_wakes ~config signals =
+  match Schedule_store.read_state_result config with
+  | Error err ->
+    Log.Server.warn
+      "schedule_signal_wake: cannot read schedule store: %s"
+      (Schedule_store.read_error_to_string err);
+    wake_enqueue_failed_all (List.length signals)
+  | Ok state ->
+    let base_path = config.Workspace.base_path in
+    List.fold_left
+      (fun (counts : Schedule_runner_status.wake_enqueue_counts)
+        (signal : Schedule_runner.wake_signal) ->
+         match keeper_owner_for_schedule_signal ~base_path state signal with
+         | ( Signal_missing_schedule
+           | Signal_non_keeper_actor
+           | Signal_unregistered_keeper _ ) as reason ->
+           record_wake_skip_no_keeper counts reason
+         | Signal_keeper_owner keeper_name ->
+           (match enqueue_schedule_signal_for_keeper ~base_path ~keeper_name signal with
+            | Ok () ->
+              { counts with wake_enqueued = counts.wake_enqueued + 1 }
+            | Error msg ->
+              Log.Server.warn "%s" msg;
+              { counts with wake_failed = counts.wake_failed + 1 }))
+      Schedule_runner_status.empty_wake_enqueue_counts
+      signals
+;;
+
 (* Resolve the provider config for the Memory OS per-keeper consolidation pass.
    Env var takes precedence; otherwise inherit the librarian runtime so the
    consolidation LLM uses the same JSON-capable model the librarian uses.
@@ -51,6 +315,33 @@ let run_with_keeper_timeout ~clock ~timeout_sec ~keeper_id ~on_timeout f =
        on_timeout ())
 ;;
 
+let memory_os_fact_store_keeper_ids_for_tick ~site =
+  match Keeper_memory_os_io.list_fact_store_keeper_ids_result () with
+  | Ok keeper_ids -> Ok keeper_ids
+  | Error error ->
+    Log.Server.warn
+      "%s: keeper fact-store discovery failed; skipping tick: %s"
+      site
+      error;
+    Error error
+;;
+
+module For_testing = struct
+  let record_schedule_runner_due_lag_metrics =
+    record_schedule_runner_due_lag_metrics
+
+  let record_schedule_runner_dispatch_metrics =
+    record_schedule_runner_dispatch_metrics
+
+  let enqueue_schedule_signal_keeper_wakes =
+    enqueue_schedule_signal_keeper_wakes
+
+  let schedule_dispatch_wrapper = schedule_dispatch_wrapper
+
+  let memory_os_fact_store_keeper_ids_for_tick =
+    memory_os_fact_store_keeper_ids_for_tick
+end
+
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
    The optional [timeout_sec] lets tests exercise the per-keeper timeout without
@@ -65,7 +356,6 @@ let run_memory_os_consolidation_tick
       ~now
       ()
   =
-  let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
   let consolidate_one keeper_id () =
     try
       match
@@ -123,20 +413,26 @@ let run_memory_os_consolidation_tick
         keeper_id
         (Printexc.to_string exn)
   in
-  Eio.Fiber.all
-    (List.map
-       (fun keeper_id () ->
-          run_with_keeper_timeout
-            ~clock
-            ~timeout_sec
-            ~keeper_id
-            ~on_timeout:(fun () ->
-              Log.Server.warn
-                "memory_os_keeper_consolidation: keeper=%s timeout after %.0fs"
-                keeper_id
-                timeout_sec)
-            (consolidate_one keeper_id))
-       keeper_ids)
+  match
+    memory_os_fact_store_keeper_ids_for_tick
+      ~site:"memory_os_keeper_consolidation"
+  with
+  | Error _ -> ()
+  | Ok keeper_ids ->
+    Eio.Fiber.all
+      (List.map
+         (fun keeper_id () ->
+            run_with_keeper_timeout
+              ~clock
+              ~timeout_sec
+              ~keeper_id
+              ~on_timeout:(fun () ->
+                Log.Server.warn
+                  "memory_os_keeper_consolidation: keeper=%s timeout after %.0fs"
+                  keeper_id
+                  timeout_sec)
+              (consolidate_one keeper_id))
+         keeper_ids)
 ;;
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
@@ -186,20 +482,39 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      the production caller that observes due rows and emits at-most-once generic wake signals.  It
      catches per-tick failures so a corrupt schedule row or transient write
      error cannot cancel unrelated keeper/server fibers. *)
+  Subsystem_health.register "schedule_runner";
   fork_logged_fiber
     ~sw
-    ~on_error:(log_server_fiber_crash "schedule_runner")
+    ~on_error:(fun exn ->
+      Subsystem_health.mark_dead "schedule_runner";
+      log_server_fiber_crash "schedule_runner" exn)
     (fun () ->
-      let interval = 15.0 in
       let rec loop () =
+        let started_at = Time_compat.now () in
+        Schedule_runner_status.record_tick_started ~now:started_at;
         (try
            match
-             Schedule_runner.tick
-               ~consumer:Server_schedule_consumers.consumer
+             schedule_runner_tick_with_spans
                (Mcp_server.workspace_config state)
-               ~now:(Time_compat.now ())
+               ~now:started_at
            with
            | Ok result ->
+             let wake_enqueue_counts =
+               enqueue_schedule_signal_keeper_wakes
+               ~config:(Mcp_server.workspace_config state)
+                 result.emitted
+             in
+             let finished_at = Time_compat.now () in
+             Schedule_runner_status.record_tick_ok
+               ~wake_enqueue_counts
+               ~started_at
+               ~finished_at
+               result;
+             record_schedule_runner_tick_metric
+               ~result:"ok"
+               ~duration_sec:(finished_at -. started_at);
+             record_schedule_runner_due_lag_metrics result.emitted;
+             record_schedule_runner_dispatch_metrics result.dispatches;
              if result.Schedule_runner.emitted <> []
                 || result.rescheduled > 0
                 || result.dispatches <> []
@@ -211,16 +526,28 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  result.rescheduled
                  (List.length result.dispatches)
            | Error err ->
+             let finished_at = Time_compat.now () in
+             let error = Schedule_runner.runner_error_to_string err in
+             Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
+             record_schedule_runner_tick_metric
+               ~result:"error"
+               ~duration_sec:(finished_at -. started_at);
              Log.Server.warn
                "schedule_runner: tick failed: %s"
-               (Schedule_runner.runner_error_to_string err)
+               error
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
+           let finished_at = Time_compat.now () in
+           let error = Printexc.to_string exn in
+           Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
+           record_schedule_runner_tick_metric
+             ~result:"crash"
+             ~duration_sec:(finished_at -. started_at);
            Log.Server.warn
              "schedule_runner: tick crashed: %s"
-             (Printexc.to_string exn));
-        Eio.Time.sleep clock interval;
+             error);
+        Eio.Time.sleep clock schedule_runner_interval_sec;
         loop ()
       in
       loop ());
@@ -247,17 +574,23 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       let interval = 300.0 in
       let rec loop () =
         (try
-           let report =
-             Keeper_memory_os_consolidator.run
-               ~keeper_ids:(Keeper_memory_os_io.list_fact_store_keeper_ids ())
-               ~now:(Time_compat.now ())
-               ()
-           in
-           if report.Keeper_memory_os_consolidator.promoted > 0
-           then
-             Log.Server.info "memory_os_consolidation: keepers=%d promoted=%d"
-               report.Keeper_memory_os_consolidator.keepers_scanned
-               report.Keeper_memory_os_consolidator.promoted
+           match
+             memory_os_fact_store_keeper_ids_for_tick
+               ~site:"memory_os_consolidation"
+           with
+           | Error _ -> ()
+           | Ok keeper_ids ->
+             let report =
+               Keeper_memory_os_consolidator.run
+                 ~keeper_ids
+                 ~now:(Time_compat.now ())
+                 ()
+             in
+             if report.Keeper_memory_os_consolidator.promoted > 0
+             then
+               Log.Server.info "memory_os_consolidation: keepers=%d promoted=%d"
+                 report.Keeper_memory_os_consolidator.keepers_scanned
+                 report.Keeper_memory_os_consolidator.promoted
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -310,24 +643,27 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             (Printexc.to_string exn)
       in
       let rec loop () =
-        let keeper_ids =
-          List.filter
-            (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
-            (Keeper_memory_os_io.list_fact_store_keeper_ids ())
-        in
-        Eio.Fiber.all
-          (List.map
-             (fun keeper_id () ->
-                run_with_keeper_timeout
-                  ~clock:(Some clock)
-                  ~timeout_sec:120.0
-                  ~keeper_id
-                  ~on_timeout:(fun () ->
-                    Log.Server.warn
-                      "memory_os_gc: keeper=%s timeout after 120s"
-                      keeper_id)
-                  (gc_one keeper_id))
-             keeper_ids);
+        (match memory_os_fact_store_keeper_ids_for_tick ~site:"memory_os_gc" with
+         | Error _ -> ()
+         | Ok keeper_ids ->
+           let keeper_ids =
+             List.filter
+               (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
+               keeper_ids
+           in
+           Eio.Fiber.all
+             (List.map
+                (fun keeper_id () ->
+                   run_with_keeper_timeout
+                     ~clock:(Some clock)
+                     ~timeout_sec:120.0
+                     ~keeper_id
+                     ~on_timeout:(fun () ->
+                       Log.Server.warn
+                         "memory_os_gc: keeper=%s timeout after 120s"
+                         keeper_id)
+                     (gc_one keeper_id))
+                keeper_ids));
         Eio.Time.sleep clock interval;
         loop ()
       in

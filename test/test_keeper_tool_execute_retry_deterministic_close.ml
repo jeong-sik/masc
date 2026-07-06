@@ -401,6 +401,18 @@ let test_invalid_json_returns_none () =
   check_classify ~name:"invalid JSON" ~expected:None raw
 ;;
 
+let test_invalid_json_result_returns_typed_error () =
+  let raw = "not json at all" in
+  match D.classify_raw_result raw with
+  | Error (D.Raw_payload_malformed_json message) ->
+    Alcotest.(check bool) "message is non-empty" true (String.length message > 0)
+  | Error other ->
+    Alcotest.failf
+      "expected malformed-json error, got %s"
+      (D.raw_payload_parse_error_to_string other)
+  | Ok _ -> Alcotest.fail "invalid JSON classified through Result API"
+;;
+
 let test_empty_payload_returns_none () =
   let raw = "{}" in
   check_classify ~name:"empty object" ~expected:None raw
@@ -601,6 +613,10 @@ let () =
             `Quick
             test_transient_failure_class_is_not_deterministic
         ; Alcotest.test_case "invalid_json" `Quick test_invalid_json_returns_none
+        ; Alcotest.test_case
+            "invalid_json_typed_result"
+            `Quick
+            test_invalid_json_result_returns_typed_error
         ; Alcotest.test_case "empty_payload" `Quick test_empty_payload_returns_none
         ; Alcotest.test_case
             "unknown_error_code"

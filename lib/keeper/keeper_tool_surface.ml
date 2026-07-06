@@ -26,8 +26,22 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
+        let persisted_names, keeper_names_known, read_errors =
+          match keeper_names_result config with
+          | Ok names -> names, true, []
+          | Error err ->
+              ( [],
+                false,
+                [
+                  `Assoc
+                    [
+                      ("source", `String "keeper_names_result");
+                      ("message", `String err);
+                    ];
+                ] )
+        in
         let names =
-          registry_names @ keeper_names config
+          registry_names @ persisted_names
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
@@ -38,11 +52,19 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           |> List.filter_map (fun name ->
                keeper_list_row_json ~runtime_class:"keeper" config name)
         in
+        let row_read_errors =
+          rows
+          |> List.filter_map (fun row ->
+               Json_util.assoc_member_opt "read_error" row)
+        in
+        let read_errors = read_errors @ row_read_errors in
         let json =
           if not detailed then
             `Assoc
               [
                 ("count", `Int (List.length names));
+                ("keeper_names_known", `Bool keeper_names_known);
+                ("read_errors", `List read_errors);
                 ("keepers", `List (List.map (fun name -> `String name) names));
                 ("items", `List rows);
               ]
@@ -50,6 +72,8 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
             `Assoc
               [
                 ("count", `Int (List.length rows));
+                ("keeper_names_known", `Bool keeper_names_known);
+                ("read_errors", `List read_errors);
                 ("keepers", `List rows);
               ]
         in
@@ -78,18 +102,44 @@ let keeper_sandbox_status_fleet_names ctx =
     Keeper_registry.all ~base_path:ctx.config.base_path ()
     |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
   in
-  registry_names @ configured_keeper_names ctx.config @ keeper_names ctx.config
-  |> dedupe_sorted_strings
+  let persisted_names, discovery_read_errors =
+    match keeper_names_result ctx.config with
+    | Ok names -> names, []
+    | Error err ->
+        ( [],
+          [
+            `Assoc
+              [
+                ("source", `String "keeper_names_result");
+                ("message", `String err);
+              ];
+          ] )
+  in
+  ( registry_names @ configured_keeper_names ctx.config @ persisted_names
+    |> dedupe_sorted_strings,
+    discovery_read_errors )
 
 type sandbox_status_fleet_item =
   | Sandbox_status_meta of keeper_meta
-  | Sandbox_status_error of { name : string; error : string }
+  | Sandbox_status_error of {
+      name : string;
+      error : string;
+      why_no_container : string;
+      effective_meta_error : Yojson.Safe.t option;
+    }
 
-let keeper_sandbox_status_error_item_json config ~name ~error =
-  let persisted_meta =
+let keeper_sandbox_status_error_item_json
+      ?effective_meta_error
+      config
+      ~name
+      ~error
+      ~why_no_container
+  =
+  let persisted_meta, persisted_meta_read_error =
     match read_meta config name with
-    | Ok (Some meta) -> Some meta
-    | Ok None | Error _ -> None
+    | Ok (Some meta) -> Some meta, None
+    | Ok None -> None, None
+    | Error read_err -> None, Some read_err
   in
   let keepalive_running =
     match persisted_meta with
@@ -106,6 +156,7 @@ let keeper_sandbox_status_error_item_json config ~name ~error =
             `String (sandbox_profile_to_string meta.sandbox_profile) );
           ( "persisted_network_mode",
             `String (network_mode_to_string meta.network_mode) );
+          ("persisted_meta_read_error", `Null);
         ]
     | None ->
         [
@@ -113,6 +164,8 @@ let keeper_sandbox_status_error_item_json config ~name ~error =
           ("agent_name", `Null);
           ("persisted_sandbox_profile", `Null);
           ("persisted_network_mode", `Null);
+          ( "persisted_meta_read_error",
+            Json_util.string_opt_to_json persisted_meta_read_error );
         ]
   in
   error_assoc
@@ -126,11 +179,13 @@ let keeper_sandbox_status_error_item_json config ~name ~error =
        ("containers", `List []);
        ("preflight", `Null);
        ("container_error", `Null);
-       ("why_no_container", `String "effective_meta_read_failed");
+       ("why_no_container", `String why_no_container);
        ( "recommendation",
          `String "Fix keeper TOML/persona profile and retry sandbox status." );
        ("keepalive_running", `Bool keepalive_running);
-       ("effective_meta_error", keeper_list_effective_meta_error_json name error);
+       ( "effective_meta_error",
+         Option.value effective_meta_error
+           ~default:(keeper_list_effective_meta_error_json name error) );
      ]
      @ persisted_fields)
 
@@ -141,7 +196,9 @@ let handle_keeper_sandbox_status ctx args : tool_result =
   match String.trim (get_string args "name" "") with
   | "" ->
       let configured_names = configured_keeper_names ctx.config in
-      let candidate_names = keeper_sandbox_status_fleet_names ctx in
+      let candidate_names, discovery_read_errors =
+        keeper_sandbox_status_fleet_names ctx
+      in
       let resolved =
         candidate_names
         |> List.filter_map (fun name ->
@@ -154,20 +211,57 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                      | Ok effective_meta -> Some (Sandbox_status_meta effective_meta)
                      | Error msg ->
                          Log.Keeper.warn
-                           "keeper_sandbox_status fleet: failed to overlay effective meta for materialized keeper %s: %s"
-                           name msg;
-                         Some (Sandbox_status_error { name; error = msg }))
+                       "keeper_sandbox_status fleet: failed to overlay effective meta for materialized keeper %s: %s"
+                       name msg;
+                         Some
+                           (Sandbox_status_error
+                              {
+                                name;
+                                error = msg;
+                                why_no_container = "effective_meta_overlay_failed";
+                                effective_meta_error = None;
+                              }))
                  | Error msg ->
                      Log.Keeper.warn
                        "keeper_sandbox_status fleet: failed to materialize configured keeper %s: %s"
                        name msg;
-                     Some (Sandbox_status_error { name; error = msg }))
-             | Ok None -> None
+                     Some
+                       (Sandbox_status_error
+                          {
+                            name;
+                            error = msg;
+                            why_no_container =
+                              "configured_keeper_materialization_failed";
+                            effective_meta_error = None;
+                          }))
+             | Ok None ->
+                 Log.Keeper.warn
+                   "keeper_sandbox_status fleet: effective meta missing after discovery for %s"
+                   name;
+                 Some
+                   (Sandbox_status_error
+                      {
+                        name;
+                        error = "effective meta missing after keeper name discovery";
+                        why_no_container =
+                          "effective_meta_missing_after_discovery";
+                        effective_meta_error =
+                          Some
+                            (Keeper_status_bridge
+                             .keeper_list_effective_meta_missing_json name);
+                      })
              | Error msg ->
                  Log.Keeper.warn
                    "keeper_sandbox_status fleet: failed to read effective meta for %s: %s"
                    name msg;
-                 Some (Sandbox_status_error { name; error = msg }))
+                 Some
+                   (Sandbox_status_error
+                      {
+                        name;
+                        error = msg;
+                        why_no_container = "effective_meta_read_failed";
+                        effective_meta_error = None;
+                      }))
       in
       let seen = Hashtbl.create 16 in
       let unique_items =
@@ -210,8 +304,14 @@ let handle_keeper_sandbox_status ctx args : tool_result =
         List.map
           (function
             | Sandbox_status_meta meta -> render_item meta
-            | Sandbox_status_error { name; error } ->
-                keeper_sandbox_status_error_item_json ctx.config ~name ~error)
+            | Sandbox_status_error
+                { name; error; why_no_container; effective_meta_error } ->
+                keeper_sandbox_status_error_item_json
+                  ?effective_meta_error
+                  ctx.config
+                  ~name
+                  ~error
+                  ~why_no_container)
           unique_items
       in
       tool_result_ok
@@ -219,6 +319,7 @@ let handle_keeper_sandbox_status ctx args : tool_result =
            (`Assoc
               [
                 ("count", `Int (List.length items));
+                ("read_errors", `List discovery_read_errors);
                 ("items", `List items);
               ]))
   | _ ->

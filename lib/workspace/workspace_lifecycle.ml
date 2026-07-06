@@ -98,7 +98,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
          capabilities;
          meta = Some new_meta;
        } in
-       write_json config agent_file_dedup (agent_to_yojson updated);
+       write_agent config agent_file_dedup updated;
        if is_inactive then begin
          (* Restore to active_agents on session rebound *)
          let _state = update_state config (fun s ->
@@ -163,9 +163,8 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     last_seen = now_iso ();
     meta = Some meta;
   } in
-  let agent_json = agent_to_yojson agent in
   (* Write to filesystem — agent state is short-term workspace data. *)
-  write_json config agent_file agent_json;
+  write_agent config agent_file agent;
 
   (* Update state *)
   let _state = update_state config (fun s ->
@@ -224,7 +223,7 @@ let end_session ?(stop_heartbeats = true) config ~agent_name =
     (match read_agent_with_repair config agent_file with
      | Ok existing_agent ->
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
-       write_json config agent_file (agent_to_yojson updated)
+       write_agent config agent_file updated
      | Error e ->
          let snapshot =
            agent_parse_error_snapshot ~agent_name:actual_name ~agent_file
@@ -234,35 +233,44 @@ let end_session ?(stop_heartbeats = true) config ~agent_name =
            actual_name e (Yojson.Safe.to_string snapshot));
 
     (* Capture active agents before removal for relationship materialization *)
-    let peers_before_leave = (read_state config).active_agents in
+    let state_snapshot = read_state_snapshot config in
+    match state_snapshot.status with
+    | State_default_from_read_error ->
+      let msg = String.concat "; " state_snapshot.read_errors in
+      Log.Workspace.error
+        "agent session end skipped state update for %s: %s"
+        actual_name
+        msg;
+      Printf.sprintf "%s session end failed: state read failed: %s" actual_name msg
+    | State_authoritative | State_recovered_unpersisted ->
+      let peers_before_leave = state_snapshot.state.active_agents in
+      let _state = update_state config (fun s ->
+        { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
+      ) in
 
-    let _state = update_state config (fun s ->
-      { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
-    ) in
+      let _ =
+        broadcast config ~from_agent:"system"
+          ~msg_type:"session_ended"
+          ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
+      in
 
-    let _ =
-      broadcast config ~from_agent:"system"
-        ~msg_type:"session_ended"
-        ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
-    in
+      (* Log event *)
+      log_event config (`Assoc [
+        ("type", `String "agent_session_ended");
+        ("agent", `String actual_name);
+        ("ts", `String (now_iso ()));
+      ]);
+      (Atomic.get Workspace_hooks.observe_agent_lifecycle_fn) config ~agent_id:actual_name
+        ~event:Workspace_hooks.Session_ended
+        ~details:`Null;
 
-    (* Log event *)
-    log_event config (`Assoc [
-      ("type", `String "agent_session_ended");
-      ("agent", `String actual_name);
-      ("ts", `String (now_iso ()));
-    ]);
-    (Atomic.get Workspace_hooks.observe_agent_lifecycle_fn) config ~agent_id:actual_name
-      ~event:Workspace_hooks.Session_ended
-      ~details:`Null;
+      (* Record co-presence relationships via hook (async, non-blocking) *)
+      (try (Atomic.get Workspace_hooks.relation_on_leave_fn)
+             ~leaving_agent:actual_name ~active_agents:peers_before_leave
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+         Log.Workspace.error "relation-materializer session-end hook error: %s"
+           (Printexc.to_string exn));
 
-    (* Record co-presence relationships via hook (async, non-blocking) *)
-    (try (Atomic.get Workspace_hooks.relation_on_leave_fn)
-           ~leaving_agent:actual_name ~active_agents:peers_before_leave
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Workspace.error "relation-materializer session-end hook error: %s"
-         (Printexc.to_string exn));
-
-    Printf.sprintf "%s left the namespace" actual_name
+      Printf.sprintf "%s left the namespace" actual_name
   end else
     Printf.sprintf "%s was not in the namespace" actual_name

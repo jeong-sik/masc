@@ -46,7 +46,7 @@ This RFC's purpose is **not** to introduce a new pattern. It is to:
 | 6 | `lib/telemetry_eio.ml:166-173` | `Safe_ops.report_persistence_read_drop` (typed) | Already-migrated read-side | RFC-0044 (active path) |
 | 7 | retired | `[identity_drift:alias_fallback]` WARN-only credential alias fallback | Runtime credential alias fallback removed; old dashboard-dev token files are ignored and the dashboard dev-token route only mints or reuses the canonical dashboard token. | Closed |
 | 8 | `lib/dashboard.ml:460-475` | reads `metric_total` to format a *display title* | Aggregation reader, not a counter-as-fix emitter | Out of scope (false positive) |
-| 9-12 | `lib/keeper/keeper_alerting.ml:553-642` (3 sites) | `Log.Keeper.error "... JSONL write failed: %s"` + no counter, drop record | Write-side silent failure | RFC-0077 (cohort C) |
+| 9-12 | retired | The previous `lib/keeper/keeper_alerting.ml` alert writer was removed with the heuristic score/fanout path. | Closed | RFC-0077 (cohort C retired item) |
 | 13-15 | `lib/keeper/keeper_checkpoint_store.ml:55, 91, 195, 238, 256` | `Log.Keeper.warn "... failed"` + drop archive | Write-side / cleanup silent failure | RFC-0077 (cohort B) |
 | 16+ | `lib/keeper/keeper_heartbeat_loop.ml:195, 462, 1268`, `keeper_keepalive.ml:513`, `keeper_supervisor.ml:720, 2061`, `keeper_turn_runtime_budget.ml:675`, `keeper_agent_memory_episode.ml:103, 192`, `keeper_crash_persistence.ml:135`, `keeper_approval_queue.ml:430`, `keeper_context_core.ml:786` | `Log.Keeper.warn/error "... write/save failed"` + warn + default | Write-side silent failure | RFC-0077 §3.1 (already enumerated in that RFC's inventory) |
 

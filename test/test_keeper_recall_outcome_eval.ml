@@ -98,6 +98,7 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
       (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
       [ {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":["a"],"injected_fact_key_count":7,"injected_episode_keys":[],"ts":1.0}|}
       ; {|{"keeper_id":"alpha","turn":2,"injected_fact_keys":[],"injected_episode_keys":[]}|}
+      ; {|{"keeper_id":"alpha","trace_id":"trace-bad","turn":3,"injected_fact_keys":[1],"injected_episode_keys":[]}|}
       ; {|{"keeper_id":|}
       ];
     write_lines
@@ -115,7 +116,7 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
     Alcotest.(check int) "typed cancelled outcome" 1 report.outcome_cancelled;
     Alcotest.(check int) "explicit injected count" 7 report.injected_fact_keys;
     Alcotest.(check int) "malformed rows" 1 report.malformed_jsonl_rows;
-    Alcotest.(check int) "invalid recall rows" 1 report.invalid_recall_rows;
+    Alcotest.(check int) "invalid recall rows" 2 report.invalid_recall_rows;
     Alcotest.(check int) "invalid receipt rows" 1 report.invalid_receipt_rows;
     Alcotest.(check int) "receipt metrics rows ignored" 0 report.outcome_error;
     Alcotest.(check bool) "load error details" true (report.load_errors <> []))

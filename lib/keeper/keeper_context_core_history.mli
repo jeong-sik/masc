@@ -24,7 +24,16 @@ type history_line_action =
   | Move_internal
   | Drop_line
 
+type history_jsonl_line_error =
+  | History_jsonl_malformed_json of string
+  | History_jsonl_type_error of string
+
+val history_jsonl_line_error_to_string : history_jsonl_line_error -> string
+
 val classify_history_entry : source:string -> content:string -> history_line_action
+
+val classify_history_jsonl_line_result :
+  string -> (history_line_action, history_jsonl_line_error) result
 
 val classify_history_jsonl_line : string -> history_line_action option
 

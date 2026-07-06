@@ -62,7 +62,12 @@ val write_json_local :
 (** {1 JSON I/O — root-scoped (cluster registry)} *)
 
 val read_json_root : config -> string -> Yojson.Safe.t
+val read_json_root_result :
+  config -> string -> (Yojson.Safe.t, string) result
+val write_json_root_result :
+  config -> string -> Yojson.Safe.t -> (unit, string) result
 val write_json_root : config -> string -> Yojson.Safe.t -> unit
+val delete_path_root_result : config -> string -> (unit, string) result
 val delete_path_root : config -> string -> unit
 val path_exists_root : config -> string -> bool
 
@@ -90,14 +95,23 @@ val write_json : config -> string -> Yojson.Safe.t -> unit
 (** Result-returning variant that reports backend and local mirror failures. *)
 val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) result
 
+val write_agent_result : config -> string -> agent -> (unit, string) result
+
+val write_agent : config -> string -> agent -> unit
+
 val write_text_local : string -> string -> (unit, string) result
+val write_text_result : config -> string -> string -> (unit, string) result
 val write_text : config -> string -> string -> unit
+val delete_path_result : config -> string -> (unit, string) result
 val delete_path : config -> string -> unit
 val path_exists : config -> string -> bool
+val append_text_result : config -> string -> string -> (unit, string) result
 val append_text : config -> string -> string -> unit
 
 (** Read JSON if present; [None] for absent files (no WARN log). *)
 val read_json_opt : config -> string -> Yojson.Safe.t option
+val read_json_opt_result :
+  config -> string -> (Yojson.Safe.t option, string) result
 
 (** {1 Agent JSON repair} *)
 

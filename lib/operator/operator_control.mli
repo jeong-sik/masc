@@ -13,6 +13,16 @@ val snapshot_json :
   'a context ->
   Yojson.Safe.t
 
+val snapshot_json_result :
+  ?actor:string ->
+  ?view:string ->
+  ?include_messages:bool ->
+  ?include_keepers:bool ->
+  ?include_summary_fields:bool ->
+  ?lightweight_summary:bool ->
+  'a context ->
+  (Yojson.Safe.t, string) result
+
 val recent_actions_json : Workspace.config -> Yojson.Safe.t
 
 val action_json :

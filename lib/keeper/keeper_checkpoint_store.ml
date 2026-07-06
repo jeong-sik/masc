@@ -201,6 +201,13 @@ type checkpoint_load_error =
       surfaced during a load. (#8605 family) *)
   | Sdk_other_error of string
 
+let checkpoint_load_error_to_string = function
+  | Not_found -> "not_found"
+  | Store_error error -> "store_error: " ^ error
+  | Parse_error error -> "parse_error: " ^ error
+  | Io_error error -> "io_error: " ^ error
+  | Sdk_other_error error -> "sdk_error: " ^ error
+
 (* RFC-0089 G4 (#15514-sibling): [Not_found] classification was previously
    string-matched against [FileOpFailed.detail] across four prefixes
    ("no_such_file", "no such file", "unix_error (enoent", "eio.io fs
@@ -297,7 +304,7 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
 let last_saved_oas_turn_count_mu = Stdlib.Mutex.create ()
 let last_saved_oas_turn_count : (string, int) Hashtbl.t = Hashtbl.create 16
 
-let known_oas_turn_count ~session_dir ~session_id =
+let known_oas_turn_count_result ~session_dir ~session_id =
   let key = oas_checkpoint_path ~session_dir ~session_id in
   let cached =
     (* Stdlib mutex on purpose: the critical section is a pure Hashtbl
@@ -306,11 +313,27 @@ let known_oas_turn_count ~session_dir ~session_id =
       Hashtbl.find_opt last_saved_oas_turn_count key)
   in
   match cached with
-  | Some _ as hit -> hit
+  | Some _ as hit -> Ok hit
   | None ->
     (match load_oas ~session_dir ~session_id with
-     | Ok existing -> Some existing.turn_count
-     | Error _ -> None)
+     | Ok existing -> Ok (Some existing.turn_count)
+     | Error Not_found -> Ok None
+     | Error error -> Error error)
+
+let observe_oas_watermark_load_failure ~session_id error =
+  let error = checkpoint_load_error_to_string error in
+  Log.Keeper.warn
+    "OAS checkpoint watermark load failed for %s: %s"
+    session_id
+    error;
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string CheckpointFailures)
+    ~labels:
+      [ "site"
+      , Keeper_checkpoint_store_failure_site.(to_label Oas_watermark_load)
+      ]
+    ();
+  error
 
 let record_saved_oas_turn_count ~session_dir ~session_id turn_count =
   let key = oas_checkpoint_path ~session_dir ~session_id in
@@ -333,7 +356,13 @@ let save_relation ~known ~incoming =
 
 let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (save_oas_outcome, string) result =
-  let known = known_oas_turn_count ~session_dir ~session_id:ckpt.session_id in
+  match known_oas_turn_count_result ~session_dir ~session_id:ckpt.session_id with
+  | Error error ->
+    let error =
+      observe_oas_watermark_load_failure ~session_id:ckpt.session_id error
+    in
+    Error ("save_oas watermark load failed: " ^ error)
+  | Ok known -> (
   match known with
   | Some known when ckpt.turn_count < known ->
     Log.Keeper.warn
@@ -357,7 +386,7 @@ let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
             { relation = save_relation ~known ~incoming:ckpt.turn_count
             ; turn_count = ckpt.turn_count
             })
-     | Error _ as e -> e)
+     | Error _ as e -> e))
 
 let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (unit, string) result =

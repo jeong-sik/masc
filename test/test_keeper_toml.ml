@@ -1470,7 +1470,18 @@ base = "base.toml"
 [keeper
 name = "bad"
 |};
+  let toml_skip_metric () =
+    Masc.Otel_metric_store.metric_value_or_zero
+      Keeper_metrics.(to_string ProfileLoadFailures)
+      ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Toml_skip) ]
+      ()
+  in
+  let before_toml_skip = toml_skip_metric () in
   let rows = KTP.keeper_toml_unknown_keys_in_dir dir in
+  check (float 0.0001)
+    "malformed TOML scan increments profile-load failure metric"
+    1.0
+    (toml_skip_metric () -. before_toml_skip);
   match rows with
   | [ row ] ->
     check string "keeper name" "alpha" row.KTP.keeper_name;

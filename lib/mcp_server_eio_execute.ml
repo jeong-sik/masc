@@ -395,31 +395,15 @@ let execute_tool_eio
                          (fun registry ~agent_name ~timeout ->
                            wait_for_message_eio ~clock registry ~agent_name ~timeout)
                      ; governance_defaults = Mcp_server_eio_governance.governance_defaults
-                     ; save_governance = Mcp_server_eio_governance.save_governance
+                     ; save_governance = Mcp_server_eio_governance.save_governance_result
                      ; load_mcp_sessions = Mcp_server_eio_governance.load_mcp_sessions
-                     ; save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions
+                     ; save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions_result
                      }
                    in
                    Mcp_tool_runtime.dispatch mcp_runtime_ctx ~name)
             in
-            (* #9784: enrich Unknown tool errors with closest-name suggestions so the
-     LLM can self-correct on the next turn rather than re-emit the same
-     hallucinated name. Suggestions come from a similarity scan of the
-     full tool registry, filtered through Keeper_tool_visibility_projection to
-     exclude internal handler names (#17023). *)
             let format_unknown_tool_error ~reason =
-              let suggestions =
-                Tool_dispatch.find_similar_names ~query:name ()
-                |> Keeper_tool_visibility_projection.filter_schema_visible_suggestions
-              in
-              match suggestions with
-              | [] -> Printf.sprintf "Unknown tool: %s (%s)" name reason
-              | xs ->
-                Printf.sprintf
-                  "Unknown tool: %s — did you mean: %s? (%s)"
-                  name
-                  (String.concat ", " xs)
-                  reason
+              Printf.sprintf "Unknown tool: %s (%s)" name reason
             in
             let internal_keeper_meta_of_agent () =
               match Keeper_registry_lookup.find_by_agent_name agent_name with

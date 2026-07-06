@@ -1426,6 +1426,10 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         Alcotest.(check (list string)) "persisted meta includes disabled keeper"
           [ "masc-improver"; "operator" ]
           (json |> member "persisted_meta_names" |> to_list |> List.map to_string);
+        Alcotest.(check bool) "persisted meta names are known" true
+          (json |> member "persisted_meta_names_known" |> to_bool);
+        Alcotest.(check int) "persisted meta read errors absent" 0
+          (json |> member "persisted_meta_read_error_count" |> to_int);
         Alcotest.(check (list string)) "configured without meta"
           [ "mad-improver" ]
           (json |> member "configured_without_meta_names" |> to_list
@@ -1481,6 +1485,116 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
           []
           (json |> member "meta_without_config_names" |> to_list
            |> List.map to_string)))
+
+let test_keeper_identity_drift_reports_persisted_meta_read_failure () =
+  with_temp_dir "keeper-identity-drift-meta-read-error" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_config_root_keeper_toml config_root "mad-improver";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
+      let previous_state = !Server_auth.server_state in
+      Fun.protect
+        ~finally:(fun () ->
+          Server_auth.server_state := previous_state;
+          Config_dir_resolver.reset ())
+        (fun () ->
+          Config_dir_resolver.reset ();
+          let state = Mcp_server.create_state ~base_path:dir in
+          Server_auth.server_state := Some state;
+          let config = Mcp_server.workspace_config state in
+          let keeper_dir = Keeper_types_profile.keeper_dir config in
+          mkdir_p (Filename.dirname keeper_dir);
+          rm_rf keeper_dir;
+          write_file keeper_dir "not-a-directory";
+          let json =
+            Server_routes_http_runtime_fleet_scan.keeper_identity_drift_health_json
+              config
+          in
+          let open Yojson.Safe.Util in
+          Alcotest.(check string)
+            "identity drift marks persisted meta read failure unknown"
+            "unknown"
+            (json |> member "status" |> to_string);
+          Alcotest.(check bool)
+            "identity drift does not claim a blocking drift diff"
+            false
+            (json |> member "blocking" |> to_bool);
+          Alcotest.(check string)
+            "identity drift uses typed read-error terminal reason"
+            "persisted_meta_read_error"
+            (json |> member "terminal_reason" |> to_string);
+          Alcotest.(check bool)
+            "identity drift asks operator action on unknown meta discovery"
+            true
+            (json |> member "operator_action_required" |> to_bool);
+          Alcotest.(check (list string))
+            "identity drift keeps configured names visible"
+            [ "mad-improver" ]
+            (json |> member "configured_keeper_names" |> to_list
+             |> List.map to_string);
+          Alcotest.(check bool)
+            "identity drift marks persisted meta names unknown"
+            false
+            (json |> member "persisted_meta_names_known" |> to_bool);
+          Alcotest.(check int)
+            "identity drift counts persisted meta read error"
+            1
+            (json |> member "persisted_meta_read_error_count" |> to_int);
+          Alcotest.(check int)
+            "identity drift does not project configured names as missing meta"
+            0
+            (json |> member "configured_without_meta_count" |> to_int);
+          Alcotest.(check (list string))
+            "identity drift configured-without-meta names remain unknown-empty"
+            []
+            (json |> member "configured_without_meta_names" |> to_list
+             |> List.map to_string);
+          Alcotest.(check int)
+            "identity drift does not project stale meta while discovery failed"
+            0
+            (json |> member "meta_without_config_count" |> to_int);
+          Alcotest.(check (list string))
+            "identity drift meta-without-config names remain unknown-empty"
+            []
+            (json |> member "meta_without_config_names" |> to_list
+             |> List.map to_string);
+          Alcotest.(check string)
+            "identity drift next action repairs meta store"
+            "repair_keeper_meta_store"
+            (json |> member "next_action" |> to_string);
+          let read_errors =
+            json |> member "persisted_meta_read_errors" |> to_list
+          in
+          Alcotest.(check int)
+            "identity drift exposes one read error detail"
+            1 (List.length read_errors);
+          let read_error =
+            match read_errors with
+            | [ read_error ] -> read_error
+            | _ ->
+                Alcotest.fail
+                  "identity drift expected exactly one persisted meta read error"
+          in
+          Alcotest.(check string)
+            "identity drift read error source is keeper meta store"
+            "keeper_meta_store"
+            (read_error |> member "source" |> to_string);
+          let request = Httpun.Request.create `GET "/health" in
+          let health = Server_routes_http_runtime.make_health_json request in
+          let drift = health |> member "keeper_identity_drift" in
+          Alcotest.(check string)
+            "full health exposes identity drift unknown"
+            "unknown"
+            (drift |> member "status" |> to_string);
+          Alcotest.(check bool)
+            "top-level health names identity drift read error"
+            true
+            (health |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_identity_drift:persisted_meta_read_error"))))
 
 let test_health_json_keeps_timeout_pause_without_policy_manual () =
   with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
@@ -2798,6 +2912,95 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
           false
           (reaction_ledger |> member "operator_action_required" |> to_bool))))
 
+let test_health_json_reaction_ledger_reports_keeper_name_discovery_failure () =
+  with_temp_dir "health-reaction-ledger-name-read-error" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
+      let previous_state = !Server_auth.server_state in
+      Fun.protect
+        ~finally:(fun () ->
+          Server_auth.server_state := previous_state;
+          Config_dir_resolver.reset ())
+        (fun () ->
+          Config_dir_resolver.reset ();
+          let state = Mcp_server.create_state ~base_path:dir in
+          Server_auth.server_state := Some state;
+          let config = Mcp_server.workspace_config state in
+          let keeper_dir = Keeper_types_profile.keeper_dir config in
+          mkdir_p (Filename.dirname keeper_dir);
+          rm_rf keeper_dir;
+          write_file keeper_dir "not-a-directory";
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let reaction_ledger = json |> member "keeper_reaction_ledger" in
+          let paused = json |> member "paused_keepers" in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          Alcotest.(check string)
+            "health reaction ledger marks name read failure unknown"
+            "unknown"
+            (reaction_ledger |> member "status" |> to_string);
+          Alcotest.(check bool)
+            "health reaction ledger asks for operator action"
+            true
+            (reaction_ledger |> member "operator_action_required" |> to_bool);
+          Alcotest.(check bool)
+            "health reaction ledger keeper count is unknown"
+            false
+            (reaction_ledger |> member "keeper_count_known" |> to_bool);
+          Alcotest.(check int)
+            "health reaction ledger keeps compatibility keeper count zero"
+            0
+            (reaction_ledger |> member "keeper_count" |> to_int);
+          Alcotest.(check int)
+            "health reaction ledger counts discovery read error"
+            1
+            (reaction_ledger |> member "read_error_count" |> to_int);
+          Alcotest.(check string)
+            "health reaction ledger records error source"
+            "keeper_meta_store"
+            (reaction_ledger |> member "read_error_source" |> to_string);
+          Alcotest.(check int)
+            "health paused keepers counts name discovery read error"
+            1
+            (paused |> member "keeper_name_discovery_read_error_count" |> to_int);
+          Alcotest.(check int)
+            "health paused read error count includes discovery"
+            1
+            (paused |> member "read_error_count" |> to_int);
+          Alcotest.(check string)
+            "health fleet safety degrades on name discovery read error"
+            "degraded"
+            (fleet_safety |> member "status" |> to_string);
+          Alcotest.(check string)
+            "health fleet safety uses typed discovery blocker"
+            "keeper_name_discovery_read_error"
+            (fleet_safety |> member "blocker" |> to_string);
+          Alcotest.(check bool)
+            "health fleet safety asks operator action"
+            true
+            (fleet_safety |> member "operator_action_required" |> to_bool);
+          Alcotest.(check int)
+            "health fleet safety counts name discovery read error"
+            1
+            (fleet_safety
+             |> member "keeper_name_discovery_read_error_count"
+             |> to_int);
+          Alcotest.(check int)
+            "health fleet safety total read error count includes discovery"
+            1
+            (fleet_safety |> member "autoboot_enabled_read_error_count" |> to_int);
+          Alcotest.(check bool)
+            "top-level health names fleet discovery blocker"
+            true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_fleet_safety:keeper_name_discovery_read_error"))))
+
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
   Log.emit Log.Warn ~module_name:"HealthTest"
@@ -2918,6 +3121,28 @@ let check_otel_health_shape label json =
   ignore (otel |> member "consecutive_failures" |> to_int)
 ;;
 
+let check_schedule_runner_health_shape label json =
+  let open Yojson.Safe.Util in
+  let runner = json |> member "schedule_runner" in
+  Alcotest.(check bool) (label ^ " schedule runner object") true
+    (match runner with `Assoc _ -> true | _ -> false);
+  Alcotest.(check string) (label ^ " schedule runner schema")
+    "masc.schedule.runner_status.v1"
+    (runner |> member "schema" |> to_string);
+  Alcotest.(check bool) (label ^ " schedule runner status bounded") true
+    (List.mem
+       (runner |> member "status" |> to_string)
+       [ "ok"; "running"; "not_started"; "stale"; "degraded" ]);
+  ignore (runner |> member "tick_in_flight" |> to_bool);
+  ignore (runner |> member "tick_count" |> to_int);
+  ignore (runner |> member "success_count" |> to_int);
+  ignore (runner |> member "failure_count" |> to_int);
+  ignore (runner |> member "crash_count" |> to_int);
+  match runner |> member "stale_after_sec" with
+  | `Float _ | `Int _ | `Null -> ()
+  | _ -> Alcotest.fail (label ^ " schedule runner stale_after_sec has invalid type")
+;;
+
 let test_health_response_default_is_light_probe () =
   let request = Httpun.Request.create `GET "/health" in
   let json = Server_routes_http_runtime.make_health_response_json request in
@@ -2933,6 +3158,7 @@ let test_health_response_default_is_light_probe () =
   Alcotest.(check bool) "internal mcp auth stays on default health" true
     (match json |> member "internal_mcp_auth" with `Assoc _ -> true | _ -> false);
   check_otel_health_shape "default health" json;
+  check_schedule_runner_health_shape "default health" json;
   Alcotest.(check bool) "default health skips reaction ledger" true
     (json |> member "keeper_reaction_ledger" = `Null);
   Alcotest.(check bool) "default health skips cdal snapshot" true
@@ -2961,6 +3187,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
           Alcotest.(check string) "full health detail" "full"
             (first |> member "health_detail" |> to_string);
           check_otel_health_shape "full health" first;
+          check_schedule_runner_health_shape "full health" first;
           Alcotest.(check bool) "full health includes snapshot metadata" true
             (match first |> member "full_health_snapshot" with
              | `Assoc _ -> true
@@ -2990,6 +3217,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
           Alcotest.(check string) "refreshed snapshot is ready" "ready"
             (refreshed |> member "full_health_snapshot" |> member "status"
            |> to_string);
+          check_schedule_runner_health_shape "refreshed full health" refreshed;
           Alcotest.(check bool) "ready snapshot has no stale reason" true
             (refreshed |> member "full_health_snapshot"
              |> member "stale_reason" = `Null);
@@ -4259,6 +4487,10 @@ let () =
             `Quick
             test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable;
           Alcotest.test_case
+            "health json reports identity drift persisted meta read failure"
+            `Quick
+            test_keeper_identity_drift_reports_persisted_meta_read_failure;
+          Alcotest.test_case
             "health json keeps timeout pause without policy manual"
             `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
           Alcotest.test_case
@@ -4327,6 +4559,10 @@ let () =
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
+          Alcotest.test_case
+            "health json reaction ledger reports keeper-name discovery failure"
+            `Quick
+            test_health_json_reaction_ledger_reports_keeper_name_discovery_failure;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case

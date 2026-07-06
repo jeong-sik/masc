@@ -51,6 +51,7 @@
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate
+  test_board_mention_backfill
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
   test_keeper_idle_threshold_contract
@@ -192,6 +193,7 @@
   test_keeper_chat_blocks
   test_keeper_chat_media_store
   test_keeper_external_attention
+  test_keeper_waiting_inventory
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -350,7 +352,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_persist_poison
-  test_keeper_relevance_check
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -394,6 +395,7 @@
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate
+  test_board_mention_backfill
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
   test_keeper_idle_threshold_contract
@@ -536,6 +538,7 @@
   test_keeper_chat_blocks
   test_keeper_chat_media_store
   test_keeper_external_attention
+  test_keeper_waiting_inventory
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -698,7 +701,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_persist_poison
-  test_keeper_relevance_check
   test_actionable_path_action
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -967,7 +969,7 @@
   test_json_util
   test_process_eio_coverage
   test_with_process_coverage
-  test_bg_task_stub
+  test_bg_task_pull
   test_process_eio_detached
   test_voice_runtime_overlay
   test_worker_container_coverage
@@ -1162,7 +1164,7 @@
   test_json_util
   test_process_eio_coverage
   test_with_process_coverage
-  test_bg_task_stub
+  test_bg_task_pull
   test_process_eio_detached
   test_voice_runtime_overlay
   test_worker_container_coverage

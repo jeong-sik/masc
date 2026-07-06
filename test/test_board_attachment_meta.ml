@@ -227,12 +227,27 @@ let test_meta_total_on_none () =
 let test_meta_total_on_non_object () =
   let bogus : Yojson.Safe.t = `String "not an object" in
   check int "non-object => []"
-    0 (List.length (BAM.attachments_of_post_meta (Some bogus)))
+    0 (List.length (BAM.attachments_of_post_meta (Some bogus)));
+  let result = BAM.attachments_of_post_meta_result (Some bogus) in
+  check int "non-object reports one error" 1 (List.length result.BAM.errors);
+  match result.BAM.errors with
+  | [ BAM.Meta_not_object { received = "string" } ] -> ()
+  | _ -> fail "non-object attachment meta error not surfaced"
 
 let test_meta_total_on_missing_key () =
   let no_attachments : Yojson.Safe.t = `Assoc [("foo", `String "bar")] in
   check int "missing key => []"
     0 (List.length (BAM.attachments_of_post_meta (Some no_attachments)))
+
+let test_meta_reports_non_list_attachments_slot () =
+  let meta : Yojson.Safe.t = `Assoc [(BAM.meta_json_key, `String "not a list")] in
+  let parsed = BAM.attachments_of_post_meta (Some meta) in
+  check int "non-list attachments => []" 0 (List.length parsed);
+  let result = BAM.attachments_of_post_meta_result (Some meta) in
+  check int "non-list reports one error" 1 (List.length result.BAM.errors);
+  match result.BAM.errors with
+  | [ BAM.Attachments_not_list { received = "string" } ] -> ()
+  | _ -> fail "non-list attachment slot error not surfaced"
 
 let test_meta_drops_invalid_items () =
   let valid = sample_attachment () in
@@ -244,7 +259,14 @@ let test_meta_drops_invalid_items () =
     ]);
   ] in
   let parsed = BAM.attachments_of_post_meta (Some meta) in
-  check int "invalid items dropped, valid kept" 1 (List.length parsed)
+  check int "invalid items dropped, valid kept" 1 (List.length parsed);
+  let result = BAM.attachments_of_post_meta_result (Some meta) in
+  check int "result keeps valid attachment" 1 (List.length result.BAM.attachments);
+  check int "result reports invalid items" 2 (List.length result.BAM.errors);
+  match result.BAM.errors with
+  | [ BAM.Attachment_decode_error { index = 1; _ };
+      BAM.Attachment_decode_error { index = 2; _ } ] -> ()
+  | _ -> fail "invalid attachment item errors not surfaced with item indexes"
 
 (* --- registration --- *)
 
@@ -287,6 +309,8 @@ let () =
       test_case "total on None" `Quick test_meta_total_on_none;
       test_case "total on non-object" `Quick test_meta_total_on_non_object;
       test_case "total on missing key" `Quick test_meta_total_on_missing_key;
+      test_case "reports non-list attachments slot" `Quick
+        test_meta_reports_non_list_attachments_slot;
       test_case "drops invalid items" `Quick test_meta_drops_invalid_items;
     ];
   ]

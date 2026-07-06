@@ -144,7 +144,7 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
        missing agents file, malformed JSON) returned [ctx.agent_name]
        silently while only the rare [exn] catch-all logged. Operators
        saw the loud path but missed the common one. Single warn arm
-       mirrors [Tool_workspace.safe_read_backlog]. *)
+       preserves compatibility while keeping cancellation explicit. *)
     try Workspace.resolve_agent_name ctx.config ctx.agent_name with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -285,6 +285,15 @@ let handle_add_task ~tool_name ~start_time ctx args =
     | _ -> None
   in
   let contract_result = parse_task_contract args in
+  let validate_goal_id () =
+    match goal_id with
+    | None -> Ok ()
+    | Some requested_goal_id ->
+      (match Goal_store.get_goal_result ctx.config ~goal_id:requested_goal_id with
+       | Error msg -> Error (`Runtime msg)
+       | Ok None -> Error (`Workflow (Printf.sprintf "Unknown goal_id '%s'" requested_goal_id))
+       | Ok (Some _) -> Ok ())
+  in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
   (* RFC-0189: title/priority/goal_id/contract validation — all
@@ -299,28 +308,29 @@ let handle_add_task ~tool_name ~start_time ctx args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
-  else if Option.is_some goal_id
-          && not
-               (* DET-OK: [Option.value ~default:""] is guarded by
-                  the [Option.is_some goal_id] guard above; the
-                  empty default is unreachable.  Refactoring to a
-                  match would split the boolean chain awkwardly. *)
-               (Goal_store.list_goals ctx.config ()
-                |> List.exists (fun (goal : Goal_store.goal) ->
-                       String.equal goal.id (Option.value ~default:"" goal_id)))
-  then
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time
-      (* DET-OK: same guarded branch — goal_id is [Some _]. *)
-      (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
-    match contract_result with
-    | Error error ->
+    match validate_goal_id () with
+    | Error (`Runtime msg) ->
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Runtime_failure)
+        ~tool_name
+        ~start_time
+        (Printf.sprintf "Goal store read failed: %s" msg)
+    | Error (`Workflow msg) ->
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name
+        ~start_time
+        msg
+    | Ok () ->
+      (match contract_result with
+       | Error error ->
         Tool_result.error
           ~failure_class:(Some Tool_result.Workflow_rejection)
-          ~tool_name ~start_time error
-    | Ok contract ->
+          ~tool_name
+          ~start_time
+          error
+       | Ok contract ->
         let add_result =
           Workspace.add_task_with_result ?contract
             ?goal_id
@@ -352,7 +362,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
              ~failure_class:(Some Tool_result.Workflow_rejection)
              ~tool_name
              ~start_time
-             (Workspace.add_task_error_to_string err))
+             (Workspace.add_task_error_to_string err)))
 
 (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
    over [Task_goal_assignment.set_task_goal] — the single validated backend
@@ -392,8 +402,17 @@ let handle_set_goal ~tool_name ~start_time ctx args =
               ; ("goal_id", `String goal_id)
               ]))
       | Error err ->
+        let failure_class =
+          match err with
+          | Task_goal_assignment.Unknown_task _
+          | Task_goal_assignment.Unknown_goal _
+          | Task_goal_assignment.Already_assigned _ -> Tool_result.Workflow_rejection
+          | Task_goal_assignment.Task_read_failed _
+          | Task_goal_assignment.Goal_read_failed _
+          | Task_goal_assignment.Link_write_failed _ -> Tool_result.Runtime_failure
+        in
         Tool_result.error
-          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~failure_class:(Some failure_class)
           ~tool_name ~start_time
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
@@ -467,6 +486,37 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
     let tasks =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
+    let validate_batch_goal_ids tasks =
+      let rec loop idx errors = function
+        | [] ->
+          if errors = [] then Ok () else Error (`Workflow (List.rev errors))
+        | (_, _, _, _, None) :: rest -> loop (idx + 1) errors rest
+        | (_, _, _, _, Some goal_id) :: rest ->
+          (match Goal_store.get_goal_result ctx.config ~goal_id with
+           | Error msg -> Error (`Runtime msg)
+           | Ok (Some _) -> loop (idx + 1) errors rest
+           | Ok None ->
+             loop
+               (idx + 1)
+               (Printf.sprintf "item[%d]: Unknown goal_id '%s'" idx goal_id :: errors)
+               rest)
+      in
+      loop 0 [] tasks
+    in
+    match validate_batch_goal_ids tasks with
+    | Error (`Runtime msg) ->
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Runtime_failure)
+        ~tool_name
+        ~start_time
+        (Printf.sprintf "Goal store read failed: %s" msg)
+    | Error (`Workflow errors) ->
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name
+        ~start_time
+        (Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
+    | Ok () ->
     let batch_result =
       Workspace.batch_add_tasks_with_contracts_result
         ~created_by:ctx.agent_name ctx.config tasks

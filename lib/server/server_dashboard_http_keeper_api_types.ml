@@ -246,13 +246,20 @@ let tool_call_output_text_opt json =
     | None -> None)
   | None | Some _ -> None
 
-let parse_tool_output_json_opt json =
+let parse_tool_output_json_result json =
   match tool_call_output_text_opt json with
-  | None -> None
+  | None -> Ok None
   | Some output -> (
     match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
+    | Ok parsed -> Ok (Some parsed)
+    | Error err -> Error err)
+
+let parse_tool_output_json_opt json =
+  match parse_tool_output_json_result json with
+  | Ok parsed -> parsed
+  | Error err ->
+    Log.Dashboard.warn "runtime_lens.tool_output parse failed: %s" err;
+    None
 
 let tool_call_runtime_contract json =
   match Json_util.assoc_member_opt "runtime_contract" json with
@@ -322,6 +329,8 @@ let claim_scope_summary_absent =
     ; ("claimed_goal_id", `Null)
     ; ("trace_id", `Null)
     ; ("keeper_turn_id", `Null)
+    ; ("read_error_source", `Null)
+    ; ("read_error", `Null)
     ]
 
 let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)

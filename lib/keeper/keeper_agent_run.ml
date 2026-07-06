@@ -26,6 +26,34 @@ let observation_timestamp_ms () =
 let completion_contract_result_for_progress_evidence =
   Turn_helpers.completion_contract_result_for_progress_evidence
 
+type turn_record_inference_telemetry =
+  | Turn_record_inference_telemetry of Agent_sdk.Types.inference_telemetry option
+  | Turn_record_absent_due_to_turn_error of string
+
+let turn_record_inference_telemetry_of_result
+      (turn_result : (run_result, Agent_sdk.Error.sdk_error) result)
+  =
+  match turn_result with
+  | Ok result -> Turn_record_inference_telemetry result.inference_telemetry
+  | Error err ->
+    Turn_record_absent_due_to_turn_error
+      (Keeper_agent_error.sdk_error_kind_for_receipt err)
+;;
+
+let request_latency_ms_of_turn_record_telemetry = function
+  | Turn_record_inference_telemetry telemetry ->
+    Option.bind telemetry (fun (t : Agent_sdk.Types.inference_telemetry) ->
+      t.request_latency_ms)
+  | Turn_record_absent_due_to_turn_error _error_kind -> None
+;;
+
+let ttfrc_ms_of_turn_record_telemetry = function
+  | Turn_record_inference_telemetry telemetry ->
+    Option.bind telemetry (fun (t : Agent_sdk.Types.inference_telemetry) ->
+      t.ttfrc_ms)
+  | Turn_record_absent_due_to_turn_error _error_kind -> None
+;;
+
 let keeper_oas_visibility_neutral_guardrails ?guardrails () =
   let max_tool_calls_per_turn =
     match guardrails with
@@ -609,7 +637,13 @@ let run_turn
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
     let keeper_has_owned_active_task () =
-      Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
+      match owned_active_task_id_result_for_meta ~config ~meta:acc.meta with
+      | Ok task_id -> Option.is_some task_id
+      | Error err ->
+        Log.Keeper.warn ~keeper_name:meta.name
+          "owned active task check failed at turn start; treating claim-context progress as owned: %s"
+          err;
+        true
     in
     (* A claim tool mutates [acc.meta.current_task_id_id] during this run; contract
      gating must judge claim-context tools against ownership at turn entry. *)
@@ -968,6 +1002,9 @@ let run_turn
             }
           | Ok _ | Error _ -> { input_tokens = None; output_tokens = None }
         in
+        let turn_record_inference_telemetry =
+          turn_record_inference_telemetry_of_result turn_result
+        in
         let request_latency_ms : int option =
           (* RFC-0233 §9 — wall-clock duration of the provider call in
              milliseconds, sourced from OAS
@@ -980,11 +1017,8 @@ let run_turn
              rather than nesting option-of-option; on the error path the
              dashboard renders absence for the generation phase rather than a
              fabricated duration. *)
-          match turn_result with
-          | Ok result ->
-              Option.bind result.inference_telemetry (fun t ->
-                t.request_latency_ms)
-          | Error _ -> None
+          request_latency_ms_of_turn_record_telemetry
+            turn_record_inference_telemetry
         in
         let ttfrc_ms : float option =
           (* RFC-0233 §10 — time-to-first-response-chunk (wall-clock, ms),
@@ -996,10 +1030,7 @@ let run_turn
              [Option.bind] flattens (same pattern as [request_latency_ms]
              above). The decode (post-first-chunk) duration is NOT derived
              from request_latency_ms - ttfrc_ms (§9.6 fabrication guard). *)
-          match turn_result with
-          | Ok result ->
-              Option.bind result.inference_telemetry (fun t -> t.ttfrc_ms)
-          | Error _ -> None
+          ttfrc_ms_of_turn_record_telemetry turn_record_inference_telemetry
         in
         (* RFC-0233 §2.3 — views derive, no view-side repair: ground the
            inspector's [model] and [finish_reason] in the same refs the

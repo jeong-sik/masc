@@ -1816,6 +1816,61 @@ let test_cmd_prefix_uses_shell_command_words () =
     "cd"
     "cd repos/masc && git status"
 
+let test_command_words_result_surfaces_parse_errors () =
+  (match Keeper_tool_command_words.first_token_of_cmd_result "git status" with
+   | Ok (Some token) -> Alcotest.(check string) "first token" "git" token
+   | Ok None -> Alcotest.fail "expected first token"
+   | Error error ->
+     Alcotest.failf
+       "expected first token, got %s"
+       (Keeper_tool_command_words.command_word_parse_error_to_string error));
+  (match Keeper_tool_command_words.first_token_of_cmd_result "   " with
+   | Ok token -> Alcotest.(check (option string)) "empty command has no token" None token
+   | Error error ->
+     Alcotest.failf
+       "expected empty command to have no token, got %s"
+       (Keeper_tool_command_words.command_word_parse_error_to_string error));
+  let unsupported = "cd repos/masc && git status" in
+  (match Keeper_tool_command_words.cmd_prefix_result unsupported with
+   | Error (Keeper_tool_command_words.Shell_ir_parse_error _) -> ()
+   | Ok prefix -> Alcotest.failf "expected unsupported shell shape error, got %S" prefix
+   | Error error ->
+     Alcotest.failf
+       "expected shell-ir parse error, got %s"
+       (Keeper_tool_command_words.command_word_parse_error_to_string error));
+  Alcotest.(check string)
+    "legacy prefix keeps leading-token fallback"
+    "cd"
+    (Keeper_tool_command_words.cmd_prefix unsupported)
+
+let test_guard_tokens_with_errors_retains_partial_segments () =
+  let result =
+    Keeper_tool_command_words.guard_tokens_of_cmd_with_errors
+      "echo ok; echo 'unterminated"
+  in
+  let { Keeper_tool_command_words.guard_tokens; guard_token_parse_errors } = result in
+  Alcotest.(check int)
+    "one tokenizer error"
+    1
+    (List.length guard_token_parse_errors);
+  (match guard_token_parse_errors with
+   | [ Keeper_tool_command_words.Shell_words_parse_error
+         { segment; error = Masc_exec_shell_words.Shell_words.Unclosed_quote } ] ->
+     Alcotest.(check string) "error segment" "echo 'unterminated" segment
+   | [ error ] ->
+     Alcotest.failf
+       "unexpected tokenizer error: %s"
+       (Keeper_tool_command_words.command_word_parse_error_to_string error)
+   | _ -> Alcotest.fail "expected one tokenizer error");
+  Alcotest.(check bool)
+    "valid segment tokens retained"
+    true
+    (List.exists
+       (function
+         | Keeper_tool_command_words.Guard_word ("echo", false) -> true
+         | _ -> false)
+       guard_tokens)
+
 let detect_repo_hosting_cli_repo_api_misuse_of_string cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir ->
@@ -2524,6 +2579,14 @@ let () =
             "history cmd_prefix uses shell command words"
             `Quick
             test_cmd_prefix_uses_shell_command_words;
+          Alcotest.test_case
+            "command words Result surfaces parse errors"
+            `Quick
+            test_command_words_result_surfaces_parse_errors;
+          Alcotest.test_case
+            "command words with_errors retains partial segments"
+            `Quick
+            test_guard_tokens_with_errors_retains_partial_segments;
           Alcotest.test_case
             "docker run does not retry generic timeout"
             `Quick

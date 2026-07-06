@@ -40,6 +40,21 @@ let add_task ?goal_id config ~title =
   then failf "add_task failed: %s" result
 ;;
 
+let make_path_unreadable path =
+  if Sys.file_exists path && not (Sys.is_directory path) then Sys.remove path;
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
+let make_goal_task_link_registry_unreadable config =
+  make_path_unreadable (Workspace_goal_index.goal_task_links_path config);
+  make_path_unreadable (Workspace_goal_index.goal_task_links_recovery_path config)
+;;
+
+let assoc_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
 let test_active_goal_ids_filter_claimable_tasks () =
   let config = make_config () in
   Fun.protect
@@ -51,7 +66,13 @@ let test_active_goal_ids_filter_claimable_tasks () =
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
       in
-      check string "mode" "active_goal_ids" scope.mode;
+      check string "mode"
+        Keeper_runtime_contract.claim_scope_mode_active_goal_ids
+        scope.mode;
+      check (option string) "no read error" None
+        (Option.map
+           Keeper_runtime_contract.claim_goal_scope_read_error_to_string
+           scope.read_error);
       check (list string) "effective goal ids" [ "goal-a" ] scope.effective_goal_ids;
       let tasks = Workspace.get_tasks_raw config in
       let included =
@@ -89,10 +110,15 @@ let test_no_scoped_match_falls_back_to_all_tasks () =
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
       in
-      check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
+      check string "fallback mode"
+        Keeper_runtime_contract.claim_scope_mode_empty_goal_scope_fallback_all_tasks
         scope.mode;
       check (option string) "fallback reason recorded"
         (Some "no_scoped_claimable_tasks") scope.fallback_reason;
+      check (option string) "no read error" None
+        (Option.map
+           Keeper_runtime_contract.claim_goal_scope_read_error_to_string
+           scope.read_error);
       check (list string) "effective goal ids preserved" [ "goal-a" ]
         scope.effective_goal_ids;
       match
@@ -125,8 +151,14 @@ let test_scoped_match_present_keeps_isolation () =
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
       in
-      check string "scoped mode" "active_goal_ids" scope.mode;
+      check string "scoped mode"
+        Keeper_runtime_contract.claim_scope_mode_active_goal_ids
+        scope.mode;
       check (option string) "no fallback reason" None scope.fallback_reason;
+      check (option string) "no read error" None
+        (Option.map
+           Keeper_runtime_contract.claim_goal_scope_read_error_to_string
+           scope.read_error);
       let tasks = Workspace.get_tasks_raw config in
       let included =
         tasks
@@ -134,6 +166,74 @@ let test_scoped_match_present_keeps_isolation () =
         |> List.map (fun (task : Masc_domain.task) -> task.title)
       in
       check (list string) "only linked task in scope" [ "goal a task" ] included)
+;;
+
+let test_goal_link_read_failure_keeps_claim_scope_closed () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      add_task ~goal_id:"goal-a" config ~title:"goal a task";
+      add_task ~goal_id:"goal-b" config ~title:"goal b task";
+      make_goal_task_link_registry_unreadable config;
+      let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
+      let scope =
+        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+      in
+      check string "read failure mode"
+        Keeper_runtime_contract.claim_scope_mode_goal_task_links_read_failed
+        scope.mode;
+      check (option string) "no all-tasks fallback reason" None scope.fallback_reason;
+      let read_error =
+        Option.map
+          Keeper_runtime_contract.claim_goal_scope_read_error_to_string
+          scope.read_error
+      in
+      check bool "read error recorded" true (Option.is_some read_error);
+      let runtime_contract =
+        Keeper_runtime_contract.runtime_contract_json ~config meta
+      in
+      let goal_progress =
+        match assoc_opt "goal_progress" runtime_contract with
+        | Some json -> json
+        | None -> fail "runtime contract missing goal_progress"
+      in
+      check (option string) "goal progress status unknown" (Some "unknown")
+        (match assoc_opt "status" goal_progress with
+         | Some (`String status) -> Some status
+         | _ -> None);
+      check bool "goal progress read error recorded" true
+        (match assoc_opt "read_error" goal_progress with
+         | Some (`String msg) -> String.length msg > 0
+         | _ -> false);
+      check bool "blocked task count remains unknown" true
+        (match assoc_opt "blocked_task_count" runtime_contract with
+         | Some `Null -> true
+         | _ -> false);
+      check bool "blocked task count known is false" true
+        (match assoc_opt "blocked_task_count_known" runtime_contract with
+         | Some (`Bool false) -> true
+         | _ -> false);
+      let tasks = Workspace.get_tasks_raw config in
+      let included =
+        tasks
+        |> List.filter scope.task_filter
+        |> List.map (fun (task : Masc_domain.task) -> task.title)
+      in
+      check (list string) "read failure does not widen claim scope" [] included;
+      match
+        Workspace.claim_next_r config ~agent_name:"keeper-runtime-contract"
+          ~task_filter:scope.task_filter
+          ()
+      with
+      | Workspace.Claim_next_no_eligible { excluded_count; _ } ->
+        check int "all tasks excluded by closed scope" 2 excluded_count
+      | Workspace.Claim_next_claimed { task_id; _ } ->
+        failf "expected closed scope, claimed %s" task_id
+      | Workspace.Claim_next_no_unclaimed ->
+        fail "expected closed scope with excluded unclaimed tasks"
+      | Workspace.Claim_next_error msg ->
+        failf "expected closed scope, got error: %s" msg)
 ;;
 
 let () =
@@ -146,6 +246,8 @@ let () =
             test_scoped_match_present_keeps_isolation
         ; test_case "falls back to all_tasks when no scoped match" `Quick
             test_no_scoped_match_falls_back_to_all_tasks
+        ; test_case "keeps scope closed when goal links cannot be read" `Quick
+            test_goal_link_read_failure_keeps_claim_scope_closed
         ] )
     ]
 ;;

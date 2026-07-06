@@ -13,11 +13,32 @@ val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
 val task_is_linked_to_keeper_goals :
   ?task_goal_index:(string, string list) Hashtbl.t -> string list -> Masc_domain.task -> bool
 
+type claim_goal_scope_mode =
+  | All_tasks
+  | Active_goal_ids
+  | Empty_goal_scope_fallback_all_tasks
+  | Goal_task_links_read_failed_scope
+
+val claim_goal_scope_mode_to_string : claim_goal_scope_mode -> string
+
+val claim_scope_mode_all_tasks : string
+val claim_scope_mode_active_goal_ids : string
+val claim_scope_mode_empty_goal_scope_fallback_all_tasks : string
+val claim_scope_mode_goal_task_links_read_failed : string
+
+type claim_goal_scope_read_error =
+  | Goal_task_links_read_failed of string
+
+val claim_goal_scope_read_error_to_string :
+  claim_goal_scope_read_error -> string
+
 type claim_goal_scope = {
   task_filter : Masc_domain.task -> bool;
+  scope_mode : claim_goal_scope_mode;
   mode : string;
   effective_goal_ids : string list;
   fallback_reason : string option;
+  read_error : claim_goal_scope_read_error option;
 }
 
 val resolve_claim_goal_scope :

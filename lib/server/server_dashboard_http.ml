@@ -534,7 +534,12 @@ let dashboard_verification_resolve_http_json
 ;;
 
 let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
-  let goals = Goal_store.list_goals config () in
+  let goals_result = Goal_store.list_goals_result config () in
+  let goals, goal_store_known, goal_store_read_error =
+    match goals_result with
+    | Ok goals -> goals, true, None
+    | Error msg -> [], false, Some msg
+  in
   let rollup = Goal_store.compute_rollup goals in
   let task_rollup =
     dashboard_tasks_safe config
@@ -554,6 +559,8 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "goal_store_known", `Bool goal_store_known
+    ; "goal_store_read_error", Json_util.string_opt_to_json goal_store_read_error
     ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
     ; "rollup", Goal_store.rollup_to_yojson rollup
     ; ( "task_backlog"

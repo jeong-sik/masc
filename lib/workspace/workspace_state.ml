@@ -16,6 +16,7 @@
 
 open Masc_domain
 open Workspace_utils
+open Result.Syntax
 
 (* ============================================ *)
 (* Shared String Utilities                      *)
@@ -84,39 +85,108 @@ let recover_workspace_state config json =
 (* State Read / Write / Update                  *)
 (* ============================================ *)
 
-let write_state config state =
+let write_state_result config state =
   let json = workspace_state_to_yojson state in
-  write_json config (state_path config) json
+  write_json_result config (state_path config) json
 
-let read_state config =
-  let json = read_json config (state_path config) in
+let write_state config state =
+  match write_state_result config state with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
+
+type read_state_error =
+  | State_read_failed of string
+  | State_repair_write_failed of
+      { decode_error : string
+      ; write_error : string
+      ; recovered_state : Masc_domain.workspace_state
+      }
+
+let read_state_error_to_string = function
+  | State_read_failed error ->
+      Printf.sprintf "workspace_state read failed: %s" error
+  | State_repair_write_failed { decode_error; write_error; _ } ->
+      Printf.sprintf
+        "workspace_state repair write failed after decode error (%s): %s"
+        decode_error write_error
+
+type read_state_status =
+  | State_authoritative
+  | State_recovered_unpersisted
+  | State_default_from_read_error
+
+let read_state_status_to_string = function
+  | State_authoritative -> "authoritative"
+  | State_recovered_unpersisted -> "recovered_unpersisted"
+  | State_default_from_read_error -> "default_from_read_error"
+
+type read_state_snapshot =
+  { state : Masc_domain.workspace_state
+  ; status : read_state_status
+  ; read_errors : string list
+  }
+
+let workspace_state_raw_snippet json =
+  let s = Yojson.Safe.to_string json in
+  if String.length s <= 500 then s else String.sub s 0 500 ^ "...(truncated)"
+
+let read_state_result config =
+  let* json =
+    read_json_result config (state_path config)
+    |> Result.map_error (fun error -> State_read_failed error)
+  in
   match workspace_state_of_yojson json with
-  | Ok state -> state
+  | Ok state -> Ok state
   | Error msg ->
       let repaired = recover_workspace_state config json in
-      let raw_snippet =
-        let s = Yojson.Safe.to_string json in
-        if String.length s <= 500 then s
-        else String.sub s 0 500 ^ "...(truncated)"
-      in
       Log.Misc.warn
         "read_state: deserialization failed (%s), raw=%s — repairing and rewriting"
-        msg raw_snippet;
-      (try write_state config repaired
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Misc.warn "read_state: failed to persist repaired state: %s"
-             (Printexc.to_string exn));
-      repaired
+        msg (workspace_state_raw_snippet json);
+      (match write_state_result config repaired with
+       | Ok () -> Ok repaired
+       | Error error ->
+           Error
+             (State_repair_write_failed
+                { decode_error = msg; write_error = error; recovered_state = repaired }))
+
+let read_state_snapshot config =
+  match read_state_result config with
+  | Ok state -> { state; status = State_authoritative; read_errors = [] }
+  | Error (State_repair_write_failed { recovered_state; _ } as error) ->
+      let message = read_state_error_to_string error in
+      Log.Misc.warn "read_state: %s" message;
+      { state = recovered_state
+      ; status = State_recovered_unpersisted
+      ; read_errors = [ message ]
+      }
+  | Error (State_read_failed _ as error) ->
+      let message = read_state_error_to_string error in
+      Log.Misc.warn "read_state: %s" message;
+      { state = Workspace_bootstrap.default_workspace_state config
+      ; status = State_default_from_read_error
+      ; read_errors = [ message ]
+      }
+
+let read_state config =
+  (read_state_snapshot config).state
+
+let update_state_result config f =
+  with_file_lock config (state_path config) (fun () ->
+    let snapshot = read_state_snapshot config in
+    match snapshot.status with
+    | State_default_from_read_error ->
+      Error (String.concat "; " snapshot.read_errors)
+    | State_authoritative | State_recovered_unpersisted ->
+      let new_state = f snapshot.state in
+      (match write_state_result config new_state with
+       | Ok () -> Ok new_state
+       | Error msg -> Error msg)
+  )
 
 let update_state config f =
-  with_file_lock config (state_path config) (fun () ->
-    let state = read_state config in
-    let new_state = f state in
-    write_state config new_state;
-    new_state
-  )
+  match update_state_result config f with
+  | Ok state -> state
+  | Error msg -> raise (Sys_error msg)
 
 (* ============================================ *)
 (* Sequence Numbers                             *)
@@ -130,15 +200,34 @@ let next_seq config =
 (* Pause State                                  *)
 (* ============================================ *)
 
+let is_paused_result config =
+  let snapshot = read_state_snapshot config in
+  match snapshot.status with
+  | State_default_from_read_error -> Error (String.concat "; " snapshot.read_errors)
+  | State_authoritative | State_recovered_unpersisted -> Ok snapshot.state.paused
+
 let is_paused config =
-  let state = read_state config in
-  state.paused
+  match is_paused_result config with
+  | Ok paused -> paused
+  | Error msg ->
+    Log.Workspace.error "is_paused failed: %s" msg;
+    false
+
+let pause_info_result config =
+  let snapshot = read_state_snapshot config in
+  match snapshot.status with
+  | State_default_from_read_error -> Error (String.concat "; " snapshot.read_errors)
+  | State_authoritative | State_recovered_unpersisted ->
+    let state = snapshot.state in
+    if state.paused
+    then Ok (Some (state.paused_by, state.pause_reason, state.paused_at))
+    else Ok None
 
 let pause_info config =
-  let state = read_state config in
-  if state.paused then
-    Some (state.paused_by, state.pause_reason, state.paused_at)
-  else
+  match pause_info_result config with
+  | Ok info -> info
+  | Error msg ->
+    Log.Workspace.error "pause_info failed: %s" msg;
     None
 
 (* Broadcast moved to Workspace_broadcast (exported via Workspace aggregator).

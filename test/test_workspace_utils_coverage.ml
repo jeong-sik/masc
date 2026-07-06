@@ -66,6 +66,18 @@ let test_parse_gitdir_with_spaces () =
   | Some path -> check string "trimmed" "/home/user/project" path
   | None -> fail "expected Some"
 
+let test_read_git_file_result_surfaces_missing_file () =
+  let missing =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      "masc-workspace-utils-missing-git-file"
+  in
+  if Sys.file_exists missing then Sys.remove missing;
+  match Workspace_utils.read_git_file_result missing with
+  | Ok _ -> fail "expected missing .git file read to return Error"
+  | Error msg ->
+    check bool "error message populated" true (String.length msg > 0)
+
 let write_file path contents =
   let oc = open_out path in
   Fun.protect
@@ -535,6 +547,26 @@ let make_test_config ~base_path ~cluster_name : Workspace_utils.config =
     backend = Workspace_utils.Memory memory_backend;
   }
 
+let make_filesystem_test_config ~env ~base_path ~cluster_name : Workspace_utils.config =
+  let backend_config : Backend_types.config = {
+    base_path;
+    node_id = "test-node";
+    cluster_name;
+    pubsub_max_messages = 1000;
+  } in
+  let filesystem_backend =
+    Backend.FileSystem.create
+      ~fs:Eio.Path.(Eio.Stdenv.fs env / base_path)
+      backend_config
+  in
+  {
+    Workspace_utils.base_path;
+    workspace_path = base_path;
+    lock_expiry_minutes = 30;
+    backend_config;
+    backend = Workspace_utils.FileSystem filesystem_backend;
+  }
+
 let test_masc_root_dir_default_cluster () =
   let cfg = make_test_config ~base_path:"/home/user/project" ~cluster_name:"default" in
   let result = Workspace_utils.masc_root_dir cfg in
@@ -569,6 +601,65 @@ let test_list_dir_prefers_backend_for_memory_keys () =
       let listed = Workspace_utils.list_dir cfg workers_dir |> List.sort String.compare in
       check (list string) "memory backend ignores local-only stale files"
         [ "backend.json" ] listed)
+
+let test_list_dir_result_reports_backend_error () =
+  Eio_main.run @@ fun env ->
+  let scratch = Filename.temp_dir "workspace-utils-list-dir-result" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg =
+        make_filesystem_test_config
+          ~env
+          ~base_path:scratch
+          ~cluster_name:"default"
+      in
+      let invalid_dir =
+        Filename.concat (Workspace_utils.masc_root_dir cfg) "bad*dir"
+      in
+      (match Workspace_utils.list_dir_result cfg invalid_dir with
+       | Ok names ->
+         failf
+           "expected list_dir_result backend error, got %d names"
+           (List.length names)
+       | Error msg ->
+         check bool "backend list error is surfaced" true
+           (str_contains msg "Invalid character"));
+      check (list string)
+        "compatibility list_dir returns empty list"
+        []
+        (Workspace_utils.list_dir cfg invalid_dir))
+
+let test_backend_get_all_reports_stale_filesystem_key () =
+  Eio_main.run @@ fun env ->
+  let scratch = Filename.temp_dir "workspace-utils-get-all-stale-key" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg =
+        make_filesystem_test_config
+          ~env
+          ~base_path:scratch
+          ~cluster_name:"default"
+      in
+      (match Workspace_utils.backend_set cfg ~key:"live" ~value:"ok" with
+       | Ok () -> ()
+       | Error err ->
+         failf "backend_set live failed: %s" (Backend_types.show_error err));
+      (match Workspace_utils.backend_set cfg ~key:"gone" ~value:"stale" with
+       | Ok () -> ()
+       | Error err ->
+         failf "backend_set gone failed: %s" (Backend_types.show_error err));
+      Sys.remove (Filename.concat scratch "gone");
+      match Workspace_utils.backend_get_all cfg ~prefix:"" with
+      | Ok pairs ->
+        failf
+          "expected stale key read failure, got %d pairs"
+          (List.length pairs)
+      | Error (Backend_types.NotFound key) ->
+        check string "stale key is reported" "gone" key
+      | Error err ->
+        failf "expected NotFound stale key, got %s" (Backend_types.show_error err))
 
 let test_default_config_memory_fallback_isolated_by_base_path () =
   let first = Filename.temp_dir "workspace-utils-memory-first" "" in
@@ -646,6 +737,8 @@ let () =
       test_case "empty" `Quick test_parse_gitdir_empty;
       test_case "nested" `Quick test_parse_gitdir_nested_worktree;
       test_case "with spaces" `Quick test_parse_gitdir_with_spaces;
+      test_case "read_git_file_result missing file surfaces error" `Quick
+        test_read_git_file_result_surfaces_missing_file;
       test_case "ignores inherited env in tests by default" `Quick
         test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default;
       test_case "prefers requested path in tests" `Quick
@@ -749,6 +842,10 @@ let () =
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "list_dir prefers backend for memory keys" `Quick
         test_list_dir_prefers_backend_for_memory_keys;
+      test_case "list_dir_result reports backend error" `Quick
+        test_list_dir_result_reports_backend_error;
+      test_case "backend_get_all reports stale filesystem key" `Quick
+        test_backend_get_all_reports_stale_filesystem_key;
       test_case "memory fallback isolated by base path" `Quick
         test_default_config_memory_fallback_isolated_by_base_path;
       test_case "memory fallback keys by backend base path" `Quick

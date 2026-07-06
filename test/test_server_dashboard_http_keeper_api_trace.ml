@@ -2,6 +2,7 @@ open Alcotest
 open Masc
 module Trace = Server_dashboard_http_keeper_api_trace
 module Types = Server_dashboard_http_keeper_api_types
+module Lens_summaries = Server_dashboard_http_keeper_runtime_lens_summaries
 module T = Trajectory
 
 let mk_thinking_with_turn ~turn ~ts ~redacted ~content =
@@ -210,6 +211,44 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
       (Option.is_none (trace_block_by_turn_ref disallowed_ref)))
 ;;
 
+let test_parse_tool_output_json_result_surfaces_malformed_output () =
+  let call =
+    `Assoc
+      [ ("tool", `String "keeper_task_claim")
+      ; ("output", `String "{not-json")
+      ; ("trace_id", `String "trace-runtime-lens")
+      ; ("keeper_turn_id", `Int 9)
+      ]
+  in
+  (match Types.parse_tool_output_json_result call with
+   | Ok _ -> fail "malformed tool output must surface Error"
+   | Error msg ->
+     check bool "parse error is populated" true (String.length msg > 0));
+  check bool "legacy option facade projects parse failure to None" true
+    (Option.is_none (Types.parse_tool_output_json_opt call))
+;;
+
+let test_claim_scope_summary_surfaces_tool_output_parse_error () =
+  let call =
+    `Assoc
+      [ ("tool", `String "keeper_task_claim")
+      ; ("output", `String "{not-json")
+      ; ("trace_id", `String "trace-runtime-lens")
+      ; ("keeper_turn_id", `Int 9)
+      ]
+  in
+  let summary = Lens_summaries.claim_scope_summary_of_tool_call_json call in
+  let open Yojson.Safe.Util in
+  check bool "matching claim is present" true (summary |> member "present" |> to_bool);
+  check string "status" "read_error" (summary |> member "status" |> to_string);
+  check string "read error source" "runtime_lens.tool_output"
+    (summary |> member "read_error_source" |> to_string);
+  check string "trace id preserved" "trace-runtime-lens"
+    (summary |> member "trace_id" |> to_string);
+  check int "keeper turn id preserved" 9
+    (summary |> member "keeper_turn_id" |> to_int)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
@@ -239,6 +278,16 @@ let () =
              "reads allowed trace_history trace ids"
              `Quick
              test_chat_trace_block_by_turn_ref_reads_allowed_trace_history
+         ] )
+     ; ( "tool_output_json"
+       , [ test_case
+             "parse result surfaces malformed output"
+             `Quick
+             test_parse_tool_output_json_result_surfaces_malformed_output
+         ; test_case
+             "claim summary surfaces tool output parse error"
+             `Quick
+             test_claim_scope_summary_surfaces_tool_output_parse_error
          ] )
      ]
 ;;

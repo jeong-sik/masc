@@ -39,6 +39,25 @@ let schedules_recovery_path config = schedules_path config ^ ".last-good"
 
 let human ?display_name id = { id; kind = Human_operator; display_name }
 
+let read_audit_ok config =
+  match Schedule_audit_log.read_all config with
+  | Ok events -> events
+  | Error msg -> fail msg
+;;
+
+let read_recent_audit_ok config ~limit =
+  match Schedule_audit_log.read_recent config ~limit with
+  | Ok events -> events
+  | Error msg -> fail msg
+;;
+
+let audit_actions events =
+  List.map
+    (fun (event : Schedule_audit_log.event) ->
+       Schedule_audit_log.action_to_string event.action)
+    events
+;;
+
 let payload_json () =
   `Assoc
     [ "kind", `String "consumer.note"
@@ -136,16 +155,95 @@ let test_grant_records_and_schedules_request () =
   | None -> fail "schedule missing"
 ;;
 
+let test_audit_records_insert_and_grant () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  (match record_grant config (grant req) with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  match read_audit_ok config with
+  | [ created; approved ] ->
+    check (list string) "audit actions"
+      [ "request_created"; "grant_approved" ]
+      (audit_actions [ created; approved ]);
+    check string "created schedule" req.schedule_id created.schedule_id;
+    check bool "created has no previous status" true
+      (Option.is_none created.previous_status);
+    check_status "created current" Pending_approval created.current_status;
+    (match approved.previous_status with
+     | Some previous -> check_status "approved previous" Pending_approval previous
+     | None -> fail "approved audit event must include previous status");
+    check_status "approved current" Scheduled approved.current_status;
+    check string "approved actor" "approver"
+      (match approved.actor with
+       | Some actor -> actor.id
+       | None -> "")
+  | events ->
+    failf "expected two audit events, got %d" (List.length events)
+;;
+
+let test_audit_records_due_execution_lifecycle () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"audit-run-1" ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "one due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
+   | Ok updated -> check_status "running" Running updated.status
+   | Error err -> fail (store_error_to_string err));
+  (match complete_running config ~now:203.0 ~schedule_id:req.schedule_id () with
+   | Ok updated -> check_status "succeeded" Succeeded updated.status
+   | Error err -> fail (store_error_to_string err));
+  let events = read_audit_ok config in
+  check (list string) "lifecycle actions"
+    [ "request_created"
+    ; "request_marked_due"
+    ; "execution_started"
+    ; "execution_succeeded"
+    ]
+    (audit_actions events);
+  let recent = read_recent_audit_ok config ~limit:2 in
+  check (list string) "recent newest first"
+    [ "execution_succeeded"; "execution_started" ]
+    (audit_actions recent)
+;;
+
 let test_cancel_request_marks_cancelled () =
   with_workspace
   @@ fun config ->
   let req = make_request ~schedule_id:"cancel-1" ~risk_class:Read_only () in
   ignore (insert_ok config req);
-  (match cancel_request config ~schedule_id:req.schedule_id with
+  let cancelled_by = human "operator" in
+  (match
+     cancel_request config ~schedule_id:req.schedule_id
+       ~cancelled_by
+       ~reason:"operator cleanup"
+   with
    | Ok updated -> check_status "cancelled status" Cancelled updated.status
    | Error err -> fail (store_error_to_string err));
   match get_schedule config ~schedule_id:req.schedule_id with
-  | Some stored -> check_status "stored cancelled" Cancelled stored.status
+  | Some stored ->
+    check_status "stored cancelled" Cancelled stored.status;
+    (match List.rev (read_audit_ok config) with
+     | cancelled :: _ ->
+       check string "cancel audit action" "request_cancelled"
+         (Schedule_audit_log.action_to_string cancelled.action);
+       check string "cancel audit actor" "operator"
+         (match cancelled.actor with
+          | Some actor -> actor.id
+          | None -> "");
+       (match cancelled.detail with
+        | Some (`Assoc fields) ->
+          (match List.assoc_opt "reason" fields with
+           | Some (`String reason) ->
+             check string "cancel audit reason" "operator cleanup" reason
+           | _ -> fail "cancel audit reason missing")
+        | _ -> fail "cancel audit detail missing")
+     | [] -> fail "cancel audit event missing")
   | None -> fail "schedule missing"
 ;;
 
@@ -286,6 +384,35 @@ let test_reschedule_due_cron_advances_to_next_match () =
     check_status "cron scheduled" Scheduled stored.status;
     check (float 0.001) "cron next due" 118800.0 stored.due_at
   | None -> fail "cron schedule missing"
+;;
+
+let test_reschedule_due_recurring_reports_due_calculation_error () =
+  with_workspace
+  @@ fun config ->
+  let invalid =
+    { (make_request ~schedule_id:"bad-loop" ~risk_class:Read_only ())
+      with
+      recurrence = Interval { interval_sec = 0 }
+    }
+  in
+  ignore (insert_ok config invalid);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  let before = read_state config in
+  (match reschedule_due_recurring config ~now:201.0 ~schedule_ids:[ "bad-loop" ] with
+   | Error (Recurrence_calculation_failed (Due_invalid_interval interval_sec)) ->
+     check int "invalid interval" 0 interval_sec
+   | Error err ->
+     fail
+       ("expected recurrence calculation failure, got: "
+        ^ store_error_to_string err)
+   | Ok _ -> fail "invalid recurrence was silently rescheduled");
+  let after = read_state config in
+  check int "version unchanged" before.version after.version;
+  match get_schedule config ~schedule_id:"bad-loop" with
+  | Some stored -> check_status "still due" Due stored.status
+  | None -> fail "schedule missing"
 ;;
 
 let test_recovers_from_last_good () =
@@ -447,6 +574,43 @@ let test_recurring_grant_is_scoped_to_current_due_at () =
     (List.length (due_execution_candidates (read_state config)))
 ;;
 
+let test_complete_running_reports_due_calculation_error () =
+  with_workspace
+  @@ fun config ->
+  let invalid =
+    { (make_request ~schedule_id:"bad-complete" ~risk_class:Read_only ())
+      with
+      recurrence = Interval { interval_sec = 0 }
+    }
+  in
+  ignore (insert_ok config invalid);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:"bad-complete" with
+   | Ok running -> check_status "running" Running running.status
+   | Error err -> fail (store_error_to_string err));
+  let before = read_state config in
+  (match complete_running config ~now:203.0 ~schedule_id:"bad-complete" () with
+   | Error (Recurrence_calculation_failed (Due_invalid_interval interval_sec)) ->
+     check int "invalid interval" 0 interval_sec
+   | Error err ->
+     fail
+       ("expected recurrence calculation failure, got: "
+        ^ store_error_to_string err)
+   | Ok _ -> fail "invalid recurrence was silently completed");
+  let after = read_state config in
+  check int "version unchanged" before.version after.version;
+  (match get_schedule config ~schedule_id:"bad-complete" with
+   | Some stored -> check_status "still running" Running stored.status
+   | None -> fail "schedule missing");
+  match last_execution_for_schedule after ~schedule_id:"bad-complete" with
+  | Some execution ->
+    check string "execution still running" "running"
+      (execution_status_to_string execution.status)
+  | None -> fail "missing running execution"
+;;
+
 let test_load_corrupt_when_both_unparseable () =
   with_workspace
   @@ fun config ->
@@ -598,6 +762,8 @@ let () =
             test_store_rejects_side_effecting_scheduled_insert;
           test_case "grant records and schedules request" `Quick
             test_grant_records_and_schedules_request;
+          test_case "audit records insert and grant" `Quick
+            test_audit_records_insert_and_grant;
           test_case "cancel request marks cancelled" `Quick
             test_cancel_request_marks_cancelled;
           test_case "requester grant rejected without bump" `Quick
@@ -615,12 +781,18 @@ let () =
             test_reschedule_due_recurring_advances_only_matching_recurring_rows;
           test_case "reschedule due cron rows" `Quick
             test_reschedule_due_cron_advances_to_next_match;
+          test_case "reschedule due reports recurrence calculation error" `Quick
+            test_reschedule_due_recurring_reports_due_calculation_error;
           test_case "start and complete persist execution record" `Quick
             test_start_and_complete_persist_execution_record;
+          test_case "audit records due execution lifecycle" `Quick
+            test_audit_records_due_execution_lifecycle;
           test_case "fail due candidate records failed execution" `Quick
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring grant is scoped to current due_at" `Quick
             test_recurring_grant_is_scoped_to_current_due_at;
+          test_case "complete running reports recurrence calculation error" `Quick
+            test_complete_running_reports_due_calculation_error;
         ] );
     ]
 ;;

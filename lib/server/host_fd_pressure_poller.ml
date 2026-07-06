@@ -9,8 +9,9 @@
      on [cooldown_until]; a stale [ts] yields a smaller [until_ts]
      and is rejected by the CAS. So even if this poller reads the
      same line twice, behaviour is correct.
-   - Parse failures and missing files are no-ops, not warnings —
-     during normal operation the file is *absent* most of the time. *)
+   - Missing files are no-ops because the file is absent during normal
+     operation. Parse failures do not engage FD pressure, but they are
+     surfaced through a throttled WARN with a typed parse reason. *)
 
 type state_file_source =
   | Canonical_env
@@ -112,48 +113,76 @@ type parsed =
   ; reason : string
   }
 
-let parse_state_line line =
+type state_line_parse_error =
+  | State_line_json_parse_error of string
+  | State_line_expected_object of { received : string }
+  | State_line_missing_or_invalid_field of
+      { field : string
+      ; received : string option
+      }
+  | State_line_unknown_level of string
+  | State_line_invalid_timestamp of string
+
+let state_line_parse_error_to_string = function
+  | State_line_json_parse_error message -> "json_parse_error: " ^ message
+  | State_line_expected_object { received } ->
+    Printf.sprintf "expected object, received %s" received
+  | State_line_missing_or_invalid_field { field; received = None } ->
+    Printf.sprintf "missing required field %S" field
+  | State_line_missing_or_invalid_field { field; received = Some received } ->
+    Printf.sprintf "field %S must be string, received %s" field received
+  | State_line_unknown_level level ->
+    Printf.sprintf "unknown level %S" level
+  | State_line_invalid_timestamp ts ->
+    Printf.sprintf "invalid timestamp %S" ts
+;;
+
+let required_string_field field kvs =
+  match List.assoc_opt field kvs with
+  | Some (`String value) -> Ok value
+  | Some other ->
+    Error
+      (State_line_missing_or_invalid_field
+         { field; received = Some (Json_util.kind_name other) })
+  | None -> Error (State_line_missing_or_invalid_field { field; received = None })
+;;
+
+let optional_string_field field kvs =
+  match List.assoc_opt field kvs with
+  | Some (`String value) -> Some value
+  | _ -> None
+;;
+
+let external_level_of_string level =
+  match String.uppercase_ascii level with
+  | "WARN" -> Ok Keeper_fd_pressure.External_warn
+  | "CRIT" -> Ok Keeper_fd_pressure.External_crit
+  | _ -> Error (State_line_unknown_level level)
+;;
+
+let ( let* ) = Result.bind
+
+let parse_state_line_result line =
   match Yojson.Safe.from_string line with
-  | json ->
-    (try
-       let level_str = (match Json_util.assoc_member_opt "level" json with Some (`String s) -> s | _ -> "") in
-       let level =
-         match String.uppercase_ascii level_str with
-         | "WARN" -> Some Keeper_fd_pressure.External_warn
-         | "CRIT" -> Some Keeper_fd_pressure.External_crit
-         | _ -> None
+  | `Assoc kvs ->
+    let* level_str = required_string_field "level" kvs in
+    let* level = external_level_of_string level_str in
+    let* ts_str = required_string_field "ts" kvs in
+    (match parse_iso8601_opt ts_str with
+     | None -> Error (State_line_invalid_timestamp ts_str)
+     | Some ts ->
+       let kinds = Option.value ~default:"?" (optional_string_field "kinds" kvs) in
+       let summary = Option.value ~default:"" (optional_string_field "summary" kvs) in
+       let reason =
+         let r = Printf.sprintf "sysmon kinds=%s %s" kinds summary in
+         if String.length r > 200 then String.sub r 0 200 else r
        in
-       let ts_str =
-         match json |> Json_util.assoc_member_opt "ts" with
-         | Some (`String s) -> s
-         | _ -> ""
-       in
-       let kinds =
-         match json |> Json_util.assoc_member_opt "kinds" with
-         | Some (`String s) -> s
-         | _ -> "?"
-       in
-       let summary =
-         match json |> Json_util.assoc_member_opt "summary" with
-         | Some (`String s) -> s
-         | _ -> ""
-       in
-       match level, parse_iso8601_opt ts_str with
-       | Some level, Some ts ->
-         let reason =
-           let r = Printf.sprintf "sysmon kinds=%s %s" kinds summary in
-           if String.length r > 200 then String.sub r 0 200 else r
-         in
-         Some { level; ts; reason }
-       | _ -> None
-     with
-     (* RFC-0145 — narrowed from a wildcard to the only exception the
-        Yojson projection helpers raise on wrong-typed JSON. *)
-     | Yojson.Safe.Util.Type_error _ -> None)
+       Ok { level; ts; reason })
+  | json -> Error (State_line_expected_object { received = Json_util.kind_name json })
   (* RFC-0145 — narrowed from a wildcard to the only exception
      [Yojson.Safe.from_string] raises on malformed JSON.  An I/O or
      internal runtime exception bubbles to the caller. *)
-  | exception Yojson.Json_error _ -> None
+  | exception Yojson.Json_error message -> Error (State_line_json_parse_error message)
 ;;
 
 let read_state_file_opt path =
@@ -184,20 +213,17 @@ let one_tick path =
   match read_state_file_opt path with
   | None -> ()
   | Some line ->
-    (match parse_state_line line with
-     | Some p ->
-       Keeper_fd_pressure.engage_external
-         ~reason:p.reason
-         ~level:p.level
-         ~ts:p.ts
-         ()
-     | None ->
+    (match parse_state_line_result line with
+     | Ok p ->
+       Keeper_fd_pressure.engage_external ~reason:p.reason ~level:p.level ~ts:p.ts ()
+     | Error err ->
        log_throttled_warn (fun () ->
          let truncated =
            if String.length line > 80 then String.sub line 0 80 else line
          in
          Printf.sprintf
-           "host_fd_pressure_poller: malformed state line (truncated): %s"
+           "host_fd_pressure_poller: malformed state line (%s, truncated): %s"
+           (state_line_parse_error_to_string err)
            truncated))
 ;;
 

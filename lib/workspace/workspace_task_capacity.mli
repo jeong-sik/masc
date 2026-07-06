@@ -22,6 +22,9 @@ type capacity_error = {
     runtime helper value. *)
 val default_goal_open_limit : int
 
+val goal_task_links_read_failed_prefix : string
+val goal_task_links_read_failed_message : string -> string
+
 (** [check ?goal_id backlog] returns [None] when [add_task] may proceed,
     [Some err] when adding another open task linked to [goal_id] would
     exceed [default_goal_open_limit].
@@ -37,6 +40,12 @@ val check_for_config :
   ?goal_id:string ->
   Masc_domain.backlog ->
   capacity_error option
+
+val check_for_config_result :
+  Workspace_utils_backend_setup.config ->
+  ?goal_id:string ->
+  Masc_domain.backlog ->
+  (capacity_error option, string) result
 
 (** [error_to_json_string err] serializes to the same JSON-string shape
     that the pre-RFC-0034.v2 keeper task runtime helper produced

@@ -37,7 +37,7 @@
     Internal helpers stay private at this boundary
     (~17 internal lets — [trim_nonempty] /
     [getenv_nonempty] / [split_csv],
-    [ice_server_urls] / [parse_ice_servers_json] /
+    [ice_server_urls] / [parse_ice_servers_json_report] /
     [configured_ice_config], registries
     [pending_offers] / [active_peers] /
     [peer_webrtc_map] / [peer_channel_map],
@@ -83,9 +83,11 @@ val is_enabled : unit -> bool
 (** {1 ICE config} *)
 
 val configured_ice_servers : unit -> Webrtc.Ice.ice_server list
-(** Resolves [MASC_WEBRTC_ICE_SERVERS_JSON] into a list
-    of {!Webrtc.Ice.ice_server} entries.  Returns
-    [\[\]] on unset / parse failure. *)
+(** Resolves the WebRTC ICE server configuration from
+    [MASC_WEBRTC_ICE_SERVERS_JSON], then CSV environment
+    fields, then the WebRTC default.  Malformed JSON
+    entries are warned through {!Log.Server.warn}; valid
+    entries from the same payload are still preserved. *)
 
 val configured_ice_server_urls : unit -> string list
 (** Flattens {!configured_ice_servers} to its [.urls]

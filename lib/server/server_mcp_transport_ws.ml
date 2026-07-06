@@ -27,6 +27,12 @@ let sha1 s =
 let websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 let sec_websocket_accept key = Base64.encode_string (sha1 (key ^ websocket_guid))
 
+let sec_websocket_key_is_valid key =
+  match Base64.decode key with
+  | Ok decoded -> String.length decoded = 16
+  | Error (`Msg _) -> false
+;;
+
 let inbound_message_handler : (string -> string -> unit) Atomic.t =
   Atomic.make (fun session_id _body ->
       Log.Server.warn
@@ -1206,7 +1212,7 @@ let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
   | `GET, Some _host, Some upgrade, Some connection, Some key, Some "13"
     when ci_eq upgrade "websocket"
          && connection_lists_upgrade connection
-         && (try String.length (Base64.decode_exn key) = 16 with _ -> false) ->
+         && sec_websocket_key_is_valid key ->
     Ok (sec_websocket_accept key)
   | _ -> Error "websocket upgrade request did not pass RFC 6455 §4.2.1 scrutiny"
 

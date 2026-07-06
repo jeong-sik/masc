@@ -6,6 +6,7 @@ let () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_keeper_tool_registry ();
   let open Alcotest in
   run
     "Tool_registry"
@@ -86,6 +87,15 @@ let () =
             let s = List.assoc "keeper_time_now" stats in
             check int "call_count" 1 (Atomic.get s.call_count);
             check int "agent_internal_count" 1 (Atomic.get s.agent_internal_count))
+        ; test_case "gated recording rejects unregistered keeper-like name" `Quick (fun () ->
+            Tool_registry.reset ();
+            Tool_registry.record_call_if_known
+              ~source:Agent_internal
+              ~tool_name:"keeper_not_registered_by_catalog_or_dispatch"
+              ~success:true
+              ~duration_ms:1
+              ();
+            check int "total" 0 (Tool_registry.total_calls ()))
         ; test_case "tracks source attribution" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call

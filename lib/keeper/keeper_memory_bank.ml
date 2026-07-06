@@ -88,6 +88,18 @@ type keeper_memory_row_raw = {
   ts_unix: float;
 }
 
+type memory_bank_row_parse_error =
+  | Malformed_json of string
+  | Non_object_json of string
+  | Schema_version_mismatch of { expected : int; actual : int option }
+  | Unknown_kind of string
+  | Missing_horizon
+  | Horizon_mismatch of { kind : string; expected : string; actual : string }
+  | Missing_source
+  | Missing_trace_id
+  | Empty_text
+  | Non_meaningful_text
+
 type memory_consolidation_summarizer =
   trace_id:string -> texts:string list -> string option
 
@@ -96,13 +108,70 @@ let memory_horizon_of_kind_exn kind =
   | Some horizon -> horizon
   | None -> invalid_arg ("unknown memory kind: " ^ kind)
 
-let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
-  try
-    let j = Yojson.Safe.from_string line in
-    let schema_version = Safe_ops.json_int ~default:0 "schema_version" j in
-    if schema_version <> keeper_memory_schema_version then
-      None
-    else
+let memory_bank_row_parse_error_kind = function
+  | Malformed_json _ -> "malformed_json"
+  | Non_object_json _ -> "non_object_json"
+  | Schema_version_mismatch _ -> "schema_version_mismatch"
+  | Unknown_kind _ -> "unknown_kind"
+  | Missing_horizon -> "missing_horizon"
+  | Horizon_mismatch _ -> "horizon_mismatch"
+  | Missing_source -> "missing_source"
+  | Missing_trace_id -> "missing_trace_id"
+  | Empty_text -> "empty_text"
+  | Non_meaningful_text -> "non_meaningful_text"
+
+let memory_bank_row_parse_error_message = function
+  | Malformed_json message -> message
+  | Non_object_json kind ->
+    Printf.sprintf "memory bank row must be object, got %s" kind
+  | Schema_version_mismatch { expected; actual } ->
+    Printf.sprintf
+      "memory bank schema_version mismatch: expected %d, got %s"
+      expected
+      (match actual with
+       | Some version -> string_of_int version
+       | None -> "missing_or_non_integer")
+  | Unknown_kind kind ->
+    Printf.sprintf "memory bank row has unknown kind %S" kind
+  | Missing_horizon -> "memory bank row missing canonical horizon"
+  | Horizon_mismatch { kind; expected; actual } ->
+    Printf.sprintf
+      "memory bank row horizon mismatch for kind %S: expected %S, got %S"
+      kind
+      expected
+      actual
+  | Missing_source -> "memory bank row missing source"
+  | Missing_trace_id -> "memory bank row missing trace_id"
+  | Empty_text -> "memory bank row missing text"
+  | Non_meaningful_text -> "memory bank row text is not meaningful"
+
+let memory_bank_row_parse_error_to_json ~source ?keeper ?path ~line_index error =
+  `Assoc
+    ([ "source", `String source
+     ; "line_index", `Int line_index
+     ; "error_kind", `String (memory_bank_row_parse_error_kind error)
+     ; "message", `String (memory_bank_row_parse_error_message error)
+     ]
+     @
+     (match keeper with
+      | Some keeper_name -> [ "keeper", `String keeper_name ]
+      | None -> [])
+     @
+     match path with
+     | Some source_path -> [ "path", `String source_path ]
+     | None -> [])
+
+let parse_memory_bank_row_result (line : string) :
+    (keeper_memory_row_raw, memory_bank_row_parse_error) result =
+  match Yojson.Safe.from_string line with
+  | exception Yojson.Json_error message -> Error (Malformed_json message)
+  | `Assoc _ as j ->
+    let schema_version = Safe_ops.json_int_opt "schema_version" j in
+    if schema_version <> Some keeper_memory_schema_version then
+      Error
+        (Schema_version_mismatch
+           { expected = keeper_memory_schema_version; actual = schema_version })
+    else (
     let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
     let horizon = memory_horizon_of_json_opt j in
     let expected_horizon = memory_horizon_of_kind_opt kind in
@@ -115,15 +184,19 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
       if raw < 1 then 1 else if raw > 100 then 100 else raw
     in
     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-    match expected_horizon, horizon with
-    | Some expected_horizon, Some horizon
-      when String.equal expected_horizon horizon
-           && kind <> ""
-           && source_raw <> ""
-           && trace_id <> ""
-           && text <> ""
-           && is_meaningful_memory_text text ->
-      Some
+    match expected_horizon, horizon, source_raw, trace_id, text with
+    | None, _, _, _, _ -> Error (Unknown_kind kind)
+    | Some _, None, _, _, _ -> Error Missing_horizon
+    | Some expected_horizon, Some horizon, _, _, _
+      when not (String.equal expected_horizon horizon) ->
+      Error (Horizon_mismatch { kind; expected = expected_horizon; actual = horizon })
+    | Some _, Some _, "", _, _ -> Error Missing_source
+    | Some _, Some _, _, "", _ -> Error Missing_trace_id
+    | Some _, Some _, _, _, "" -> Error Empty_text
+    | Some _, Some _, _, _, _ when not (is_meaningful_memory_text text) ->
+      Error Non_meaningful_text
+    | Some _, Some horizon, _, _, _ ->
+      Ok
         { json = j
         ; kind
         ; horizon
@@ -132,10 +205,13 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
         ; text
         ; priority
         ; ts_unix
-        }
-    | _ -> None
-  with Yojson.Json_error _ ->
-    None
+        })
+  | other -> Error (Non_object_json (Json_util.kind_name other))
+
+let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
+  match parse_memory_bank_row_result line with
+  | Ok row -> Some row
+  | Error (_error : memory_bank_row_parse_error) -> None
 
 let parse_memory_bank_content content =
   let lines =
@@ -146,9 +222,9 @@ let parse_memory_bank_content content =
   let parsed_rev, invalid =
     List.fold_left
       (fun (acc, inv) line ->
-         match parse_memory_bank_row line with
-         | Some row -> row :: acc, inv
-         | None -> acc, inv + 1)
+         match parse_memory_bank_row_result line with
+         | Ok row -> row :: acc, inv
+         | Error (_error : memory_bank_row_parse_error) -> acc, inv + 1)
       ([], 0)
       lines
   in
@@ -776,14 +852,14 @@ let compact_memory_bank_if_needed
                 error = None;
               }
 
-let append_memory_notes_from_reply
+let append_memory_notes_from_reply_result
     (config : Workspace.config)
     (meta : keeper_meta)
     ?snapshot
     ?state_snapshot_source
     ~(turn : int)
     ~(reply : string)
-    () : (int * string list) =
+    () : ((int * string list), string) result =
   (* [source] is the per-note provenance written to the memory-bank JSONL — a
      separate vocabulary from the turn-cascade [state_snapshot_source]. The
      turn-cascade source (when present) is rendered to its wire string and carries
@@ -832,38 +908,55 @@ let append_memory_notes_from_reply
       (String.concat ","
          (List.map (fun (k, c) -> Printf.sprintf "%s:%d" k c) selection.dropped_by_kind));
   if notes = [] then
-    (0, [])
+    Ok (0, [])
   else
     let now_ts = Time_compat.now () in
     let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
-    let kinds_acc = ref [] in
     let seen_kinds : (string, unit) Hashtbl.t = Hashtbl.create 8 in
     with_memory_bank_lock path (fun () ->
-      List.iter
-        (fun (kind, text, priority) ->
-           let horizon = memory_horizon_of_kind_exn kind in
-           if not (Hashtbl.mem seen_kinds kind) then begin
-             Hashtbl.add seen_kinds kind ();
-             kinds_acc := kind :: !kinds_acc
-           end;
-           Keeper_types_support.append_jsonl_line path
-             (`Assoc
-               [
-                 ("ts", `String (now_iso ()));
-                 ("ts_unix", `Float now_ts);
-                 ("name", `String meta.name);
-                 ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-                 ("generation", `Int meta.runtime.generation);
-                 ("turn", `Int turn);
-                 ("kind", `String kind);
-                 ("horizon", `String horizon);
-                 ("source", `String source);
-                 ("schema_version", `Int keeper_memory_schema_version);
-                 ("priority", `Int priority);
-                 ("text", `String text);
-               ]))
-        notes);
-    (List.length notes, List.rev !kinds_acc)
+      let rec loop kinds_acc written = function
+        | [] -> Ok (written, List.rev kinds_acc)
+        | (kind, text, priority) :: rest ->
+          let horizon = memory_horizon_of_kind_exn kind in
+          let is_new_kind = not (Hashtbl.mem seen_kinds kind) in
+          let json =
+            `Assoc
+              [
+                ("ts", `String (now_iso ()));
+                ("ts_unix", `Float now_ts);
+                ("name", `String meta.name);
+                ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+                ("generation", `Int meta.runtime.generation);
+                ("turn", `Int turn);
+                ("kind", `String kind);
+                ("horizon", `String horizon);
+                ("source", `String source);
+                ("schema_version", `Int keeper_memory_schema_version);
+                ("priority", `Int priority);
+                ("text", `String text);
+              ]
+          in
+          (match Keeper_types_support.append_jsonl_line_result path json with
+           | Error msg -> Error msg
+           | Ok () ->
+             let kinds_acc =
+               if is_new_kind then begin
+                 Hashtbl.add seen_kinds kind ();
+                 kind :: kinds_acc
+               end
+               else kinds_acc
+             in
+             loop kinds_acc (written + 1) rest)
+      in
+      loop [] 0 notes)
+
+let append_memory_notes_from_reply config meta ?snapshot ?state_snapshot_source ~turn ~reply () =
+  match
+    append_memory_notes_from_reply_result config meta ?snapshot ?state_snapshot_source ~turn
+      ~reply ()
+  with
+  | Ok value -> value
+  | Error msg -> raise (Sys_error msg)
 
 let strip_tool_result_reserved_keys (result : Yojson.Safe.t) : Yojson.Safe.t =
   match result with
@@ -901,56 +994,63 @@ let tool_result_memory_text ~kind ~artifact_id ~payload_preview : string =
     "ToolResult %s artifact %s: %s"
     kind artifact_id payload_preview
 
-let append_memory_notes_from_tool_results
+let append_memory_notes_from_tool_results_result
     (config : Workspace.config)
     (meta : keeper_meta)
     ~(turn : int)
-    ~(results : Yojson.Safe.t list) : int =
+    ~(results : Yojson.Safe.t list) : (int, string) result =
   let now_ts = Time_compat.now () in
   let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   let seen_artifacts : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-  let written = ref 0 in
   with_memory_bank_lock path (fun () ->
-    List.iter
-      (fun result ->
-         match
-           ( Multimodal.Tool_emission.extract_kind_from_result result,
-             Multimodal.Tool_emission.extract_id_from_result result )
-         with
-         | Some kind_tag, Some artifact_id
-           when String.trim artifact_id <> ""
-                && not (Hashtbl.mem seen_artifacts artifact_id) ->
-           Hashtbl.add seen_artifacts artifact_id ();
-           let kind = Multimodal.Artifact.kind_tag_to_string kind_tag in
-           let payload_preview = tool_result_payload_preview result in
-           let text = tool_result_memory_text ~kind ~artifact_id ~payload_preview in
-           if is_meaningful_memory_text text then begin
-             Keeper_types_support.append_jsonl_line path
-               (`Assoc
-                 [ ("ts", `String (now_iso ()))
-                 ; ("ts_unix", `Float now_ts)
-                 ; ("name", `String meta.name)
-                 ; ( "trace_id",
-                     `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                 ; ("generation", `Int meta.runtime.generation)
-                 ; ("turn", `Int turn)
-                 ; ("kind", `String "long_term")
-                 ; ("horizon", `String long_term_horizon)
-                 ; ("source", `String (memory_row_source_to_string Tool_result))
-                 ; ("schema_version", `Int keeper_memory_schema_version)
-                 ; ( "priority",
-                     `Int (tuned_priority_for_candidate ~kind:"long_term" ~text) )
-                 ; ("text", `String text)
-                 ; ("artifact_id", `String artifact_id)
-                 ; ("artifact_kind", `String kind)
-                 ; ("payload_preview", `String payload_preview)
-                 ; ("metadata", tool_result_metadata result)
-                 ]);
-             incr written
-           end
-         | _ -> ())
-      results);
-  !written
+    let rec loop written = function
+      | [] -> Ok written
+      | result :: rest -> (
+        match
+          ( Multimodal.Tool_emission.extract_kind_from_result result,
+            Multimodal.Tool_emission.extract_id_from_result result )
+        with
+        | Some kind_tag, Some artifact_id
+          when String.trim artifact_id <> ""
+               && not (Hashtbl.mem seen_artifacts artifact_id) ->
+          Hashtbl.add seen_artifacts artifact_id ();
+          let kind = Multimodal.Artifact.kind_tag_to_string kind_tag in
+          let payload_preview = tool_result_payload_preview result in
+          let text = tool_result_memory_text ~kind ~artifact_id ~payload_preview in
+          if is_meaningful_memory_text text then
+            let json =
+              `Assoc
+                [ ("ts", `String (now_iso ()))
+                ; ("ts_unix", `Float now_ts)
+                ; ("name", `String meta.name)
+                ; ( "trace_id",
+                    `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
+                ; ("generation", `Int meta.runtime.generation)
+                ; ("turn", `Int turn)
+                ; ("kind", `String "long_term")
+                ; ("horizon", `String long_term_horizon)
+                ; ("source", `String (memory_row_source_to_string Tool_result))
+                ; ("schema_version", `Int keeper_memory_schema_version)
+                ; ("priority", `Int (tuned_priority_for_candidate ~kind:"long_term" ~text))
+                ; ("text", `String text)
+                ; ("artifact_id", `String artifact_id)
+                ; ("artifact_kind", `String kind)
+                ; ("payload_preview", `String payload_preview)
+                ; ("metadata", tool_result_metadata result)
+                ]
+            in
+            (match Keeper_types_support.append_jsonl_line_result path json with
+             | Error msg -> Error msg
+             | Ok () -> loop (written + 1) rest)
+          else loop written rest
+        | _ -> loop written rest)
+    in
+    loop 0 results)
+
+let append_memory_notes_from_tool_results config meta ~turn ~results =
+  match append_memory_notes_from_tool_results_result config meta ~turn ~results with
+  | Ok written -> written
+  | Error msg -> raise (Sys_error msg)
 
 let append_voice_output
     (config : Workspace.config)
@@ -992,13 +1092,12 @@ let append_voice_output
       ]
       @ optional_provider
     in
-    try
+    match
       with_memory_bank_lock path (fun () ->
-        Keeper_types_support.append_jsonl_line path (`Assoc fields));
-      Ok 1
+        Keeper_types_support.append_jsonl_line_result path (`Assoc fields))
     with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn))
+    | Ok () -> Ok 1
+    | Error msg -> Error msg)
 
 let summarize_memory_bank_lines
     (lines : string list)

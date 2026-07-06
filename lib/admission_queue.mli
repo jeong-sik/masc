@@ -60,6 +60,15 @@ val try_with_permit :
   'a option
 (** Non-blocking variant. Returns [None] if host resources are saturated. *)
 
+val try_with_permit_result :
+  priority:Llm_provider.Request_priority.t ->
+  keeper_name:string ->
+  runtime_id:string ->
+  (unit -> 'a) ->
+  ('a, [> `Host_resource_saturated of string ]) result
+(** Non-blocking variant with an explicit rejection result. Prefer this over
+    [try_with_permit] for new callers. *)
+
 val snapshot : unit -> snapshot
 (** Current queue state for observability. Non-blocking. *)
 
@@ -99,6 +108,16 @@ module For_testing : sig
   (** The production gate as a pure function: [fd_count] is forced only when
       [threshold] is [Some _]. Tests pass a counting thunk to assert the
       [/dev/fd] scan is skipped while gating is disabled ([None]). *)
+
+  val try_with_permit_result_for_threshold :
+    keeper_name:string ->
+    runtime_id:string ->
+    threshold:int option ->
+    fd_count:(unit -> int) ->
+    (unit -> 'a) ->
+    ('a, [> `Host_resource_saturated of string ]) result
+  (** Test hook for [try_with_permit_result] with deterministic host-resource
+      inputs. *)
 
   val apply_active_delta :
     active:int -> delta:int -> (int, [> `Counter_underflow of int ]) result

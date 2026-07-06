@@ -162,8 +162,9 @@ let append_now ~site json =
   match get_default_store () with
   | None -> ()
   | Some store ->
-    (try Dated_jsonl.append store json with
-     | exn -> observe_append_failure ~site exn)
+    (match Dated_jsonl.append_result store json with
+     | Ok () -> ()
+     | Error msg -> observe_append_failure ~site (Sys_error msg))
 ;;
 
 let flush_pending () =

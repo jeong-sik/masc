@@ -86,6 +86,15 @@ type attempt_record_decode_error =
       ; value : string
       }
 
+type desired_record_decode_error =
+  | Desired_record_not_object of string
+  | Desired_record_invalid_field of
+      { field : string
+      ; expected : string
+      ; actual : string
+      }
+  | Desired_record_unknown_state of string
+
 let attempt_record_decode_error_to_string = function
   | Attempt_record_not_object actual ->
     Printf.sprintf "attempt record must be an object, got %s" actual
@@ -95,6 +104,15 @@ let attempt_record_decode_error_to_string = function
     Printf.sprintf "field %S has unknown result %S" "last_attempt_result" value
   | Attempt_record_invalid_timestamp { field; value } ->
     Printf.sprintf "field %S has invalid ISO-8601 timestamp %S" field value
+;;
+
+let desired_record_decode_error_to_string = function
+  | Desired_record_not_object actual ->
+    Printf.sprintf "desired record must be an object, got %s" actual
+  | Desired_record_invalid_field { field; expected; actual } ->
+    Printf.sprintf "field %S must be %s, got %s" field expected actual
+  | Desired_record_unknown_state value ->
+    Printf.sprintf "field %S has unknown desired state %S" "desired_state" value
 ;;
 
 let sidecar_operator_next_action =
@@ -202,12 +220,6 @@ let attempt_record_of_json_result = function
   | other -> Error (Attempt_record_not_object (Json_util.kind_name other))
 ;;
 
-let attempt_record_of_json json =
-  match attempt_record_of_json_result json with
-  | Ok record -> Some record
-  | Error _ -> None
-;;
-
 let desired_record_json (record : desired_record) =
   `Assoc
     [ "connector_id", `String record.connector_id
@@ -218,25 +230,46 @@ let desired_record_json (record : desired_record) =
     ]
 ;;
 
-let desired_record_of_json = function
+let invalid_desired_field ~field ~expected actual =
+  Error
+    (Desired_record_invalid_field
+       { field; expected; actual = Json_util.kind_name actual })
+;;
+
+let required_desired_string_field fields field =
+  match List.assoc_opt field fields with
+  | Some (`String value) -> Ok value
+  | Some actual -> invalid_desired_field ~field ~expected:"string" actual
+  | None ->
+    Error
+      (Desired_record_invalid_field { field; expected = "string"; actual = "missing" })
+;;
+
+let required_desired_int_field fields field =
+  match List.assoc_opt field fields with
+  | Some (`Int value) -> Ok value
+  | Some actual -> invalid_desired_field ~field ~expected:"integer" actual
+  | None ->
+    Error
+      (Desired_record_invalid_field
+         { field; expected = "integer"; actual = "missing" })
+;;
+
+let desired_record_of_json_result = function
   | `Assoc fields ->
-    (match
-       ( List.assoc_opt "connector_id" fields
-       , List.assoc_opt "desired_state" fields
-       , List.assoc_opt "generation" fields
-       , List.assoc_opt "updated_by" fields
-       , List.assoc_opt "updated_at" fields )
-     with
-     | ( Some (`String connector_id)
-       , Some (`String desired_state)
-       , Some (`Int generation)
-       , Some (`String updated_by)
-       , Some (`String updated_at) ) ->
-       desired_state_of_string desired_state
-       |> Option.map (fun desired_state ->
-         { connector_id; desired_state; generation; updated_by; updated_at })
-     | _ -> None)
-  | _ -> None
+    let ( let* ) = Result.bind in
+    let* connector_id = required_desired_string_field fields "connector_id" in
+    let* desired_state_raw = required_desired_string_field fields "desired_state" in
+    let* desired_state =
+      match desired_state_of_string desired_state_raw with
+      | Some desired_state -> Ok desired_state
+      | None -> Error (Desired_record_unknown_state desired_state_raw)
+    in
+    let* generation = required_desired_int_field fields "generation" in
+    let* updated_by = required_desired_string_field fields "updated_by" in
+    let* updated_at = required_desired_string_field fields "updated_at" in
+    Ok { connector_id; desired_state; generation; updated_by; updated_at }
+  | other -> Error (Desired_record_not_object (Json_util.kind_name other))
 ;;
 
 let sidecar_desired_path ~base_path id =
@@ -257,24 +290,32 @@ let sidecar_attempt_path ~base_path id =
        race, permission change, partial write mid-rename),
    (2) file read OK but JSON was malformed,
    (3) JSON was syntactically valid but semantically invalid.
-   Desired-state reads remain log-only for compatibility. Attempt-state reads
-   use [read_attempt_record_result] so reconcile/status callers can fail closed
-   or surface corruption instead of treating it as absence. *)
-let read_desired_record ~base_path id =
+   Attempt-state and desired-state product reads use Result boundaries so
+   reconcile/status callers can fail closed or surface corruption instead of
+   treating it as absence. *)
+let read_desired_record_result ~base_path id =
   let path = sidecar_desired_path ~base_path id in
   if not (Sys.file_exists path)
-  then None
+  then Ok None
   else (
-    try read_file path |> Yojson.Safe.from_string |> desired_record_of_json with
+    try
+      let json = read_file path |> Yojson.Safe.from_string in
+      match desired_record_of_json_result json with
+      | Ok record -> Ok (Some record)
+      | Error error ->
+        let detail = desired_record_decode_error_to_string error in
+        Log.Server.warn "[sidecar/desired] invalid persisted state at %s: %s" path detail;
+        Error (Printf.sprintf "invalid persisted desired state at %s: %s" path detail)
+    with
     | Sys_error msg ->
       Log.Server.warn
         "[sidecar/desired] file_exists OK but read failed at %s: %s"
         path
         msg;
-      None
+      Error (Printf.sprintf "desired state read failed at %s: %s" path msg)
     | Yojson.Json_error msg ->
       Log.Server.warn "[sidecar/desired] malformed JSON at %s: %s" path msg;
-      None)
+      Error (Printf.sprintf "malformed desired state JSON at %s: %s" path msg))
 ;;
 
 let read_attempt_record_result ~base_path id =
@@ -300,12 +341,6 @@ let read_attempt_record_result ~base_path id =
     | Yojson.Json_error msg ->
       Log.Server.warn "[sidecar/attempt] malformed JSON at %s: %s" path msg;
       Error (Printf.sprintf "malformed attempt state JSON at %s: %s" path msg))
-;;
-
-let read_attempt_record ~base_path id =
-  match read_attempt_record_result ~base_path id with
-  | Ok record -> record
-  | Error _ -> None
 ;;
 
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
@@ -345,7 +380,8 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
 ;;
 
 let write_desired_record ?updated_at ~base_path ~id ~updated_by desired_state =
-  let previous = read_desired_record ~base_path id in
+  let ( let* ) = Result.bind in
+  let* previous = read_desired_record_result ~base_path id in
   let generation =
     match previous with
     | Some record -> record.generation + 1
@@ -506,7 +542,12 @@ let lifecycle_json ~base_path id status_json =
     | Ok previous_attempt -> previous_attempt, []
     | Error msg -> None, [ "attempt_read_error", `String msg ]
   in
-  match read_desired_record ~base_path id with
+  let desired_record, desired_error_fields =
+    match read_desired_record_result ~base_path id with
+    | Ok record -> record, []
+    | Error msg -> None, [ "desired_read_error", `String msg ]
+  in
+  match desired_record with
   | None ->
     `Assoc
       ([ "desired_state", `Null
@@ -515,7 +556,8 @@ let lifecycle_json ~base_path id status_json =
        ; "reconcile_result", `String "none"
        ]
        @ attempt_fields previous_attempt
-       @ attempt_error_fields)
+       @ attempt_error_fields
+       @ desired_error_fields)
   | Some record ->
     `Assoc
       ([ "desired_state", `String (desired_state_to_string record.desired_state)
@@ -527,7 +569,8 @@ let lifecycle_json ~base_path id status_json =
          , `String (reconcile_preview ?previous_attempt record observed_state) )
        ]
        @ attempt_fields previous_attempt
-       @ attempt_error_fields)
+       @ attempt_error_fields
+       @ desired_error_fields)
 ;;
 
 let append_assoc key value = function
@@ -589,6 +632,43 @@ let bad_request request reqd msg =
     (`Assoc [ "ok", `Bool false; "error", `String msg ])
 ;;
 
+type status_file_json_read_error =
+  | Status_file_read_failed of
+      { path : string
+      ; detail : string
+      }
+  | Status_file_json_malformed of
+      { path : string
+      ; detail : string
+      }
+
+let status_file_json_read_error_kind = function
+  | Status_file_read_failed _ -> "read_failed"
+  | Status_file_json_malformed _ -> "json_malformed"
+;;
+
+let status_file_json_read_error_to_string = function
+  | Status_file_read_failed { path; detail } ->
+    Printf.sprintf "status file read failed at %s: %s" path detail
+  | Status_file_json_malformed { path; detail } ->
+    Printf.sprintf "malformed status JSON at %s: %s" path detail
+;;
+
+let read_status_file_json_result path =
+  if not (Sys.file_exists path)
+  then Ok None
+  else (
+    try Ok (Some (read_file path |> Yojson.Safe.from_string)) with
+    | Sys_error detail ->
+      let error = Status_file_read_failed { path; detail } in
+      Log.Server.warn "[sidecar/status] %s" (status_file_json_read_error_to_string error);
+      Error error
+    | Yojson.Json_error detail ->
+      let error = Status_file_json_malformed { path; detail } in
+      Log.Server.warn "[sidecar/status] %s" (status_file_json_read_error_to_string error);
+      Error error)
+;;
+
 let read_status_json ~base_path id =
   let configured_sidecar_root = sidecar_root () in
   let project_root = project_root_from_executable () in
@@ -608,29 +688,25 @@ let read_status_json ~base_path id =
       id
   in
   let status =
-    if Sys.file_exists path
-    then (
-      let body = read_file path in
-      let parsed =
-        (* Mirror read_desired_record/read_attempt_record: surface
-           malformed JSON instead of silently collapsing to [`Null] in
-           the response payload. *)
-        try Some (Yojson.Safe.from_string body) with
-        | Yojson.Json_error msg ->
-          Log.Server.warn
-            "[sidecar/status] malformed JSON at %s: %s"
-            path
-            msg;
-          None
-      in
+    match read_status_file_json_result path with
+    | Ok (Some parsed) ->
       `Assoc
         [ "ok", `Bool true
         ; "available", `Bool true
         ; "status_path", `String path
-        ; "status", Option.value parsed ~default:`Null
-        ])
-    else
+        ; "status", parsed
+        ]
+    | Ok None ->
       `Assoc [ "ok", `Bool true; "available", `Bool false; "status_path", `String path ]
+    | Error error ->
+      `Assoc
+        [ "ok", `Bool true
+        ; "available", `Bool true
+        ; "status_path", `String path
+        ; "status", `Null
+        ; "status_read_error", `String (status_file_json_read_error_to_string error)
+        ; "status_read_error_kind", `String (status_file_json_read_error_kind error)
+        ]
   in
   status
   |> append_assoc "sidecar_lifecycle" (lifecycle_json ~base_path id status)

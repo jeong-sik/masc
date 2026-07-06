@@ -17,7 +17,9 @@
     safe (reject) direction. So a new side-effecting kind needs BOTH the list
     entry and a validator branch. *)
 
-let supported = [ "masc.board_post" ]
+let board_post = "masc.board_post"
+
+let supported = [ board_post ]
 
 let supported_list_string () = String.concat ", " supported
 

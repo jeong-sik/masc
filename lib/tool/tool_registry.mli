@@ -35,7 +35,8 @@ val record_call_if_known :
 
 val is_known_tool : string -> bool
 (** [is_known_tool name] returns whether [name] is admitted to in-memory call
-    stats.  This is not a public-surface visibility predicate. *)
+    stats through catalog metadata or dispatch tag/schema registration. This is
+    not a public-surface visibility predicate. *)
 val get_stats : unit -> (string * call_stats) list
 val get_top_n : int -> (string * call_stats) list
 val get_unused_since : float -> string list

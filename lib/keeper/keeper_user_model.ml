@@ -22,6 +22,20 @@ type t =
   ; shared_fact_count : int
   }
 
+type build_error =
+  | Fact_store_parse_error of Keeper_memory_os_io.fact_jsonl_parse_error list
+
+let build_error_to_string = function
+  | Fact_store_parse_error errors ->
+    (match errors with
+     | [] -> "fact store parse error"
+     | first :: _ ->
+       Printf.sprintf
+         "fact store parse errors count=%d first=%s"
+         (List.length errors)
+         (Keeper_memory_os_io.fact_jsonl_parse_error_to_string first))
+;;
+
 let default_max_preferences = 5
 let default_max_constraints = 5
 let max_claim_len = 220
@@ -111,7 +125,7 @@ let with_fact_store_locks keeper_ids f =
   loop paths
 ;;
 
-let build ~keeper_id ~now ?(max_preferences = default_max_preferences)
+let build_result ~keeper_id ~now ?(max_preferences = default_max_preferences)
       ?(max_constraints = default_max_constraints) () =
   let max_preferences = max 0 max_preferences in
   let max_constraints = max 0 max_constraints in
@@ -120,49 +134,78 @@ let build ~keeper_id ~now ?(max_preferences = default_max_preferences)
     then [ keeper_id ]
     else [ keeper_id; shared_store_id ]
   in
-  let private_facts, shared_facts =
+  let private_facts, shared_facts, parse_errors =
     with_fact_store_locks fact_store_ids (fun () ->
-      let private_facts : Keeper_memory_os_types.fact list =
-        Keeper_memory_os_io.read_facts_tail
+      let private_read =
+        Keeper_memory_os_io.read_facts_tail_with_errors
           ~keeper_id
           ~n:Keeper_memory_os_io.fact_store_max
-        |> rank_facts ~now
       in
+      let
+        { Keeper_memory_os_io.facts = private_all_facts
+        ; parse_errors = private_parse_errors
+        }
+        =
+        private_read
+      in
+      let private_facts = private_all_facts |> rank_facts ~now in
       let private_keys =
         List.map
           (fun (fact : Keeper_memory_os_types.fact) -> claim_identity fact)
           private_facts
       in
-      let shared_facts : Keeper_memory_os_types.fact list =
+      let shared_facts, shared_parse_errors =
         if String.equal keeper_id shared_store_id
-        then []
-        else
-          Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
-          |> rank_facts ~now
-          |> List.filter (fun (fact : Keeper_memory_os_types.fact) ->
-            not (List.mem (claim_identity fact) private_keys))
+        then [], []
+        else (
+          let shared_read =
+            Keeper_memory_os_io.read_facts_all_with_errors
+              ~keeper_id:shared_store_id
+          in
+          let
+            { Keeper_memory_os_io.facts = shared_all_facts
+            ; parse_errors = shared_parse_errors
+            }
+            =
+            shared_read
+          in
+          ( shared_all_facts
+            |> rank_facts ~now
+            |> List.filter (fun (fact : Keeper_memory_os_types.fact) ->
+              not (List.mem (claim_identity fact) private_keys))
+          , shared_parse_errors ))
       in
-      private_facts, shared_facts)
+      private_facts, shared_facts, private_parse_errors @ shared_parse_errors)
   in
-  let all_items =
-    List.map (item_of_fact ~source:Keeper_private) private_facts
-    @ List.map
-        (fun (fact : fact) ->
-          item_of_fact ~source:(Shared fact.observed_by) fact)
-        shared_facts
-  in
-  let select category max_items =
-    all_items
-    |> List.filter (fun item -> item.category = category)
-    |> List.sort (fun a b ->
-      compare (item_truth_anchor b) (item_truth_anchor a))
-    |> take max_items
-  in
-  { preferences = select Preference max_preferences
-  ; constraints = select Constraint max_constraints
-  ; source_fact_count = List.length private_facts
-  ; shared_fact_count = List.length shared_facts
-  }
+  match parse_errors with
+  | _ :: _ -> Error (Fact_store_parse_error parse_errors)
+  | [] ->
+    let all_items =
+      List.map (item_of_fact ~source:Keeper_private) private_facts
+      @ List.map
+          (fun (fact : fact) ->
+             item_of_fact ~source:(Shared fact.observed_by) fact)
+          shared_facts
+    in
+    let select category max_items =
+      all_items
+      |> List.filter (fun item -> item.category = category)
+      |> List.sort (fun a b ->
+        compare (item_truth_anchor b) (item_truth_anchor a))
+      |> take max_items
+    in
+    Ok
+      { preferences = select Preference max_preferences
+      ; constraints = select Constraint max_constraints
+      ; source_fact_count = List.length private_facts
+      ; shared_fact_count = List.length shared_facts
+      }
+;;
+
+let build ~keeper_id ~now ?max_preferences ?max_constraints () =
+  match build_result ~keeper_id ~now ?max_preferences ?max_constraints () with
+  | Ok model -> model
+  | Error error -> invalid_arg (build_error_to_string error)
 ;;
 
 let source_label = function

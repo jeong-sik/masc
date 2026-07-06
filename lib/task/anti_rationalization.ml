@@ -556,55 +556,43 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
 ;;
 
 (* ================================================================ *)
-(* Verdict parsing (text fallback — Samchon Rank 1: lenient)        *)
+(* Verdict parsing (legacy text fallback)                           *)
 (* ================================================================ *)
 
-(** Parse "APPROVE" or "REJECT: reason" from model text output.
+(** Parse strict "APPROVE" or "REJECT: reason" model text protocol.
     Returns Result instead of bare verdict to avoid silent degradation.
     ADR D3: unknown format returns Error, NOT a permissive default. *)
+type text_verdict_marker =
+  | Text_approve
+  | Text_reject
+
+let text_verdict_marker_to_wire = function
+  | Text_approve -> "APPROVE"
+  | Text_reject -> "REJECT"
+
+let reject_text_prefix =
+  text_verdict_marker_to_wire Text_reject ^ ":"
+
 let parse_verdict_typed (text : string) : (verdict, verdict_parse_error) result =
   let trimmed = String.trim text in
-  let upper = String.uppercase_ascii trimmed in
-  
-  (* Scan for APPROVE/REJECT keyword anywhere in text (case-insensitive) *)
-  let scan_for_keyword () =
-    let upper_len = String.length upper in
-    let rec scan_idx idx =
-      if idx >= upper_len then None
-      else if idx + 7 <= upper_len && String.starts_with ~prefix:"APPROVE" (String.sub upper idx 7)
-      then Some (idx, "APPROVE", 7)
-      else if idx + 6 <= upper_len && String.starts_with ~prefix:"REJECT" (String.sub upper idx 6)
-      then Some (idx, "REJECT", 6)
-      else scan_idx (idx + 1)
-    in
-    scan_idx 0
-  in
-  
-  match scan_for_keyword () with
-  | Some (pos, keyword, len) ->
-    (* Extract reason after keyword *)
-    let rest_start = pos + len in
-    let rest = 
-      if rest_start < String.length text 
-      then 
-        let raw_rest = String.sub text rest_start (String.length text - rest_start) in
-        String.trim raw_rest
-      else "" 
-    in
-    (* Strip leading colon/dash/space from reason *)
-    let reason = 
-      if String.length rest > 0 && (rest.[0] = ':' || rest.[0] = '-' || rest.[0] = ' ')
-      then String.trim (String.sub rest 1 (String.length rest - 1))
-      else rest 
-    in
-    if keyword = "APPROVE" then Ok Approve
-    else 
-      let final_reason = if reason = "" then "completion notes did not address the task" else reason in
-      Ok (Reject final_reason)
-  | None ->
-    (* No keyword found - check if text is empty *)
-    if String.length trimmed = 0
-    then Error Empty_review_output
+  if String.equal trimmed "" then Error Empty_review_output
+  else if String.equal trimmed (text_verdict_marker_to_wire Text_approve) then
+    Ok Approve
+  else
+    let prefix_len = String.length reject_text_prefix in
+    let trimmed_len = String.length trimmed in
+    if trimmed_len > prefix_len
+       && String.equal (String.sub trimmed 0 prefix_len) reject_text_prefix
+    then
+      let reason =
+        String.sub trimmed prefix_len (trimmed_len - prefix_len)
+        |> String.trim
+      in
+      if String.equal reason "" then
+        Error
+          (Unrecognized_review_format
+             "REJECT verdict requires a non-empty reason")
+      else Ok (Reject reason)
     else
       Error
         (Unrecognized_review_format

@@ -33,6 +33,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module Config = Masc.Config
+module Catalog = Tool_catalog
 module Registry = Tool_help_registry
 
 let lookup name =
@@ -145,6 +146,47 @@ let test_entry_json_includes_populated_fields () =
       "empty alternatives list omitted from JSON" false (has_key "alternatives")
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
+let command_plane_doc_refs =
+  [
+    "docs/COMMAND-PLANE-RUNBOOK.md";
+    "docs/BENCHMARK-RUNBOOK.md";
+  ]
+
+let command_plane_operation_names =
+  [
+    "masc_policy_approve";
+    "masc_policy_freeze_unit";
+    "masc_policy_kill_switch";
+    "masc_observe_operations";
+    "masc_observe_capacity";
+    "masc_observe_traces";
+  ]
+
+let synthetic_schema name : Masc_domain.tool_schema =
+  {
+    name;
+    description = "Synthetic schema used to pin catalog-owned doc references.";
+    input_schema = `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
+  }
+
+let test_command_plane_doc_refs_owned_by_catalog () =
+  List.iter
+    (fun name ->
+      Alcotest.(check (list string))
+        (Printf.sprintf "%s doc refs come from Tool_catalog" name)
+        command_plane_doc_refs (Catalog.doc_refs name))
+    command_plane_operation_names
+
+let test_entry_of_schema_uses_catalog_doc_refs () =
+  let entry = Registry.entry_of_schema (synthetic_schema "masc_policy_approve") in
+  Alcotest.(check (list string))
+    "registered command-plane operation gets catalog doc refs"
+    command_plane_doc_refs entry.doc_refs;
+  let unrelated = Registry.entry_of_schema (synthetic_schema "masc_policy_unregistered") in
+  Alcotest.(check (list string))
+    "unregistered prefix sibling is not inferred by prefix"
+    [] unrelated.doc_refs
+
 let () =
   Alcotest.run "tool_help_metadata_rfc_0195"
     [
@@ -168,5 +210,12 @@ let () =
             `Quick test_entry_json_omits_empty_fields;
           Alcotest.test_case "populated optional fields are emitted"
             `Quick test_entry_json_includes_populated_fields;
+        ] );
+      ( "doc_refs",
+        [
+          Alcotest.test_case "command-plane doc refs are catalog-owned"
+            `Quick test_command_plane_doc_refs_owned_by_catalog;
+          Alcotest.test_case "entry_of_schema reads doc refs without prefix inference"
+            `Quick test_entry_of_schema_uses_catalog_doc_refs;
         ] );
     ]

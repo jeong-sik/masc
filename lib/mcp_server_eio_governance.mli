@@ -10,7 +10,7 @@
     [mcp_session_{to,of}_json] as top-level lets.
 
     Internal helpers (the [governance_path] / [mcp_sessions_path]
-    path joiners and the [ensure_masc_dir] mkdir helper) are
+    path joiners) are
     hidden — callers go through [load_*] / [save_*] which call
     them on every read / write. The auto-derived
     [mcp_session_record_to_yojson] /
@@ -70,6 +70,10 @@ val save_governance :
     [Masc_domain.now_iso ()]) when the encoder produces an [`Assoc].
     Creates the [.masc/] directory if absent. *)
 
+val save_governance_result :
+  Workspace.config -> governance_config -> (unit, string) result
+(** Result-returning variant of {!save_governance}. *)
+
 (** {1 MCP sessions} *)
 
 type mcp_session_record = {
@@ -107,3 +111,7 @@ val save_mcp_sessions :
 (** Persist [sessions] as a [`List] to [mcp-sessions.json] under
     [config]'s [.masc/] root. Creates the [.masc/] directory if
     absent. *)
+
+val save_mcp_sessions_result :
+  Workspace.config -> mcp_session_record list -> (unit, string) result
+(** Result-returning variant of {!save_mcp_sessions}. *)

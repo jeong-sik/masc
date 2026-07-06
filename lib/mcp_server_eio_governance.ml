@@ -29,11 +29,6 @@ let governance_defaults level =
 let governance_path (config : Workspace.config) =
   Filename.concat (Workspace_utils.masc_dir config) "governance.json"
 
-let ensure_masc_dir (config : Workspace.config) =
-  let dir = Workspace_utils.masc_dir config in
-  if not (Sys.file_exists dir) then
-    Workspace_utils.mkdir_p dir
-
 let load_governance (config : Workspace.config) : governance_config =
   let path = governance_path config in
   if Workspace_utils.path_exists config path then
@@ -50,14 +45,18 @@ let load_governance (config : Workspace.config) : governance_config =
   else
     governance_defaults "development"
 
-let save_governance (config : Workspace.config) (g : governance_config) =
-  ensure_masc_dir config;
+let save_governance_result (config : Workspace.config) (g : governance_config) =
   let json = match governance_config_to_yojson g with
     | `Assoc fields ->
         `Assoc (fields @ [("updated_at", `String (Masc_domain.now_iso ()))])
     | other -> other
   in
-  Workspace_utils.write_json config (governance_path config) json
+  Workspace_utils.write_json_result config (governance_path config) json
+
+let save_governance (config : Workspace.config) (g : governance_config) =
+  match save_governance_result config g with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 (** {1 MCP Sessions} *)
 
@@ -90,7 +89,13 @@ let load_mcp_sessions (config : Workspace.config) : mcp_session_record list =
   else
     []
 
-let save_mcp_sessions (config : Workspace.config) (sessions : mcp_session_record list) =
-  ensure_masc_dir config;
+let save_mcp_sessions_result (config : Workspace.config)
+    (sessions : mcp_session_record list) =
   let json = `List (List.map mcp_session_to_json sessions) in
-  Workspace_utils.write_json config (mcp_sessions_path config) json
+  Workspace_utils.write_json_result config (mcp_sessions_path config) json
+
+let save_mcp_sessions (config : Workspace.config)
+    (sessions : mcp_session_record list) =
+  match save_mcp_sessions_result config sessions with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)

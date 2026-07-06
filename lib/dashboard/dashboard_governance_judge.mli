@@ -78,6 +78,7 @@ type runtime_snapshot = {
   last_compute_timeout_sec : float option;
   last_compute_outcome : string option;
   last_compute_reason : string option;
+  judgment_read_errors : Yojson.Safe.t list;
 }
 (** Snapshot of the daemon's externally-visible runtime
     state.  Constructed by {!runtime_status_at} under
@@ -141,6 +142,7 @@ type state = {
   mutable next_compute_after_unix : float option;
   mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
+  mutable judgment_read_errors : Yojson.Safe.t list;
 }
 (** Mutable in-memory daemon state.  One instance per
     [base_path] is cached in the singleton table and
@@ -156,7 +158,9 @@ type state = {
     triple) replaces the #11079 [int] counter.  The
     [next_cycle_id] field drives [mark_compute_start]'s
     monotonic tag.  [next_compute_after_unix] records
-    timeout backoff for advisory judge retries.  Every other
+    timeout backoff for advisory judge retries.  Judgment
+    disk-load failures are retained in [judgment_read_errors]
+    and projected through {!runtime_status}.  Every other
     reader goes through {!runtime_status} /
     {!fresh_judgments_json}. *)
 

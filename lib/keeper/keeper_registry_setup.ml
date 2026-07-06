@@ -300,22 +300,40 @@ let merge_event_queues ~durable ~live =
   loop durable live
 ;;
 
+let load_event_queue_for_registry ~base_path name ~operation =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:name with
+  | Ok queue -> queue
+  | Error msg ->
+    Log.Keeper.warn
+      "registry: %s could not load durable event queue name=%s: %s"
+      operation
+      name
+      msg;
+    Keeper_event_queue.empty
+;;
+
 let refresh_entry_event_queue_from_persistence ~base_path name entry =
-  let durable = Keeper_event_queue_persistence.load ~base_path ~keeper_name:name in
-  let rec loop () =
-    let live = Atomic.get entry.event_queue in
-    let merged = merge_event_queues ~durable ~live in
-    if merged = live
-    then ()
-    else if Atomic.compare_and_set entry.event_queue live merged
-    then
-      Keeper_event_queue_persistence.persist_snapshot
-        ~base_path
-        ~keeper_name:name
-        (fun () -> Atomic.get entry.event_queue)
-    else loop ()
-  in
-  loop ()
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:name with
+  | Error msg ->
+    Log.Keeper.warn
+      "registry: refresh_entry_event_queue_from_persistence failed name=%s: %s"
+      name
+      msg
+  | Ok durable ->
+    let rec loop () =
+      let live = Atomic.get entry.event_queue in
+      let merged = merge_event_queues ~durable ~live in
+      if merged = live
+      then ()
+      else if Atomic.compare_and_set entry.event_queue live merged
+      then
+        Keeper_event_queue_persistence.persist_snapshot
+          ~base_path
+          ~keeper_name:name
+          (fun () -> Atomic.get entry.event_queue)
+      else loop ()
+    in
+    loop ()
 ;;
 
 let register_with_state
@@ -343,7 +361,7 @@ let register_with_state
      decr_running_count_clamped ()
    | _ -> ());
   let initial_event_queue =
-    Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
+    load_event_queue_for_registry ~base_path name ~operation:"register_with_state"
   in
   let entry =
     { base_path
@@ -437,7 +455,7 @@ let register_restarting ~base_path name meta
      queue snapshot instead of being reset across restart. *)
   let done_p, done_r = Eio.Promise.create () in
   let initial_event_queue =
-    Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
+    load_event_queue_for_registry ~base_path name ~operation:"register"
   in
   let new_entry =
     { base_path

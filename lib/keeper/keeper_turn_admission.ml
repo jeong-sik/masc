@@ -35,6 +35,7 @@ type slot =
        non-cooperative mutex is the right choice here. *)
   ; mutable info : in_flight_info option
   ; mutable waiting : int
+  ; mutable waiting_since : float option
   }
 
 let slots : (string, slot) Hashtbl.t = Hashtbl.create 16
@@ -55,6 +56,7 @@ let slot_for ~base_path ~keeper_name =
         ; state_mu = Stdlib.Mutex.create ()
         ; info = None
         ; waiting = 0
+        ; waiting_since = None
         }
       in
       Hashtbl.add slots key slot;
@@ -84,6 +86,11 @@ let run_locked slot ~lane f =
 
 let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
 
+let waiting_since slot =
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    if slot.waiting > 0 then slot.waiting_since else None)
+;;
+
 let run_if_free ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   (* Yield to a parked chat before touching the lock. [waiting > 0] implies
@@ -105,6 +112,11 @@ let run_serialized ~base_path ~keeper_name f =
       if slot.waiting >= max_waiting_chat_requests
       then false
       else (
+        if slot.waiting = 0
+        then
+          (* NDT-OK: observability timestamp only; admission decisions use the
+             typed waiter count, not elapsed time. *)
+          slot.waiting_since <- Some (Unix.gettimeofday ());
         slot.waiting <- slot.waiting + 1;
         true))
   in
@@ -120,7 +132,9 @@ let run_serialized ~base_path ~keeper_name f =
        counting as waiting once it holds the slot. *)
     Fun.protect
       ~finally:(fun () ->
-        Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting <- slot.waiting - 1))
+        Stdlib.Mutex.protect slot.state_mu (fun () ->
+          slot.waiting <- slot.waiting - 1;
+          if slot.waiting = 0 then slot.waiting_since <- None))
       (fun () -> Eio.Mutex.lock slot.turn_mu);
     run_locked slot ~lane:Chat f)
 ;;
@@ -137,6 +151,13 @@ let chat_waiting ~base_path ~keeper_name =
   match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
   | None -> false (* no slot yet ⇒ no turn ran ⇒ no chat can be waiting *)
   | Some slot -> waiting_count slot > 0
+;;
+
+let chat_waiting_since ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
+  | None -> None
+  | Some slot -> waiting_since slot
 ;;
 
 module For_testing = struct

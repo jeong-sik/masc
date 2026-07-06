@@ -20,7 +20,8 @@ val write_backlog :
     both the primary and recovery paths, then invokes [after_commit] if
     provided.  Use [after_commit] for cache-invalidation side-effects that
     must not fire unless the backlog commit succeeded (RFC-0221 §3.3).
-    Non-transition callers (GC, init, query) omit the callback. *)
+    Non-transition callers (GC, init, query) omit the callback. Raises
+    [Sys_error] when {!write_backlog_result} reports a persistence failure. *)
 
 val write_backlog_result :
   ?after_commit:(unit -> unit) ->

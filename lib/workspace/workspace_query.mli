@@ -18,9 +18,11 @@ val update_priority : config -> task_id:string -> priority:int -> string
 
 (** Return raw task list (used by orchestrator).
     Requires initialization. *)
+val get_tasks_raw_result : config -> (Masc_domain.task list, string) result
 val get_tasks_raw : config -> Masc_domain.task list
 
 (** Like {!get_tasks_raw} but returns [[]] when not initialized. *)
+val get_tasks_safe_result : config -> (Masc_domain.task list, string) result
 val get_tasks_safe : config -> Masc_domain.task list
 
 (** Return all agents including inactive (for orchestrator).
@@ -39,6 +41,13 @@ val get_all_agents : config -> Masc_domain.agent list
 (** Find claimed/in_progress tasks whose assignees are not active.
     Returns [(task, assignee)] pairs for orphaned tasks. *)
 val audit_orphan_tasks : config -> (Masc_domain.task * string) list
+
+(** Result-returning sibling of {!audit_orphan_tasks}. Active-agent read
+    failures make orphan classification unknowable, so callers that mutate
+    task state should consume this boundary instead of treating read failure as
+    an empty orphan set. *)
+val audit_orphan_tasks_result :
+  config -> ((Masc_domain.task * string) list, string) result
 
 (** RFC-0294 PR-4: typed source of truth for orphan-status classification.
     [Some label] for an orphan-eligible status (Claimed / InProgress /
@@ -78,6 +87,10 @@ val get_all_messages_raw :
 (** {1 Formatted Output} *)
 
 (** List tasks with optional filters, returning a formatted string. *)
+val list_tasks_result :
+  ?include_done:bool -> ?include_cancelled:bool -> ?status:string ->
+  config -> (string, string) result
+
 val list_tasks :
   ?include_done:bool -> ?include_cancelled:bool -> ?status:string ->
   config -> string

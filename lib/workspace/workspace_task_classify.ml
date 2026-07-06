@@ -76,18 +76,43 @@ let trim_opt = Env_config_core.trim_opt
 (* Agents who currently hold a Claimed or InProgress task.
     Used by the Hebbian hook to strengthen only against agents who are
     actively working, not everyone who happens to be joined.
-    Falls back to active_agents if the backlog cannot be read. *)
-let working_agents config =
+    [working_agents_result] fails closed when the backlog cannot be read.
+    [working_agents] is the legacy compatibility wrapper. *)
+type working_agents_error =
+  | Working_agents_backlog_read_failed of string
+
+let working_agents_error_to_string = function
+  | Working_agents_backlog_read_failed msg ->
+    Printf.sprintf "working_agents backlog read failed: %s" msg
+
+let working_agents_of_backlog backlog =
+  List.filter_map
+    (fun (t : task) ->
+       match t.task_status with
+       | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
+       | Todo | Done _ | Cancelled _ | AwaitingVerification _ -> None)
+    backlog.tasks
+  |> List.sort_uniq String.compare
+;;
+
+let working_agents_result config =
   match read_backlog_r config with
-  | Error _ -> (Workspace_state.read_state config).active_agents
-  | Ok backlog ->
-    List.filter_map
-      (fun (t : task) ->
-         match t.task_status with
-         | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
-         | Todo | Done _ | Cancelled _ | AwaitingVerification _ -> None)
-      backlog.tasks
-    |> List.sort_uniq String.compare
+  | Ok backlog -> Ok (working_agents_of_backlog backlog)
+  | Error msg -> Error (Working_agents_backlog_read_failed msg)
+;;
+
+let working_agents config =
+  match working_agents_result config with
+  | Ok agents -> agents
+  | Error error ->
+    let state_snapshot = Workspace_state.read_state_snapshot config in
+    Log.Misc.warn
+      "working_agents: %s; using legacy active_agents fallback \
+       (workspace_state_status=%s, workspace_state_read_error_count=%d)"
+      (working_agents_error_to_string error)
+      (Workspace_state.read_state_status_to_string state_snapshot.status)
+      (List.length state_snapshot.read_errors);
+    state_snapshot.state.active_agents
 ;;
 
 (** Update the on-disk agent state record under its own file lock.
@@ -103,13 +128,11 @@ let working_agents config =
     [update_agent_r] or concurrent workspace_task transitions can race and
     lose each other's updates.
 
-    This helper centralises the pattern, takes [with_file_lock] on the
-    agent file, and silently skips the write when the file is missing
-    (matching the pre-existing [if Sys.file_exists agent_file]
-    guards).  It never blocks the caller on a missing/corrupt agent
-    record — the backlog transition is the source of truth and the
-    agent mirror is best-effort telemetry.  On JSON parse failure the
-    error is logged with the agent name for diagnostic context. *)
+    This helper centralises the pattern and takes [with_file_lock] on the
+    agent file.  Missing files keep the pre-existing no-op semantics because
+    the backlog transition is the source of truth and the agent mirror is
+    best-effort telemetry.  Parse and write failures are logged with the
+    agent name for diagnostic context. *)
 let update_local_agent_state config ~agent_name f =
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
@@ -119,7 +142,13 @@ let update_local_agent_state config ~agent_name f =
     with_file_lock config agent_file (fun () ->
       let json = read_json config agent_file in
       match agent_of_yojson json with
-      | Ok agent -> write_json config agent_file (agent_to_yojson (f agent))
+      | Ok agent -> (
+          match write_agent_result config agent_file (f agent) with
+          | Ok () -> ()
+          | Error msg ->
+              Log.Misc.error
+                "update_local_agent_state: write failed for %s: %s"
+                agent_name msg)
       | Error msg ->
         Log.Misc.error "update_local_agent_state: parse failed for %s: %s" agent_name msg)
 ;;

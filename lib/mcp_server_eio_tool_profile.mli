@@ -22,10 +22,11 @@
     (consumed by {!tool_title_of_name}), [tool_icons_for_name]
     (consumed by {!tool_json_for_profile}), the parsing helpers
     [strict_assoc_params] / [cursor_param] / [bool_param] /
-    [decode_cursor_offset] / [drop_list] / [take_list] /
+    [decode_cursor_offset] / [decode_cursor_result] /
+    [drop_list] / [take_list] /
     [paginate_json_items] / [cursor_only_params] /
     [validate_optional_meta], and the raw cursor codec
-    [encode_cursor] / [decode_cursor] (callers go through
+    [encode_cursor] / [decode_cursor_result] (callers go through
     {!page_items_with_cursor}). *)
 
 (** {1 Profile} *)
@@ -195,6 +196,22 @@ val list_page_size : unit -> int
 (** [list_page_size ()] reads [Env_config.Tools.list_page_size ()]
     at call time.  Used by {!page_items_with_cursor} as the page
     cap — env mutation takes effect on next call. *)
+
+type cursor_decode_error =
+  | Cursor_base64_decode_error of { kind : string; message : string }
+  | Cursor_kind_mismatch of { expected_kind : string }
+  | Cursor_offset_parse_error of { kind : string; raw_offset : string }
+  | Cursor_negative_offset of { kind : string; offset : int }
+(** Structured decode failure for opaque MCP pagination cursors. *)
+
+val cursor_decode_error_to_string :
+  encoded:string -> cursor_decode_error -> string
+(** Operator-facing error message for an invalid opaque cursor. *)
+
+val decode_cursor_result :
+  kind:string -> string -> (int, cursor_decode_error) result
+(** [decode_cursor_result ~kind cursor] base64-decodes [cursor], verifies the
+    cursor kind, and returns a non-negative offset. *)
 
 val page_items_with_cursor :
   kind:string ->

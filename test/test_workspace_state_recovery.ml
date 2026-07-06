@@ -128,6 +128,84 @@ let test_read_state_filters_invalid_active_agent_entries () =
         [ "gemini-brave-bear" ]
         state.active_agents)
 
+let test_read_state_result_reports_repair_write_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:None);
+      write_text_file (state_path base_dir) "{}";
+      let masc_dir = Filename.concat base_dir Common.masc_dirname in
+      Unix.chmod masc_dir 0o500;
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod masc_dir 0o755)
+        (fun () ->
+          match Workspace.read_state_result config with
+          | Ok _ -> fail "repair write failure must be reported"
+          | Error
+              (Workspace.State_repair_write_failed
+                 { decode_error; write_error; recovered_state }) ->
+              check bool "decode error reported" true (String.length decode_error > 0);
+              check bool "write error reported" true (String.length write_error > 0);
+              check string "recovered protocol" "0.1.0"
+                recovered_state.protocol_version;
+              let snapshot = Workspace.read_state_snapshot config in
+              check string "snapshot status" "recovered_unpersisted"
+                (Workspace.read_state_status_to_string snapshot.status);
+              check int "snapshot read error count" 1
+                (List.length snapshot.read_errors)
+          | Error (Workspace.State_read_failed msg) ->
+              fail ("expected repair write failure, got read failure: " ^ msg)))
+
+let test_read_state_result_reports_unreadable_state_path () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:None);
+      Unix.unlink (state_path base_dir);
+      Unix.mkdir (state_path base_dir) 0o755;
+      match Workspace.read_state_result config with
+      | Ok _ -> fail "directory state path must be reported as read failure"
+      | Error (Workspace.State_repair_write_failed _) ->
+          fail "directory state path should fail before repair"
+      | Error (Workspace.State_read_failed msg) ->
+          check bool "read failure message reported" true (String.length msg > 0);
+          let snapshot = Workspace.read_state_snapshot config in
+          check string "snapshot status" "default_from_read_error"
+            (Workspace.read_state_status_to_string snapshot.status);
+          check int "snapshot read error count" 1
+            (List.length snapshot.read_errors))
+
+let test_state_result_helpers_report_unreadable_state_path () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:None);
+      Unix.unlink (state_path base_dir);
+      Unix.mkdir (state_path base_dir) 0o755;
+      let expect_error label = function
+        | Ok _ -> fail (label ^ " unexpectedly succeeded")
+        | Error msg ->
+            check bool (label ^ " read failure") true (String.length msg > 0)
+      in
+      expect_error
+        "update_state_result"
+        (Workspace.update_state_result config (fun state ->
+           { state with message_seq = state.message_seq + 1 }));
+      expect_error "is_paused_result" (Workspace.is_paused_result config);
+      expect_error "pause_info_result" (Workspace.pause_info_result config))
+
 let test_agent_of_yojson_accepts_numeric_last_seen () =
   let json =
     `Assoc
@@ -323,6 +401,12 @@ let () =
             test_read_state_drops_legacy_active_agent_objects;
           test_case "filters invalid active_agents entries" `Quick
             test_read_state_filters_invalid_active_agent_entries;
+          test_case "read_state_result reports repair write failure" `Quick
+            test_read_state_result_reports_repair_write_failure;
+          test_case "read_state_result reports unreadable state path" `Quick
+            test_read_state_result_reports_unreadable_state_path;
+          test_case "state result helpers report unreadable state path" `Quick
+            test_state_result_helpers_report_unreadable_state_path;
           test_case "agent parser accepts numeric last_seen" `Quick
             test_agent_of_yojson_accepts_numeric_last_seen;
           test_case "agent parser bootstraps null last_seen from session_bound_at (#7947)" `Quick

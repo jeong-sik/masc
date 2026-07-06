@@ -77,18 +77,20 @@ let invalidatestatus_cache () =
   status_cache.expires_at <- 0.0
 ;;
 
-let cached_text_by_key cache ~key ~ttl_s compute =
+let cached_text_by_key_result cache ~key ~ttl_s compute =
   let now = Time_compat.now () in
   match cache.key, cache.value with
   | Some cached_key, Some value
     when String.equal cached_key key && Stdlib.Float.compare now cache.expires_at < 0 ->
-    value
+    Ok value
   | _ ->
-    let value = compute () in
-    cache.key <- Some key;
-    cache.value <- Some value;
-    cache.expires_at <- now +. ttl_s;
-    value
+    (match compute () with
+     | Error _ as error -> error
+     | Ok value ->
+       cache.key <- Some key;
+       cache.value <- Some value;
+       cache.expires_at <- now +. ttl_s;
+       Ok value)
 ;;
 
 let effective_cluster_name (config : Workspace.config) =
@@ -195,14 +197,6 @@ let safe_get_agents (ctx : context) =
   | exn ->
     Log.Workspace.warn "get_active_agents failed: %s" (Stdlib.Printexc.to_string exn);
     []
-;;
-
-let safe_read_backlog (ctx : context) =
-  try Workspace.read_backlog ctx.config with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Workspace.warn "read_backlog failed: %s" (Stdlib.Printexc.to_string exn);
-    { Masc_domain.tasks = []; last_updated = Masc_domain.now_iso (); version = 1 }
 ;;
 
 let safe_is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen =
@@ -315,10 +309,18 @@ let planning_context_state
        { planning_missing_task = None; deliverable_conflict_task })
 ;;
 
-let status_summary_string (ctx : context) =
+let status_summary_string_result (ctx : context) =
   Workspace.ensure_initialized ctx.config;
-  let state = Workspace.read_state ctx.config in
-  let backlog = safe_read_backlog ctx in
+  match Workspace.read_state_result ctx.config with
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "masc_status state read failed: %s"
+         (Workspace.read_state_error_to_string error))
+  | Ok state ->
+  (match Workspace.read_backlog_r ctx.config with
+  | Error msg -> Error (Printf.sprintf "masc_status backlog read failed: %s" msg)
+  | Ok backlog ->
   let session_bound =
     (* status_summary_string is read-only on the workspace file; a missing
        or malformed file is treated as "session not bound" because that's the
@@ -577,40 +579,47 @@ let status_summary_string (ctx : context) =
         ]
     else items
   in
-  Workspace_status_rendering.status_summary_string
-    ~ctx
-    ~bound:session_bound
-    ~actual_name
-    ~credential_state
-    ~credential_blocked
-    ~current_task
-    ~effective_cluster_name
-    ~agents_with_state
-    ~active_tasks
-    ~todo_count
-    ~claimed_count
-    ~in_progress_count
-    ~done_count
-    ~cancelled_count
-    ~todo_conflict_task_ids
-    ~binding
-    ~planning_state
-    ~suggested_next
-    ~attention_items
-    ~state
-    ~backlog
+  Ok
+    (Workspace_status_rendering.status_summary_string
+       ~ctx
+       ~bound:session_bound
+       ~actual_name
+       ~credential_state
+       ~credential_blocked
+       ~current_task
+       ~effective_cluster_name
+       ~agents_with_state
+       ~active_tasks
+       ~todo_count
+       ~claimed_count
+       ~in_progress_count
+       ~done_count
+       ~cancelled_count
+       ~todo_conflict_task_ids
+       ~binding
+       ~planning_state
+       ~suggested_next
+       ~attention_items
+       ~state
+       ~backlog))
 ;;
 
 let handle_status ~tool_name ~start_time ctx _args =
   let cache_key = Printf.sprintf "%s::%s" ctx.config.base_path ctx.agent_name in
-  Tool_result.ok
-    ~tool_name
-    ~start_time
-    (cached_text_by_key
-       status_cache
-       ~key:cache_key
-       ~ttl_s:(status_cache_ttl_s ())
-       (fun () -> status_summary_string ctx))
+  match
+    cached_text_by_key_result
+      status_cache
+      ~key:cache_key
+      ~ttl_s:(status_cache_ttl_s ())
+      (fun () -> status_summary_string_result ctx)
+  with
+  | Ok status -> Tool_result.ok ~tool_name ~start_time status
+  | Error msg ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Runtime_failure)
+      ~tool_name
+      ~start_time
+      msg
 ;;
 
 let handle_reset ~tool_name ~start_time ctx args =
@@ -637,23 +646,33 @@ type agent_state =
   ; current_task_set : bool
   }
 
-let inspect_state ctx =
+let inspect_state_result ctx =
+  let actual_name = safe_resolve_agent_name ctx ~session_bound:true in
+  let matches_you assignee =
+    String.equal assignee ctx.agent_name || String.equal assignee actual_name
+  in
+  match Workspace.get_tasks_raw_result ctx.config with
+  | Error msg -> Error (Printf.sprintf "masc_check backlog read failed: %s" msg)
+  | Ok tasks ->
+  let assigned_task_ids =
+    Workspace_status_rendering.assigned_task_ids ~matches_you tasks
+  in
   let binding =
-    let actual_name = safe_resolve_agent_name ctx ~session_bound:true in
-    let matches_you assignee =
-      String.equal assignee ctx.agent_name || String.equal assignee actual_name
-    in
-    let assigned_task_ids =
-      Workspace.get_tasks_raw ctx.config
-      |> Workspace_status_rendering.assigned_task_ids ~matches_you
-    in
     resolve_current_binding
       ~assigned_task_ids
       ~planning_current:(safe_current_task ctx ~session_bound:true)
   in
   let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
   let current_task_set = binding.current_task_set in
-  { task_claimed; current_task_set }
+  Ok { task_claimed; current_task_set }
+;;
+
+let inspect_state ctx =
+  match inspect_state_result ctx with
+  | Ok state -> state
+  | Error msg ->
+    Log.Workspace.warn "inspect_state failed: %s" msg;
+    { task_claimed = false; current_task_set = false }
 ;;
 
 let state_to_json st =
@@ -698,13 +717,20 @@ type dispatch_handler =
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
 let handle_check ~tool_name ~start_time ctx args =
-  let inspect ctx =
-    let s = inspect_state ctx in
-    { Workspace_assertions.task_claimed = s.task_claimed
-    ; current_task_set = s.current_task_set
-    }
-  in
-  Workspace_assertions.handle_check ~inspect_state:inspect ~tool_name ~start_time ctx args
+  match inspect_state_result ctx with
+  | Error msg ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Runtime_failure)
+      ~tool_name
+      ~start_time
+      msg
+  | Ok state ->
+    let inspect _ctx =
+      { Workspace_assertions.task_claimed = state.task_claimed
+      ; current_task_set = state.current_task_set
+      }
+    in
+    Workspace_assertions.handle_check ~inspect_state:inspect ~tool_name ~start_time ctx args
 ;;
 
 let dispatch_bindings : (string * dispatch_handler) list =

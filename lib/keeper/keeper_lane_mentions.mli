@@ -1,16 +1,16 @@
-(** Keeper_lane_mentions — boundary mention parser for keeper chat lanes
+(** Keeper_lane_mentions — keeper identity adapter for explicit mention tokens
     (RFC-0232 §3.3).
 
-    The legacy [line_mentions] tokenizer ran at {e read} time inside the
-    world-observation scan, re-deriving mention semantics from
-    [chat_message.content] on every observation.  This module is that
-    tokenizer relocated to the {e write} boundary: writers parse a user
-    line once at append, persist the resulting {!Keeper_identity.Keeper_id.t}
-    list on the line, and observation filters on the persisted ids only.
+    The exact ["@name"] token parser lives in {!Board_types.Mention_id} so
+    keeper chat and board rows share one protocol syntax.  This module applies
+    keeper-specific canonicalization on top of those raw token ids:
+    writers parse a user line once at append, persist the resulting
+    {!Keeper_identity.Keeper_id.t} list on the line, and observation filters on
+    the persisted ids only.
 
-    Tokenization contract (unchanged from the legacy tokenizer): a line
-    mentions [x] when some whitespace-separated token equals ["@" ^ x]
-    after trimming non-word edge characters.  Token equality, not
+    Tokenization contract: a line mentions [x] when some
+    whitespace-separated token equals ["@" ^ x] after trimming non-word edge
+    characters.  Token equality, not
     substring — ["@alicex"] and ["email@alice.com"] do not mention
     ["alice"].  On top of the legacy contract, extracted names are
     minted through {!Keeper_identity.Keeper_id.of_string}, so

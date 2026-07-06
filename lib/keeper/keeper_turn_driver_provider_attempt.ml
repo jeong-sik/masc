@@ -13,19 +13,37 @@ let provider_attempt_status_of_result = function
   | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) -> "timeout"
   | Error _ -> "error"
 
-let provider_attempt_exception_kind_of_result = function
+type provider_attempt_exception_kind_absence =
+  | Provider_attempt_succeeded
+  | Provider_attempt_unclassified_sdk_error
+
+type provider_attempt_exception_kind_projection =
+  | Provider_attempt_exception_kind of string
+  | Provider_attempt_exception_kind_absent of provider_attempt_exception_kind_absence
+
+let provider_attempt_exception_kind_projection_of_result = function
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }))
     when Keeper_oas_timeout_message.is_structural message ->
-    Some "oas_agent_execution_timeout"
+    Provider_attempt_exception_kind "oas_agent_execution_timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
-    Some "oas_agent_execution_timeout"
+    Provider_attempt_exception_kind "oas_agent_execution_timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
-    Some "oas_agent_idle_timeout"
+    Provider_attempt_exception_kind "oas_agent_idle_timeout"
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
-    Some "outer_oas_timeout"
+    Provider_attempt_exception_kind "outer_oas_timeout"
   | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
-    Some "outer_oas_timeout"
-  | Ok _ | Error _ -> None
+    Provider_attempt_exception_kind "outer_oas_timeout"
+  | Ok _ -> Provider_attempt_exception_kind_absent Provider_attempt_succeeded
+  | Error _ ->
+    Provider_attempt_exception_kind_absent Provider_attempt_unclassified_sdk_error
+
+let provider_attempt_exception_kind_to_option = function
+  | Provider_attempt_exception_kind kind -> Some kind
+  | Provider_attempt_exception_kind_absent _ -> None
+
+let provider_attempt_exception_kind_of_result result =
+  provider_attempt_exception_kind_to_option
+    (provider_attempt_exception_kind_projection_of_result result)
 
 let provider_attempt_status_and_error_of_exception = function
   | Eio.Time.Timeout -> "timeout", "Eio.Time.Timeout"

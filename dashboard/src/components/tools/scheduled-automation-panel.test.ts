@@ -8,11 +8,13 @@ import type {
 } from '../../api'
 
 const mocks = vi.hoisted(() => ({
+  cancelSchedule: vi.fn(),
   resolveScheduleApproval: vi.fn(),
   showToast: vi.fn(),
 }))
 
 vi.mock('../../api', () => ({
+  cancelSchedule: mocks.cancelSchedule,
   resolveScheduleApproval: mocks.resolveScheduleApproval,
 }))
 
@@ -56,6 +58,32 @@ function automation(
   }
 }
 
+function unknownAutomation(): DashboardScheduledAutomation {
+  return {
+    schema: 'masc.dashboard.scheduled_automation.v1',
+    status: 'unknown',
+    source: 'schedule_store',
+    generated_at: '2026-06-21T00:00:00Z',
+    schedule_store_known: false,
+    schedule_store_read_error: 'schedule ledger is present but unparseable',
+    request_count: null,
+    request_limit: 50,
+    truncated: null,
+    counts: null,
+    derived_counts: {
+      due_effective: null,
+      blocked_approval: null,
+      due_execution_ready: null,
+      expired_effective: null,
+      unsupported_payload_kind: null,
+      unknown_payload_kind: null,
+    },
+    payload_support: null,
+    fsm: { state: 'unknown', active_count: null, terminal_count: null, next_due_at: null },
+    requests: [],
+  }
+}
+
 function approvalAutomationFixture(): DashboardScheduledAutomation {
   return {
     schema: 'masc.dashboard.scheduled_automation.v1',
@@ -93,6 +121,7 @@ function approvalAutomationFixture(): DashboardScheduledAutomation {
         recurrence: { kind: 'one_shot' },
         recurrence_kind: 'one_shot',
         payload_kind: 'masc.board_post',
+        payload_dispatch_tool: 'masc_board_post',
         due_at_iso: '2026-06-21T01:00:00Z',
         approval_policy: 'separate_human_grant_required',
       },
@@ -229,6 +258,9 @@ describe('ScheduledAutomationPanel wake-signal feed', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    mocks.cancelSchedule.mockReset()
+    mocks.resolveScheduleApproval.mockReset()
+    mocks.showToast.mockReset()
   })
 
   afterEach(() => {
@@ -287,6 +319,7 @@ describe('ScheduledAutomationPanel approval actions', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    mocks.cancelSchedule.mockReset()
     mocks.resolveScheduleApproval.mockReset()
     mocks.showToast.mockReset()
   })
@@ -320,6 +353,7 @@ describe('ScheduledAutomationPanel approval actions', () => {
     ) as HTMLButtonElement | null
     expect(approve).not.toBeNull()
     expect(reject).not.toBeNull()
+    expect(container.textContent).toContain('tool masc_board_post')
 
     approve?.click()
     await flush()
@@ -389,6 +423,50 @@ function sampleAutomation(): DashboardScheduledAutomation {
             artifacts: ['receipt', 'log'],
           },
         },
+        lifecycle_audit: {
+          source: 'schedule_lifecycle_audit_jsonl',
+          status: 'ok',
+          limit: 10,
+          event_count: 2,
+          coverage: 'events_recorded',
+          backfill_policy: 'not_synthesized_from_schedule_snapshot',
+          events: [
+            {
+              schema: 'masc.schedule.lifecycle_audit.v1',
+              schema_version: 1,
+              event_id: 'sched-audit-created',
+              recorded_at: 1782000000,
+              action: 'request_created',
+              schedule_id: 'sched-keeper-review',
+              state_version: 1,
+              previous_status: null,
+              current_status: 'pending_approval',
+              payload_digest: 'sha256:abc123',
+              due_at: 1782003600,
+            },
+            {
+              schema: 'masc.schedule.lifecycle_audit.v1',
+              schema_version: 1,
+              event_id: 'sched-audit-cancelled',
+              recorded_at: 1782000100,
+              action: 'request_cancelled',
+              schedule_id: 'sched-keeper-review',
+              state_version: 2,
+              previous_status: 'scheduled',
+              current_status: 'cancelled',
+              payload_digest: 'sha256:abc123',
+              due_at: 1782003600,
+              actor: {
+                id: 'operator',
+                kind: 'human_operator',
+                display_name: 'Operator',
+              },
+              detail: {
+                reason: 'operator cleanup',
+              },
+            },
+          ],
+        },
       },
       {
         schedule_id: 'sched-run-smoke',
@@ -445,6 +523,17 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('Completed keeper review sweep.')
     expect(container.textContent).toContain('{1 field}')
     expect(container.textContent).toContain('[2 items]')
+    expect(container.textContent).toContain('lifecycle audit')
+    expect(container.textContent).toContain('schedule_lifecycle_audit_jsonl')
+    expect(container.textContent).toContain('events_recorded')
+    expect(container.textContent).toContain('not_synthesized_from_schedule_snapshot')
+    expect(container.textContent).toContain('request created')
+    expect(container.textContent).toContain('none -> pending approval')
+    expect(container.textContent).toContain('request cancelled')
+    expect(container.textContent).toContain('Operator')
+    expect(container.textContent).toContain('reason: operator cleanup')
+    expect(container.querySelector('[data-schedule-lifecycle-event="sched-audit-created"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-lifecycle-detail="sched-audit-cancelled:reason"]')).not.toBeNull()
     expect(container.querySelector('[data-execution-detail-row="kind"]')).not.toBeNull()
     expect(container.textContent).not.toContain('"kind":"test.done"')
     expect(container.querySelector('[data-schedule-filter="all"]')).not.toBeNull()
@@ -455,6 +544,46 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('위험도')
     expect(container.textContent).toContain('승인 정책')
     expect(container.textContent).toContain('페이로드')
+  })
+
+  it('renders runner wake enqueue counts', () => {
+    const automation = sampleAutomation()
+    automation.runner_status = {
+      status: 'degraded',
+      tick_count: 1,
+      last_counts: {
+        due_changed: 1,
+        emitted: 2,
+        rescheduled: 0,
+        dispatch_succeeded: 0,
+        dispatch_failed: 0,
+        dispatch_unsupported: 0,
+        dispatch_start_rejected: 0,
+        wake_enqueued: 1,
+        wake_skipped_no_keeper: 3,
+        wake_skipped_missing_schedule: 1,
+        wake_skipped_non_keeper_actor: 1,
+        wake_skipped_unregistered_keeper: 1,
+        wake_failed: 1,
+      },
+    }
+
+    render(html`<${ScheduledAutomationPanel} automation=${automation} />`, container)
+
+    expect(container.textContent).toContain('wake queued')
+    expect(container.textContent).toContain('wake skipped')
+    expect(container.textContent).toContain('missing schedule')
+    expect(container.textContent).toContain('non-keeper actor')
+    expect(container.textContent).toContain('unregistered keeper')
+    expect(container.textContent).toContain('wake failed')
+  })
+
+  it('renders schedule store read errors without false zero counts', () => {
+    render(html`<${ScheduledAutomationPanel} automation=${unknownAutomation()} />`, container)
+
+    expect(container.querySelector('[data-schedule-store-read-error]')).not.toBeNull()
+    expect(container.textContent).toContain('schedule store read error')
+    expect(container.textContent).toContain('unknown')
   })
 
   it('filters schedule cards without filtering the wake signal feed', async () => {
@@ -542,6 +671,20 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-schedule-detail-panel="sched-run-smoke"]')).not.toBeNull()
   })
 
+  it('renders durable schedule runner signal decode errors', async () => {
+    const automation = sampleAutomation()
+    automation.signal_error_count = 1
+    automation.signal_errors = [
+      { ordinal: 0, error: 'missing field: schedule_id' },
+    ]
+
+    render(html`<${ScheduledAutomationPanel} automation=${automation} />`, container)
+
+    expect(container.textContent).toContain('signal decode error')
+    expect(container.textContent).toContain('missing field: schedule_id')
+    expect(container.querySelector('[data-schedule-signal-error="0"]')).not.toBeNull()
+  })
+
   it('does not render prototype action buttons without a backend action callback', () => {
     render(html`<${ScheduledAutomationPanel} automation=${sampleAutomation()} />`, container)
 
@@ -549,6 +692,102 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).not.toContain('승인 — grant 발급')
     expect(container.textContent).not.toContain('거부')
     expect(container.textContent).not.toContain('취소')
+  })
+
+  it('renders v2 durable signal decode errors instead of the empty signal placeholder', () => {
+    const automation = sampleAutomation()
+    automation.signals = []
+    automation.signal_error_count = 1
+    automation.signal_errors = [
+      { ordinal: 0, error: 'missing field: schedule_id' },
+    ]
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${automation}
+        variant="v2"
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-schedule-signal-error="0"]')).not.toBeNull()
+    expect(container.textContent).toContain('missing field: schedule_id')
+    expect(container.querySelector('[data-missing="durable runner signals"]')).toBeNull()
+  })
+
+  it('cancels a v2 schedule only after an explicit operator reason', async () => {
+    mocks.cancelSchedule.mockResolvedValue({
+      ok: true,
+      schedule_id: 'sched-keeper-review',
+      decision: 'cancel',
+      reason: 'operator cancelled',
+    })
+    const onResolved = vi.fn()
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${sampleAutomation()}
+        variant="v2"
+        onResolved=${onResolved}
+      />`,
+      container,
+    )
+
+    const detail = container.querySelector(
+      '[data-schedule-detail="sched-keeper-review"]',
+    ) as HTMLButtonElement | null
+    detail?.click()
+    await flush()
+
+    const reason = container.querySelector(
+      '[data-testid="schedule-cancel-reason-sched-keeper-review"]',
+    ) as HTMLInputElement | null
+    const cancel = container.querySelector(
+      '[data-testid="schedule-cancel-sched-keeper-review"]',
+    ) as HTMLButtonElement | null
+    expect(reason).not.toBeNull()
+    expect(cancel).not.toBeNull()
+    expect(container.querySelector('[data-schedule-lifecycle-event="sched-audit-created"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-lifecycle-detail="sched-audit-cancelled:reason"]')).not.toBeNull()
+    expect(cancel?.disabled).toBe(true)
+
+    reason!.value = 'operator cancelled'
+    reason!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    expect(cancel?.disabled).toBe(false)
+    cancel?.click()
+    await flush()
+
+    expect(mocks.cancelSchedule).toHaveBeenCalledWith('sched-keeper-review', 'operator cancelled')
+    expect(onResolved).toHaveBeenCalledTimes(1)
+    expect(mocks.showToast).toHaveBeenCalledWith('sched-keeper-review cancelled', 'success')
+  })
+
+  it('does not render v2 mutation buttons for terminal canceled schedules', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [{
+      ...automation.requests[0]!,
+      schedule_id: 'sched-canceled-terminal',
+      status: 'canceled',
+      effective_status: 'canceled',
+      execution_readiness: 'blocked_approval',
+      operator_action: 'approve_or_reject',
+    }]
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${automation}
+        variant="v2"
+        onResolved=${vi.fn()}
+        selectedScheduleId="sched-canceled-terminal"
+      />`,
+      container,
+    )
+    await flush()
+
+    expect(container.querySelector('[data-schedule-detail-panel="sched-canceled-terminal"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
 })
 
@@ -561,7 +800,14 @@ describe('filterMatches', () => {
     expect(filterMatches('terminal', request({ schedule_id: 't', status: 'succeeded' }))).toBe(true)
     expect(filterMatches('terminal', request({ schedule_id: 't2', status: 'scheduled' }))).toBe(false)
     expect(filterMatches('pending', request({ schedule_id: 'p', status: 'pending_approval' }))).toBe(true)
+    expect(filterMatches('pending', request({ schedule_id: 'pb', effective_status: 'blocked_approval' }))).toBe(true)
+    expect(filterMatches('pending', request({ schedule_id: 'pa', operator_action: 'approve_or_reject' }))).toBe(true)
     expect(filterMatches('due', request({ schedule_id: 'd', effective_status: 'due' }))).toBe(true)
+  })
+
+  it('does not infer pending approval from status/action substrings', () => {
+    expect(filterMatches('pending', request({ schedule_id: 's', status: 'approval_not_required' }))).toBe(false)
+    expect(filterMatches('pending', request({ schedule_id: 'a', operator_action: 'preapprove_later' }))).toBe(false)
   })
 
   it('throws on an out-of-union filter key instead of silently showing all', () => {
@@ -598,6 +844,10 @@ describe('scheduledPendingApprovalCount', () => {
       request({ schedule_id: 'a', status: 'scheduled', effective_status: 'pending_approval' }),
     ])
     expect(scheduledPendingApprovalCount(auto)).toBe(1)
+  })
+
+  it('returns unknown for unreadable schedule store projections', () => {
+    expect(scheduledPendingApprovalCount(unknownAutomation())).toBeNull()
   })
 })
 

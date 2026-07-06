@@ -68,7 +68,7 @@ let skill_route_text =
   let route : KSR.keeper_skill_route =
     { primary_skill = "code_review";
       secondary_skill = None;
-      reason = ""; selection_mode = Heuristic }
+      reason = ""; selection_mode = Default_route }
   in
   KSR.skill_route_context_text
     ~fallback_route:route 
@@ -493,6 +493,56 @@ let test_recent_failure_context_is_dynamic_guidance () =
   check bool "strips role-like prefix from fingerprint" false
     (has_in context "system: retry")
 
+let default_skill_route : KSR.keeper_skill_route =
+  { primary_skill = "masc-keeper-autonomy";
+    secondary_skill = None;
+    reason = "Default route pending model selection";
+    selection_mode = KSR.Default_route;
+  }
+
+let test_skill_route_parser_accepts_typed_header () =
+  let route =
+    KSR.parse_skill_route_response
+      "SKILL: masc-heartbeat (+masc-keeper-autonomy)\n\
+       SKILL_REASON: heartbeat signal requires autonomy follow-up"
+      ~fallback_route:default_skill_route
+  in
+  check string "primary" "masc-heartbeat" route.primary_skill;
+  check (option string) "secondary" (Some "masc-keeper-autonomy")
+    route.secondary_skill;
+  check string "reason" "heartbeat signal requires autonomy follow-up"
+    route.reason;
+  check bool "model selected" true
+    (match route.selection_mode with
+     | KSR.Model_selected reason ->
+         String.equal reason "heartbeat signal requires autonomy follow-up"
+     | KSR.Default_route
+     | KSR.Model_rejected _ -> false)
+
+let test_skill_route_parser_rejects_malformed_secondary () =
+  let route =
+    KSR.parse_skill_route_response
+      "SKILL: masc-heartbeat (+)\nSKILL_REASON: malformed secondary"
+      ~fallback_route:default_skill_route
+  in
+  check string "fallback primary retained" default_skill_route.primary_skill
+    route.primary_skill;
+  check bool "malformed route is explicit rejection" true
+    (match route.selection_mode with
+     | KSR.Model_rejected reason ->
+         has_in reason "Invalid SKILL line"
+         && has_in reason "Empty secondary skill"
+     | KSR.Default_route
+     | KSR.Model_selected _ -> false)
+
+let test_skill_route_scrubber_uses_typed_protocol_parser () =
+  let raw =
+    "skill: masc-heartbeat\nVisible answer\nSKILL_REASON: model metadata"
+  in
+  check int "counts both protocol lines" 2 (KSR.count_skill_route_lines raw);
+  check string "strips protocol lines only" "Visible answer"
+    (KSR.strip_skill_route_lines raw |> String.trim)
+
 (* ── Suite ────────────────────────────────────────────── *)
 
 let () =
@@ -555,5 +605,14 @@ let () =
         [
           test_case "renders recent failures as dynamic guidance" `Quick
             test_recent_failure_context_is_dynamic_guidance;
+        ] );
+      ( "skill_routing",
+        [
+          test_case "accepts typed skill route header" `Quick
+            test_skill_route_parser_accepts_typed_header;
+          test_case "rejects malformed secondary skill" `Quick
+            test_skill_route_parser_rejects_malformed_secondary;
+          test_case "scrubber uses typed protocol parser" `Quick
+            test_skill_route_scrubber_uses_typed_protocol_parser;
         ] );
     ]

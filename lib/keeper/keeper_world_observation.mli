@@ -58,6 +58,14 @@ type pending_board_event = {
   (** Author of the most recent external comment (for prompt context). *)
   latest_external_preview : string option;
   (** Preview of the most recent external comment content. *)
+  post_read_error : string option;
+  (** Board post read failure observed while enriching a queued board signal.
+      [None] means the event came from an already-materialized post/synthetic
+      producer, or the board post read succeeded. *)
+  comment_read_error : string option;
+  (** Board comment stream read failure observed while checking keeper
+      self-comment state. [None] means the comment stream was not needed or the
+      read succeeded. *)
   provenance : observation_provenance;
   (** RFC-0247: provenance classified at construction; drives the
       trusted-vs-observational rendering split. *)
@@ -77,7 +85,12 @@ type scheduled_automation_item = {
 }
 
 (** Durable scheduled-automation summary from the MASC schedule store. *)
+type scheduled_automation_read_status =
+  | Schedule_observation_ok
+  | Schedule_observation_read_error of string
+
 type scheduled_automation_observation = {
+  read_status : scheduled_automation_read_status;
   active_count : int;
   due_ready_count : int;
   blocked_approval_count : int;
@@ -86,6 +99,8 @@ type scheduled_automation_observation = {
 }
 
 val empty_scheduled_automation_observation : scheduled_automation_observation
+val scheduled_automation_counts_known : scheduled_automation_observation -> bool
+val scheduled_automation_read_error : scheduled_automation_observation -> string option
 
 (** Snapshot of the world as seen by a keeper at heartbeat time. *)
 type world_observation = {
@@ -236,7 +251,6 @@ type keeper_cycle_decision = {
 type board_signal_match = {
   explicit_mention : bool;
   matched_targets : string list;
-  score : int;
 }
 
 (** Collect recent board activity within the keeper's heartbeat window.
@@ -301,7 +315,8 @@ val pending_board_event_of_external_attention :
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
     and [Bg_completed] (RFC-0290) produce [Some];
-    [Bootstrap]/[No_progress_recovery] return [None] (no prompt injection). *)
+    [Bootstrap], [No_progress_recovery], [Schedule_signal], [Connector_attention],
+    and [Hitl_resolved] return [None] (no prompt injection). *)
 val pending_board_event_of_stimulus :
   continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -317,8 +332,13 @@ val read_continuity_summary :
 
 val read_scheduled_automation_observation :
   config:Workspace.config ->
+  ?keeper_name:string ->
   now:float ->
   scheduled_automation_observation
+(** Read scheduled automation attention. Without [keeper_name], returns the
+    global schedule attention projection. With [keeper_name], returns only
+    schedules whose [scheduled_by] actor is the automated actor for that keeper;
+    this keeps keeper world observation lane-scoped. *)
 
 (** Build a world observation from workspace state and keeper metadata.
 

@@ -668,12 +668,46 @@ let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
            ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
            Run_error))
 
+type keeper_reply_payload_parse_error = { detail : string }
+
+type keeper_reply_payload_decode =
+  | Keeper_reply_payload_json of Yojson.Safe.t
+  | Keeper_reply_payload_parse_error of keeper_reply_payload_parse_error
+
+let keeper_reply_payload_parse_observation_event_name =
+  "KEEPER_REPLY_PAYLOAD_PARSE_OBSERVATION"
+
+let decode_keeper_reply_payload body =
+  match Yojson.Safe.from_string body with
+  | payload_json -> Keeper_reply_payload_json payload_json
+  | exception Yojson.Json_error detail ->
+      Keeper_reply_payload_parse_error { detail }
+
+let payload_json_opt_of_keeper_reply_payload_decode = function
+  | Keeper_reply_payload_json payload_json -> Some payload_json
+  | Keeper_reply_payload_parse_error _ -> None
+
+let publish_reply_payload_parse_observation ~events ~redact_text decode =
+  match decode with
+  | Keeper_reply_payload_json _ -> ()
+  | Keeper_reply_payload_parse_error { detail } ->
+      Keeper_chat_events.publish events
+        (Custom
+           { name = keeper_reply_payload_parse_observation_event_name
+           ; value =
+               `Assoc
+                 [ ("kind", `String "json_parse_error")
+                 ; ("detail", `String (redact_text detail))
+                 ; ("fallback", `String "raw_visible_reply")
+                 ]
+           })
+
 (** Extract visible reply from the keeper pipeline result body.
     Parses JSON if possible and strips internal markers. *)
-let extract_visible_reply body =
+let extract_visible_reply_with_decode body =
+  let payload_decode = decode_keeper_reply_payload body in
   let payload_json_opt =
-    try Some (Yojson.Safe.from_string body)
-    with Yojson.Json_error _ -> None
+    payload_json_opt_of_keeper_reply_payload_decode payload_decode
   in
   let visible_reply =
     match payload_json_opt with
@@ -692,7 +726,11 @@ let extract_visible_reply body =
         let visible = strip_keeper_visible_reply body in
         visible
   in
-  (payload_json_opt, visible_reply)
+  (payload_decode, visible_reply)
+
+let extract_visible_reply body =
+  let payload_decode, visible_reply = extract_visible_reply_with_decode body in
+  (payload_json_opt_of_keeper_reply_payload_decode payload_decode, visible_reply)
 
 let persisted_error_reply err =
   let detail =
@@ -969,7 +1007,19 @@ let process_single_turn ~connector_user_line_recorded_upstream
         in
         match dispatch_result with
         | Ok (true, body) ->
-            let payload_json_opt, visible_reply = extract_visible_reply body in
+            let payload_decode, visible_reply =
+              extract_visible_reply_with_decode body
+            in
+            (match payload_decode with
+             | Keeper_reply_payload_json _ -> ()
+             | Keeper_reply_payload_parse_error { detail } ->
+                 Log.Keeper.warn
+                   "keeper_stream: direct reply payload JSON parse failed \
+                    keeper=%s request_id=%s: %s"
+                   payload.name request_id detail);
+            let payload_json_opt =
+              payload_json_opt_of_keeper_reply_payload_decode payload_decode
+            in
             let streamed_text =
               Keeper_stream_text_accum.streamed_text worker_text_accum
             in
@@ -1159,7 +1209,14 @@ let process_single_turn ~connector_user_line_recorded_upstream
         Keeper_chat_events.publish events (Event_error { message = err })
     | Stream_terminal { ok = true; body; _ } -> (
         try
-          let payload_json_opt, visible_reply = extract_visible_reply body in
+          let payload_decode, visible_reply =
+            extract_visible_reply_with_decode body
+          in
+          publish_reply_payload_parse_observation ~events ~redact_text
+            payload_decode;
+          let payload_json_opt =
+            payload_json_opt_of_keeper_reply_payload_decode payload_decode
+          in
           let visible_reply =
             match String.trim visible_reply with
             | "" ->
@@ -1537,6 +1594,7 @@ module For_testing = struct
   let turn_instructions_for_request = turn_instructions_for_request
   let args_of_request = args_of_request
   let modalities_for_request = modalities_for_request
+  let extract_visible_reply_with_decode = extract_visible_reply_with_decode
   let extract_visible_reply = extract_visible_reply
   let direct_reply_terminal_error = direct_reply_terminal_error
   let visible_reply_with_stream_fallback = visible_reply_with_stream_fallback

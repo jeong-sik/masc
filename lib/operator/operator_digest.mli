@@ -38,6 +38,12 @@ val summary_of_recommendations : actor:string -> recommended_action list -> Yojs
 
 val health_from_attention_items : attention_item list -> string
 
+val build_workspace_attention_items_of_pending :
+  Operator_pending_confirm.pending_confirm list -> attention_item list
+
+val build_workspace_attention_items_result :
+  Workspace.config -> (attention_item list, string) result
+
 val build_workspace_attention_items : Workspace.config -> attention_item list
 
 val workspace_recommendations : Workspace.config -> recommended_action list

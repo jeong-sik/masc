@@ -4,8 +4,8 @@
     Owns:
     - the {b agent-lookup callback} ({!set_agent_lookup} /
       {!set_agent_lookup_none} / {!is_agent}) wired at
-      server bootstrap so post-kind classification can ask
-      whether a name is currently bound to the namespace,
+      server bootstrap for callers that need namespace-bound identity
+      truth,
     - the {b post / comment / vote handlers} routed
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
@@ -111,10 +111,10 @@ val visibility_of_string : string -> Board.visibility option
 (** {1 Agent lookup callback} *)
 
 val set_agent_lookup : (string -> bool) -> unit
-(** Wires the [is_agent_session_bound] check used by the
-    auto-classifier to decide whether a [system_*] author
-    name resolves to a live agent.  Installed once at
-    server bootstrap from [server_state.workspace_config]. *)
+(** Wires the [is_agent_session_bound] check used by {!is_agent}.
+    Installed once at server bootstrap from
+    [server_state.workspace_config].  Board post kind selection does
+    not use this callback; callers must pass explicit [post_kind]. *)
 
 val set_agent_lookup_none : unit -> unit
 (** Clears the previously-installed callback.  Used by

@@ -11,9 +11,11 @@
 open Alcotest
 module Workspace = Masc.Workspace
 module Dash = Dashboard_http_keeper
+module Feeds = Dashboard_http_keeper_feeds
 module Keeper_config = Masc.Keeper_config
 module Keeper_fs = Masc.Keeper_fs
 module Keeper_types = Keeper_types
+module Provider_routes = Server_routes_http_routes_provider_runs
 module Json = Yojson.Safe.Util
 
 let test_counter = ref 0
@@ -89,6 +91,17 @@ let append_jsonl path json =
 
 let strings json = json |> Json.to_list |> List.map Json.to_string
 
+let string_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> value
+  | other ->
+    fail
+      (Printf.sprintf
+         "field %s is not string: %s"
+         key
+         (Yojson.Safe.to_string other))
+;;
+
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in
@@ -102,7 +115,117 @@ let contains_substring ~needle haystack =
   String.equal needle "" || loop 0
 ;;
 
+let replace_keeper_dir_with_file config content =
+  let keepers_dir = Keeper_types_profile.keeper_dir config in
+  Fs_compat.mkdir_p (Filename.dirname keepers_dir);
+  write_file keepers_dir content
+;;
+
+let test_provider_routes_keeper_scan_surfaces_keeper_names_failure () =
+  with_config
+  @@ fun config ->
+  replace_keeper_dir_with_file config "not a keeper directory";
+  let scan = Provider_routes.provider_dashboard_keeper_meta_scan config in
+  check bool "keeper names marked unknown" false scan.keeper_names_known;
+  check int "no keepers on discovery failure" 0 (List.length scan.keepers);
+  check int "one keeper discovery read error" 1 (List.length scan.read_errors);
+  match scan.read_errors with
+  | [ error ] ->
+    check string "read error source" "keeper_names_result" (string_field "source" error);
+    check
+      bool
+      "read error mentions keepers path"
+      true
+      (contains_substring ~needle:"keepers" (string_field "message" error))
+  | _ -> fail "expected one keeper discovery read error"
+;;
+
+let test_provider_routes_keeper_scan_surfaces_meta_read_failure () =
+  with_config
+  @@ fun config ->
+  let keepers_dir = Keeper_types_profile.keeper_dir config in
+  Fs_compat.mkdir_p keepers_dir;
+  write_file (Filename.concat keepers_dir "broken.json") "{not-json";
+  let scan = Provider_routes.provider_dashboard_keeper_meta_scan config in
+  check bool "keeper names remain known" true scan.keeper_names_known;
+  check int "corrupt keeper meta omitted" 0 (List.length scan.keepers);
+  check int "one keeper meta read error" 1 (List.length scan.read_errors);
+  match scan.read_errors with
+  | [ error ] ->
+    check string "read error source" "read_meta" (string_field "source" error);
+    check string "read error keeper" "broken" (string_field "keeper" error);
+    check bool "read error message present" true
+      (String.length (string_field "message" error) > 0)
+  | _ -> fail "expected one keeper meta read error"
+;;
+
+let test_provider_routes_feed_json_merges_keeper_scan_read_errors () =
+  with_config
+  @@ fun config ->
+  replace_keeper_dir_with_file config "not a keeper directory";
+  let scan = Provider_routes.provider_dashboard_keeper_meta_scan config in
+  let existing_error =
+    `Assoc [ "source", `String "existing_feed_error"; "message", `String "bad row" ]
+  in
+  let json =
+    Provider_routes.provider_dashboard_json_with_keeper_meta_scan
+      scan
+      (`Assoc
+        [ "events", `List []
+        ; "read_error_count", `Int 1
+        ; "read_errors", `List [ existing_error ]
+        ])
+  in
+  check
+    bool
+    "merged json marks keeper names unknown"
+    false
+    Json.(json |> member "keeper_names_known" |> to_bool);
+  check
+    int
+    "keeper meta scan error count"
+    1
+    Json.(json |> member "keeper_meta_read_error_count" |> to_int);
+  check
+    int
+    "combined read error count"
+    2
+    Json.(json |> member "read_error_count" |> to_int);
+  let read_errors = Json.(json |> member "read_errors" |> to_list) in
+  check int "combined read errors" 2 (List.length read_errors);
+  check
+    bool
+    "existing feed read error preserved"
+    true
+    (contains_substring
+       ~needle:"existing_feed_error"
+       (Yojson.Safe.to_string (`List read_errors)))
+;;
+
 (* --- Decision log tests --- *)
+
+let test_parse_decision_event_result_surfaces_parse_errors () =
+  let parse line_index line =
+    Feeds.parse_decision_event_result
+      ~keeper_name:"k2-decision-parser"
+      ~line_index
+      line
+  in
+  (match parse 7 "{not-json" with
+   | Ok _ -> fail "expected malformed JSON to return Error"
+   | Error error ->
+     check int "json error line index" 7 error.Feeds.line_index;
+     check bool "json error message present" true
+       (String.length error.Feeds.message > 0));
+  match parse 8 "[]" with
+  | Ok _ -> fail "expected non-object JSON to return Error"
+  | Error error ->
+    check int "shape error line index" 8 error.Feeds.line_index;
+    check bool "shape error message is specific" true
+      (contains_substring
+         ~needle:"dashboard decision log row must be object"
+         error.Feeds.message)
+;;
 
 let test_decisions_log_evidence_refs_are_real_refs () =
   with_config
@@ -280,6 +403,80 @@ let test_decisions_json_terminal_reason_duration_fallback () =
      contains_substring ~needle:"reason: provider_error" s)
 ;;
 
+let test_decisions_json_surfaces_malformed_rows () =
+  with_config
+  @@ fun config ->
+  let meta = keeper_meta "k2-decision-parse-errors" in
+  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
+  let valid_row =
+    `Assoc
+      [ "ts_unix", `Float 1_400.0
+      ; "keeper_name", `String meta.name
+      ; "event", `String "tool_exec"
+      ; "outcome", `String "success"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  write_file path ("{not-json\n" ^ valid_row ^ "\n[]\n");
+  let json = Dash.keeper_decisions_json ~config ~keepers:[ meta ] ~limit:10 () in
+  let events = Json.(json |> member "events" |> to_list) in
+  check int "valid decision rows still surface" 1 (List.length events);
+  check string "valid event type survives malformed neighbors" "tool_exec"
+    Json.(List.hd events |> member "event_type" |> to_string);
+  check int "root exposes parse error count" 2
+    Json.(json |> member "read_error_count" |> to_int);
+  let errors = Json.(json |> member "read_errors" |> to_list) in
+  check int "root read errors" 2 (List.length errors);
+  (match errors with
+   | first :: _ ->
+     check
+       string
+       "parse error source"
+       "dashboard_keeper_decisions_jsonl"
+       Json.(first |> member "source" |> to_string);
+     check string "parse error keeper" meta.name
+       Json.(first |> member "keeper" |> to_string)
+   | [] -> fail "expected read errors")
+;;
+
+let test_decisions_log_json_surfaces_malformed_rows () =
+  with_config
+  @@ fun config ->
+  let meta = keeper_meta "k2-decision-log-parse-errors" in
+  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
+  let valid_row =
+    `Assoc
+      [ "ts_unix", `Float 1_500.0
+      ; "keeper_name", `String meta.name
+      ; "outcome", `String "success"
+      ; "channel", `String "reactive"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  write_file path ("{not-json\n" ^ valid_row ^ "\n[]\n");
+  let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 () in
+  let events = Json.(json |> member "events" |> to_list) in
+  check int "valid log rows still surface" 1 (List.length events);
+  check string "valid log decision type survives malformed neighbors" "success"
+    Json.(List.hd events |> member "decision_type" |> to_string);
+  check int "log feed exposes parse error count" 2
+    Json.(json |> member "read_error_count" |> to_int);
+  let errors = Json.(json |> member "read_errors" |> to_list) in
+  check int "log feed read errors" 2 (List.length errors);
+  (match errors with
+   | first :: _ ->
+     check
+       string
+       "log parse error source"
+       "dashboard_keeper_decisions_log_jsonl"
+       Json.(first |> member "source" |> to_string);
+     check string "log parse error keeper" meta.name
+       Json.(first |> member "keeper" |> to_string)
+   | [] -> fail "expected log read errors")
+;;
+
 (* --- Memory log tests --- *)
 
 let memory_horizon kind =
@@ -367,11 +564,63 @@ let test_memory_log_kind_mapping () =
   check (list string) "kind mapping" [ "fact"; "plan"; "episode" ] kinds
 ;;
 
+let test_memory_log_surfaces_malformed_rows () =
+  with_config
+  @@ fun config ->
+  let meta = keeper_meta "k2-memory-parse-errors" in
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
+  let valid_row =
+    memory_row
+      ~kind:"goal"
+      ~trace_id:"trace-memory-parse-valid"
+      ~ts:4_000.0
+      "Goal memory parse visibility row"
+    |> Yojson.Safe.to_string
+  in
+  write_file path ("{not-json\n" ^ valid_row ^ "\n[]\n");
+  let json = Dash.keeper_memory_log_json ~config ~keepers:[ meta ] ~limit:10 () in
+  let entries = Json.(json |> member "entries" |> to_list) in
+  check int "valid memory rows still surface" 1 (List.length entries);
+  check string "valid memory kind survives malformed neighbors" "plan"
+    Json.(List.hd entries |> member "kind" |> to_string);
+  check int "memory feed exposes parse error count" 2
+    Json.(json |> member "read_error_count" |> to_int);
+  let errors = Json.(json |> member "read_errors" |> to_list) in
+  check int "memory feed read errors" 2 (List.length errors);
+  (match errors with
+   | first :: _ ->
+     check
+       string
+       "memory parse error source"
+       "dashboard_keeper_memory_log_jsonl"
+       Json.(first |> member "source" |> to_string);
+     check string "memory parse error keeper" meta.name
+       Json.(first |> member "keeper" |> to_string)
+   | [] -> fail "expected memory read errors")
+;;
+
 let () =
   run
     "dashboard_k2_feeds"
     [ ( "decision log"
       , [ test_case
+            "provider route scan surfaces keeper-name discovery failure"
+            `Quick
+            test_provider_routes_keeper_scan_surfaces_keeper_names_failure
+        ; test_case
+            "provider route scan surfaces keeper meta read failure"
+            `Quick
+            test_provider_routes_keeper_scan_surfaces_meta_read_failure
+        ; test_case
+            "provider route feed JSON merges keeper scan read errors"
+            `Quick
+            test_provider_routes_feed_json_merges_keeper_scan_read_errors
+        ; test_case
+            "parse result surfaces malformed input"
+            `Quick
+            test_parse_decision_event_result_surfaces_parse_errors
+        ; test_case
             "keeps prose out of evidence refs"
             `Quick
             test_decisions_log_evidence_refs_are_real_refs
@@ -382,6 +631,14 @@ let () =
             "terminal reason and duration fallback"
             `Quick
             test_decisions_json_terminal_reason_duration_fallback
+        ; test_case
+            "compact feed surfaces malformed rows"
+            `Quick
+            test_decisions_json_surfaces_malformed_rows
+        ; test_case
+            "log feed surfaces malformed rows"
+            `Quick
+            test_decisions_log_json_surfaces_malformed_rows
         ] )
     ; ( "memory log"
       , [ test_case
@@ -389,6 +646,10 @@ let () =
             `Quick
             test_memory_log_ids_distinguish_same_timestamp_rows
         ; test_case "kind mapping (episode/fact/plan)" `Quick test_memory_log_kind_mapping
+        ; test_case
+            "surfaces malformed memory rows"
+            `Quick
+            test_memory_log_surfaces_malformed_rows
         ] )
     ]
 ;;

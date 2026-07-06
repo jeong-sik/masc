@@ -372,6 +372,16 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                  body_str
                              with
                              | Error
+                                 (Server_mcp_request_context.Parse_error msg)
+                               ->
+                                 let body = json_rpc_error Mcp_error_code.Parse_error msg in
+                                 h2_respond_json h2_reqd body
+                                   ~status:`Bad_request
+                                   ~extra_headers:
+                                     (cors
+                                     @ mcp_headers session_id
+                                         protocol_version)
+                             | Error
                                  (Server_mcp_request_context.Session_required msg)
                                ->
                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg in
@@ -843,11 +853,22 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/status" ->
           with_server_state h2_reqd (fun state ->
             let config = (Mcp_server.workspace_config state) in
-            let workspace_state = Workspace.read_state config in
+            let workspace_state_snapshot = Workspace.read_state_snapshot config in
+            let workspace_state = workspace_state_snapshot.state in
             let tempo = Tempo.get_tempo config in
             let json = `Assoc [
               ("cluster", `String (Env_config_core.cluster_name ()));
               ("project", `String workspace_state.project);
+              ( "workspace_state_status",
+                `String
+                  (Workspace.read_state_status_to_string workspace_state_snapshot.status) );
+              ( "workspace_state_read_error_count",
+                `Int (List.length workspace_state_snapshot.read_errors) );
+              ( "workspace_state_read_errors",
+                `List
+                  (List.map
+                     (fun error -> `String error)
+                     workspace_state_snapshot.read_errors) );
               ("tempo_interval_s", `Float tempo.current_interval_s);
               ("paused", `Bool workspace_state.paused);
             ] in

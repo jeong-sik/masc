@@ -162,6 +162,7 @@ include Server_dashboard_http_keeper_runtime_manifest_scan
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
 let receipt_row_matches = Scan_summary.receipt_row_matches
+let read_receipt_rows_with_read_errors = Scan_summary.read_receipt_rows_with_read_errors
 let read_receipt_rows = Scan_summary.read_receipt_rows
 let unique_ints = Scan_summary.unique_ints
 let json_int_list = Scan_summary.json_int_list
@@ -251,8 +252,11 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
                row.Keeper_runtime_manifest.links.tool_call_log_path)
           |> unique_present_paths
         in
+        let receipts, receipt_read_errors =
+          read_receipt_rows_with_read_errors ~keeper_name:name ~trace_id ?turn_id receipt_paths
+        in
         let receipts =
-          read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
+          receipts
           |> List_util.take_last limit
         in
         let selected_turn_id = selected_keeper_turn_id ?turn_id manifest_scan in
@@ -265,6 +269,8 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
           if manifest_scan.total_rows = 0 then ("empty", Some "no_manifest_rows")
           else if not selected_terminal_event_present then
             ("incomplete", Some "missing_turn_finished")
+          else if receipts = [] && receipt_read_errors <> [] then
+            ("partial", Some "receipt_read_error")
           else if receipts = [] then ("partial", Some "no_matching_receipt_rows")
           else ("ok", None)
         in
@@ -285,6 +291,8 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ("manifest_scanned_lines", `Int manifest_scan.scanned_lines);
               ("manifest_returned_rows", `Int (List.length manifest_rows));
               ("receipt_returned_rows", `Int (List.length receipts));
+              ("receipt_read_error_count", `Int (List.length receipt_read_errors));
+              ("receipt_read_errors", `List receipt_read_errors);
               ( "turn_identity",
                 turn_identity_summary_json ?turn_id manifest_scan receipts );
               ("provider_attempts", provider_attempts_summary_json manifest_scan);
@@ -754,6 +762,57 @@ let should_persist_directive_paused_state directive (meta : Keeper_meta_contract
   | `Resume -> true
   | `Pause | `Wakeup -> not (Bool.equal meta.paused paused)
 
+type bulk_directive_meta_read_status =
+  | Bulk_directive_meta_present of Keeper_meta_contract.keeper_meta
+  | Bulk_directive_meta_missing
+  | Bulk_directive_meta_read_error of string
+
+let bulk_directive_meta_read_status_of_result = function
+  | Ok (Some meta) -> Bulk_directive_meta_present meta
+  | Ok None -> Bulk_directive_meta_missing
+  | Error err -> Bulk_directive_meta_read_error err
+
+let bulk_directive_meta_opt = function
+  | Bulk_directive_meta_present meta -> Some meta
+  | Bulk_directive_meta_missing
+  | Bulk_directive_meta_read_error _ ->
+      None
+
+let bulk_directive_meta_read_status_label = function
+  | Bulk_directive_meta_present _ -> "present"
+  | Bulk_directive_meta_missing -> "missing"
+  | Bulk_directive_meta_read_error _ -> "read_error"
+
+let bulk_directive_meta_read_fields status =
+  let fields =
+    [
+      ( "meta_read_status",
+        `String (bulk_directive_meta_read_status_label status) );
+    ]
+  in
+  match status with
+  | Bulk_directive_meta_read_error err ->
+      fields @ [ ("meta_read_error", `String err) ]
+  | Bulk_directive_meta_present _
+  | Bulk_directive_meta_missing ->
+      fields
+
+let bulk_directive_result_json meta_read_status ~name ~ok ?error () =
+  let fields =
+    [ ("name", `String name); ("ok", `Bool ok) ]
+    @ bulk_directive_meta_read_fields meta_read_status
+  in
+  let fields =
+    match error with
+    | None -> fields
+    | Some err -> fields @ [ ("error", `String err) ]
+  in
+  `Assoc fields
+
+let bulk_directive_result_has_meta_read_error = function
+  | _, Bulk_directive_meta_read_error _ -> true
+  | _ -> false
+
 let persist_directive_paused_state ~config ~name ~action_str directive meta paused =
   match meta_with_directive_paused_state ~config directive meta paused with
   | Error err ->
@@ -1056,28 +1115,15 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
       in
       let process_one name =
         let read_result = Keeper_meta_store.read_meta config name in
-        let meta_opt =
-          match read_result with
-          | Ok (Some m) -> Some m
-          | Ok None | Error _ -> None
+        let meta_read_status =
+          bulk_directive_meta_read_status_of_result read_result
         in
-        match read_result, needs_meta with
-        | Error err, true ->
-            `Assoc
-              [
-                ("name", `String name);
-                ("ok", `Bool false);
-                ( "error",
-                  `String (Printf.sprintf "read_meta failed: %s" err) );
-              ]
-        | Ok None, true ->
-            `Assoc
-              [
-                ("name", `String name);
-                ("ok", `Bool false);
-                ("error", `String "keeper meta not found");
-              ]
-        | Error _, false | Ok None, false | Ok (Some _), _ ->
+        let meta_opt = bulk_directive_meta_opt meta_read_status in
+        let result_row ~ok ?error () =
+          ( bulk_directive_result_json meta_read_status ~name ~ok ?error ()
+          , meta_read_status )
+        in
+        let proceed () =
             let target_paused =
               match directive with
               | `Pause -> Some true
@@ -1090,8 +1136,7 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
                | `Pause | `Wakeup -> Ok `Already_registered
              with
              | Error err ->
-                 `Assoc
-                   [ ("name", `String name); ("ok", `Bool false); ("error", `String err) ]
+                 result_row ~ok:false ~error:err ()
              | Ok registration_state ->
                  let persist_result =
                    match directive, registration_state, target_paused, meta_opt with
@@ -1110,12 +1155,7 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
                  in
                  (match persist_result with
                   | Error err ->
-                      `Assoc
-                        [
-                          ("name", `String name);
-                          ("ok", `Bool false);
-                          ("error", `String err);
-                        ]
+                      result_row ~ok:false ~error:err ()
                   | Ok () ->
                       let resolved_agent_name =
                         match Keeper_registry_lookup.find_by_name name with
@@ -1127,9 +1167,29 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
                       in
                       Keeper_keepalive.process_directive
                         ~agent_name:resolved_agent_name action_str;
-                      `Assoc [ ("name", `String name); ("ok", `Bool true) ]))
+                      result_row ~ok:true ()))
+        in
+        match meta_read_status, needs_meta with
+        | Bulk_directive_meta_read_error err, true ->
+            result_row
+              ~ok:false
+              ~error:(Printf.sprintf "read_meta failed: %s" err)
+              ()
+        | Bulk_directive_meta_missing, true ->
+            result_row ~ok:false ~error:"keeper meta not found" ()
+        | Bulk_directive_meta_read_error err, false ->
+            Log.Keeper.warn
+              "bulk directive %s: read_meta failed for %s (best-effort proceed): %s"
+              action_str
+              name
+              err;
+            proceed ()
+        | Bulk_directive_meta_missing, false
+        | Bulk_directive_meta_present _, _ ->
+            proceed ()
       in
-      let results = List.map process_one names in
+      let result_rows = List.map process_one names in
+      let results = List.map fst result_rows in
       let ok_count =
         List.fold_left
           (fun acc r ->
@@ -1137,6 +1197,13 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
             | Some (`Bool true) -> acc + 1
             | _ -> acc)
           0 results
+      in
+      let meta_read_error_count =
+        List.fold_left
+          (fun acc row ->
+             if bulk_directive_result_has_meta_read_error row then acc + 1 else acc)
+          0
+          result_rows
       in
       let requested_count = List.length names in
       let failed_count = requested_count - ok_count in
@@ -1149,6 +1216,7 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
             ("requested", `Int requested_count);
             ("succeeded", `Int ok_count);
             ("failed", `Int failed_count);
+            ("meta_read_error_count", `Int meta_read_error_count);
             ("results", `List results);
           ]
       in
@@ -1157,5 +1225,21 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
       else
         Http.Response.json_value ~status:`Internal_server_error ~compress:true
           ~request:req response reqd
+
+module For_testing = struct
+  let bulk_directive_meta_read_error_result_json
+        ~name
+        ~ok
+        ?error
+        ~meta_read_error
+        ()
+    =
+    bulk_directive_result_json
+      (Bulk_directive_meta_read_error meta_read_error)
+      ~name
+      ~ok
+      ?error
+      ()
+end
 
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)

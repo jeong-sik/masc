@@ -45,3 +45,18 @@ val start :
 (** Fork the gateway fiber. Returns immediately. Warnings and the
     eventual gateway crash (if any) are emitted via [Log.Server].
     Cancellation propagates through [~sw]. *)
+
+module For_testing : sig
+  val handle_ambient :
+    base_dir:string ->
+    channel_id:string ->
+    guild_id:string option ->
+    message_id:string ->
+    author_id:string ->
+    author_name:string option ->
+    content:string ->
+    unit
+  (** Exercise the ambient connector path without opening a Discord gateway
+      connection. This preserves the production handler body so tests can pin
+      the external-attention record plus typed wake producer. *)
+end

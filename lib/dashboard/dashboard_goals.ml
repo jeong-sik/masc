@@ -42,24 +42,78 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
           ("causal_timeline", `List []);
         ]
 
+type keeper_meta_scan =
+  { keeper_metas : Keeper_meta_contract.keeper_meta list
+  ; keeper_names_known : bool
+  ; read_errors : Yojson.Safe.t list
+  }
+
+let keeper_meta_scan_read_error_json ?keeper ~source message =
+  `Assoc
+    ([
+       ("source", `String source);
+       ("message", `String message);
+     ]
+     @
+     match keeper with
+     | Some keeper_name -> [ ("keeper", `String keeper_name) ]
+     | None -> [])
+
+let read_keeper_metas_scan config =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error err ->
+      {
+        keeper_metas = [];
+        keeper_names_known = false;
+        read_errors =
+          [ keeper_meta_scan_read_error_json ~source:"keeper_names_result" err ];
+      }
+  | Ok keeper_names ->
+      let keeper_metas, read_errors =
+        List.fold_left
+          (fun (metas, errors) keeper_name ->
+            match Keeper_meta_store.read_meta config keeper_name with
+            | Ok (Some meta) -> meta :: metas, errors
+            | Ok None ->
+                ( metas,
+                  keeper_meta_scan_read_error_json
+                    ~keeper:keeper_name
+                    ~source:"read_meta"
+                    "keeper meta missing after keeper name discovery"
+                  :: errors )
+            | Error err ->
+                ( metas,
+                  keeper_meta_scan_read_error_json
+                    ~keeper:keeper_name
+                    ~source:"read_meta"
+                    err
+                  :: errors ))
+          ([], [])
+          keeper_names
+      in
+      {
+        keeper_metas = List.rev keeper_metas;
+        keeper_names_known = true;
+        read_errors = List.rev read_errors;
+      }
 
 
 
 
-let build_forest ~(config : Workspace.config) ~goals ~tasks =
+
+let build_forest_with_goal_task_index
+    ~(keeper_meta_scan : keeper_meta_scan)
+    ~(config : Workspace.config)
+    ~goals
+    ~tasks
+    ~goal_task_index =
   let goal_ids = List.map (fun (goal : Goal_store.goal) -> goal.id) goals in
   let is_root (goal : Goal_store.goal) =
     match goal.parent_goal_id with
     | None -> true
     | Some parent_id -> not (List.mem parent_id goal_ids)
   in
-  let keeper_metas =
-    Keeper_meta_store.keeper_names config
-    |> List.filter_map (fun keeper_name ->
-           match Keeper_meta_store.read_meta config keeper_name with
-           | Ok (Some meta) -> Some meta
-           | Ok None | Error _ -> None)
-  in
+  let keeper_metas = keeper_meta_scan.keeper_metas in
   let pending_approvals =
     match Keeper_approval_queue.list_pending_dashboard_json () with
     | `List items -> items
@@ -70,7 +124,6 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
     |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
-  let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
   let context =
     {
       now_ts = Time_compat.now ();
@@ -90,12 +143,56 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
   |> List.filter is_root
   |> List.map (build_tree context goals)
 
+let build_forest_result ~(config : Workspace.config) ~goals ~tasks =
+  match Workspace_goal_index.build_task_goal_index_for_config_result config with
+  | Ok goal_task_index ->
+      let keeper_meta_scan = read_keeper_metas_scan config in
+      Ok
+        (build_forest_with_goal_task_index
+           ~keeper_meta_scan
+           ~config
+           ~goals
+           ~tasks
+           ~goal_task_index)
+  | Error msg -> Error (Workspace_goal_index.goal_task_links_read_failed_message msg)
+;;
+
+let build_forest_result_with_keeper_meta_scan ~(config : Workspace.config) ~goals ~tasks =
+  match Workspace_goal_index.build_task_goal_index_for_config_result config with
+  | Ok goal_task_index ->
+      let keeper_meta_scan = read_keeper_metas_scan config in
+      Ok
+        ( build_forest_with_goal_task_index
+            ~keeper_meta_scan
+            ~config
+            ~goals
+            ~tasks
+            ~goal_task_index,
+          keeper_meta_scan )
+  | Error msg -> Error (Workspace_goal_index.goal_task_links_read_failed_message msg)
+;;
+
+let build_forest ~(config : Workspace.config) ~goals ~tasks =
+  match build_forest_result ~config ~goals ~tasks with
+  | Ok forest -> forest
+  | Error msg ->
+      Log.Dashboard.warn
+        "[dashboard_goals] goal-task link registry read failed: %s"
+        msg;
+      []
+;;
+
 
 
 let build_goal_verification_projection ~(config : Workspace.config) goals =
   let requests =
-    Goal_verification.read_state config |> fun (state : Goal_verification.state) ->
-    state.requests
+    match Goal_verification.read_state_result config with
+    | Ok (state : Goal_verification.state) -> state.requests
+    | Error msg ->
+      Log.Dashboard.warn
+        "[dashboard_goals] goal verification state read failed: %s"
+        msg;
+      []
   in
   let effective_policy_table = Hashtbl.create (max 16 (List.length goals)) in
   let request_table = Hashtbl.create (max 16 (List.length requests)) in
@@ -152,22 +249,30 @@ let build_goal_verification_projection ~(config : Workspace.config) goals =
       Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]) )
 
 let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
-  let goals = Goal_store.list_goals config () in
-  let tasks = Workspace.get_tasks_safe config in
-  let ( _effective_policy_for_goal,
-        _open_request_for_goal,
-        _latest_request_for_goal,
-        _events_for_goal ) =
-    build_goal_verification_projection ~config goals
-  in
-  let forest = build_forest ~config ~goals ~tasks in
-  let all_nodes = flatten_tree [] forest in
-  List.iter
-    (fun (node : tree_node) ->
-      let goal = node.goal in
-      let attainment = goal_attainment_to_json goal node in
-      observe_goal_attainment_metrics goal attainment)
-    all_nodes
+  match Goal_store.list_goals_result config () with
+  | Error msg ->
+    Log.Dashboard.warn "[dashboard_goals] goal metrics skipped: %s" msg
+  | Ok goals ->
+    let tasks = Workspace.get_tasks_safe config in
+    let ( _effective_policy_for_goal,
+          _open_request_for_goal,
+          _latest_request_for_goal,
+          _events_for_goal ) =
+      build_goal_verification_projection ~config goals
+    in
+    match build_forest_result ~config ~goals ~tasks with
+    | Error msg ->
+      Log.Dashboard.warn
+        "[dashboard_goals] goal attainment metrics skipped: %s"
+        msg
+    | Ok forest ->
+      let all_nodes = flatten_tree [] forest in
+      List.iter
+        (fun (node : tree_node) ->
+          let goal = node.goal in
+          let attainment = goal_attainment_to_json goal node in
+          observe_goal_attainment_metrics goal attainment)
+        all_nodes
 
 let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
     ?(open_request_for_goal = fun _ -> None)
@@ -293,24 +398,27 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
 
 let goal_detail_json ~(config : Workspace.config) ~goal_id :
     (Yojson.Safe.t, string) result =
-  let goals = Goal_store.list_goals config () in
-  let tasks = Workspace.get_tasks_safe config in
-  let ( effective_policy_for_goal,
-        open_request_for_goal,
-        latest_request_for_goal,
-        events_for_goal ) =
-    build_goal_verification_projection ~config goals
-  in
-  let forest = build_forest ~config ~goals ~tasks in
-  let all_nodes = flatten_tree [] forest in
-  match List.find_opt (fun (node : tree_node) -> String.equal node.goal.id goal_id) all_nodes with
-  | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
-  | Some node ->
+  match Goal_store.list_goals_result config () with
+  | Error msg -> Error msg
+  | Ok goals ->
+    let tasks = Workspace.get_tasks_safe config in
+    let ( effective_policy_for_goal,
+          open_request_for_goal,
+          latest_request_for_goal,
+          events_for_goal ) =
+      build_goal_verification_projection ~config goals
+    in
+    match build_forest_result_with_keeper_meta_scan ~config ~goals ~tasks with
+    | Error msg -> Error msg
+    | Ok (forest, keeper_meta_scan) ->
+      let all_nodes = flatten_tree [] forest in
+      match List.find_opt (fun (node : tree_node) -> String.equal node.goal.id goal_id) all_nodes with
+      | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
+      | Some node ->
       let keeper_details =
-        Keeper_meta_store.keeper_names config
-        |> List.filter_map (fun keeper_name ->
-               match Keeper_meta_store.read_meta config keeper_name with
-               | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->
+        keeper_meta_scan.keeper_metas
+        |> List.filter_map (fun (meta : Keeper_meta_contract.keeper_meta) ->
+               if List.mem meta.name node.linked_keeper_names then
                    let latest_receipt =
                      List.assoc_opt meta.name
                        (Keeper_execution_receipt.latest_json_by_keeper
@@ -334,7 +442,8 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
                        latest_receipt;
                        runtime_trust;
                      }
-               | Ok None | Error _ | Ok (Some _) -> None)
+               else
+                 None)
       in
       let approvals =
         match Keeper_approval_queue.list_pending_dashboard_json () with
@@ -357,6 +466,8 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
                 ~latest_request_for_goal ~events_for_goal node );
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
             ("linked_keepers", `List (List.map goal_detail_keeper_json keeper_details));
+            ("keeper_meta_known", `Bool keeper_meta_scan.keeper_names_known);
+            ("keeper_meta_read_errors", `List keeper_meta_scan.read_errors);
             ("approvals", `List approvals);
             ("execution_receipts", `List latest_receipts);
             ( "timeline",
@@ -364,86 +475,148 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
                 (build_goal_timeline node keeper_details approvals goal_events) );
           ])
 
-let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
-  let goals = Goal_store.list_goals config () in
-  let tasks = Workspace.get_tasks_safe config in
-  let ( effective_policy_for_goal,
-        open_request_for_goal,
-        latest_request_for_goal,
-        events_for_goal ) =
-    build_goal_verification_projection ~config goals
-  in
-  let forest = build_forest ~config ~goals ~tasks in
-  let all_nodes = flatten_tree [] forest in
-  let total_goals = List.length goals in
-  let total_tasks =
-    List.fold_left
-      (fun acc (node : tree_node) -> acc + List.length node.tasks)
-      0 all_nodes
-  in
-  let done_tasks =
-    List.fold_left
-      (fun acc (node : tree_node) ->
-        acc
-        + List.length
-            (List.filter
-               (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
-               node.tasks))
-      0 all_nodes
-  in
-  let overall_convergence =
-    match forest with
-    | [] -> 0.0
-    | roots ->
-        let sum =
-          List.fold_left (fun acc (node : tree_node) -> acc +. node.convergence)
-            0.0 roots
-        in
-        sum /. float_of_int (List.length roots)
-  in
-  let count_health health =
-    List.length
-      (List.filter (fun (node : tree_node) -> String.equal node.health health) all_nodes)
-  in
+let unknown_dashboard_goals_tree_json
+    ?(goal_store_known = true)
+    ?goal_store_read_error
+    ~goals
+    ~pending_approval_total
+    ~read_error
+  =
   let active_goal_count =
     goals
     |> List.filter (fun (goal : Goal_store.goal) -> goal.status = Goal_store.Active)
     |> List.length
   in
+  `Assoc
+    [
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ("status", `String "unknown");
+      ("goal_store_known", `Bool goal_store_known);
+      ("goal_store_read_error", Json_util.string_opt_to_json goal_store_read_error);
+      ("goal_task_links_known", `Bool false);
+      ("goal_task_links_read_error", Json_util.string_opt_to_json read_error);
+      ("tree", `List []);
+      ( "summary",
+        `Assoc
+          [
+            ("total_goals", `Int (List.length goals));
+            ("active_goals", `Int active_goal_count);
+            ("on_track_goals", `Null);
+            ("done_goals", `Null);
+            ("paused_goals", `Null);
+            ("at_risk_goals", `Null);
+            ("blocked_goals", `Null);
+            ("total_tasks", `Null);
+            ("done_tasks", `Null);
+            ("pending_approvals", `Int pending_approval_total);
+            ("infra_risk_count", `Null);
+            ("overall_convergence", `Null);
+            ("overall_convergence_pct", `Null);
+          ] );
+    ]
+;;
+
+let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   let pending_approval_total =
     match Keeper_approval_queue.list_pending_dashboard_json () with
     | `List items -> List.length items
     | _ -> 0
   in
-  `Assoc
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ( "tree",
-        `List
-          (List.map
-             (tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
-                ~latest_request_for_goal ~events_for_goal)
-             forest) );
-      ( "summary",
-        `Assoc
-          [
-            ("total_goals", `Int total_goals);
-            ("active_goals", `Int active_goal_count);
-            ("on_track_goals", `Int (count_health "on_track"));
-            ("done_goals", `Int (count_health "done"));
-            ("paused_goals", `Int (count_health "paused"));
-            ("at_risk_goals", `Int (count_health "at_risk"));
-            ("blocked_goals", `Int (count_health "blocked"));
-            ("total_tasks", `Int total_tasks);
-            ("done_tasks", `Int done_tasks);
-            ("pending_approvals", `Int pending_approval_total);
-            ( "infra_risk_count",
-              `Int
-                (List.fold_left
-                   (fun acc (node : tree_node) -> acc + node.infra_risk_count)
-                   0 forest) );
-            ("overall_convergence", `Float overall_convergence);
-            ( "overall_convergence_pct",
-              `Int (int_of_float (overall_convergence *. 100.0)) );
-          ] );
-    ]
+  match Goal_store.list_goals_result config () with
+  | Error goal_store_read_error ->
+    unknown_dashboard_goals_tree_json
+      ~goal_store_known:false
+      ~goal_store_read_error
+      ~goals:[]
+      ~pending_approval_total
+      ~read_error:None
+  | Ok goals ->
+    let tasks = Workspace.get_tasks_safe config in
+    let ( effective_policy_for_goal,
+          open_request_for_goal,
+          latest_request_for_goal,
+          events_for_goal ) =
+      build_goal_verification_projection ~config goals
+    in
+    match build_forest_result_with_keeper_meta_scan ~config ~goals ~tasks with
+    | Error read_error ->
+      unknown_dashboard_goals_tree_json
+        ~goals
+        ~pending_approval_total
+        ~read_error:(Some read_error)
+    | Ok (forest, keeper_meta_scan) ->
+      let all_nodes = flatten_tree [] forest in
+      let total_goals = List.length goals in
+      let total_tasks =
+        List.fold_left
+          (fun acc (node : tree_node) -> acc + List.length node.tasks)
+          0 all_nodes
+      in
+      let done_tasks =
+        List.fold_left
+          (fun acc (node : tree_node) ->
+            acc
+            + List.length
+                (List.filter
+                   (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+                   node.tasks))
+          0 all_nodes
+      in
+      let overall_convergence =
+        match forest with
+        | [] -> 0.0
+        | roots ->
+            let sum =
+              List.fold_left (fun acc (node : tree_node) -> acc +. node.convergence)
+                0.0 roots
+            in
+            sum /. float_of_int (List.length roots)
+      in
+      let count_health health =
+        List.length
+          (List.filter (fun (node : tree_node) -> String.equal node.health health) all_nodes)
+      in
+      let active_goal_count =
+        goals
+        |> List.filter (fun (goal : Goal_store.goal) -> goal.status = Goal_store.Active)
+        |> List.length
+      in
+      `Assoc
+        [
+          ("generated_at", `String (Masc_domain.now_iso ()));
+          ("status", `String "ok");
+          ("goal_store_known", `Bool true);
+          ("goal_store_read_error", `Null);
+          ("goal_task_links_known", `Bool true);
+          ("goal_task_links_read_error", `Null);
+          ("keeper_meta_known", `Bool keeper_meta_scan.keeper_names_known);
+          ("keeper_meta_read_errors", `List keeper_meta_scan.read_errors);
+          ( "tree",
+            `List
+              (List.map
+                 (tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
+                    ~latest_request_for_goal ~events_for_goal)
+                 forest) );
+          ( "summary",
+            `Assoc
+              [
+                ("total_goals", `Int total_goals);
+                ("active_goals", `Int active_goal_count);
+                ("on_track_goals", `Int (count_health "on_track"));
+                ("done_goals", `Int (count_health "done"));
+                ("paused_goals", `Int (count_health "paused"));
+                ("at_risk_goals", `Int (count_health "at_risk"));
+                ("blocked_goals", `Int (count_health "blocked"));
+                ("total_tasks", `Int total_tasks);
+                ("done_tasks", `Int done_tasks);
+                ("pending_approvals", `Int pending_approval_total);
+                ( "infra_risk_count",
+                  `Int
+                    (List.fold_left
+                       (fun acc (node : tree_node) -> acc + node.infra_risk_count)
+                       0 forest) );
+                ("overall_convergence", `Float overall_convergence);
+                ( "overall_convergence_pct",
+                  `Int (int_of_float (overall_convergence *. 100.0)) );
+              ] );
+        ]

@@ -28,6 +28,12 @@ let dashboard_keeper_decisions_cache : (string, dashboard_json_cache_entry) Hash
 let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_memory_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 
+type provider_keeper_meta_scan =
+  { keepers : Keeper_meta_contract.keeper_meta list
+  ; keeper_names_known : bool
+  ; read_errors : Yojson.Safe.t list
+  }
+
 let cache_key parts = String.concat "\x1f" parts
 
 let new_cache_entry () =
@@ -51,6 +57,88 @@ let json_with_cache_metadata json metadata =
   match json with
   | `Assoc fields -> `Assoc (fields @ [ "cache", metadata ])
   | other -> `Assoc [ "payload", other; "cache", metadata ]
+
+let provider_keeper_meta_read_error_json ?keeper ~source message =
+  `Assoc
+    (([ "source", `String source; "message", `String message ]
+      : (string * Yojson.Safe.t) list)
+     @
+     match keeper with
+     | Some keeper_name -> [ "keeper", `String keeper_name ]
+     | None -> [])
+
+let provider_dashboard_keeper_meta_scan config =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error msg ->
+    { keepers = []
+    ; keeper_names_known = false
+    ; read_errors =
+        [ provider_keeper_meta_read_error_json ~source:"keeper_names_result" msg ]
+    }
+  | Ok keeper_names ->
+    let keepers, read_errors =
+      List.fold_left
+        (fun (keepers, read_errors) keeper_name ->
+          match Keeper_meta_store.read_meta config keeper_name with
+          | Ok (Some meta) -> meta :: keepers, read_errors
+          | Ok None ->
+            ( keepers
+            , provider_keeper_meta_read_error_json
+                ~keeper:keeper_name
+                ~source:"read_meta"
+                "keeper meta missing after keeper-name discovery"
+              :: read_errors )
+          | Error msg ->
+            ( keepers
+            , provider_keeper_meta_read_error_json
+                ~keeper:keeper_name
+                ~source:"read_meta"
+                msg
+              :: read_errors ))
+        ([], [])
+        keeper_names
+    in
+    { keepers = List.rev keepers
+    ; keeper_names_known = true
+    ; read_errors = List.rev read_errors
+    }
+
+let provider_dashboard_json_with_keeper_meta_scan scan json =
+  let existing_fields =
+    match json with
+    | `Assoc fields -> fields
+    | other -> [ "payload", other ]
+  in
+  let existing_read_errors =
+    match List.assoc_opt "read_errors" existing_fields with
+    | Some (`List errors) -> errors
+    | _ -> []
+  in
+  let read_errors = scan.read_errors @ existing_read_errors in
+  let fields =
+    existing_fields
+    |> List.filter (fun (key, _) ->
+      not
+        (List.mem
+           key
+           [ "keeper_names_known"
+           ; "keeper_meta_read_error_count"
+           ; "keeper_meta_read_errors"
+           ; "read_error_count"
+           ; "read_errors"
+           ]))
+  in
+  `Assoc
+    (fields
+     @ [ "keeper_names_known", `Bool scan.keeper_names_known
+       ; "keeper_meta_read_error_count", `Int (List.length scan.read_errors)
+       ; "keeper_meta_read_errors", `List scan.read_errors
+       ; "read_error_count", `Int (List.length read_errors)
+       ; "read_errors", `List read_errors
+       ])
+
+let empty_provider_keeper_meta_scan =
+  { keepers = []; keeper_names_known = true; read_errors = [] }
 
 let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   let now = Unix.gettimeofday () in
@@ -215,19 +303,18 @@ let add_routes ~sw router =
            cached_dashboard_json ~sw ~sync_first:false
              ~cache:dashboard_keeper_costs_cache ~key
              ~placeholder:
-               (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window)
+               (Dashboard_http_keeper.keeper_cost_aggregates_json
+                  ~config
+                  ~keepers:[]
+                  ~window_minutes:window
+                |> provider_dashboard_json_with_keeper_meta_scan
+                     empty_provider_keeper_meta_scan)
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
+               let scan = provider_dashboard_keeper_meta_scan config in
                Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                 ~keepers ~window_minutes:window)
+                 ~keepers:scan.keepers
+                 ~window_minutes:window
+               |> provider_dashboard_json_with_keeper_meta_scan scan)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -255,19 +342,21 @@ let add_routes ~sw router =
            cached_dashboard_json ~sw ~sync_first:true
              ~cache:dashboard_keeper_decisions_cache ~key
              ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_json ~config
-                  ~keepers:[] ~limit ())
+               (Dashboard_http_keeper.keeper_decisions_json
+                  ~config
+                  ~keepers:[]
+                  ~limit
+                  ()
+                |> provider_dashboard_json_with_keeper_meta_scan
+                     empty_provider_keeper_meta_scan)
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_json ~config ~keepers
-                 ~limit ())
+               let scan = provider_dashboard_keeper_meta_scan config in
+               Dashboard_http_keeper.keeper_decisions_json
+                 ~config
+                 ~keepers:scan.keepers
+                 ~limit
+                 ()
+               |> provider_dashboard_json_with_keeper_meta_scan scan)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -280,19 +369,20 @@ let add_routes ~sw router =
            cached_dashboard_json ~sw ~sync_first:false
              ~cache:dashboard_keeper_decisions_log_cache ~key
              ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_log_json ~config
-                  ~keepers:[] ~limit ())
+               (Dashboard_http_keeper.keeper_decisions_log_json
+                  ~config
+                  ~keepers:[]
+                  ~limit
+                  ()
+                |> provider_dashboard_json_with_keeper_meta_scan
+                     empty_provider_keeper_meta_scan)
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
+               let scan = provider_dashboard_keeper_meta_scan config in
                Dashboard_http_keeper.keeper_decisions_log_json ~config
-                 ~keepers ~limit ())
+                 ~keepers:scan.keepers
+                 ~limit
+                 ()
+               |> provider_dashboard_json_with_keeper_meta_scan scan)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -305,19 +395,21 @@ let add_routes ~sw router =
            cached_dashboard_json ~sw ~sync_first:false
              ~cache:dashboard_keeper_memory_log_cache ~key
              ~placeholder:
-               (Dashboard_http_keeper.keeper_memory_log_json ~config
-                  ~keepers:[] ~limit ())
+               (Dashboard_http_keeper.keeper_memory_log_json
+                  ~config
+                  ~keepers:[]
+                  ~limit
+                  ()
+                |> provider_dashboard_json_with_keeper_meta_scan
+                     empty_provider_keeper_meta_scan)
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_memory_log_json ~config ~keepers
-                 ~limit ())
+               let scan = provider_dashboard_keeper_meta_scan config in
+               Dashboard_http_keeper.keeper_memory_log_json
+                 ~config
+                 ~keepers:scan.keepers
+                 ~limit
+                 ()
+               |> provider_dashboard_json_with_keeper_meta_scan scan)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

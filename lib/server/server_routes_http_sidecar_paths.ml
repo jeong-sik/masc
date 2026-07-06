@@ -186,18 +186,27 @@ let env_file_lookup path names =
     names |> List.find_map (fun name -> List.assoc_opt name pairs |> trim_opt))
 ;;
 
-let toml_lookup path keys =
+let toml_lookup_result path keys =
   if not (Sys.file_exists path)
-  then None
+  then Ok None
   else (
     match Keeper_toml_loader.parse_toml (read_file path) with
-    | Error _ -> None
+    | Error msg -> Error msg
     | Ok doc ->
       keys
       |> List.find_map (fun key ->
         match List.assoc_opt key doc with
         | Some (Keeper_toml_loader.Toml_string value) -> trim_opt (Some value)
         | _ -> None))
+      |> fun value -> Ok value
+;;
+
+let toml_lookup path keys =
+  match toml_lookup_result path keys with
+  | Ok value -> value
+  | Error msg ->
+    Log.Keeper.warn "sidecar TOML lookup failed path=%s: %s" path msg;
+    None
 ;;
 
 let resolve_relative_path ~roots raw_path =

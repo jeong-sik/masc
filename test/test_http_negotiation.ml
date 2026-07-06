@@ -44,6 +44,36 @@ let test_classify_mcp_accept () =
     (classify_mcp_accept (Some "text/event-stream"));
   ()
 
+let test_body_jsonrpc_method_result_surfaces_parse_error () =
+  let module Headers = Server_mcp_transport_http_headers in
+  match Headers.body_jsonrpc_method_result "not json" with
+  | Error (Headers.Body_jsonrpc_method_parse_error message) ->
+      check bool "parse detail present" true (String.length message > 0)
+  | Ok _ -> fail "expected JSON parse error"
+
+let test_body_jsonrpc_method_result_keeps_valid_no_method_none () =
+  let module Headers = Server_mcp_transport_http_headers in
+  check
+    (result (option (pair string bool)) reject)
+    "valid no-method body"
+    (Ok None)
+    (Headers.body_jsonrpc_method_result {|{"jsonrpc":"2.0","id":1}|})
+
+let test_body_required_name_result_surfaces_parse_error () =
+  let module Headers = Server_mcp_transport_http_headers in
+  match Headers.body_required_name_for_method_result "not json" "tools/call" with
+  | Error (Headers.Body_required_name_parse_error message) ->
+      check bool "parse detail present" true (String.length message > 0)
+  | Ok _ -> fail "expected required-name JSON parse error"
+
+let test_body_required_name_result_keeps_unrequired_method_none () =
+  let module Headers = Server_mcp_transport_http_headers in
+  check
+    (result (option string) reject)
+    "tools/list has no required name"
+    (Ok None)
+    (Headers.body_required_name_for_method_result "not json" "tools/list")
+
 let test_is_json_content_type () =
   let open Mcp_transport_protocol.Http_negotiation in
   let check_json label expected value =
@@ -311,6 +341,16 @@ let () =
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict classification" `Quick test_classify_mcp_accept]);
+      ("body_jsonrpc_method", [
+        test_case "parse error is typed" `Quick
+          test_body_jsonrpc_method_result_surfaces_parse_error;
+        test_case "valid no-method body is Ok None" `Quick
+          test_body_jsonrpc_method_result_keeps_valid_no_method_none;
+        test_case "required name parse error is typed" `Quick
+          test_body_required_name_result_surfaces_parse_error;
+        test_case "unrequired method skips body parse" `Quick
+          test_body_required_name_result_keeps_unrequired_method_none;
+      ]);
       ("is_json_content_type", [test_case "content-type contract" `Quick test_is_json_content_type]);
       ("protocol_continuity", [
         test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;

@@ -6,16 +6,51 @@ module StringMap = Map.Make (String)
 
 let memory_subsystems_entry_cache_ttl_sec = 30.0
 
+type memory_subsystems_entries = {
+  rows : (string * Keeper_memory_policy.keeper_memory_line) list;
+  errors : (string * string) list;
+  keeper_names_known : bool option;
+  keeper_name_discovery_read_errors : string list;
+}
+
+type memory_subsystems_entry_cache_entry = {
+  base_path : string;
+  cached_at : float;
+  entries : memory_subsystems_entries;
+}
+
+type user_model_fact_read_error_source =
+  | User_model_fact_store_parse
+  | User_model_fact_store_read
+
+type user_model_fact_read_error = {
+  keeper : string;
+  source : user_model_fact_read_error_source;
+  path : string option;
+  line_index : int option;
+  error : string;
+}
+
+type user_model_facts = {
+  items : (string * Keeper_memory_os_types.fact) list;
+  fact_read_errors : user_model_fact_read_error list;
+  keeper_ids_known : bool;
+  keeper_id_discovery_read_errors : string list;
+}
+
+let empty_memory_subsystems_entries =
+  {
+    rows = [];
+    errors = [];
+    keeper_names_known = None;
+    keeper_name_discovery_read_errors = [];
+  }
+
 (* RFC-0149 §3.1: cache holds typed errors alongside successful rows so the
    dashboard JSON can surface per-keeper Read failure class instead of silently
    swallowing them. *)
 let memory_subsystems_entry_cache
-  : (string
-     * float
-     * (string * Keeper_memory_policy.keeper_memory_line) list
-     * (string * string) list)
-      option
-      Atomic.t
+  : memory_subsystems_entry_cache_entry option Atomic.t
   =
   Atomic.make None
 ;;
@@ -54,81 +89,137 @@ let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
   (* NDT-OK: wall-clock read only gates a dashboard cache TTL. *)
   let now = Unix.gettimeofday () in
   let is_fresh = function
-    | Some (base_path, cached_at, _rows, _errors) ->
-      String.equal base_path config.base_path
-      && now -. cached_at < memory_subsystems_entry_cache_ttl_sec
+    | Some cached ->
+      String.equal cached.base_path config.base_path
+      && now -. cached.cached_at < memory_subsystems_entry_cache_ttl_sec
     | None -> false
   in
   match Atomic.get memory_subsystems_entry_cache with
-  | Some (base_path, cached_at, rows, errors) as cached when is_fresh cached ->
-    (rows, errors)
+  | Some cached when is_fresh (Some cached) -> cached.entries
   | _ ->
     Eio.Mutex.use_rw ~protect:true memory_subsystems_entry_cache_mu
     @@ fun () ->
     (match Atomic.get memory_subsystems_entry_cache with
-     | Some (base_path, cached_at, rows, errors) as cached when is_fresh cached ->
-       (rows, errors)
+     | Some cached when is_fresh (Some cached) -> cached.entries
      | _ ->
-       let rows, errors =
-         try
-           Keeper_meta_store.keeper_names config
-           |> List.fold_left
-                (fun (rows_acc, errs_acc) keeper ->
-                  match
-                    Keeper_memory_recall.read_keeper_memory_summary_result
-                      config
-                      ~name:keeper
-                      ~max_bytes:120000
-                      ~max_lines:180
-                      ~recent_limit:30
-                  with
-                  | Ok summary ->
-                    let rows =
-                      List.map
-                        (fun (row : Keeper_memory_policy.keeper_memory_line) ->
-                          keeper, row)
-                        summary.recent_notes
-                    in
-                    List.rev_append rows rows_acc, errs_acc
-                  | Error exn_class ->
-                    let label =
-                      Keeper_memory_recall_exn_class.to_label exn_class
-                    in
-                    rows_acc, (keeper, label) :: errs_acc)
-                ([], [])
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> [], []
+       let entries =
+         match Keeper_meta_store.keeper_names_result config with
+         | Error error ->
+           {
+             rows = [];
+             errors = [];
+             keeper_names_known = Some false;
+             keeper_name_discovery_read_errors = [ error ];
+           }
+         | Ok names ->
+           let rows, errors =
+             names
+             |> List.fold_left
+                  (fun (rows_acc, errs_acc) keeper ->
+                    match
+                      Keeper_memory_recall.read_keeper_memory_summary_result
+                        config
+                        ~name:keeper
+                        ~max_bytes:120000
+                        ~max_lines:180
+                        ~recent_limit:30
+                    with
+                    | Ok summary ->
+                      let rows =
+                        List.map
+                          (fun (row : Keeper_memory_policy.keeper_memory_line) ->
+                            keeper, row)
+                          summary.recent_notes
+                      in
+                      List.rev_append rows rows_acc, errs_acc
+                    | Error exn_class ->
+                      let label =
+                        Keeper_memory_recall_exn_class.to_label exn_class
+                      in
+                      rows_acc, (keeper, label) :: errs_acc)
+                  ([], [])
+           in
+           {
+             rows = List.rev rows;
+             errors = List.rev errors;
+             keeper_names_known = Some true;
+             keeper_name_discovery_read_errors = [];
+           }
        in
-       let rows = List.rev rows in
-       let errors = List.rev errors in
        Atomic.set memory_subsystems_entry_cache
-         (Some (config.base_path, now, rows, errors));
-       rows, errors)
+         (Some { base_path = config.base_path; cached_at = now; entries });
+       entries)
 ;;
 
 let load_user_model_facts ~(config : Workspace_utils.config) =
   let now = Time_compat.now () in
   let base_path = config.base_path in
-  Keeper_memory_os_io.list_fact_store_keeper_ids_for_base_path ~base_path
-  |> List.fold_left
-       (fun (items_acc, errors_acc) keeper ->
-         try
-           let items =
-             Keeper_memory_os_io.read_facts_tail_for_base_path
-               ~base_path
-               ~keeper_id:keeper
-               ~n:Keeper_memory_os_io.fact_store_max
-             |> List.filter Keeper_memory_os_types.fact_is_user_model
-             |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
-             |> List.map (fun fact -> keeper, fact)
-           in
-           List.rev_append items items_acc, errors_acc
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> items_acc, (keeper, Printexc.to_string exn) :: errors_acc)
-       ([], [])
-  |> fun (items, errors) -> List.rev items, List.rev errors
+  let facts_path_for_keeper keeper_id =
+    Keeper_memory_os_io.facts_path_for_keepers_dir
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      ~keeper_id
+  in
+  let fact_parse_read_errors ~keeper_id errors =
+    List.map
+      (fun (error : Keeper_memory_os_io.fact_jsonl_parse_error) ->
+        { keeper = keeper_id
+        ; source = User_model_fact_store_parse
+        ; path = Some error.path
+        ; line_index = Some error.line_index
+        ; error = Keeper_memory_os_io.fact_jsonl_parse_error_to_string error
+        })
+      errors
+  in
+  let fact_store_read_error ~keeper_id error =
+    { keeper = keeper_id
+    ; source = User_model_fact_store_read
+    ; path = Some (facts_path_for_keeper keeper_id)
+    ; line_index = None
+    ; error
+    }
+  in
+  match Keeper_memory_os_io.list_fact_store_keeper_ids_for_base_path_result ~base_path with
+  | Error error ->
+    {
+      items = [];
+      fact_read_errors = [];
+      keeper_ids_known = false;
+      keeper_id_discovery_read_errors = [ error ];
+    }
+  | Ok keeper_ids ->
+    let items, errors =
+      keeper_ids
+      |> List.fold_left
+           (fun (items_acc, errors_acc) keeper ->
+              try
+                match
+                  Keeper_memory_os_io.read_facts_tail_with_errors_for_base_path
+                    ~base_path
+                    ~keeper_id:keeper
+                    ~n:Keeper_memory_os_io.fact_store_max
+                with
+                | { parse_errors = _ :: _ as parse_errors; facts = _ } ->
+                  items_acc, List.rev_append (fact_parse_read_errors ~keeper_id:keeper parse_errors) errors_acc
+                | { facts; parse_errors = [] } ->
+                  let items =
+                    facts
+                    |> List.filter Keeper_memory_os_types.fact_is_user_model
+                    |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
+                    |> List.map (fun fact -> keeper, fact)
+                  in
+                  List.rev_append items items_acc, errors_acc
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn ->
+                items_acc, fact_store_read_error ~keeper_id:keeper (Printexc.to_string exn) :: errors_acc)
+           ([], [])
+    in
+    {
+      items = List.rev items;
+      fact_read_errors = List.rev errors;
+      keeper_ids_known = true;
+      keeper_id_discovery_read_errors = [];
+    }
 ;;
 
 let user_model_prompt_json () =
@@ -141,6 +232,32 @@ let user_model_prompt_json () =
     ]
 ;;
 
+let user_model_fact_read_error_source_to_string = function
+  | User_model_fact_store_parse -> "user_model_fact_store_parse"
+  | User_model_fact_store_read -> "user_model_fact_store_read"
+;;
+
+let user_model_fact_read_error_to_json error =
+  let fields =
+    [ ( "source"
+      , `String (user_model_fact_read_error_source_to_string error.source) )
+    ; "keeper", `String error.keeper
+    ; "error", `String error.error
+    ]
+  in
+  let fields =
+    match error.path with
+    | None -> fields
+    | Some path -> fields @ [ "path", `String path ]
+  in
+  let fields =
+    match error.line_index with
+    | None -> fields
+    | Some line_index -> fields @ [ "line_index", `Int line_index ]
+  in
+  `Assoc fields
+;;
+
 (* The Hebbian synapse weight is a DISPLAY-only saturation scale for the
    dashboard graph, not a learned or normalized synaptic strength: a keeper pair
    reaches [max_synapse_weight] once they co-observe [synapse_saturation_facts]
@@ -149,6 +266,42 @@ let user_model_prompt_json () =
    how thick the dashboard edge renders). *)
 let max_synapse_weight = 1.0
 let synapse_saturation_facts = 10.0
+
+let hebbian_read_error_json ?(source = "memory_os_shared_facts") ?path ?line_index error =
+  let fields = [ "source", `String source; "error", `String error ] in
+  let fields =
+    match path with
+    | Some value -> fields @ [ "path", `String value ]
+    | None -> fields
+  in
+  let fields =
+    match line_index with
+    | Some value -> fields @ [ "line_index", `Int value ]
+    | None -> fields
+  in
+  `Assoc fields
+;;
+
+let hebbian_fact_parse_read_errors errors =
+  List.map
+    (fun (error : Keeper_memory_os_io.fact_jsonl_parse_error) ->
+      hebbian_read_error_json
+        ~source:"memory_os_shared_fact_store_parse"
+        ~path:error.path
+        ~line_index:error.line_index
+        (Keeper_memory_os_io.fact_jsonl_parse_error_to_string error))
+    errors
+;;
+
+let hebbian_json ~known ~synapses ~last_consolidation ~read_errors =
+  `Assoc
+    [ "synapses", `List synapses
+    ; "last_consolidation", `Float last_consolidation
+    ; "hebbian_known", `Bool known
+    ; "read_error_count", `Int (List.length read_errors)
+    ; "read_errors", `List read_errors
+    ]
+;;
 
 (* RFC-0244 Tier 2: derive the Hebbian synapse view from cross-keeper
    corroboration. Each shared fact that was observed by multiple keepers
@@ -161,68 +314,115 @@ let compute_hebbian ~base_path ~now () =
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path
     in
-    let shared_facts =
-      Keeper_memory_os_io.read_facts_all_for_keepers_dir
+    match
+      Keeper_memory_os_io.read_facts_all_with_errors_for_keepers_dir
         ~keepers_dir
         ~keeper_id:Keeper_memory_os_types.shared_store_id
-      |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
-    in
-    (* [last_consolidation] is the most recent [last_verified_at] of any
-       current shared fact, not the timestamp of the last consolidator run.
-       The name matches the dashboard schema; the value is fact-derived because
-       the shared store is the SSOT for cross-keeper corroboration. *)
-    let last_consolidation =
-      shared_facts
-      |> List.filter_map (fun (f : Keeper_memory_os_types.fact) -> f.last_verified_at)
-      |> List.fold_left Float.max 0.0
-    in
-    let synapse_counts : ((string * string), int) Hashtbl.t = Hashtbl.create 16 in
-    shared_facts
-    |> List.iter (fun (fact : Keeper_memory_os_types.fact) ->
-      (* Dedupe within a single fact so a duplicate observer cannot inflate the
-         synapse count, and convert to an array for O(1) pairwise indexing. *)
-      let keepers =
-        fact.observed_by
-        |> List.sort_uniq String.compare
-        |> Array.of_list
+    with
+    | { parse_errors = _ :: _ as parse_errors; facts = _ } ->
+      let read_errors = hebbian_fact_parse_read_errors parse_errors in
+      let first_error =
+        match parse_errors with
+        | first :: _ -> Keeper_memory_os_io.fact_jsonl_parse_error_to_string first
+        | [] -> "unavailable"
       in
-      let n = Array.length keepers in
-      for i = 0 to n - 1 do
-        for j = i + 1 to n - 1 do
-          let a = keepers.(i) in
-          let b = keepers.(j) in
-          let key = if String.compare a b <= 0 then a, b else b, a in
-          let prev = Option.value (Hashtbl.find_opt synapse_counts key) ~default:0 in
-          Hashtbl.replace synapse_counts key (prev + 1)
-        done
-      done);
-    let synapses =
-      Hashtbl.fold
-        (fun (a, b) count acc ->
-           let weight =
-             Float.min max_synapse_weight (float_of_int count /. synapse_saturation_facts)
-           in
-           `Assoc
-             [ "from_agent", `String a
-             ; "to_agent", `String b
-             ; "weight", `Float weight
-             ]
-           :: acc)
-        synapse_counts
-        []
-    in
-    `Assoc [ "synapses", `List synapses; "last_consolidation", `Float last_consolidation ]
+      Log.Server.warn
+        "compute_hebbian: shared fact store parse errors count=%d first=%s"
+        (List.length parse_errors)
+        first_error;
+      hebbian_json
+        ~known:false
+        ~synapses:[]
+        ~last_consolidation:0.0
+        ~read_errors
+    | { facts; parse_errors = [] } ->
+      let shared_facts =
+        facts |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
+      in
+      (* [last_consolidation] is the most recent [last_verified_at] of any
+         current shared fact, not the timestamp of the last consolidator run.
+         The name matches the dashboard schema; the value is fact-derived because
+         the shared store is the SSOT for cross-keeper corroboration. *)
+      let last_consolidation =
+        shared_facts
+        |> List.filter_map (fun (f : Keeper_memory_os_types.fact) -> f.last_verified_at)
+        |> List.fold_left Float.max 0.0
+      in
+      let synapse_counts : ((string * string), int) Hashtbl.t = Hashtbl.create 16 in
+      shared_facts
+      |> List.iter (fun (fact : Keeper_memory_os_types.fact) ->
+        (* Dedupe within a single fact so a duplicate observer cannot inflate the
+           synapse count, and convert to an array for O(1) pairwise indexing. *)
+        let keepers =
+          fact.observed_by
+          |> List.sort_uniq String.compare
+          |> Array.of_list
+        in
+        let n = Array.length keepers in
+        for i = 0 to n - 1 do
+          for j = i + 1 to n - 1 do
+            let a = keepers.(i) in
+            let b = keepers.(j) in
+            let key = if String.compare a b <= 0 then a, b else b, a in
+            let prev = Option.value (Hashtbl.find_opt synapse_counts key) ~default:0 in
+            Hashtbl.replace synapse_counts key (prev + 1)
+          done
+        done);
+      let synapses =
+        Hashtbl.fold
+          (fun (a, b) count acc ->
+             let weight =
+               Float.min max_synapse_weight (float_of_int count /. synapse_saturation_facts)
+             in
+             `Assoc
+               [ "from_agent", `String a
+               ; "to_agent", `String b
+               ; "weight", `Float weight
+               ]
+             :: acc)
+          synapse_counts
+          []
+      in
+      hebbian_json
+        ~known:true
+        ~synapses
+        ~last_consolidation
+        ~read_errors:[]
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    (* Log rather than silently swallow: a persistent fact-store read failure
-       must be distinguishable from a genuinely empty graph, otherwise it
-       presents as the same last_consolidation=0.0 "unviewable" state this
-       function was added to fix. *)
+    let error = Printexc.to_string exn in
     Log.Server.warn
-      "compute_hebbian: synapse view derivation failed, returning empty graph: %s"
-      (Printexc.to_string exn);
-    `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
+      "compute_hebbian: synapse view derivation failed, marking Hebbian graph \
+       unknown: %s"
+      error;
+    let shared_facts_path =
+      try
+        Ok
+          (Keeper_memory_os_io.facts_path_for_keepers_dir
+             ~keepers_dir:
+               (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+             ~keeper_id:Keeper_memory_os_types.shared_store_id)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Error (Printexc.to_string exn)
+    in
+    let read_errors =
+      match shared_facts_path with
+      | Ok path -> [ hebbian_read_error_json ~path error ]
+      | Error path_error ->
+        [ hebbian_read_error_json error
+        ; `Assoc
+            [ "source", `String "memory_os_shared_facts_path"
+            ; "error", `String path_error
+            ]
+        ]
+    in
+    hebbian_json
+      ~known:false
+      ~synapses:[]
+      ~last_consolidation:0.0
+      ~read_errors
 ;;
 
 let dashboard_memory_quality_recent_limit request =
@@ -479,10 +679,44 @@ let dashboard_memory_subsystems_http_json
   in
   let now = Unix.gettimeofday () in
   let hebbian = compute_hebbian ~base_path:config.base_path ~now () in
-  let all_episodes =
-    try Institution_eio.load_recent_episodes_jsonl ~limit:max_int with
+  let institution_episode_read_error_json ~source ?path error =
+    `Assoc
+      ([
+         ("source", `String source);
+         ("error", `String error);
+       ]
+       @
+       match path with
+       | Some value -> [ ("path", `String value) ]
+       | None -> [])
+  in
+  let all_episodes, episode_read_errors =
+    try
+      let path = Institution_eio.episodes_jsonl_path () in
+      try
+        (Institution_eio.load_recent_episodes_jsonl ~limit:max_int, [])
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        ( []
+        , [ institution_episode_read_error_json
+              ~source:"institution_episodes_jsonl"
+              ~path
+              (Printexc.to_string exn)
+          ] )
+    with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> []
+    | exn ->
+      ( []
+      , [ institution_episode_read_error_json
+            ~source:"institution_episodes_jsonl_path"
+            (Printexc.to_string exn)
+        ] )
+  in
+  let episodes_known =
+    match episode_read_errors with
+    | [] -> true
+    | _ -> false
   in
   let total = List.length all_episodes in
   (* Empty filter [q] used to match all episodes; preserve that and
@@ -528,12 +762,16 @@ let dashboard_memory_subsystems_http_json
         , `List (List.map (fun keeper -> `String keeper) fact.observed_by) )
       ]
   in
-  let all_memory_entries, memory_entry_errors =
+  let memory_subsystems_entries =
     if include_memory_entries
     then load_memory_subsystems_entries ~config
-    else [], []
+    else empty_memory_subsystems_entries
   in
-  let all_user_model_items, user_model_errors = load_user_model_facts ~config in
+  let all_memory_entries = memory_subsystems_entries.rows in
+  let memory_entry_errors = memory_subsystems_entries.errors in
+  let user_model_facts = load_user_model_facts ~config in
+  let all_user_model_items = user_model_facts.items in
+  let user_model_errors = user_model_facts.fact_read_errors in
   let memory_total = List.length all_memory_entries in
   let memory_filtered =
     all_memory_entries
@@ -695,6 +933,45 @@ let dashboard_memory_subsystems_http_json
         ; "error", `String msg
         ]
   in
+  let memory_keeper_names_known_json =
+    match memory_subsystems_entries.keeper_names_known with
+    | Some value -> `Bool value
+    | None -> `Null
+  in
+  let memory_keeper_name_discovery_read_errors =
+    List.map
+      (fun error ->
+        `Assoc [ "source", `String "keeper_names_result"; "error", `String error ])
+      memory_subsystems_entries.keeper_name_discovery_read_errors
+  in
+  let memory_entry_read_errors =
+    List.map
+      (fun (keeper, error_class) ->
+        `Assoc
+          [ "source", `String "read_keeper_memory_summary_result"
+          ; "keeper", `String keeper
+          ; "error_class", `String error_class
+          ])
+      memory_entry_errors
+  in
+  let memory_read_errors =
+    memory_keeper_name_discovery_read_errors @ memory_entry_read_errors
+  in
+  let user_model_keeper_id_discovery_read_errors =
+    List.map
+      (fun error ->
+        `Assoc
+          [ "source", `String "list_fact_store_keeper_ids_for_base_path"
+          ; "error", `String error
+          ])
+      user_model_facts.keeper_id_discovery_read_errors
+  in
+  let user_model_fact_read_errors =
+    List.map user_model_fact_read_error_to_json user_model_errors
+  in
+  let user_model_read_errors =
+    user_model_keeper_id_discovery_read_errors @ user_model_fact_read_errors
+  in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "hebbian", hebbian
@@ -706,9 +983,12 @@ let dashboard_memory_subsystems_http_json
     ; ( "episodes"
       , `Assoc
           [ "total", `Int total
+          ; "episodes_known", `Bool episodes_known
           ; "filtered", `Int filtered_total
           ; "shown", `Int (List.length episodes)
           ; "limit", `Int limit
+          ; "read_error_count", `Int (List.length episode_read_errors)
+          ; "read_errors", `List episode_read_errors
           ; "items", `List (List.map Institution_eio.episode_to_json episodes)
           ] )
     ; ( "memory_entries"
@@ -717,6 +997,13 @@ let dashboard_memory_subsystems_http_json
           ; "filtered", `Int memory_filtered_total
           ; "shown", `Int (List.length memory_entries)
           ; "limit", `Int limit
+          ; "keeper_names_known", memory_keeper_names_known_json
+          ; ( "keeper_name_discovery_read_error_count"
+            , `Int (List.length memory_keeper_name_discovery_read_errors) )
+          ; ( "keeper_name_discovery_read_errors"
+            , `List memory_keeper_name_discovery_read_errors )
+          ; "read_error_count", `Int (List.length memory_read_errors)
+          ; "read_errors", `List memory_read_errors
           ; ( "items"
             , `List
                 (List.map
@@ -741,6 +1028,13 @@ let dashboard_memory_subsystems_http_json
           ; "filtered", `Int (List.length user_model_filtered)
           ; "shown", `Int (List.length user_model_items)
           ; "limit", `Int limit
+          ; "keeper_ids_known", `Bool user_model_facts.keeper_ids_known
+          ; ( "keeper_id_discovery_read_error_count"
+            , `Int (List.length user_model_keeper_id_discovery_read_errors) )
+          ; ( "keeper_id_discovery_read_errors"
+            , `List user_model_keeper_id_discovery_read_errors )
+          ; "read_error_count", `Int (List.length user_model_read_errors)
+          ; "read_errors", `List user_model_read_errors
           ; ( "items"
             , `List
                 (List.map
@@ -749,8 +1043,11 @@ let dashboard_memory_subsystems_http_json
           ; ( "errors"
             , `List
                 (List.map
-                   (fun (keeper, error) ->
-                     `Assoc [ "keeper", `String keeper; "error", `String error ])
+                   (fun error ->
+                     `Assoc
+                       [ "keeper", `String error.keeper
+                       ; "error", `String error.error
+                       ])
                    user_model_errors) )
           ] )
     ; "draft_skill_candidates", draft_skill_candidates

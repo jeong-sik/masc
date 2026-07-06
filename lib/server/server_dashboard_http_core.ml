@@ -488,16 +488,17 @@ let dashboard_shell_payload_json
         dashboard_general_agent_count agents, agents_ms)
     in
     let tasks, tasks_ms = measure_ms "tasks" (fun () -> dashboard_tasks_safe config) in
-    let persisted_keepers, persisted_keepers_ms =
-      measure_ms "persisted_keepers" (fun () -> keeper_count config)
+    let persisted_keeper_scan, persisted_keepers_ms =
+      measure_ms "persisted_keepers" (fun () -> keeper_count_scan config)
     in
+    let persisted_keepers = persisted_keeper_scan.keeper_count in
     let configured_keepers, configured_keepers_ms =
       measure_ms "configured_keepers" (fun () -> configured_keeper_count config)
     in
     let meta_cognition_r = ref (`Null, 0) in
     let config_resolution_r = ref (`Null, 0) in
     let runtime_resolution_r = ref (`Null, 0) in
-    let active_keepers, keepers_ms =
+    let active_keepers, active_keepers_known, active_keeper_read_errors, keepers_ms =
       if light
       then (
         let runtime_resolution_json, runtime_resolution_ms =
@@ -505,11 +506,28 @@ let dashboard_shell_payload_json
             Server_dashboard_http_runtime_info.light_runtime_resolution_json config)
         in
         runtime_resolution_r := (runtime_resolution_json, runtime_resolution_ms);
-        ( Option.value
-            ~default:0
-            (json_assoc_int_opt "keeper_fibers" runtime_resolution_json)
-        , 0 ))
-      else measure_ms "keepers" (fun () -> running_keeper_count config)
+        match json_assoc_int_opt "keeper_fibers" runtime_resolution_json with
+        | Some count -> (count, true, [], 0)
+        | None ->
+          ( 0
+          , false
+          , [ `Assoc
+                [ ( "source"
+                  , `String "light_runtime_resolution.keeper_fibers" )
+                ; ( "message"
+                  , `String
+                      "runtime resolution did not include keeper_fibers" )
+                ]
+            ]
+          , 0 ))
+      else
+        let running_scan, keepers_ms =
+          measure_ms "keepers" (fun () -> running_keeper_count_scan config)
+        in
+        ( running_scan.running_keeper_count
+        , running_scan.running_keeper_count_known
+        , running_scan.running_keeper_count_read_errors
+        , keepers_ms )
     in
     if light
     then
@@ -559,6 +577,9 @@ let dashboard_shell_payload_json
     let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
     let config_resolution_json, config_resolution_ms = !config_resolution_r in
     let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
+    let keeper_count_read_errors =
+      persisted_keeper_scan.keeper_count_read_errors @ active_keeper_read_errors
+    in
     shell_projection_trace_finish trace Shell_trace_finished;
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
@@ -569,10 +590,16 @@ let dashboard_shell_payload_json
             [ "agents", `Int general_agents
             ; "tasks", `Int (List.length tasks)
             ; "keepers", `Int active_keepers
+            ; "keepers_known", `Bool active_keepers_known
             ; "persisted_keepers", `Int persisted_keepers
+            ; ( "persisted_keepers_known"
+              , `Bool persisted_keeper_scan.keeper_count_known )
             ; "total_runtimes", `Int (general_agents + active_keepers)
             ] )
       ; "persisted_keepers", `Int persisted_keepers
+      ; "persisted_keepers_known", `Bool persisted_keeper_scan.keeper_count_known
+      ; "keeper_count_read_error_count", `Int (List.length keeper_count_read_errors)
+      ; "keeper_count_read_errors", `List keeper_count_read_errors
       ; "configured_keepers", `Int configured_keepers
       ; "providers", provider_capacity_json ()
       ; "meta_cognition", meta_cognition_json
@@ -589,6 +616,11 @@ let dashboard_shell_payload_json
             ; "keeper_count_source", `String "runtime_keepalive"
             ; "configured_keeper_count_source", `String "keeper_toml"
             ; "persisted_keeper_count_source", `String "keeper_meta"
+            ; "keeper_count_known", `Bool active_keepers_known
+            ; ( "persisted_keeper_count_known"
+              , `Bool persisted_keeper_scan.keeper_count_known )
+            ; ( "keeper_count_read_error_count"
+              , `Int (List.length keeper_count_read_errors) )
             ; "status_ms", `Int status_ms
             ; "agents_ms", `Int agents_ms
             ; "tasks_ms", `Int tasks_ms
@@ -639,6 +671,14 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     | Some (Ok cred) -> Some cred.Masc_domain.agent_name
     | _ -> None
   in
+  let auth_error_code_json err =
+    Json_util.string_opt_to_json (Option.bind err dashboard_auth_error_code)
+  in
+  let auth_error_detail_json err =
+    match err with
+    | Some err -> `String (Masc_domain.masc_error_to_string err)
+    | None -> `Null
+  in
   let resolved_agent_name_result =
     match token_credential_result with
     (* Keep stale bearer tokens visible as auth failures in shell summaries instead of
@@ -659,10 +699,10 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
                 }))
       else Ok "dashboard")
   in
-  let effective_agent =
+  let effective_agent, effective_agent_error =
     match resolved_agent_name_result with
-    | Ok agent_name -> Some agent_name
-    | Error _ -> None
+    | Ok agent_name -> Some agent_name, None
+    | Error err -> None, Some err
   in
   let effective_role_result =
     match resolved_agent_name_result with
@@ -697,15 +737,11 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     | Ok () -> true, None
     | Error err -> false, Some (Masc_domain.masc_error_to_string err)
   in
-  let effective_admin =
+  let effective_admin, effective_role, effective_role_error =
     match effective_role_result with
-    | Ok role -> Some (role = Masc_domain.Admin)
-    | Error _ -> None
-  in
-  let effective_role =
-    match effective_role_result with
-    | Ok role -> Some (Masc_domain.agent_role_to_string role)
-    | Error _ -> None
+    | Ok role ->
+      Some (role = Masc_domain.Admin), Some (Masc_domain.agent_role_to_string role), None
+    | Error err -> None, None, Some err
   in
   let auth_error =
     match token_credential_result with
@@ -728,12 +764,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     ; "requested_agent", Json_util.string_opt_to_json requested_agent
     ; "effective_agent", Json_util.string_opt_to_json effective_agent
     ; "effective_role", Json_util.string_opt_to_json effective_role
-    ; ( "auth_error_code"
-      , Json_util.string_opt_to_json (Option.bind auth_error dashboard_auth_error_code) )
-    ; ( "auth_error_detail"
-      , match auth_error with
-        | Some err -> `String (Masc_domain.masc_error_to_string err)
-        | None -> `Null )
+    ; "effective_agent_error_code", auth_error_code_json effective_agent_error
+    ; "effective_agent_error_detail", auth_error_detail_json effective_agent_error
+    ; "effective_role_error_code", auth_error_code_json effective_role_error
+    ; "effective_role_error_detail", auth_error_detail_json effective_role_error
+    ; "auth_error_code", auth_error_code_json auth_error
+    ; "auth_error_detail", auth_error_detail_json auth_error
     ; "effective_admin", Json_util.bool_opt_to_json effective_admin
     ; "can_keeper_msg", `Bool can_keeper_msg
     ; "keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error

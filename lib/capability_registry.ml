@@ -188,9 +188,8 @@ let keeper_wrapped_server_tool_alias name =
 ;;
 
 let keeper_wrapped_server_tools : string list =
-  [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
-    "masc_tasks"; "masc_broadcast";
-  ]
+  [ "masc_board_post"; "masc_board_comment"; "masc_board_list"; "masc_tasks"; "masc_broadcast" ]
+  @ Tool_catalog_surfaces.keeper_schedule_surface_tools
 ;;
 
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :

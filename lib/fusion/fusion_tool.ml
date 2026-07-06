@@ -4,6 +4,11 @@
 let status_json ~ok fields =
   Yojson.Safe.to_string (`Assoc (("ok", `Bool ok) :: fields))
 
+let structural_cancel_failure_code = "cancelled"
+
+let structural_cancel_failure =
+  "cancelled: structural cancellation (shutdown or sibling switch failure)"
+
 let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
   (* 실패 알림도 성공 결론(fusion_sink.emit)과 동일하게 키퍼 *메인* conversation에
      남긴다(conversation_id 생략). recent_direct_conversation observation 필터는
@@ -45,6 +50,26 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
   Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
   Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
     ~resolved_answer:content ~board_post_id:""
+
+let finalize_cancelled_run ~base_dir ~keeper ~run_id =
+  (* [mark_completed] is non-yielding registry state, so run visibility is
+     closed before any protected suspending cleanup starts. *)
+  Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+    ~failure:structural_cancel_failure
+    ~failure_code:structural_cancel_failure_code
+    ~ok:false
+    ();
+  try
+    Eio.Cancel.protect (fun () ->
+      Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
+        ~resolved_answer:structural_cancel_failure ~board_post_id:"")
+  with
+  | Eio.Cancel.Cancelled _ as cleanup_exn ->
+    Log.Keeper.warn ~keeper_name:keeper
+      "fusion cancelled finalizer was cancelled during protected cleanup run_id=%s: %s"
+      run_id
+      (Printexc.to_string cleanup_exn)
 
 let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
   let prompt = Tool_args.get_string args "prompt" "" in
@@ -115,20 +140,11 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
           append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
             (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
         | exception (Eio.Cancel.Cancelled _ as exn) ->
-          (* RFC-0266 §7: 취소도 종료 상태다. register_running(위 line 73)으로 [Running]
-             으로 등록된 run을 [Completed{ok=false}]로 갱신하지 않으면, in-memory registry
-             ([global], 서버 수명)에 영구 "running"으로 남아 dashboard fusion-runs 패널과
-             masc_fusion_status가 거짓 "심의중"을 보인다(prune는 [Running]을 evict하지 않음 —
-             fusion_run_registry.ml). 다른 종료 분기(Denied/Sink_failed/exception)는
-             append_chat_failure 경유로 이미 mark_completed 하는데 이 분기만 빠져 있었다.
-             [mark_completed]는 순수 in-memory CAS(suspension 없음)라 취소 컨텍스트에서도
-             안전하다. broadcast는 [Sse.broadcast]가 mailbox에서 suspend/block할 수 있어
-             취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
-             registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
-             그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
-          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-            ~failure:"cancelled: structural cancellation (shutdown or sibling switch failure)"
-            ~failure_code:"cancelled" ~ok:false ();
+          (* RFC-0266 §7: 취소도 종료 상태이며 결과 전달 계약의 일부다. Registry는
+             non-yielding 상태로 먼저 닫고, dashboard broadcast + typed
+             [Fusion_completed] wake는 Eio's protected cleanup context에서 시도한다.
+             원래 구조적 취소는 흡수하지 않고 아래에서 그대로 재전파한다. *)
+          finalize_cancelled_run ~base_dir ~keeper ~run_id;
           raise exn
         | exception exn ->
           append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"

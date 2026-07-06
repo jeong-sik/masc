@@ -151,37 +151,95 @@ type workflow_rejection_payload =
   ; recoverability : workflow_rejection_recoverability option
   }
 
-let workflow_rejection_payload_of_json json =
-  let payload_from_json json =
-  match json_or_detail_string_opt "failure_class" json with
-  | Some "workflow_rejection" ->
-    Some
-      { info = workflow_rejection_info_of_json json
-      ; error_class =
-          Option.bind
-            (json_or_detail_string_opt "error_class" json)
-            workflow_rejection_error_class_of_string
-      ; recoverability =
-          Option.map
-            workflow_rejection_recoverability_of_bool
-            (json_or_detail_bool_opt "recoverable" json)
+type workflow_rejection_parse_source =
+  | Workflow_rejection_raw
+  | Workflow_rejection_error_field
+
+type workflow_rejection_parse_error =
+  | Workflow_rejection_json_parse_error of
+      { source : workflow_rejection_parse_source
+      ; message : string
       }
-  | Some _
-  | None ->
-    None
+
+let workflow_rejection_parse_source_to_string = function
+  | Workflow_rejection_raw -> "raw"
+  | Workflow_rejection_error_field -> "error_field"
+;;
+
+let workflow_rejection_parse_error_to_string = function
+  | Workflow_rejection_json_parse_error { source; message } ->
+    Printf.sprintf
+      "%s: %s"
+      (workflow_rejection_parse_source_to_string source)
+      message
+;;
+
+let json_payload_candidate raw =
+  let raw = String.trim raw in
+  match String.length raw with
+  | 0 -> false
+  | _ ->
+    (match raw.[0] with
+     | '{' | '[' -> true
+     | _ -> false)
+;;
+
+let parse_json_payload_candidate ~source raw =
+  let raw = String.trim raw in
+  match json_payload_candidate raw with
+  | false -> Ok None
+  | true ->
+    (try Ok (Some (Yojson.Safe.from_string raw)) with
+     | Yojson.Json_error message ->
+       Error (Workflow_rejection_json_parse_error { source; message }))
+;;
+
+let workflow_rejection_payload_of_json_result json =
+  let payload_from_json json =
+    match json_or_detail_string_opt "failure_class" json with
+    | Some "workflow_rejection" ->
+      Some
+        { info = workflow_rejection_info_of_json json
+        ; error_class =
+            Option.bind
+              (json_or_detail_string_opt "error_class" json)
+              workflow_rejection_error_class_of_string
+        ; recoverability =
+            Option.map
+              workflow_rejection_recoverability_of_bool
+              (json_or_detail_bool_opt "recoverable" json)
+        }
+    | Some _
+    | None ->
+      None
   in
   match payload_from_json json with
-  | Some _ as payload -> payload
+  | Some _ as payload -> Ok payload
   | None ->
     (match json_assoc_string_opt "error" json with
      | Some raw ->
-       (try
-          match Yojson.Safe.from_string raw with
-          | `Assoc _ as nested -> payload_from_json nested
-          | _ -> None
-        with
-        | Yojson.Json_error _ -> None)
-     | None -> None)
+       (match parse_json_payload_candidate ~source:Workflow_rejection_error_field raw with
+        | Ok (Some (`Assoc _ as nested)) -> Ok (payload_from_json nested)
+        | Ok (Some _)
+        | Ok None ->
+          Ok None
+        | Error error -> Error error)
+     | None -> Ok None)
+;;
+
+let log_workflow_rejection_parse_error ~surface error =
+  Log.Keeper.warn
+    "keeper_tools_oas_workflow.%s parse failed: %s"
+    surface
+    (workflow_rejection_parse_error_to_string error)
+;;
+
+let workflow_rejection_payload_of_json json =
+  match workflow_rejection_payload_of_json_result json with
+  | Ok payload -> payload
+  | Error error ->
+    log_workflow_rejection_parse_error ~surface:"payload_of_json" error;
+    None
 ;;
 
 let workflow_rejection_retry_policy payload =
@@ -251,14 +309,23 @@ let workflow_rejection_payload_json
   Yojson.Safe.to_string (`Assoc fields)
 ;;
 
+let workflow_rejection_info_of_raw_result raw =
+  match parse_json_payload_candidate ~source:Workflow_rejection_raw raw with
+  | Ok (Some json) ->
+    (match workflow_rejection_payload_of_json_result json with
+     | Ok (Some payload) -> Ok (Some payload.info)
+     | Ok None -> Ok None
+     | Error error -> Error error)
+  | Ok None -> Ok None
+  | Error error -> Error error
+;;
+
 let workflow_rejection_info_of_raw raw =
-  try
-    let json = Yojson.Safe.from_string raw in
-    match workflow_rejection_payload_of_json json with
-    | Some payload -> Some payload.info
-    | None -> None
-  with
-  | Yojson.Json_error _ -> None
+  match workflow_rejection_info_of_raw_result raw with
+  | Ok info -> info
+  | Error error ->
+    log_workflow_rejection_parse_error ~surface:"info_of_raw" error;
+    None
 ;;
 
 let workflow_rejection_family_key ~tool_name (info : workflow_rejection_info) =

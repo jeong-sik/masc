@@ -777,7 +777,8 @@ let test_validate_path_access_playground_gitdir_escape_denied () =
       | Ok () -> Alcotest.fail "expected gitdir escape to be denied"
       | Error msg ->
           Alcotest.(check bool)
-            "mentions not allowed" true (contains_substring msg "not allowed"))
+            "mentions origin read failure" true
+            (contains_substring msg "Repository origin read failed"))
 
 let test_validate_path_access_playground_dot_git_symlink_denied () =
   with_temp_base_path (fun base_path ->
@@ -910,7 +911,42 @@ let test_validate_path_access_playground_large_git_config_denied () =
       | Ok () -> Alcotest.fail "expected oversized git config to be denied"
       | Error msg ->
           Alcotest.(check bool)
-            "mentions not allowed" true (contains_substring msg "not allowed"))
+            "mentions origin read failure" true
+            (contains_substring msg "Repository origin read failed"))
+
+let test_validate_path_access_playground_missing_git_config_denied_explicitly () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repo_root =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/missing-config-worktree"
+      in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      ensure_dir (Filename.concat repo_root ".git");
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected missing git config to be denied"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions origin read failure" true
+            (contains_substring msg "Repository origin read failed");
+          Alcotest.(check bool)
+            "mentions git config" true
+            (contains_substring msg "git config"))
 
 let test_validate_path_access_playground_unknown_repo_denied () =
   with_temp_base_path (fun base_path ->
@@ -1147,6 +1183,8 @@ let () =
             test_validate_path_access_playground_gitdir_parent_symlink_escape_denied;
           Alcotest.test_case "playground large git config is denied" `Quick
             test_validate_path_access_playground_large_git_config_denied;
+          Alcotest.test_case "playground missing git config is explicit" `Quick
+            test_validate_path_access_playground_missing_git_config_denied_explicitly;
           Alcotest.test_case "playground unknown repo denied by explicit mapping" `Quick
             test_validate_path_access_playground_unknown_repo_denied;
           Alcotest.test_case "playground unknown repo denied by wildcard mapping" `Quick

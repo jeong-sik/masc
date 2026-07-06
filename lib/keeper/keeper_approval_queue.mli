@@ -348,6 +348,10 @@ val resolve :
 
 val list_pending_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json : unit -> Yojson.Safe.t
+val list_pending_entries : unit -> pending_approval list
+(** Typed snapshot of pending approvals sorted by [requested_at] then [id].
+    Exposes the in-memory read model without forcing dashboard/status code to
+    re-parse dashboard JSON. *)
 
 (** Detail view of a single pending entry with input + runtime
     contract included. *)

@@ -347,6 +347,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         row_count: 8,
         stimulus_count: 4,
         reaction_count: 4,
+        stimulus_consumed_count: 1,
         cursor_ack_count: 2,
         cursor_swept_stimulus_count: 3,
         legacy_cursor_swept_stimulus_count: 1,
@@ -405,6 +406,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       },
       keeper_reaction_ledger: {
         status: 'ok',
+        stimulus_consumed_count: 1,
         cursor_ack_count: 2,
         cursor_swept_stimulus_count: 3,
         legacy_cursor_swept_stimulus_count: 1,

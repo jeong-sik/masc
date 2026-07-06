@@ -53,7 +53,9 @@ type kill_error =
   | Kill_failed of string
 
 type state = {
+  task_id : task_id;
   handle : Process_eio.detached_handle;
+  base_path : string option;
   keeper : string;
   timeout_sec : float;
   stdout_buf : Buffer.t;
@@ -68,15 +70,39 @@ type state = {
       (** Full path to the persistence sidecar when
           [~base_path] was supplied at spawn. Deleted on close/kill. *)
   mutable release_lifetime_guard : (unit -> unit) option;
+  mutable completion_notified : bool;
 }
 
 type lifetime_guard = { acquire : unit -> (unit -> unit) }
+
+type completion = {
+  base_path : string option;
+  keeper : string;
+  task_id : task_id;
+  status : Unix.process_status;
+  finished_at : float;
+}
 
 let default_lifetime_guard = { acquire = (fun () -> fun () -> ()) }
 let lifetime_guard : lifetime_guard Atomic.t = Atomic.make default_lifetime_guard
 let set_lifetime_guard guard = Atomic.set lifetime_guard guard
 let reset_lifetime_guard_for_testing () = Atomic.set lifetime_guard default_lifetime_guard
 let acquire_lifetime_guard () = (Atomic.get lifetime_guard).acquire ()
+
+let completion_observer : (completion -> unit) Atomic.t = Atomic.make (fun _ -> ())
+
+let set_completion_observer f = Atomic.set completion_observer f
+let reset_completion_observer_for_testing () = Atomic.set completion_observer (fun _ -> ())
+
+let observe_completion completion =
+  try (Atomic.get completion_observer) completion with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "bg_task completion observer failed keeper=%s task_id=%s: %s"
+      completion.keeper
+      (task_id_to_string completion.task_id)
+      (Printexc.to_string exn)
 
 (* Tick 7: PID-file helpers. Path convention:
      <base_path>/.masc/keeper/<keeper>/bg/<task_id>.pid
@@ -184,8 +210,21 @@ let close_task_fds st =
   Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd)
 
 let mark_process_finished st status =
-  if Option.is_none st.status then st.status <- Some status;
-  release_lifetime_guard st
+  let first_status = Option.is_none st.status in
+  if first_status then st.status <- Some status;
+  release_lifetime_guard st;
+  if first_status && not st.completion_notified
+  then begin
+    st.completion_notified <- true;
+    Some
+      { base_path = st.base_path
+      ; keeper = st.keeper
+      ; task_id = st.task_id
+      ; status
+      ; finished_at = Unix.gettimeofday ()
+      }
+  end
+  else None
 
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
@@ -208,7 +247,9 @@ let start_exit_watcher st =
   (Atomic.get exit_watcher_thread_create)
     (let rec wait () =
        match Unix.waitpid [] st.handle.pid with
-       | _, status -> with_reg (fun () -> mark_process_finished st status)
+       | _, status ->
+           let completion = with_reg (fun () -> mark_process_finished st status) in
+           Option.iter observe_completion completion
        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
        | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
            with_reg (fun () -> release_lifetime_guard st)
@@ -365,6 +406,12 @@ let drain_outcome_is_eof = function
 (* Called under [registry_mu]. Drains pipes, reaps if exited, kills
    on timeout. *)
 let poll_state st =
+  let completions = ref [] in
+  let mark_finished status =
+    match mark_process_finished st status with
+    | None -> ()
+    | Some completion -> completions := completion :: !completions
+  in
   if st.closed then ()
   else begin
     if not st.stdout_eof then begin
@@ -392,9 +439,9 @@ let poll_state st =
      | None ->
 	         (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
 	          | 0, _ -> ()
-	          | _, s -> mark_process_finished st s
+	          | _, s -> mark_finished s
 	          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
-	              mark_process_finished st (Unix.WEXITED 0)
+	              mark_finished (Unix.WEXITED 0)
 	          (* RFC-0145 — narrow to the only remaining exception kind
 	             [Unix.waitpid] raises (the [ECHILD] case is handled
 	             above as a domain-meaningful outcome). *)
@@ -407,7 +454,7 @@ let poll_state st =
         ~signal:Sys.sigterm ~grace_sec:2.0;
 	      (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
 	       | 0, _ -> ()
-	       | _, s -> mark_process_finished st s
+	       | _, s -> mark_finished s
 	       (* RFC-0145 — narrow to [Unix.Unix_error] (the only exception
 	          [Unix.waitpid] raises). *)
 	       | exception Unix.Unix_error _ -> ())
@@ -417,10 +464,14 @@ let poll_state st =
 		      close_task_fds st;
 		      try_delete_pid_file st.pid_file
 		    end
-	  end
+	  end;
+  List.rev !completions
 
 let poll_all_states () =
-  Hashtbl.iter (fun _ st -> poll_state st) registry
+  Hashtbl.fold
+    (fun _ st completions -> poll_state st @ completions)
+    registry
+    []
 
 let live_task_count ?keeper () =
   Hashtbl.fold
@@ -438,22 +489,26 @@ let pending_keeper_count keeper =
   |> Option.value ~default:0
 
 let reserve_spawn_slot ~keeper =
-  with_reg (fun () ->
-    poll_all_states ();
-    let global_limit = global_task_limit () in
-    let per_keeper_limit = per_keeper_task_limit () in
-    let keeper_pending = pending_keeper_count keeper in
-    let keeper_count = live_task_count ~keeper () + keeper_pending in
-    let global_count = live_task_count () + !pending_spawn_global in
-    if keeper_count >= per_keeper_limit then
-      Error (Too_many_tasks { keeper; limit = per_keeper_limit })
-    else if global_count >= global_limit then
-      Error (Too_many_tasks { keeper = "global"; limit = global_limit })
-    else begin
-      incr pending_spawn_global;
-      Hashtbl.replace pending_spawn_by_keeper keeper (keeper_pending + 1);
-      Ok ()
-    end)
+  let completions, result =
+    with_reg (fun () ->
+        let completions = poll_all_states () in
+        let global_limit = global_task_limit () in
+        let per_keeper_limit = per_keeper_task_limit () in
+        let keeper_pending = pending_keeper_count keeper in
+        let keeper_count = live_task_count ~keeper () + keeper_pending in
+        let global_count = live_task_count () + !pending_spawn_global in
+        if keeper_count >= per_keeper_limit then
+          completions, Error (Too_many_tasks { keeper; limit = per_keeper_limit })
+        else if global_count >= global_limit then
+          completions, Error (Too_many_tasks { keeper = "global"; limit = global_limit })
+        else begin
+          incr pending_spawn_global;
+          Hashtbl.replace pending_spawn_by_keeper keeper (keeper_pending + 1);
+          completions, Ok ()
+        end)
+  in
+  List.iter observe_completion completions;
+  result
 
 let release_spawn_slot ~keeper =
   with_reg (fun () ->
@@ -514,7 +569,9 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
             in
             let st =
               {
+                task_id = tid;
                 handle;
+                base_path;
                 keeper;
                 timeout_sec;
                 stdout_buf = Buffer.create 4096;
@@ -527,6 +584,7 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
                 stderr_eof = false;
                 pid_file;
                 release_lifetime_guard = Some release_lifetime_guard;
+                completion_notified = false;
               }
             in
             with_reg (fun () ->
@@ -568,7 +626,8 @@ let read tid ~since_stdout ~since_stderr =
   | None -> Error (Unknown_task tid)
   | Some st ->
       (try
-         with_reg (fun () -> poll_state st);
+         let completions = with_reg (fun () -> poll_state st) in
+         List.iter observe_completion completions;
          Ok
            {
              stdout_since =
@@ -595,7 +654,8 @@ let kill tid ~signal ~grace_sec =
   | Some st ->
       (try
          Process_eio.tree_kill ~pgid:st.handle.pgid ~signal ~grace_sec;
-         with_reg (fun () -> poll_state st);
+         let completions = with_reg (fun () -> poll_state st) in
+         List.iter observe_completion completions;
          (* Best-effort PID file cleanup: if poll_state did not
             observe EOF yet (slow-closing FDs), at least unlink the
             sidecar so the next reap cycle does not flag a live

@@ -10,6 +10,12 @@ val record_probe :
 (** Append probe results for all endpoints to today's JSONL file.
     Logs and counts I/O failures while preserving best-effort persistence. *)
 
+val record_probe_result :
+  base_path:string ->
+  Llm_provider.Discovery.endpoint_status list ->
+  (unit, string) result
+(** Result-returning variant of {!record_probe}. *)
+
 (** #10404: probe records previously stored only the head model in
     [model_id], silently discarding additional models loaded on the
     same endpoint.  [models] now carries the full list; [model_id]

@@ -106,6 +106,7 @@ tools = ["masc_status", "masc_web_search", "masc_web_fetch"]
 tools = [
   "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task",
   "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
+  "masc_keeper_waiting_inventory",
   "masc_agent_card", "masc_tool_help",
   "masc_task_history", "masc_plan_get", "masc_plan_get_task",
   "masc_heartbeat",
@@ -118,6 +119,7 @@ tools = [
   "masc_add_task",
   "masc_agents",
   "masc_dashboard",
+  "masc_keeper_waiting_inventory",
   "masc_agent_card",
   "masc_tool_help",
 ]

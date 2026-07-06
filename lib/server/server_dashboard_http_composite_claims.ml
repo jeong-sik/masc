@@ -32,13 +32,18 @@ let tool_call_output_text json =
   | _ -> None
 ;;
 
+type tool_call_output_parse =
+  | Tool_call_output_missing
+  | Tool_call_output_json of Yojson.Safe.t
+  | Tool_call_output_parse_error of string
+
 let parse_tool_call_output json =
   match tool_call_output_text json with
-  | None -> None
+  | None -> Tool_call_output_missing
   | Some output -> (
     match Safe_ops.parse_json_safe ~context:"composite.tool_call_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
+    | Ok parsed -> Tool_call_output_json parsed
+    | Error detail -> Tool_call_output_parse_error detail)
 ;;
 
 let claim_status_of_output output =
@@ -57,6 +62,8 @@ let composite_claim_scope_absent =
     [ "present", `Bool false
     ; "source", `String "keeper_task_claim_tool_call"
     ; "status", `String "not_observed"
+    ; "output_parse_status", `String "not_observed"
+    ; "output_error", `Null
     ; "result", `Null
     ; "mode", `Null
     ; "scoped", `Null
@@ -66,6 +73,33 @@ let composite_claim_scope_absent =
     ; "claimed_task_id", `Null
     ; "claimed_goal_id", `Null
     ]
+;;
+
+let output_parse_status_to_string = function
+  | Tool_call_output_missing -> "missing_output"
+  | Tool_call_output_json (`Assoc _) -> "parsed"
+  | Tool_call_output_json _ -> "non_object"
+  | Tool_call_output_parse_error _ -> "parse_error"
+;;
+
+let output_parse_error = function
+  | Tool_call_output_missing -> Some "keeper_task_claim tool call has no output text"
+  | Tool_call_output_json (`Assoc _) -> None
+  | Tool_call_output_json _ -> Some "keeper_task_claim output JSON was not an object"
+  | Tool_call_output_parse_error detail -> Some detail
+;;
+
+let output_parse_claim_status = function
+  | Tool_call_output_missing -> "output_missing"
+  | Tool_call_output_json (`Assoc _ as output) -> claim_status_of_output output
+  | Tool_call_output_json _ -> "output_not_object"
+  | Tool_call_output_parse_error _ -> "parse_error"
+;;
+
+let output_parse_assoc = function
+  | Tool_call_output_json (`Assoc _ as output) -> output
+  | Tool_call_output_missing | Tool_call_output_json _ | Tool_call_output_parse_error _ ->
+      `Assoc []
 ;;
 
 let composite_claim_scope_json ~keeper_name =
@@ -78,11 +112,8 @@ let composite_claim_scope_json ~keeper_name =
   with
   | None -> composite_claim_scope_absent
   | Some call ->
-    let output =
-      match parse_tool_call_output call with
-      | Some (`Assoc _ as output) -> output
-      | _ -> `Assoc []
-    in
+    let output_parse = parse_tool_call_output call in
+    let output = output_parse_assoc output_parse in
     let claim_scope =
       match json_assoc "claim_scope" output with
       | Some value -> value
@@ -92,7 +123,9 @@ let composite_claim_scope_json ~keeper_name =
     `Assoc
       [ "present", `Bool true
       ; "source", `String "keeper_task_claim_tool_call"
-      ; "status", `String (claim_status_of_output output)
+      ; "status", `String (output_parse_claim_status output_parse)
+      ; "output_parse_status", `String (output_parse_status_to_string output_parse)
+      ; "output_error", Json_util.string_opt_to_json (output_parse_error output_parse)
       ; "result", Json_util.string_opt_to_json (json_string "result" output)
       ; "mode", Json_util.string_opt_to_json (json_string "mode" claim_scope)
       ; ( "scoped",

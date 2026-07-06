@@ -32,9 +32,9 @@ open Tool_args
 
 (** {1 Agent lookup callback} *)
 
-(** Set once at server startup with the real [Workspace.is_agent_session_bound]
-    check so that board posts are auto-classified without requiring
-    callers to pass config or post_kind. *)
+(** Optional agent lookup callback retained for callers that need registry
+    truth elsewhere.  Board post kind selection is not derived from this
+    callback; callers must pass an explicit [post_kind]. *)
 let agent_lookup_hook : (string -> bool) option Atomic.t = Atomic.make None
 
 let set_agent_lookup f = Atomic.set agent_lookup_hook (Some f)
@@ -49,7 +49,7 @@ let is_agent name =
   | None -> false
 ;;
 
-let resolve_board_post_kind ~author (raw_kind : string option)
+let resolve_board_post_kind (raw_kind : string option)
   : (Board.post_kind, string) Stdlib.result
   =
   match raw_kind with
@@ -59,17 +59,33 @@ let resolve_board_post_kind ~author (raw_kind : string option)
        Error "system posts are reserved for platform/internal surfaces"
      | Some kind -> Ok kind
      | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
-  | None ->
-    let author_lc = String.lowercase_ascii (String.trim author) in
-    if String.equal author_lc "" || String.equal author_lc "anonymous"
-    then
-      (* Missing or default author is never direct/manual — classify as
-         automation to prevent misleading direct-attributed posts (#4604). *)
-      Ok Board.Automation_post
-    else (
-      match Atomic.get agent_lookup_hook with
-      | Some _ when is_agent author_lc -> Ok Board.Automation_post
-      | _ -> Ok Board.Human_post)
+  | None -> Error "post_kind is required: direct or automation"
+;;
+
+let resolve_board_visibility raw : (Board.visibility, string) Stdlib.result =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  match Board.visibility_of_string normalized with
+  | Some visibility -> Ok visibility
+  | None -> Error (Printf.sprintf "unknown visibility: %s" raw)
+;;
+
+let resolve_board_visibility_with_default raw ~default
+  : (Board.visibility, string) Stdlib.result
+  =
+  match raw with
+  | Some value -> resolve_board_visibility value
+  | None -> Ok default
+;;
+
+let resolve_board_visibility_filter raw
+  : (Board.visibility option, string) Stdlib.result
+  =
+  match raw with
+  | Some value ->
+    (match resolve_board_visibility value with
+     | Ok visibility -> Ok (Some visibility)
+     | Error msg -> Error msg)
+  | None -> Ok None
 ;;
 
 (** {1 SOUL Evolution callback} *)

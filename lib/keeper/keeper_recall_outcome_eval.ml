@@ -210,76 +210,122 @@ let parse_json_line ~path ~line_no line =
     Error (Printf.sprintf "%s:%d: malformed JSONL row: %s" path line_no msg)
 ;;
 
+let ( let* ) = Result.bind
+
+let field_type_error field expected actual =
+  Printf.sprintf
+    "%s expected %s, got %s"
+    field
+    expected
+    (Json_util.kind_name actual)
+;;
+
+let required_string_field json field =
+  match Json_util.assoc_member_opt field json with
+  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some (`String _) -> Error (Printf.sprintf "%s expected non-empty string" field)
+  | Some actual -> Error (field_type_error field "non-empty string" actual)
+  | None -> Error (Printf.sprintf "%s is missing" field)
+;;
+
+let optional_string_field json field =
+  match Json_util.assoc_member_opt field json with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some actual -> Error (field_type_error field "string" actual)
+;;
+
+let optional_int_field json field =
+  match Json_util.assoc_member_opt field json with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) -> Ok (Some value)
+  | Some (`Intlit raw) ->
+    (match int_of_string_opt raw with
+     | Some value -> Ok (Some value)
+     | None -> Error (Printf.sprintf "%s expected int, got intlit:%s" field raw))
+  | Some actual -> Error (field_type_error field "int" actual)
+;;
+
+let optional_float_field json field =
+  match Json_util.assoc_member_opt field json with
+  | None | Some `Null -> Ok None
+  | Some (`Float value) -> Ok (Some value)
+  | Some (`Int value) -> Ok (Some (Float.of_int value))
+  | Some actual -> Error (field_type_error field "float" actual)
+;;
+
 let parse_recall_json = function
   | `Assoc _ as json ->
-    (match
-       ( Json_util.get_string_nonempty json "keeper_id"
-       , Json_util.get_string_nonempty json "trace_id"
-       , Json_util.get_int json "turn" )
-     with
-     | Some keeper_id, Some trace_id, Some turn ->
-       let injected_fact_keys = Json_util.get_string_list json "injected_fact_keys" in
-       let injected_episode_keys =
-         Json_util.get_string_list json "injected_episode_keys"
-       in
-       Some
-         { keeper_id
-         ; trace_id
-         ; turn
-         ; injected_fact_keys
-         ; injected_fact_key_count =
-             Option.value
-               (Json_util.get_int json "injected_fact_key_count")
-               ~default:(List.length injected_fact_keys)
-         ; injected_episode_key_count =
-             Option.value
-               (Json_util.get_int json "injected_episode_key_count")
-               ~default:(List.length injected_episode_keys)
-         ; failure_reason = Json_util.get_string_nonempty json "failure_reason"
-         ; ts = Json_util.get_float json "ts"
-         }
-     | _ -> None)
-  | _ -> None
+    let* ledger_record =
+      match Keeper_recall_injection_ledger.record_of_json_result json with
+      | Ok record -> Ok record
+      | Error error ->
+        Error
+          (Printf.sprintf
+             "recall ledger schema %s"
+             (Keeper_recall_injection_ledger.decode_error_to_string error))
+    in
+    let* injected_fact_key_count =
+      optional_int_field json "injected_fact_key_count"
+    in
+    let* injected_episode_key_count =
+      optional_int_field json "injected_episode_key_count"
+    in
+    let* ts = optional_float_field json "ts" in
+    Ok
+      { keeper_id = ledger_record.keeper_id
+      ; trace_id = ledger_record.trace_id
+      ; turn = ledger_record.turn
+      ; injected_fact_keys = ledger_record.injected_fact_keys
+      ; injected_fact_key_count =
+          Option.value
+            injected_fact_key_count
+            ~default:(List.length ledger_record.injected_fact_keys)
+      ; injected_episode_key_count =
+          Option.value
+            injected_episode_key_count
+            ~default:(List.length ledger_record.injected_episode_keys)
+      ; failure_reason = ledger_record.failure_reason
+      ; ts
+      }
+  | actual -> Error (field_type_error "recall_row" "object" actual)
 ;;
 
 let parse_ended_at json =
-  match Json_util.get_string json "ended_at" with
-  | None -> Some (None, None)
-  | Some raw when String.trim raw = "" -> Some (Some raw, None)
+  let* ended_at = optional_string_field json "ended_at" in
+  match ended_at with
+  | None -> Ok (None, None)
+  | Some raw when String.trim raw = "" -> Ok (Some raw, None)
   | Some raw ->
     (match Masc_domain.parse_iso8601_opt raw with
-     | Some ts -> Some (Some raw, Some ts)
-     | None -> None)
+     | Some ts -> Ok (Some raw, Some ts)
+     | None -> Error "ended_at expected ISO-8601 timestamp")
 ;;
 
 let parse_receipt_json = function
   | `Assoc _ as json ->
-    (match
-       ( Json_util.get_string_nonempty json "schema"
-       , Json_util.get_string_nonempty json "keeper_name"
-       , Json_util.get_string_nonempty json "trace_id"
-       , Json_util.get_string_nonempty json "outcome"
-       , Json_util.get_string_nonempty json "terminal_reason_code"
-       , parse_ended_at json )
-     with
-     | ( Some schema
-       , Some keeper_name
-       , Some trace_id
-       , Some outcome
-       , Some terminal_reason_code
-       , Some (ended_at, ended_at_unix) )
-       when String.equal schema Keeper_types_support.execution_receipt_schema ->
-       Some
-         { keeper_name
-         ; trace_id
-         ; outcome
-         ; terminal_reason_code
-         ; current_task_id = Json_util.get_string json "current_task_id"
-         ; ended_at
-         ; ended_at_unix
-         }
-     | _ -> None)
-  | _ -> None
+    let* schema = required_string_field json "schema" in
+    if not (String.equal schema Keeper_types_support.execution_receipt_schema)
+    then Error (Printf.sprintf "schema expected %s" Keeper_types_support.execution_receipt_schema)
+    else (
+      let* keeper_name = required_string_field json "keeper_name" in
+      let* trace_id = required_string_field json "trace_id" in
+      let* outcome = required_string_field json "outcome" in
+      let* terminal_reason_code =
+        required_string_field json "terminal_reason_code"
+      in
+      let* ended_at, ended_at_unix = parse_ended_at json in
+      let* current_task_id = optional_string_field json "current_task_id" in
+      Ok
+        { keeper_name
+        ; trace_id
+        ; outcome
+        ; terminal_reason_code
+        ; current_task_id
+        ; ended_at
+        ; ended_at_unix
+        })
+  | actual -> Error (field_type_error "receipt_row" "object" actual)
 ;;
 
 let load_records_from_files files parse =
@@ -293,14 +339,19 @@ let load_records_from_files files parse =
         } )
     | Ok json ->
       (match parse json with
-       | Some record -> record :: records, stats
-       | None ->
+       | Ok record -> record :: records, stats
+       | Error error ->
          ( records
          , { stats with
              invalid_rows = stats.invalid_rows + 1
            ; errors =
                stats.errors
-               @ [ Printf.sprintf "%s:%d: invalid row schema" path line_no ]
+               @ [ Printf.sprintf
+                     "%s:%d: invalid row schema: %s"
+                     path
+                     line_no
+                     error
+                 ]
            } ))
   in
   let load_file (records, stats) path =

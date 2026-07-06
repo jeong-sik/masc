@@ -307,5 +307,7 @@ let approval_rule_of_yojson_with_error json =
 let approval_rule_of_yojson json =
   match approval_rule_of_yojson_with_error json with
   | Ok rule -> Some rule
-  | Error _ -> None
+  | Error msg ->
+    Log.Keeper.warn "approval_rule_of_yojson rejected persisted rule: %s" msg;
+    None
 ;;

@@ -113,6 +113,76 @@ val metric_backend_mutex_held_sec : string
 (** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
 val metric_tool_metrics_persist_dropped : string
 
+(** Schedule runner tick counter. Labels: [result] in
+    {[ok | error | crash]}. *)
+val metric_schedule_runner_tick_total : string
+
+(** Schedule runner tick duration histogram, in seconds. Labels:
+    [result] in {[ok | error | crash]}. *)
+val metric_schedule_runner_tick_duration_seconds : string
+
+(** Schedule runner dispatch decision counter. Labels: [status] in
+    {[succeeded | failed | unsupported | start_rejected]}. *)
+val metric_schedule_runner_dispatch_total : string
+
+(** Schedule due lag histogram in seconds. Labels:
+    [kind] in schedule signal kind labels and [risk_class] in
+    [Schedule_domain.risk_class_to_string] labels. *)
+val metric_schedule_runner_due_lag_seconds : string
+
+(** Schedule runner dispatch duration histogram in seconds. Labels:
+    [status] in {[succeeded | failed | unsupported | start_rejected]}. *)
+val metric_schedule_runner_dispatch_duration_seconds : string
+
+(** Schedule unsupported payload counter. Labels:
+    [phase] in {[creation | dispatch]} and [risk_class] in
+    [Schedule_domain.risk_class_to_string] labels. Raw payload kinds are not
+    labels; they remain in schedule JSON/error detail to avoid unbounded
+    cardinality. *)
+val metric_schedule_payload_unsupported_total : string
+
+(** Schedule signal read decode error counter. Labels:
+    [kind] in {[json_parse | schema_decode]}. *)
+val metric_schedule_signal_read_error_total : string
+
+(** Current count of schedules blocked on approval. Gauge, no labels. *)
+val metric_schedule_approval_blocked_count : string
+
+(** Oldest schedule approval block age in seconds, measured from due time.
+    Gauge, no labels. *)
+val metric_schedule_approval_wait_seconds : string
+
+(** Background task completion wake producer counter. Labels:
+    [kind] in {[subprocess]} and [outcome] in {[ok | failed]}. *)
+val metric_keeper_bg_completion_wake_total : string
+
+(** Keeper wake enqueue receipt counter. Labels:
+    [keeper], [source] in the closed [Keeper_event_queue.payload_kind_label]
+    vocabulary, and [outcome] in {[queued | persisted | duplicate]}. *)
+val metric_keeper_wake_enqueue_total : string
+
+(** Keeper wake consumption receipt counter. Labels:
+    [keeper], [source] in the closed [Keeper_event_queue.payload_kind_label]
+    vocabulary, and [outcome] in {[completed | requeued]}. *)
+val metric_keeper_wake_consume_total : string
+
+(** Keeper wake enqueue-to-consume delay histogram in seconds. Labels:
+    [keeper], [source]. Observed only when a stimulus is acknowledged as
+    completed. *)
+val metric_keeper_wake_delay_seconds : string
+
+(** Keeper waiting row count gauge. Labels: [scope] in
+    {[keeper | global]} and [source] in the closed waiting-source vocabulary. *)
+val metric_keeper_waiting_count : string
+
+(** Oldest keeper waiting age gauge in seconds. Labels: [scope] in
+    {[keeper | global]} and [source] in the closed waiting-source vocabulary. *)
+val metric_keeper_waiting_age_seconds : string
+
+(** Keeper count by waiting state gauge. Labels: [state] in
+    {[idle | waiting | deferred]}. *)
+val metric_keeper_waiting_keeper_count : string
+
 (** Counter for bind-required guard rejects. Labels: [tool],
     [agent_name], and [reason]. *)
 val metric_tool_bind_required_guard : string

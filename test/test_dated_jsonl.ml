@@ -42,6 +42,29 @@ let test_append_creates_dated_file () =
     |> List.filter (fun l -> String.trim l <> "") in
   check int "two lines" 2 (List.length lines)
 
+let test_append_result_success () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_append_result" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  match Dated_jsonl.append_result store (make_json 1) with
+  | Error msg -> fail ("append_result failed: " ^ msg)
+  | Ok () ->
+    let rows = Dated_jsonl.read_recent store 1 in
+    check int "append_result writes one row" 1 (List.length rows)
+
+let test_append_result_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_append_result_error" in
+  let base_file = Filename.concat dir "not-a-directory" in
+  Fs_compat.save_file base_file "occupied";
+  let store = Dated_jsonl.create ~base_dir:base_file () in
+  match Dated_jsonl.append_result store (make_json 1) with
+  | Ok () -> fail "append_result must fail when base_dir is a file"
+  | Error msg ->
+    check bool "append_result returns explicit error" true (String.length msg > 0)
+
 (* ── read_recent returns newest N in chronological order ─ *)
 
 let test_read_recent () =
@@ -344,6 +367,8 @@ let () =
       ( "append",
         [
           test_case "creates dated file" `Quick test_append_creates_dated_file;
+          test_case "append_result succeeds" `Quick test_append_result_success;
+          test_case "append_result returns error" `Quick test_append_result_error;
         ] );
       ( "read_recent",
         [

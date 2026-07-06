@@ -126,6 +126,8 @@ val strip_prefix : string -> string -> string
 (** List directory entries either via [Sys.readdir] (when the
     backend supports a local dir mirror) or via [backend_list_keys]
     over the synthesized prefix. *)
+val list_dir_result : config -> string -> (string list, string) result
+
 val list_dir : config -> string -> string list
 
 (** {1 Initialization check} *)

@@ -9,7 +9,12 @@ val json_number : string -> Yojson.Safe.t -> float option
 val json_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val string_has_prefix : prefix:string -> string -> bool
 val tool_call_output_text : Yojson.Safe.t -> string option
-val parse_tool_call_output : Yojson.Safe.t -> Yojson.Safe.t option
+type tool_call_output_parse =
+  | Tool_call_output_missing
+  | Tool_call_output_json of Yojson.Safe.t
+  | Tool_call_output_parse_error of string
+
+val parse_tool_call_output : Yojson.Safe.t -> tool_call_output_parse
 val claim_status_of_output : Yojson.Safe.t -> string
 val composite_claim_scope_absent :
   [> `Assoc of

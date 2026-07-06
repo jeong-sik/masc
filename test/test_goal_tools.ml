@@ -41,6 +41,25 @@ let with_workspace f =
        f config)
 ;;
 
+let make_path_unreadable path =
+  if Sys.file_exists path && not (Sys.is_directory path) then Sys.remove path;
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
+let replace_path_with_file path content =
+  rm_rf path;
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let make_goal_task_link_registry_unreadable config =
+  make_path_unreadable (Workspace_goal_index.goal_task_links_path config);
+  make_path_unreadable (Workspace_goal_index.goal_task_links_recovery_path config)
+;;
+
 let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;
@@ -341,6 +360,36 @@ let test_goal_list_rejects_status_filter () =
   | field_error :: _ ->
     check string "field" "status" (get_string_field field_error "field")
   | [] -> fail "expected status field error"
+;;
+
+let test_goal_list_reports_goal_store_read_failure () =
+  with_workspace
+  @@ fun config ->
+  replace_path_with_file (Goal_store.goals_path config) "{not-json";
+  replace_path_with_file (Goal_store.goals_path config ^ ".last-good") "{not-json";
+  match
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_list"
+      ~args:(`Assoc [])
+  with
+  | Some result ->
+    check bool "goal list failed" false (Tool_result.is_success result);
+    check
+      (option string)
+      "runtime failure"
+      (Some "runtime_failure")
+      (Option.map
+         Tool_result.tool_failure_class_to_string
+         (Tool_result.failure_class result));
+    let json = Yojson.Safe.from_string (Tool_result.message result) in
+    check string "internal error" "internal_error" (get_string_field json "error_code");
+    check
+      bool
+      "message carries goal ledger read failure"
+      true
+      (contains_substring (Yojson.Safe.to_string json) "goals.json")
+  | None -> fail "masc_goal_list not handled"
 ;;
 
 let test_goal_upsert_rejects_lifecycle_fields () =
@@ -1612,6 +1661,164 @@ let test_goal_completion_blocks_open_tasks () =
     (get_string_field error_json "error_code")
 ;;
 
+let test_goal_completion_reports_goal_link_read_failure () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Unreadable link registry completion" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  ignore
+    (Workspace_task.add_task
+       ~goal_id:goal.id
+       config
+       ~title:"Linked but registry unreadable"
+       ~priority:3
+       ~description:"open");
+  make_goal_task_link_registry_unreadable config;
+  let completed =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let error_json = expect_error completed in
+  check
+    string
+    "goal link read failure blocks completion"
+    "conflict"
+    (get_string_field error_json "error_code");
+  check
+    bool
+    "error reports goal link read failure"
+    true
+    (contains_substring
+       (Yojson.Safe.to_string error_json)
+       Workspace_goal_index.goal_task_links_read_failed_prefix)
+;;
+
+let test_dashboard_goals_tree_reports_goal_link_read_failure () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Dashboard goal link read failure" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  ignore
+    (Workspace_task.add_task
+       ~goal_id:goal.id
+       config
+       ~title:"Dashboard linked task"
+       ~priority:3
+       ~description:"open");
+  make_goal_task_link_registry_unreadable config;
+  let json = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check
+    string
+    "dashboard goals status unknown"
+    "unknown"
+    (get_string_field json "status");
+  check
+    bool
+    "dashboard goals marks goal links unknown"
+    false
+    (Yojson.Safe.Util.member "goal_task_links_known" json |> Yojson.Safe.Util.to_bool);
+  check
+    bool
+    "dashboard goals read error recorded"
+    true
+    (contains_substring
+       (Yojson.Safe.Util.member "goal_task_links_read_error" json
+        |> Yojson.Safe.Util.to_string)
+       Workspace_goal_index.goal_task_links_read_failed_prefix);
+  check
+    yojson_t
+    "tree omitted when link registry unreadable"
+    (`List [])
+    (Yojson.Safe.Util.member "tree" json);
+  check
+    yojson_t
+    "task count is unknown"
+    `Null
+    (json
+     |> Yojson.Safe.Util.member "summary"
+     |> Yojson.Safe.Util.member "total_tasks")
+;;
+
+let test_dashboard_goals_tree_reports_goal_store_read_failure () =
+  with_workspace
+  @@ fun config ->
+  replace_path_with_file (Goal_store.goals_path config) "{not-json";
+  replace_path_with_file (Goal_store.goals_path config ^ ".last-good") "{not-json";
+  let json = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check
+    string
+    "dashboard goals status unknown"
+    "unknown"
+    (get_string_field json "status");
+  check
+    bool
+    "dashboard goals marks goal store unknown"
+    false
+    (Yojson.Safe.Util.member "goal_store_known" json |> Yojson.Safe.Util.to_bool);
+  check
+    bool
+    "dashboard goals goal store read error recorded"
+    true
+    (contains_substring
+       (Yojson.Safe.Util.member "goal_store_read_error" json
+        |> Yojson.Safe.Util.to_string)
+       "goals.json");
+  check
+    yojson_t
+    "goal task link error not forged"
+    `Null
+    (Yojson.Safe.Util.member "goal_task_links_read_error" json);
+  check
+    yojson_t
+    "tree omitted when goal store unreadable"
+    (`List [])
+    (Yojson.Safe.Util.member "tree" json)
+;;
+
+let test_dashboard_goals_tree_surfaces_keeper_meta_read_failure () =
+  with_workspace
+  @@ fun config ->
+  ignore
+    (Goal_store.upsert_goal
+       config
+       ~title:"Dashboard keeper meta read failure"
+       ());
+  replace_path_with_file
+    (Keeper_types_profile.keeper_dir config)
+    "not a keeper directory";
+  let json = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check string "dashboard goals status remains ok" "ok" (get_string_field json "status");
+  check
+    bool
+    "dashboard goals marks keeper meta unknown"
+    false
+    (Yojson.Safe.Util.member "keeper_meta_known" json |> Yojson.Safe.Util.to_bool);
+  let read_errors =
+    Yojson.Safe.Util.member "keeper_meta_read_errors" json |> Yojson.Safe.Util.to_list
+  in
+  check bool "keeper meta read error recorded" true (read_errors <> []);
+  check
+    bool
+    "keeper meta read error mentions keeper_names_result"
+    true
+    (contains_substring
+       (Yojson.Safe.to_string (`List read_errors))
+       "keeper_names_result")
+;;
+
 let test_goal_completion_override_allows_empty_goal () =
   with_workspace
   @@ fun config ->
@@ -1864,6 +2071,10 @@ let () =
             `Quick
             test_goal_list_rejects_status_filter
         ; test_case
+            "list reports goal store read failure"
+            `Quick
+            test_goal_list_reports_goal_store_read_failure
+        ; test_case
             "upsert rejects lifecycle fields"
             `Quick
             test_goal_upsert_rejects_lifecycle_fields
@@ -1936,6 +2147,22 @@ let () =
             "completion blocks open tasks"
             `Quick
             test_goal_completion_blocks_open_tasks
+        ; test_case
+            "completion reports goal link read failure"
+            `Quick
+            test_goal_completion_reports_goal_link_read_failure
+        ; test_case
+            "dashboard goals tree reports goal link read failure"
+            `Quick
+            test_dashboard_goals_tree_reports_goal_link_read_failure
+        ; test_case
+            "dashboard goals tree reports goal store read failure"
+            `Quick
+            test_dashboard_goals_tree_reports_goal_store_read_failure
+        ; test_case
+            "dashboard goals tree surfaces keeper meta read failure"
+            `Quick
+            test_dashboard_goals_tree_surfaces_keeper_meta_read_failure
         ; test_case
             "completion override allows empty goal"
             `Quick

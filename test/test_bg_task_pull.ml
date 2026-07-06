@@ -1,8 +1,6 @@
 (* Tick 6a: Bg_task pull-based implementation tests.
 
-   File name still [test_bg_task_stub.ml] from Tick 4; behaviour is
-   now integration coverage, not stub assertions.  A rename requires
-   updating two sibling dune stanzas — left for a follow-up. *)
+   This exercises the live pull/read/completion-observer behavior. *)
 
 open Alcotest
 
@@ -91,6 +89,14 @@ let with_bg_task_limits ~global ~per_keeper f =
   with_env "MASC_KEEPER_BG_TASK_GLOBAL_MAX" global (fun () ->
       with_env "MASC_KEEPER_BG_TASK_PER_KEEPER_MAX" per_keeper f)
 
+let with_completion_events f =
+  let events = ref [] in
+  Bg_task.set_completion_observer (fun completion ->
+      events := completion :: !events);
+  Fun.protect
+    ~finally:Bg_task.reset_completion_observer_for_testing
+    (fun () -> f (fun () -> List.rev !events))
+
 let sp
     ?(keeper = "test-keeper")
     ?(cwd = "")
@@ -137,6 +143,42 @@ let test_echo_roundtrip () =
       (match s.status with
        | Some (Unix.WEXITED 0) -> ()
        | _ -> fail "echo must exit 0")
+
+let test_completion_observer_fires_once () =
+  with_temp_base "bg_task_completion" (fun base ->
+      with_completion_events (fun events ->
+          let keeper = "kp-completion" in
+          let tid =
+            match
+              Bg_task.spawn
+                ~base_path:base
+                ~keeper
+                ~argv:[ "/bin/sh"; "-c"; "exit 0" ]
+                ~cwd:""
+                ~envp:(env_of_current ())
+                ~timeout_sec:0.0
+                ()
+            with
+            | Ok tid -> tid
+            | Error _ -> fail "spawn failed"
+          in
+          check bool "completion observed" true
+            (wait_until ~timeout_s:3.0 (fun () -> List.length (events ()) = 1));
+          let completion =
+            match events () with
+            | [ completion ] -> completion
+            | events -> failf "expected one completion, got %d" (List.length events)
+          in
+          check (option string) "base_path" (Some base) completion.base_path;
+          check string "keeper" keeper completion.keeper;
+          check string "task id"
+            (Bg_task.task_id_to_string tid)
+            (Bg_task.task_id_to_string completion.task_id);
+          (match completion.status with
+           | Unix.WEXITED 0 -> ()
+           | _ -> fail "completion status must be exit 0");
+          ignore (Bg_task.read tid ~since_stdout:0 ~since_stderr:0);
+          check int "completion remains one-shot" 1 (List.length (events ()))))
 
 let test_since_offset_skips_prefix () =
   let tid = sp ~keeper:"kp2" [ "/bin/echo"; "abcdef" ] in
@@ -576,6 +618,8 @@ let () =
             test_timeout_enforced;
           test_case "lifetime guard releases on task close" `Quick
             test_lifetime_guard_released_on_close;
+          test_case "completion observer fires once" `Quick
+            test_completion_observer_fires_once;
           test_case "exit watcher failure rolls back spawn" `Quick
             test_exit_watcher_failure_rolls_back_spawn;
           test_case "global capacity blocks detached stampede" `Quick

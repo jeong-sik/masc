@@ -24,10 +24,16 @@ type classification =
   ; source : classification_source
   }
 
+type raw_payload_parse_error = Raw_payload_malformed_json of string
+
 let classification_source_to_string = function
   | Deterministic_retry_marker -> "deterministic_retry_marker"
   | Workflow_rejection_marker -> "workflow_rejection_marker"
   | Path_check_marker -> "path_check_marker"
+;;
+
+let raw_payload_parse_error_to_string = function
+  | Raw_payload_malformed_json message -> "malformed_json: " ^ message
 ;;
 
 let to_telemetry_key = function
@@ -225,14 +231,30 @@ let classify (json : Yojson.Safe.t) : deterministic_reason option =
   | None -> None
 ;;
 
-let classify_raw (raw : string) : deterministic_reason option =
+let classify_raw_result (raw : string) :
+    (deterministic_reason option, raw_payload_parse_error) result =
   match Yojson.Safe.from_string raw with
-  | exception Yojson.Json_error _ -> None
-  | json -> classify json
+  | exception Yojson.Json_error message ->
+    Error (Raw_payload_malformed_json message)
+  | json -> Ok (classify json)
+;;
+
+let classify_raw_with_source_result (raw : string) :
+    (classification option, raw_payload_parse_error) result =
+  match Yojson.Safe.from_string raw with
+  | exception Yojson.Json_error message ->
+    Error (Raw_payload_malformed_json message)
+  | json -> Ok (classify_with_source json)
+;;
+
+let classify_raw (raw : string) : deterministic_reason option =
+  match classify_raw_result raw with
+  | Ok classification -> classification
+  | Error (Raw_payload_malformed_json _) -> None
 ;;
 
 let classify_raw_with_source (raw : string) : classification option =
-  match Yojson.Safe.from_string raw with
-  | exception Yojson.Json_error _ -> None
-  | json -> classify_with_source json
+  match classify_raw_with_source_result raw with
+  | Ok classification -> classification
+  | Error (Raw_payload_malformed_json _) -> None
 ;;

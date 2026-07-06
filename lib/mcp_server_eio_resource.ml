@@ -22,6 +22,14 @@ let public_tool_help_schemas () =
 let cache_hint_fields ~scope ~ttl_ms =
   [ ("ttlMs", `Int ttl_ms); ("cacheScope", `String scope) ]
 
+type status_resource_backlog_status =
+  | Backlog_available
+  | Backlog_read_error
+
+let status_resource_backlog_status_to_string = function
+  | Backlog_available -> "available"
+  | Backlog_read_error -> "read_error"
+
 let handle_read_resource_eio state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
@@ -108,19 +116,52 @@ let handle_read_resource_eio state id params =
               ("text/markdown", text_opt)
           | "status" -> ("text/markdown", Some (Workspace.status config))
           | "status.json" ->
-              let state_json = Masc_domain.workspace_state_to_yojson (Workspace.read_state config) in
-              let backlog_json = Masc_domain.backlog_to_yojson (Workspace.read_backlog config) in
+              let state_snapshot = Workspace.read_state_snapshot config in
+              let state_json = Masc_domain.workspace_state_to_yojson state_snapshot.state in
+              let backlog_json, backlog_status, backlog_read_errors =
+                match Workspace.read_backlog_r config with
+                | Ok backlog ->
+                    ( Masc_domain.backlog_to_yojson backlog
+                    , Backlog_available
+                    , [] )
+                | Error error -> (`Null, Backlog_read_error, [ error ])
+              in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [
                 ("base_path", `String config.base_path);
                 ("state", state_json);
+                ( "workspace_state_status",
+                  `String (Workspace.read_state_status_to_string state_snapshot.status) );
+                ( "workspace_state_read_error_count",
+                  `Int (List.length state_snapshot.read_errors) );
+                ( "workspace_state_read_errors",
+                  `List (List.map (fun error -> `String error) state_snapshot.read_errors) );
                 ("backlog", backlog_json);
+                ( "backlog_status",
+                  `String (status_resource_backlog_status_to_string backlog_status) );
+                ( "backlog_read_error_count",
+                  `Int (List.length backlog_read_errors) );
+                ( "backlog_read_errors",
+                  `List (List.map (fun error -> `String error) backlog_read_errors) );
                 ("connected_agents", `List connected_agents);
               ] in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "tasks" -> ("text/markdown", Some (Workspace.list_tasks config))
           | "tasks.json" ->
-              let backlog_json = Masc_domain.backlog_to_yojson (Workspace.read_backlog config) in
+              let backlog_json =
+                match Workspace.read_backlog_r config with
+                | Ok backlog -> Masc_domain.backlog_to_yojson backlog
+                | Error error ->
+                    `Assoc
+                      [ ( "backlog_status",
+                          `String
+                            (status_resource_backlog_status_to_string
+                               Backlog_read_error) )
+                      ; "backlog_read_error_count", `Int 1
+                      ; "backlog_read_errors", `List [ `String error ]
+                      ; "tasks", `Null
+                      ]
+              in
               ("application/json", Some (Yojson.Safe.pretty_to_string backlog_json))
           | "who" -> ("text/markdown", Some (Session.status_string registry))
           | "who.json" ->

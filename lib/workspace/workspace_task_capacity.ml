@@ -16,6 +16,12 @@ type capacity_error = {
 }
 
 let default_goal_open_limit = 3
+let goal_task_links_read_failed_prefix =
+  Workspace_goal_index.goal_task_links_read_failed_prefix
+;;
+
+let goal_task_links_read_failed_message =
+  Workspace_goal_index.goal_task_links_read_failed_message
 
 (** Compatibility wrapper — O(k) lookup via a pre-built index.
     Retained for existing callers that have an index available. *)
@@ -60,8 +66,19 @@ let check ?goal_id ?(goal_task_links = []) (backlog : Masc_domain.backlog) =
       Some { goal_id; open_task_count; limit; message }
 ;;
 
+let check_for_config_result config ?goal_id backlog =
+  match goal_id with
+  | None -> Ok None
+  | Some _ ->
+    (match Workspace_goal_index.read_goal_task_links_r config with
+     | Ok goal_task_links -> Ok (check ?goal_id ~goal_task_links backlog)
+     | Error msg -> Error (goal_task_links_read_failed_message msg))
+;;
+
 let check_for_config config ?goal_id backlog =
-  check ?goal_id ~goal_task_links:(Workspace_goal_index.read_goal_task_links config) backlog
+  match check_for_config_result config ?goal_id backlog with
+  | Ok result -> result
+  | Error msg -> raise (Sys_error msg)
 ;;
 
 (* Field order matches the pre-RFC-0034.v2 shape produced by
@@ -89,5 +106,7 @@ let rejection_for_add_task ?goal_id backlog =
 ;;
 
 let rejection_for_add_task_for_config config ?goal_id backlog =
-  check_for_config config ?goal_id backlog |> Option.map (fun err -> err.message)
+  match check_for_config_result config ?goal_id backlog with
+  | Ok result -> Option.map (fun err -> err.message) result
+  | Error msg -> Some msg
 ;;

@@ -94,7 +94,7 @@ let test_partition_resolution_uses_project_root_for_masc_base_path () =
     (match Repo_store.save_all ~base_path [ sample_repo ] with
      | Ok () -> ()
      | Error msg -> fail ("repo save failed: " ^ msg));
-    let config = Workspace.default_config (Filename.concat base_path ".masc") in
+    let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
     let partition, rel_path =
       Masc.Keeper_run_tools_hooks.observation_partition_for_tool_input
         ~config
@@ -111,6 +111,45 @@ let test_partition_resolution_uses_project_root_for_masc_base_path () =
     | Agent_observation.Base_unresolved
     | Agent_observation.Legacy_default ->
       fail "expected By_url partition")
+;;
+
+let test_claim_output_scope_result_extracts_nested_task_id () =
+  match
+    Masc.Keeper_run_tools_task_scope.task_id_scope_of_claim_output_result
+      ~tool_name:"keeper_task_claim"
+      {|{"result":{"task_id":"task-123"}}|}
+  with
+  | Ok (Some task_id) -> check string "task id" "task-123" task_id
+  | Ok None -> fail "expected nested task_id"
+  | Error err ->
+    fail
+      (Masc.Keeper_run_tools_task_scope.claim_output_scope_error_to_string err)
+;;
+
+let test_claim_output_scope_result_reports_parse_error () =
+  match
+    Masc.Keeper_run_tools_task_scope.task_id_scope_of_claim_output_result
+      ~tool_name:"keeper_task_claim"
+      "{not-json"
+  with
+  | Error (Masc.Keeper_run_tools_task_scope.Claim_output_json_parse_error _) -> ()
+  | Ok _ -> fail "malformed claim output parsed successfully"
+  | Error err ->
+    fail
+      (Masc.Keeper_run_tools_task_scope.claim_output_scope_error_to_string err)
+;;
+
+let test_claim_output_scope_result_reports_non_object () =
+  match
+    Masc.Keeper_run_tools_task_scope.task_id_scope_of_claim_output_result
+      ~tool_name:"keeper_task_claim"
+      {|["not","object"]|}
+  with
+  | Error (Masc.Keeper_run_tools_task_scope.Claim_output_expected_object _) -> ()
+  | Ok _ -> fail "non-object claim output parsed successfully"
+  | Error err ->
+    fail
+      (Masc.Keeper_run_tools_task_scope.claim_output_scope_error_to_string err)
 ;;
 
 let () =
@@ -136,6 +175,20 @@ let () =
             "uses project root when config base is .masc"
             `Quick
             test_partition_resolution_uses_project_root_for_masc_base_path
+        ] )
+    ; ( "task_scope"
+      , [ test_case
+            "claim output result extracts nested task id"
+            `Quick
+            test_claim_output_scope_result_extracts_nested_task_id
+        ; test_case
+            "claim output result reports parse error"
+            `Quick
+            test_claim_output_scope_result_reports_parse_error
+        ; test_case
+            "claim output result reports non-object"
+            `Quick
+            test_claim_output_scope_result_reports_non_object
         ] )
     ]
 ;;

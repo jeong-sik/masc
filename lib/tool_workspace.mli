@@ -15,7 +15,7 @@
     Internal: ~50+ helpers stay private — text-cache primitives
     (\[text_cache] type, \[make_text_cache], \[_status_cache],
     \[cache_ttl_seconds], \[status_cache_ttl_s],
-    \[invalidate_status_cache], \[cached_text_by_key]),
+    \[invalidate_status_cache], \[cached_text_by_key_result]),
     \[take_items], \[effective_cluster_name],
     \[lifecycle_tools] / \[is_lifecycle_tool],
     \[unique_strings], \[credential_state],

@@ -187,6 +187,39 @@ let test_dashboard_perf_empty_shape () =
   check bool "comparison null" true
     (match json |> member "comparison" with `Null -> true | _ -> false)
 
+let test_dashboard_perf_surfaces_csv_and_meta_read_errors () =
+  with_temp_base @@ fun base_path ->
+  let config = Lib.Workspace.default_config base_path in
+  let results_dir = Filename.concat base_path "benchmarks/results" in
+  let latest_file = Filename.concat results_dir "results_20260331_170000.csv" in
+  write_file latest_file
+    (String.concat "\n"
+       [
+         "benchmark,avg_ms,p50_ms,p95_ms,max_ms,notes";
+         "mcp_session_init,9,9,14,18,session";
+         "malformed,row";
+         "mcp_read_status,nope,7,66,88,source=live";
+       ]
+     ^ "\n");
+  write_file (Filename.chop_suffix latest_file ".csv" ^ ".meta.json") "{bad";
+  set_mtime latest_file 4_000.0;
+  let json = Server_dashboard_http.dashboard_perf_http_json config in
+  let open Yojson.Safe.Util in
+  check string "status" "degraded" (json |> member "status" |> to_string);
+  check int "one valid benchmark kept" 1
+    (json |> member "benchmarks" |> to_list |> List.length);
+  check int "read errors surfaced" 3
+    (json |> member "read_error_count" |> to_int);
+  let error_kinds =
+    json |> member "read_errors" |> to_list
+    |> List.map (fun error -> error |> member "kind" |> to_string)
+  in
+  check (list string) "error kinds"
+    [ "csv_row_parse_error"; "csv_number_parse_error"; "json_parse_error" ]
+    error_kinds;
+  check int "malformed row index" 3
+    (json |> member "read_errors" |> index 0 |> member "line_index" |> to_int)
+
 let () =
   run "dashboard_perf"
     [
@@ -200,5 +233,7 @@ let () =
             test_dashboard_perf_reads_worktree_benchmarks;
           test_case "prefers latest artifact within scoped dirs" `Quick
             test_dashboard_perf_prefers_latest_scoped_artifact;
+          test_case "surfaces CSV and meta read errors" `Quick
+            test_dashboard_perf_surfaces_csv_and_meta_read_errors;
         ] );
     ]

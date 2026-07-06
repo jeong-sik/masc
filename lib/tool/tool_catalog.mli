@@ -66,6 +66,7 @@ val full_surface_override : unit -> bool
 val metadata : string -> metadata
 val implementation_status : string -> implementation_status
 val effect_domain : string -> effect_domain option
+val doc_refs : string -> string list
 val requires_actor_binding : string -> bool
 val canonical_tool_name : string -> string
 val is_placeholder : string -> bool

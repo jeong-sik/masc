@@ -19,6 +19,7 @@ module BH = Masc.Keeper_binding_health
 module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
 module KTD = Masc.Keeper_turn_driver
+module KTDPA = Masc.Keeper_turn_driver_provider_attempt
 module RC = Runtime_candidate
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
@@ -115,6 +116,45 @@ let test_sdk_typed_wire () =
        let actual = typed_wire (AE.terminal_reason_code_of_sdk_error_typed err) in
        Alcotest.(check string) ("sdk/" ^ label) expected actual)
     sdk_cases
+;;
+
+let test_provider_attempt_exception_kind_projection () =
+  (match KTDPA.provider_attempt_exception_kind_projection_of_result (Ok ()) with
+   | KTDPA.Provider_attempt_exception_kind_absent
+       KTDPA.Provider_attempt_succeeded -> ()
+   | _ -> Alcotest.fail "provider attempt success must carry success absence");
+  let unclassified =
+    (Error (SdkE.Internal "unclassified provider-attempt error")
+     : (unit, SdkE.sdk_error) result)
+  in
+  (match KTDPA.provider_attempt_exception_kind_projection_of_result unclassified with
+   | KTDPA.Provider_attempt_exception_kind_absent
+       KTDPA.Provider_attempt_unclassified_sdk_error -> ()
+   | _ ->
+     Alcotest.fail
+       "unclassified SDK error must carry unclassified absence");
+  Alcotest.(check (option string))
+    "unclassified SDK error remains manifest-compatible"
+    None
+    (KTDPA.provider_attempt_exception_kind_of_result unclassified);
+  let timed_out =
+    (Error
+       (SdkE.Agent
+          (SdkE.AgentExecutionTimeout
+             { elapsed_sec = 572.5
+             ; timeout_sec = 555.0
+             ; turn_count = 24
+             ; max_turns = 340
+             }))
+     : (unit, SdkE.sdk_error) result)
+  in
+  (match KTDPA.provider_attempt_exception_kind_projection_of_result timed_out with
+   | KTDPA.Provider_attempt_exception_kind "oas_agent_execution_timeout" -> ()
+   | _ -> Alcotest.fail "agent timeout exception kind drifted");
+  Alcotest.(check (option string))
+    "agent timeout legacy projection"
+    (Some "oas_agent_execution_timeout")
+    (KTDPA.provider_attempt_exception_kind_of_result timed_out)
 ;;
 
 let check_parse_split label err ~provider ~model_ ~server =
@@ -748,6 +788,12 @@ let () =
             "all sdk_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
+        ] )
+    ; ( "provider attempt manifest projection"
+      , [ Alcotest.test_case
+            "exception kind absence is typed before option projection"
+            `Quick
+            test_provider_attempt_exception_kind_projection
         ] )
     ; ( "server parse rejection split"
       , [ Alcotest.test_case

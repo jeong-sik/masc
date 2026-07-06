@@ -39,6 +39,10 @@ val auto_execution_session_surface_json : unit -> Yojson.Safe.t
 
 val workspace_surface_json : keeper_meta -> Yojson.Safe.t
 
+val keeper_list_effective_meta_error_json : string -> string -> Yojson.Safe.t
+
+val keeper_list_effective_meta_missing_json : string -> Yojson.Safe.t
+
 val live_override_fields :
   keeper_meta -> keeper_profile_defaults -> string list
 

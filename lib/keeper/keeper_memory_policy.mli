@@ -1,12 +1,11 @@
-(** Keeper Memory Policy — observation classification, alert scoring,
-    [STATE] block parsing, and snapshot serialisation.
+(** Keeper Memory Policy — observation classification, [STATE] block parsing,
+    and snapshot serialisation.
 
-    Centralises the heuristics that turn LLM turn output into structured
-    keeper memory: extracting the [STATE] block emitted by the persona
-    template, scoring "interesting" workspace messages for alerting, capping
-    snapshot fields to the prompt budget, and round-tripping snapshots
-    through assistant messages so a fresh keeper generation can resume
-    from disk. *)
+    Centralises the deterministic parsing that turns LLM turn output into
+    structured keeper memory: extracting the [STATE] block emitted by the
+    persona template, capping snapshot fields to the prompt budget, and
+    round-tripping snapshots through assistant messages so a fresh keeper
+    generation can resume from disk. *)
 
 (** {1 STATE block regexes}
 
@@ -18,38 +17,6 @@ val state_start_re : Re.re
 
 val state_end_re : Re.re
 (** Closing fence of the [STATE]…[/STATE] block. *)
-
-(** {1 Interesting-message alerting} *)
-
-type alert_channel_result = {
-  channel : string;
-  attempted : bool;
-  success : bool;
-  attempts : int;
-  detail : string option;
-}
-(** Per-channel delivery outcome for an interesting-message alert. *)
-
-type interesting_alert_result = {
-  enabled : bool;
-  triggered : bool;
-  score : float;
-  threshold : float;
-  reasons : string list;
-  keywords : string list;
-  alert_id : string option;
-  channels : alert_channel_result list;
-  retry_queued : bool;
-  deadlettered : bool;
-}
-(** Aggregate result of a single alert evaluation: whether the policy
-    fired, why, and what each delivery channel did. *)
-
-val empty_interesting_alert_result : interesting_alert_result
-(** [enabled=false] zero value used as a default. *)
-
-val alert_channel_result_to_json : alert_channel_result -> Yojson.Safe.t
-(** Wire encoding for dashboard / audit log. *)
 
 (** {1 Keeper state snapshot} *)
 
@@ -203,11 +170,25 @@ val structured_state_snapshot_schema :
   keeper_state_snapshot Agent_sdk.Structured.schema
 (** Provider-native structured-output schema for keeper state snapshots. *)
 
+type structured_state_snapshot_reply_parse_error =
+  | Structured_state_snapshot_reply_empty
+  | Structured_state_snapshot_reply_json_parse_error of string
+  | Structured_state_snapshot_reply_schema_mismatch
+
+val structured_state_snapshot_reply_parse_error_to_string :
+  structured_state_snapshot_reply_parse_error -> string
+
+val parse_structured_state_snapshot_from_reply_result :
+  string -> (keeper_state_snapshot, structured_state_snapshot_reply_parse_error) result
+(** Parse a full assistant reply that is itself structured JSON, preserving
+    malformed JSON and schema mismatch as typed errors. *)
+
 val parse_structured_state_snapshot_from_reply :
   string -> keeper_state_snapshot option
-(** Parse a full assistant reply that is itself structured JSON.  Accepts
-    raw snapshot JSON, the versioned [state_snapshot] envelope, or replay
-    metadata. *)
+(** Compatibility projection of {!parse_structured_state_snapshot_from_reply_result}.
+    Accepts raw snapshot JSON, the versioned [state_snapshot] envelope, or
+    replay metadata; returns [None] for empty, malformed, or schema-mismatched
+    structured replies. *)
 
 val state_snapshot_of_summary_text : string -> keeper_state_snapshot option
 (** Re-parse the rendered summary text back into a snapshot.  Inverse

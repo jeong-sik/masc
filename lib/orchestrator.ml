@@ -184,12 +184,9 @@ let make_zero_zombie_consumer ~sw ~workspace_config
          or MASC-not-initialized at startup), in which case operators
          expect no log noise.
 
-         Kept local to the consumer body — release_stale_claims itself
-         still raises and is wrapped here, because lifting Result into
-         the public signature would force every test-suite caller
-         (test_workspace.ml:909-964) to be rewritten.  Follow-up RFC =
-         typed recovery consumer can decide whether to escalate to operators
-         (see project_keeper-reaction-chain-break). *)
+         Kept local to the consumer body so the cleanup policy stays explicit:
+         the workspace API provides a Result boundary, and this consumer maps it
+         into the local stale-claim outcome before deciding log severity. *)
       let module Stale_claim_outcome = struct
         type t =
           | Released of (string * string) list
@@ -199,16 +196,14 @@ let make_zero_zombie_consumer ~sw ~workspace_config
       let release_stale_claims_typed () : Stale_claim_outcome.t =
         let ttl = Env_config_runtime.Claim.ttl_seconds in
         match
-          Workspace_task_schedule.release_stale_claims workspace_config ~ttl_seconds:ttl
+          Workspace_task_schedule.release_stale_claims_result
+            workspace_config
+            ~ttl_seconds:ttl
         with
-        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-        | exception exn ->
-          Stale_claim_outcome.Failed
-            { benign = Workspace_resilience.ZeroZombie.is_benign_error exn
-            ; reason = Printexc.to_string exn
-            }
-        | [] -> Stale_claim_outcome.Empty
-        | released -> Stale_claim_outcome.Released released
+        | Ok [] -> Stale_claim_outcome.Empty
+        | Ok released -> Stale_claim_outcome.Released released
+        | Error reason ->
+          Stale_claim_outcome.Failed { benign = false; reason }
       in
       if not (Atomic.compare_and_set cleanup_running false true)
       then Log.Orchestrator.debug "[zombie] cleanup already running; skipping beat"

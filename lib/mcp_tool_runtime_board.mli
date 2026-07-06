@@ -18,6 +18,29 @@
 
 (** {1 Caller-identity enforcement (test-visible)} *)
 
+type board_post_id_extract_error =
+  | Board_post_id_payload_not_object of { received_kind : string }
+  | Board_post_id_missing_id
+  | Board_post_id_id_not_string of { received_kind : string }
+  | Board_post_id_blank_id
+
+val board_post_id_extract_error_to_string :
+  board_post_id_extract_error -> string
+
+val extract_board_post_id_from_data_result :
+  Yojson.Safe.t -> (string, board_post_id_extract_error) result
+(** [extract_board_post_id_from_data_result data] extracts the created
+    post id from structured [Tool_result.data].  It does not parse the
+    human-facing [Tool_result.message] string; malformed or drifted
+    payloads are returned as typed errors so runtime dispatch can log and
+    count the failure explicitly. *)
+
+val extract_board_post_id_from_data : Yojson.Safe.t -> string option
+(** Compatibility projection over
+    {!extract_board_post_id_from_data_result}.  New code that must
+    distinguish parse/schema failures should use the Result-returning
+    function. *)
+
 val ensure_board_post_author :
   agent_name:string -> Yojson.Safe.t -> Yojson.Safe.t
 (** [ensure_board_post_author ~agent_name args] enforces the

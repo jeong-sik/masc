@@ -165,6 +165,78 @@ let read_file path =
     None
 ;;
 
+let executable_build_commit_stamp_source = "executable_build_commit_stamp"
+
+let build_commit_stamp_path executable_path = executable_path ^ ".build-commit"
+
+let repo_roots_for_runtime () =
+  pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(runtime_cwd ())
+  |> List.filter_map find_git_root
+  |> List.fold_left
+       (fun roots repo_root ->
+          if List.exists (String.equal repo_root) roots then roots else repo_root :: roots)
+       []
+  |> List.rev
+;;
+
+let stamp_commit_exists_in_runtime_repo_roots commit_hash =
+  let commit_ref = commit_hash ^ "^{commit}" in
+  repo_roots_for_runtime ()
+  |> List.exists (fun repo_root ->
+    match git_capture_output_result ~repo_root [ "cat-file"; "-e"; commit_ref ] with
+    | Ok _ -> true
+    | Error _ -> false)
+;;
+
+let read_executable_build_commit_stamp executable_path =
+  let stamp_path = build_commit_stamp_path executable_path in
+  if not (Sys.file_exists stamp_path)
+  then None
+  else (
+    try
+      let stamp_stat = Unix.stat stamp_path in
+      let exe_stat = Unix.stat executable_path in
+      if stamp_stat.st_mtime < exe_stat.st_mtime
+      then (
+        Log.Identity.warn
+          "build_identity: build commit stamp %s is older than executable %s"
+          stamp_path
+          executable_path;
+        None)
+      else (
+        match Option.bind (read_file stamp_path) String_util.trim_to_option with
+        | None ->
+          observe_probe_failure
+            ~site:"build_commit_stamp_empty"
+            (Failure (Printf.sprintf "empty build commit stamp %s" stamp_path));
+          None
+        | Some commit when stamp_commit_exists_in_runtime_repo_roots commit -> Some commit
+        | Some commit ->
+          observe_probe_failure
+            ~site:"build_commit_stamp_commit_verify"
+            (Failure
+               (Printf.sprintf
+                  "build commit stamp %s does not name a commit object: %s"
+                  stamp_path
+                  commit));
+          None)
+    with
+    | Unix.Unix_error (code, fn, arg) ->
+      Log.Identity.warn
+        "build_identity: cannot read build commit stamp %s: %s (%s %s)"
+        stamp_path
+        (Unix.error_message code)
+        fn
+        arg;
+      None
+    | exn ->
+      Log.Identity.warn
+        "build_identity: unexpected build commit stamp failure %s: %s"
+        stamp_path
+        (Printexc.to_string exn);
+      None)
+;;
+
 let probe_repo_version repo_root =
   let dune_project = Filename.concat repo_root "dune-project" in
   Option.bind (read_file dune_project) parse_dune_project_version
@@ -208,17 +280,7 @@ let probe_commit_unix_ts commit_hash_opt =
   match commit_hash_opt with
   | None -> None
   | Some commit_hash ->
-    let repo_roots =
-      pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(runtime_cwd ())
-      |> List.filter_map find_git_root
-      |> List.fold_left
-           (fun roots repo_root ->
-              if List.exists (String.equal repo_root) roots
-              then roots
-              else repo_root :: roots)
-           []
-      |> List.rev
-    in
+    let repo_roots = repo_roots_for_runtime () in
     let probe_one repo_root =
       let raw_opt =
         try
@@ -276,19 +338,26 @@ type commit_resolution =
 let build_env_commit_source = "env:MASC_BUILD_GIT_COMMIT"
 let runtime_repo_head_source = "runtime_repo_head"
 
-let resolve_commit_details ~env_value ~probe =
-  let binary_commit = Option.bind env_value String_util.trim_to_option in
+let resolve_commit_details ?(stamp_value = None) ~env_value ~probe =
+  let env_commit = Option.bind env_value String_util.trim_to_option in
+  let stamp_commit = Option.bind stamp_value String_util.trim_to_option in
+  let binary_commit, binary_commit_source =
+    match env_commit, stamp_commit with
+    | Some commit, _ -> Some commit, Some build_env_commit_source
+    | None, Some commit -> Some commit, Some executable_build_commit_stamp_source
+    | None, None -> None, None
+  in
   let repo_head_commit = probe () in
   let commit, commit_source =
     match binary_commit, repo_head_commit with
-    | Some commit, _ -> Some commit, Some build_env_commit_source
+    | Some commit, _ -> Some commit, binary_commit_source
     | None, Some commit -> Some commit, Some runtime_repo_head_source
     | None, None -> None, None
   in
   { commit
   ; commit_source
   ; binary_commit
-  ; binary_commit_source = Option.map (fun _ -> build_env_commit_source) binary_commit
+  ; binary_commit_source
   ; repo_head_commit
   ; repo_head_commit_source = Option.map (fun _ -> runtime_repo_head_source) repo_head_commit
   }
@@ -313,6 +382,7 @@ let resolved_executable_dir = Filename.dirname resolved_executable_path
 let commit_resolution =
   resolve_commit_details
     ~env_value:(Env_config_core.build_git_commit_opt ())
+    ~stamp_value:(read_executable_build_commit_stamp resolved_executable_path)
     ~probe:probe_git_commit
 ;;
 
@@ -352,6 +422,7 @@ module For_testing = struct
   let observe_probe_failure = observe_probe_failure
   let probe_commit_unix_ts = probe_commit_unix_ts
   let runtime_cwd = runtime_cwd
+  let stamp_commit_exists_in_runtime_repo_roots = stamp_commit_exists_in_runtime_repo_roots
 end
 
 (* [to_yojson] is generated by [ppx_deriving_yojson] from the type definition. *)

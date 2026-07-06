@@ -623,20 +623,79 @@ let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 ;;
 
-let running_keeper_names (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
-  |> List.filter_map (fun name ->
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->
-      Some name
-    | _ -> None)
+type running_keeper_scan =
+  { running_keeper_names : string list
+  ; running_keeper_names_known : bool
+  ; running_keeper_read_errors : Yojson.Safe.t list
+  }
+
+let running_keeper_read_error_json ?keeper ~source message =
+  `Assoc
+    (([ "source", `String source; "message", `String message ]
+      : (string * Yojson.Safe.t) list)
+     @
+     match keeper with
+     | Some keeper_name -> [ "keeper", `String keeper_name ]
+     | None -> [])
+
+let running_keeper_scan (config : Workspace.config) =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error msg ->
+    { running_keeper_names = []
+    ; running_keeper_names_known = false
+    ; running_keeper_read_errors =
+        [ running_keeper_read_error_json ~source:"keeper_names_result" msg ]
+    }
+  | Ok keeper_names ->
+    let running_keeper_names, running_keeper_read_errors =
+      List.fold_left
+        (fun (running, read_errors) keeper_name ->
+          match Keeper_meta_store.read_meta config keeper_name with
+          | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->
+            meta.name :: running, read_errors
+          | Ok (Some _) -> running, read_errors
+          | Ok None ->
+            ( running
+            , running_keeper_read_error_json
+                ~keeper:keeper_name
+                ~source:"read_meta"
+                "keeper meta missing after keeper-name discovery"
+              :: read_errors )
+          | Error msg ->
+            ( running
+            , running_keeper_read_error_json
+                ~keeper:keeper_name
+                ~source:"read_meta"
+                msg
+              :: read_errors ))
+        ([], [])
+        keeper_names
+    in
+    { running_keeper_names = List.rev running_keeper_names
+    ; running_keeper_names_known = true
+    ; running_keeper_read_errors = List.rev running_keeper_read_errors
+    }
+;;
+
+let annotate_running_keeper_scan fields scan =
+  fields
+  |> upsert_assoc_field
+       "running_keeper_names_known"
+       (`Bool scan.running_keeper_names_known)
+  |> upsert_assoc_field
+       "running_keeper_read_error_count"
+       (`Int (List.length scan.running_keeper_read_errors))
+  |> upsert_assoc_field
+       "running_keeper_read_errors"
+       (`List scan.running_keeper_read_errors)
 ;;
 
 let patch_surface_json_for_running_keepers (config : Workspace.config) = function
-  | `Assoc fields as json ->
-    let running = running_keeper_names config in
-    if running = []
-    then json
+  | `Assoc fields ->
+    let scan = running_keeper_scan config in
+    let fields = annotate_running_keeper_scan fields scan in
+    if scan.running_keeper_names = []
+    then `Assoc fields
     else (
       let patch_rows rows =
         List.fold_left
@@ -647,7 +706,7 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
                ~keepalive_running:true
                acc)
           rows
-          running
+          scan.running_keeper_names
       in
       match List.assoc_opt "keepers" fields with
       | Some (`List rows) ->

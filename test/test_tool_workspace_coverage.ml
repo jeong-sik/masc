@@ -216,6 +216,39 @@ let () =
 ;;
 
 let () =
+  test "dispatch_status_reports_state_read_failure" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    let state_path = Workspace.state_path ctx.config in
+    Unix.unlink state_path;
+    Unix.mkdir state_path 0o755;
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      assert
+        (String.starts_with
+           ~prefix:"masc_status state read failed:"
+           (Tool_result.message result))
+    | None -> Alcotest.fail "dispatch returned None")
+;;
+
+let () =
+  test "dispatch_status_reports_backlog_read_failure" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    let backlog_path = Workspace.backlog_path ctx.config in
+    Fs_compat.save_file backlog_path "{not-json";
+    Fs_compat.save_file (backlog_path ^ ".last-good") "{not-json";
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      assert (String.starts_with ~prefix:"masc_status backlog read failed:" (Tool_result.message result))
+    | None -> Alcotest.fail "dispatch returned None")
+;;
+
+let () =
   test "dispatch_status_hides_stale_current_task_without_writing" (fun () ->
     let ctx = make_test_ctx () in
     let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in
@@ -464,6 +497,24 @@ let () =
     assert (Tool_workspace.dispatch ctx ~name:"masc_workspaces_list" ~args = None);
     assert (Tool_workspace.dispatch ctx ~name:"masc_workspace_create" ~args = None);
     assert (Tool_workspace.dispatch ctx ~name:"masc_workspace_enter" ~args = None))
+;;
+
+let () =
+  test "dispatch_check_reports_backlog_read_failure" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    let backlog_path = Workspace.backlog_path ctx.config in
+    Fs_compat.save_file backlog_path "{not-json";
+    Fs_compat.save_file (backlog_path ^ ".last-good") "{not-json";
+    match Tool_workspace.dispatch ctx ~name:"masc_check" ~args:(`Assoc []) with
+    | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      assert
+        (String.starts_with
+           ~prefix:"masc_check backlog read failed:"
+           (Tool_result.message result))
+    | None -> Alcotest.fail "dispatch returned None")
 ;;
 
 let () =

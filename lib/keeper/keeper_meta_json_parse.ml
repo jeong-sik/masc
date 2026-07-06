@@ -308,6 +308,18 @@ let parse_last_continuity_update_ts ~(continuity_summary : string) (json : Yojso
   else parsed_ts
 ;;
 
+let record_optional_meta_field_drop ~keeper_name ~field ~site ~error =
+  Log.Keeper.warn
+    "%s: malformed %s JSON dropped: %s"
+    keeper_name
+    field
+    error;
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string MetaReadFailures)
+    ~labels:[ "keeper", keeper_name; "site", site ]
+    ()
+;;
+
 let parse_keeper_state
       (json : Yojson.Safe.t)
       ~(trace_id : Keeper_id.Trace_id.t)
@@ -392,14 +404,11 @@ let parse_keeper_state
       (match Keeper_latched_reason.Stable.of_yojson reason_json with
        | Ok reason -> Some reason
        | Error err ->
-         Log.Keeper.warn
-           "%s: malformed latched_reason JSON dropped: %s"
-           keeper_name
-           err;
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string MetaReadFailures)
-           ~labels:[ "keeper", keeper_name; "site", "latched_reason_parse" ]
-           ();
+         record_optional_meta_field_drop
+           ~keeper_name
+           ~field:"latched_reason"
+           ~site:"latched_reason_parse"
+           ~error:err;
          None)
   in
   let ps_auto_resume_after_sec = Safe_ops.json_float_opt "auto_resume_after_sec" json in
@@ -410,7 +419,13 @@ let parse_keeper_state
     | Some s ->
       (match Keeper_id.Task_id.of_string s with
        | Ok tid -> Some tid
-       | Error _ -> None)
+       | Error err ->
+         record_optional_meta_field_drop
+           ~keeper_name
+           ~field:"current_task_id"
+           ~site:"current_task_id_parse"
+           ~error:err;
+         None)
   in
   let ps_max_context_override = Safe_ops.json_int_opt "max_context_override" json in
   { ps_created_at_raw
@@ -591,7 +606,13 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                         | Some s ->
                           (match Keeper_id.uid_of_yojson (`String s) with
                            | Ok uid -> Some uid
-                           | Error _ -> None)
+                           | Error err ->
+                             record_optional_meta_field_drop
+                               ~keeper_name:identity.pk_name
+                               ~field:"keeper_id"
+                               ~site:"keeper_id_parse"
+                               ~error:err;
+                             None)
                         | None -> None)
                    ; meta_version =
                        (match Safe_ops.json_int_opt "meta_version" json with

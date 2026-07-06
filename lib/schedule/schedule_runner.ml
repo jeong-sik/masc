@@ -17,6 +17,21 @@ type wake_signal =
   ; payload : Yojson.Safe.t
   }
 
+type wake_signal_read_error_kind =
+  | Wake_signal_json_parse_error
+  | Wake_signal_schema_decode_error
+
+type wake_signal_read_error =
+  { ordinal : int
+  ; kind : wake_signal_read_error_kind
+  ; error : string
+  }
+
+type wake_signal_read_result =
+  { signals : wake_signal list
+  ; errors : wake_signal_read_error list
+  }
+
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
@@ -35,12 +50,16 @@ and dispatch_result =
   ; status : dispatch_status
   ; detail : Yojson.Safe.t option
   ; error : string option
+  ; duration_sec : float
   }
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch : Schedule_domain.schedule_request -> (Yojson.Safe.t, string) result
   }
+
+type dispatch_wrapper =
+  Schedule_domain.schedule_request -> (unit -> dispatch_result) -> dispatch_result
 
 type runner_error =
   | Service_error of Schedule_service.service_error
@@ -62,6 +81,11 @@ let signal_kind_of_string = function
   | "schedule.due_candidate" -> Ok Due_candidate
   | "schedule.due_blocked_approval" -> Ok Due_blocked_approval
   | other -> Error ("unknown schedule signal kind: " ^ other)
+;;
+
+let wake_signal_read_error_kind_to_string = function
+  | Wake_signal_json_parse_error -> "json_parse"
+  | Wake_signal_schema_decode_error -> "schema_decode"
 ;;
 
 let dispatch_status_to_string = function
@@ -182,23 +206,16 @@ let read_seen config =
 
 let write_seen config keys =
   Workspace_utils.mkdir_p (schedules_dir config);
-  Workspace_utils.write_json config (signal_seen_path config)
+  Workspace_utils.write_json_result config (signal_seen_path config)
     (`List (List.map (fun key -> `String key) keys))
 ;;
 
+module For_testing = struct
+  let write_seen = write_seen
+end
+
 let append_signal config signal =
-  try
-    Dated_jsonl.append (signal_store config) (wake_signal_to_yojson signal);
-    Ok ()
-  with
-  | Sys_error msg -> Error msg
-  | Unix.Unix_error (err, fn, arg) ->
-    Error
-      (Printf.sprintf
-         "%s failed for %s: %s"
-         fn
-         arg
-         (Unix.error_message err))
+  Dated_jsonl.append_result (signal_store config) (wake_signal_to_yojson signal)
 ;;
 
 let append_new_signals config candidates =
@@ -211,7 +228,7 @@ let append_new_signals config candidates =
     let seen_rev = ref (List.rev seen) in
     let rec loop = function
       | [] ->
-        write_seen config (List.rev !seen_rev);
+        let* () = write_seen config (List.rev !seen_rev) in
         Ok (List.rev !emitted_rev)
       | signal :: rest ->
         if Hashtbl.mem seen_tbl signal.signal_id then loop rest
@@ -246,8 +263,8 @@ let blocked_approval_signals ~now (state : Schedule_store.state) =
   |> List.map (make_signal ~now Due_blocked_approval)
 ;;
 
-let dispatch_result ?detail ?error schedule_id status =
-  { schedule_id; status; detail; error }
+let dispatch_result ?detail ?error ?(duration_sec = 0.0) schedule_id status =
+  { schedule_id; status; detail; error; duration_sec }
 ;;
 
 let finish_failed_dispatch config ~now ~schedule_id error =
@@ -265,54 +282,108 @@ let finish_failed_dispatch config ~now ~schedule_id error =
 
 let safe_consumer_dispatch consumer request =
   try consumer.dispatch request with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let dispatch_candidate config ~now consumer (request : Schedule_domain.schedule_request) =
+let default_dispatch_wrapper _request run = run ()
+
+let dispatch_candidate
+      ?(dispatch_wrapper = default_dispatch_wrapper)
+      config
+      ~now
+      consumer
+      (request : Schedule_domain.schedule_request)
+  =
+  let started_at = Unix.gettimeofday () in
   let schedule_id = request.Schedule_domain.schedule_id in
-  match consumer.accepts request with
-  | Error reason ->
-    (match Schedule_store.fail_due_candidate config ~now ~schedule_id ~error:reason with
-     | Ok _ -> dispatch_result ~error:reason schedule_id Dispatch_unsupported
-     | Error err ->
-       let error =
-         Printf.sprintf
-           "%s; failed to mark schedule failed: %s"
-           reason
-           (Schedule_store.store_error_to_string err)
-       in
-       dispatch_result ~error schedule_id Dispatch_unsupported)
-  | Ok () ->
-    (match Schedule_store.start_due_candidate config ~now ~schedule_id with
-     | Error err ->
-       dispatch_result ~error:(Schedule_store.store_error_to_string err) schedule_id
-         Dispatch_start_rejected
-     | Ok running_request ->
-       (match safe_consumer_dispatch consumer running_request with
-        | Error error -> finish_failed_dispatch config ~now ~schedule_id error
-        | Ok detail ->
-          (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with
-           | Ok _ -> dispatch_result ~detail schedule_id Dispatch_succeeded
-           | Error err ->
-             dispatch_result ~detail
-               ~error:(Schedule_store.store_error_to_string err)
-               schedule_id Dispatch_failed)))
+  let run () =
+    match consumer.accepts request with
+    | Error reason ->
+      (match Schedule_store.fail_due_candidate config ~now ~schedule_id ~error:reason with
+       | Ok _ -> dispatch_result ~error:reason schedule_id Dispatch_unsupported
+       | Error err ->
+         let error =
+           Printf.sprintf
+             "%s; failed to mark schedule failed: %s"
+             reason
+             (Schedule_store.store_error_to_string err)
+         in
+         dispatch_result ~error schedule_id Dispatch_unsupported)
+    | Ok () ->
+      (match Schedule_store.start_due_candidate config ~now ~schedule_id with
+       | Error err ->
+         dispatch_result ~error:(Schedule_store.store_error_to_string err) schedule_id
+           Dispatch_start_rejected
+       | Ok running_request ->
+         (match safe_consumer_dispatch consumer running_request with
+          | Error error -> finish_failed_dispatch config ~now ~schedule_id error
+          | Ok detail ->
+            (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with
+             | Ok _ -> dispatch_result ~detail schedule_id Dispatch_succeeded
+             | Error err ->
+               dispatch_result
+                 ~detail
+                 ~error:(Schedule_store.store_error_to_string err)
+                 schedule_id
+                 Dispatch_failed)))
+  in
+  let result = dispatch_wrapper request run in
+  { result with duration_sec = max 0.0 (Unix.gettimeofday () -. started_at) }
 ;;
 
-let dispatch_candidates config ~now consumer state =
+let dispatch_candidates ?dispatch_wrapper config ~now consumer state =
   Schedule_store.due_execution_candidates state
-  |> List.map (dispatch_candidate config ~now consumer)
+  |> List.map (dispatch_candidate ?dispatch_wrapper config ~now consumer)
+;;
+
+let read_recent_signals_with_errors config n =
+  let rec loop ordinal signals_rev errors_rev = function
+    | [] -> { signals = List.rev signals_rev; errors = List.rev errors_rev }
+    | line :: rest ->
+      let next_ordinal = ordinal + 1 in
+      let decoded =
+        match Yojson.Safe.from_string line with
+        | exception Yojson.Json_error msg ->
+          Error
+            { ordinal
+            ; kind = Wake_signal_json_parse_error
+            ; error = "json parse failed: " ^ msg
+            }
+        | json ->
+          (match wake_signal_of_yojson json with
+           | Ok signal -> Ok signal
+           | Error error ->
+             Error { ordinal; kind = Wake_signal_schema_decode_error; error })
+      in
+      (match decoded with
+       | Ok signal -> loop next_ordinal (signal :: signals_rev) errors_rev rest
+       | Error error -> loop next_ordinal signals_rev (error :: errors_rev) rest)
+  in
+  loop 0 [] [] (Dated_jsonl.read_recent_lines (signal_store config) n)
+;;
+
+let record_wake_signal_read_error error =
+  let kind = wake_signal_read_error_kind_to_string error.kind in
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_schedule_signal_read_error_total
+    ~labels:[ "kind", kind ]
+    ();
+  Log.Misc.warn
+    "schedule_runner.read_recent_signals dropped wake signal row ordinal=%d \
+     kind=%s: %s"
+    error.ordinal
+    kind
+    error.error
 ;;
 
 let read_recent_signals config n =
-  Dated_jsonl.read_recent (signal_store config) n
-  |> List.filter_map (fun json ->
-    match wake_signal_of_yojson json with
-    | Ok signal -> Some signal
-    | Error _ -> None)
+  let read = read_recent_signals_with_errors config n in
+  List.iter record_wake_signal_read_error read.errors;
+  read.signals
 ;;
 
-let tick ?consumer config ~now =
+let tick ?dispatch_wrapper ?consumer config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Service_error (Schedule_service.Store_error err))
   | Ok (state, due_changed) ->
@@ -321,7 +392,7 @@ let tick ?consumer config ~now =
     let* emitted = append_new_signals config signals in
     (match consumer with
      | Some consumer ->
-       let dispatches = dispatch_candidates config ~now consumer state in
+       let dispatches = dispatch_candidates ?dispatch_wrapper config ~now consumer state in
        Ok { due_changed; emitted; rescheduled = 0; dispatches }
      | None ->
        let schedule_ids =

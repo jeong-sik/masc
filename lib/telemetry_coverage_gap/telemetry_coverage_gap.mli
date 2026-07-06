@@ -47,6 +47,21 @@ val record :
     to substring matching on [error] (RFC-0154 §4 backward compat
     window). *)
 
+val record_result :
+  masc_root:string ->
+  source:string ->
+  producer:string ->
+  durable_store:string ->
+  dashboard_surface:string ->
+  stale_reason:string ->
+  ?keeper_name:string ->
+  ?trace_id:string ->
+  ?error:string ->
+  ?exn:exn ->
+  unit ->
+  (unit, string) result
+(** Result-returning variant of {!record}. *)
+
 val read_recent :
   masc_root:string ->
   n:int ->
@@ -56,3 +71,10 @@ val read_recent :
     [Dated_jsonl.read_recent]. Returns the empty list when
     [n <= 0] or when the store directory does not yet exist
     (no rows have been recorded for this [masc_root]). *)
+
+val read_recent_with_read_errors :
+  masc_root:string ->
+  n:int ->
+  Yojson.Safe.t list * Yojson.Safe.t list
+(** Read the same recent coverage-gap rows as {!read_recent}, plus
+    row-indexed read errors for malformed coverage-gap JSONL rows. *)

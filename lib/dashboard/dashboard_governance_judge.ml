@@ -16,6 +16,7 @@ type runtime_snapshot = {
   last_compute_timeout_sec : float option;
   last_compute_outcome : string option;
   last_compute_reason : string option;
+  judgment_read_errors : Yojson.Safe.t list;
 }
 
 (** State of the in-flight compute cycle.
@@ -66,6 +67,7 @@ type state = {
   mutable next_compute_after_unix : float option;
   mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
+  mutable judgment_read_errors : Yojson.Safe.t list;
 }
 
 (* #9880 facet 4: per-cycle counter for empty [response.model] in
@@ -279,8 +281,9 @@ let get_state base_path =
             last_compute_reason = None;
             next_compute_after_unix = None;
             last_disk_load_unix = None;
-          judgments = Hashtbl.create 32;
-        }
+            judgments = Hashtbl.create 32;
+            judgment_read_errors = [];
+          }
       in
       Hashtbl.add states base_path st;
       st)
@@ -329,44 +332,98 @@ let normalize_disk_recommended_action judgment =
        | other -> other)
   | _ -> judgment
 
-let load_judgments_into_table jsons =
+type disk_judgment_row =
+  { line_index : int
+  ; json : Yojson.Safe.t
+  }
+
+type raw_judgment_line =
+  { line_index : int
+  ; line : string
+  }
+
+let judgment_read_error_to_json ~source ~path ~line_index message =
+  `Assoc
+    [ "source", `String source
+    ; "path", `String path
+    ; "line_index", `Int line_index
+    ; "message", `String message
+    ]
+
+let parse_judgment_lines ~source ~path lines =
+  lines
+  |> List.fold_left
+       (fun (rows, errors) { line_index; line } ->
+          match Yojson.Safe.from_string line with
+          | json -> { line_index; json } :: rows, errors
+          | exception Yojson.Json_error message ->
+            ( rows
+            , judgment_read_error_to_json ~source ~path ~line_index message :: errors ))
+       ([], [])
+  |> fun (rows, errors) -> List.rev rows, List.rev errors
+
+let load_judgments_into_table ~source ~path rows =
   let table = Hashtbl.create 32 in
-  List.iter (fun json ->
-    try
-      let status = Json_util.get_string json "status" in
-      if status = Some "active" then
-        let key = judgment_key json in
-        match Hashtbl.find_opt table key with
-        | Some current
-          when judgment_generated_at current >= judgment_generated_at json -> ()
-        | _ -> Hashtbl.replace table key json
-    with
-    | Yojson.Safe.Util.Type_error _ -> ()
-    | exn -> Log.Governance.warn "load_latest_from_disk parse: %s" (Printexc.to_string exn)
-  ) jsons;
-  table
+  let read_errors = ref [] in
+  let add_read_error ~line_index message =
+    read_errors := judgment_read_error_to_json ~source ~path ~line_index message :: !read_errors
+  in
+  List.iter (fun { line_index; json } ->
+    match json with
+    | `Assoc _ ->
+        (try
+           let status = Json_util.get_string json "status" in
+           if status = Some "active" then
+             let key = judgment_key json in
+             match Hashtbl.find_opt table key with
+             | Some current
+               when judgment_generated_at current >= judgment_generated_at json -> ()
+             | _ -> Hashtbl.replace table key json
+         with
+         | Yojson.Safe.Util.Type_error (message, _) -> add_read_error ~line_index message
+         | exn -> add_read_error ~line_index (Printexc.to_string exn))
+    | other ->
+        add_read_error ~line_index
+          (Printf.sprintf "expected judgment object, got %s" (Json_util.kind_name other))
+  ) rows;
+  table, List.rev !read_errors
 
 (** Load latest judgments.
     Tries date-split store first; falls back to legacy single file. *)
 let load_latest_from_disk base_path =
   let store = get_judgments_store base_path in
-  let jsons = Dated_jsonl.read_recent store 10_000 in
-  if jsons <> [] then
-    load_judgments_into_table jsons
+  let dated_lines = Dated_jsonl.read_recent_lines store 10_000 in
+  if dated_lines <> [] then
+    let path = Dated_jsonl.base_dir store in
+    let source = "dashboard_governance_judgments_jsonl" in
+    let rows, parse_errors =
+      dated_lines
+      |> List.mapi (fun line_index line -> { line_index; line })
+      |> parse_judgment_lines ~source ~path
+    in
+    let table, shape_errors = load_judgments_into_table ~source ~path rows in
+    table, parse_errors @ shape_errors
   else
     (* Legacy fallback *)
     let path = judgments_path base_path in
-    if not (Sys.file_exists path) then Hashtbl.create 32
+    if not (Sys.file_exists path) then Hashtbl.create 32, []
     else
       let content = Fs_compat.load_file path in
-      let legacy_jsons =
-        String.split_on_char '\n' content
-        |> List.filter (fun line -> String.trim line <> "")
-        |> List.filter_map (fun line ->
-            try Some (Yojson.Safe.from_string line)
-            with Yojson.Json_error _ -> None)
+      let source = "dashboard_governance_legacy_judgments_jsonl" in
+      let legacy_rows, parse_errors =
+        content
+        |> String.split_on_char '\n'
+        |> List.mapi (fun line_index line -> { line_index; line })
+        |> List.filter (fun { line; _ } -> String.trim line <> "")
+        |> parse_judgment_lines ~source ~path
       in
-      load_judgments_into_table legacy_jsons
+      let table, shape_errors =
+        load_judgments_into_table
+          ~source
+          ~path
+          legacy_rows
+      in
+      table, parse_errors @ shape_errors
 
 let latest_judgments base_path =
   let st = get_state base_path in
@@ -379,7 +436,9 @@ let latest_judgments base_path =
               Unix.gettimeofday () -. last_load >= empty_judgment_reload_cooldown_sec
         in
         if should_reload then begin
-          st.judgments <- load_latest_from_disk base_path;
+          let judgments, read_errors = load_latest_from_disk base_path in
+          st.judgments <- judgments;
+          st.judgment_read_errors <- read_errors;
           st.last_disk_load_unix <- Some (Unix.gettimeofday ())
         end
       end;
@@ -477,6 +536,7 @@ let runtime_status_at ~now_ts base_path =
         last_compute_timeout_sec = st.last_compute_timeout_sec;
         last_compute_outcome = st.last_compute_outcome;
         last_compute_reason = st.last_compute_reason;
+        judgment_read_errors = st.judgment_read_errors;
       })
 
 let runtime_status base_path =
@@ -759,9 +819,21 @@ let compute_judgments
 
 (** Append judgments to date-split store.
     Thread-safe via Dated_jsonl internal mutex. *)
-let append_judgments base_path judgments =
+let append_judgments_result base_path judgments =
   let store = get_judgments_store base_path in
-  List.iter (fun json -> Dated_jsonl.append store json) judgments
+  let rec loop = function
+    | [] -> Ok ()
+    | json :: rest ->
+        (match Dated_jsonl.append_result store json with
+        | Ok () -> loop rest
+        | Error error -> Error error)
+  in
+  loop judgments
+
+let append_judgments base_path judgments =
+  match append_judgments_result base_path judgments with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 let should_backoff ~sw:_ ~net:_ =
   (* RFC-0206 single-binding: the deleted

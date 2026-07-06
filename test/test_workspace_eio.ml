@@ -82,6 +82,35 @@ let test_remove_missing_agent_is_noop () =
   Alcotest.(check int) "no leave event for already missing agent" 0
     (List.length events)
 
+let test_get_event_result_surfaces_decode_error () =
+  with_eio_env @@ fun config ->
+  let event =
+    Workspace_eio.log_event
+      config
+      ~event_type:Workspace_eio.Broadcast
+      ~agent:"tester"
+      ~payload:(`Assoc [ "message", `String "hello" ])
+  in
+  let key = Workspace_eio.event_key event.event_seq in
+  (match Backend.FileSystem.set config.backend key "{not-json" with
+   | Ok () -> ()
+   | Error err ->
+     Alcotest.failf
+       "failed to corrupt event fixture: %s"
+       (Backend_types.show_error err));
+  (match Workspace_eio.get_event_result config ~seq:event.event_seq with
+   | Ok _ -> Alcotest.fail "expected corrupt event to surface Error"
+   | Error msg ->
+     Alcotest.(check bool) "decode error populated" true (String.length msg > 0));
+  Alcotest.(check bool)
+    "legacy get_event projects corrupt event to None"
+    true
+    (Option.is_none (Workspace_eio.get_event config ~seq:event.event_seq));
+  Alcotest.(check int)
+    "recent events skips corrupt event after logging"
+    0
+    (List.length (Workspace_eio.get_recent_events config ~limit:10))
+
 (** {1 Lock Tests} *)
 
 let test_acquire_lock () =
@@ -199,6 +228,12 @@ let () =
         "remove missing agent is no-op"
         `Quick
         test_remove_missing_agent_is_noop;
+    ];
+    "event", [
+      Alcotest.test_case
+        "get_event_result surfaces decode error"
+        `Quick
+        test_get_event_result_surfaces_decode_error;
     ];
     "lock", [
       Alcotest.test_case "acquire lock" `Quick test_acquire_lock;

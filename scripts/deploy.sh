@@ -55,6 +55,52 @@ restore_env_override() {
     fi
 }
 
+build_commit_stamp_path() {
+    printf '%s.build-commit\n' "$1"
+}
+
+resolve_source_head_commit() {
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+    git -C "$REPO_DIR" rev-parse --verify 'HEAD^{commit}' 2>/dev/null | tr -d '[:space:]'
+}
+
+source_tree_is_clean() {
+    local status_output
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+    if ! status_output="$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)"; then
+        return 1
+    fi
+    [ -z "$status_output" ]
+}
+
+stamp_build_commit_for_executable() {
+    local exe_path="$1"
+    local label="$2"
+    local commit stamp_path
+    stamp_path="$(build_commit_stamp_path "$exe_path")"
+    if ! source_tree_is_clean; then
+        echo "Warning: refusing to stamp $label build commit because $REPO_DIR has uncommitted changes." >&2
+        rm -f "$stamp_path"
+        return 0
+    fi
+    commit="$(resolve_source_head_commit || true)"
+    if [ -z "$commit" ]; then
+        echo "Warning: cannot stamp $label build commit; git HEAD is unavailable for $REPO_DIR." >&2
+        rm -f "$stamp_path"
+        return 0
+    fi
+    if ! printf '%s\n' "$commit" > "$stamp_path"; then
+        echo "Warning: failed to write $label build commit stamp: $stamp_path" >&2
+        rm -f "$stamp_path"
+        return 0
+    fi
+    echo "    Stamped $label build commit: $commit" >&2
+}
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-build) SKIP_BUILD=true; shift ;;
@@ -82,6 +128,9 @@ BUILD_EXE="$REPO_DIR/_build/default/bin/main_eio.exe"
 if [ ! -x "$BUILD_EXE" ]; then
     echo "Error: Build artifact not found at $BUILD_EXE" >&2
     exit 1
+fi
+if [ "$SKIP_BUILD" = false ]; then
+    stamp_build_commit_for_executable "$BUILD_EXE" "main_eio.exe"
 fi
 
 # --- 2. Detect management mode ---
@@ -127,6 +176,14 @@ if [ -f "$RELEASE_EXE" ]; then
 fi
 
 install -m 755 "$BUILD_EXE" "$RELEASE_EXE"
+BUILD_STAMP="$(build_commit_stamp_path "$BUILD_EXE")"
+RELEASE_STAMP="$(build_commit_stamp_path "$RELEASE_EXE")"
+if [ -f "$BUILD_STAMP" ]; then
+    install -m 644 "$BUILD_STAMP" "$RELEASE_STAMP"
+else
+    rm -f "$RELEASE_STAMP"
+    echo "    Warning: build commit stamp missing for $BUILD_EXE; release binary commit proof will be null." >&2
+fi
 echo "    Binary installed to releases/main_eio.exe" >&2
 
 # --- 5. Start prod ---

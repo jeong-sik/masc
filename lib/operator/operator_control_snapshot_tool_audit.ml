@@ -3,6 +3,11 @@
 
 let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
 let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
+let collect_recent_tool_names_with_errors =
+  Operator_control_snapshot_tool_names.collect_recent_tool_names_with_errors
+
+let tool_name_parse_error_to_json =
+  Operator_control_snapshot_tool_names.recent_tool_name_parse_error_to_json
 
 let lightweight_tool_audit_fallback_json (meta : Keeper_meta_contract.keeper_meta) =
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
@@ -24,6 +29,8 @@ let lightweight_tool_audit_fallback_json (meta : Keeper_meta_contract.keeper_met
         else if has_runtime_activity
         then `String meta.updated_at
         else `Null )
+    ; "tool_audit_read_error_count", `Int 0
+    ; "tool_audit_read_errors", `List []
     ]
 ;;
 
@@ -44,7 +51,7 @@ let decision_tail_bytes = 120000
 let decision_lines_projection : string list Jsonl_incremental_projection.t =
   Jsonl_incremental_projection.create ()
 
-let recent_tool_names_from_files config keeper_name =
+let recent_tool_names_from_files_with_read_errors config keeper_name =
   let decision_lines =
     let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
     (* file_exists guard preserves the prior "missing file -> []" behavior:
@@ -57,30 +64,59 @@ let recent_tool_names_from_files config keeper_name =
         ~site:"operator_tool_audit_decisions" ~key:path ~path
         ~window:decision_tail_window ~initial_tail_bytes:decision_tail_bytes
   in
-  let metrics_lines =
+  let decision_names, decision_parse_errors =
+    collect_recent_tool_names_with_errors decision_lines
+  in
+  let decision_read_errors =
+    List.map
+      (tool_name_parse_error_to_json
+         ~source:"operator_tool_audit_decisions_jsonl"
+         ~keeper:keeper_name
+         ~path:(Keeper_types_support.keeper_decision_log_path config keeper_name))
+      decision_parse_errors
+  in
+  let metrics_lines, metrics_source_path =
     let store = Keeper_types_support.keeper_metrics_store config keeper_name in
     let dated = Dated_jsonl.read_recent_lines store 120 in
     if dated <> []
-    then dated
+    then dated, Dated_jsonl.base_dir store
     else (
       let path = Keeper_types_support.keeper_metrics_path config keeper_name in
       match
         Keeper_memory.read_file_tail_lines_result path
           ~max_bytes:120000 ~max_lines:120
       with
-      | Ok lines -> lines
+      | Ok lines -> lines, path
       | Error exn_class ->
           Keeper_memory.record_memory_recall_read_error
             ~site:"operator_tool_audit_metrics" path exn_class;
-          [])
+          [], path)
   in
-  merge_tool_name_lists
-    (collect_recent_tool_names decision_lines)
-    (collect_recent_tool_names metrics_lines)
+  let metrics_names, metrics_parse_errors =
+    collect_recent_tool_names_with_errors metrics_lines
+  in
+  let metrics_read_errors =
+    List.map
+      (tool_name_parse_error_to_json
+         ~source:"operator_tool_audit_metrics_jsonl"
+         ~keeper:keeper_name
+         ~path:metrics_source_path)
+      metrics_parse_errors
+  in
+  ( merge_tool_name_lists decision_names metrics_names
+  , decision_read_errors @ metrics_read_errors )
 ;;
 
-let keeper_tool_audit_fields config (meta : Keeper_meta_contract.keeper_meta) =
-  let recent_tool_names = recent_tool_names_from_files config meta.name in
+let recent_tool_names_from_files config keeper_name =
+  fst (recent_tool_names_from_files_with_read_errors config keeper_name)
+;;
+
+let keeper_tool_audit_fields_with_read_errors config
+      (meta : Keeper_meta_contract.keeper_meta)
+  =
+  let recent_tool_names, tool_audit_read_errors =
+    recent_tool_names_from_files_with_read_errors config meta.name
+  in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
     match
@@ -119,7 +155,27 @@ let keeper_tool_audit_fields config (meta : Keeper_meta_contract.keeper_meta) =
   , fallback_snapshot.latest_tool_call_count
   , fallback_snapshot.latest_action_source
   , fallback_snapshot.tool_audit_source
-  , fallback_snapshot.tool_audit_at )
+  , fallback_snapshot.tool_audit_at
+  , tool_audit_read_errors )
+;;
+
+let keeper_tool_audit_fields config meta =
+  let ( recent_tool_names
+      , latest_tool_names
+      , latest_tool_call_count
+      , latest_action_source
+      , tool_audit_source
+      , tool_audit_at
+      , _tool_audit_read_errors )
+    =
+    keeper_tool_audit_fields_with_read_errors config meta
+  in
+  ( recent_tool_names
+  , latest_tool_names
+  , latest_tool_call_count
+  , latest_action_source
+  , tool_audit_source
+  , tool_audit_at )
 ;;
 
 let cached_tool_audit_json
@@ -136,7 +192,8 @@ let cached_tool_audit_json
         , latest_tool_call_count
         , latest_action_source
         , tool_audit_source
-        , tool_audit_at )
+        , tool_audit_at
+        , tool_audit_read_errors )
       =
       if lightweight
       then (
@@ -145,17 +202,19 @@ let cached_tool_audit_json
             , latest_tool_call_count
             , latest_action_source
             , tool_audit_source
-            , tool_audit_at )
+            , tool_audit_at
+            , tool_audit_read_errors )
           =
-          keeper_tool_audit_fields config meta
+          keeper_tool_audit_fields_with_read_errors config meta
         in
         ( recent_tool_names
         , latest_tool_names
         , latest_tool_call_count
         , latest_action_source
         , tool_audit_source
-        , tool_audit_at ))
-      else keeper_tool_audit_fields config meta
+        , tool_audit_at
+        , tool_audit_read_errors ))
+      else keeper_tool_audit_fields_with_read_errors config meta
     in
     `Assoc
       [ "recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names)
@@ -164,6 +223,8 @@ let cached_tool_audit_json
       ; "latest_action_source", Json_util.string_opt_to_json latest_action_source
       ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
       ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
+      ; "tool_audit_read_error_count", `Int (List.length tool_audit_read_errors)
+      ; "tool_audit_read_errors", `List tool_audit_read_errors
       ])
 ;;
 

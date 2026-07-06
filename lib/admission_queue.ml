@@ -289,12 +289,23 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~runtime_id f =
         Ok (with_inflight_observation ~keeper_name ~runtime_id f))
 ;;
 
-let try_with_permit ~priority:_ ~keeper_name ~runtime_id f =
-  match
-    check_host_resources ~surface:Admission_queue_metrics.Try_with_permit ~keeper_name
-  with
-  | Error _ -> None
-  | Ok () -> Some (with_inflight_observation ~keeper_name ~runtime_id f)
+let try_with_permit_result_with_check ~keeper_name ~runtime_id ~check_host_resources f =
+  match check_host_resources () with
+  | Error _ as e -> e
+  | Ok () -> Ok (with_inflight_observation ~keeper_name ~runtime_id f)
+;;
+
+let try_with_permit_result ~priority:_ ~keeper_name ~runtime_id f =
+  try_with_permit_result_with_check ~keeper_name ~runtime_id
+    ~check_host_resources:(fun () ->
+      check_host_resources ~surface:Admission_queue_metrics.Try_with_permit ~keeper_name)
+    f
+;;
+
+let try_with_permit ~priority ~keeper_name ~runtime_id f =
+  match try_with_permit_result ~priority ~keeper_name ~runtime_id f with
+  | Ok value -> Some value
+  | Error (`Host_resource_saturated _) -> None
 ;;
 
 let snapshot () =
@@ -361,6 +372,18 @@ module For_testing = struct
   ;;
 
   let check_host_resources_for_threshold = check_host_resources_for_threshold
+
+  let try_with_permit_result_for_threshold ~keeper_name ~runtime_id ~threshold
+      ~fd_count f =
+    try_with_permit_result_with_check ~keeper_name ~runtime_id
+      ~check_host_resources:(fun () ->
+        check_host_resources_for_threshold
+          ~surface:Admission_queue_metrics.Try_with_permit
+          ~keeper_name
+          ~threshold
+          ~fd_count)
+      f
+  ;;
 
   let apply_active_delta ~active ~delta =
     match apply_active_delta { active; max_slots = 0 } ~delta with

@@ -153,6 +153,27 @@ let playground_repo_entry ~config ~meta ~repo_name =
            repo_name
            (Yojson.Safe.to_string (`List repos)))
 
+let playground_repo_read_error_entry ~config ~meta ~source =
+  let repos =
+    Masc.Keeper_sandbox_control.playground_repos_json ~config ~meta
+    |> Yojson.Safe.Util.to_list
+  in
+  match
+    List.find_opt
+      (fun json ->
+        match json_string_opt "read_error_source" json with
+        | Some value -> String.equal value source
+        | None -> false)
+      repos
+  with
+  | Some json -> json
+  | None ->
+      fail
+        (Printf.sprintf
+           "expected playground repo read_error_source=%s, got: %s"
+           source
+           (Yojson.Safe.to_string (`List repos)))
+
 let test_missing_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
   let config = Masc.Workspace.default_config base_path in
@@ -362,6 +383,22 @@ let test_playground_repos_projection_does_not_record_policy_metrics () =
   check (float 0.0) "policy projection does not record decision metrics"
     before
     (repo_mapping_decision_metric_total ())
+
+let test_playground_repos_surfaces_malformed_cache_state () =
+  let base_path = temp_dir "masc-playground-repo-cache" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let playground =
+    Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  in
+  mkdir_p playground;
+  write_file (Filename.concat playground ".playground_state.json") "{not-json";
+  let json = playground_repo_read_error_entry ~config ~meta ~source:"cache_state" in
+  check bool "read error row" true (json_bool "read_error" json);
+  check string "read error source" "cache_state"
+    (json_string "read_error_source" json);
+  check bool "read error detail is surfaced" true
+    (String.length (json_string "error" json) > 0)
 
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
@@ -723,6 +760,8 @@ let () =
           test_playground_repos_mark_mapping_load_error_denied;
         test_case "policy projection does not record decision metrics" `Quick
           test_playground_repos_projection_does_not_record_policy_metrics;
+        test_case "malformed cache state is surfaced" `Quick
+          test_playground_repos_surfaces_malformed_cache_state;
       ];
       "status_hints",
       [

@@ -9,39 +9,6 @@ let assoc_string_opt key fields =
   | Some (`String value) -> nonempty_trimmed value
   | _ -> None
 
-let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
-  let lines =
-    let dated = Dated_jsonl.read_recent_lines metrics_store 8 in
-    if dated <> []
-    then dated
-    else
-      (match
-         Keeper_memory.read_file_tail_lines_result metrics_path
-           ~max_bytes:tail_bytes
-           ~max_lines:8
-       with
-       | Ok lines -> lines
-       | Error exn_class ->
-           Keeper_memory.record_memory_recall_read_error
-             ~site:"keeper_status_detail_observability" metrics_path exn_class;
-           [])
-  in
-  let parsed, _ =
-    Fs_compat.parse_jsonl_lines ~source:"keeper_metrics_latest" lines
-  in
-  match
-    List.rev parsed
-    |> List.find_opt (fun json ->
-      match Json_util.assoc_member_opt "runtime" json with
-      | Some (`Assoc _) -> true
-      | _ -> false)
-  with
-  | Some json -> Some json
-  | None ->
-      (match List.rev parsed with
-       | json :: _ -> Some json
-       | [] -> None)
-
 let first_some candidates =
   List.find_map Fun.id candidates
 

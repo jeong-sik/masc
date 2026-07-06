@@ -91,6 +91,42 @@ let test_audit_events_filter_severity_before_paging () =
   check string "older error retained" "keeper-a" (row |> member "actor" |> to_string);
   check string "severity" "error" (row |> member "severity" |> to_string)
 
+let audit_count_for_kind ~kind entries =
+  Audit_log.audit_events_response_json ~kind ~limit:20 entries
+  |> Yojson.Safe.Util.member "count"
+  |> Yojson.Safe.Util.to_int
+
+let test_audit_events_kind_filter_is_exact_or_family () =
+  let entries =
+    [
+      entry ~timestamp:1.0 ~agent_id:"keeper-a"
+        ~action:(Audit_log.ToolCall "read") ~outcome:Audit_log.Success;
+      entry ~timestamp:2.0 ~agent_id:"keeper-b"
+        ~action:(Audit_log.ToolCall "write") ~outcome:Audit_log.Success;
+      entry ~timestamp:3.0 ~agent_id:"keeper-c" ~action:Audit_log.AuthSuccess
+        ~outcome:Audit_log.Success;
+      entry ~timestamp:4.0 ~agent_id:"keeper-d" ~action:Audit_log.AuthFailure
+        ~outcome:(Audit_log.Failure "bad token");
+      entry ~timestamp:5.0 ~agent_id:"keeper-e"
+        ~action:(Audit_log.GovernanceDecision Audit_log.Governance_allow)
+        ~outcome:Audit_log.Success;
+      entry ~timestamp:6.0 ~agent_id:"keeper-f" ~action:(Audit_log.Custom "foo")
+        ~outcome:Audit_log.Success;
+    ]
+  in
+  check int "tool_call family" 2 (audit_count_for_kind ~kind:"tool_call" entries);
+  check int "tool_call exact" 1
+    (audit_count_for_kind ~kind:"tool_call:read" entries);
+  check int "governance_decision family" 1
+    (audit_count_for_kind ~kind:"governance_decision" entries);
+  check int "custom family" 1 (audit_count_for_kind ~kind:"custom" entries);
+  check int "auth_success exact" 1
+    (audit_count_for_kind ~kind:"auth_success" entries);
+  check int "auth prefix no longer matches" 0
+    (audit_count_for_kind ~kind:"auth" entries);
+  check int "tool prefix no longer matches" 0
+    (audit_count_for_kind ~kind:"tool" entries)
+
 (* ── Codec round-trip tests ────────────────────────────────────────── *)
 
 let action_roundtrip label action expected_wire =
@@ -283,6 +319,8 @@ let () =
             test_system_internal_details_deduplicate_canonical_keys;
           test_case "audit event severity filters before paging" `Quick
             test_audit_events_filter_severity_before_paging;
+          test_case "audit kind filter is exact or family" `Quick
+            test_audit_events_kind_filter_is_exact_or_family;
         ] );
       ( "codec_roundtrip",
         [

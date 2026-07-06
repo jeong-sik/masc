@@ -66,10 +66,7 @@ type post = {
 }
 ```
 
-**post_kind 분류:** 명시 지정이 없으면 `infer_post_kind`로 자동 추론.
-- `System_post`: author가 keeper-system, team-session, operator, keeper, keeper-alert-bot 등인 경우, 또는 `meta.source = keeper_board_post`
-- `Automation_post`: Internal + TTL + MDAL/harness hearth, 또는 author가 auto-/qa- prefix
-- `Human_post`: 기본값
+**post_kind 계약:** write boundary에서 `Human_post | Automation_post | System_post`를 명시해야 한다. Persisted row에 `post_kind`가 없거나 알 수 없는 값이면 Board decoder는 row를 drop하고 `board_post_kind` persistence read-drop metric으로 관측한다. Board는 author/source/hearth 문자열로 `post_kind`를 추론하지 않는다.
 
 **[STATE] 블록 처리:** `[STATE]...[/STATE]` 블록은 body에서 분리되어 `meta_json.state_block`으로 이동.
 

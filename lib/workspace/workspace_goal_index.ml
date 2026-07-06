@@ -17,6 +17,12 @@ type link_goalless_task_to_goal_error =
   | Already_linked_to_goals of string list
   | Link_write_failed of goal_task_links_write_error
 
+let goal_task_links_read_failed_prefix = "goal_task_links_read_failed"
+
+let goal_task_links_read_failed_message msg =
+  Printf.sprintf "%s: %s" goal_task_links_read_failed_prefix msg
+;;
+
 let goal_task_links_write_error_to_string msg = msg
 
 let link_goalless_task_to_goal_error_to_string = function
@@ -137,9 +143,16 @@ let read_goal_task_links config =
 ;;
 
 let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
-  try
-    write_json config path json;
-    match read_json_result config path with
+  match write_json_result config path json with
+  | Error msg ->
+    Error
+      (Printf.sprintf
+         "write_goal_task_links: %s write failed for %s: %s"
+         label
+         path
+         msg)
+  | Ok () ->
+    (match read_json_result config path with
     | Ok written when links_of_yojson written = expected_links -> Ok ()
     | Ok _ ->
       Error
@@ -153,16 +166,7 @@ let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
            "write_goal_task_links: %s write/readback failed for %s: %s"
            label
            path
-           msg)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Error
-      (Printf.sprintf
-         "write_goal_task_links: %s write failed for %s: %s"
-         label
-         path
-         (Printexc.to_string exn))
+           msg))
 ;;
 
 let write_goal_task_links_result ?(rollback_on_recovery_failure = true) ?previous_links config links =
@@ -234,7 +238,7 @@ let write_goal_task_links_result ?(rollback_on_recovery_failure = true) ?previou
 let write_goal_task_links config links =
   match write_goal_task_links_result config links with
   | Ok () -> ()
-  | Error msg -> Log.Misc.warn "%s" msg
+  | Error msg -> raise (Sys_error msg)
 ;;
 
 let goal_task_links_lock_path config =
@@ -301,7 +305,7 @@ let prune_links_for_goal_result config ~goal_id =
 let prune_links_for_goal config ~goal_id =
   match prune_links_for_goal_result config ~goal_id with
   | Ok () -> ()
-  | Error msg -> Log.Misc.warn "%s" msg
+  | Error msg -> raise (Sys_error msg)
 ;;
 
 let link_task_to_goal_result config ~goal_id ~task_id =
@@ -320,7 +324,7 @@ let link_task_to_goal_result config ~goal_id ~task_id =
 let link_task_to_goal config ~goal_id ~task_id =
   match link_task_to_goal_result config ~goal_id ~task_id with
   | Ok () -> ()
-  | Error msg -> Log.Misc.warn "%s" msg
+  | Error msg -> raise (Sys_error msg)
 ;;
 
 let before_unlink_task_from_goal_for_testing = Atomic.make None
@@ -414,7 +418,7 @@ let link_tasks_to_goals_result config links =
 let link_tasks_to_goals config links =
   match link_tasks_to_goals_result config links with
   | Ok () -> ()
-  | Error msg -> Log.Misc.warn "%s" msg
+  | Error msg -> raise (Sys_error msg)
 ;;
 
 (** Build a reverse index from goal_id to its linked tasks.
@@ -495,10 +499,30 @@ let build_task_goal_index
   tbl
 ;;
 
+let build_goal_task_index_for_config_result config tasks =
+  match read_goal_task_links_r config with
+  | Ok goal_task_links -> Ok (build_goal_task_index tasks ~goal_task_links)
+  | Error msg -> Error msg
+;;
+
 let build_goal_task_index_for_config config tasks =
-  build_goal_task_index tasks ~goal_task_links:(read_goal_task_links config)
+  match build_goal_task_index_for_config_result config tasks with
+  | Ok index -> index
+  | Error msg ->
+    Log.Misc.warn "build_goal_task_index_for_config failed: %s" msg;
+    build_goal_task_index tasks ~goal_task_links:[]
+;;
+
+let build_task_goal_index_for_config_result config =
+  match read_goal_task_links_r config with
+  | Ok goal_task_links -> Ok (build_task_goal_index ~goal_task_links ())
+  | Error msg -> Error msg
 ;;
 
 let build_task_goal_index_for_config config =
-  build_task_goal_index ~goal_task_links:(read_goal_task_links config) ()
+  match build_task_goal_index_for_config_result config with
+  | Ok index -> index
+  | Error msg ->
+    Log.Misc.warn "build_task_goal_index_for_config failed: %s" msg;
+    build_task_goal_index ~goal_task_links:[] ()
 ;;

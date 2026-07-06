@@ -187,39 +187,92 @@ type agent_profile = {
   interests : string list;
   activity_level : float option;
   primary_value : string option;
+  profile_errors : agent_profile_error list;
 }
 
-(** Extract persona name from MASC agent name.
-    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc" *)
-let extract_persona_name (agent_name : string) : string =
-  let s = agent_name in
-  let s =
-    if String.length s > 7 && String.starts_with ~prefix:"keeper-" s then
-      String.sub s 7 (String.length s - 7)
-    else s
-  in
-  let s =
-    if String.length s > 6 && String.sub s (String.length s - 6) 6 = "-agent" then
-      String.sub s 0 (String.length s - 6)
-    else s
-  in
-  s
+and agent_profile_error = {
+  source : agent_profile_error_source;
+  path : string option;
+  detail : string;
+}
+
+and agent_profile_error_source =
+  | Profile_identity_normalization
+  | Persona_profile_file
+
+let agent_profile_error_source_to_string = function
+  | Profile_identity_normalization -> "identity_normalization"
+  | Persona_profile_file -> "persona_profile_file"
+
+let agent_profile_error_json error =
+  `Assoc
+    [
+      ("source", `String (agent_profile_error_source_to_string error.source));
+      ("path", Json_util.string_opt_to_json error.path);
+      ("detail", `String error.detail);
+    ]
+
+let agent_profile_errors_json profile =
+  `List (List.map agent_profile_error_json profile.profile_errors)
+
+let with_profile_errors errors profile =
+  { profile with profile_errors = profile.profile_errors @ errors }
+
+let fallback_agent_profile ?(profile_errors = []) name =
+  {
+    emoji = "🤖";
+    korean_name = name;
+    model = None;
+    traits = [];
+    interests = [];
+    activity_level = None;
+    primary_value = None;
+    profile_errors;
+  }
+
+type persona_name_resolution =
+  | Persona_name_resolved of string
+  | Persona_name_invalid of agent_profile_error
+
+let resolve_persona_name agent_name =
+  match Keeper_identity.normalize_all_names ~input_agent_name:agent_name () with
+  | Ok bundle -> Persona_name_resolved bundle.persona_name
+  | Error err ->
+      let detail = Keeper_identity.show_validation_error err in
+      Log.Dashboard.warn
+        "agent profile identity normalization failed for %S: %s"
+        agent_name detail;
+      Persona_name_invalid
+        {
+          source = Profile_identity_normalization;
+          path = None;
+          detail;
+        }
+
+type persona_profile_lookup =
+  | Persona_profile_absent
+  | Persona_profile_loaded of agent_profile
+  | Persona_profile_read_error of agent_profile_error
+
+let persona_profile_path persona_name =
+  match Config_dir_resolver.personas_dir_opt () with
+  | Some personas_root ->
+      Some
+        (Filename.concat (Filename.concat personas_root persona_name) "profile.json")
+  | None -> None
 
 (** Try loading agent profile from local persona profile.json.
     Path: resolved personas root / <persona_name> / profile.json *)
-let load_persona_profile (persona_name : string) : agent_profile option =
-  let path =
-    match Config_dir_resolver.personas_dir_opt () with
-    | Some personas_root ->
-        Filename.concat
-          (Filename.concat personas_root persona_name)
-          "profile.json"
-    | None -> ""
-  in
-  if not (Sys.file_exists path) then None
-  else
-    match Safe_ops.read_json_file_safe path with
-    | Error _ -> None
+let load_persona_profile (persona_name : string) : persona_profile_lookup =
+  match persona_profile_path persona_name with
+  | None -> Persona_profile_absent
+  | Some path ->
+    if not (Sys.file_exists path) then Persona_profile_absent
+    else
+      match Safe_ops.read_json_file_safe path with
+      | Error detail ->
+          Persona_profile_read_error
+            { source = Persona_profile_file; path = Some path; detail }
     | Ok json ->
         let name_val =
           Safe_ops.json_string_opt "name" json
@@ -245,7 +298,9 @@ let load_persona_profile (persona_name : string) : agent_profile option =
             interests = [];
             activity_level = None;
             primary_value = None;
+            profile_errors = [];
           }
+        |> fun profile -> Persona_profile_loaded profile
 
 (** Neo4j agent identity cache.  Loaded lazily on first lookup; once
     populated the Hashtbl is read-only.
@@ -314,6 +369,7 @@ let populate_neo4j_identity_cache_locked () =
                   interests;
                   activity_level;
                   primary_value;
+                  profile_errors = [];
                 }
             end)
           edges
@@ -338,30 +394,29 @@ let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_pr
     interests = (if overlay.interests <> [] then overlay.interests else base.interests);
     activity_level = (match overlay.activity_level with Some _ -> overlay.activity_level | None -> base.activity_level);
     primary_value = (match overlay.primary_value with Some _ -> overlay.primary_value | None -> base.primary_value);
+    profile_errors = base.profile_errors @ overlay.profile_errors;
   }
 
-(** Get full agent profile: persona + Neo4j merged -> hardcoded fallback *)
+(** Get full agent profile: persona + Neo4j merged -> fallback profile. *)
 let get_agent_profile (name : string) : agent_profile =
-  let persona_name = extract_persona_name name in
-  let neo4j_profile = lookup_neo4j_profile persona_name in
-  let persona_profile = load_persona_profile persona_name in
-  match (persona_profile, neo4j_profile) with
-  | (Some persona, Some neo4j) ->
+  let persona_profile_lookup, neo4j_profile, identity_errors =
+    match resolve_persona_name name with
+    | Persona_name_resolved persona_name ->
+        load_persona_profile persona_name, lookup_neo4j_profile persona_name, []
+    | Persona_name_invalid error -> Persona_profile_absent, None, [ error ]
+  in
+  match (persona_profile_lookup, neo4j_profile) with
+  | (Persona_profile_loaded persona, Some neo4j) ->
       (* Merge: Neo4j has emoji/traits/interests, persona has model/korean_name *)
       merge_profiles ~base:persona ~overlay:neo4j
-  | (Some persona, None) -> persona
-  | (None, Some neo4j) -> neo4j
-  | (None, None) ->
-      (* Generic fallback — no persona or Neo4j data available *)
-      {
-        emoji = "🤖";
-        korean_name = name;
-        model = None;
-        traits = [];
-        interests = [];
-        activity_level = None;
-        primary_value = None;
-      }
+      |> with_profile_errors identity_errors
+  | (Persona_profile_loaded persona, None) -> with_profile_errors identity_errors persona
+  | (Persona_profile_absent, Some neo4j) -> with_profile_errors identity_errors neo4j
+  | (Persona_profile_absent, None) -> fallback_agent_profile ~profile_errors:identity_errors name
+  | (Persona_profile_read_error error, Some neo4j) ->
+      with_profile_errors (identity_errors @ [ error ]) neo4j
+  | (Persona_profile_read_error error, None) ->
+      fallback_agent_profile ~profile_errors:(identity_errors @ [ error ]) name
 
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id
     ~focus_kind () =

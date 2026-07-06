@@ -2135,6 +2135,8 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
   in
   Alcotest.(check bool) "mentions unknown keeper internal tool" true
     (contains_substring msg "Unknown tool: keeper_time_now");
+  Alcotest.(check bool) "does not include did-you-mean suggestion" false
+    (contains_substring msg "did you mean");
   cleanup_dir base_path
 
 let tool_names_from_list_response response =
@@ -2248,6 +2250,8 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
       in
       Alcotest.(check bool) "mentions retired tool_execute" true
         (contains_substring msg "Unknown tool: tool_execute");
+      Alcotest.(check bool) "does not include did-you-mean suggestion" false
+        (contains_substring msg "did you mean");
       Alcotest.(check bool) "mentions registry inconsistency" true
         (contains_substring msg "registry inconsistency"))
 
@@ -2822,6 +2826,76 @@ Alpha body
     cases;
   cleanup_dir base_path
 
+let test_handle_request_status_json_reports_backlog_read_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let config = Mcp_server.workspace_config state in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "fixture-root"));
+  let remove_if_exists path =
+    if Sys.file_exists path then Sys.remove path
+  in
+  remove_if_exists (Masc.Workspace.backlog_path config);
+  remove_if_exists (Masc.Workspace.backlog_recovery_path config);
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 251);
+          ("method", `String "resources/read");
+          ("params", `Assoc [ ("uri", `String "masc://status.json") ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check string) "status.json mime type" "application/json"
+    (resource_mime_type_exn response);
+  let json = response |> resource_text_exn |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "backlog status" "read_error"
+    (json |> member "backlog_status" |> to_string);
+  Alcotest.(check int) "backlog error count" 1
+    (json |> member "backlog_read_error_count" |> to_int);
+  (match json |> member "backlog" with
+   | `Null -> ()
+   | other ->
+       Alcotest.fail
+         (Printf.sprintf
+            "expected backlog=null on read error, got %s"
+            (Yojson.Safe.to_string other)));
+  (match json |> member "backlog_read_errors" |> to_list with
+   | _ :: _ -> ()
+   | [] -> Alcotest.fail "expected backlog_read_errors to explain the read failure");
+  let tasks_request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 252);
+          ("method", `String "resources/read");
+          ("params", `Assoc [ ("uri", `String "masc://tasks.json") ]);
+        ])
+  in
+  let tasks_response = Mcp_eio.handle_request ~clock ~sw state tasks_request in
+  Alcotest.(check string) "tasks.json mime type" "application/json"
+    (resource_mime_type_exn tasks_response);
+  let tasks_json = tasks_response |> resource_text_exn |> Yojson.Safe.from_string in
+  Alcotest.(check string) "tasks backlog status" "read_error"
+    (tasks_json |> member "backlog_status" |> to_string);
+  Alcotest.(check int) "tasks backlog error count" 1
+    (tasks_json |> member "backlog_read_error_count" |> to_int);
+  (match tasks_json |> member "tasks" with
+   | `Null -> ()
+   | other ->
+       Alcotest.fail
+         (Printf.sprintf
+            "expected tasks=null on backlog read error, got %s"
+            (Yojson.Safe.to_string other)));
+  cleanup_dir base_path
+
 let test_handle_request_resources_subscribe_requires_session () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2996,6 +3070,8 @@ let eio_tests = [
     test_handle_request_resources_list_paginates;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
   "handle resources/read matrix", `Quick, test_handle_request_resources_read_matrix;
+  "handle resources/read status.json reports backlog read error", `Quick,
+    test_handle_request_status_json_reports_backlog_read_error;
   "handle resources/templates/list rejects invalid cursor", `Quick,
     test_handle_request_resources_templates_rejects_invalid_cursor;
   "handle resources/subscribe requires session", `Quick,

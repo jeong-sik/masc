@@ -47,6 +47,71 @@ type dashboard_perf_compare_row =
   ; verdict : string
   }
 
+let dashboard_perf_read_error_json ?line_index ~source ~path ~kind ~message () =
+  let fields =
+    [ "source", `String source
+    ; "path", `String path
+    ; "kind", `String kind
+    ; "message", `String message
+    ]
+  in
+  let fields =
+    match line_index with
+    | None -> fields
+    | Some value -> fields @ [ "line_index", `Int value ]
+  in
+  `Assoc fields
+;;
+
+let path_exists_result path =
+  try Ok (Sys.file_exists path) with
+  | Sys_error message -> Error message
+;;
+
+let path_exists path =
+  match path_exists_result path with
+  | Ok value -> value
+  | Error _ -> false
+;;
+
+let is_directory_result path =
+  try Ok (Sys.is_directory path) with
+  | Sys_error message -> Error message
+;;
+
+let is_directory path =
+  match is_directory_result path with
+  | Ok value -> value
+  | Error _ -> false
+;;
+
+let existing_directory_candidate ~source path =
+  match path_exists_result path with
+  | Error message ->
+    ( None
+    , [ dashboard_perf_read_error_json
+          ~source
+          ~path
+          ~kind:"path_exists_error"
+          ~message
+          ()
+      ] )
+  | Ok false -> None, []
+  | Ok true ->
+    (match is_directory_result path with
+     | Ok true -> Some path, []
+     | Ok false -> None, []
+     | Error message ->
+       ( None
+       , [ dashboard_perf_read_error_json
+             ~source
+             ~path
+             ~kind:"directory_probe_error"
+             ~message
+             ()
+         ] ))
+;;
+
 let dedupe_strings values =
   List.fold_left
     (fun acc value -> if value = "" || List.mem value acc then acc else acc @ [ value ])
@@ -100,7 +165,7 @@ let display_benchmark_path (config : Workspace.config) path =
   | None -> Filename.basename path
 ;;
 
-let benchmark_results_dir_candidates (config : Workspace.config) =
+let benchmark_results_dir_candidates_with_read_errors (config : Workspace.config) =
   let env_dir =
     match Sys.getenv_opt "MASC_BENCHMARK_RESULTS_DIR" with
     | Some "" | None -> None
@@ -115,35 +180,120 @@ let benchmark_results_dir_candidates (config : Workspace.config) =
     (match String_util.trim_to_option (Option.value ~default:"" env_dir) with
      | Some dir -> [ dir ]
      | None -> scoped_dirs)
-  |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
+  |> List.fold_left
+       (fun (dirs, read_errors) path ->
+          let candidate, candidate_errors =
+            existing_directory_candidate
+              ~source:"dashboard_perf_candidate_dir"
+              path
+          in
+          let dirs =
+            match candidate with
+            | None -> dirs
+            | Some dir -> dirs @ [ dir ]
+          in
+          dirs, read_errors @ candidate_errors)
+       ([], [])
+;;
+
+let benchmark_results_dir_candidates (config : Workspace.config) =
+  let dirs, _read_errors =
+    benchmark_results_dir_candidates_with_read_errors config
+  in
+  dirs
+;;
+
+let benchmark_result_files_with_read_errors results_dir =
+  let entries =
+    try Sys.readdir results_dir |> Array.to_list with
+    | Sys_error message ->
+      []
+      , [ dashboard_perf_read_error_json
+            ~source:"dashboard_perf_results_dir"
+            ~path:results_dir
+            ~kind:"directory_read_error"
+            ~message
+            ()
+        ]
+  in
+  match entries with
+  | [], (_ :: _ as read_errors) -> [], read_errors
+  | entries, [] ->
+    ( entries
+      |> List.filter (fun name ->
+        String.starts_with ~prefix:"results_" name && Filename.check_suffix name ".csv")
+      |> List.map (Filename.concat results_dir)
+      |> List.filter path_exists
+    , [] )
 ;;
 
 let benchmark_result_files results_dir =
-  let entries =
-    try Sys.readdir results_dir |> Array.to_list with
-    | Sys_error _ -> []
+  let files, _read_errors = benchmark_result_files_with_read_errors results_dir in
+  files
+;;
+
+let latest_file_by_mtime_with_read_errors files =
+  let stats, read_errors =
+    List.fold_left
+      (fun (stats, read_errors) path ->
+         match
+           try Ok (Unix.stat path) with
+           | Unix.Unix_error (err, fn, arg) ->
+             Error
+               (Printf.sprintf "%s %s: %s" fn arg (Unix.error_message err))
+           | Sys_error msg -> Error msg
+         with
+         | Ok stat -> (path, stat.Unix.st_mtime) :: stats, read_errors
+         | Error message ->
+           ( stats
+           , read_errors
+             @ [ dashboard_perf_read_error_json
+                   ~source:"dashboard_perf_result_file"
+                   ~path
+                   ~kind:"stat_read_error"
+                   ~message
+                   ()
+               ] ))
+      ([], [])
+      files
   in
-  entries
-  |> List.filter (fun name ->
-    String.starts_with ~prefix:"results_" name && Filename.check_suffix name ".csv")
-  |> List.map (Filename.concat results_dir)
-  |> List.filter (fun path -> Sys.file_exists path)
+  let latest =
+    stats
+    |> List.sort (fun (_, left) (_, right) -> Float.compare right left)
+    |> List.map fst
+    |> list_hd_opt
+  in
+  latest, read_errors
 ;;
 
 let latest_file_by_mtime files =
-  files
-  |> List.filter_map (fun path ->
-    try Some (path, (Unix.stat path).Unix.st_mtime) with
-    | Unix.Unix_error _ | Sys_error _ -> None)
-  |> List.sort (fun (_, left) (_, right) -> Float.compare right left)
-  |> List.map fst
-  |> list_hd_opt
+  let latest, _read_errors = latest_file_by_mtime_with_read_errors files in
+  latest
+;;
+
+let latest_benchmark_result_file_with_read_errors (config : Workspace.config) =
+  let candidate_dirs, candidate_errors =
+    benchmark_results_dir_candidates_with_read_errors config
+  in
+  let files, discovery_errors =
+    candidate_dirs
+    |> List.fold_left
+         (fun (files, read_errors) results_dir ->
+            let dir_files, dir_errors =
+              benchmark_result_files_with_read_errors results_dir
+            in
+            files @ dir_files, read_errors @ dir_errors)
+         ([], [])
+  in
+  let latest, stat_errors = latest_file_by_mtime_with_read_errors files in
+  latest, candidate_errors @ discovery_errors @ stat_errors
 ;;
 
 let latest_benchmark_result_file (config : Workspace.config) =
-  benchmark_results_dir_candidates config
-  |> List.concat_map benchmark_result_files
-  |> latest_file_by_mtime
+  let latest, _read_errors =
+    latest_benchmark_result_file_with_read_errors config
+  in
+  latest
 ;;
 
 let split_csv_row line =
@@ -156,37 +306,101 @@ let split_csv_row line =
 
 let int_of_string_opt raw = int_of_string_opt (String.trim raw)
 
-let load_benchmark_rows path =
+let load_benchmark_rows_with_read_errors path =
   let lines =
     try Fs_compat.load_file path |> String.split_on_char '\n' with
-    | Sys_error _ -> []
+    | Sys_error message ->
+      []
+      , [ dashboard_perf_read_error_json
+            ~source:"dashboard_perf_result_csv"
+            ~path
+            ~kind:"file_read_error"
+            ~message
+            ()
+        ]
   in
-  lines
-  |> List.filter_map (fun line ->
-    let trimmed = String.trim line in
-    if trimmed = "" || String.starts_with ~prefix:"benchmark," trimmed
-    then None
-    else (
-      match split_csv_row trimmed with
-      | Some (benchmark, avg_ms, p50_ms, p95_ms, max_ms, notes) ->
-        (match
-           ( int_of_string_opt avg_ms
-           , int_of_string_opt p50_ms
-           , int_of_string_opt p95_ms
-           , int_of_string_opt max_ms )
-         with
-         | Some avg_ms, Some p50_ms, Some p95_ms, Some max_ms ->
-           Some { benchmark; avg_ms; p50_ms; p95_ms; max_ms; notes }
-         | _ -> None)
-      | None -> None))
+  match lines with
+  | [], (_ :: _ as read_errors) -> [], read_errors
+  | lines, [] ->
+    lines
+    |> List.mapi (fun index line -> index + 1, String.trim line)
+    |> List.fold_left
+         (fun (rows, read_errors) (line_index, trimmed) ->
+            if trimmed = "" || String.starts_with ~prefix:"benchmark," trimmed
+            then rows, read_errors
+            else
+              match split_csv_row trimmed with
+              | None ->
+                ( rows
+                , read_errors
+                  @ [ dashboard_perf_read_error_json
+                        ~source:"dashboard_perf_result_csv"
+                        ~path
+                        ~line_index
+                        ~kind:"csv_row_parse_error"
+                        ~message:"expected benchmark,avg_ms,p50_ms,p95_ms,max_ms,notes"
+                        ()
+                    ] )
+              | Some (benchmark, avg_ms, p50_ms, p95_ms, max_ms, notes) ->
+                (match
+                   ( int_of_string_opt avg_ms
+                   , int_of_string_opt p50_ms
+                   , int_of_string_opt p95_ms
+                   , int_of_string_opt max_ms )
+                 with
+                 | Some avg_ms, Some p50_ms, Some p95_ms, Some max_ms ->
+                   ( { benchmark; avg_ms; p50_ms; p95_ms; max_ms; notes }
+                     :: rows
+                   , read_errors )
+                 | _ ->
+                   ( rows
+                   , read_errors
+                     @ [ dashboard_perf_read_error_json
+                           ~source:"dashboard_perf_result_csv"
+                           ~path
+                           ~line_index
+                           ~kind:"csv_number_parse_error"
+                           ~message:"expected integer avg_ms/p50_ms/p95_ms/max_ms"
+                           ()
+                       ] )))
+         ([], [])
+    |> fun (rows, read_errors) -> List.rev rows, read_errors
+;;
+
+let load_benchmark_rows path =
+  let rows, _read_errors = load_benchmark_rows_with_read_errors path in
+  rows
+;;
+
+let load_benchmark_meta_with_read_errors path =
+  if
+    path_exists path
+  then (
+    try Some (Yojson.Safe.from_file path), [] with
+    | Yojson.Json_error message ->
+      ( None
+      , [ dashboard_perf_read_error_json
+            ~source:"dashboard_perf_meta_json"
+            ~path
+            ~kind:"json_parse_error"
+            ~message
+            ()
+        ] )
+    | Sys_error message ->
+      ( None
+      , [ dashboard_perf_read_error_json
+            ~source:"dashboard_perf_meta_json"
+            ~path
+            ~kind:"file_read_error"
+            ~message
+            ()
+        ] ))
+  else None, []
 ;;
 
 let load_benchmark_meta path =
-  if Sys.file_exists path
-  then (
-    try Some (Yojson.Safe.from_file path) with
-    | Yojson.Json_error _ | Sys_error _ -> None)
-  else None
+  let meta, _read_errors = load_benchmark_meta_with_read_errors path in
+  meta
 ;;
 
 let note_tags_json notes =
@@ -280,17 +494,30 @@ let dashboard_perf_compare_row_json (row : dashboard_perf_compare_row) =
     ]
 ;;
 
-let baseline_file_for ~current_file ~meta =
+let baseline_file_for_with_read_errors ~current_file ~meta =
   match meta with
   | Some json ->
     (match json_string_field_opt "compare_baseline_file" json with
-     | Some path when Sys.file_exists path -> Some path
-     | _ -> None)
+     | Some path when path_exists path -> Some path, []
+     | _ -> None, [])
   | None ->
     let results_dir = Filename.dirname current_file in
-    benchmark_result_files results_dir
-    |> List.filter (fun path -> not (String.equal path current_file))
-    |> latest_file_by_mtime
+    let files, discovery_errors =
+      benchmark_result_files_with_read_errors results_dir
+    in
+    let latest, stat_errors =
+      files
+      |> List.filter (fun path -> not (String.equal path current_file))
+      |> latest_file_by_mtime_with_read_errors
+    in
+    latest, discovery_errors @ stat_errors
+;;
+
+let baseline_file_for ~current_file ~meta =
+  let baseline_file, _read_errors =
+    baseline_file_for_with_read_errors ~current_file ~meta
+  in
+  baseline_file
 ;;
 
 let benchmark_source_json config ~results_dir ~result_file ~meta_file ~baseline_file =
@@ -372,11 +599,14 @@ let verdict_counts_json rows =
 ;;
 
 let dashboard_perf_compute (config : Workspace.config) : Yojson.Safe.t =
-  match latest_benchmark_result_file config with
-  | None ->
+  match latest_benchmark_result_file_with_read_errors config with
+  | None, read_errors ->
+    let status = if read_errors = [] then "empty" else "unknown" in
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "status", `String "empty"
+      ; "status", `String status
+      ; "read_error_count", `Int (List.length read_errors)
+      ; "read_errors", `List read_errors
       ; "benchmarks", `List []
       ; "comparison", `Null
       ; ( "candidate_dirs"
@@ -385,25 +615,48 @@ let dashboard_perf_compute (config : Workspace.config) : Yojson.Safe.t =
              |> List.map (fun path -> `String (display_benchmark_path config path))) )
       ; "message", `String "No benchmark artifacts found"
       ]
-  | Some result_file ->
+  | Some result_file, discovery_errors ->
     let results_dir = Filename.dirname result_file in
-    let rows = load_benchmark_rows result_file in
+    let rows, row_read_errors = load_benchmark_rows_with_read_errors result_file in
     let meta_file =
       let path = Filename.chop_suffix result_file ".csv" ^ ".meta.json" in
-      if Sys.file_exists path then Some path else None
+      if path_exists path then Some path else None
     in
-    let meta = Option.bind meta_file load_benchmark_meta in
-    let baseline_file = baseline_file_for ~current_file:result_file ~meta in
-    let comparison_rows =
+    let meta, meta_read_errors =
+      match meta_file with
+      | None -> None, []
+      | Some path -> load_benchmark_meta_with_read_errors path
+    in
+    let baseline_file, baseline_discovery_errors =
+      baseline_file_for_with_read_errors ~current_file:result_file ~meta
+    in
+    let comparison_rows, baseline_read_errors =
       match baseline_file with
       | Some path ->
-        let baseline_rows = load_benchmark_rows path in
-        compare_rows ~baseline:baseline_rows ~current:rows
-      | None -> []
+        let baseline_rows, read_errors =
+          load_benchmark_rows_with_read_errors path
+        in
+        compare_rows ~baseline:baseline_rows ~current:rows, read_errors
+      | None -> [], []
+    in
+    let read_errors =
+      discovery_errors
+      @ row_read_errors
+      @ meta_read_errors
+      @ baseline_discovery_errors
+      @ baseline_read_errors
+    in
+    let status =
+      match rows, read_errors with
+      | [], _ :: _ -> "unknown"
+      | _, _ :: _ -> "degraded"
+      | _ -> "ok"
     in
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "status", `String "ok"
+      ; "status", `String status
+      ; "read_error_count", `Int (List.length read_errors)
+      ; "read_errors", `List read_errors
       ; ( "source"
         , benchmark_source_json config ~results_dir ~result_file ~meta_file ~baseline_file
         )

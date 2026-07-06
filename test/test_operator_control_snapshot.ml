@@ -723,6 +723,44 @@ let test_snapshot_has_expected_sections () =
         | `List _ -> true
         | _ -> false))
 
+let test_snapshot_keepers_surfaces_keeper_name_discovery_failure () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      replace_path_with_file
+        (Keeper_types_profile.keeper_dir config)
+        "not a keeper directory";
+      let json =
+        Operator_control.snapshot_json ~view:"keepers"
+          (operator_ctx env sw config "owner")
+      in
+      let keepers = Yojson.Safe.Util.(json |> member "keepers") in
+      Alcotest.(check int) "no keeper rows on discovery failure" 0
+        Yojson.Safe.Util.(keepers |> member "count" |> to_int);
+      Alcotest.(check bool) "keeper names marked unknown" false
+        Yojson.Safe.Util.(keepers |> member "keeper_names_known" |> to_bool);
+      Alcotest.(check int) "one discovery read error" 1
+        Yojson.Safe.Util.(
+          keepers |> member "keeper_name_discovery_read_error_count" |> to_int);
+      let read_errors =
+        Yojson.Safe.Util.(keepers |> member "read_errors" |> to_list)
+      in
+      match read_errors with
+      | [ error ] ->
+        Alcotest.(check string) "read error source" "keeper_names_result"
+          Yojson.Safe.Util.(error |> member "source" |> to_string);
+        Alcotest.(check bool) "read error mentions keepers path" true
+          (String_util.contains_substring_ci
+             Yojson.Safe.Util.(error |> member "error" |> to_string)
+             "keepers")
+      | _ -> Alcotest.fail "expected one keeper discovery read error")
+
 let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1066,6 +1104,173 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
         []
         Yojson.Safe.Util.
           (keeper |> member "latest_tool_names" |> to_list |> List.map to_string))
+
+let test_snapshot_surfaces_tool_audit_parse_errors () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio_guard.enable ();
+  Dashboard_cache.invalidate_all ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Eio_guard.disable ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let keeper_ctx : _ Keeper_tool_surface.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_name = "tool-audit-parse-errors" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Surface tool audit parse errors");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let decision_path =
+        Keeper_types_support.keeper_decision_log_path config keeper_name
+      in
+      Fs_compat.mkdir_p (Filename.dirname decision_path);
+      let valid_decision =
+        `Assoc
+          [
+            ("ts", `String (Masc_domain.now_iso ()));
+            ("selected_mode", `String "tool_use");
+            ("tool_call_count", `Int 1);
+            ("tools_used", `List [ `String "masc_status" ]);
+          ]
+        |> Yojson.Safe.to_string
+      in
+      Fs_compat.save_file decision_path ("{not-json\n" ^ valid_decision ^ "\n");
+      let meta =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "expected keeper meta"
+        | Error err -> Alcotest.fail err
+      in
+      Dashboard_cache.invalidate_all ();
+      let audit =
+        Operator_control_snapshot.cached_tool_audit_json ~lightweight:false
+          config meta
+      in
+      Alcotest.(check int)
+        "tool audit parse error count"
+        1
+        Yojson.Safe.Util.(
+          audit |> member "tool_audit_read_error_count" |> to_int);
+      Alcotest.(check (list string))
+        "valid recent tool survives parse error"
+        [ "masc_status" ]
+        Yojson.Safe.Util.(
+          audit |> member "recent_tool_names" |> to_list |> List.map to_string);
+      let audit_errors =
+        Yojson.Safe.Util.(audit |> member "tool_audit_read_errors" |> to_list)
+      in
+      Alcotest.(check bool)
+        "audit error source is typed"
+        true
+        (List.exists
+           (fun error ->
+              Yojson.Safe.Util.(error |> member "source" |> to_string)
+              = "operator_tool_audit_decisions_jsonl")
+           audit_errors);
+      let metrics_path =
+        Keeper_types_support.keeper_metrics_path config keeper_name
+      in
+      Fs_compat.mkdir_p (Filename.dirname metrics_path);
+      let valid_metrics =
+        `Assoc
+          [
+            ("ts_unix", `Float (Unix.gettimeofday ()));
+            ("channel", `String "turn");
+            ("snapshot_source", `String "keeper_context_status");
+            ("context_ratio", `Float 0.5);
+            ("context_tokens", `Int 128);
+            ("context_max", `Int 512);
+            ("tool_call_count", `Int 0);
+            ("tools_used", `List []);
+          ]
+        |> Yojson.Safe.to_string
+      in
+      Fs_compat.save_file metrics_path ("{not-json\n" ^ valid_metrics ^ "\n");
+      Operator_control.invalidate_snapshot_cache ();
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:false
+          ~lightweight_summary:false
+          (operator_ctx env sw config "owner")
+      in
+      let keepers = Yojson.Safe.Util.(json |> member "keepers") in
+      let keeper =
+        match
+          Yojson.Safe.Util.(keepers |> member "items" |> to_list)
+          |> List.find_opt (fun row ->
+                 Yojson.Safe.Util.(row |> member "name" |> to_string)
+                 = keeper_name)
+        with
+        | Some keeper -> keeper
+        | None -> Alcotest.fail "expected keeper in snapshot"
+      in
+      Alcotest.(check int)
+        "snapshot row exposes tool audit parse error count"
+        1
+        Yojson.Safe.Util.(
+          keeper |> member "tool_audit_read_error_count" |> to_int);
+      Alcotest.(check int)
+        "snapshot row exposes recent activity parse error count"
+        1
+        Yojson.Safe.Util.(
+          keeper |> member "recent_activity_read_error_count" |> to_int);
+      Alcotest.(check int)
+        "snapshot row exposes context parse error count"
+        1
+        Yojson.Safe.Util.(keeper |> member "context_read_error_count" |> to_int);
+      Alcotest.(check string)
+        "valid context row survives malformed neighbor"
+        "keeper_context_status"
+        Yojson.Safe.Util.(keeper |> member "context_source" |> to_string);
+      Alcotest.(check int)
+        "valid recent activity survives malformed neighbor"
+        1
+        Yojson.Safe.Util.(keeper |> member "recent_activity" |> to_list |> List.length);
+      Alcotest.(check bool)
+        "snapshot keepers section exposes read error"
+        true
+        (Yojson.Safe.Util.(keepers |> member "read_errors" |> to_list) <> []);
+      Alcotest.(check bool)
+        "snapshot keepers section exposes recent activity read error"
+        true
+        (List.exists
+           (fun error ->
+              Yojson.Safe.Util.(error |> member "source" |> to_string)
+              = "operator_recent_activity_metrics_jsonl")
+           Yojson.Safe.Util.(keepers |> member "read_errors" |> to_list));
+      Alcotest.(check bool)
+        "snapshot keepers section exposes context read error"
+        true
+        (List.exists
+           (fun error ->
+              Yojson.Safe.Util.(error |> member "source" |> to_string)
+              = "operator_context_snapshot_metrics_jsonl")
+           Yojson.Safe.Util.(keepers |> member "read_errors" |> to_list)))
 
 (* Snapshot cache behavioural tests live in
    [test_operator_control_snapshot_cache.ml]; they drive the public

@@ -30,14 +30,23 @@ let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
 (* Git Root Detection (Worktree Support)        *)
 (* ============================================ *)
 
-(** Read .git file content (for worktrees) *)
-let read_git_file path =
+(** Read .git file content (for worktrees). *)
+let read_git_file_result path =
   match Safe_ops.read_file_safe path with
   | Ok content ->
     (match String.split_on_char '\n' content with
-     | line :: _ -> Some (String.trim line)
-     | [] -> None)
-  | Error _ -> None
+     | line :: _ -> Ok (Some (String.trim line))
+     | [] -> Ok None)
+  | Error err -> Error err
+
+(** Compatibility facade for callers that only know how to project
+    unreadable worktree pointers to local git-root fallback. *)
+let read_git_file path =
+  match read_git_file_result path with
+  | Ok value -> value
+  | Error err ->
+    Log.Workspace.warn "read_git_file failed for %s: %s" path err;
+    None
 
 (** Parse gitdir from .git file
     Format: "gitdir: /path/to/main/.git/worktrees/branch-name"

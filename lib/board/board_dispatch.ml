@@ -82,6 +82,7 @@ type board_signal = {
   author : string;
   title : string;
   content : string;
+  mention_ids : Board.Mention_id.t list;
   hearth : string option;
   updated_at : float option;
 }
@@ -153,7 +154,10 @@ let start_flusher_actor ~sw store =
     while true do
       match Eio.Stream.take store.Board.flusher_inbox with
       | Board_types.Flush ->
-          (try Board.flush_dirty store
+          (try
+             match Board.flush_dirty store with
+             | Ok () -> ()
+             | Error e -> Log.BoardLog.error "Flush failed: %s" (Board.show_board_error e)
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
@@ -357,6 +361,7 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
               author = auth;
               title = post.title;
               content = post.content;
+              mention_ids = post.mention_ids;
               hearth = post.hearth;
               updated_at = Some post.updated_at;
             };
@@ -491,6 +496,7 @@ let add_comment ~post_id ~author ~content ?parent_id
                   author = auth;
                   title = post.title;
                   content;
+                  mention_ids = comment.mention_ids;
                   hearth = post.hearth;
                   updated_at = Some post.updated_at;
                 }
@@ -627,7 +633,10 @@ let search ~query ~limit =
 
 let flush () =
   match Atomic.get backend_state with
-  | Active (Jsonl store, _) -> Board.flush_dirty store
+  | Active (Jsonl store, _) ->
+      (match Board.flush_dirty store with
+       | Ok () -> ()
+       | Error e -> Log.BoardLog.error "Board flush failed: %s" (Board.show_board_error e))
   | Uninitialized -> ()
 
 let sweep () =

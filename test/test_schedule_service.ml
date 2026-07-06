@@ -22,6 +22,14 @@ let rm_rf dir =
   | _ -> ()
 ;;
 
+let write_text path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
@@ -77,6 +85,31 @@ let check_service_error label expected = function
     check string label (service_error_to_string expected) (service_error_to_string actual)
 ;;
 
+let corrupt_schedule_ledger config =
+  write_text (Schedule_store.schedules_path config) "{not-json"
+;;
+
+let assert_corrupt_read_ledger label = function
+  | Error
+      (Schedule_store.Corrupt_read_ledger
+        { primary_err; recovery_err = Some _ }) ->
+    check bool (label ^ " primary error visible") true (String.length primary_err > 0)
+  | Error (Schedule_store.Corrupt_read_ledger { recovery_err = None; _ }) ->
+    fail (label ^ ": expected recovery read failure detail")
+  | Ok _ -> fail (label ^ ": expected corrupt read ledger")
+;;
+
+let assert_corrupt_service_error label = function
+  | Error
+      (Store_error
+        (Schedule_store.Corrupt_ledger { primary_err; recovery_err = Some _ })) ->
+    check bool (label ^ " primary error visible") true (String.length primary_err > 0)
+  | Error (Store_error (Schedule_store.Corrupt_ledger { recovery_err = None; _ })) ->
+    fail (label ^ ": expected recovery read failure detail")
+  | Error err -> fail (label ^ ": " ^ service_error_to_string err)
+  | Ok _ -> fail (label ^ ": expected corrupt ledger service error")
+;;
+
 let test_create_mints_schedule_id () =
   with_workspace
   @@ fun config ->
@@ -101,6 +134,14 @@ let test_list_and_get_by_status () =
   (match get config ~schedule_id:scheduled.schedule_id with
    | Some stored -> check string "scheduled id" scheduled.schedule_id stored.schedule_id
    | None -> fail "scheduled missing")
+;;
+
+let test_list_and_get_result_report_corrupt_ledger () =
+  with_workspace
+  @@ fun config ->
+  corrupt_schedule_ledger config;
+  assert_corrupt_read_ledger "list_result" (list_result config ());
+  assert_corrupt_read_ledger "get_result" (get_result config ~schedule_id:"missing")
 ;;
 
 let test_approve_separate_human () =
@@ -170,6 +211,15 @@ let test_missing_schedule_approval_reports_store_error () =
        ~schedule_id:"missing" ~approved_by:(human "approver") ())
 ;;
 
+let test_approval_reports_corrupt_ledger_as_store_error () =
+  with_workspace
+  @@ fun config ->
+  corrupt_schedule_ledger config;
+  assert_corrupt_service_error "approve corrupt ledger"
+    (approve config ~grant_id:"grant-corrupt" ~approved_at:150.0
+       ~schedule_id:"missing" ~approved_by:(human "approver") ())
+;;
+
 let () =
   run "Schedule_service"
     [
@@ -177,6 +227,8 @@ let () =
         [
           test_case "create mints schedule id" `Quick test_create_mints_schedule_id;
           test_case "list and get by status" `Quick test_list_and_get_by_status;
+          test_case "list/get result report corrupt ledger" `Quick
+            test_list_and_get_result_report_corrupt_ledger;
         ] );
       ( "approval",
         [
@@ -185,6 +237,8 @@ let () =
           test_case "reject marks rejected" `Quick test_reject_marks_rejected;
           test_case "missing schedule reports store error" `Quick
             test_missing_schedule_approval_reports_store_error;
+          test_case "approval reports corrupt ledger as store error" `Quick
+            test_approval_reports_corrupt_ledger_as_store_error;
         ] );
       ( "due",
         [

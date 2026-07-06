@@ -166,6 +166,26 @@ let inject_stale_failure_count_for_test counts key count =
 open Keeper_tools_oas_workflow
 open Keeper_tools_oas_deterministic_error
 
+type structured_error_payload_parse_error =
+  | Structured_error_payload_json_decode_error of string
+  | Structured_error_payload_non_object of { received : string }
+
+let structured_error_payload_parse_error_to_string = function
+  | Structured_error_payload_json_decode_error message ->
+    "json_decode_error: " ^ message
+  | Structured_error_payload_non_object { received } ->
+    Printf.sprintf "non_object: %s" received
+;;
+
+let structured_error_payload_fields_result error_msg =
+  match Yojson.Safe.from_string error_msg with
+  | exception Yojson.Json_error message ->
+    Error (Structured_error_payload_json_decode_error message)
+  | `Assoc fields -> Ok fields
+  | other ->
+    Error (Structured_error_payload_non_object { received = Json_util.kind_name other })
+;;
+
 (** Normalize a raw tool result string into a consistent JSON envelope.
 
     The LLM sees this output directly. Without normalization, tool results
@@ -192,14 +212,6 @@ let normalize_tool_result
         (List.mem
            key
            [ "ok"; "error"; "detail"; "result"; "output"; "message"; "status" ]))
-  in
-  let structured_error_payload error_msg =
-    try
-      match Yojson.Safe.from_string error_msg with
-      | `Assoc fields -> Some fields
-      | _ -> None
-    with
-    | Yojson.Json_error _ -> None
   in
   let merge_metadata primary secondary =
     let primary_keys = List.map fst primary in
@@ -242,15 +254,17 @@ let normalize_tool_result
                  | _ -> "tool call failed")))
       in
       let error_msg, nested_fields =
-        match structured_error_payload error_msg with
-        | Some fields ->
+        match structured_error_payload_fields_result error_msg with
+        | Ok fields ->
           let nested_error =
             match List.assoc_opt "error" fields with
             | Some (`String msg) when String.trim msg <> "" -> msg
             | _ -> error_msg
           in
           nested_error, metadata_from_assoc fields
-        | None -> error_msg, []
+        | Error (Structured_error_payload_json_decode_error _)
+        | Error (Structured_error_payload_non_object _) ->
+          error_msg, []
       in
       let preserved_fields =
         (match json with

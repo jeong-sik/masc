@@ -50,10 +50,12 @@ val write_text_file : string -> string -> unit
     per-[run.json] file locks to prevent lost updates across
     concurrent fibers. *)
 
+val write_run_result :
+  Workspace_utils.config -> run_record -> (unit, string) result
+
 val write_run : Workspace_utils.config -> run_record -> unit
 
-val read_run :
-  Workspace_utils.config -> string -> (run_record, string) result
+val read_run : Workspace_utils.config -> string -> (run_record, string) result
 
 (** [init config ~task_id ~agent_name] creates the run directory,
     a default [plan.md], and writes an initial [run.json]. *)

@@ -1146,6 +1146,11 @@ export function RuntimeLensSection({
   const artifacts = trace.linked_artifacts
   const clockEdges = lens.clock_edges
   const clockGroups = lens.clock_groups
+  const claimScopeValue = claim.read_error
+    ? `${claim.status} / ${claim.read_error}`
+    : claim.present
+      ? `${claim.mode ?? 'unknown'} / ${claim.status}`
+      : 'not observed'
   const swimlanes = [
     lens.swimlanes.keeper,
     lens.swimlanes.masc_policy_runtime,
@@ -1163,7 +1168,7 @@ export function RuntimeLensSection({
         <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
         <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
-        <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
+        <${SignalRow} label="claim scope" value=${claimScopeValue} />
         <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />

@@ -364,15 +364,23 @@ let save_posts_jsonl content =
     ensure_masc_dir ();
     let path = persist_path () in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_posts" msg
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_posts" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
 ;;
+
 let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)
 ;;
+
+let restore_post_after_rewrite_failure store (post : post) =
+  with_lock store (fun () ->
+    Hashtbl.replace store.posts (Post_id.to_string post.id) post;
+    invalidate_post_caches store)
+;;
+
 let rewrite_comments store =
   try
     ensure_masc_dir ();
@@ -384,10 +392,10 @@ let rewrite_comments store =
          Buffer.add_char buf '\n')
       store.comments;
     match Fs_compat.save_file_atomic path (Buffer.contents buf) with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_comments" msg
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_comments" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_comments" msg
 ;;
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -403,14 +411,16 @@ let save_reactions_jsonl content =
     ensure_masc_dir ();
     let path = reactions_path () in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_reactions" msg
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_reactions" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_reactions" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
 ;;
+
 let rewrite_reactions_unlocked store =
   save_reactions_jsonl (reactions_jsonl_unlocked store)
 ;;
+
 let rewrite_reactions store =
   let content = with_lock store (fun () -> reactions_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_reactions_jsonl content)
@@ -517,6 +527,11 @@ let post_of_create_post_outcome = function
 let status_rollup_task_id = Board_core_status_rollup.status_rollup_task_id
 let is_status_rollup_candidate = Board_core_status_rollup.is_status_rollup_candidate
 let find_status_rollup_target_unlocked = Board_core_status_rollup.find_status_rollup_target_unlocked
+
+let post_mention_ids ~title ~body =
+  Mention_id.mention_ids_of_post_fields ~title ~body
+;;
+
 let create_post_with_outcome
       store
       ~author
@@ -625,6 +640,7 @@ let create_post_with_outcome
                     ; title = normalized_title
                     ; body = normalized_body
                     ; content = normalized_body
+                    ; mention_ids = post_mention_ids ~title:normalized_title ~body:normalized_body
                     ; post_kind = normalized_kind
                     ; meta_json = normalized_meta
                     ; visibility
@@ -677,6 +693,7 @@ let create_post_with_outcome
                         title = normalized_title
                       ; body = normalized_body
                       ; content = normalized_body
+                      ; mention_ids = post_mention_ids ~title:normalized_title ~body:normalized_body
                       ; post_kind = normalized_kind
                       ; meta_json = normalized_meta
                       ; updated_at = now
@@ -694,7 +711,7 @@ let create_post_with_outcome
                       task_id
                       existing_id
                       (String.length normalized_body);
-                    Ok (`Rolled_up (updated, posts_jsonl_unlocked store))
+                    Ok (`Rolled_up (existing, updated, posts_jsonl_unlocked store))
                   | None -> create_fresh ())
                | None -> create_fresh ())))
       in
@@ -716,9 +733,12 @@ let create_post_with_outcome
          | Error e ->
            rollback_fresh_post store post;
            Error e)
-      | Ok (`Rolled_up (post, posts_jsonl)) ->
-        with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-        Ok (Rolled_up_post post)
+      | Ok (`Rolled_up (previous, post, posts_jsonl)) ->
+        (match with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl) with
+         | Ok () -> Ok (Rolled_up_post post)
+         | Error _ as e ->
+           restore_post_after_rewrite_failure store previous;
+           e)
       | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;
@@ -818,6 +838,7 @@ let update_post_with_outcome
                   ; title = normalized_title
                   ; body = normalized_body
                   ; content = normalized_body
+                  ; mention_ids = post_mention_ids ~title:normalized_title ~body:normalized_body
                   ; meta_json = normalized_meta
                   ; updated_at = now
                   }
@@ -825,13 +846,16 @@ let update_post_with_outcome
                 Hashtbl.replace store.posts key updated;
                 mark_dirty_post store key;
                 invalidate_post_caches store;
-                Ok (updated, posts_jsonl_unlocked store))))
+                Ok (existing, updated, posts_jsonl_unlocked store))))
     in
     match snapshot_result with
     | Error _ as e -> e
-    | Ok (updated, posts_jsonl) ->
-      with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-      Ok updated
+    | Ok (previous, updated, posts_jsonl) ->
+      (match with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl) with
+       | Ok () -> Ok updated
+       | Error _ as e ->
+         restore_post_after_rewrite_failure store previous;
+         e)
 ;;
 let create_post
       store

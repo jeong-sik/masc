@@ -73,6 +73,47 @@ let test_empty_env_is_absent () =
   with_env [ canonical_env, Some ""; legacy_env, Some "" ] (fun () ->
     check_resolution "empty" default_path Poller.Default)
 
+let test_parse_state_line_success () =
+  match
+    Poller.parse_state_line_result
+      {|{"level":"WARN","ts":"2026-05-19T22:02:26+0900","kinds":"fd","summary":"high"}|}
+  with
+  | Ok parsed ->
+    check bool "warn level" true (parsed.level = Keeper_fd_pressure.External_warn);
+    check bool "timestamp parsed" true (parsed.ts > 0.0);
+    check string "reason" "sysmon kinds=fd high" parsed.reason
+  | Error err ->
+    fail
+      ("expected successful state line parse: "
+       ^ Poller.state_line_parse_error_to_string err)
+
+let test_parse_state_line_reports_json_error () =
+  match Poller.parse_state_line_result "{not-json" with
+  | Error (Poller.State_line_json_parse_error _) -> ()
+  | Ok _ -> fail "malformed json parsed successfully"
+  | Error err ->
+    fail
+      ("unexpected parse error: " ^ Poller.state_line_parse_error_to_string err)
+
+let test_parse_state_line_reports_field_and_level_errors () =
+  (match Poller.parse_state_line_result {|{"level":"WARN"}|} with
+   | Error (Poller.State_line_missing_or_invalid_field { field = "ts"; _ }) -> ()
+   | Ok _ -> fail "missing timestamp parsed successfully"
+   | Error err ->
+     fail
+       ("unexpected missing-ts error: "
+        ^ Poller.state_line_parse_error_to_string err));
+  match
+    Poller.parse_state_line_result
+      {|{"level":"INFO","ts":"2026-05-19T22:02:26+0900"}|}
+  with
+  | Error (Poller.State_line_unknown_level "INFO") -> ()
+  | Ok _ -> fail "unknown level parsed successfully"
+  | Error err ->
+    fail
+      ("unexpected unknown-level error: "
+       ^ Poller.state_line_parse_error_to_string err)
+
 let () =
   run
     "Host_fd_pressure_poller"
@@ -85,5 +126,16 @@ let () =
             `Quick
             test_conflicting_envs_are_detected
         ; test_case "empty env is absent" `Quick test_empty_env_is_absent
+        ] )
+    ; ( "state line parser"
+      , [ test_case "parses valid state line" `Quick test_parse_state_line_success
+        ; test_case
+            "reports json parse errors"
+            `Quick
+            test_parse_state_line_reports_json_error
+        ; test_case
+            "reports field and level errors"
+            `Quick
+            test_parse_state_line_reports_field_and_level_errors
         ] )
     ]

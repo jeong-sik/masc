@@ -285,6 +285,26 @@ let test_write_state_result_keeps_primary_commit_when_recovery_write_fails () =
   | Some stored -> check string "primary has goal" goal.title stored.title
   | None -> fail "primary goal missing after recovery mirror failure"
 
+let test_goal_read_result_reports_corrupt_primary_without_recovery () =
+  with_workspace @@ fun config ->
+  Fs_compat.save_file (Goal_store.goals_path config) "{not-json";
+  if Sys.file_exists (goals_recovery_path config)
+  then Sys.remove (goals_recovery_path config);
+  (match Goal_store.read_state_result config with
+   | Ok _ -> fail "corrupt goals primary without recovery must be reported"
+   | Error (Goal_store.Primary_decode_failed { recovery_err; _ }) ->
+     (match recovery_err with
+      | Goal_store.Recovery_absent -> ()
+      | _ -> fail "expected absent recovery error")
+   | Error (Goal_store.Primary_read_failed _) ->
+     fail "expected decode failure for malformed primary");
+  (match Goal_store.list_goals_result config () with
+   | Ok _ -> fail "list_goals_result must report corrupt goal ledger"
+   | Error msg -> check bool "list error is explicit" true (String.length msg > 0));
+  match Goal_store.upsert_goal config ~title:"Should not overwrite corrupt ledger" () with
+  | Ok _ -> fail "upsert must not overwrite corrupt goal ledger with default state"
+  | Error msg -> check bool "upsert error is explicit" true (String.length msg > 0)
+
 let () =
   run "Goal_store.delete_goal"
     [ ( "regression-7690",
@@ -310,4 +330,6 @@ let () =
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting;
           test_case "recovery mirror write failure preserves primary" `Quick
-            test_write_state_result_keeps_primary_commit_when_recovery_write_fails ] ) ]
+            test_write_state_result_keeps_primary_commit_when_recovery_write_fails;
+          test_case "corrupt goal ledger is explicit" `Quick
+            test_goal_read_result_reports_corrupt_primary_without_recovery ] ) ]

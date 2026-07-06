@@ -13,11 +13,16 @@ val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> strin
 (** RFC-0244 Tier 2: keeper ids that currently have a [*.facts.jsonl] store, for
     the cross-keeper consolidation sweep. Excludes the reserved shared id; sorted. *)
 val list_fact_store_keeper_ids : unit -> string list
+val list_fact_store_keeper_ids_result : unit -> (string list, string) result
 val list_fact_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
+val list_fact_store_keeper_ids_for_keepers_dir_result :
+  keepers_dir:string -> (string list, string) result
 
 (** Base-path-scoped variant of {!list_fact_store_keeper_ids}; avoids ambient
     config-dir reads in multi-workspace dashboard routes. *)
 val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
+val list_fact_store_keeper_ids_for_base_path_result :
+  base_path:string -> (string list, string) result
 
 val events_path : keeper_id:string -> string
 val events_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
@@ -42,12 +47,16 @@ val episode_path : keeper_id:string -> trace_id:string -> generation:int -> stri
     The reservation is serialized with a per-trace file lock and a small counter
     file, so concurrent callers cannot receive the same generation. Gaps are
     possible if a caller reserves a generation and later fails before appending
-    the episode. *)
+    the episode. A persisted counter must be a non-negative integer; malformed or
+    negative counters are read failures, not missing counters. *)
 val next_generation : keeper_id:string -> trace_id:string -> int
+val next_generation_result : keeper_id:string -> trace_id:string -> (int, string) result
 
 (** Like {!next_generation}, but preserves a caller-provided generation lower
     bound while still advancing the counter past it. *)
 val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:string -> int
+val next_generation_with_floor_result :
+  floor:int -> keeper_id:string -> trace_id:string -> (int, string) result
 
 (** {1 Atomic writes} *)
 
@@ -103,10 +112,36 @@ val with_facts_lock :
 val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit
 val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t option
 
+(** Fact JSONL read diagnostics. Legacy fact readers still return only facts,
+    while [*_with_errors] variants preserve malformed row diagnostics. *)
+type fact_jsonl_read_scope =
+  | Fact_read_full_file
+  | Fact_read_tail_window
+
+type fact_jsonl_parse_error =
+  { path : string
+  ; scope : fact_jsonl_read_scope
+  ; line_index : int
+  ; message : string
+  }
+
+type fact_read_with_errors =
+  { facts : fact list
+  ; parse_errors : fact_jsonl_parse_error list
+  }
+
+val fact_jsonl_parse_error_to_string : fact_jsonl_parse_error -> string
+
 (** {1 Bounded tail reads} *)
 
 val read_facts_all : keeper_id:string -> fact list
 val read_facts_all_for_keepers_dir : keepers_dir:string -> keeper_id:string -> fact list
+
+val read_facts_all_with_errors : keeper_id:string -> fact_read_with_errors
+
+val read_facts_all_with_errors_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> fact_read_with_errors
+
 (** Read every fact in the store, failing if any JSONL row is malformed or does
     not match the fact schema. Use this before destructive rewrites so corrupt
     input cannot be partially dropped and overwritten. *)
@@ -114,9 +149,47 @@ val read_facts_all_strict : keeper_id:string -> (fact list, string) result
 val read_facts_all_strict_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (fact list, string) result
 val read_facts_tail : keeper_id:string -> n:int -> fact list
+
+val read_facts_tail_with_errors :
+  keeper_id:string -> n:int -> fact_read_with_errors
+
+val read_facts_tail_with_errors_for_base_path :
+  base_path:string -> keeper_id:string -> n:int -> fact_read_with_errors
+
+val read_facts_tail_with_errors_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> n:int -> fact_read_with_errors
+
 val read_facts_tail_for_base_path : base_path:string -> keeper_id:string -> n:int -> fact list
+
+(** Episode/event read diagnostics. Legacy episode readers still return only
+    parseable episodes, while [*_with_errors] variants preserve malformed
+    event-row / episode-file diagnostics. *)
+type episode_read_scope =
+  | Episode_read_events_tail
+  | Episode_read_episode_dir
+  | Episode_read_episode_file
+  | Episode_read_episode_file_unlink
+
+type episode_parse_error =
+  { episode_parse_path : string
+  ; episode_parse_scope : episode_read_scope
+  ; episode_parse_line_index : int
+  ; episode_parse_message : string
+  }
+
+type episode_read_with_errors =
+  { episodes : episode list
+  ; episode_parse_errors : episode_parse_error list
+  }
+
+val episode_parse_error_to_string : episode_parse_error -> string
+
 val read_events_tail : keeper_id:string -> n:int -> episode list
+val read_events_tail_with_errors :
+  keeper_id:string -> n:int -> episode_read_with_errors
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
+val read_episodes_tail_with_errors :
+  keeper_id:string -> n:int -> episode_read_with_errors
 
 (** {1 Retention (RFC-0239 Q4, supersedes RFC-0238 Capped_by_score)} *)
 
@@ -150,11 +223,19 @@ val cap_events : keeper_id:string -> keep:int -> trigger:int -> int
 
 (** RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
     parseable-file count exceeds [trigger], keep the [keep] most-recent files by
-    recency and best-effort unlink the rest; otherwise no-op. Unparseable files
-    are left untouched. Returns the number unlinked. *)
+    recency and unlink the rest; otherwise no-op. Unparseable files are left
+    untouched. Returns the number actually unlinked; use
+    {!cap_episode_files_with_errors} when unlink/read diagnostics are needed. *)
 val cap_episode_files : keeper_id:string -> keep:int -> trigger:int -> int
 
-(** Read and parse every fact in the store (unbounded; used by retention). *)
+type episode_file_cap_result =
+  { episode_files_dropped : int
+  ; episode_file_cap_errors : episode_parse_error list
+  }
+
+val cap_episode_files_with_errors :
+  keeper_id:string -> keep:int -> trigger:int -> episode_file_cap_result
+
 val read_all_facts : keeper_id:string -> fact list
 
 (** When the fact store exceeds [trigger], keep the [keep] highest-[rank]ed

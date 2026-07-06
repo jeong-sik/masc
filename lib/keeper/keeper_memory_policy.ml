@@ -41,52 +41,6 @@ open Keeper_meta_contract
 let state_start_re = Re.str "[STATE]" |> Re.compile
 let state_end_re = Re.str "[/STATE]" |> Re.compile
 
-type alert_channel_result = {
-  channel: string;
-  attempted: bool;
-  success: bool;
-  attempts: int;
-  detail: string option;
-}
-
-type interesting_alert_result = {
-  enabled: bool;
-  triggered: bool;
-  score: float;
-  threshold: float;
-  reasons: string list;
-  keywords: string list;
-  alert_id: string option;
-  channels: alert_channel_result list;
-  retry_queued: bool;
-  deadlettered: bool;
-}
-
-let empty_interesting_alert_result = {
-  enabled = false;
-  triggered = false;
-  score = 0.0;
-  threshold = 0.0;
-  reasons = [];
-  keywords = [];
-  alert_id = None;
-  channels = [];
-  retry_queued = false;
-  deadlettered = false;
-}
-
-let alert_channel_result_to_json (r : alert_channel_result) : Yojson.Safe.t =
-  `Assoc [
-    ("channel", `String r.channel);
-    ("attempted", `Bool r.attempted);
-    ("success", `Bool r.success);
-    ("attempts", `Int r.attempts);
-    ("detail",
-      match r.detail with
-      | Some d when String.trim d <> "" -> `String d
-      | _ -> `Null);
-  ]
-
 type keeper_state_snapshot = {
   priority: int option;
   goal: string option;
@@ -887,16 +841,42 @@ let strip_json_markdown_fences (text : string) : string =
         String.concat "\n" body |> String.trim
     | _ -> trimmed
 
+type structured_state_snapshot_reply_parse_error =
+  | Structured_state_snapshot_reply_empty
+  | Structured_state_snapshot_reply_json_parse_error of string
+  | Structured_state_snapshot_reply_schema_mismatch
+
+let structured_state_snapshot_reply_parse_error_to_string = function
+  | Structured_state_snapshot_reply_empty -> "empty_reply"
+  | Structured_state_snapshot_reply_json_parse_error message ->
+    "json_parse_error: " ^ message
+  | Structured_state_snapshot_reply_schema_mismatch -> "schema_mismatch"
+;;
+
+let parse_structured_state_snapshot_from_reply_result
+    (reply : string)
+    : (keeper_state_snapshot, structured_state_snapshot_reply_parse_error) result =
+  let text = strip_json_markdown_fences reply in
+  if String.trim text = ""
+  then Error Structured_state_snapshot_reply_empty
+  else (
+    match Yojson.Safe.from_string text with
+    | exception Yojson.Json_error message ->
+      Error (Structured_state_snapshot_reply_json_parse_error message)
+    | json ->
+      (match structured_state_snapshot_of_json json with
+       | Some snapshot -> Ok snapshot
+       | None -> Error Structured_state_snapshot_reply_schema_mismatch))
+;;
+
 let parse_structured_state_snapshot_from_reply
     (reply : string) : keeper_state_snapshot option =
-  let text = strip_json_markdown_fences reply in
-  if String.trim text = "" then None
-  else
-    try
-      Yojson.Safe.from_string text
-      |> structured_state_snapshot_of_json
-    with
-    | Yojson.Json_error _ -> None
+  match parse_structured_state_snapshot_from_reply_result reply with
+  | Ok snapshot -> Some snapshot
+  | Error Structured_state_snapshot_reply_empty
+  | Error (Structured_state_snapshot_reply_json_parse_error _)
+  | Error Structured_state_snapshot_reply_schema_mismatch ->
+    None
 
 let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
     keeper_state_snapshot option =

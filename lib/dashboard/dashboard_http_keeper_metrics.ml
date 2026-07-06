@@ -177,6 +177,27 @@ let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
   && has_int (m "context_max")
   && has_int (m "message_count")
 
+type keeper_metrics_24h_read_error_kind =
+  | Metrics_24h_json_error
+  | Metrics_24h_row_not_object
+  | Metrics_24h_type_error
+  | Metrics_24h_missing_field
+
+let keeper_metrics_24h_read_error_kind_to_string = function
+  | Metrics_24h_json_error -> "json_error"
+  | Metrics_24h_row_not_object -> "row_not_object"
+  | Metrics_24h_type_error -> "type_error"
+  | Metrics_24h_missing_field -> "missing_field"
+
+let keeper_metrics_24h_read_error_to_json ~line_index ~kind ~message () =
+  `Assoc
+    [
+      ("source", `String "dashboard_keeper_metrics_24h_jsonl");
+      ("line_index", `Int line_index);
+      ("kind", `String (keeper_metrics_24h_read_error_kind_to_string kind));
+      ("message", `String message);
+    ]
+
 let keeper_metrics_24h_json
     ~(metrics_lines : string list)
     ~(now_ts : float) : Yojson.Safe.t * Yojson.Safe.t =
@@ -187,10 +208,12 @@ let keeper_metrics_24h_json
   let sample_points = ref 0 in
   let proactive_points = ref 0 in
   let proactive_fallback_count = ref 0 in
-  List.iter
-    (fun line ->
+  let read_errors_rev =
+    List.fold_left
+      (fun read_errors (line_index, line) ->
       try
-        let j = Yojson.Safe.from_string line in
+        match Yojson.Safe.from_string line with
+        | `Assoc _ as j ->
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         if ts_unix >= start_ts && ts_unix <= (now_ts +. 60.0)
            && metrics_row_has_context_snapshot j
@@ -228,9 +251,45 @@ let keeper_metrics_24h_json
               b.proactive_fallback_count <- b.proactive_fallback_count + 1;
             end
           end
-        end
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Server.info "keeper log parse: %s" (Printexc.to_string exn))
-    lines;
+        end;
+        read_errors
+        | other ->
+          keeper_metrics_24h_read_error_to_json
+            ~line_index
+            ~kind:Metrics_24h_row_not_object
+            ~message:
+              (Printf.sprintf
+                 "keeper metrics 24h JSONL row must be object, got %s"
+                 (Json_util.kind_name other))
+            ()
+          :: read_errors
+      with
+      | Yojson.Json_error message ->
+        keeper_metrics_24h_read_error_to_json
+          ~line_index
+          ~kind:Metrics_24h_json_error
+          ~message
+          ()
+        :: read_errors
+      | Yojson.Safe.Util.Type_error (message, value) ->
+        keeper_metrics_24h_read_error_to_json
+          ~line_index
+          ~kind:Metrics_24h_type_error
+          ~message:
+            (Printf.sprintf "%s (got %s)" message (Json_util.kind_name value))
+          ()
+        :: read_errors
+      | Not_found ->
+        keeper_metrics_24h_read_error_to_json
+          ~line_index
+          ~kind:Metrics_24h_missing_field
+          ~message:"required metrics 24h row field was not found"
+          ()
+        :: read_errors)
+      []
+      (List.mapi (fun line_index line -> line_index, line) lines)
+  in
+  let read_errors = List.rev read_errors_rev in
   let rows =
     buckets
     |> Hashtbl.to_seq
@@ -271,6 +330,8 @@ let keeper_metrics_24h_json
     `Assoc [
       ("window_hours", `Float 24.0);
       ("source_lines", `Int (List.length metrics_lines));
+      ("read_error_count", `Int (List.length read_errors));
+      ("read_errors", `List read_errors);
       ("sample_points", `Int !sample_points);
       ("bucket_count", `Int bucket_count);
       ("from_ts_unix", `Float start_ts);
@@ -287,21 +348,60 @@ let keeper_metrics_24h_json
   in
   (`List rows, summary)
 
-let keeper_history_summary_json
+type keeper_history_read_error_kind =
+  | Keeper_history_json_error
+  | Keeper_history_row_not_object
+  | Keeper_history_type_error
+  | Keeper_history_missing_field
+
+let keeper_history_read_error_kind_to_string = function
+  | Keeper_history_json_error -> "json_error"
+  | Keeper_history_row_not_object -> "row_not_object"
+  | Keeper_history_type_error -> "type_error"
+  | Keeper_history_missing_field -> "missing_field"
+
+let keeper_history_read_error_to_json
+    ~keeper_name
+    ~history_path
+    ~line_index
+    ~kind
+    ~message
+    () =
+  `Assoc
+    [
+      ("source", `String "dashboard_keeper_history_jsonl");
+      ("keeper", `String keeper_name);
+      ("path", `String history_path);
+      ("line_index", `Int line_index);
+      ("kind", `String (keeper_history_read_error_kind_to_string kind));
+      ("message", `String message);
+    ]
+
+let keeper_history_summary_json_with_read_errors
     ~(all_keeper_names : string list)
     ~(keeper_name : string)
     ~(history_path : string)
     ~(filter_fragments : bool)
-  : Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int =
+  : Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int
+    * Yojson.Safe.t list =
   let history_lines =
     Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_history_summary"
       history_path ~max_bytes:120000 ~max_lines:80
   in
   let mention_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let (conversation_rev, k2k_rev, raw_count, fragment_count, filtered_count) =
-    List.fold_left (fun (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count) line ->
+  let indexed_history_lines =
+    List.mapi (fun line_index line -> line_index, line) history_lines
+  in
+  let ( conversation_rev,
+        k2k_rev,
+        raw_count,
+        fragment_count,
+        filtered_count,
+        read_errors_rev ) =
+    List.fold_left (fun (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count, read_errors) (line_index, line) ->
       try
-        let j = Yojson.Safe.from_string line in
+        match Yojson.Safe.from_string line with
+        | `Assoc _ as j ->
         let role = Safe_ops.json_string ~default:"" "role" j |> String.trim in
         let role_lc = String.lowercase_ascii role in
         (* Message text lives in typed [content_blocks], not a flat [content]
@@ -320,7 +420,7 @@ let keeper_history_summary_json
            || Keeper_types_support.is_internal_history_source source
            || Keeper_context_core.has_world_state_signature content
         then
-          (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
+          (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count, read_errors)
         else
           let is_fragment =
             role_lc = "assistant"
@@ -368,11 +468,82 @@ let keeper_history_summary_json
             k2k_acc,
             raw_count + 1,
             fragment_count + (if is_fragment then 1 else 0),
-            filtered_count + (if should_filter then 1 else 0) )
+            filtered_count + (if should_filter then 1 else 0),
+            read_errors )
+        | other ->
+          let read_error =
+            keeper_history_read_error_to_json
+              ~keeper_name
+              ~history_path
+              ~line_index
+              ~kind:Keeper_history_row_not_object
+              ~message:
+                (Printf.sprintf
+                   "keeper history JSONL row must be object, got %s"
+                   (Json_util.kind_name other))
+              ()
+          in
+          ( conv_acc,
+            k2k_acc,
+            raw_count,
+            fragment_count,
+            filtered_count,
+            read_error :: read_errors )
       with
-      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Not_found ->
-        (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
-    ) ([], [], 0, 0, 0) history_lines
+      | Yojson.Json_error message ->
+        let read_error =
+          keeper_history_read_error_to_json
+            ~keeper_name
+            ~history_path
+            ~line_index
+            ~kind:Keeper_history_json_error
+            ~message
+            ()
+        in
+        ( conv_acc,
+          k2k_acc,
+          raw_count,
+          fragment_count,
+          filtered_count,
+          read_error :: read_errors )
+      | Yojson.Safe.Util.Type_error (message, value) ->
+        let read_error =
+          keeper_history_read_error_to_json
+            ~keeper_name
+            ~history_path
+            ~line_index
+            ~kind:Keeper_history_type_error
+            ~message:
+              (Printf.sprintf
+                 "%s (got %s)"
+                 message
+                 (Json_util.kind_name value))
+            ()
+        in
+        ( conv_acc,
+          k2k_acc,
+          raw_count,
+          fragment_count,
+          filtered_count,
+          read_error :: read_errors )
+      | Not_found ->
+        let read_error =
+          keeper_history_read_error_to_json
+            ~keeper_name
+            ~history_path
+            ~line_index
+            ~kind:Keeper_history_missing_field
+            ~message:"required history row field was not found"
+            ()
+        in
+        ( conv_acc,
+          k2k_acc,
+          raw_count,
+          fragment_count,
+          filtered_count,
+          read_error :: read_errors ))
+      ([], [], 0, 0, 0, [])
+      indexed_history_lines
   in
   let conversation = `List (List.rev conversation_rev) in
   let k2k_recent = `List (List.rev k2k_rev) in
@@ -387,6 +558,33 @@ let keeper_history_summary_json
     |> List.map (fun (k, v) ->
          `Assoc [("keeper", `String k); ("count", `Int v)])
     |> fun xs -> `List xs
+  in
+  ( conversation,
+    k2k_recent,
+    k2k_mentions,
+    raw_count,
+    fragment_count,
+    filtered_count,
+    List.rev read_errors_rev )
+
+let keeper_history_summary_json
+    ~(all_keeper_names : string list)
+    ~(keeper_name : string)
+    ~(history_path : string)
+    ~(filter_fragments : bool)
+  : Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int =
+  let ( conversation,
+        k2k_recent,
+        k2k_mentions,
+        raw_count,
+        fragment_count,
+        filtered_count,
+        _read_errors ) =
+    keeper_history_summary_json_with_read_errors
+      ~all_keeper_names
+      ~keeper_name
+      ~history_path
+      ~filter_fragments
   in
   (conversation, k2k_recent, k2k_mentions, raw_count, fragment_count, filtered_count)
 

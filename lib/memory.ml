@@ -144,8 +144,33 @@ let append_from_reply
     ~reply
     ()
 
+let append_from_reply_result
+    config
+    meta
+    ?snapshot
+    ?state_snapshot_source
+    ~turn
+    ~reply
+    ()
+  =
+  Keeper_memory_bank.append_memory_notes_from_reply_result
+    config
+    meta
+    ?snapshot
+    ?state_snapshot_source
+    ~turn
+    ~reply
+    ()
+
 let append_from_tool_results config meta ~turn ~results =
   Keeper_memory_bank.append_memory_notes_from_tool_results
+    config
+    meta
+    ~turn
+    ~results
+
+let append_from_tool_results_result config meta ~turn ~results =
+  Keeper_memory_bank.append_memory_notes_from_tool_results_result
     config
     meta
     ~turn

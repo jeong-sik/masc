@@ -201,7 +201,9 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          | None -> `Null);
       ]
   in
-  Dated_jsonl.append metrics_store snapshot;
+  (match Dated_jsonl.append_result metrics_store snapshot with
+   | Ok () -> ()
+   | Error error -> raise (Sys_error error));
   (* #9943: a compaction trigger that produced no token reduction
      is invisible in [masc_keeper_compactions_total] (which counts
      trigger fires).  Emit a dedicated counter here so dashboards

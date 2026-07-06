@@ -226,6 +226,9 @@ let test_autonomous_yields_to_parked_chat () =
   check
     "chat_waiting is false before any turn"
     (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
+  check
+    "chat_waiting_since is None before any turn"
+    (Option.is_none (Keeper_turn_admission.chat_waiting_since ~base_path ~keeper_name));
   Eio.Switch.run (fun sw ->
     let started, set_started = Eio.Promise.create () in
     let release, set_release = Eio.Promise.create () in
@@ -253,6 +256,9 @@ let test_autonomous_yields_to_parked_chat () =
     check
       "chat_waiting reports the parked chat"
       (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name);
+    (match Keeper_turn_admission.chat_waiting_since ~base_path ~keeper_name with
+     | Some ts -> check "chat_waiting_since records the parked chat" (ts > 0.0)
+     | None -> check "chat_waiting_since records the parked chat" false);
     (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
      | `Busy _ -> check "run_if_free yields (Busy) while a chat is parked" true
      | `Ran () -> check "run_if_free must not admit while a chat is parked" false);
@@ -263,7 +269,10 @@ let test_autonomous_yields_to_parked_chat () =
   (* The switch exits only after the parked chat drained; nothing waits now. *)
   check
     "chat_waiting is false after the queue drains"
-    (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name))
+    (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
+  check
+    "chat_waiting_since is None after the queue drains"
+    (Option.is_none (Keeper_turn_admission.chat_waiting_since ~base_path ~keeper_name))
 ;;
 
 let test_idle_loop_yields_to_parked_chat () =

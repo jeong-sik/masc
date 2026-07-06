@@ -28,6 +28,8 @@ type keeper_result =
 
 type t =
   { keepers_dir : string
+  ; keeper_ids_known : bool
+  ; keeper_id_discovery_read_errors : string list
   ; results : keeper_result list
   ; total_input : int
   ; ttl_expired : int
@@ -48,8 +50,10 @@ val run_for_keepers_dir
 (** Scan keeper fact stores and run {!Keeper_memory_os_gc.run_gc_for_keepers_dir}
     with [dry_run:true]. Must be called inside an Eio context because the GC
     path takes the per-keeper facts lock. If [keeper_ids] is omitted, every
-    existing non-shared [*.facts.jsonl] store in [keepers_dir] is scanned. If it
-    is provided, missing stores are reported as per-keeper errors instead of
+    existing non-shared [*.facts.jsonl] store in [keepers_dir] is scanned.
+    Discovery failures are reported through [keeper_ids_known=false] and
+    [keeper_id_discovery_read_errors], not as an empty fleet. If [keeper_ids] is
+    provided, missing stores are reported as per-keeper errors instead of
     silently returning an empty report. *)
 
 module For_testing : sig

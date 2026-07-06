@@ -66,6 +66,13 @@ let with_temp_workspace f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
 let save_auth_config base_path =
   let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
   Auth.save_auth_config base_path cfg
@@ -194,10 +201,22 @@ let json_string_member label key json =
   | other -> failf "%s: expected string member %s, got %s" label key (Yojson.Safe.to_string other)
 ;;
 
+let json_int_member label key json =
+  match Json.member key json with
+  | `Int value -> value
+  | other -> failf "%s: expected int member %s, got %s" label key (Yojson.Safe.to_string other)
+;;
+
 let json_list_member label key json =
   match Json.member key json with
   | `List values -> values
   | other -> failf "%s: expected list member %s, got %s" label key (Yojson.Safe.to_string other)
+;;
+
+let json_data_member label json =
+  match Json.member "data" json with
+  | `Assoc _ as data -> data
+  | other -> failf "%s: expected data object, got %s" label (Yojson.Safe.to_string other)
 ;;
 
 let setup_state base_path =
@@ -282,6 +301,46 @@ let test_read_cursors_records_unmatched_repo_orphan_metric () =
     check (float 0.0001) "unmatched orphan read increments" (before +. 1.0) after)
 ;;
 
+let test_read_cursors_records_repo_lookup_error_orphan_metric () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let config_dir =
+      Filename.concat (Filename.concat base_path Common.masc_dirname) "config"
+    in
+    Unix.mkdir config_dir 0o700;
+    write_file (Filename.concat config_dir "repositories.toml") "[repository.bad\n";
+    let before = orphan_read_count "base_unresolved" in
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors?repo_id=masc" () in
+    let response = dispatch router request in
+    check int "GET cursors succeeds" 200 (status_of_response response);
+    let after = orphan_read_count "base_unresolved" in
+    check (float 0.0001) "base_unresolved orphan read increments" (before +. 1.0) after)
+;;
+
+let test_status_reports_workspace_state_read_error () =
+  with_ide_server (fun ~base_path:_ ~state ~router ->
+    let config = Masc.Mcp_server.workspace_config state in
+    let state_path = Masc.Workspace.state_path config in
+    if Sys.file_exists state_path then Sys.remove state_path;
+    let request = http_request ~meth:`GET ~path:"/api/v1/status" () in
+    let response = dispatch router request in
+    check_status "GET status succeeds with missing state" 200 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    let data = json_data_member "status response" json in
+    check
+      string
+      "workspace_state_status"
+      "default_from_read_error"
+      (json_string_member "status data" "workspace_state_status" data);
+    check
+      int
+      "workspace_state_read_error_count"
+      1
+      (json_int_member "status data" "workspace_state_read_error_count" data);
+    match json_list_member "status data" "workspace_state_read_errors" data with
+    | _ :: _ -> ()
+    | [] -> fail "expected workspace_state_read_errors to explain the read failure")
+;;
+
 let test_memory_response_declares_annotation_source_contract () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     (match
@@ -336,6 +395,17 @@ let test_memory_response_declares_annotation_source_contract () =
       (json_string_member "entry" "retrieval_status" entry))
 ;;
 
+let test_memory_invalid_limit_uses_observed_default () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/memory?limit=not-an-int" ()
+    in
+    let response = dispatch router request in
+    check int "GET memory succeeds" 200 (status_of_response response);
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    check int "invalid limit falls back to default" 50 (Json.member "limit" json |> Json.to_int))
+;;
+
 let () =
   run
     "server_ide_http"
@@ -358,9 +428,21 @@ let () =
             `Quick
             test_read_cursors_records_unmatched_repo_orphan_metric
         ; test_case
+            "GET cursors records repo lookup-error orphan read metric"
+            `Quick
+            test_read_cursors_records_repo_lookup_error_orphan_metric
+        ; test_case
+            "GET status reports workspace state read error"
+            `Quick
+            test_status_reports_workspace_state_read_error
+        ; test_case
             "GET memory declares annotation source contract"
             `Quick
             test_memory_response_declares_annotation_source_contract
+        ; test_case
+            "GET memory invalid limit uses observed default"
+            `Quick
+            test_memory_invalid_limit_uses_observed_default
         ] )
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick

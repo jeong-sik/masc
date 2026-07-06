@@ -27,6 +27,50 @@ let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
       record_memory_recall_read_error ~site path exn_class;
       []
 
+type status_detail_jsonl_parse_error = {
+  line_index : int;
+  message : string;
+}
+
+let parse_status_detail_jsonl_objects lines =
+  let parse_line line_index line =
+    match Yojson.Safe.from_string line with
+    | `Assoc _ as json -> Ok json
+    | other ->
+        Error
+          {
+            line_index;
+            message =
+              Printf.sprintf "status detail JSONL row must be object, got %s"
+                (Json_util.kind_name other);
+          }
+    | exception Yojson.Json_error message -> Error { line_index; message }
+  in
+  let rec loop line_index parsed errors = function
+    | [] -> List.rev parsed, List.rev errors
+    | line :: rest -> (
+        match parse_line line_index line with
+        | Ok json -> loop (line_index + 1) (json :: parsed) errors rest
+        | Error error -> loop (line_index + 1) parsed (error :: errors) rest)
+  in
+  loop 0 [] [] lines
+
+let status_detail_jsonl_parse_error_to_json ~source ?keeper ?path
+    { line_index; message } =
+  `Assoc
+    ([
+       ("source", `String source);
+       ("line_index", `Int line_index);
+       ("message", `String message);
+     ]
+    @ (match keeper with
+      | Some keeper_name -> [ ("keeper", `String keeper_name) ]
+      | None -> [])
+    @
+    match path with
+    | Some source_path -> [ ("path", `String source_path) ]
+    | None -> [])
+
 (* ── Response cache ──────────────────────────────────── *)
 
 type cache_entry = {
@@ -264,7 +308,6 @@ let hash_status_args _config resolved_name (meta : keeper_meta) args =
 
 let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
 let json_string_opt_member = Json_util.get_string_nonempty
-let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
 (* TEL-OK: status handler — telemetry surfaces via the cache layer
@@ -401,34 +444,83 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            Keeper_generation_lineage.surface_json config m ~recent_limit:6
          in
 
-         let metrics_tail =
-           let lines =
+         let metrics_tail_lines, metrics_tail_line_path =
              let dated = Dated_jsonl.read_recent_lines metrics_store tail_turns in
-             if dated <> [] then dated
+             if dated <> [] then dated, None
              else
-               read_tail_lines_or_empty ~site:"keeper_status_detail_metrics_tail"
-                 metrics_path ~max_bytes:tail_bytes ~max_lines:tail_turns
-           in
-           let (parsed, _) =
-             Fs_compat.parse_jsonl_lines ~source:"keeper_metrics" lines
-           in
-           `List (apply_tail_order tail_order parsed)
+               ( read_tail_lines_or_empty
+                   ~site:"keeper_status_detail_metrics_tail"
+                   metrics_path
+                   ~max_bytes:tail_bytes
+                   ~max_lines:tail_turns
+               , Some metrics_path )
          in
-         let metrics_window_lines =
+         let parsed_metrics_tail, metrics_tail_parse_error_records =
+           parse_metrics_json_lines metrics_tail_lines
+         in
+         let metrics_tail_parse_errors =
+           List.map
+             (metrics_json_line_parse_error_to_json
+                ~source:"keeper_status_detail_metrics_tail_jsonl"
+                ~keeper:m.name
+                ?path:metrics_tail_line_path)
+             metrics_tail_parse_error_records
+         in
+         let metrics_tail =
+           `List (apply_tail_order tail_order parsed_metrics_tail)
+         in
+         let metrics_window_lines, metrics_window_line_path =
            if include_metrics_overview then
              let n = max tail_turns 200 in
              let dated = Dated_jsonl.read_recent_lines metrics_store n in
-             if dated <> [] then dated
+             if dated <> [] then dated, None
              else
-               read_tail_lines_or_empty ~site:"keeper_status_detail_metrics_window"
-                 metrics_path ~max_bytes:tail_bytes ~max_lines:n
+               ( read_tail_lines_or_empty
+                   ~site:"keeper_status_detail_metrics_window"
+                   metrics_path
+                   ~max_bytes:tail_bytes
+                   ~max_lines:n
+               , Some metrics_path )
            else
-             []
+             [], None
+         in
+         let parsed_metrics_window, metrics_window_parse_error_records =
+           parse_metrics_json_lines metrics_window_lines
+         in
+         let metrics_window_parse_errors =
+           List.map
+             (metrics_json_line_parse_error_to_json
+                ~source:"keeper_status_detail_metrics_window_jsonl"
+                ~keeper:m.name
+                ?path:metrics_window_line_path)
+             metrics_window_parse_error_records
+         in
+         let metrics_parse_errors =
+           if include_metrics_overview then
+             metrics_window_parse_errors
+           else
+             metrics_tail_parse_errors
+         in
+         let metrics_read_error =
+           match metrics_parse_errors with
+           | [] -> None
+           | errors ->
+             Some
+               (`Assoc
+                 [ ("source", `String "keeper_status_detail_metrics_parse")
+                 ; ("keeper", `String m.name)
+                 ; ( "message"
+                   , `String
+                       "keeper status detail metrics JSONL contains malformed rows"
+                   )
+                 ; ("parse_error_count", `Int (List.length errors))
+                 ; ("parse_errors", `List errors)
+                 ])
          in
          let metrics_overview =
            if include_metrics_overview then
-             summarize_metrics_lines
-               metrics_window_lines
+             summarize_metrics_jsons
+               parsed_metrics_window
                ~default_generation:m.runtime.generation
            else
              empty_metrics_summary
@@ -439,35 +531,32 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            else
              let rec find_latest = function
                | [] -> None
-               | line :: tl ->
-                 (try
-                    let j = Yojson.Safe.from_string line in
-                    match Safe_ops.json_string_opt "skill_primary" j with
-                    | Some primary when String.trim primary <> "" ->
-                      let secondary =
-                        match Json_util.assoc_member_opt "skill_secondary" j with
-                        | Some (`List xs) ->
-                          xs
-                          |> List.filter_map (fun v ->
-                               match v with
-                               | `String s when String.trim s <> "" -> Some s
-                               | _ -> None)
-                        | None | Some _ -> []
-                      in
-                      let reason = Safe_ops.json_string_opt "skill_reason" j in
-                      Some
-                        (`Assoc
-                           [
-                             ("primary", `String primary);
-                             ( "secondary",
-                               `List (List.map (fun s -> `String s) secondary) );
-                             ( "reason",
-                               Json_util.string_opt_to_json reason );
-                           ])
-                    | _ -> find_latest tl
-                  with Yojson.Json_error _ -> find_latest tl)
+               | j :: tl -> (
+                   match Safe_ops.json_string_opt "skill_primary" j with
+                   | Some primary when String.trim primary <> "" ->
+                     let secondary =
+                       match Json_util.assoc_member_opt "skill_secondary" j with
+                       | Some (`List xs) ->
+                         xs
+                         |> List.filter_map (fun v ->
+                              match v with
+                              | `String s when String.trim s <> "" -> Some s
+                              | _ -> None)
+                       | None | Some _ -> []
+                     in
+                     let reason = Safe_ops.json_string_opt "skill_reason" j in
+                     Some
+                       (`Assoc
+                          [
+                            ("primary", `String primary);
+                            ( "secondary",
+                              `List (List.map (fun s -> `String s) secondary) );
+                            ( "reason",
+                              Json_util.string_opt_to_json reason );
+                          ])
+                   | _ -> find_latest tl)
              in
-             find_latest (List.rev metrics_window_lines)
+             find_latest (List.rev parsed_metrics_window)
          in
          (* RFC-0149 §3.1 — typed Result resolver.  The companion
             [memory_bank_error_class] travels alongside the summary so
@@ -513,19 +602,32 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let history_filter_fragments =
            bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
          in
-         let (history_tail, history_raw_count, history_fragment_count, history_fragment_filtered_count) =
+         let ( history_tail,
+               history_raw_count,
+               history_fragment_count,
+               history_fragment_filtered_count,
+               history_parse_errors ) =
            if not include_history_tail then
-             (`List [], 0, 0, 0)
+             (`List [], 0, 0, 0, [])
            else
              let lines =
                read_tail_lines_or_empty ~site:"keeper_status_detail_history"
                  history_path ~max_bytes:tail_bytes ~max_lines:tail_messages
              in
+             let parsed_history, history_parse_error_records =
+               parse_status_detail_jsonl_objects lines
+             in
+             let history_parse_errors =
+               List.map
+                 (status_detail_jsonl_parse_error_to_json
+                    ~source:"keeper_status_detail_history_jsonl"
+                    ~keeper:m.name
+                    ~path:history_path)
+                 history_parse_error_records
+             in
              let (items_rev, raw_count, fragment_count, filtered_count) =
                List.fold_left
-                 (fun (acc, raw_count, fragment_count, filtered_count) line ->
-                   try
-                     let j = Yojson.Safe.from_string line in
+                 (fun (acc, raw_count, fragment_count, filtered_count) j ->
                      let role = Safe_ops.json_string ~default:"unknown" "role" j in
                      let content = Safe_ops.json_string ~default:"" "content" j in
                      let source = Safe_ops.json_string ~default:"unknown" "source" j in
@@ -587,33 +689,62 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                      ( acc,
                        raw_count + 1,
                        fragment_count + (if is_fragment then 1 else 0),
-                       filtered_count )
-                   with Yojson.Json_error _ -> (acc, raw_count, fragment_count, filtered_count))
-                 ([], 0, 0, 0) lines
+                       filtered_count ))
+                 ([], 0, 0, 0) parsed_history
              in
             ( `List (apply_tail_order tail_order (List.rev items_rev)),
               raw_count,
               fragment_count,
-              filtered_count )
+              filtered_count,
+              history_parse_errors )
          in
-         let compaction_history_tail =
+         let history_read_error =
+           match history_parse_errors with
+           | [] -> None
+           | errors ->
+               Some
+                 (`Assoc
+                   [
+                     ("source", `String "keeper_status_detail_history_parse");
+                     ("keeper", `String m.name);
+                     ( "message",
+                       `String
+                         "keeper status detail history JSONL contains malformed \
+                          rows" );
+                     ("parse_error_count", `Int (List.length errors));
+                     ("parse_errors", `List errors);
+                   ])
+         in
+         let compaction_history_tail, compaction_history_parse_errors =
            if not include_compaction_history then
-             (`List [], 0)
+             (`List [], 0), []
            else
              let n = max 200 (tail_compactions * 20) in
-             let lines =
+             let lines, line_path =
                let dated = Dated_jsonl.read_recent_lines metrics_store n in
-               if dated <> [] then dated
+               if dated <> [] then dated, None
                else
-                 read_tail_lines_or_empty
-                   ~site:"keeper_status_detail_compaction_history" metrics_path
-                   ~max_bytes:tail_bytes ~max_lines:n
+                 ( read_tail_lines_or_empty
+                     ~site:"keeper_status_detail_compaction_history"
+                     metrics_path
+                     ~max_bytes:tail_bytes
+                     ~max_lines:n,
+                   Some metrics_path )
+             in
+             let parsed_compaction_metrics, compaction_parse_error_records =
+               parse_metrics_json_lines lines
+             in
+             let compaction_history_parse_errors =
+               List.map
+                 (metrics_json_line_parse_error_to_json
+                    ~source:"keeper_status_detail_compaction_history_jsonl"
+                    ~keeper:m.name
+                    ?path:line_path)
+                 compaction_parse_error_records
              in
              let events_rev =
                List.fold_left
-                 (fun acc line ->
-                   try
-                     let j = Yojson.Safe.from_string line in
+                 (fun acc j ->
                      let compacted = Safe_ops.json_bool ~default:false "compacted" j in
                      let memory_compaction_performed =
                        Safe_ops.json_bool ~default:false "memory_compaction_performed" j
@@ -671,15 +802,34 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                              | _ -> `Null );
                          ]
                        in
-                       item :: acc
-                   with Yojson.Json_error _ -> acc)
-                 [] lines
+                       item :: acc)
+                 [] parsed_compaction_metrics
              in
              let events = List.rev events_rev in
              let total = List.length events in
              let start = max 0 (total - tail_compactions) in
              let tail = List.filteri (fun i _ -> i >= start) events in
-             (`List (apply_tail_order tail_order tail), total)
+             ( (`List (apply_tail_order tail_order tail), total),
+               compaction_history_parse_errors )
+         in
+         let compaction_history_read_error =
+           match compaction_history_parse_errors with
+           | [] -> None
+           | errors ->
+               Some
+                 (`Assoc
+                   [
+                     ( "source",
+                       `String "keeper_status_detail_compaction_history_parse"
+                     );
+                     ("keeper", `String m.name);
+                     ( "message",
+                       `String
+                         "keeper status detail compaction history JSONL \
+                          contains malformed rows" );
+                     ("parse_error_count", `Int (List.length errors));
+                     ("parse_errors", `List errors);
+                   ])
         in
         let allowed_tools = keeper_allowed_tool_names m in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
@@ -735,8 +885,24 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            Keeper_runtime_trust_snapshot.snapshot_json
              ~config:config ~meta:m
          in
+         let latest_metrics_from parsed =
+           match
+             List.rev parsed
+             |> List.find_opt (fun json ->
+                  match Json_util.assoc_member_opt "runtime" json with
+                  | Some (`Assoc _) -> true
+                  | _ -> false)
+           with
+           | Some json -> Some json
+           | None -> (
+               match List.rev parsed with
+               | json :: _ -> Some json
+               | [] -> None)
+         in
          let latest_metrics =
-           latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
+           match latest_metrics_from parsed_metrics_window with
+           | Some _ as latest -> latest
+           | None -> latest_metrics_from parsed_metrics_tail
          in
          let model_observability =
            model_observability_json
@@ -784,6 +950,14 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              [
                ("pending_messages", pending_messages);
                ("durable_replay_enabled", `Bool (Keeper_chat_queue.persistence_configured ()));
+             ]
+         in
+         let read_errors =
+           List.filter_map Fun.id
+             [
+               metrics_read_error;
+               history_read_error;
+               compaction_history_read_error;
              ]
          in
 
@@ -911,6 +1085,15 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("tail_order", `String (tail_order_to_string tail_order));
            ]);
            ("context_budget", context_budget);
+           ("read_errors", `List read_errors);
+           ("metrics_parse_error_count", `Int (List.length metrics_parse_errors));
+           ("metrics_parse_errors", `List metrics_parse_errors);
+           ("history_parse_error_count", `Int (List.length history_parse_errors));
+           ("history_parse_errors", `List history_parse_errors);
+           ( "compaction_history_parse_error_count",
+             `Int (List.length compaction_history_parse_errors) );
+           ( "compaction_history_parse_errors",
+             `List compaction_history_parse_errors );
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
            ("chat_queue", chat_queue);

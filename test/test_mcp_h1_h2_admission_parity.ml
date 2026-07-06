@@ -166,6 +166,16 @@ let test_request_context_decides_post_body () =
   | Error _ -> fail "missing session should use Session_required");
   (match
      Request_context.decide_post_body ~request:streamable_request
+       ~context:(context ~session_was_provided:false ()) ~session_is_known:false
+       "{"
+   with
+  | Error (Request_context.Parse_error msg) ->
+      check bool "parse error message" true
+        (contains ~needle:"Invalid JSON request body" msg)
+  | Ok _ -> fail "malformed JSON should reject"
+  | Error _ -> fail "malformed JSON should use Parse_error");
+  (match
+     Request_context.decide_post_body ~request:streamable_request
        ~context:(context ()) ~session_is_known:false (body "tools/call")
    with
   | Error (Request_context.Unknown_session msg) ->

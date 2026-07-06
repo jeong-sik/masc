@@ -27,6 +27,13 @@ let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =
      | None -> [])
 ;;
 
+let mention_ids_to_yojson mention_ids =
+  `List
+    (List.map
+       (fun mention_id -> `String (Mention_id.to_string mention_id))
+       mention_ids)
+;;
+
 let post_to_yojson (p : post) : Yojson.Safe.t =
   `Assoc
     ([ "id", `String (Post_id.to_string p.id)
@@ -36,6 +43,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
      ; "post_kind", `String (post_kind_to_string p.post_kind)
      ; "classification_reason", `String (post_classification_reason p)
      ; "content", `String p.content
+     ; "mention_ids", mention_ids_to_yojson p.mention_ids
      ; "visibility", `String (visibility_to_string p.visibility)
      ; "created_at", `Float p.created_at
      ; "updated_at", `Float p.updated_at
@@ -69,6 +77,7 @@ let comment_to_yojson (c : comment) : Yojson.Safe.t =
       , Json_util.string_opt_to_json (Option.map Comment_id.to_string c.parent_id) )
     ; "author", `String (Agent_id.to_string c.author)
     ; "content", `String c.content
+    ; "mention_ids", mention_ids_to_yojson c.mention_ids
     ; "created_at", `Float c.created_at
     ; "expires_at", `Float c.expires_at
     ; "votes_up", `Int c.votes_up

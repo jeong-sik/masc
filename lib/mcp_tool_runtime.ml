@@ -49,10 +49,14 @@ type context = Mcp_tool_runtime_types.context = {
     Yojson.Safe.t option;
   governance_defaults : string -> Mcp_server_eio_governance.governance_config;
   save_governance :
-    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
+    Workspace.config ->
+    Mcp_server_eio_governance.governance_config ->
+    (unit, string) result;
   load_mcp_sessions : Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
-    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Workspace.config ->
+    Mcp_server_eio_governance.mcp_session_record list ->
+    (unit, string) result;
 }
 
 (* RFC-0189 PR-2: MCP runtime helpers return [Tool_result.result] directly.
@@ -78,6 +82,14 @@ let runtime_err_workflow ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+;;
+
+let runtime_err_runtime ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
     ~start_time
     msg
 ;;
@@ -146,6 +158,9 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       let now = Time_compat.now () in
       let sessions = ctx.load_mcp_sessions config in
       let save sessions = ctx.save_mcp_sessions config sessions in
+      let save_error error =
+        Error (Tool_result.Runtime_failure, "MCP session persistence failed: " ^ error)
+      in
       let response =
         match action with
         | Mcp_session.Create ->
@@ -153,22 +168,36 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
             let id = Mcp_session.generate () in
             let record : Mcp_server_eio_governance.mcp_session_record =
               { id; agent_name; created_at = now; last_seen = now } in
-            save (record :: sessions);
-            Ok (`Assoc [
-              ("status", `String "created");
-              ("session", Mcp_server_eio_governance.mcp_session_to_json record);
-            ])
+            (match save (record :: sessions) with
+             | Ok () ->
+                 Ok
+                   (`Assoc
+                     [
+                       ("status", `String "created");
+                       ( "session",
+                         Mcp_server_eio_governance.mcp_session_to_json record );
+                     ])
+             | Error error -> save_error error)
         | Mcp_session.Get ->
             let session_id = arg_get_string "session_id" "" in
             (match List.find_opt (fun (s : Mcp_server_eio_governance.mcp_session_record) -> String.equal s.id session_id) sessions with
-             | None -> Error (Printf.sprintf "MCP session '%s' not found" session_id)
+             | None ->
+                 Error
+                   ( Tool_result.Workflow_rejection,
+                     Printf.sprintf "MCP session '%s' not found" session_id )
              | Some s ->
                  let updated = { s with last_seen = now } in
                  let others = List.filter (fun (x : Mcp_server_eio_governance.mcp_session_record) -> not (String.equal x.id session_id)) sessions in
-                 save (updated :: others);
-                 Ok (Tool_args.ok_assoc [
-                   ("session", Mcp_server_eio_governance.mcp_session_to_json updated);
-                 ]))
+                 (match save (updated :: others) with
+                  | Ok () ->
+                      Ok
+                        (Tool_args.ok_assoc
+                           [
+                             ( "session",
+                               Mcp_server_eio_governance.mcp_session_to_json
+                                 updated );
+                           ])
+                  | Error error -> save_error error))
         | Mcp_session.List ->
             Ok (`Assoc [
               ("count", `Int (List.length sessions));
@@ -178,28 +207,46 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
             let cutoff = now -. Masc_time_constants.days_to_seconds 7 in
             let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> Stdlib.Float.compare s.last_seen cutoff >= 0) sessions in
             let removed = List.length sessions - List.length remaining in
-            save remaining;
-            Ok (`Assoc [
-              ("status", `String "cleaned");
-              ("removed", `Int removed);
-              ("remaining", `Int (List.length remaining));
-            ])
+            (match save remaining with
+             | Ok () ->
+                 Ok
+                   (`Assoc
+                     [
+                       ("status", `String "cleaned");
+                       ("removed", `Int removed);
+                       ("remaining", `Int (List.length remaining));
+                     ])
+             | Error error -> save_error error)
         | Mcp_session.Remove ->
             let session_id = arg_get_string "session_id" "" in
             let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> not (String.equal s.id session_id)) sessions in
             if List.length remaining = List.length sessions then
-              Error (Printf.sprintf "MCP session '%s' not found" session_id)
+              Error
+                ( Tool_result.Workflow_rejection,
+                  Printf.sprintf "MCP session '%s' not found" session_id )
             else begin
-              save remaining;
-              Ok (`Assoc [
-                ("status", `String "removed");
-                ("session_id", `String session_id);
-              ])
+              match save remaining with
+              | Ok () ->
+                  Ok
+                    (`Assoc
+                      [
+                        ("status", `String "removed");
+                        ("session_id", `String session_id);
+                      ])
+              | Error error -> save_error error
             end
       in
       (match response with
        | Ok json -> Some (runtime_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
-       | Error e -> Some (runtime_err_workflow ~tool_name:name ~start_time:start e)))
+       | Error (class_, e) ->
+           Some
+             (match class_ with
+              | Tool_result.Workflow_rejection ->
+                  runtime_err_workflow ~tool_name:name ~start_time:start e
+              | Tool_result.Runtime_failure ->
+                  runtime_err_runtime ~tool_name:name ~start_time:start e
+              | Tool_result.Policy_rejection | Tool_result.Transient_error ->
+                  Tool_result.make_err ~tool_name:name ~class_ ~start_time:start e)))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->

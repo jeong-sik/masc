@@ -175,6 +175,14 @@ let append_decision_record
                       - observation.claimable_task_count)) );
               ("failed_task_count", `Int observation.failed_task_count);
               ("pending_verification_count", `Int observation.pending_verification_count);
+              ( "scheduled_automation_counts_known",
+                `Bool
+                  (Keeper_world_observation.scheduled_automation_counts_known
+                     observation.scheduled_automation) );
+              ( "scheduled_automation_read_error",
+                Json_util.string_opt_to_json
+                  (Keeper_world_observation.scheduled_automation_read_error
+                     observation.scheduled_automation) );
               ( "scheduled_automation_active_count",
                 `Int observation.scheduled_automation.active_count );
               ( "scheduled_automation_due_ready_count",
@@ -384,19 +392,19 @@ let append_decision_record
               ] );
       ])
   in
-  try
-    Keeper_types_support.append_jsonl_line
+  match
+    Keeper_types_support.append_jsonl_line_result
       (Keeper_types_support.keeper_decision_log_path config meta.name)
       json
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  | Ok () -> ()
+  | Error msg ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DecisionAuditFlushFailures)
         ~labels:[("keeper", meta.name)]
         ();
       Log.Keeper.warn "append decision record failed for %s: %s"
-        meta.name (Printexc.to_string exn)
+        meta.name msg
 
 (** Observe tool call history from run_result to update keeper metrics.
     No action_taken type — we observe what the agent did, not classify it. *)

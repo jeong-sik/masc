@@ -36,21 +36,30 @@ let longest_local_path = function
            first rest)
 
 module Make (Store : Store) = struct
-  let find_url_by_id ~base_path id =
+  let find_url_by_id_result ~base_path id =
     match Store.load_all ~base_path with
-    | Error _ -> None
+    | Error msg -> Error msg
     | Ok repos -> (
         match
           List.find_opt
             (fun (repo : repository) -> String.equal repo.id id)
             repos
         with
-        | Some repo when not (String.equal repo.url "") -> Some repo.url
-        | Some _ | None -> None)
+        | Some repo when not (String.equal repo.url "") -> Ok (Some repo.url)
+        | Some _ | None -> Ok None)
 
-  let find_repo_by_path_prefix ~base_path abs_path =
+  let find_url_by_id ~base_path id =
+    match find_url_by_id_result ~base_path id with
+    | Ok value -> value
+    | Error msg ->
+      Log.Misc.warn
+        "Repo_store.find_url_by_id failed to read repository store: base_path=%S id=%S error=%s"
+        base_path id msg;
+      None
+
+  let find_repo_by_path_prefix_result ~base_path abs_path =
     match Store.load_all ~base_path with
-    | Error _ -> None
+    | Error msg -> Error msg
     | Ok repos ->
         let candidates =
           List.filter_map
@@ -64,4 +73,14 @@ module Make (Store : Store) = struct
         candidates
         |> longest_local_path
         |> Option.map (fun (repo, _, rel) -> (repo, rel))
+        |> fun value -> Ok value
+
+  let find_repo_by_path_prefix ~base_path abs_path =
+    match find_repo_by_path_prefix_result ~base_path abs_path with
+    | Ok value -> value
+    | Error msg ->
+      Log.Misc.warn
+        "Repo_store.find_repo_by_path_prefix failed to read repository store: base_path=%S path=%S error=%s"
+        base_path abs_path msg;
+      None
 end

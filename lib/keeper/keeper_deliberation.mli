@@ -1,5 +1,5 @@
 (** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, triage logic, and MODEL-driven deliberation.
+    world observation builder, and MODEL-driven deliberation.
 
     @since 2.90.0 *)
 
@@ -102,18 +102,6 @@ val policy_labels_of_action : deliberation_action -> string list
 val legality_verdict : world_observation -> deliberation_action -> legality_verdict
 val execute_structured_result :
   world_observation -> structured_result -> execution_result
-
-(** {1 Triage} *)
-
-type triage_result =
-  | Skip of string
-  | Triggered of deliberation_trigger list
-
-val triage_result_to_json : triage_result -> Yojson.Safe.t
-
-(** Evaluate a world observation and return triggers that warrant deliberation.
-    Pure heuristic — no MODEL calls, no I/O. *)
-val triage : world_observation -> triage_result
 
 (** {1 Deliberation meta (tracking fields for keeper_meta)} *)
 

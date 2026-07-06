@@ -274,3 +274,13 @@ let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
   let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
   Fs_compat.append_file path line
+
+let append_jsonl_line_result path json =
+  try
+    append_jsonl_line path json;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))

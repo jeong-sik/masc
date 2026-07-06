@@ -2,6 +2,7 @@ open Alcotest
 
 module Metrics = Dashboard_http_keeper_metrics
 module Detail = Dashboard_http_keeper_detail
+module Status_metrics = Keeper_status_metrics
 
 let metric ?(channel = "turn") tools =
   `Assoc
@@ -144,6 +145,33 @@ let test_24h_context_ignores_sparse_tool_events () =
   | other ->
       failf "expected one 24h bucket, got %s" (Yojson.Safe.to_string other)
 
+let test_24h_metrics_surfaces_parse_errors () =
+  let rows, summary =
+    Metrics.keeper_metrics_24h_json
+      ~metrics_lines:
+        [
+          "{not-json";
+          json_line (context_snapshot ~context_ratio:0.44 ());
+        ]
+      ~now_ts:100.0
+  in
+  check int "sample points preserve valid row" 1
+    (summary_int "sample_points" summary);
+  check int "read error count" 1 (summary_int "read_error_count" summary);
+  (match rows with
+  | `List [ row ] ->
+      check (float 0.0001) "valid context row still aggregates" 0.44
+        (summary_float "context_ratio_avg" row)
+  | other -> failf "expected one 24h bucket, got %s" (Yojson.Safe.to_string other));
+  match Yojson.Safe.Util.(summary |> member "read_errors" |> to_list) with
+  | [ error ] ->
+      let open Yojson.Safe.Util in
+      check string "source" "dashboard_keeper_metrics_24h_jsonl"
+        (error |> member "source" |> to_string);
+      check string "kind" "json_error" (error |> member "kind" |> to_string);
+      check int "line index" 0 (error |> member "line_index" |> to_int)
+  | other -> failf "expected one read error, got %d" (List.length other)
+
 let test_context_snapshot_classifier_rejects_sparse_tool_events () =
   check bool "context row qualifies" true
     (Metrics.metrics_row_has_context_snapshot (context_snapshot ()));
@@ -174,6 +202,38 @@ let test_metrics_series_ignores_sparse_tool_events () =
         (summary_float "context_ratio" row)
   | other ->
       failf "expected one metrics series row, got %d" (List.length other)
+
+let test_metrics_window_surfaces_indexed_row_read_errors () =
+  let valid_row = context_snapshot ~context_ratio:0.62 () in
+  let invalid_row : Status_metrics.parsed_metrics_json_line =
+    { metrics_line_index = 7; metrics_json = `String "not-an-object" }
+  in
+  let valid_indexed_row : Status_metrics.parsed_metrics_json_line =
+    { metrics_line_index = 8; metrics_json = valid_row }
+  in
+  let items, summary, _, _ =
+    Detail.compute_metrics_window
+      ~parsed_metric_lines:[ invalid_row; valid_indexed_row ]
+      ~parsed_metrics:[ invalid_row.metrics_json; valid_row ]
+      ~generation:0
+      ~compact:false
+      ~series_points:80
+      ~metrics_window_max_bytes:200_000
+      ~primary_model_norm:""
+      ~primary_model:""
+  in
+  check int "valid row still emits one series item" 1 (List.length items);
+  check int "read error count" 1 (summary_int "read_error_count" summary);
+  match Yojson.Safe.Util.(summary |> member "read_errors" |> to_list) with
+  | [ error ] ->
+      let open Yojson.Safe.Util in
+      check string "source" "dashboard_keeper_detail_metrics_jsonl"
+        (error |> member "source" |> to_string);
+      check string "kind" "row_not_object"
+        (error |> member "kind" |> to_string);
+      check int "parsed index" 0 (error |> member "parsed_index" |> to_int);
+      check int "source line index" 7 (error |> member "line_index" |> to_int)
+  | other -> failf "expected one read error, got %d" (List.length other)
 
 let test_metrics_window_redacts_model_and_handoff_labels () =
   let row =
@@ -277,6 +337,45 @@ let test_history_summary_decodes_content_blocks () =
             content
       | _ -> fail "expected non-empty conversation list")
 
+let test_history_summary_surfaces_read_errors () =
+  let rows =
+    String.concat
+      "\n"
+      [
+        "{not-json";
+        {|{"role":"user","content_blocks":[{"type":"text","text":"hello taskmaster"}],"ts_unix":2.0}|};
+      ]
+    ^ "\n"
+  in
+  with_temp_history rows (fun path ->
+      let ( conversation,
+            _k2k_recent,
+            _k2k_mentions,
+            raw_count,
+            _fragment_count,
+            _filtered_count,
+            read_errors ) =
+        Metrics.keeper_history_summary_json_with_read_errors
+          ~all_keeper_names:[ "albini"; "taskmaster" ]
+          ~keeper_name:"albini"
+          ~history_path:path
+          ~filter_fragments:false
+      in
+      check int "valid raw count" 1 raw_count;
+      (match conversation with
+      | `List items -> check int "valid conversation count" 1 (List.length items)
+      | _ -> fail "expected conversation list");
+      match read_errors with
+      | [ error ] ->
+          let open Yojson.Safe.Util in
+          check string "source" "dashboard_keeper_history_jsonl"
+            (error |> member "source" |> to_string);
+          check string "keeper" "albini" (error |> member "keeper" |> to_string);
+          check string "path" path (error |> member "path" |> to_string);
+          check string "kind" "json_error" (error |> member "kind" |> to_string);
+          check int "line index" 0 (error |> member "line_index" |> to_int)
+      | other -> failf "expected one read error, got %d" (List.length other))
+
 let () =
   run "dashboard_keeper_metrics_10286"
     [
@@ -298,10 +397,14 @@ let () =
             test_metrics_window_does_not_classify_execute_as_pr_work;
           test_case "24h context ignores sparse tool events" `Quick
             test_24h_context_ignores_sparse_tool_events;
+          test_case "24h surfaces parse errors" `Quick
+            test_24h_metrics_surfaces_parse_errors;
           test_case "classifies sparse tool events" `Quick
             test_context_snapshot_classifier_rejects_sparse_tool_events;
           test_case "series ignores sparse tool events" `Quick
             test_metrics_series_ignores_sparse_tool_events;
+          test_case "surfaces indexed row read errors" `Quick
+            test_metrics_window_surfaces_indexed_row_read_errors;
           test_case "redacts model and handoff labels" `Quick
             test_metrics_window_redacts_model_and_handoff_labels;
         ] );
@@ -309,5 +412,7 @@ let () =
         [
           test_case "decodes content_blocks rows" `Quick
             test_history_summary_decodes_content_blocks;
+          test_case "surfaces read errors" `Quick
+            test_history_summary_surfaces_read_errors;
         ] );
     ]

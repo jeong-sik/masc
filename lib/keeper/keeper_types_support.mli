@@ -105,3 +105,9 @@ val maybe_rotate_file : string -> unit
 (** Append [json] as a single UTF-8-repaired JSONL line to [path],
     rotating first if needed. *)
 val append_jsonl_line : string -> Yojson.Safe.t -> unit
+
+val append_jsonl_line_result : string -> Yojson.Safe.t -> (unit, string) result
+(** Result-returning variant of {!append_jsonl_line}. [Eio.Cancel.Cancelled]
+    is re-raised; ordinary filesystem/rotation/write failures are returned as
+    [Error] so correctness-critical callers can avoid exception-local
+    persistence policy. *)

@@ -61,13 +61,12 @@ let emit_transition
       "restart_count", `Int restart_count;
     ] in
     let path = trace_path ~base_path ~keeper_name in
-    try Keeper_types_support.append_jsonl_line path json
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
+    match Keeper_types_support.append_jsonl_line_result path json with
+    | Ok () -> ()
+    | Error msg ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string TraceEmitFailures)
           ~labels:[("keeper", keeper_name)]
           ();
         Log.Keeper.warn "trace_emit: %s: %s"
-          keeper_name (Printexc.to_string exn)
+          keeper_name msg

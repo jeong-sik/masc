@@ -25,6 +25,21 @@ type t =
   ; shared_fact_count : int
   }
 
+type build_error =
+  | Fact_store_parse_error of Keeper_memory_os_io.fact_jsonl_parse_error list
+
+val build_error_to_string : build_error -> string
+
+val build_result
+  :  keeper_id:string
+  -> now:float
+  -> ?max_preferences:int
+  -> ?max_constraints:int
+  -> unit
+  -> (t, build_error) result
+(** Result-returning projection. Malformed private or shared Memory OS fact rows
+    are explicit errors, not partial user-model projections. *)
+
 val build
   :  keeper_id:string
   -> now:float

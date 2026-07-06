@@ -111,16 +111,38 @@ let read_header_line (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.
 
 (** Parse [Content-Length] value from a header line.
     Returns [Some n] if the header matches, [None] otherwise. *)
-let parse_content_length line =
+type content_length_parse_error =
+  | Invalid_content_length of { raw : string }
+  | Negative_content_length of { value : int }
+
+let content_length_parse_error_to_string = function
+  | Invalid_content_length { raw } ->
+    Printf.sprintf "invalid Content-Length %S" raw
+  | Negative_content_length { value } ->
+    Printf.sprintf "negative Content-Length %d" value
+
+let parse_content_length_result line =
   let prefix = "Content-Length: " in
   if String.starts_with ~prefix line
   then (
     let raw =
       String.sub line (String.length prefix) (String.length line - String.length prefix)
     in
-    try Some (int_of_string (String.trim raw)) with
-    | Failure _ -> None)
-  else None
+    match int_of_string_opt (String.trim raw) with
+    | Some n when n >= 0 -> Ok (Some n)
+    | Some n -> Error (Negative_content_length { value = n })
+    | None -> Error (Invalid_content_length { raw }))
+  else Ok None
+;;
+
+let parse_content_length line =
+  match parse_content_length_result line with
+  | Ok value -> value
+  | Error error ->
+    Log.Server.warn
+      "lsp_process_manager: %s"
+      (content_length_parse_error_to_string error);
+    None
 ;;
 
 (** Read one complete LSP message from stdout.

@@ -112,6 +112,9 @@ val append_entry : config -> audit_entry -> unit
 (** Atomic append to today's day-file; creates the directory and
     file on first call. *)
 
+val append_entry_result : config -> audit_entry -> (unit, string) result
+(** Result-returning append variant for recoverable filesystem failures. *)
+
 val audit_event_severity : audit_entry -> string
 (** Dashboard severity for an audit entry: ["info"], ["warn"], or ["error"]. *)
 
@@ -129,7 +132,11 @@ val audit_events_response_json :
   audit_entry list ->
   Yojson.Safe.t
 (** Filter and page chronological audit entries, returning
-    [{entries, count}]. Filters are applied before pagination. *)
+    [{entries, count}]. Filters are applied before pagination. [kind] accepts
+    an exact action wire string (for example, ["auth_success"] or
+    ["tool_call:masc_status"]) or one of the explicit parametric action
+    families ["tool_call"], ["governance_decision"], or ["custom"]. It is not a
+    prefix match. *)
 
 (** {1 Logging — generic} *)
 

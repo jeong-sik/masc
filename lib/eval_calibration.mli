@@ -129,6 +129,15 @@ val record_verdict :
     [Harness.verdict] and invokes the callback after persistence.
     This enables wiring to [Eval.add_verdict] or SSE event publishers. *)
 
+val record_verdict_result :
+  task_id:string ->
+  req:Task.Anti_rationalization.review_request ->
+  result:Task.Anti_rationalization.review_result ->
+  ?on_harness_verdict:(Agent_sdk.Harness.verdict -> unit) ->
+  unit ->
+  (unit, string) result
+(** Result-returning variant of {!record_verdict}. *)
+
 val record_human_label :
   notes_hash:string ->
   human_verdict:label_verdict ->
@@ -136,6 +145,14 @@ val record_human_label :
   reason:string ->
   unit
 (** Append a human label for ground-truth tracking. *)
+
+val record_human_label_result :
+  notes_hash:string ->
+  human_verdict:label_verdict ->
+  labeler:string ->
+  reason:string ->
+  (unit, string) result
+(** Result-returning variant of {!record_human_label}. *)
 
 (** {1 Analysis} *)
 

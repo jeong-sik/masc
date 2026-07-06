@@ -228,9 +228,58 @@ let test_empty_scan_is_empty_report () =
   with_eio (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
       let report = Report.run_for_keepers_dir ~keepers_dir ~now:1_000.0 () in
+      Alcotest.(check bool) "keeper ids known" true report.keeper_ids_known;
       Alcotest.(check int) "no keepers" 0 (List.length report.results);
       Alcotest.(check int) "no errors" 0 report.error_count;
       Alcotest.(check int) "no input" 0 report.total_input))
+;;
+
+let test_implicit_scan_discovery_failure_is_report_error () =
+  with_eio (fun () ->
+    let keepers_path = Filename.temp_file "keeper-memory-os-gc-dry-run-file-" ".txt" in
+    Fun.protect
+      ~finally:(fun () -> if Sys.file_exists keepers_path then Sys.remove keepers_path)
+      (fun () ->
+         let report =
+           Report.run_for_keepers_dir ~keepers_dir:keepers_path ~now:1_000.0 ()
+         in
+         Alcotest.(check bool) "keeper ids unknown" false report.keeper_ids_known;
+         Alcotest.(check int)
+           "one discovery error"
+           1
+           (List.length report.keeper_id_discovery_read_errors);
+         Alcotest.(check int) "no keeper rows" 0 (List.length report.results);
+         Alcotest.(check int) "report error count includes discovery failure" 1 report.error_count;
+         match Report.to_json report with
+         | `Assoc fields ->
+           Alcotest.(check (option bool))
+             "json keeper ids known"
+             (Some false)
+             (Option.bind
+                (List.assoc_opt "keeper_ids_known" fields)
+                (function `Bool value -> Some value | _ -> None));
+           Alcotest.(check (option int))
+             "json discovery error count"
+             (Some 1)
+             (Option.bind
+                (List.assoc_opt "keeper_id_discovery_read_error_count" fields)
+                (function `Int value -> Some value | _ -> None));
+           (match List.assoc_opt "keeper_id_discovery_read_errors" fields with
+            | Some (`List [ `Assoc error_fields ]) ->
+              Alcotest.(check (option string))
+                "json discovery error source"
+                (Some "list_fact_store_keeper_ids_for_keepers_dir")
+                (Option.bind
+                   (List.assoc_opt "source" error_fields)
+                   (function `String value -> Some value | _ -> None));
+              Alcotest.(check (option string))
+                "json discovery error path"
+                (Some keepers_path)
+                (Option.bind
+                   (List.assoc_opt "path" error_fields)
+                   (function `String value -> Some value | _ -> None))
+            | Some _ | None -> Alcotest.fail "missing discovery error JSON")
+         | _ -> Alcotest.fail "report JSON must be an object"))
 ;;
 
 let () =
@@ -261,6 +310,10 @@ let () =
             "empty scan is empty report"
             `Quick
             test_empty_scan_is_empty_report
+        ; Alcotest.test_case
+            "implicit scan discovery failure is report error"
+            `Quick
+            test_implicit_scan_discovery_failure_is_report_error
         ] )
     ]
 ;;

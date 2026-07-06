@@ -505,18 +505,57 @@ let list_page_size () = Env_config.Tools.list_page_size ()
 let encode_cursor ~kind offset =
   Base64.encode_string (Printf.sprintf "%s:%d" kind offset)
 
-let decode_cursor ~kind cursor =
+type cursor_decode_error =
+  | Cursor_base64_decode_error of { kind : string; message : string }
+  | Cursor_kind_mismatch of { expected_kind : string }
+  | Cursor_offset_parse_error of { kind : string; raw_offset : string }
+  | Cursor_negative_offset of { kind : string; offset : int }
+
+let cursor_decode_error_to_string ~encoded = function
+  | Cursor_base64_decode_error { kind; message } ->
+      Printf.sprintf
+        "Invalid params: cursor %S could not be decoded (expected \
+         base64-encoded \"%s:<non-negative int>\": %s)"
+        encoded
+        kind
+        message
+  | Cursor_kind_mismatch { expected_kind } ->
+      Printf.sprintf
+        "Invalid params: cursor %S has wrong kind (expected base64-encoded \
+         \"%s:<non-negative int>\")"
+        encoded
+        expected_kind
+  | Cursor_offset_parse_error { kind; raw_offset } ->
+      Printf.sprintf
+        "Invalid params: cursor offset must be a non-negative integer string \
+         (kind=%S, raw_offset=%S, encoded=%S)"
+        kind
+        raw_offset
+        encoded
+  | Cursor_negative_offset { kind; offset } ->
+      Printf.sprintf
+        "Invalid params: cursor decoded to negative offset %d (kind=%S, \
+         encoded=%S)"
+        offset
+        kind
+        encoded
+
+let decode_cursor_result ~kind cursor =
   match Base64.decode cursor with
   | Ok decoded ->
       let prefix = kind ^ ":" in
       let prefix_len = String.length prefix in
-      if String.starts_with decoded ~prefix
-      then
-        int_of_string_opt
-          (String.sub decoded prefix_len (String.length decoded - prefix_len))
+      if String.starts_with decoded ~prefix then
+        let raw_offset =
+          String.sub decoded prefix_len (String.length decoded - prefix_len)
+        in
+        match int_of_string_opt raw_offset with
+        | Some offset when offset >= 0 -> Ok offset
+        | Some offset -> Error (Cursor_negative_offset { kind; offset })
+        | None -> Error (Cursor_offset_parse_error { kind; raw_offset })
       else
-        None
-  | Error _ -> None
+        Error (Cursor_kind_mismatch { expected_kind = kind })
+  | Error (`Msg message) -> Error (Cursor_base64_decode_error { kind; message })
 
 let page_items_with_cursor ~kind items cursor =
   let page_size = list_page_size () in
@@ -524,27 +563,9 @@ let page_items_with_cursor ~kind items cursor =
     match cursor with
     | None -> Ok 0
     | Some encoded -> (
-        match decode_cursor ~kind encoded with
-        | Some value when value >= 0 -> Ok value
-        | Some value ->
-            Error
-              (Printf.sprintf
-                 "Invalid params: cursor decoded to negative offset %d \
-                  (kind=%S, encoded=%S)"
-                 value kind encoded)
-        | None ->
-            (* [decode_cursor] returns [None] for three different
-               failure modes (base64 decode failed / kind-prefix
-               mismatch / int_of_string_opt failed).  Promoting it to
-               [(int, string) result] is a separate change because it
-               is the second [decode_cursor] in the tree (the other
-               lives in [graphql_api]) and the [int option] contract
-               is exercised by both. *)
-            Error
-              (Printf.sprintf
-                 "Invalid params: cursor %S could not be decoded \
-                  (expected base64-encoded \"%s:<non-negative int>\")"
-                 encoded kind))
+        match decode_cursor_result ~kind encoded with
+        | Ok offset -> Ok offset
+        | Error err -> Error (cursor_decode_error_to_string ~encoded err))
   in
   let rec drop n xs =
     match (n, xs) with

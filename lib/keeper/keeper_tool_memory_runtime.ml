@@ -255,43 +255,75 @@ let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
 
 (* --- History search (checkpoint + trace history) --- *)
 
+type history_read_error =
+  { path : string
+  ; exception_class : Keeper_memory_recall_exn_class.t
+  }
+
+type history_search_result =
+  { matches : string list
+  ; read_errors : history_read_error list
+  }
+
+let empty_history_search_result = { matches = []; read_errors = [] }
+
+let history_read_error_to_json (error : history_read_error) =
+  `Assoc
+    [ "source", `String (memory_search_source_to_string History)
+    ; "path", `String error.path
+    ; "exception_class"
+      , `String
+          (Keeper_memory_recall_exn_class.to_label error.exception_class)
+    ]
+;;
+
+let history_read_error_fields errors =
+  let read_error_count = List.length errors in
+  [ "read_error_count", `Int read_error_count
+  ; "read_errors", `List (List.map history_read_error_to_json errors)
+  ]
+  @ if read_error_count > 0 then [ "partial", `Bool true ] else []
+;;
+
+let load_history_messages_for_search ~path ~max_n =
+  match Keeper_memory_recall.load_history_user_messages_result ~path ~max_n with
+  | Ok msgs -> msgs, []
+  | Error exception_class -> [], [ { path; exception_class } ]
+;;
+
 let search_history
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(query : string)
       ~(limit : int)
-  : string list
+  : history_search_result
   =
-  (* RFC-0149 §3.1 — aggregation site.  Multiple history files are
-     concatenated for search; a per-path Read failure is dropped to
-     [[]] so a single corrupt history does not suppress matches from
-     the others.  The decision to elide is made *here* rather than
-     hidden inside a silent facade — failures still surface via the
-     [metric_keeper_memory_recall_read_errors] counter emitted by
-     [Keeper_memory_recall.load_history_user_messages_result]. *)
-  let current_history =
-    match
-      Keeper_memory_recall.load_history_user_messages_result
-        ~path:
-          (Keeper_types_support.keeper_history_path
-             config
-             (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-        ~max_n:50
-    with
-    | Ok msgs -> msgs
-    | Error _ -> []
+  (* RFC-0149 §3.1 follow-up — aggregation site.  Multiple history
+     files are concatenated for search; a per-path read failure does
+     not suppress checkpoint matches or other history files, but the
+     tool result now carries typed [read_errors] so callers can
+     distinguish "no history match" from "history source partially
+     unavailable". *)
+  let current_history_path =
+    Keeper_types_support.keeper_history_path
+      config
+      (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   in
-  let prev_history =
+  let current_history, current_read_errors =
+    load_history_messages_for_search ~path:current_history_path ~max_n:50
+  in
+  let prev_history, prev_read_errors =
     meta.runtime.trace_history
-    |> List.concat_map (fun old_trace_id ->
-      match
-        Keeper_memory_recall.load_history_user_messages_result
-          ~path:(Keeper_types_support.keeper_history_path config old_trace_id)
-          ~max_n:20
-      with
-      | Ok msgs -> msgs
-      | Error _ -> [])
+    |> List.fold_left
+         (fun (messages_rev, errors_rev) old_trace_id ->
+            let path = Keeper_types_support.keeper_history_path config old_trace_id in
+            let loaded, read_errors =
+              load_history_messages_for_search ~path ~max_n:20
+            in
+            List.rev_append loaded messages_rev, List.rev_append read_errors errors_rev)
+         ([], [])
+    |> fun (messages_rev, errors_rev) -> List.rev messages_rev, List.rev errors_rev
   in
   let checkpoint_user_msgs =
     Keeper_memory_recall.recent_user_messages (messages_of_context ctx_work) ~max_n:100
@@ -315,15 +347,20 @@ let search_history
       lst
     |> fun (acc, seen) -> List.rev acc, seen
   in
+  let unique_current_history, seen1 = dedup seen0 current_history in
+  let unique_prev_history, _seen2 = dedup seen1 prev_history in
   let all_candidates =
     checkpoint_user_msgs
-    @ fst (dedup seen0 current_history)
-    @ fst (dedup (snd (dedup seen0 current_history)) prev_history)
+    @ unique_current_history
+    @ unique_prev_history
   in
-  all_candidates
-  |> List.filter (fun msg -> query <> "" && String_util.contains_all_tokens_ci msg query)
-  |> List.rev
-  |> take limit
+  let matches =
+    all_candidates
+    |> List.filter (fun msg -> query <> "" && String_util.contains_all_tokens_ci msg query)
+    |> List.rev
+    |> take limit
+  in
+  { matches; read_errors = current_read_errors @ prev_read_errors }
 ;;
 
 (* --- Unified keeper_memory_search dispatch --- *)
@@ -353,7 +390,8 @@ let keeper_memory_search_json
     let result =
     match source with
     | History ->
-      let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
+      let history = search_history ~config ~meta ~ctx_work ~query ~limit in
+      let matches = history.matches in
       let no_match = matches = [] in
       let match_jsons = List.map (fun msg -> `String msg) matches in
       `Assoc
@@ -362,17 +400,19 @@ let keeper_memory_search_json
          ; "match_count", `Int (List.length matches)
          ; "matches", `List match_jsons
          ]
+         @ history_read_error_fields history.read_errors
          @ if no_match then [ "no_match", `Bool true ] else [])
     | All ->
       let bank_matches, bank_total =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
       in
       let history_limit = max 0 (limit - List.length bank_matches) in
-      let history_matches =
+      let history =
         if history_limit > 0
         then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
-        else []
+        else empty_history_search_result
       in
+      let history_matches = history.matches in
       let total_matches = List.length bank_matches + List.length history_matches in
       let no_match = total_matches = 0 in
       let bank_jsons = List.map memory_match_to_json bank_matches in
@@ -392,6 +432,7 @@ let keeper_memory_search_json
          ; "match_count", `Int total_matches
          ; "matches", `List (bank_jsons @ history_jsons)
          ]
+         @ history_read_error_fields history.read_errors
          @ if no_match then [ "no_match", `Bool true ] else [])
     | Memory ->
       let matches, total_candidates =
@@ -433,34 +474,34 @@ let keeper_memory_search_json
        | _ -> None)
     | _ -> None
   in
-  (try
-     let log_entry =
-       `Assoc
-         ([ "ts_unix", `Float (Time_compat.now ())
-          ; "event", `String "memory_search"
-          ; "query", `String query
-          ; "source", `String source_label
-          ; "kind_filter", `String kind_filter
-          ; "match_count", `Int log_match_count
-          ]
-          @
-          match log_top_score with
-          | Some s -> [ "top_score", `Float s ]
-          | None -> [])
-     in
-     Keeper_types_support.append_jsonl_line
+  let log_entry =
+    `Assoc
+      ([ "ts_unix", `Float (Time_compat.now ())
+       ; "event", `String "memory_search"
+       ; "query", `String query
+       ; "source", `String source_label
+       ; "kind_filter", `String kind_filter
+       ; "match_count", `Int log_match_count
+       ]
+       @
+       match log_top_score with
+       | Some s -> [ "top_score", `Float s ]
+       | None -> [])
+  in
+  (match
+     Keeper_types_support.append_jsonl_line_result
        (Keeper_types_support.keeper_decision_log_path config meta.name)
        log_entry
    with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
+   | Ok () -> ()
+   | Error msg ->
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string DecisionAuditFlushFailures)
        ~labels:[ "keeper", meta.name ]
        ();
      Log.Keeper.warn ~keeper_name:meta.name
        "memory_search decision-log append failed: %s"
-       (Printexc.to_string exn));
+       msg);
   Yojson.Safe.to_string result
 ;;
 

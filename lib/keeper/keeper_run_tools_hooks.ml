@@ -199,7 +199,21 @@ let assemble_hooks
              acc.meta <- entry.meta;
              meta_ref := entry.meta
            | None -> ());
-          let task_id = Keeper_run_tools_task_scope.task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta:acc.meta in
+          let task_scope =
+            Keeper_run_tools_task_scope.task_id_scope_of_tool_call_report
+              ~tool_name
+              ~input
+              ~output_text
+              ~meta:acc.meta
+          in
+          (match task_scope.claim_output_error with
+           | None -> ()
+           | Some error ->
+             Log.Keeper.warn ~keeper_name:acc.meta.name
+               "keeper task scope claim output parse failed tool=%s: %s"
+               tool_name
+               (Keeper_run_tools_task_scope.claim_output_scope_error_to_string error));
+          let task_id = task_scope.task_id in
           acc.tool_calls
           <- { tool_name
              ; provider

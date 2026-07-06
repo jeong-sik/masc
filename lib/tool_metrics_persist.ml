@@ -144,12 +144,11 @@ let drain_to_store (store : Dated_jsonl.t) : int =
     match take_queued_record () with
     | None -> ()
     | Some json ->
-      (try
-         Dated_jsonl.append store json;
-         Stdlib.incr count
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      (match Dated_jsonl.append_result store json with
+       | Ok () -> Stdlib.incr count
+       | Error msg ->
          Log.Metrics.error "tool_metrics_persist: append failed: %s"
-           (Stdlib.Printexc.to_string exn));
+           msg);
       drain ()
   in
   drain ();

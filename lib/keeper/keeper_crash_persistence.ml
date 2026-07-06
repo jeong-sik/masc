@@ -55,14 +55,18 @@ let drain_batch () =
   done;
   List.rev !batch
 
-let write_event (ev : crash_event) =
+let crash_event_to_json (ev : crash_event) =
+  `Assoc
+    [ ( "ts", `Float ev.ts )
+    ; ( "reason", `String ev.reason )
+    ; ( "restart_count", `Int ev.restart_count )
+    ]
+;;
+
+let write_event_result (ev : crash_event) =
   let store = crash_store ~keepers_dir:ev.keepers_dir ev.name in
-  let json = `Assoc [
-    ("ts", `Float ev.ts);
-    ("reason", `String ev.reason);
-    ("restart_count", `Int ev.restart_count);
-  ] in
-  Dated_jsonl.append store json
+  Dated_jsonl.append_result store (crash_event_to_json ev)
+;;
 
 (* ── self-preservation events ──────────────────────────────── *)
 
@@ -106,16 +110,20 @@ let drain_sp_batch () =
   done;
   List.rev !batch
 
-let write_sp_event (ev : sp_event) =
+let sp_event_to_json (ev : sp_event) =
+  `Assoc
+    [ ( "ts", `Float ev.sp_ts )
+    ; ( "suppressed_count", `Int ev.sp_suppressed_count )
+    ; ( "total", `Int ev.sp_total )
+    ; ( "ratio", `Float ev.sp_ratio )
+    ; ( "dominant_cohort", `String ev.sp_dominant_cohort )
+    ]
+;;
+
+let write_sp_event_result (ev : sp_event) =
   let store = sp_store ~keepers_dir:ev.sp_keepers_dir in
-  let json = `Assoc [
-    ("ts", `Float ev.sp_ts);
-    ("suppressed_count", `Int ev.sp_suppressed_count);
-    ("total", `Int ev.sp_total);
-    ("ratio", `Float ev.sp_ratio);
-    ("dominant_cohort", `String ev.sp_dominant_cohort);
-  ] in
-  Dated_jsonl.append store json
+  Dated_jsonl.append_result store (sp_event_to_json ev)
+;;
 
 (* ── drain fiber ─────────────────────────────────────────────── *)
 
@@ -126,25 +134,27 @@ let start_drain_fiber ~sw ~clock =
         Env_config_keeper.KeeperPollIntervals.crash_persistence_drain_sec;
       let batch = drain_batch () in
       List.iter (fun ev ->
-        (try write_event ev
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        match write_event_result ev with
+        | Ok () -> ()
+        | Error error ->
            Otel_metric_store.inc_counter
              Keeper_metrics.(to_string CrashPersistenceFailures)
              ~labels:[("site", Keeper_crash_persistence_failure_site.(to_label Crash_write))]
              ();
            Log.Keeper.warn "crash persistence write failed for %s: %s"
-             ev.name (Printexc.to_string exn))
+             ev.name error
       ) batch;
       let sp_batch = drain_sp_batch () in
       List.iter (fun ev ->
-        (try write_sp_event ev
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        match write_sp_event_result ev with
+        | Ok () -> ()
+        | Error error ->
            Otel_metric_store.inc_counter
              Keeper_metrics.(to_string CrashPersistenceFailures)
              ~labels:[("site", Keeper_crash_persistence_failure_site.(to_label Sp_write))]
              ();
            Log.Keeper.warn "sp persistence write failed: %s"
-             (Printexc.to_string exn))
+             error
       ) sp_batch
     done;
     `Stop_daemon)

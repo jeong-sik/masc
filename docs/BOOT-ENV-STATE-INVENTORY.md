@@ -127,7 +127,7 @@ canonical process env var is already set.
 | `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
 | `[autonomous]` | 2 | `fairness_cooldown_sec`, `max_idle_turns` |
 | `[reactive]` | 1 | `max_idle_turns` |
-| `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
+| `[heartbeat]` | 7 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `sleep_chunk_sec` |
 | `[turn]` | 19 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
 | `[proactive]` | 1 | `min_interval_sec` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
@@ -135,7 +135,6 @@ canonical process env var is already set.
 | `[budget]` | 1 | `daily_usd` |
 | `[metrics]` | 2 | `max_bytes`, `max_rotated` |
 | `[memory]` | 6 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
-| `[alert]` | 17 | `slack_enabled`, `slack_dm_user_id`, `github_enabled`, `github_min_score` |
 | `[debug]` | 1 | `enabled` |
 
 **Example** (`<active config root>/runtime.toml`):
@@ -146,9 +145,6 @@ canonical process env var is already set.
 [reactive]
 
 [heartbeat]
-board_generic_wakeup_limit = 3 # caps non-explicit board_activity fanout; explicit mentions bypass this cap
-board_debounce_sec = 30
-board_wakeup_max = 4 # caps total non-explicit board wakeups after reason prioritization
 
 [bootstrap]
 max_active_keepers = 12
@@ -632,34 +628,15 @@ MASC_SSE_KEEPALIVE_SEC
 
 ### A.4 `env_config_keeper`
 
-Used for keeper bootstrap, alert fanout, supervisor policy, keepalive cadence, tool retry behavior, OAS turn limits, and the context ratio hard cap.
+Used for keeper bootstrap, supervisor policy, keepalive cadence, tool retry behavior, OAS turn limits, and the context ratio hard cap.
 
 ```text
-MASC_ALERT_DEDUP_WINDOW_SEC
 MASC_CONTEXT_RATIO_HARD_CAP
 MASC_DASHBOARD_HEALTH_CTX_CRITICAL
 MASC_DASHBOARD_HEALTH_CTX_WARN
 MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL
 MASC_DASHBOARD_HEALTH_PENALTY_WARN
 MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO
-MASC_KEEPER_ALERT_BOARD_AUTHOR
-MASC_KEEPER_ALERT_BOARD_ENABLED
-MASC_KEEPER_ALERT_BOARD_HEARTH
-MASC_KEEPER_ALERT_BOARD_VISIBILITY
-MASC_KEEPER_ALERT_ENABLED
-MASC_KEEPER_ALERT_GITHUB_ENABLED
-MASC_KEEPER_ALERT_GITHUB_LABEL
-MASC_KEEPER_ALERT_GITHUB_MIN_SCORE
-MASC_KEEPER_ALERT_GITHUB_REPO
-MASC_KEEPER_ALERT_MAX_BODY_CHARS
-MASC_KEEPER_ALERT_MAX_RETRIES
-MASC_KEEPER_ALERT_MIN_SCORE
-MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS
-MASC_KEEPER_ALERT_SLACK_DM_ENABLED
-MASC_KEEPER_ALERT_SLACK_DM_USER_ID
-MASC_KEEPER_ALERT_SLACK_ENABLED
-MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL
-MASC_KEEPER_BOARD_DEBOUNCE_SEC
 MASC_KEEPER_BOOTSTRAP_ENABLED
 MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS
 MASC_KEEPER_BOOTSTRAP_MAX_SCAN

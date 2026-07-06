@@ -140,6 +140,7 @@ type extraction_error =
   | Provider_transport_failed of string
   | Provider_empty_response
   | Provider_unparseable_response of string
+  | Memory_generation_reservation_failed of string
   | Memory_fact_upsert_failed of string
 
 val extraction_error_to_string : extraction_error -> string
@@ -187,6 +188,22 @@ val per_keeper_slot_capacity : unit -> int
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT] (default 1, 0 disables the
     gate). The capacity is applied per keeper, not fleet-wide. *)
 
+type 'a provider_slot_result =
+  | Provider_slot_acquired of 'a
+  | Provider_slot_busy
+  | Provider_slot_acquisition_failed of string
+(** Typed provider-slot acquisition result. [Provider_slot_busy] is the expected
+    capacity timeout path; [Provider_slot_acquisition_failed] is an infrastructure
+    failure while taking the semaphore and must not be reported as ordinary slot
+    pressure. *)
+
+val with_provider_slot_result
+  :  keeper_id:string
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> (unit -> 'a)
+  -> 'a provider_slot_result
+(** Typed provider-slot guard used by production runtime accounting. *)
+
 val with_provider_slot
   :  keeper_id:string
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -196,6 +213,9 @@ val with_provider_slot
     storm guard. At capacity N per keeper, the (N+1)-th concurrent entrant for
     the same keeper returns [None] after [provider_slot_wait_sec] (drop, not
     block); capacity 0 disables the gate so [f] always runs ([Some]). The
+    compatibility wrapper also maps acquisition failures to [None]; production
+    accounting should use {!with_provider_slot_result} to avoid classifying
+    acquisition failures as ordinary slot pressure. The
     provider slot registry is guarded through [Eio_guard.with_mutex], avoiding
     blocking stdlib locks on keeper runtime fibers. Exposed for storm-guard
     regression coverage (#21376). *)

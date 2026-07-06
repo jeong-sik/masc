@@ -2,6 +2,16 @@
 
 open Repo_manager_types
 
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
+
 let sample_repo ?(auto_sync = true) ?(sync_interval = 300) ?(updated_at = Int64.of_int 1700000000) id =
   {
     id;
@@ -74,6 +84,22 @@ let with_temp_base_path f =
       rm_rf dir)
     (fun () -> f dir)
 
+let run_git_quiet args =
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close devnull)
+    (fun () ->
+      let argv = Array.of_list ("git" :: args) in
+      try
+        let pid = Unix.create_process "git" argv Unix.stdin devnull devnull in
+        match Unix.waitpid [] pid with
+        | _, Unix.WEXITED code -> code
+        | _, (Unix.WSIGNALED _ | Unix.WSTOPPED _) -> 1
+      with
+      | Unix.Unix_error _ -> 1)
+
+let git_available () = run_git_quiet [ "--version" ] = 0
+
 let test_sync_all_empty_repos () =
   with_temp_base_path (fun base_path ->
       match Repo_sync.sync_all ~base_path ~now:(Int64.of_int 1700004000) with
@@ -95,6 +121,48 @@ let test_sync_all_no_due_repos () =
           | Ok synced -> Alcotest.(check int) "no due repos" 0 (List.length synced)
           | Error e -> Alcotest.fail ("sync_all failed: " ^ e)))
 
+let test_sync_all_reports_due_repo_failures () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let repo_dir = Filename.concat base_path "repo-fetch-fails" in
+        Unix.mkdir repo_dir 0o755;
+        ignore (run_git_quiet [ "init"; repo_dir ]);
+        ignore
+          (run_git_quiet
+             [ "-C"
+             ; repo_dir
+             ; "remote"
+             ; "add"
+             ; "origin"
+             ; Filename.concat base_path "missing-remote"
+             ]);
+        let repo =
+          { (sample_repo ~sync_interval:0 ~updated_at:Int64.zero "fetch-fails") with
+            local_path = repo_dir
+          }
+        in
+        match Repo_store.save_all ~base_path [ repo ] with
+        | Error e -> Alcotest.fail ("save failed: " ^ e)
+        | Ok () -> (
+            match Repo_sync.sync_all ~base_path ~now:(Int64.of_int 1) with
+            | Ok synced ->
+                Alcotest.failf
+                  "sync_all must report due repo failure, got %d successes"
+                  (List.length synced)
+            | Error msg ->
+                Alcotest.(check bool) "mentions repo id" true
+                  (contains_substring msg "fetch-fails");
+                match Repo_store.find ~base_path "fetch-fails" with
+                | Error e -> Alcotest.fail ("find after sync failed: " ^ e)
+                | Ok persisted -> (
+                    match persisted.status with
+                    | Error detail ->
+                        Alcotest.(check bool) "persists failure detail" true
+                          (String.length detail > 0)
+                    | Active | Paused | Cloning ->
+                        Alcotest.fail "failed repo status must be persisted as Error")))
+
 let () =
   Alcotest.run "Repo_sync"
     [
@@ -112,5 +180,7 @@ let () =
         [
           Alcotest.test_case "empty repos" `Quick test_sync_all_empty_repos;
           Alcotest.test_case "no due repos" `Quick test_sync_all_no_due_repos;
+          Alcotest.test_case "due repo failures return Error" `Quick
+            test_sync_all_reports_due_repo_failures;
         ] );
     ]

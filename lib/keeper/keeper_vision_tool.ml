@@ -18,12 +18,16 @@ let default_complete : complete_fn =
  fun ~sw ~net ?clock ~config ~messages () ->
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 
-(* Only [Eio.Time.Timeout] is caught here; [Eio.Cancel.Cancelled] and other
-   exceptions are intentionally propagated so caller cancellation is not
+type 'a timeout_result =
+  | Completed of 'a
+  | Timed_out
+
+(* Only [Eio.Time.Timeout] becomes [Timed_out] here; [Eio.Cancel.Cancelled] and
+   other exceptions are intentionally propagated so caller cancellation is not
    swallowed by the tool-level timeout handler. *)
 let with_timeout ~clock ~timeout_sec f =
-  try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
-  | Eio.Time.Timeout -> None
+  try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Eio.Time.Timeout -> Timed_out
 
 let valid_timeout_sec timeout_sec =
   Float.is_finite timeout_sec && timeout_sec > 0.0
@@ -396,13 +400,13 @@ let run_candidates
             with_timeout ~clock ~timeout_sec (fun () ->
               complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
           with
-          | None ->
+          | Timed_out ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"error"
               ~reason:"timeout";
             continue_with (`Timeout runtime_id)
-          | Some (Error err) ->
+          | Completed (Error err) ->
             if terminal_policy_http_error err
             then (
               record_vision_candidate_attempt
@@ -429,7 +433,7 @@ let run_candidates
                 ~failure_class:(failure_class_of_http_error err)
                 ~detail:(Provider_http_error.to_message err)
                 "provider_error")
-          | Some (Ok response) ->
+          | Completed (Ok response) ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"ok"
@@ -482,13 +486,13 @@ let run_candidates_outcome
             with_timeout ~clock ~timeout_sec (fun () ->
               complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
           with
-          | None ->
+          | Timed_out ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"error"
               ~reason:"timeout";
             continue_with (`Timeout runtime_id)
-          | Some (Error err) ->
+          | Completed (Error err) ->
             if terminal_policy_http_error err
             then (
               record_vision_candidate_attempt
@@ -515,7 +519,7 @@ let run_candidates_outcome
                 { failure_class = failure_class_of_http_error err
                 ; detail = Provider_http_error.to_message err
                 })
-          | Some (Ok response) ->
+          | Completed (Ok response) ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"ok"

@@ -25,14 +25,55 @@ let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
       record_memory_recall_read_error ~site path exn_class;
       []
 
+let keeper_list_error_row_json config name effective_meta_error =
+  let persisted_meta, persisted_meta_read_error =
+    match read_meta config name with
+    | Ok (Some meta) -> Some meta, None
+    | Ok None -> None, None
+    | Error err -> None, Some err
+  in
+  let keepalive_running =
+    match persisted_meta with
+    | Some meta -> runtime_keepalive_running config meta
+    | None -> false
+  in
+  let persisted_fields =
+    match persisted_meta with
+    | Some meta ->
+        [
+          ("agent_name", `String meta.agent_name);
+          ("created_at", `String meta.created_at);
+          ("updated_at", `String meta.updated_at);
+          ("autoboot_enabled", `Bool meta.autoboot_enabled);
+          ("proactive_enabled", `Bool meta.proactive.enabled);
+          ("proactive_idle_sec", `Int meta.proactive.idle_sec);
+          ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+          ("persisted_meta_read_error", `Null);
+        ]
+    | None ->
+        [
+          ("agent_name", `Null);
+          ("created_at", `Null);
+          ("updated_at", `Null);
+          ( "persisted_meta_read_error",
+            Json_util.string_opt_to_json persisted_meta_read_error );
+        ]
+  in
+  error_assoc
+    ([
+       ("name", `String name);
+       ("keepalive_running", `Bool keepalive_running);
+       ("effective_meta_error", effective_meta_error);
+     ]
+     @ persisted_fields)
+
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
-  let dir = keeper_dir ctx.config in
-  match Safe_ops.list_dir_safe dir with
+  match Keeper_meta_store.keeper_names_result ctx.config with
   | Error e -> tool_result_error e
-  | Ok _files ->
-  let keeper_names = Keeper_meta_store.keeper_names ctx.config |> take limit in
+  | Ok names ->
+  let keeper_names = names |> take limit in
   if not detailed then
     let json = `Assoc [
       ("count", `Int (List.length keeper_names));
@@ -44,8 +85,18 @@ let handle_keeper_list ctx args : tool_result =
     let keepers =
       List.filter_map (fun name ->
         match read_effective_meta ctx.config name with
-        | Error _ -> None
-        | Ok None -> None
+        | Error err ->
+            Some
+              (keeper_list_error_row_json
+                 ctx.config
+                 name
+                 (keeper_list_effective_meta_error_json name err))
+        | Ok None ->
+            Some
+              (keeper_list_error_row_json
+                 ctx.config
+                 name
+                 (keeper_list_effective_meta_missing_json name))
         | Ok (Some m) ->
           let created_ts =
             Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
@@ -70,33 +121,59 @@ let handle_keeper_list ctx args : tool_result =
           in
           let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
           let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
-          let metrics_window_lines =
+          let metrics_window_lines, metrics_line_path =
             let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
-            if dated <> [] then dated
+            if dated <> [] then dated, None
             else
-              read_tail_lines_or_empty ~site:"keeper_status_metrics" metrics_path
-                ~max_bytes:120000 ~max_lines:120
+              ( read_tail_lines_or_empty ~site:"keeper_status_metrics" metrics_path
+                  ~max_bytes:120000 ~max_lines:120
+              , Some metrics_path )
+          in
+          let parsed_metrics, metrics_parse_error_records =
+            parse_metrics_json_lines metrics_window_lines
+          in
+          let metrics_parse_errors =
+            List.map
+              (metrics_json_line_parse_error_to_json
+                 ~source:"keeper_status_metrics_jsonl"
+                 ~keeper:m.name
+                 ?path:metrics_line_path)
+              metrics_parse_error_records
+          in
+          let metrics_read_error =
+            match metrics_parse_errors with
+            | [] -> None
+            | errors ->
+              Some
+                (`Assoc
+                  [ ("source", `String "keeper_status_metrics_parse")
+                  ; ("keeper", `String m.name)
+                  ; ( "message"
+                    , `String
+                        "keeper status metrics JSONL contains malformed rows"
+                    )
+                  ; ("parse_error_count", `Int (List.length errors))
+                  ; ("parse_errors", `List errors)
+                  ])
           in
           let last_metrics =
-            match List.rev metrics_window_lines with
-            | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+            match List.rev parsed_metrics with
+            | metrics :: _ -> Some metrics
             | [] -> None
           in
           let metrics_overview =
-            summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
+            summarize_metrics_jsons parsed_metrics
+              ~default_generation:m.runtime.generation
           in
           let last_skill_metrics =
             let rec find_latest = function
               | [] -> None
-              | line :: tl ->
-                  (try
-                     let j = Yojson.Safe.from_string line in
-                     match Safe_ops.json_string_opt "skill_primary" j with
-                     | Some primary when String.trim primary <> "" -> Some j
-                     | _ -> find_latest tl
-                   with Yojson.Json_error _ -> find_latest tl)
+              | json :: tl ->
+                  (match Safe_ops.json_string_opt "skill_primary" json with
+                   | Some primary when String.trim primary <> "" -> Some json
+                   | _ -> find_latest tl)
             in
-            find_latest (List.rev metrics_window_lines)
+            find_latest (List.rev parsed_metrics)
           in
           (* RFC-0149 §3.1 — single typed read drives both the structured
              [memory_bank_summary] (consumed by [memory_bank] / counts
@@ -271,6 +348,8 @@ let handle_keeper_list ctx args : tool_result =
                 Json_util.string_opt_to_json memory_recent_note);
               ("context", context_json);
               ("skill_route", skill_route_json);
+              ("metrics_parse_error_count", `Int (List.length metrics_parse_errors));
+              ("metrics_parse_errors", `List metrics_parse_errors);
               ("metrics_overview", metrics_summary_to_json metrics_overview);
               ("memory_bank", memory_summary_to_json memory_bank_summary);
               ("storage_paths", `Assoc [
@@ -303,11 +382,21 @@ let handle_keeper_list ctx args : tool_result =
                        ctx.config
                        (Keeper_id.Trace_id.to_string m.runtime.trace_id)) );
               ]);
-            ]))
+            ]
+            @
+            match metrics_read_error with
+            | None -> []
+            | Some read_error -> [ ("read_error", read_error) ]))
         ) keeper_names
+      in
+      let read_errors =
+        keepers
+        |> List.filter_map (fun row ->
+             Json_util.assoc_member_opt "read_error" row)
       in
       let json = `Assoc [
         ("count", `Int (List.length keepers));
+        ("read_errors", `List read_errors);
         ("keepers", `List keepers);
       ] in
       tool_result_ok (Yojson.Safe.to_string json)

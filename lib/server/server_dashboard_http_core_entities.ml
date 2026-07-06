@@ -1,5 +1,6 @@
 let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
-  let workspace_state = Workspace.read_state config in
+  let workspace_state_snapshot = Workspace.read_state_snapshot config in
+  let workspace_state = workspace_state_snapshot.state in
   let cluster = Env_config_core.cluster_name () in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
@@ -10,6 +11,13 @@ let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "project", `String workspace_state.project
+    ; ( "workspace_state_status"
+      , `String
+          (Workspace.read_state_status_to_string workspace_state_snapshot.status) )
+    ; ( "workspace_state_read_error_count"
+      , `Int (List.length workspace_state_snapshot.read_errors) )
+    ; ( "workspace_state_read_errors"
+      , `List (List.map (fun error -> `String error) workspace_state_snapshot.read_errors) )
     ; "tempo_interval_s", `Float tempo.current_interval_s
     ; "paused", `Bool workspace_state.paused
     ; "version", `String build.release_version
@@ -66,6 +74,8 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
     ; "emoji", `String profile.emoji
     ; "koreanName", `String profile.korean_name
+    ; "profile_errors", Dashboard_execution_helpers.agent_profile_errors_json profile
+    ; "profile_error_count", `Int (List.length profile.profile_errors)
     ; "model", `Null
     ; "traits", `List (List.map (fun t -> `String t) profile.traits)
     ; "interests", `List (List.map (fun i -> `String i) profile.interests)

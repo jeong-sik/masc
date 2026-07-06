@@ -316,6 +316,14 @@ let otel_health_json () =
     ]
 ;;
 
+let schedule_runner_status_json () =
+  let now = Time_compat.now () in
+  Schedule_runner_status.snapshot ()
+  |> Schedule_runner_status.snapshot_to_yojson
+       ~now
+       ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
+;;
+
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
@@ -346,6 +354,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
       ("subsystems", Subsystem_health.to_yojson ());
+      ("schedule_runner", schedule_runner_status_json ());
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
     ]
@@ -548,8 +557,11 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
               ("configured_keeper_names", `List []);
               ("materializable_configured_keeper_count", `Int 0);
               ("materializable_configured_keeper_names", `List []);
+              ("persisted_meta_names_known", `Bool false);
               ("persisted_meta_count", `Int 0);
               ("persisted_meta_names", `List []);
+              ("persisted_meta_read_error_count", `Int 0);
+              ("persisted_meta_read_errors", `List []);
               ("configured_without_meta_count", `Int 0);
               ("configured_without_meta_names", `List []);
               ("meta_without_config_count", `Int 0);
@@ -632,6 +644,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
     ("subsystems", Subsystem_health.to_yojson ());
+    ("schedule_runner", schedule_runner_status_json ());
     (* Server log visibility belongs on the first health probe too.  Keep the
        payload cheap and redacted: only ring counters, latest metadata, and
        file-sink state are exposed here; full log rows stay behind the
@@ -799,8 +812,11 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("configured_keeper_names", `List []);
           ("materializable_configured_keeper_count", `Int 0);
           ("materializable_configured_keeper_names", `List []);
+          ("persisted_meta_names_known", `Bool false);
           ("persisted_meta_count", `Int 0);
           ("persisted_meta_names", `List []);
+          ("persisted_meta_read_error_count", `Int 0);
+          ("persisted_meta_read_errors", `List []);
           ("configured_without_meta_count", `Int 0);
           ("configured_without_meta_names", `List []);
           ("meta_without_config_count", `Int 0);

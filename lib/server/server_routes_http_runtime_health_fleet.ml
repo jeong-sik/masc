@@ -24,6 +24,7 @@ let keeper_reaction_ledger_health_json () =
       ; "row_count", `Int 0
       ; "stimulus_count", `Int 0
       ; "reaction_count", `Int 0
+      ; "stimulus_consumed_count", `Int 0
       ; "pending_stimulus_count", `Int 0
       ; "pending_by_keeper", `List []
       ; "read_error_count", `Int 0
@@ -31,19 +32,20 @@ let keeper_reaction_ledger_health_json () =
       ]
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
-    let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings |> take 64 with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Keeper.warn
-          "health: failed to compute keeper reaction ledger names: %s"
-          (Printexc.to_string exn);
-        []
-    in
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path:config.base_path
-      ~keeper_names
-      ~limit_per_keeper:20
+    (match Keeper_meta_store.keeper_names_result config with
+     | Error error ->
+       Log.Keeper.warn
+         "health: failed to compute keeper reaction ledger names: %s"
+         error;
+       Keeper_reaction_ledger.fleet_summary_read_error_json
+         ~limit_per_keeper:20
+         ~source:"keeper_meta_store"
+         ~error
+     | Ok keeper_names ->
+       Keeper_reaction_ledger.fleet_summary_json
+         ~base_path:config.base_path
+         ~keeper_names:(keeper_names |> sorted_unique_strings |> take 64)
+         ~limit_per_keeper:20)
 ;;
 
 let paused_keeper_count = function

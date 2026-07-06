@@ -3,7 +3,7 @@ rfc: "0089"
 title: "String Classifier to Typed Variant — direct replacement, no lint"
 status: Implemented
 created: 2026-05-15
-updated: 2026-05-17
+updated: 2026-07-05
 author: vincent
 supersedes: []
 superseded_by: null
@@ -33,7 +33,9 @@ repair가 누적된다.
 
 - `lib/audit_log.ml:126` — action kind를 string prefix로 되읽는다.
 - `lib/board_core_classify.ml:80` — author prefix가 내부 분류 기준이 된다.
-- `lib/tool_help_registry.ml:71` — tool family를 tool name prefix로 추정한다.
+- `lib/tool_surface/tool_help_registry.ml` — historical tool doc-ref family를
+  tool name prefix로 추정했다. 2026-07-05 local residual cleanup 이후 doc refs는
+  `Tool_catalog.doc_refs` exact catalog metadata에서만 온다(CI pending).
 
 ```ocaml
 if String.starts_with ~prefix:"masc_keeper_" tool_name then
@@ -78,11 +80,11 @@ RFC-0042 (Draft, `keeper_turn_terminal.t.code` closed sum) 가 동일 안티패�
 
 | Domain | File:Line | 현재 패턴 (요약) | Typed variant 후보 | Variant 이미 존재? |
 |---|---|---|---|---|
-| Audit action kind | `lib/audit_log.ml:126` | `starts_with ~prefix:"tool_call:" / "governance_decision:" / "custom:"` 후 substring 분리 | 기존 `action_kind` variant (`ToolCall of string` 등) 가 이미 정의 — 문제는 *string 직렬화 후 재분류 경로*가 존재한다는 것 | 부분 (직렬화 round-trip만 미정의) |
-| Anti-rationalization decision | `lib/anti_rationalization.ml:409` | `starts_with ~prefix:"APPROVE" / "REJECT"` upper-case prefix + word-boundary 검사 후 `Approve / Reject` 변형 생성 | LLM 응답 파싱 boundary이므로 typed parser 결과(`type decision = Approve \| Reject \| Abstain`)로 산출. 내부 caller는 string을 다시 보지 않음 | 변형은 존재, parser 경로만 string 통과 |
-| Board author classification | `lib/board_core_classify.ml:80` | `starts_with ~prefix:"auto-" / "qa-"` + substring(`researcher / harness / smoke / probe`) | `type author_kind = Human \| Automation_prefixed of automation_label \| System_actor of system_actor \| External_observer of observer_label` | 없음 — 신규 type 필요 |
-| Tool name family | `lib/tool_help_registry.ml:71-83` | 14 site의 `starts_with ~prefix:"masc_operation_" / "masc_dispatch_" / "masc_unit_" / "masc_policy_" / "masc_observe_" / "masc_detachment_" / "masc_keeper_"` | tool registry가 이미 tool descriptor 보유 — `tool_family` 필드를 descriptor에 추가하면 prefix 분류 자체가 사라짐 | 없음 — descriptor 확장 |
-| Skill routing line marker | `lib/keeper_skill_routing/keeper_skill_routing.ml:137-148` | `starts_with ~prefix:"skill:" / "skill_reason:" / "SKILL:" / "SKILL_REASON:"` mixed case | skill output protocol parser를 typed (`type skill_line = Skill of skill_name \| Reason of string \| Other of string`) 로 분리. RFC §3.2 boundary가 아닌 이유: 마커는 우리가 *직접 정의*한 내부 protocol | 없음 — 신규 |
+| Audit action kind | `lib/audit_log.ml` | action codec uses first-colon parsing; API kind filter no longer prefix-matches arbitrary action wires | existing `action` variant remains SSOT; `string_to_action` preserves unknown wires, and `/api/v1/audit?kind=` now accepts exact action wires or explicit parametric families only | Implemented locally, CI pending |
+| Anti-rationalization decision | `lib/task/anti_rationalization.ml` | legacy text fallback now accepts only exact `APPROVE` or `REJECT: <reason>` protocol | LLM text fallback produces typed `verdict_parse_error`; embedded keyword prose, lowercase markers, and empty reject reasons are malformed instead of local verdict decisions | Implemented locally, CI pending |
+| Board author classification | retired | legacy author-name classifier removed | Board writes require explicit `post_kind`; persisted rows without valid `post_kind` are dropped and observed via `board_post_kind` read-drop metric | N/A |
+| Tool name family | `lib/tool_surface/tool_help_registry.ml` | residual doc-ref assignment no longer infers family from `masc_policy_` / `masc_observe_` prefixes | `Tool_catalog.doc_refs` owns exact tool-name metadata; help registry consumes catalog metadata only | Implemented locally, CI pending |
+| Skill routing line marker | `lib/keeper_tooling/keeper_skill_routing.ml` | marker prefix parsing is confined to the protocol parser | skill output protocol parser emits typed `skill_line` (`Skill` / `Skill_reason` / `Skill_parse_error` / `Other`); invalid payloads become `Model_rejected` instead of a local route decision | Implemented locally, CI pending |
 | Checkpoint store ENOENT 분류 | `lib/keeper/keeper_checkpoint_store.ml:367-370` | `starts_with ~prefix:"no_such_file" / "no such file" / "unix_error (enoent" / "eio.io fs not_found"` 4-way string match | OCaml stdlib + Eio exception 종류를 직접 `match` (`Unix_error (ENOENT, _, _)` / `Eio.Io (Fs (Not_found _), _)`) — exception을 string화한 뒤 prefix 비교하는 것 자체가 변환 손실 | 없음 — exception pattern match로 직행 |
 
 ### §3.1.1 Implementation status (2026-05-17)
@@ -91,20 +93,22 @@ RFC-0042 (Draft, `keeper_turn_terminal.t.code` closed sum) 가 동일 안티패�
 
 | Domain | Status | PR |
 |---|---|---|
-| Tool name family (`tool_help_registry`) | Implemented | #15520 |
+| Tool name family (`tool_help_registry`) | Implemented; residual doc-ref prefix cleanup source-hardened locally, CI pending | #15520 + local |
 | Checkpoint store ENOENT | Implemented | #15523 |
 | Board author classification | Implemented | #15524 |
-| Audit action kind (`audit_log.ml`) | Pending | — |
-| Anti-rationalization decision (`anti_rationalization.ml`) | Pending | — |
-| Skill routing line marker (`keeper_skill_routing.ml`) | Pending | — |
+| Audit action kind (`audit_log.ml`) | Implemented locally, CI pending | — |
+| Anti-rationalization decision (`anti_rationalization.ml`) | Implemented locally, CI pending | — |
+| Skill routing line marker (`keeper_skill_routing.ml`) | Implemented locally, CI pending | — |
 | Keeper path-check error (post-RFC discovery) | Implemented | #15684 |
 | Shadow-gate parse outcome (post-RFC discovery) | Implemented | #15699 |
 | Eval gate destructive-pattern SSOT (post-RFC discovery) | Implemented | #15703 |
 | Eval gate evasion kind (post-RFC discovery) | Implemented | #15704 |
 
 §4 Top 3 우선순위 도메인 (tool_help_registry / checkpoint / board author)
-은 모두 Implemented. §3.1 의 나머지 3 도메인 (audit action, anti-rationalization,
-skill routing) 은 후속 PR 대상으로 남았다.
+은 모두 Implemented. 2026-07-05 residual cleanup으로 tool_help_registry doc-ref
+assignment도 prefix 추론 없이 catalog exact metadata를 소비한다(CI pending). §3.1 의
+tracked 도메인 중 audit action, skill routing protocol marker, anti-rationalization text
+fallback parser는 source-hardened 상태다(CI pending).
 
 ### §3.2 Scope-out (boundary site, 정당)
 
@@ -143,6 +147,9 @@ caller delta가 작고 typed variant 도입 효과가 큰 순:
    `tool_help_registry.ml` 14 prefix site 모두 한 descriptor 필드로 흡수.
    caller 동선이 *registry → consumer*로 단방향이라 reverse search 없음.
    기대 효과 = prefix-as-classifier 14 site 즉시 0.
+   2026-07-05 residual cleanup: doc-ref assignment now uses exact
+   `Tool_catalog.doc_refs` metadata and `tool_help_registry` no longer owns a
+   prefix classifier.
 
 2. **Checkpoint store ENOENT 분류 → exception pattern match.**
    4 string match를 exception variant match로 교체. ocaml stdlib + Eio 직접 사용.
@@ -210,10 +217,13 @@ Implemented 로 가는 것이 아니라, 각 §3.1 도메인이 완료될 때마
 | Accepted (현재) | §4 Top 3 도메인 중 최소 1개 Implemented + spec 합의 입증 |
 | Implemented | §3.1 모든 도메인 Implemented + RFC 채택 이후 발견된 모든 도메인 Implemented |
 
-**현재 상태 (2026-05-17)**: §4 Top 3 도메인 3/3 Implemented + RFC 후 발견 도메인
-4 건 Implemented (PR #15684/#15699/#15703/#15704). §3.1 잔여 도메인 3 건 (audit
-action, anti-rationalization, skill routing) 이 후속 PR 대기. Accepted 상태로
-승격되어 reviewer 가 새 PR 의 string classifier 도입을 reject 할 근거가 명시화됨.
+**현재 상태 (2026-07-05)**: §4 Top 3 도메인 3/3 Implemented + RFC 후 발견 도메인
+4 건 Implemented (PR #15684/#15699/#15703/#15704). Tool_help_registry residual
+doc-ref cleanup, audit action, skill routing protocol marker, anti-rationalization
+text fallback parser는 source-hardened 상태다(CI pending). §3.1 tracked 도메인의
+active implementation residual은 현재 0건이며, CI proof와 long-tail single-file
+confirmation은 별도다. Accepted 상태로 reviewer 가 새 PR 의 string classifier 도입을
+reject 할 근거가 명시화됨.
 
 ## §8 위험
 
@@ -243,8 +253,9 @@ action, anti-rationalization, skill routing) 이 후속 PR 대기. Accepted 상�
 
 ## §10 Open questions
 
-1. `tool_help_registry` 14 prefix를 tool descriptor 필드로 옮길 때 descriptor
-   타입의 caller blast가 본 RFC 추정치를 초과하면 도메인을 별도 RFC로 분리할지.
+1. Future tool-help documentation metadata must be added as explicit catalog
+   metadata (`Tool_catalog.doc_refs` or a successor descriptor field), not by
+   reintroducing prefix-family inference in `tool_help_registry`.
 2. `keeper_checkpoint_store` ENOENT 분류는 stdlib `Unix.error` 변형과 Eio
    variant를 union typing으로 묶을지, 각각 별도 match로 둘지 — OCaml exception
    match의 cross-library 패턴 결정 필요.

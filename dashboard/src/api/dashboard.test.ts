@@ -48,6 +48,7 @@ import {
   fetchTelemetrySummary,
   fetchTlcResults,
   fetchToolQuality,
+  cancelSchedule,
   resolveScheduleApproval,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
@@ -182,6 +183,39 @@ describe('resolveScheduleApproval', () => {
     expect(JSON.parse(String(init.body))).toEqual({
       schedule_id: 'sched-1',
       decision: 'approve',
+    })
+  })
+
+  it('posts dashboard schedule cancellation with an explicit reason', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        schedule_id: 'sched-1',
+        decision: 'cancel',
+        reason: 'operator cancelled',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await cancelSchedule('sched-1', 'operator cancelled')
+
+    expect(result).toEqual({
+      ok: true,
+      schedule_id: 'sched-1',
+      decision: 'cancel',
+      reason: 'operator cancelled',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/schedule/resolve')
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      schedule_id: 'sched-1',
+      decision: 'cancel',
+      reason: 'operator cancelled',
     })
   })
 })
@@ -951,6 +985,11 @@ describe('fetchDashboardTools', () => {
   it('returns a new object without mutating the raw response', async () => {
     const tools = [{ name: 'tool_x' }]
     const rawResponse = {
+      schedule_tool_contract: {
+        schema: 'masc.schedule_tool_contract.v1',
+        source: 'Tool_catalog_surfaces.public_schedule_surface_tools',
+        public_schedule_tools: ['masc_schedule_create'],
+      },
       tool_inventory: { tools },
       tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 1 },
     }
@@ -967,6 +1006,7 @@ describe('fetchDashboardTools', () => {
 
     // The returned tools array should be a different reference
     expect(result.tool_inventory.tools).not.toBe(tools)
+    expect(result.schedule_tool_contract).toEqual(rawResponse.schedule_tool_contract)
     // Original raw tools should not have category/tier injected
     expect(tools[0]).not.toHaveProperty('category')
     expect(tools[0]).not.toHaveProperty('tier')

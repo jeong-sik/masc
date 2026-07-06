@@ -9,6 +9,17 @@ type service_error =
 
 val service_error_to_string : service_error -> string
 
+val list_result :
+  Workspace_utils.config ->
+  ?status:Schedule_domain.schedule_status ->
+  unit ->
+  (Schedule_domain.schedule_request list, Schedule_store.read_error) result
+
+val get_result :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  (Schedule_domain.schedule_request option, Schedule_store.read_error) result
+
 val create :
   Workspace_utils.config ->
   ?schedule_id:string ->
@@ -57,6 +68,8 @@ val reject :
 
 val cancel :
   Workspace_utils.config ->
+  ?cancelled_by:Schedule_domain.actor ->
+  ?reason:string ->
   schedule_id:string ->
   (Schedule_domain.schedule_request, service_error) result
 

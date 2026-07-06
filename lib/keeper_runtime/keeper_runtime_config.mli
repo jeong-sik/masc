@@ -68,7 +68,6 @@ val resolve_overrides :
 
       [heartbeat]
       sleep_chunk_sec             = 1.5
-      board_wakeup_max            = 4
 
       [proactive]
       min_interval_sec            = 900

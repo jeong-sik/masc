@@ -56,25 +56,51 @@ let sync_current_task_binding config ~agent_name =
     ~agent_name
 ;;
 
-let meta_for_agent config ~agent_name =
+let meta_for_agent_result config ~agent_name =
   let resolved = resolve_agent_name config agent_name ~log_context:"owner policy" in
-  [ agent_name; resolved ]
-  |> List.filter_map Keeper_identity.canonical_keeper_name
-  |> Json_util.dedupe_keep_order
-  |> List.find_map (fun keeper_name ->
-    match Keeper_registry.get ~base_path:config.base_path keeper_name with
-    | Some entry -> Some entry.meta
-    | None ->
-      (match Keeper_meta_store.read_meta config keeper_name with
-       | Ok (Some meta) -> Some meta
-       | Ok None | Error _ -> None))
-;;
+  let candidate_names =
+    [ agent_name; resolved ]
+    |> List.filter_map Keeper_identity.canonical_keeper_name
+    |> Json_util.dedupe_keep_order
+  in
+  let rec find_meta = function
+    | [] -> Ok None
+    | keeper_name :: rest -> (
+        match Keeper_registry.get ~base_path:config.base_path keeper_name with
+        | Some entry -> Ok (Some entry.meta)
+        | None -> (
+            match Keeper_meta_store.read_meta config keeper_name with
+            | Ok (Some meta) -> Ok (Some meta)
+            | Ok None -> find_meta rest
+            | Error err ->
+              Error
+                (Printf.sprintf
+                   "keeper meta read failed for %s while resolving task-owner \
+                    policy for %s: %s"
+                   keeper_name
+                   agent_name
+                   err)))
+  in
+  find_meta candidate_names
+
+let meta_for_agent config ~agent_name =
+  match meta_for_agent_result config ~agent_name with
+  | Ok meta -> meta
+  | Error err ->
+    Log.Task.warn "%s" err;
+    None
+
+let transition_action_fail_closed_denylist () =
+  Masc_domain.valid_task_action_strings
+  |> List.map Task.Handlers.transition_action_denylist_entry
 
 let transition_action_denylist config ~agent_name =
-  match meta_for_agent config ~agent_name with
-  | Some meta -> meta.tool_denylist
-  | None -> []
-;;
+  match meta_for_agent_result config ~agent_name with
+  | Ok (Some meta) -> meta.tool_denylist
+  | Ok None -> []
+  | Error err ->
+    Log.Task.warn "transition_action_denylist failed closed: %s" err;
+    transition_action_fail_closed_denylist ()
 
 let active_goal_phases_for_agent config ~agent_name =
   match Keeper_meta_store.read_meta_resolved config agent_name with
@@ -85,7 +111,13 @@ let active_goal_phases_for_agent config ~agent_name =
          | Some goal -> Printf.sprintf "%s=%s" goal_id (Goal_phase.to_string goal.phase)
          | None -> Printf.sprintf "%s=missing" goal_id)
       meta.active_goal_ids
-  | Ok None | Error _ -> []
+  | Ok None -> []
+  | Error err ->
+    Log.Task.warn
+      "active_goal_phases_for_agent meta read failed for %s: %s"
+      agent_name
+      err;
+    []
 ;;
 let install_hooks () =
   let is_registered_agent_alias_fn = is_registered_agent_alias in

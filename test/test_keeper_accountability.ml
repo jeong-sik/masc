@@ -71,6 +71,16 @@ let append_jsonl path json =
       output_string oc (Yojson.Safe.to_string json);
       output_char oc '\n')
 
+let append_line path line =
+  let oc =
+    open_out_gen [ Open_creat; Open_text; Open_append ] 0o644 path
+  in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc line;
+      output_char oc '\n')
+
 let append_accountability_event base_dir ~created_at json =
   let month = String.sub created_at 0 7 in
   let day = String.sub created_at 8 2 in
@@ -128,6 +138,12 @@ let append_decision_log_event config keeper_name json =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
   append_jsonl path json
+
+let append_decision_log_raw_line config keeper_name line =
+  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  append_line path line;
+  path
 
 let test_same_turn_evidence_marks_claim_supported () =
   with_workspace (fun config ->
@@ -447,6 +463,47 @@ let test_recent_decision_without_claim_exposes_coverage_gap () =
       check int "claim count" 0
         (int_member "accountability_claim_count" summary))
 
+let test_recent_decision_parse_error_is_visible () =
+  with_workspace ~agent_name:"keeper-sangsu-agent" (fun config ->
+      let now = Unix.gettimeofday () in
+      append_decision_log_event config "sangsu"
+        (`Assoc
+           [
+             ("id", `String "decision-active-with-malformed-tail");
+             ("ts", `String (iso_of_unix now));
+             ("ts_unix", `Float now);
+             ("keeper_name", `String "sangsu");
+             ("agent_name", `String "keeper-sangsu-agent");
+             ("outcome", `String "success");
+             ("tools_used", `List [ `String "keeper_task_claim" ]);
+           ]);
+      let decision_log_path =
+        append_decision_log_raw_line config "sangsu" "{not-json"
+      in
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent"
+      in
+      check int "valid decision signal is still counted" 1
+        (int_member "decision_signal_count" summary);
+      check int "decision read error count" 1
+        (int_member "decision_read_error_count" summary);
+      check string "coverage health still follows valid decision" "coverage_gap"
+        (string_member "coverage_health" summary);
+      let read_errors =
+        Yojson.Safe.Util.(summary |> member "decision_read_errors" |> to_list)
+      in
+      check int "decision read errors length" 1 (List.length read_errors);
+      match read_errors with
+      | [ error ] ->
+        check string "error source" "keeper_accountability_decision_log_jsonl"
+          (string_member "source" error);
+        check string "error keeper" "sangsu" (string_member "keeper" error);
+        check string "error path" decision_log_path (string_member "path" error);
+        check int "line index" 1 (int_member "line_index" error);
+        check string "error kind" "json_error" (string_member "kind" error)
+      | _ -> Alcotest.fail "expected exactly one decision read error")
+
 let test_unmapped_alias_exposes_no_history_source () =
   with_workspace ~agent_name:"orphan-eager-viper" (fun config ->
       let summary =
@@ -760,20 +817,15 @@ let test_attr_expired () =
       (Astring.String.is_infix ~affix:"expired" reason)
   | _ -> Alcotest.fail "expected Policy_failed"
 
-let test_attr_partial_score_clamped () =
-  (* 0 evidence → 0.5; 10+ evidence → clamped to 1.0. *)
-  let get_score refs_count =
-    match
-      KA.attribution_from_status KA.Partial ~evidence:sample_evidence
-        ~evidence_refs_count:refs_count ()
-    with
-    | Some { outcome = A.Partial_pass { score; _ }; _ } -> score
-    | _ -> Alcotest.fail "expected Partial_pass"
-  in
-  check (float 0.0001) "0 refs → 0.5 baseline" 0.5 (get_score 0);
-  check (float 0.0001) "3 refs → 0.8" 0.8 (get_score 3);
-  check (float 0.0001) "10 refs → clamped to 1.0" 1.0 (get_score 10);
-  check (float 0.0001) "50 refs → still 1.0" 1.0 (get_score 50)
+let test_attr_partial_is_unscored_categorical_status () =
+  match
+    KA.attribution_from_status KA.Partial ~evidence:sample_evidence
+      ~resolution_reason:"some evidence is unresolved" ()
+  with
+  | Some { outcome = A.Partial_pass { score; rationale }; _ } ->
+    check (float 0.0001) "legacy scalar is not fabricated confidence" 0.0 score;
+    check string "rationale uses resolution reason" "some evidence is unresolved" rationale
+  | _ -> Alcotest.fail "expected Partial_pass"
 
 let test_attr_gate_invariants () =
   List.iter
@@ -808,6 +860,8 @@ let () =
             `Quick test_task_transition_resolution_rows_include_identity;
           test_case "recent decision without claim exposes coverage gap"
             `Quick test_recent_decision_without_claim_exposes_coverage_gap;
+          test_case "recent decision parse error is visible" `Quick
+            test_recent_decision_parse_error_is_visible;
           test_case "unmapped alias exposes no-history source" `Quick
             test_unmapped_alias_exposes_no_history_source;
           test_case "claim tool exposes routing warning for high risk keeper"
@@ -830,8 +884,8 @@ let () =
           test_case "Unsupported → Policy_failed (default reason)" `Quick
             test_attr_unsupported_default_reason;
           test_case "Expired → Policy_failed" `Quick test_attr_expired;
-          test_case "Partial score clamped [0.5, 1.0]" `Quick
-            test_attr_partial_score_clamped;
+          test_case "Partial is categorical, not locally scored" `Quick
+            test_attr_partial_is_unscored_categorical_status;
           test_case "gate=accountability origin=Det invariant" `Quick
             test_attr_gate_invariants;
         ] );

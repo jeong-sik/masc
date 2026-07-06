@@ -74,6 +74,13 @@ let test_local_tests_pass_runs_in_local_target () =
 let test_docker_without_factory_does_not_fall_back_to_host () =
   with_fixture ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ->
+  (match Probe.evaluate ~config ~meta [ tests_pass "test 1 = 1" ] with
+   | Deterministic_evidence_evaluator.Indeterminate reason ->
+     check bool "indeterminate reason populated" true (String.length reason > 0)
+   | Deterministic_evidence_evaluator.Satisfied ->
+     fail "docker evidence without factory must not be satisfied"
+   | Deterministic_evidence_evaluator.Unsatisfied reason ->
+     fail ("expected indeterminate, got unsatisfied: " ^ reason));
   check bool
     "docker command evidence without factory stays indeterminate"
     false

@@ -45,7 +45,6 @@ keeper_agent_memory_episode.ml:192 failed_turn_episode_create failed     -> erro
 keeper_checkpoint_store.ml:279     OAS snapshot archive write failed     -> warn + drop archive
 keeper_crash_persistence.ml:135    crash persistence write failed        -> warn + lose crash record
 keeper_approval_queue.ml:430       upsert_rule: save failed              -> warn + in-memory only
-keeper_alerting.ml:554             alert JSONL write failed              -> error + drop alert
 keeper_context_core.ml:786         migrate_session_history_logs save     -> error + partial migration
 keeper_heartbeat_loop.ml:1268      heartbeat snapshot write failed       -> error + skip snapshot
 ```
@@ -120,7 +119,7 @@ Existing helpers (`write_json_atomic`, `write_meta`, `append_jsonl_line`) gain `
 | PR-1 | Introduce `Write_failure_reason.t` + `write_outcome` modules. Inert. | Mirrors RFC-0044 PR-1 / RFC-0042 PR-1. No callsite change. |
 | PR-2 | Migrate **cohort A: `write_meta` chains** — 10 sites in `keeper_heartbeat_loop.ml`, `keeper_keepalive.ml`, `keeper_supervisor.ml`, `keeper_turn*.ml`. | Highest blast radius. Propagate `Write_drop` to the cycle return so heartbeat can decide to retry. |
 | PR-3 | Migrate **cohort B: external memory & checkpoint** — `keeper_agent_memory_episode.ml`, `keeper_checkpoint_store.ml`, `keeper_crash_persistence.ml`. | Cross-module. Episode caller chain needs explicit "create failed, abort vs continue with partial memory" decision. |
-| PR-4 | Migrate **cohort C: append-only logs & policy** — `keeper_alerting.ml`, `keeper_approval_queue.ml`. | Lower blast radius (observability + policy state). |
+| PR-4 | Migrate **cohort C: append-only logs & policy** — `keeper_approval_queue.ml`. | Lower blast radius (policy state). The previous `keeper_alerting.ml` alert writer is retired. |
 | PR-5 (optional) | Migrate **cohort D: migration writes** — `keeper_context_core.ml:786, 798`. | Migration is one-time; PR-5 captures the *partial migration* state in `Migration_partial` so an operator can resume. |
 
 PR-2 is the load-bearing migration: it changes 10 sites, all of which are on the keeper heartbeat / supervisor hot path. Per AGENT-LLM-A.md "확인 후 실행 Protocol" — each PR-2 sub-step must be reviewed by user before merge.

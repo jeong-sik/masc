@@ -32,29 +32,13 @@ let schema_visible_keep_order names =
   |> List.map schema_visible_name
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
-let allowed_visible_candidates candidates ~allowed_tools =
-  candidates
-  |> List.filter (fun name -> includes_tool name allowed_tools)
-  |> schema_visible_keep_order
-
 let recovery_hint ~allowed_tools ~tool_names =
   if includes_tool "keeper_tool_search" tool_names then
     Some
-      (let code_search =
-         allowed_visible_candidates
-           [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute" ]
-           ~allowed_tools
-       in
-       let next =
-         match code_search with
-         | [] -> "Use a visible file/content search tool if one is active."
-         | names ->
-           Printf.sprintf
-             "For source files, functions, types, or symbols, switch to %s."
-             (String.concat " then " names)
-       in
-       "keeper_tool_search discovers active tool schemas only; it does not search \
-        repository files, definitions, functions, types, or symbols. " ^ next)
+      "keeper_tool_search discovers active tool schemas only; it does not search \
+       repository files, definitions, functions, types, or symbols. Use an \
+       explicitly visible file/content tool if one is active; otherwise state \
+       that repository content search is unavailable in the current tool surface."
   else if includes_tool "keeper_tools_list" tool_names then
     Some
       (if includes_tool "keeper_surface_read" allowed_tools then
@@ -122,11 +106,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
         ~max_suggestions:5
     in
     let preferred =
-      if includes_tool "keeper_tool_search" tool_names then
-        allowed_visible_candidates
-          [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute" ]
-          ~allowed_tools
-      else if includes_tool "keeper_tools_list" tool_names
+      if includes_tool "keeper_tools_list" tool_names
               && includes_tool "keeper_surface_read" allowed_tools
       then
         [ "keeper_surface_read" ]

@@ -79,6 +79,15 @@ val build_forest :
     from the keeper / receipt / pending-approval state
     accessible via [config]. *)
 
+val build_forest_result :
+  config:Workspace.config ->
+  goals:Goal_store.goal list ->
+  tasks:Masc_domain.task list ->
+  (tree_node list, string) result
+(** Result-returning forest builder. Returns [Error] when the goal-task link
+    registry cannot be read, so callers do not have to treat unreadable links as
+    an empty registry. *)
+
 (** {1 Per-node JSON renderer} *)
 
 val tree_node_to_json :

@@ -536,19 +536,19 @@ let record_runtime_audit store_opt ~now ~keeper_name ~runtime_id ~observation
   match store_opt with
   | None -> ()
   | Some store ->
-      (try
-         Dated_jsonl.append store
+      (match
+         Dated_jsonl.append_result store
            (runtime_audit_json ~now ~keeper_name ~runtime_id ~observation
               ~outcome)
        with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
+      | Ok () -> ()
+      | Error error ->
           (* Iter 47: tick counter per-record append failure rate
              alertable.  Single-event audit loss compounds over
              time for post-incident analysis. *)
           Runtime_metrics.on_runtime_audit_failure ~stage:"append";
           Log.Misc.warn "runtime audit append failed runtime=%s error=%s"
-            runtime_id_string (Printexc.to_string exn))
+            runtime_id_string error)
 
 (* ================================================================ *)
 (* Aggregate metrics recording                                       *)

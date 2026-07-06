@@ -3,6 +3,7 @@ type paused_keeper_scan = {
   autoboot_enabled_names : string list;
   details : Yojson.Safe.t list;
   read_errors : (string * string) list;
+  discovery_read_errors : string list;
 }
 val empty_paused_keeper_scan : paused_keeper_scan
 val sorted_unique_strings : String.t list -> String.t list
@@ -45,6 +46,7 @@ val running_keeper_names : ?base_path:string -> unit -> String.t list
 type autoboot_keeper_scan = {
   autoboot_names : string list;
   read_errors : (string * string) list;
+  discovery_read_errors : string list;
 }
 val empty_autoboot_keeper_scan : autoboot_keeper_scan
 type keeper_fleet_meta_scan = {
@@ -55,6 +57,8 @@ type keeper_fleet_meta_scan = {
 type keeper_identity_drift_scan = {
   configured_names : string list;
   persisted_meta_names : string list;
+  persisted_meta_names_known : bool;
+  persisted_meta_read_errors : string list;
   materializable_configured_names : string list;
   configured_without_meta_names : string list;
   meta_without_config_names : string list;

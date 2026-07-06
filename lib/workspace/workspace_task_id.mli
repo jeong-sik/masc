@@ -14,6 +14,9 @@ val task_id_to_int : string -> int option
 (** Read every task id stored in [tasks-archive.json] under the
     config's base path.  Returns an empty list when the archive
     file does not exist. *)
+val read_archive_task_ids_result :
+  Workspace_utils_backend_setup.config -> (int list, string) result
+
 val read_archive_task_ids : Workspace_utils_backend_setup.config -> int list
 
 (** Append [tasks] to [tasks-archive.json], deduplicating by task id.
@@ -23,13 +26,21 @@ val read_archive_task_ids : Workspace_utils_backend_setup.config -> int list
 val append_archive_tasks :
   Workspace_utils_backend_setup.config -> task list -> unit
 
+val append_archive_tasks_result :
+  Workspace_utils_backend_setup.config -> task list -> (unit, string) result
+
 (** Non-terminal tasks currently sitting in [tasks-archive.json] — obligations a
     buggy GC pass stranded (RFC-0220: an [AwaitingVerification] obligation must
     stay claimable by a verifier).  Read-only; pair with {!drop_archive_tasks}
     after the live backlog has been rewritten so a crash between the two cannot
-    lose the task.  Unparseable entries are skipped. *)
+    lose the task.  The [_result] variant returns [Error] when the archive
+    cannot be read or any archive entry cannot be decoded as a task; the legacy
+    wrapper logs that error and returns [[]]. *)
 val read_orphaned_nonterminal_tasks :
   Workspace_utils_backend_setup.config -> task list
+
+val read_orphaned_nonterminal_tasks_result :
+  Workspace_utils_backend_setup.config -> (task list, string) result
 
 (** Remove archive entries whose task id is in [ids], under the archive lock.
     Entries without an [id] field are preserved (an unreadable line is never
@@ -37,7 +48,13 @@ val read_orphaned_nonterminal_tasks :
 val drop_archive_tasks :
   Workspace_utils_backend_setup.config -> ids:string list -> unit
 
+val drop_archive_tasks_result :
+  Workspace_utils_backend_setup.config -> ids:string list -> (unit, string) result
+
 (** Next task number = [max(existing backlog ids, archive ids) + 1].
     Returns [1] when both backlog and archive are empty. *)
+val next_task_number_result :
+  Workspace_utils_backend_setup.config -> backlog -> (int, string) result
+
 val next_task_number :
   Workspace_utils_backend_setup.config -> backlog -> int

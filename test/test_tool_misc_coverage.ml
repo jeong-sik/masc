@@ -24,6 +24,14 @@ let parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
+let json_string_member key = function
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`String value) -> value
+       | Some _ -> failwith ("json field is not a string: " ^ key)
+       | None -> failwith ("missing json field: " ^ key))
+  | _ -> failwith "expected json object"
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -139,6 +147,38 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+let () = test "dispatch_keeper_waiting_inventory" (fun () ->
+  let ctx = make_test_ctx () in
+  Workspace.ensure_workspace_bootstrap ctx.config;
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_keeper_waiting_inventory" ~args with
+  | Some result ->
+      assert (Tool_result.is_success result);
+      let data = Tool_result.data result in
+      assert
+        (String.equal
+           (json_string_member "schema" data)
+           "masc.dashboard.keeper_waiting_inventory.v1");
+      assert
+        (String.equal
+           (json_string_member "source" data)
+           "server_keeper_waiting_inventory")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_keeper_waiting_inventory_rejects_unexpected_args" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [ ("scope", `String "current") ] in
+  match Tool_misc.dispatch ctx ~name:"masc_keeper_waiting_inventory" ~args with
+  | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert
+        (Tool_result.message result
+         = "masc_keeper_waiting_inventory does not accept arguments: scope")
+  | None -> failwith "dispatch returned None"
 )
 
 let () = test "dispatch_dashboard_invalid_scope" (fun () ->

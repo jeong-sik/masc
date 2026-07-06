@@ -13,6 +13,7 @@ open Alcotest
 module Task = Masc.Keeper_tool_task_runtime
 module Dispatch = Masc.Keeper_tool_dispatch_runtime
 module Boundary = Masc.Keeper_tools_oas_failure_boundary
+module Tools_oas = Masc.Keeper_tools_oas
 module Response_text = Masc.Keeper_agent_run_response_text
 module State = Masc.Keeper_memory_policy
 module Receipt = Masc.Keeper_execution_receipt
@@ -39,6 +40,10 @@ let cleanup_dir dir =
       Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 
 let meta_with_active_goals goal_ids =
   match
@@ -90,6 +95,66 @@ let test_gate2_still_counts_validation () =
     "Gate#2 does not treat validation as workflow_rejection (still counts)"
     false classified.Boundary.is_workflow_rejection
 
+let check_parse_observation classified kind =
+  check bool ("parse observation includes " ^ kind) true
+    (List.exists
+       (fun observation ->
+          String.equal (Boundary.parse_observation_kind observation) kind)
+       classified.Boundary.parse_observations)
+
+let check_parse_observation_log_field classified =
+  match Boundary.parse_observation_log_fields classified with
+  | [ "failure_boundary_parse_observations", `List (_ :: _) ] -> ()
+  | fields ->
+    failf
+      "expected non-empty parse-observation log field, got %s"
+      (Yojson.Safe.to_string (`Assoc fields))
+
+let test_failure_boundary_parse_observations_are_reported () =
+  let malformed_raw = Boundary.classify_raw_failure "not-json" in
+  check string "malformed raw falls back to runtime_failure" "runtime_failure"
+    (TR.tool_failure_class_to_string malformed_raw.Boundary.failure_class);
+  check_parse_observation
+    malformed_raw
+    "raw_failure_payload_json_decode_error";
+  check_parse_observation_log_field malformed_raw;
+  let malformed_nested =
+    Boundary.classify_raw_failure {|{"ok":false,"error":"not-json"}|}
+  in
+  check_parse_observation
+    malformed_nested
+    "structured_error_json_decode_error";
+  check_parse_observation_log_field malformed_nested;
+  let non_object_nested =
+    Boundary.classify_raw_failure {|{"ok":false,"error":"123"}|}
+  in
+  check_parse_observation
+    non_object_nested
+    "structured_error_json_non_object";
+  check_parse_observation_log_field non_object_nested
+
+let test_normalize_nested_error_payload_parse_result_is_typed () =
+  match Tools_oas.structured_error_payload_fields_result "{not-json" with
+  | Error (Tools_oas.Structured_error_payload_json_decode_error message) ->
+    check bool "message is non-empty" true (String.length message > 0)
+  | Error other ->
+    failf
+      "expected nested error JSON decode error, got %s"
+      (Tools_oas.structured_error_payload_parse_error_to_string other)
+  | Ok _ -> fail "malformed nested error payload parsed successfully"
+
+let test_normalize_tool_result_preserves_malformed_nested_error_text () =
+  let normalized =
+    Tools_oas.normalize_tool_result
+      ~success:false
+      {|{"ok":false,"error":"{not-json"}|}
+  in
+  let json = Yojson.Safe.from_string normalized in
+  check string
+    "malformed nested error text remains visible"
+    "{not-json"
+    (json |> U.member "error" |> U.to_string)
+
 let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
   let base_path = temp_dir () in
   Fun.protect
@@ -116,8 +181,38 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
          (json |> U.member "goal_id" = `Null);
        match Masc.Workspace.get_tasks_raw config with
        | [ _task ] -> ()
-       | tasks ->
-           failf "expected exactly one persisted task, got %d" (List.length tasks))
+	       | tasks ->
+	           failf "expected exactly one persisted task, got %d" (List.length tasks))
+
+let test_task_create_reports_backlog_read_failure () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       write_file (Masc.Workspace.backlog_path config) "{not-json";
+       write_file (Masc.Workspace.backlog_recovery_path config) "{not-json";
+       let meta = meta_with_active_goals [] in
+       let payload =
+         Task.handle_keeper_task_tool
+           ~config
+           ~meta
+           ~name:"keeper_task_create"
+           ~args:
+             (`Assoc
+               [ "title", `String "Should fail closed"
+               ; "description", `String "Unreadable backlog must not be treated as empty"
+               ; "priority", `Int 3
+               ])
+       in
+       let json = Yojson.Safe.from_string payload in
+       check bool
+         "backlog read failure is surfaced"
+         true
+         (String.starts_with
+            ~prefix:"keeper_task_create backlog read failed:"
+            (json |> U.member "error" |> U.to_string)))
 
 let test_state_block_reply_returns_state_snapshot () =
   let raw_response_text =
@@ -224,10 +319,20 @@ let () =
             test_gate1_exempts_validation_but_counts_unclassified
         ; test_case "Gate#2 still counts validation (no over-exempt)" `Quick
             test_gate2_still_counts_validation
+        ; test_case "failure-boundary parse observations are reported" `Quick
+            test_failure_boundary_parse_observations_are_reported
+        ; test_case "nested error payload parse result is typed" `Quick
+            test_normalize_nested_error_payload_parse_result_is_typed
+        ; test_case "normalize preserves malformed nested error text" `Quick
+            test_normalize_tool_result_preserves_malformed_nested_error_text
         ; test_case
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
+        ; test_case
+            "keeper_task_create reports backlog read failure"
+            `Quick
+            test_task_create_reports_backlog_read_failure
         ; test_case "state block reply returns state snapshot" `Quick
             test_state_block_reply_returns_state_snapshot
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

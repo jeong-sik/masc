@@ -49,6 +49,11 @@ type provider_slot =
   ; sem : Eio.Semaphore.t option
   }
 
+type 'a provider_slot_result =
+  | Provider_slot_acquired of 'a
+  | Provider_slot_busy
+  | Provider_slot_acquisition_failed of string
+
 let provider_slots_mu = Eio.Mutex.create ()
 let provider_slots : (string, provider_slot) Hashtbl.t = Hashtbl.create 64
 
@@ -69,34 +74,42 @@ let provider_slot_for_keeper ~keeper_id capacity =
       slot)
 ;;
 
-let with_provider_slot ~keeper_id ~clock f =
+let with_provider_slot_result ~keeper_id ~clock f =
   let capacity = per_keeper_slot_capacity () in
   let slot = provider_slot_for_keeper ~keeper_id capacity in
   match slot.sem with
-  | None -> Some (f ())
+  | None -> Provider_slot_acquired (f ())
   | Some sem ->
-    let acquired = ref false in
-    (try
-       (try
-          Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
+    (match
+       try
+         Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
             Eio.Semaphore.acquire sem);
-         acquired := true
-        with
-        | Eio.Time.Timeout -> ())
+         Ok true
+       with
+       | Eio.Time.Timeout -> Ok false
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn -> Error (Printexc.to_string exn)
      with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
+     | Error message ->
        Log.Keeper.warn
          "librarian provider slot acquisition failed keeper=%s: %s"
          keeper_id
-         (Printexc.to_string exn));
-    if !acquired
-    then
-      Some
+         message;
+       Provider_slot_acquisition_failed message
+     | Ok false -> Provider_slot_busy
+     | Ok true ->
+       Provider_slot_acquired
         (Eio.Switch.run (fun cleanup_sw ->
            Eio.Switch.on_release cleanup_sw (fun () -> Eio.Semaphore.release sem);
-           f ()))
-    else None
+           f ())))
+;;
+
+let with_provider_slot ~keeper_id ~clock f =
+  match with_provider_slot_result ~keeper_id ~clock f with
+  | Provider_slot_acquired value -> Some value
+  | Provider_slot_busy
+  | Provider_slot_acquisition_failed _ ->
+    None
 ;;
 
 let enabled () =
@@ -394,6 +407,7 @@ type extraction_error =
   | Provider_transport_failed of string
   | Provider_empty_response
   | Provider_unparseable_response of string
+  | Memory_generation_reservation_failed of string
   | Memory_fact_upsert_failed of string
 
 let librarian_provider_clock_unavailable_error =
@@ -409,6 +423,8 @@ let extraction_error_to_string = function
   | Provider_empty_response -> "librarian provider returned empty response"
   | Provider_unparseable_response msg ->
     "librarian provider returned unparseable structured response: " ^ msg
+  | Memory_generation_reservation_failed msg ->
+    "memory os generation reservation failed: " ^ msg
   | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
 ;;
 
@@ -438,6 +454,7 @@ let should_record_cadence_backoff_after_error = function
   | Provider_clock_unavailable
   | Provider_config_rejected _
   | Prompt_render_failed _
+  | Memory_generation_reservation_failed _
   | Memory_fact_upsert_failed _ ->
     false
 ;;
@@ -503,9 +520,13 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
    2026-06-24): four byte-for-output-identical copies unified. *)
 
+type 'a timeout_result =
+  | Completed of 'a
+  | Timed_out
+
 let with_timeout ~clock ~timeout_sec f =
-  try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
-  | Eio.Time.Timeout -> None
+  try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Eio.Time.Timeout -> Timed_out
 ;;
 
 let extract_with_provider_classified
@@ -535,11 +556,11 @@ let extract_with_provider_classified
               with_timeout ~clock ~timeout_sec (fun () ->
                 complete ~sw ~net ~clock ~config:provider_cfg ~messages ())
             with
-            | None -> Transport_failed Provider_timeout
-            | Some (Error err) ->
+            | Timed_out -> Transport_failed Provider_timeout
+            | Completed (Error err) ->
               Transport_failed
                 (Provider_transport_failed (Provider_http_error.to_message err))
-            | Some (Ok response) ->
+            | Completed (Ok response) ->
               let raw_evidence = Agent_sdk_response.text_of_response response |> String.trim in
               (match
                  Agent_sdk_response.structured_json_of_response
@@ -611,25 +632,27 @@ let extract_and_append_with_provider_classified
   match clock with
   | None -> Error Provider_clock_unavailable
   | Some _ ->
-    let generation =
-      Keeper_memory_os_io.next_generation_with_floor
-        ~floor:inp.Keeper_librarian.generation
-        ~keeper_id
-        ~trace_id:inp.Keeper_librarian.trace_id
-    in
     (match
-       extract_with_provider_classified
-         ?complete
-         ?clock
-         ?timeout_sec
-         ~sw
-         ~net
-         ~provider_cfg
-         ~generation
-         inp
+       Keeper_memory_os_io.next_generation_with_floor_result
+         ~floor:inp.Keeper_librarian.generation
+         ~keeper_id
+         ~trace_id:inp.Keeper_librarian.trace_id
      with
-  | Error _ as e -> e
-  | Ok episode ->
+     | Error message -> Error (Memory_generation_reservation_failed message)
+     | Ok generation ->
+       (match
+          extract_with_provider_classified
+            ?complete
+            ?clock
+            ?timeout_sec
+            ~sw
+            ~net
+            ~provider_cfg
+            ~generation
+            inp
+        with
+        | Error _ as e -> e
+        | Ok episode ->
     let now = episode.Keeper_memory_os_types.created_at in
     (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
        re-extracted across turns is folded into the existing row
@@ -685,7 +708,7 @@ let extract_and_append_with_provider_classified
            (dark-by-default, no recall consumer), so the fact upsert above is the only
            post-merge work. *)
         Ok episode
-      | Error message -> Error (Memory_fact_upsert_failed message)))
+      | Error message -> Error (Memory_fact_upsert_failed message))))
 ;;
 
 let extract_and_append_with_provider
@@ -758,7 +781,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  librarian_provider_clock_unavailable_error
              | Some clock -> (
              match
-               with_provider_slot ~keeper_id ~clock (fun () ->
+               with_provider_slot_result ~keeper_id ~clock (fun () ->
                  extract_and_append_with_provider_classified
                    ?complete
                    ~clock
@@ -769,7 +792,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                    ~provider_cfg
                    inp)
              with
-             | None ->
+             | Provider_slot_busy ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
                 ~labels:
@@ -779,14 +802,26 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  "memory os librarian skipped runtime=%s: per-keeper provider slot busy (capacity=%d)"
                  runtime_id
                  (per_keeper_slot_capacity ())
-             | Some (Ok episode) ->
+             | Provider_slot_acquisition_failed message ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string EpisodeCreateFailures)
+                 ~labels:
+                   [ "keeper", keeper_id
+                   ; "site", memory_os_librarian_provider_slot_site
+                   ]
+                 ();
+               Log.Keeper.warn ~keeper_name:keeper_id
+                 "memory os librarian failed runtime=%s: provider slot acquisition failed: %s"
+                 runtime_id
+                 message
+             | Provider_slot_acquired (Ok episode) ->
                cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
                Log.Keeper.info ~keeper_name:keeper_id
                  "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
                  episode.Keeper_memory_os_types.trace_id
                  episode.generation
                  (List.length episode.claims)
-             | Some (Error err) ->
+             | Provider_slot_acquired (Error err) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)
                  ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]

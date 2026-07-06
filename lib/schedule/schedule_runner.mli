@@ -20,6 +20,21 @@ type wake_signal =
   ; payload : Yojson.Safe.t
   }
 
+type wake_signal_read_error_kind =
+  | Wake_signal_json_parse_error
+  | Wake_signal_schema_decode_error
+
+type wake_signal_read_error =
+  { ordinal : int
+  ; kind : wake_signal_read_error_kind
+  ; error : string
+  }
+
+type wake_signal_read_result =
+  { signals : wake_signal list
+  ; errors : wake_signal_read_error list
+  }
+
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
@@ -38,12 +53,19 @@ and dispatch_result =
   ; status : dispatch_status
   ; detail : Yojson.Safe.t option
   ; error : string option
+  ; duration_sec : float
   }
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch : Schedule_domain.schedule_request -> (Yojson.Safe.t, string) result
   }
+
+type dispatch_wrapper =
+  Schedule_domain.schedule_request -> (unit -> dispatch_result) -> dispatch_result
+(** Optional composition-root hook around one dispatch attempt. The runner
+    stays telemetry-agnostic; server code can use this to add spans without
+    moving Otel policy into the schedule library. *)
 
 type runner_error =
   | Service_error of Schedule_service.service_error
@@ -53,6 +75,7 @@ val runner_error_to_string : runner_error -> string
 
 val signal_kind_to_string : signal_kind -> string
 val signal_kind_of_string : string -> (signal_kind, string) result
+val wake_signal_read_error_kind_to_string : wake_signal_read_error_kind -> string
 val dispatch_status_to_string : dispatch_status -> string
 
 val signals_dir : Workspace_utils.config -> string
@@ -63,9 +86,19 @@ val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
 val read_recent_signals :
   Workspace_utils.config -> int -> wake_signal list
-(** Read at most [n] recent durable wake signals in chronological order. *)
+(** Compatibility wrapper over {!read_recent_signals_with_errors}. Decode
+    errors are omitted from the returned list but logged and counted by
+    [masc_schedule_signal_read_error_total]; dashboard/diagnostic callers
+    should use the Result-carrying read model below. *)
+
+val read_recent_signals_with_errors :
+  Workspace_utils.config -> int -> wake_signal_read_result
+(** Read at most [n] recent durable wake-signal rows in chronological order,
+    preserving per-row JSON/schema decode failures instead of silently dropping
+    malformed records. *)
 
 val tick :
+  ?dispatch_wrapper:dispatch_wrapper ->
   ?consumer:consumer ->
   Workspace_utils.config ->
   now:float ->
@@ -76,3 +109,7 @@ val tick :
     consumer dispatch can instead complete/fail the request. Consumer payload
     rejection is recorded as a failed execution instead of leaving the request
     due forever. *)
+
+module For_testing : sig
+  val write_seen : Workspace_utils.config -> string list -> (unit, string) result
+end

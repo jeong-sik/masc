@@ -27,8 +27,6 @@ type summary_parse_error =
   | Invalid_structured_response of string
 
 module For_testing : sig
-  val summary_text_of_response : Agent_sdk.Types.api_response -> string option
-
   val summary_text_result_of_response :
     Agent_sdk.Types.api_response -> (string, summary_parse_error) result
 

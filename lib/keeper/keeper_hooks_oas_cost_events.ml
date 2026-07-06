@@ -273,12 +273,16 @@ let emit_cost_event
     ();
   record_cost_emit_source assembled.cost_usd_source;
   let entry = assembled.payload in
-  (try Dated_jsonl.append store entry
-   with Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string MetricEmitDropped)
-          ~labels:[(label_keeper, agent_name); (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write))]
-          ();
-        Log.Keeper.error "emit_cost_event: failed to write %s: %s"
-          (Dated_jsonl.base_dir store) (Printexc.to_string exn))
+  match Dated_jsonl.append_result store entry with
+  | Ok () -> ()
+  | Error msg ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MetricEmitDropped)
+      ~labels:
+        [
+          (label_keeper, agent_name);
+          (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write));
+        ]
+      ();
+    Log.Keeper.error "emit_cost_event: failed to write %s: %s"
+      (Dated_jsonl.base_dir store) msg

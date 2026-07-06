@@ -263,6 +263,53 @@ let test_missing_current_task_reconciled_before_transition_hint () =
             check bool "reconciled hint asks for claim/list" true
               (string_contains description "No task currently assigned")))
 
+let test_current_task_agent_name_sync_reports_meta_read_error () =
+  let rec rm_rf path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Sys.readdir path
+        |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path)
+      else Sys.remove path
+  in
+  let rec mkdir_p path =
+    if path = "" || path = "." || path = "/" then ()
+    else if Sys.file_exists path then ()
+    else (
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o755)
+  in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_current_task_sync_%d" (Random.int 1_000_000))
+  in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      Unix.mkdir dir 0o755;
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some "current-task-sync-test"));
+      let agent_name = "current-task-read-error" in
+      let meta_path = Keeper_types_profile.keeper_meta_path config agent_name in
+      mkdir_p (Filename.dirname meta_path);
+      let oc = open_out meta_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc "{not-json");
+      (match
+         Keeper_current_task_reconcile.sync_current_task_id_for_agent_name_result
+           ~config
+           ~agent_name
+       with
+       | Ok () -> fail "expected meta read error"
+       | Error err ->
+         check bool "meta read error surfaced" true
+           (string_contains err "keeper meta read failed"));
+      Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
+        ~config
+        ~agent_name)
+
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
 let test_atomic_write_not_empty () =
@@ -387,6 +434,8 @@ let () =
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "missing current task reconciles before transition hint" `Quick
             test_missing_current_task_reconciled_before_transition_hint;
+          test_case "current task sync reports meta read error" `Quick
+            test_current_task_agent_name_sync_reports_meta_read_error;
         ] );
       ( "atomic_agent_json",
         [

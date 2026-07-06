@@ -190,6 +190,8 @@ let worker_state_of_agent
           ("related_operation_id", Json_util.string_opt_to_json related_operation_id);
           ("emoji", `String profile.emoji);
           ("koreanName", `String profile.korean_name);
+          ("profile_errors", agent_profile_errors_json profile);
+          ("profile_error_count", `Int (List.length profile.profile_errors));
           ("model", `Null);
           ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
           ("recent_event", Json_util.string_opt_to_json recent_output_preview);
@@ -364,6 +366,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
               Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)) );
             ("emoji", `String profile.emoji);
             ("koreanName", `String profile.korean_name);
+            ("profile_errors", agent_profile_errors_json profile);
+            ("profile_error_count", `Int (List.length profile.profile_errors));
             ("skill_reason", Json_util.string_opt_to_json (String_util.trim_to_option (string_field "goal" keeper)));
           ]);
   }

@@ -42,6 +42,11 @@ async function refreshActiveKeeperChatSurface(): Promise<void> {
   refreshActiveKeeperChatHistory()
 }
 
+async function refreshToolsProjection(): Promise<void> {
+  const { loadTools } = await import('./components/tools/tool-state')
+  await loadTools()
+}
+
 type RefreshTask =
   | 'shell'
   | 'namespaceTruth'
@@ -59,6 +64,7 @@ type RefreshTask =
   | 'operatorWorkspaceDigest'
   | 'fusionRuns'
   | 'activeKeeperChat'
+  | 'toolsProjection'
 
 // Monitor data ownership is partitioned by section. Two tiers:
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
@@ -83,6 +89,8 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       return ['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat']
     case 'board':
       return ['board']
+    case 'schedule':
+      return ['toolsProjection']
     case 'fusion':
       // 'fusionBoard' feeds the board-meta-derived detail browser without
       // inheriting Board-route filters; 'fusionRuns' feeds the registry-backed
@@ -186,6 +194,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
   fusionRuns: () => { void refreshFusionRuns() },
   activeKeeperChat: () => { void refreshActiveKeeperChatSurface() },
+  toolsProjection: () => { void refreshToolsProjection() },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

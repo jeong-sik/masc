@@ -121,59 +121,6 @@ module KeeperWireCapture = struct
   ;;
 end
 
-(** {1 Keeper Interesting Alert Configuration} *)
-
-module KeeperAlert = struct
-  (** Master switch for keeper interesting alert detection/fanout *)
-  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_ENABLED"
-
-  (** Minimum score required to trigger alert fanout *)
-  let min_score = get_float ~default:0.70 "MASC_KEEPER_ALERT_MIN_SCORE"
-
-  (** Maximum alert body chars used for external fanout payloads *)
-  let max_body_chars = get_int_nonneg ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
-
-  (** Retry count for each fanout channel (in addition to initial attempt) *)
-  let max_retries = get_int_nonneg ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
-
-  (** Base retry delay in milliseconds (exponential backoff) *)
-  let retry_base_delay_ms =
-    get_int_nonneg ~default:250 "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
-  ;;
-
-  (** Board fanout configuration *)
-  let board_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_BOARD_ENABLED"
-
-  let board_author =
-    get_string ~default:"keeper-alert-bot" "MASC_KEEPER_ALERT_BOARD_AUTHOR"
-  ;;
-
-  let board_hearth = get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_BOARD_HEARTH"
-
-  let board_visibility =
-    get_string ~default:"internal" "MASC_KEEPER_ALERT_BOARD_VISIBILITY"
-  ;;
-
-  (** Slack fanout configuration *)
-  let slack_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_ENABLED"
-
-  let slack_webhook_url = get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
-
-  (** Slack DM fanout configuration *)
-  let slack_dm_enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_DM_ENABLED"
-  ;;
-
-  let slack_dm_user_id = get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
-
-  (** GitHub issue fanout configuration *)
-  let github_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_GITHUB_ENABLED"
-
-  let github_repo = get_string ~default:"" "MASC_KEEPER_ALERT_GITHUB_REPO"
-  let github_label = get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_GITHUB_LABEL"
-  let github_min_score = get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
-end
-
 (** {1 Keeper Supervisor Configuration} *)
 
 module KeeperSupervisor = Env_config_keeper_supervisor
@@ -590,13 +537,6 @@ module KeeperReducer = struct
   let cap_message_keep_recent =
     max 1 (min 20 (get_int ~default:3 "MASC_KEEPER_REDUCER_KEEP_RECENT"))
   ;;
-end
-
-(** {1 Alert Dedup Configuration} *)
-
-module AlertDedup = struct
-  (** Alert dedup window, clamped to >= 5s. Default: 60. *)
-  let window_sec = Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
 end
 
 (** Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. *)

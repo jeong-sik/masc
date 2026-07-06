@@ -35,6 +35,40 @@ let install_pool runtimes =
       fingerprint = Local_runtime_pool.current_fingerprint ();
     }
 
+let json_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let int_field name json =
+  match json_field name json with
+  | Some (`Int value) -> value
+  | Some other ->
+      Alcotest.failf
+        "field %s expected int, got %s"
+        name
+        (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "field %s missing" name
+
+let string_field name json =
+  match json_field name json with
+  | Some (`String value) -> value
+  | Some other ->
+      Alcotest.failf
+        "field %s expected string, got %s"
+        name
+        (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "field %s missing" name
+
+let list_field name json =
+  match json_field name json with
+  | Some (`List values) -> values
+  | Some other ->
+      Alcotest.failf
+        "field %s expected list, got %s"
+        name
+        (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "field %s missing" name
+
 let test_parse_runtime_env () =
   Local_runtime_pool.reset ();
   (* OAS 0.112.0 auto-appends Ollama endpoint (http://127.0.0.1:11434) to
@@ -95,6 +129,69 @@ let test_record_measured_ceiling () =
   Alcotest.(check (option int)) "ceiling is max" (Some 12)
     (Local_runtime_pool.measured_ceiling ())
 
+let test_runtime_status_json_surfaces_probe_errors () =
+  Fun.protect
+    ~finally:Local_runtime_pool.reset
+    (fun () ->
+      Local_runtime_pool.reset ();
+      let runtime =
+        make_runtime "local-test" "http://127.0.0.1:19001"
+      in
+      install_pool [ runtime ];
+      let fetch_models_at base_url =
+        Error ("models down for " ^ base_url)
+      in
+      let discover_processes () = Error "ps denied" in
+      Tool_local_runtime_status.For_testing.with_dependencies
+        ~fetch_models_at
+        ~discover_processes
+      @@ fun () ->
+      let { Tool_local_runtime_status.status_json; read_errors } =
+        Tool_local_runtime_status.runtime_status_json_with_errors ()
+      in
+      Alcotest.(check int) "typed read errors" 2 (List.length read_errors);
+      (match read_errors with
+       | [ Tool_local_runtime_status.Runtime_process_discovery_error "ps denied"
+         ; Tool_local_runtime_status.Runtime_model_fetch_error
+             { base_url; endpoint; message } ] ->
+           Alcotest.(check string) "model base url" runtime.base_url base_url;
+           Alcotest.(check string)
+             "model endpoint"
+             (runtime.base_url ^ Masc_network_defaults.openai_models_path)
+             endpoint;
+           Alcotest.(check string)
+             "model error"
+             ("models down for " ^ runtime.base_url)
+             message
+       | errors ->
+           Alcotest.failf
+             "unexpected read errors: %s"
+             (String.concat
+                "; "
+                (List.map
+                   Tool_local_runtime_status.runtime_status_read_error_to_string
+                   errors)));
+      Alcotest.(check int)
+        "json read error count"
+        2
+        (int_field "runtime_status_read_error_count" status_json);
+      Alcotest.(check int)
+        "json read errors"
+        2
+        (List.length (list_field "runtime_status_read_errors" status_json));
+      Alcotest.(check int) "process failure keeps process count zero" 0
+        (int_field "process_count" status_json);
+      Alcotest.(check int) "model failure keeps aggregate model count zero" 0
+        (int_field "model_count" status_json);
+      (match list_field "runtimes" status_json with
+       | [ runtime_json ] ->
+           Alcotest.(check string)
+             "runtime model fetch error"
+             ("models down for " ^ runtime.base_url)
+             (string_field "model_fetch_error" runtime_json)
+       | runtimes ->
+           Alcotest.failf "expected one runtime row, got %d" (List.length runtimes)))
+
 (* [test_failure_cooldown_from_env] removed 2026-05-05 — exercised the
    failure-streak path through release/acquire which was archived. *)
 
@@ -110,5 +207,7 @@ let () =
             test_select_runtime_from_empty_returns_error;
           Alcotest.test_case "record measured ceiling" `Quick
             test_record_measured_ceiling;
+          Alcotest.test_case "runtime status surfaces probe errors" `Quick
+            test_runtime_status_json_surfaces_probe_errors;
         ] );
     ]

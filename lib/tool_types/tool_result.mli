@@ -75,6 +75,27 @@ type failure_payload =
     rather than reading [.success] / [.failure_class] off a record. *)
 type result = (success_payload, failure_payload) Stdlib.Result.t
 
+type structured_payload_location =
+  | Complete_message
+  | Message_suffix of { byte_offset : int }
+
+type structured_payload_decode_error =
+  | Structured_payload_json_error of
+      { location : structured_payload_location
+      ; message : string
+      }
+
+type structured_payload_decode_report =
+  { payload : Yojson.Safe.t option
+  ; errors : structured_payload_decode_error list
+  }
+
+val structured_payload_decode_error_to_string :
+  structured_payload_decode_error -> string
+
+val structured_payload_of_message_report :
+  string -> structured_payload_decode_report
+
 val structured_payload_of_message : string -> Yojson.Safe.t option
 
 (** {2 Accessors} *)

@@ -44,6 +44,16 @@ type accumulator
 (** Allocate a fresh empty accumulator. *)
 val create_accumulator : unit -> accumulator
 
+type tool_output_parse_error =
+  | Tool_output_json_parse_error of string
+
+val tool_output_parse_error_to_string : tool_output_parse_error -> string
+
+val parse_tool_output_json :
+  string -> (Yojson.Safe.t, tool_output_parse_error) result
+(** Parse a PostToolUse output content string into JSON for tool-emission
+    capture. *)
+
 (** Reads the [MASC_TOOL_EMISSION] env var. Returns [true] for
     [1], [true], [TRUE]; [false] otherwise (including unset). *)
 val masc_tool_emission_enabled : unit -> bool
@@ -52,8 +62,9 @@ val masc_tool_emission_enabled : unit -> bool
     content as JSON into the accumulator.
 
     The handler is a no-op when [masc_tool_emission_enabled ()] is
-    [false]. Parse failures (non-JSON tool output) are silently
-    ignored — only valid JSON enters the accumulator.
+    [false]. Parse failures (non-JSON tool output) do not enter the
+    accumulator; keeper-owned accumulators increment the typed
+    [ToolEmissionParseFailures] counter with a bounded error kind.
 
     All hook events return [Continue]. The hook is purely
     observational: it never aborts a tool call, never adjusts

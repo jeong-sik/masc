@@ -108,7 +108,7 @@ val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
     fix #10078 covered [Skip_busy] without exposing this distinction. *)
 type sleep_outcome =
   | Stopped   (** [stop] atomic was observed [true] before the duration
-                  elapsed. *)
+                 elapsed. *)
   | Woken     (** [wakeup] atomic transitioned [true -> false] via CAS;
                   the caller should treat this as a [HeartbeatTick]
                   spec-action and dispatch a turn. *)
@@ -120,14 +120,33 @@ val interruptible_sleep :
   clock:'a Eio.Time.clock -> stop:bool Atomic.t -> wakeup:bool Atomic.t ->
   float -> sleep_outcome
 
+(** Durable stimulus delivery plus a best-effort fiber wake hint.
+
+    This preserves the Event Layer / hint split: [stimulus] is appended through
+    the Result-returning event queue boundary first, then [Keeper_registry.wakeup]
+    flips the keeper fiber flag if durable enqueue succeeds and a registry entry
+    exists. Use the Result-returning variant when the producer must surface
+    enqueue failure instead of logging a suppressed wake hint. *)
+val enqueue_stimulus_and_wakeup_hint :
+  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
+
+val enqueue_stimulus_and_wakeup_hint_result :
+  base_path:string ->
+  keeper_name:string ->
+  Keeper_event_queue.stimulus ->
+  (Keeper_registry_event_queue.enqueue_success, string) result
+(** Result-returning variant of {!enqueue_stimulus_and_wakeup_hint}. The wake
+    hint is flipped only after the Event Layer enqueue reports durable success. *)
+
 (** Wake up a specific keeper immediately.
 
-    When [?stimulus] is given, the stimulus is appended to the keeper's
-    Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
-    flag flips. Callers that have a real payload (board post, mention,
-    operator directive) should pass it; callers that only need to break
-    the keeper out of [interruptible_sleep] may omit it and the call
-    behaves as before. See RFC-0020 §3 (data channel vs hint signal). *)
+    When [?stimulus] is given, the stimulus is appended to the keeper's Event
+    Layer queue before the wakeup flag flips; durable enqueue failure suppresses
+    the wake hint and is logged by the compatibility wrapper. Callers that need
+    an error value should use {!enqueue_stimulus_and_wakeup_hint_result}
+    directly. Callers that only need to break the keeper out of
+    [interruptible_sleep] may omit [stimulus] and the call behaves as before.
+    See RFC-0020 §3 (data channel vs hint signal). *)
 val wakeup_keeper :
   ?base_path:string ->
   ?stimulus:Keeper_event_queue.stimulus ->
@@ -153,8 +172,6 @@ val connector_reactive_wakeup_allowed :
     keeper then sees every accumulated message in its chat history. Records the
     wakeup timestamp as a side effect when it returns [true]. *)
 
-val board_reactive_wakeup_max : int
-
 (** [board_wakeup_dedup_key] is the content fingerprint a board wakeup is
     deduped under (RFC-0239 R4): normalized (author,title,content), or the
     [post_id] when title+content are empty. Exposed for testing. *)
@@ -175,15 +192,13 @@ val board_reactive_wakeup_allowed :
     resumed implicitly by board posts or comments. *)
 val paused_meta_allows_board_auto_resume : keeper_meta -> bool
 
-(** Select which keepers wake for a board signal (RFC-0020). Explicit mentions
-    short-circuit and wake unconditionally (returned with [dropped = 0]); other
-    typed reasons compete for [?total_limit] slots in candidate order. [None]
-    reasons are dropped. Returns the selected [(item, reason)] pairs and the
-    number of non-explicit candidates dropped by the cap. *)
+(** Select which keepers wake for a board signal (RFC-0020). [None] reasons are
+    dropped; every typed wake reason is returned in candidate order. Fanout
+    suppression belongs at explicit backpressure/debounce boundaries, not after a
+    keeper already has a typed wake reason. *)
 val select_board_wakeup_candidates :
-  ?total_limit:int ->
   ('a * Keeper_world_observation_board_signal.wake_reason option) list ->
-  ('a * Keeper_world_observation_board_signal.wake_reason) list * int
+  ('a * Keeper_world_observation_board_signal.wake_reason) list
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.board_signal -> unit

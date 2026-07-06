@@ -65,6 +65,33 @@ module Agent_id : sig
   val to_string : t -> string
 end
 
+(** Board-local explicit mention ids parsed once at post/comment write time.
+    This is only the protocol token payload from ["@name"]; keeper-specific
+    canonical identity matching stays in the keeper layer. *)
+module Mention_id : sig
+  type t
+  (** Lowercase mention payload without the leading ["@"] for normal tokens.
+      Malformed tokens such as ["@@alice"] intentionally remain distinct from
+      ["alice"], preserving exact-token semantics. *)
+
+  val of_string : string -> t option
+  (** [None] iff the input is whitespace-only. *)
+
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+
+  val mention_ids_of_content : string -> t list
+  (** Parse explicit ["@name"] tokens from content, edge-trimmed,
+      lowercased, and deduplicated.  Token equality only: ["@alicex"] and
+      ["email@alice.com"] do not produce ["alice"]. *)
+
+  val mention_ids_of_post_fields : title:string -> body:string -> t list
+  (** Parse explicit mention ids from the canonical persisted board post text
+      fields.  Board post writes and offline backfills share this helper so the
+      title/body composition has one source of truth. *)
+end
+
 (** {1 Visibility & Post Kinds} *)
 
 type visibility =
@@ -78,18 +105,6 @@ type post_kind =
   | Automation_post
   | System_post
 [@@deriving tla]
-
-(** Legacy automation-author classification (RFC-0089 §4-3 G2). Defined
-    here so the board metric hook surface can reference it without a
-    dependency cycle through [Board_core_classify]; [Board_core_classify]
-    re-exports it via [include Board_types]. *)
-type automation_label =
-  | Auto_prefixed       (** Author starts with ["auto-"]. *)
-  | Qa_prefixed         (** Author starts with ["qa-"]. *)
-  | Researcher_named    (** Author contains ["researcher"]. *)
-  | Harness_named       (** Author contains ["harness"]. *)
-  | Smoke_named         (** Author contains ["smoke"]. *)
-  | Probe_named         (** Author contains ["probe"]. *)
 
 (** {1 Records — Mandatory TTL} *)
 
@@ -118,6 +133,7 @@ type post = {
   title : string;
   body : string;
   content : string;
+  mention_ids : Mention_id.t list;
   post_kind : post_kind;
   meta_json : Yojson.Safe.t option;
   visibility : visibility;
@@ -139,6 +155,7 @@ type comment = {
   parent_id : Comment_id.t option;
   author : Agent_id.t;
   content : string;
+  mention_ids : Mention_id.t list;
   created_at : float;
   expires_at : float;
   votes_up : int;

@@ -56,7 +56,17 @@ let with_isolated_base_path prefix f =
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base;
       restore_env "MASC_BASE_PATH_INPUT" old_base_input;
-      try remove_tree base_dir with _ -> ())
+      (try remove_tree base_dir with
+       | Sys_error msg ->
+         prerr_endline
+           (Printf.sprintf "test_fusion_wake: cleanup failed for %s: %s" base_dir msg)
+       | Unix.Unix_error (err, fn, arg) ->
+         prerr_endline
+           (Printf.sprintf "test_fusion_wake: cleanup failed for %s: %s(%s): %s"
+              base_dir
+              fn
+              arg
+              (Unix.error_message err))))
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base_dir;
       Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
@@ -312,6 +322,62 @@ let test_emit_board_failure_is_best_effort () =
     check bool "chat lane receives answer without fusion card block" true answer_without_card)
 ;;
 
+let test_cancelled_run_delivers_typed_wake () =
+  with_isolated_base_path "fusion-cancelled-wake" (fun base_dir ->
+    Keeper_registry.clear ();
+    Fun.protect
+      ~finally:(fun () -> Keeper_registry.clear ())
+      (fun () ->
+        let keeper = "fusion-cancel-keeper" in
+        let run_id = Printf.sprintf "fus-cancel-%d" (Random.bits ()) in
+        let meta = make_meta ~name:keeper () in
+        let _entry = Keeper_registry.register ~base_path:base_dir keeper meta in
+        Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+          ~keeper ~preset:"unit-test" ~started_at:1.0;
+        Fusion_tool.finalize_cancelled_run ~base_dir ~keeper ~run_id;
+        (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+         | Some run ->
+           (match run.Fusion_run_registry.status with
+            | Fusion_run_registry.Completed { ok; failure; failure_code } ->
+              check bool "registry marks cancellation as failed completion" false ok;
+              check
+                (option string)
+                "registry carries structural cancellation failure"
+                (Some Fusion_tool.structural_cancel_failure)
+                failure;
+              check
+                (option string)
+                "registry carries structural cancellation code"
+                (Some Fusion_tool.structural_cancel_failure_code)
+                failure_code
+            | Fusion_run_registry.Running ->
+              fail "cancelled fusion run must not remain running")
+         | None -> fail "cancelled fusion run must remain visible");
+        match
+          Keeper_registry_event_queue.snapshot ~base_path:base_dir keeper
+          |> Keeper_event_queue.to_list
+        with
+        | [ stimulus ] ->
+          (match stimulus.Keeper_event_queue.payload with
+           | Keeper_event_queue.Fusion_completed fusion ->
+             check string "wake carries run_id" run_id fusion.run_id;
+             check bool "wake marks failure" false fusion.ok;
+             check
+               string
+               "wake carries structural cancellation payload"
+               Fusion_tool.structural_cancel_failure
+               fusion.resolved_answer;
+             check string "wake has no board post" "" fusion.board_post_id;
+             check
+               string
+               "wake post_id uses event queue SSOT"
+               (Keeper_event_queue.fusion_completion_post_id fusion)
+               stimulus.Keeper_event_queue.post_id
+           | _ -> fail "cancelled fusion run must enqueue Fusion_completed")
+        | [] -> fail "cancelled fusion run must enqueue a typed wake"
+        | _ :: _ :: _ -> fail "cancelled fusion run must enqueue exactly one typed wake"))
+;;
+
 let () =
   run
     "fusion_wake"
@@ -329,6 +395,10 @@ let () =
             "emit treats board post failure as best-effort"
             `Quick
             test_emit_board_failure_is_best_effort
+        ; test_case
+            "cancelled run delivers typed wake"
+            `Quick
+            test_cancelled_run_delivers_typed_wake
         ; test_case
             "background completion is actionable (non-empty, carries output)"
             `Quick

@@ -71,9 +71,14 @@ let write_text_file path content =
   mkdir_p (Filename.dirname path);
   Fs_compat.save_file path content
 
-let write_run config (run : run_record) =
+let write_run_result config (run : run_record) =
   let path = run_json_path config run.task_id in
-  write_json config path (run_record_to_json run)
+  write_json_result config path (run_record_to_json run)
+
+let write_run config run =
+  match write_run_result config run with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error error)
 
 let read_run config task_id : (run_record, string) result =
   let path = run_json_path config task_id in
@@ -111,8 +116,9 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     let plan_file = plan_path config task_id in
     if not (path_exists config plan_file) then
       write_text_file plan_file "# Run Plan\n\n";
-    write_run config run;
-    Ok run
+    (match write_run_result config run with
+     | Ok () -> Ok run
+     | Error _ as error -> error)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
@@ -138,8 +144,9 @@ let update_plan config ~task_id ~content : (run_record, string) result =
           let updated = { run with plan = content; updated_at = Masc_domain.now_iso () } in
           let path = plan_path config task_id in
           write_text_file path content;
-          write_run config updated;
-          Ok updated)
+          (match write_run_result config updated with
+           | Ok () -> Ok updated
+           | Error _ as error -> error))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)

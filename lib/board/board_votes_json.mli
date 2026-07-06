@@ -4,6 +4,23 @@ include module type of struct
   include Board_core
 end
 
+type post_meta_json_string_parse_error =
+  | Post_meta_json_string_json_decode_error of string
+
+val post_meta_json_string_parse_error_to_string :
+  post_meta_json_string_parse_error -> string
+
+val parse_post_meta_json_string_result :
+  string -> (Yojson.Safe.t, post_meta_json_string_parse_error) result
+(** [parse_post_meta_json_string_result raw] parses the legacy
+    string-valued [meta_json] persistence field.  The parser only
+    separates JSON syntax success/failure; object-shape validation stays
+    with {!Board_core_payload.normalize_post_payload} so persisted-row
+    semantics do not drift. *)
+
+val parse_post_meta_json_string : string -> Yojson.Safe.t option
+(** Compatibility projection over {!parse_post_meta_json_string_result}. *)
+
 val visibility_of_string : string -> visibility option
 val post_of_yojson : Yojson.Safe.t -> post option
 val comment_of_yojson : Yojson.Safe.t -> comment option

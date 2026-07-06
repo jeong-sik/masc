@@ -33,7 +33,7 @@ let heartbeat config ~agent_name =
       match read_agent_with_repair config agent_file with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
-          write_json config agent_file (agent_to_yojson updated);
+          write_agent config agent_file updated;
           Printf.sprintf "%s heartbeat updated" actual_name
       | Error e ->
           Log.Workspace.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
@@ -123,7 +123,13 @@ let cleanup_zombies
                   with Sys_error _ ->
                     (* Non-filesystem backend: fall back to delete so the
                        scan does not loop forever on an unreadable entry. *)
-                    delete_path config path);
+                    (match delete_path_result config path with
+                     | Ok () -> ()
+                     | Error delete_msg ->
+                       Log.Gc.warn
+                         "failed to delete broken agent %s after rename fallback: %s"
+                         path
+                         delete_msg));
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                  Log.Gc.warn "failed to quarantine broken agent %s: %s"
@@ -145,7 +151,7 @@ let cleanup_zombies
           match read_agent_with_repair config path with
           | Ok agent ->
               let updated = { agent with status = Inactive; last_seen = now_iso () } in
-              write_json config path (agent_to_yojson updated)
+              write_agent config path updated
           | Error err -> Log.Gc.warn "gc status update parse error for %s: %s" name err
         with Sys_error msg -> Log.Gc.warn "gc status update I/O error for %s: %s" name msg);
         let _stopped = Heartbeat.stop_by_agent ~agent_name:name in
@@ -162,27 +168,31 @@ let cleanup_zombies
       (* Phase 3: Release tasks — track failures per agent *)
       let release_failed_agents = ref [] in
       let released_tasks = ref [] in
-      let backlog = read_backlog config in
-      List.iter (fun (task : task) ->
-        match task.task_status with
-        | Masc_domain.Claimed { assignee; _ }
-        | Masc_domain.InProgress { assignee; _ }
-          when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
-            (match (Atomic.get Workspace_hooks.force_release_task_fn) config ~agent_name:"keeper-gc" ~task_id:task.id () with
-             | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
-             | Error e ->
-                 if not (List.mem assignee !release_failed_agents) then
-                   release_failed_agents := assignee :: !release_failed_agents;
-                 log_event config (`Assoc [
-                   ("type", `String "zombie_runtime_error");
-                   ("task_id", `String task.id);
-                   ("agent", `String assignee);
-                   ("error", `String (Masc_domain.masc_error_to_string e));
-                   ("ts", `String (now_iso ()));
-                 ]))
-        | Masc_domain.Claimed _ | Masc_domain.InProgress _
-        | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
-      ) backlog.tasks;
+      (match read_backlog_r config with
+       | Error msg ->
+         Log.Gc.warn "gc zombie task release skipped: unreadable backlog: %s" msg;
+         release_failed_agents := List.map fst !zombie_entries
+       | Ok backlog ->
+         List.iter (fun (task : task) ->
+           match task.task_status with
+           | Masc_domain.Claimed { assignee; _ }
+           | Masc_domain.InProgress { assignee; _ }
+             when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
+               (match (Atomic.get Workspace_hooks.force_release_task_fn) config ~agent_name:"keeper-gc" ~task_id:task.id () with
+                | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
+                | Error e ->
+                    if not (List.mem assignee !release_failed_agents) then
+                      release_failed_agents := assignee :: !release_failed_agents;
+                    log_event config (`Assoc [
+                      ("type", `String "zombie_runtime_error");
+                      ("task_id", `String task.id);
+                      ("agent", `String assignee);
+                      ("error", `String (Masc_domain.masc_error_to_string e));
+                      ("ts", `String (now_iso ()));
+                    ]))
+           | Masc_domain.Claimed _ | Masc_domain.InProgress _
+           | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
+         ) backlog.tasks);
 
       (* Phase 4: Delete files — skip agents with release failures *)
       let successfully_cleaned = ref [] in
@@ -280,46 +290,95 @@ let gc config ?(days=7) () =
   in
   let cutoff_iso = Masc_domain.iso8601_of_unix_seconds cutoff_time in
 
-  let backlog = read_backlog config in
+  let backlog_read = read_backlog_r config in
+  let backlog_read_error = ref None in
   let stale_count = ref 0 in
   let archived_tasks = ref [] in
-  let kept_tasks = List.filter (fun task ->
-    let is_terminal = Masc_domain.task_status_is_terminal task.task_status in
-    let is_old = task.created_at < cutoff_iso in
-    if is_old && is_terminal then begin
-      incr stale_count;
-      archived_tasks := task :: !archived_tasks;
-      false  (* Archive: terminal and older than the cutoff. *)
-    end else
-      true   (* Keep: recent, or non-terminal at any age. *)
-  ) backlog.tasks in
+  let kept_tasks, backlog_version, backlog_tasks =
+    match backlog_read with
+    | Error msg ->
+      backlog_read_error := Some msg;
+      [], None, []
+    | Ok backlog ->
+      let kept_tasks =
+        List.filter (fun task ->
+          let is_terminal = Masc_domain.task_status_is_terminal task.task_status in
+          let is_old = task.created_at < cutoff_iso in
+          if is_old && is_terminal then begin
+            incr stale_count;
+            archived_tasks := task :: !archived_tasks;
+            false  (* Archive: terminal and older than the cutoff. *)
+          end else
+            true   (* Keep: recent, or non-terminal at any age. *)
+        ) backlog.tasks
+      in
+      kept_tasks, Some backlog.version, backlog.tasks
+  in
 
   (* Self-healing restore: recover non-terminal obligations a prior pass
      mis-archived.  Restore only ids not already live so a crash between the
      backlog write and the archive drop below cannot duplicate a task. *)
-  let orphaned = read_orphaned_nonterminal_tasks config in
-  let live_ids = List.map (fun (t : task) -> t.id) kept_tasks in
+  let orphaned, archive_restore_error =
+    match !backlog_read_error with
+    | Some msg -> [], Some (Printf.sprintf "backlog read failed: %s" msg)
+    | None ->
+      (match read_orphaned_nonterminal_tasks_result config with
+       | Ok tasks -> tasks, None
+       | Error msg ->
+           Log.Gc.warn "gc archive restore skipped: %s" msg;
+           [], Some msg)
+  in
+  let archive_terminal_result =
+    match !backlog_read_error with
+    | Some msg -> Error (Printf.sprintf "backlog read failed: %s" msg)
+    | None ->
+      if !stale_count = 0 then Ok ()
+      else append_archive_tasks_result config (List.rev !archived_tasks)
+  in
+  let terminal_archive_succeeded =
+    match archive_terminal_result with
+    | Ok () -> true
+    | Error msg ->
+        Log.Gc.warn "gc terminal archive skipped: %s" msg;
+        false
+  in
+  let live_tasks_before_restore =
+    if terminal_archive_succeeded then kept_tasks else backlog_tasks
+  in
+  let live_ids = List.map (fun (t : task) -> t.id) live_tasks_before_restore in
   let restored =
     List.filter (fun (t : task) -> not (List.mem t.id live_ids)) orphaned
   in
   let restore_count = List.length restored in
-  let live_tasks_after_gc = kept_tasks @ restored in
+  let live_tasks_after_gc = live_tasks_before_restore @ restored in
 
-  (* Backlog first: on a crash before the archive is rewritten below, the
-     restored task survives in both stores and the next GC pass dedups it. *)
-  if !stale_count > 0 || restore_count > 0 then begin
-    let new_backlog = {
-      tasks = live_tasks_after_gc;
-      last_updated = now_iso ();
-      version = backlog.version + 1;
-    } in
-    write_backlog config new_backlog
+  (* Archive terminal tasks before removing them from the live backlog. Restore
+     tasks before dropping the archive copy, so every failed intermediate state
+     preserves at least one copy of every task. *)
+  if (terminal_archive_succeeded && !stale_count > 0) || restore_count > 0 then begin
+    match backlog_version with
+    | Some version ->
+      let new_backlog = {
+        tasks = live_tasks_after_gc;
+        last_updated = now_iso ();
+        version = version + 1;
+      } in
+      write_backlog config new_backlog
+    | None ->
+      Log.Gc.warn
+        "gc archive write skipped: backlog version unavailable after read failure"
   end;
-  if !stale_count > 0 then append_archive_tasks config (List.rev !archived_tasks);
   (* Drop every orphaned non-terminal entry from the archive, including any that
      was already live (a pure duplicate). *)
-  if orphaned <> [] then
-    drop_archive_tasks config ~ids:(List.map (fun (t : task) -> t.id) orphaned);
+  let archive_drop_error =
+    if orphaned = [] then None
+    else
+      match drop_archive_tasks_result config ~ids:(List.map (fun (t : task) -> t.id) orphaned) with
+      | Ok () -> None
+      | Error msg ->
+          Log.Gc.warn "gc archive orphan cleanup failed: %s" msg;
+          Some msg
+  in
   List.iter (fun (t : task) ->
     let status = Masc_domain.task_status_to_string t.task_status in
     log_event config (`Assoc [
@@ -337,17 +396,28 @@ let gc config ?(days=7) () =
       ~tags:[ "gc"; "self_heal"; "rfc-0220" ]
       ()
   ) restored;
-  (if !stale_count > 0 then
-     results :=
-       Printf.sprintf "Archived %d terminal task(s) (older than %d days)" !stale_count days
-       :: !results
-   else
-     results :=
-       Printf.sprintf "No terminal tasks to archive (threshold: %d days)" days :: !results);
+  (match archive_terminal_result with
+   | Ok () when !stale_count > 0 ->
+       results :=
+         Printf.sprintf "Archived %d terminal task(s) (older than %d days)" !stale_count days
+         :: !results
+   | Error msg ->
+       results := Printf.sprintf "Archive terminal skipped: %s" msg :: !results
+   | Ok () ->
+       results :=
+         Printf.sprintf "No terminal tasks to archive (threshold: %d days)" days :: !results);
   if restore_count > 0 then
     results :=
       Printf.sprintf "Restored %d non-terminal task(s) from archive" restore_count
       :: !results;
+  (match archive_restore_error with
+   | Some msg ->
+       results := Printf.sprintf "Archive restore skipped: %s" msg :: !results
+   | None -> ());
+  (match archive_drop_error with
+   | Some msg ->
+       results := Printf.sprintf "Archive orphan cleanup failed: %s" msg :: !results
+   | None -> ());
 
   (* 3. Cleanup old messages - but preserve messages referencing open tasks *)
   let messages_path = messages_dir config in
@@ -356,10 +426,13 @@ let gc config ?(days=7) () =
 
   (* Get open task IDs (not Done or Cancelled) *)
   let open_task_ids =
-    List.filter_map (fun task ->
-      if Masc_domain.task_status_is_terminal task.task_status then None
-      else Some task.id
-    ) live_tasks_after_gc
+    match !backlog_read_error with
+    | Some _ -> []
+    | None ->
+      List.filter_map (fun task ->
+        if Masc_domain.task_status_is_terminal task.task_status then None
+        else Some task.id
+      ) live_tasks_after_gc
   in
 
   (* Substring check against any open task ID.
@@ -377,36 +450,42 @@ let gc config ?(days=7) () =
         fun content -> Re.execp re content
   in
 
-  if Sys.file_exists messages_path then begin
-    Sys.readdir messages_path |> Array.iter (fun name ->
-        Workspace_query.safe_yield ();
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat messages_path name in
-        let json = read_json config path in
-        let ts = Json_util.get_string json "timestamp" in
-        let content = Json_util.get_string json "content"
-                      |> Option.value ~default:"" in
-        match ts with
-        | Some ts when ts < cutoff_iso ->
-            (* Preserve if message references an open task *)
-            if mentions_open_task content then
-              incr preserved_count
-            else begin
-              Sys.remove path;
-              incr old_msg_count
-            end
-        | None | Some _ -> ()
-      end
-    )
-  end;
+  (match !backlog_read_error with
+   | Some msg ->
+     results :=
+       Printf.sprintf "Old message cleanup skipped: backlog read failed: %s" msg
+       :: !results
+   | None ->
+     if Sys.file_exists messages_path then begin
+       Sys.readdir messages_path |> Array.iter (fun name ->
+           Workspace_query.safe_yield ();
+         if Filename.check_suffix name ".json" then begin
+           let path = Filename.concat messages_path name in
+           let json = read_json config path in
+           let ts = Json_util.get_string json "timestamp" in
+           let content = Json_util.get_string json "content"
+                         |> Option.value ~default:"" in
+           match ts with
+           | Some ts when ts < cutoff_iso ->
+               (* Preserve if message references an open task *)
+               if mentions_open_task content then
+                 incr preserved_count
+               else begin
+                 Sys.remove path;
+                 incr old_msg_count
+               end
+           | None | Some _ -> ()
+         end
+       )
+     end;
 
-  if !old_msg_count > 0 || !preserved_count > 0 then begin
-    if !old_msg_count > 0 then
-      results := Printf.sprintf "Deleted %d old message(s) (older than %d days)" !old_msg_count days :: !results;
-    if !preserved_count > 0 then
-      results := Printf.sprintf "Preserved %d message(s) referencing open tasks" !preserved_count :: !results
-  end else
-    results := Printf.sprintf "No old messages (threshold: %d days)" days :: !results;
+     if !old_msg_count > 0 || !preserved_count > 0 then begin
+       if !old_msg_count > 0 then
+         results := Printf.sprintf "Deleted %d old message(s) (older than %d days)" !old_msg_count days :: !results;
+       if !preserved_count > 0 then
+         results := Printf.sprintf "Preserved %d message(s) referencing open tasks" !preserved_count :: !results
+     end else
+       results := Printf.sprintf "No old messages (threshold: %d days)" days :: !results);
 
   (* 4. Cleanup backend pubsub - no-op for filesystem backend *)
   let pubsub_cleanup_count = ref 0 in
@@ -535,6 +614,13 @@ let gc config ?(days=7) () =
   log_event config (`Assoc [
     ("type", `String "gc");
     ("stale_tasks", `Int !stale_count);
+    ("archived_terminal_tasks", `Int (if terminal_archive_succeeded then !stale_count else 0));
+    ( "archive_terminal_error"
+    , match archive_terminal_result with Ok () -> `Null | Error msg -> `String msg );
+    ( "archive_restore_error"
+    , match archive_restore_error with None -> `Null | Some msg -> `String msg );
+    ( "archive_orphan_drop_error"
+    , match archive_drop_error with None -> `Null | Some msg -> `String msg );
     ("old_messages", `Int !old_msg_count);
     ("preserved", `Int !preserved_count);
     ("pubsub_cleaned", `Int !pubsub_cleanup_count);

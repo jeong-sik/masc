@@ -22,6 +22,7 @@ let make_post ~id ~created_at ~votes_up ~votes_down ~reply_count () : Board.post
   ; title = ""
   ; body = "fixture"
   ; content = "fixture"
+  ; mention_ids = []
   ; post_kind = Board.Human_post
   ; meta_json = None
   ; visibility = Board.Public

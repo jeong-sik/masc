@@ -800,6 +800,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
   const stimulusCount = asNumber(raw.stimulus_count)
   const reactionCount = asNumber(raw.reaction_count)
   const turnStartedCount = asNumber(raw.turn_started_count)
+  const stimulusConsumedCount = asNumber(raw.stimulus_consumed_count)
   const cursorAckCount = asNumber(raw.cursor_ack_count)
   const executionReceiptCount = asNumber(raw.execution_receipt_count)
   const terminalReasonCount = asNumber(raw.terminal_reason_count)
@@ -820,6 +821,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     && stimulusCount == null
     && reactionCount == null
     && turnStartedCount == null
+    && stimulusConsumedCount == null
     && cursorAckCount == null
     && executionReceiptCount == null
     && terminalReasonCount == null
@@ -841,6 +843,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     stimulus_count: stimulusCount ?? null,
     reaction_count: reactionCount ?? null,
     turn_started_count: turnStartedCount ?? null,
+    stimulus_consumed_count: stimulusConsumedCount ?? null,
     cursor_ack_count: cursorAckCount ?? null,
     execution_receipt_count: executionReceiptCount ?? null,
     terminal_reason_count: terminalReasonCount ?? null,

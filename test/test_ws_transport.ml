@@ -232,6 +232,11 @@ let test_ws_upgrade_accept_rejects_short_key () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected a non-16-byte key to be rejected"
 
+let test_ws_upgrade_accept_rejects_invalid_base64_key () =
+  match Ws.ws_upgrade_accept (ws_upgrade_request ~key:"not valid base64!" ()) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected invalid base64 key to be rejected"
+
 let test_ws_upgrade_accept_rejects_wrong_version () =
   match
     Ws.ws_upgrade_accept
@@ -1141,6 +1146,8 @@ let () =
         test_ws_upgrade_accept_valid;
       Alcotest.test_case "non-16-byte key rejected" `Quick
         test_ws_upgrade_accept_rejects_short_key;
+      Alcotest.test_case "invalid base64 key rejected" `Quick
+        test_ws_upgrade_accept_rejects_invalid_base64_key;
       Alcotest.test_case "wrong Sec-WebSocket-Version rejected" `Quick
         test_ws_upgrade_accept_rejects_wrong_version;
     ]);

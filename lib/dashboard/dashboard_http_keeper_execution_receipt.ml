@@ -54,10 +54,17 @@ let count_execution_receipt_entries config keeper_names =
               0))
        0
 
-let execution_receipt_coverage_gaps config =
-  Telemetry_coverage_gap.read_recent
+let execution_receipt_coverage_gaps_with_read_errors config =
+  let gaps, read_errors =
+    Telemetry_coverage_gap.read_recent_with_read_errors
     ~masc_root:(Workspace.masc_root_dir config)
     ~n:50
-  |> List.filter (fun gap ->
-       String.equal execution_trust_source
-         (Safe_ops.json_string ~default:"" "source" gap))
+  in
+  ( gaps
+    |> List.filter (fun gap ->
+         String.equal execution_trust_source
+           (Safe_ops.json_string ~default:"" "source" gap)),
+    read_errors )
+
+let execution_receipt_coverage_gaps config =
+  fst (execution_receipt_coverage_gaps_with_read_errors config)

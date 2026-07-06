@@ -21,6 +21,7 @@ type post_body_decision = {
 }
 
 type post_body_rejection =
+  | Parse_error of string
   | Session_required of string
   | Unknown_session of string
   | Invalid_accept of string
@@ -29,39 +30,50 @@ type post_body_rejection =
 let invalid_accept_message =
   "Invalid Accept header: must include application/json and text/event-stream."
 
+let body_json_parse_error body_str =
+  match Yojson.Safe.from_string body_str with
+  | _ -> None
+  | exception Yojson.Json_error msg ->
+      Some ("Invalid JSON request body: " ^ msg)
+
 let decide_post_body ~request ~context ~session_is_known body_str =
-  let stateless_request =
-    Server_mcp_transport_http_protocol.request_uses_stateless_protocol request
-      body_str
-  in
-  let session_gate =
-    if stateless_request then Ok ()
-    else
-      Server_mcp_transport_http_protocol.validate_session_requirement
-        ~session_was_provided:context.session_was_provided body_str
-  in
-  match session_gate with
-  | Error msg -> Error (Session_required msg)
-  | Ok () -> (
-      let is_known = context.session_was_provided && session_is_known in
-      let known_gate =
+  match body_json_parse_error body_str with
+  | Some msg -> Error (Parse_error msg)
+  | None ->
+      let stateless_request =
+        Server_mcp_transport_http_protocol.request_uses_stateless_protocol
+          request body_str
+      in
+      let session_gate =
         if stateless_request then Ok ()
         else
-          Server_mcp_transport_http_protocol.validate_session_known
-            ~session_was_provided:context.session_was_provided ~is_known body_str
+          Server_mcp_transport_http_protocol.validate_session_requirement
+            ~session_was_provided:context.session_was_provided body_str
       in
-      match known_gate with
-      | Error msg -> Error (Unknown_session msg)
+      match session_gate with
+      | Error msg -> Error (Session_required msg)
       | Ok () -> (
-          match
-            Server_mcp_transport_http_protocol.validate_2026_request_headers
-              request body_str
-          with
-          | Error msg -> Error (Header_mismatch msg)
+          let is_known = context.session_was_provided && session_is_known in
+          let known_gate =
+            if stateless_request then Ok ()
+            else
+              Server_mcp_transport_http_protocol.validate_session_known
+                ~session_was_provided:context.session_was_provided ~is_known
+                body_str
+          in
+          match known_gate with
+          | Error msg -> Error (Unknown_session msg)
           | Ok () -> (
               match
-                Server_mcp_transport_http_headers.classify_mcp_accept request
+                Server_mcp_transport_http_protocol.validate_2026_request_headers
+                  request body_str
               with
-              | Mcp_transport_protocol.Http_negotiation.Rejected ->
-                  Error (Invalid_accept invalid_accept_message)
-              | accept_mode -> Ok { body_str; accept_mode })))
+              | Error msg -> Error (Header_mismatch msg)
+              | Ok () -> (
+                  match
+                    Server_mcp_transport_http_headers.classify_mcp_accept
+                      request
+                  with
+                  | Mcp_transport_protocol.Http_negotiation.Rejected ->
+                      Error (Invalid_accept invalid_accept_message)
+                  | accept_mode -> Ok { body_str; accept_mode })))

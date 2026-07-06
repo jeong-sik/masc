@@ -67,7 +67,9 @@ type save_oas_outcome =
     [ckpt.turn_count] is older than the last checkpoint saved for the
     same session. A stale writer must not clobber a conversation the
     newer writer already persisted, but this is not a keeper lifecycle
-    failure. Equal turn_count re-saves pass. *)
+    failure. Equal turn_count re-saves pass. If the existing checkpoint is
+    present but unreadable, returns [Error] instead of treating the write as
+    a cold save. *)
 val save_oas_classified :
   session_dir:string ->
   Agent_sdk.Checkpoint.t ->
@@ -89,6 +91,8 @@ type checkpoint_load_error =
   | Parse_error of string
   | Io_error of string
   | Sdk_other_error of string
+
+val checkpoint_load_error_to_string : checkpoint_load_error -> string
 
 (** Project an [Agent_sdk.Error.sdk_error] to [checkpoint_load_error].
 

@@ -14,6 +14,14 @@ let map_store = function
   | Error err -> Error (Store_error err)
 ;;
 
+let store_error_of_read_error = function
+  | Schedule_store.Corrupt_read_ledger { primary_err; recovery_err } ->
+    Schedule_store.Corrupt_ledger { primary_err; recovery_err }
+;;
+
+let service_error_of_read_error err = Store_error (store_error_of_read_error err)
+;;
+
 (* NDT-OK: service boundary clock; callers can pass explicit timestamps for replay/tests. *)
 let now () = Unix.gettimeofday ()
 
@@ -66,8 +74,7 @@ let create
   Schedule_store.insert_request config request |> map_store
 ;;
 
-let list config ?status () =
-  let schedules = Schedule_store.list_schedules config in
+let filter_schedules ?status schedules =
   match status with
   | None -> schedules
   | Some expected ->
@@ -77,7 +84,41 @@ let list config ?status () =
       schedules
 ;;
 
-let get config ~schedule_id = Schedule_store.get_schedule config ~schedule_id
+let list_result config ?status () =
+  match Schedule_store.read_state_result config with
+  | Error err -> Error err
+  | Ok state -> Ok (filter_schedules ?status state.Schedule_store.schedules)
+;;
+
+let raise_read_error = function
+  | Schedule_store.Corrupt_read_ledger { primary_err; recovery_err } ->
+    raise (Schedule_store.Corrupt_ledger_exn { primary_err; recovery_err })
+;;
+
+let list config ?status () =
+  match list_result config ?status () with
+  | Ok schedules -> schedules
+  | Error err -> raise_read_error err
+;;
+
+let find_schedule schedules schedule_id =
+  List.find_opt
+    (fun (request : Schedule_domain.schedule_request) ->
+      String.equal request.schedule_id schedule_id)
+    schedules
+;;
+
+let get_result config ~schedule_id =
+  match Schedule_store.read_state_result config with
+  | Error err -> Error err
+  | Ok state -> Ok (find_schedule state.Schedule_store.schedules schedule_id)
+;;
+
+let get config ~schedule_id =
+  match get_result config ~schedule_id with
+  | Ok request -> request
+  | Error err -> raise_read_error err
+;;
 
 let decision_grant
   config
@@ -88,9 +129,10 @@ let decision_grant
   ~decision
   ()
   =
-  match Schedule_store.get_schedule config ~schedule_id with
-  | None -> Error (Store_error Schedule_store.Schedule_not_found)
-  | Some request -> (* NDT-OK: API boundary default; explicit approved_at is supported. *)
+  match get_result config ~schedule_id with
+  | Error err -> Error (service_error_of_read_error err)
+  | Ok None -> Error (Store_error Schedule_store.Schedule_not_found)
+  | Ok (Some request) -> (* NDT-OK: API boundary default; explicit approved_at is supported. *)
     let approved_at = Option.value approved_at ~default:(now ()) in
     let grant_id = grant_id provided_grant_id in
     let grant =
@@ -110,8 +152,18 @@ let reject config ?grant_id ?approved_at ~schedule_id ~approved_by ~reason () =
     ~decision:(Schedule_domain.Reject reason) ()
 ;;
 
-let cancel config ~schedule_id =
-  Schedule_store.cancel_request config ~schedule_id |> map_store
+let cancel_reason = function
+  | None -> Ok None
+  | Some raw ->
+    let reason = String.trim raw in
+    if String.equal reason ""
+    then Error (Invalid_request "cancel reason must be non-empty")
+    else Ok (Some reason)
+;;
+
+let cancel config ?cancelled_by ?reason ~schedule_id =
+  let* reason = cancel_reason reason in
+  Schedule_store.cancel_request config ?cancelled_by ?reason ~schedule_id |> map_store
 ;;
 
 let due_candidates config ~now =

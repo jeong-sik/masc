@@ -1,10 +1,10 @@
-(** Keeper_skill_routing — automated and model-assisted skill routing for keepers.
-    Keepers always have access to all 'keeper' shard tools, but they
-    are routed to specific meta-skills (heartbeat, autonomy) based on
-    the user's request. *)
+(** Keeper_skill_routing -- model-assisted skill routing for keepers.
+    Keepers always have access to all 'keeper' shard tools. The local
+    fallback is a deterministic default route only; message-dependent routing
+    belongs at the model boundary. *)
 
 type selection_mode =
-  | Heuristic
+  | Default_route
   | Model_selected of string
   | Model_rejected of string
 
@@ -15,104 +15,20 @@ type keeper_skill_route =
   ; selection_mode : selection_mode
   }
 
-let keeper_allowed_skills = [ "masc-heartbeat"; "masc-keeper-autonomy" ]
+let heartbeat_skill = "masc-heartbeat"
+let autonomy_skill = "masc-keeper-autonomy"
+let default_keeper_skill = autonomy_skill
+
+let keeper_allowed_skills = [ heartbeat_skill; autonomy_skill ]
 
 let is_valid_keeper_skill s = List.mem s keeper_allowed_skills
 
-let contains_ci = String_util.contains_substring_ci
-
-let skill_match_count_ci ~(text : string) ~(keywords : string list) : int =
-  let text_lc = String.lowercase_ascii text in
-  List.fold_left
-    (fun acc kw ->
-      let kw_lc = String.lowercase_ascii kw in
-      if contains_ci text_lc kw_lc then acc + 1 else acc)
-    0 keywords
-
-let keeper_skill_priority (skill : string) : int =
-  match skill with
-  | "masc-keeper-autonomy" -> 0
-  | "masc-heartbeat" -> 1
-  | _ -> 9
-
 let route_keeper_skill ~(message : string) : keeper_skill_route =
-  let heartbeat_keywords =
-    [ "heartbeat"
-    ; "alive"
-    ; "status"
-    ; "health"
-    ; "diagnose"
-    ; "liveness"
-    ; "하트비트"
-    ; "살아"
-    ; "상태"
-    ; "진단"
-    ; "헬스"
-    ]
-  in
-  let autonomy_keywords =
-    [ "keeper"
-    ; "handoff"
-    ; "compaction"
-    ; "context"
-    ; "generation"
-    ; "trace"
-    ; "memory"
-    ; "board"
-    ; "post"
-    ; "comment"
-    ; "feed"
-    ; "social"
-    ; "k2k"
-    ; "키퍼"
-    ; "승계"
-    ; "핸드오프"
-    ; "컴팩팅"
-    ; "컨텍스트"
-    ; "세대"
-    ; "메모리"
-    ; "보드"
-    ; "포스트"
-    ; "댓글"
-    ; "피드"
-    ; "활동"
-    ; "소셜"
-    ]
-  in
-  let heartbeat_score =
-    skill_match_count_ci ~text:message ~keywords:heartbeat_keywords
-  in
-  let autonomy_score =
-    skill_match_count_ci ~text:message ~keywords:autonomy_keywords
-  in
-  let heartbeat_bonus, autonomy_bonus = (0, 1) in
-  let scored =
-    [ ("masc-heartbeat", heartbeat_score + heartbeat_bonus)
-    ; ("masc-keeper-autonomy", autonomy_score + autonomy_bonus)
-    ]
-  in
-  let sorted =
-    List.sort
-      (fun (sa, score_a) (sb, score_b) ->
-        let c = compare score_b score_a in
-        if c <> 0 then c
-        else compare (keeper_skill_priority sa) (keeper_skill_priority sb))
-      scored
-  in
-  let primary_skill =
-    match sorted with
-    | (name, _) :: _ -> name
-    | [] -> "masc-keeper-autonomy"
-  in
-  let secondary_skill =
-    match sorted with
-    | _ :: (name, score) :: _ when score > 0 -> Some name
-    | _ -> None
-  in
-  { primary_skill
-  ; secondary_skill
-  ; reason = "Heuristic match based on message content"
-  ; selection_mode = Heuristic
+  ignore message;
+  { primary_skill = default_keeper_skill
+  ; secondary_skill = None
+  ; reason = "Default route pending model selection"
+  ; selection_mode = Default_route
   }
 
 let format_skill_route_line (route : keeper_skill_route) : string =
@@ -122,54 +38,116 @@ let format_skill_route_line (route : keeper_skill_route) : string =
 
 let format_skill_route_reason (route : keeper_skill_route) : string =
   match route.selection_mode with
-  | Heuristic -> Printf.sprintf "SKILL_REASON: %s" route.reason
+  | Default_route -> Printf.sprintf "SKILL_REASON: %s" route.reason
   | Model_selected r -> Printf.sprintf "SKILL_REASON: %s" r
-  | Model_rejected r -> Printf.sprintf "SKILL_REASON: %s (heuristic fallback)" r
+  | Model_rejected r -> Printf.sprintf "SKILL_REASON: %s (default route)" r
 
-(* RFC-0089 G5 — closed sum for skill route marker lines. The LLM
-   model_select response is the producer; markers are the wire-level
-   protocol tokens. A new marker variant added here forces every reader
-   to handle it (compiler-enforced via exhaustive match), replacing the
-   previous open string-prefix classifier. *)
-type skill_marker = Skill | Skill_reason
+(* RFC-0089 G5 — closed sums for skill route protocol lines. The LLM
+   model_select response is the producer; markers are the wire-level protocol
+   tokens. Callers consume [skill_line] instead of re-running marker prefix
+   checks in routing logic. *)
+type skill_marker =
+  | Skill_marker
+  | Skill_reason_marker
+
+type skill_selection =
+  { selected_primary : string
+  ; selected_secondary : string option
+  }
+
+type skill_line =
+  | Skill of skill_selection
+  | Skill_parse_error of string
+  | Skill_reason of string
+  | Other of string
 
 let skill_marker_to_wire = function
-  | Skill -> "SKILL:"
-  | Skill_reason -> "SKILL_REASON:"
+  | Skill_marker -> "SKILL:"
+  | Skill_reason_marker -> "SKILL_REASON:"
 
-let skill_marker_wire_length m = String.length (skill_marker_to_wire m)
+let skill_markers = [ Skill_marker; Skill_reason_marker ]
 
-(* Case-insensitive lookup. Returns the matching marker variant or None.
-   All [String.starts_with] usage for skill markers in this module is
-   encapsulated here so a new marker variant only requires extending the
-   [skill_marker] sum + this table. *)
-let skill_marker_table_ci : (string * skill_marker) list =
-  [ "skill:", Skill; "skill_reason:", Skill_reason ]
+let wire_payload ~prefix source =
+  let prefix_len = String.length prefix in
+  if String.length source < prefix_len then None
+  else if String.equal (String.sub source 0 prefix_len) prefix then
+    Some
+      (String.sub source prefix_len (String.length source - prefix_len)
+       |> String.trim)
+  else None
 
-let skill_marker_of_lowered_trimmed (s : string) : skill_marker option =
-  List.find_map
-    (fun (prefix, marker) ->
-      if String.starts_with ~prefix s then Some marker else None)
-    skill_marker_table_ci
-
-(* Case-sensitive scan over a raw line — used by [parse_skill_route_response]
-   where the model is asked to emit upper-case markers verbatim. Reuses the
-   typed marker domain. *)
-let skill_marker_prefix_of_line (line : string) : skill_marker option =
-  List.find_map
-    (fun (_, marker) ->
-      let wire = skill_marker_to_wire marker in
-      if String.starts_with ~prefix:wire line then Some marker else None)
-    skill_marker_table_ci
-
-(* Shared classifier: a "skill route" line is a non-blank line whose
-   trimmed lowercased prefix matches a known [skill_marker] variant. *)
-let is_skill_route_line (line : string) : bool =
-  let trimmed = String.trim line in
-  if trimmed = "" then false
+let marker_payload_of_line ~(case_sensitive : bool) (line : string) :
+    (skill_marker * string) option =
+  let source = if case_sensitive then line else String.trim line in
+  if String.equal source "" then None
   else
-    let lc = String.lowercase_ascii trimmed in
-    Option.is_some (skill_marker_of_lowered_trimmed lc)
+    let candidate =
+      if case_sensitive then source else String.lowercase_ascii source
+    in
+  List.find_map
+    (fun marker ->
+      let wire = skill_marker_to_wire marker in
+      let prefix =
+        if case_sensitive then wire else String.lowercase_ascii wire
+      in
+      match wire_payload ~prefix candidate with
+      | Some _ ->
+          let payload =
+            String.sub source (String.length wire)
+              (String.length source - String.length wire)
+            |> String.trim
+          in
+          Some (marker, payload)
+      | None -> None)
+    skill_markers
+
+let parse_skill_payload (raw : string) :
+    (skill_selection, string) result =
+  let raw = String.trim raw in
+  if String.equal raw "" then Error "Empty SKILL payload"
+  else
+    match String.split_on_char '(' raw with
+    | [ primary ] ->
+        let selected_primary = String.trim primary in
+        if String.equal selected_primary "" then Error "Empty primary skill"
+        else Ok { selected_primary; selected_secondary = None }
+    | [ primary; secondary_segment ] ->
+        let selected_primary = String.trim primary in
+        let secondary_segment = String.trim secondary_segment in
+        let secondary_len = String.length secondary_segment in
+        if String.equal selected_primary "" then Error "Empty primary skill"
+        else if secondary_len < 3
+                || not (Char.equal (String.get secondary_segment 0) '+')
+                || not
+                     (Char.equal
+                        (String.get secondary_segment (secondary_len - 1))
+                        ')')
+        then Error "Invalid secondary skill syntax"
+        else
+          let selected_secondary =
+            String.sub secondary_segment 1 (secondary_len - 2)
+            |> String.trim
+          in
+          if String.equal selected_secondary ""
+          then Error "Empty secondary skill"
+          else Ok { selected_primary; selected_secondary = Some selected_secondary }
+    | _ -> Error "Invalid SKILL payload syntax"
+
+let parse_skill_line ~(case_sensitive : bool) (line : string) : skill_line =
+  match marker_payload_of_line ~case_sensitive line with
+  | None -> Other line
+  | Some (Skill_reason_marker, payload) -> Skill_reason payload
+  | Some (Skill_marker, payload) -> (
+      match parse_skill_payload payload with
+      | Ok selection -> Skill selection
+      | Error error -> Skill_parse_error error)
+
+let is_skill_route_line (line : string) : bool =
+  match parse_skill_line ~case_sensitive:false line with
+  | Skill _
+  | Skill_parse_error _
+  | Skill_reason _ -> true
+  | Other _ -> false
 
 let strip_skill_route_lines (raw : string) : string =
   let lines = String.split_on_char '\n' raw in
@@ -186,57 +164,53 @@ let count_skill_route_lines (raw : string) : int =
 let parse_skill_route_response (text : string)
     ~(fallback_route : keeper_skill_route) : keeper_skill_route =
   let lines = String.split_on_char '\n' text in
-  let find_marker_line marker =
-    List.find_opt
-      (fun line ->
-        match skill_marker_prefix_of_line line with
-        | Some m when m = marker -> true
-        | _ -> false)
-      lines
+  let parsed_lines = List.map (parse_skill_line ~case_sensitive:true) lines in
+  let skill_line =
+    List.find_map
+      (function
+        | Skill selection -> Some (Ok selection)
+        | Skill_parse_error error -> Some (Error error)
+        | Skill_reason _
+        | Other _ -> None)
+      parsed_lines
   in
-  let skill_line = find_marker_line Skill in
-  let reason_line = find_marker_line Skill_reason in
-  let strip_marker_prefix marker line =
-    let n = skill_marker_wire_length marker in
-    String.sub line n (String.length line - n) |> String.trim
+  let reason =
+    List.find_map
+      (function
+        | Skill_reason reason -> Some reason
+        | Skill _
+        | Skill_parse_error _
+        | Other _ -> None)
+      parsed_lines
   in
   match skill_line with
-  | Some line ->
-      let raw = strip_marker_prefix Skill line in
-      let primary, secondary =
-        if contains_ci raw "(+" then
-          match String.split_on_char '(' raw with
-          | p :: s :: _ ->
-              let p = String.trim p in
-              let s =
-                String.sub s 1 (String.length s - 2)
-                |> String.trim
-                |> String.map (fun c -> if c = ')' then ' ' else c)
-                |> String.trim
-              in
-              (p, Some s)
-          | _ -> (raw, None)
-        else (raw, None)
-      in
-      if is_valid_keeper_skill primary then
-        let reason =
-          match reason_line with
-          | Some rl -> strip_marker_prefix Skill_reason rl
-          | None -> "No reason provided by model"
-        in
+  | Some (Ok { selected_primary = primary; selected_secondary = secondary }) ->
+      if not (is_valid_keeper_skill primary) then
+        { fallback_route with
+          selection_mode =
+            Model_rejected (Printf.sprintf "Invalid skill: %s" primary)
+        }
+      else if Option.exists (fun s -> not (is_valid_keeper_skill s)) secondary then
+        { fallback_route with
+          selection_mode =
+            Model_rejected
+              (Printf.sprintf
+                 "Invalid secondary skill: %s"
+                 (Option.value ~default:"" secondary))
+        }
+      else
+        let reason = Option.value ~default:"No reason provided by model" reason in
         { primary_skill = primary
         ; secondary_skill = secondary
         ; reason
         ; selection_mode = Model_selected reason
         }
-      else
-        { fallback_route with
-          selection_mode =
-            Model_rejected (Printf.sprintf "Invalid skill: %s" primary)
-        }
-  | None ->
-      { fallback_route with selection_mode = Model_rejected "No SKILL line found"
+  | Some (Error error) ->
+      { fallback_route with
+        selection_mode = Model_rejected (Printf.sprintf "Invalid SKILL line: %s" error)
       }
+  | None ->
+      { fallback_route with selection_mode = Model_rejected "No SKILL line found" }
 
 let keeper_skill_routing_instructions ~(fallback_route : keeper_skill_route)
     : string =
@@ -256,7 +230,7 @@ let keeper_skill_routing_instructions ~(fallback_route : keeper_skill_route)
 let skill_route_context_text ~(fallback_route : keeper_skill_route) : string =
   let instructions = keeper_skill_routing_instructions ~fallback_route in
   let current =
-    Printf.sprintf "Current heuristic route:\n%s\n%s"
+    Printf.sprintf "Default route:\n%s\n%s"
       (format_skill_route_line fallback_route)
       (format_skill_route_reason fallback_route)
   in

@@ -140,14 +140,16 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
           fabricating a status. */ ''}
       ${(() => {
         const pending = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
+        const pendingKnown = pending != null
+        const pendingCount = pending ?? 0
         return html`
           <button
-            class=${`v2-statchip${pending > 0 ? ' warn' : ''}`}
-            data-schedule-pending=${pending}
+            class=${`v2-statchip${pendingKnown && pendingCount > 0 ? ' warn' : ''}`}
+            data-schedule-pending=${pendingKnown ? pendingCount : 'unknown'}
             onClick=${() => navigate('schedule')}
-            title=${pending > 0 ? `예약 자동화 큐 · 승인 대기 ${pending}건` : '예약 자동화 큐'}
+            title=${pendingKnown && pendingCount > 0 ? `예약 자동화 큐 · 승인 대기 ${pendingCount}건` : '예약 자동화 큐'}
           >
-            ${'◷'} 예약${pending > 0 ? html` <b>${pending}</b>` : null}
+            ${'◷'} 예약${pendingKnown && pendingCount > 0 ? html` <b>${pendingCount}</b>` : null}
           </button>
         `
       })()}

@@ -115,3 +115,13 @@ val handle_keeper_bulk_directive_post :
   Httpun.Reqd.t ->
   string ->
   unit
+
+module For_testing : sig
+  val bulk_directive_meta_read_error_result_json :
+    name:string ->
+    ok:bool ->
+    ?error:string ->
+    meta_read_error:string ->
+    unit ->
+    Yojson.Safe.t
+end

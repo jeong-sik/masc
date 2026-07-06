@@ -6,6 +6,28 @@ module KTP = Masc.Keeper_tool_progress
 module KUS = Masc.Keeper_unified_metrics_support
 module Outcome = Keeper_tool_outcome
 
+let read_source path =
+  let path =
+    if Filename.is_relative path then
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> Filename.concat root path
+      | None -> path
+    else path
+  in
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop index =
+    index + needle_len <= haystack_len
+    && (String.equal (String.sub haystack index needle_len) needle || loop (index + 1))
+  in
+  String.equal needle "" || loop 0
+
 (* RFC-0232: a budget-exhausted (Continuation_checkpoint) turn substitutes a
    synthetic continuation notice for the reply text. That text is display-only;
    the work preview must gate visible model text on [is_visible_reply] so the
@@ -123,6 +145,22 @@ let test_claim_contract_result_counts_initial_claim_as_execution () =
     "claim_only_after_owned_task"
     (result ~had_owned_active_task_at_turn_start:true [ "keeper_task_claim" ]);
   ()
+;;
+
+let test_turn_start_owned_task_read_error_fails_closed () =
+  let src = read_source "lib/keeper/keeper_agent_run.ml" in
+  check bool "turn start ownership uses Result reader" true
+    (contains_substring
+       src
+       "owned_active_task_id_result_for_meta ~config ~meta:acc.meta");
+  check bool "read error is projected as owned claim context" true
+    (contains_substring
+       src
+       "treating claim-context progress as owned");
+  check bool "read-error branch returns true" true
+    (contains_substring
+       src
+       "owned active task check failed at turn start")
 ;;
 
 let test_execution_tools_satisfy_contract_progress () =
@@ -296,6 +334,10 @@ let () =
             "initial claim counts as contract progress"
             `Quick
             test_claim_contract_result_counts_initial_claim_as_execution
+        ; test_case
+            "turn start owned-task read error fails closed"
+            `Quick
+            test_turn_start_owned_task_read_error_fails_closed
         ; test_case
             "execution tools satisfy contract progress"
             `Quick

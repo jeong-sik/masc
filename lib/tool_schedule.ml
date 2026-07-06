@@ -41,9 +41,13 @@ let resolve_due_at ~requested_at recurrence args =
   match due_at with
   | Some due_at -> Ok due_at
   | None ->
-    (match Schedule_domain.first_due_after ~now:requested_at recurrence with
-     | Some due_at -> Ok due_at
-     | None ->
+    (match Schedule_domain.first_due_after_result ~now:requested_at recurrence with
+     | Error err ->
+       Error
+         ("recurrence due_at calculation failed: "
+          ^ Schedule_domain.due_calculation_error_to_string err)
+     | Ok (Some due_at) -> Ok due_at
+     | Ok None ->
        Error
          "one of due_at_unix or due_at_iso is required unless recurrence_kind is daily or cron")
 ;;
@@ -173,7 +177,7 @@ let board_post_payload_from_args args =
   let* content = required_string args "board_content" in
   let schema_version =
     (* DET-OK: board_* is a stable convenience projection for the existing
-       masc.board_post v1 consumer. *)
+       board-post v1 consumer. *)
     optional_int args "payload_schema_version" |> Option.value ~default:1
   in
   if schema_version <> 1
@@ -192,7 +196,7 @@ let board_post_payload_from_args args =
     let* fields = optional_body_object args ~arg:"board_meta" ~field:"meta" fields in
     Ok
       (`Assoc
-        [ "kind", `String "masc.board_post"
+        [ "kind", `String Schedule_supported_kinds.board_post
         ; "schema_version", `Int schema_version
         ; "body", `Assoc (List.rev fields)
         ])
@@ -230,66 +234,68 @@ let payload_from_args args =
       then Error "use either payload_body or board_* convenience fields, not both"
       else
         (match string_opt args "payload_kind" with
-         | None | Some "masc.board_post" -> board_post_payload_from_args args
+         | None -> board_post_payload_from_args args
+         | Some kind when String.equal kind Schedule_supported_kinds.board_post ->
+           board_post_payload_from_args args
          | Some kind ->
            Error
-             ("board_* convenience fields require payload_kind omitted or masc.board_post, got "
+             ("board_* convenience fields require payload_kind omitted or "
+              ^ Schedule_supported_kinds.board_post
+              ^ ", got "
               ^ kind))
     else generic_payload_from_args args
 ;;
 
-let assoc_string_opt key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> trim_nonempty value
-  | _ -> None
+let schedule_payload_unsupported_labels ~phase ~risk_class =
+  [ "phase", phase
+  ; "risk_class", Schedule_domain.risk_class_to_string risk_class
+  ]
+;;
+
+let record_unsupported_payload_creation ~risk_class rejection =
+  match rejection with
+  | Schedule_payload_projection.Creation_unsupported_side_effecting_kind _ ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_schedule_payload_unsupported_total
+      ~labels:(schedule_payload_unsupported_labels ~phase:"creation" ~risk_class)
+      ()
+  | Schedule_payload_projection.Creation_invalid_payload _
+  | Schedule_payload_projection.Creation_invalid_supported_payload _ -> ()
 ;;
 
 let validate_known_payload_request ~payload ~risk_class =
-  match payload with
-  | `Assoc fields ->
-    (match assoc_string_opt "kind" fields with
-     | Some "masc.board_post" ->
-       let* () =
-         match List.assoc_opt "schema_version" fields with
-         | Some (`Int 1) -> Ok ()
-         | Some (`Int _) -> Error "masc.board_post only supports payload_schema_version=1"
-         | Some _ -> Error "masc.board_post payload.schema_version must be an integer"
-         | None -> Error "masc.board_post payload requires schema_version=1"
-       in
-       if not (Schedule_domain.is_side_effecting risk_class)
-       then Error "masc.board_post requires a side-effecting risk_class such as workspace_write"
-       else (
-         match List.assoc_opt "body" fields with
-         | Some (`Assoc body) ->
-           (match assoc_string_opt "content" body with
-            | Some _ -> Ok ()
-            | None ->
-              Error
-                "masc.board_post payload requires non-empty body.content; use board_content for board schedules")
-         | Some _ -> Error "masc.board_post payload.body must be an object"
-         | None ->
-           Error
-             "masc.board_post payload requires object body with non-empty content; use board_content for board schedules")
-     | Some kind when Schedule_domain.is_side_effecting risk_class ->
-       (* Only side-effecting work needs a consumer adapter that can dispatch
-          it. Reject kinds the consumer cannot run so the queue is not filled
-          with work that dies at dispatch. Read-only/reminder kinds carry no
-          side effect, so their kind stays opaque to the schedule domain — a
-          consumer that does not recognize one records a visible failed
-          execution (fail_due_candidate), not a silent accept-then-die. *)
-       Error (Schedule_supported_kinds.unsupported_error kind)
-     | Some _ -> Ok ()
-     | None -> Error "payload.kind is required")
-  | _ -> Error "payload must be a JSON object"
+  match
+    Schedule_payload_projection.validate_request_payload_for_creation_detailed
+      ~payload
+      ~risk_class
+  with
+  | Ok () -> Ok ()
+  | Error rejection ->
+    record_unsupported_payload_creation ~risk_class rejection;
+    Error (Schedule_payload_projection.creation_rejection_message rejection)
 ;;
 
-let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
+let schedule_request_json
+      ?last_execution
+      ?lifecycle_audit
+      (request : Schedule_domain.schedule_request)
+  =
   let next_due_at =
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
   let requires_grant = Schedule_domain.requires_separate_human_grant request in
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request
+  in
+  let lifecycle_audit_fields =
+    match lifecycle_audit with
+    | None -> []
+    | Some audit ->
+      [ ( "lifecycle_audit"
+        , Schedule_audit_log.projection_to_yojson
+            ~limit:Schedule_audit_log.default_projection_limit
+            audit )
+      ]
   in
   match Schedule_domain.schedule_request_to_yojson request with
   | `Assoc fields ->
@@ -323,6 +329,15 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
            , match Schedule_payload_projection.kind request with
              | None -> `Null
              | Some kind -> `String kind )
+         ; ( "payload_support"
+           , `String
+               (request
+                |> Schedule_payload_projection.support_status
+                |> Schedule_payload_projection.support_status_to_string) )
+         ; ( "payload_dispatch_tool"
+           , match Schedule_payload_projection.dispatch_tool_for_request request with
+             | None -> `Null
+             | Some tool_name -> `String tool_name )
          ; ( "payload_target"
            , match payload_target with
              | None -> `Null
@@ -336,7 +351,8 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
              | None -> `Null
              | Some execution -> Schedule_domain.execution_record_to_yojson execution
            )
-         ])
+         ]
+       @ lifecycle_audit_fields)
   | other -> other
 ;;
 
@@ -360,6 +376,13 @@ let runtime_error ~tool_name ~start_time message =
     ~start_time
     ~data:(Tool_args.error_assoc [ "message", `String message ])
     message
+;;
+
+let schedule_read_runtime_error ~tool_name ~start_time err =
+  runtime_error
+    ~tool_name
+    ~start_time
+    ("schedule store read failed: " ^ Schedule_store.read_error_to_string err)
 ;;
 
 let request_result ~tool_name ~start_time = function
@@ -428,44 +451,75 @@ let handle_list ~tool_name ~start_time ctx args =
       optional_int args "limit" |> Option.value ~default:50
     in
     let limit = min 200 (max 1 raw_limit) in
-    let state = Schedule_store.read_state ctx.config in
-    let schedules =
-      (match status with
-       | None -> state.Schedule_store.schedules
-       | Some expected ->
-         List.filter
-           (fun (request : Schedule_domain.schedule_request) ->
-             request.status = expected)
-           state.schedules)
-      |> take limit
-      |> List.map (fun (request : Schedule_domain.schedule_request) ->
-        let last_execution =
-          Schedule_store.last_execution_for_schedule state
-            ~schedule_id:request.Schedule_domain.schedule_id
-        in
-        schedule_request_json ?last_execution request)
-    in
-    ok ~tool_name ~start_time
-      (`Assoc
-        [ "status", `String "ok"
-        ; "limit", `Int limit
-        ; "schedules", `List schedules
-        ])
+    (match Schedule_store.read_state_result ctx.config with
+     | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
+     | Ok state ->
+       let audit_source = Schedule_audit_log.read_all ctx.config in
+       let request_rows =
+         (match status with
+          | None -> state.Schedule_store.schedules
+          | Some expected ->
+            List.filter
+              (fun (request : Schedule_domain.schedule_request) ->
+                 request.status = expected)
+              state.schedules)
+         |> take limit
+       in
+       let schedules =
+         request_rows
+         |> List.map (fun (request : Schedule_domain.schedule_request) ->
+           let last_execution =
+             Schedule_store.last_execution_for_schedule
+               state
+               ~schedule_id:request.Schedule_domain.schedule_id
+           in
+           let lifecycle_audit =
+             Schedule_audit_log.projection_for_schedule
+               audit_source
+               ~schedule_id:request.Schedule_domain.schedule_id
+               ~limit:Schedule_audit_log.default_projection_limit
+           in
+           schedule_request_json ?last_execution ~lifecycle_audit request)
+       in
+       ok ~tool_name ~start_time
+         (`Assoc
+           [ "status", `String "ok"
+           ; "limit", `Int limit
+           ; "payload_support"
+             , Schedule_payload_projection.support_summary_to_yojson request_rows
+           ; "schedules", `List schedules
+           ]))
 ;;
 
 let handle_get ~tool_name ~start_time ctx args =
   match required_string args "schedule_id" with
   | Error msg -> workflow_error ~tool_name ~start_time msg
   | Ok schedule_id ->
-    let state = Schedule_store.read_state ctx.config in
-    (match Schedule_service.get ctx.config ~schedule_id with
+    (match Schedule_store.read_state_result ctx.config with
+     | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
+     | Ok state ->
+       match
+         List.find_opt
+           (fun (request : Schedule_domain.schedule_request) ->
+              String.equal request.schedule_id schedule_id)
+           state.schedules
+       with
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
      | Some request ->
        let last_execution =
          Schedule_store.last_execution_for_schedule state
            ~schedule_id:request.Schedule_domain.schedule_id
        in
-       ok ~tool_name ~start_time (schedule_request_json ?last_execution request))
+       let lifecycle_audit =
+         Schedule_audit_log.read_recent_for_schedule
+           ctx.config
+           ~schedule_id:request.Schedule_domain.schedule_id
+           ~limit:Schedule_audit_log.default_projection_limit
+       in
+       ok
+         ~tool_name
+         ~start_time
+         (schedule_request_json ?last_execution ~lifecycle_audit request))
 ;;
 
 let handle_cancel ~tool_name ~start_time ctx args =
@@ -476,8 +530,11 @@ let handle_cancel ~tool_name ~start_time ctx args =
       actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator
     in
     let* reason = required_string args "reason" in
+    let cancelled_by : Schedule_domain.actor =
+      { id = cancelled_by_id; kind = cancelled_by_kind; display_name = None }
+    in
     let* request =
-      Schedule_service.cancel ctx.config ~schedule_id
+      Schedule_service.cancel ctx.config ~schedule_id ~cancelled_by ~reason
       |> Result.map_error Schedule_service.service_error_to_string
     in
     Ok (request, cancelled_by_id, cancelled_by_kind, reason)

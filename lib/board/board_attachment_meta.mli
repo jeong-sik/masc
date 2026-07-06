@@ -30,6 +30,14 @@ type error =
 
 val error_to_string : error -> string
 
+type attachment_meta_read_error =
+  | Meta_not_object of { received : string }
+  | Attachments_not_list of { received : string }
+  | Attachment_decode_error of { index : int; error : error }
+
+val attachment_meta_read_error_to_string :
+  attachment_meta_read_error -> string
+
 (** {1 Attachment kind — closed sum} *)
 
 type kind =
@@ -85,6 +93,19 @@ val of_yojson : Yojson.Safe.t -> (t, error) result
 val meta_json_key : string
 (** ["attachments"] — single-source-of-truth for the JSON key. *)
 
+type attachments_of_post_meta_result = {
+  attachments : t list;
+  errors : attachment_meta_read_error list;
+}
+
+val attachments_of_post_meta_result :
+  Yojson.Safe.t option ->
+  attachments_of_post_meta_result
+(** [attachments_of_post_meta_result meta] returns both successfully
+    decoded attachments and typed read errors for malformed [meta_json]
+    or malformed attachment items. [None] and a missing [meta_json_key]
+    are absence, not errors. *)
+
 val attach_to_post_meta :
   existing:Yojson.Safe.t option ->
   t list ->
@@ -101,8 +122,6 @@ val attach_to_post_meta :
 
 val attachments_of_post_meta : Yojson.Safe.t option -> t list
 (** [attachments_of_post_meta meta] returns the attachments encoded under
-    [meta_json_key].  Total: any shape that does not match returns the
-    empty list, including [None], non-[`Assoc], missing key, or invalid
-    items.  Invalid items are silently dropped — readers that need
-    strict validation should iterate the array themselves with
-    [of_yojson]. *)
+    [meta_json_key]. This is the legacy compatibility projection of
+    [attachments_of_post_meta_result]; readers that need failure
+    visibility must consume the typed [errors] field from the result API. *)

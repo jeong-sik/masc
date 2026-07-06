@@ -165,19 +165,20 @@ val append_comment : comment -> (unit, board_error) result
     [store.posts].  The implementation snapshots under [store.mutex]
     and performs disk I/O under the persist lock after releasing the
     state lock; callers must not invoke it while already holding
-    [store.mutex]. *)
-val rewrite_posts : store -> unit
+    [store.mutex]. Persistence failure is returned as [Io_error]. *)
+val rewrite_posts : store -> (unit, board_error) result
 
 (** Atomically rewrites {!comments_path} from
     [store.comments].  Same usage pattern as
     {!rewrite_posts}. *)
-val rewrite_comments : store -> unit
+val rewrite_comments : store -> (unit, board_error) result
 
-(** Atomically rewrites {!reactions_path} from [store.reactions]. *)
-val rewrite_reactions : store -> unit
+(** Atomically rewrites {!reactions_path} from [store.reactions].
+    Persistence failure is returned as [Io_error]. *)
+val rewrite_reactions : store -> (unit, board_error) result
 
 (** Rewrites reactions assuming the caller already owns [store.mutex]. *)
-val rewrite_reactions_unlocked : store -> unit
+val rewrite_reactions_unlocked : store -> (unit, board_error) result
 
 (** Marks one post for append-only deferred persistence.  Call with
     [store.mutex] already held. *)
@@ -324,14 +325,12 @@ val get_post_and_comments
   -> unit
   -> (post * comment list, board_error) Result.t
 
-(** Re-runs {!legacy_migrate_post_kind} against persisted
-    posts to detect classification drift.  [limit]
-    (default 5200) is clamped to [0..5200].  [dry_run]
-    (default [true]) reports drift without mutating the
-    store; setting it to [false] applies the new kind +
-    rewrites the JSONL.  The returned
-    {!reclassify_report.changed_post_ids} list caps at 20
-    entries for log-friendly summarisation. *)
+(** Retired post-kind reclassification scan.  [limit] (default 5200)
+    is clamped to [0..5200].  The function no longer infers missing
+    [post_kind] values from author/source/hearth strings.  Rows that
+    lack a valid explicit [post_kind] are reported through
+    {!reclassify_report.invalid_post_ids}; [dry_run = false] is kept
+    for API compatibility but does not mutate persisted rows. *)
 val reclassify_posts : store -> ?limit:int -> ?dry_run:bool -> unit -> reclassify_report
 
 (** Returns posts sorted by [(score desc, created_at desc)]
@@ -383,8 +382,8 @@ val add_comment
   -> unit
   -> (comment, board_error) Result.t
 
-(** Returns the comments for [post_id] sorted by
-    [created_at] ascending. *)
+(** Returns the comments for [post_id] sorted by [created_at] ascending.
+    Returns [Post_not_found] when [post_id] is valid but has no post row. *)
 val get_comments : store -> post_id:string -> (comment list, board_error) Result.t
 
 (** Returns up to [limit] (default 1000) most recent
@@ -429,17 +428,44 @@ val sub_boards_path : unit -> string
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
+
+type sub_board_member_parse_error =
+  Board_sub_board_json.sub_board_member_parse_error =
+  { member_name : string
+  ; error : board_error
+  }
+
+type sub_board_members_parse_report =
+  Board_sub_board_json.sub_board_members_parse_report =
+  { members : Agent_id.t list
+  ; errors : sub_board_member_parse_error list
+  }
+
+type sub_board_json_report =
+  Board_sub_board_json.sub_board_json_report =
+  { sub_board : sub_board option
+  ; member_errors : sub_board_member_parse_error list
+  }
+
+val parse_sub_board_members_lenient_report :
+  owner:Agent_id.t -> string list -> sub_board_members_parse_report
+
+val sub_board_of_yojson_report : Yojson.Safe.t -> sub_board_json_report
+
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
 (** Snapshots [store.sub_boards] under the state lock, then atomically
-    rewrites {!sub_boards_path} under the persist lock. *)
-val rewrite_sub_boards : store -> unit
+    rewrites {!sub_boards_path} under the persist lock.  Persistence
+    failure is returned as [Io_error]; callers must not report the
+    mutation as successful before this succeeds. *)
+val rewrite_sub_boards : store -> (unit, board_error) Result.t
 
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
     Returns [Validation_error] when the slug is invalid or already taken,
     [Capacity_exceeded] when the sub-board limit is reached. JSONL append
-    persistence is performed outside the state lock. *)
+    persistence is performed outside the state lock; append failure rolls
+    back the in-memory insert and returns [Io_error]. *)
 val create_sub_board
   :  store
   -> slug:string
@@ -458,12 +484,14 @@ val get_sub_board : store -> sub_board_id:string -> (sub_board, board_error) Res
 val list_sub_boards : store -> sub_board list
 
 (** Removes a sub-board by ID or slug under the state lock, then persists the
-    rewritten snapshot outside the state lock. *)
+    rewritten snapshot outside the state lock. Persistence failure rolls back
+    the sub-board row and orphaned post hearth changes. *)
 val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.
-    Persists the rewritten snapshot outside the state lock. *)
+    Persists the rewritten snapshot outside the state lock; persistence
+    failure rolls back the in-memory update. *)
 val update_sub_board
   :  store
   -> sub_board_id:string

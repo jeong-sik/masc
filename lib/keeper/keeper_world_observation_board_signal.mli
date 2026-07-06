@@ -3,10 +3,14 @@
 type match_result =
   { explicit_mention : bool
   ; matched_targets : string list
-  ; score : int
   }
 
-type comment_status = [ `Never | `No_new_external | `New_external of int * string * string ]
+type comment_status =
+  [ `Never
+  | `No_new_external
+  | `New_external of int * string * string
+  | `Comment_read_error of string
+  ]
 
 val board_signal_of_board_stimulus
   :  post_id:string
@@ -34,11 +38,13 @@ val check_self_comment_status
 
 type wake_reason =
   | Explicit_mention
-  | Stigmergy of { score : int }
   | Thread_reply_after_self_comment
+  | Board_comment_read_error of string
 (** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
     Replaces the prior [string option] contract; consumers match exhaustively
-    so the previously dead ["board_activity"] generic bucket is gone. *)
+    so the previously dead ["board_activity"] generic bucket is gone. Related
+    board activity is deliberately absent until it is produced by an explicit
+    LLM/Fusion judgment boundary, not local keyword scoring. *)
 
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)

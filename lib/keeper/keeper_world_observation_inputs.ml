@@ -44,64 +44,86 @@ let task_has_actionable_verification actionable_request_ids
   | Masc_domain.Cancelled _ -> false
 ;;
 
+type backlog_counts = int * int * int * int * bool
+
+let zero_backlog_counts : backlog_counts = 0, 0, 0, 0, false
+
+let record_backlog_counts_failure msg =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ObservationQueryFailures)
+    ~labels:
+      [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
+    ();
+  Log.Keeper.warn "read_backlog_counts failed: %s" msg
+;;
+
 (** Read workspace backlog counts. *)
-let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
-  : int * int * int * int * bool
+let read_backlog_counts_result ~(config : Workspace.config) ~(meta : keeper_meta)
+  : (backlog_counts, string) result
   =
   try
-    let backlog = Workspace.read_backlog config in
-    let unclaimed_tasks =
-      List.filter
-        (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
-        backlog.tasks
-    in
-    let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter = claim_goal_scope_filter ~config ~meta () in
-    let claimable =
-      List.length
-        (List.filter
-           (fun task ->
-              Workspace_task_schedule.task_is_claim_pool_candidate task
-              && claim_scope_filter task)
-           unclaimed_tasks)
-    in
-    let failed =
-      (* "Failed" here means still-auditable active work. Terminal Cancelled
-         tasks are historical evidence, not a reason to wake every keeper.
-         Keep the current keeper's own task out of the count: keepers may
-         claim without a materialized [.masc/agents/] record, so the audit can
-         still see the self-assigned task as an orphan. *)
-      Workspace.audit_orphan_tasks config
-      |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
-      |> List.map fst
-      |> List.filter claim_scope_filter
-      |> List.length
-    in
-    let pending_verification =
-      let actionable_request_ids = actionable_verification_request_ids ~config in
-      List.length
-        (List.filter
-           (task_has_actionable_verification actionable_request_ids)
-           backlog.tasks)
-    in
-    let backlog_updated_since_last_scheduled_autonomous =
-      backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
-    in
-    ( unclaimed
-    , claimable
-    , failed
-    , pending_verification
-    , backlog_updated_since_last_scheduled_autonomous )
+    match Workspace.read_backlog_r config with
+    | Error msg -> Error (Printf.sprintf "backlog read failed: %s" msg)
+    | Ok backlog ->
+      let unclaimed_tasks =
+        List.filter
+          (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
+          backlog.tasks
+      in
+      let unclaimed = List.length unclaimed_tasks in
+      let claim_scope_filter = claim_goal_scope_filter ~config ~meta () in
+      let claimable =
+        List.length
+          (List.filter
+             (fun task ->
+                Workspace_task_schedule.task_is_claim_pool_candidate task
+                && claim_scope_filter task)
+             unclaimed_tasks)
+      in
+      (match Workspace.audit_orphan_tasks_result config with
+       | Error msg -> Error (Printf.sprintf "orphan audit failed: %s" msg)
+       | Ok orphan_tasks ->
+         let failed =
+           (* "Failed" here means still-auditable active work. Terminal
+              Cancelled tasks are historical evidence, not a reason to wake every
+              keeper. Keep the current keeper's own task out of the count:
+              keepers may claim without a materialized [.masc/agents/] record,
+              so the audit can still see the self-assigned task as an orphan. *)
+           orphan_tasks
+           |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
+           |> List.map fst
+           |> List.filter claim_scope_filter
+           |> List.length
+         in
+         let pending_verification =
+           let actionable_request_ids = actionable_verification_request_ids ~config in
+           List.length
+             (List.filter
+                (task_has_actionable_verification actionable_request_ids)
+                backlog.tasks)
+         in
+         let backlog_updated_since_last_scheduled_autonomous =
+           backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
+         in
+         Ok
+           ( unclaimed
+           , claimable
+           , failed
+           , pending_verification
+           , backlog_updated_since_last_scheduled_autonomous ))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | ex ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ObservationQueryFailures)
-      ~labels:
-        [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
-      ();
-    Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
-    0, 0, 0, 0, false
+  | ex -> Error (Printexc.to_string ex)
+;;
+
+let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
+  : backlog_counts
+  =
+  match read_backlog_counts_result ~config ~meta with
+  | Ok counts -> counts
+  | Error msg ->
+    record_backlog_counts_failure msg;
+    zero_backlog_counts
 ;;
 
 (** Count live keeper fibers for keeper world state.

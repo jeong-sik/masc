@@ -128,6 +128,25 @@ type lifetime_guard = { acquire : unit -> (unit -> unit) }
     stdout/stderr read FDs may remain open until the next {!read} drains
     and closes the final snapshot. *)
 
+type completion = {
+  base_path : string option;
+  keeper : string;
+  task_id : task_id;
+  status : Unix.process_status;
+  finished_at : float;
+}
+(** Process completion event emitted exactly once per tracked task. The process
+    layer remains semantics-agnostic: callers decide how to interpret [status]
+    and whether to wake any keeper lane. *)
+
+val set_completion_observer : (completion -> unit) -> unit
+(** Install a process-local observer for detached task completion. The observer
+    is invoked outside the task-registry mutex. Non-cancel exceptions raised by
+    the observer are logged and swallowed so task cleanup cannot be blocked. *)
+
+val reset_completion_observer_for_testing : unit -> unit
+(** Restore the default no-op completion observer. Intended for focused tests. *)
+
 val set_lifetime_guard : lifetime_guard -> unit
 (** Install a process-wide lifetime guard. The default guard is a no-op. *)
 

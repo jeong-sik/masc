@@ -22,6 +22,7 @@ type post_body_decision = {
 }
 
 type post_body_rejection =
+  | Parse_error of string
   | Session_required of string
   | Unknown_session of string
   | Invalid_accept of string

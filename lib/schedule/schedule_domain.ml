@@ -60,6 +60,21 @@ type recurrence =
       ; timezone : string
       }
 
+type due_calculation_error =
+  | Due_invalid_interval of int
+  | Due_invalid_daily_time of
+      { hour : int
+      ; minute : int
+      ; second : int
+      }
+  | Due_invalid_daily_timezone of string
+  | Due_invalid_cron_timezone of string
+  | Due_invalid_cron_expression of string
+  | Due_cron_search_exhausted of
+      { expression : string
+      ; timezone : string
+      }
+
 type payload =
   { kind : string
   ; schema_version : int
@@ -659,29 +674,65 @@ let evidence_of_request (request : schedule_request) =
   }
 ;;
 
-let seconds_per_day = 86400.0
-
-let next_periodic_due_after ~period ~now ~anchor =
-  if period <= 0.0 then
-    None
-  else if anchor > now then
-    Some anchor
-  else
-    let missed = floor ((now -. anchor) /. period) +. 1.0 in
-    Some (anchor +. (missed *. period))
+let due_calculation_error_to_string = function
+  | Due_invalid_interval interval_sec ->
+    Printf.sprintf "recurrence.interval_sec must be positive: %d" interval_sec
+  | Due_invalid_daily_time { hour; minute; second } ->
+    Printf.sprintf
+      "recurrence daily time must be within 00:00:00..23:59:59: %02d:%02d:%02d"
+      hour
+      minute
+      second
+  | Due_invalid_daily_timezone timezone ->
+    Printf.sprintf "unsupported daily recurrence timezone: %s" timezone
+  | Due_invalid_cron_timezone timezone ->
+    Printf.sprintf "unsupported cron recurrence timezone: %s" timezone
+  | Due_invalid_cron_expression msg -> msg
+  | Due_cron_search_exhausted { expression; timezone } ->
+    Printf.sprintf
+      "no cron recurrence match found within search horizon: expression=%s timezone=%s"
+      expression
+      timezone
 ;;
 
-let next_daily_due_after ~hour ~minute ~second ~timezone ~now =
-  match timezone_offset_seconds timezone with
-  | None -> None
-  | Some offset ->
-    let local_now = now +. float_of_int offset in
-    let day_start = floor (local_now /. seconds_per_day) *. seconds_per_day in
-    let target_second =
-      float_of_int ((hour * 3600) + (minute * 60) + second)
-    in
-    let target_utc = day_start +. target_second -. float_of_int offset in
-    if target_utc > now then Some target_utc else Some (target_utc +. seconds_per_day)
+let seconds_per_day = 86400.0
+
+let next_interval_due_after_result ~interval_sec ~now ~anchor =
+  if interval_sec <= 0 then
+    Error (Due_invalid_interval interval_sec)
+  else if anchor > now then
+    Ok (Some anchor)
+  else (
+    let period = float_of_int interval_sec in
+    let missed = floor ((now -. anchor) /. period) +. 1.0 in
+    Ok (Some (anchor +. (missed *. period))))
+;;
+
+let daily_time_is_valid ~hour ~minute ~second =
+  hour >= 0
+  && hour <= 23
+  && minute >= 0
+  && minute <= 59
+  && second >= 0
+  && second <= 59
+;;
+
+let next_daily_due_after_result ~hour ~minute ~second ~timezone ~now =
+  if not (daily_time_is_valid ~hour ~minute ~second) then
+    Error (Due_invalid_daily_time { hour; minute; second })
+  else (
+    match timezone_offset_seconds timezone with
+    | None -> Error (Due_invalid_daily_timezone timezone)
+    | Some offset ->
+      let local_now = now +. float_of_int offset in
+      let day_start = floor (local_now /. seconds_per_day) *. seconds_per_day in
+      let target_second =
+        float_of_int ((hour * 3600) + (minute * 60) + second)
+      in
+      let target_utc = day_start +. target_second -. float_of_int offset in
+      Ok
+        (Some
+           (if target_utc > now then target_utc else target_utc +. seconds_per_day)))
 ;;
 
 let field_matches field value = List.mem value field.values
@@ -703,57 +754,60 @@ let cron_matches spec tm =
   && cron_day_matches spec tm
 ;;
 
-let next_cron_due_after ~expression ~timezone ~now =
-  match parse_cron_expression expression, timezone_offset_seconds timezone with
-  | Error _, _ | _, None -> None
-  | Ok spec, Some offset ->
-    let first_candidate =
-      ((floor (now /. 60.0) *. 60.0) +. 60.0) |> int_of_float
-    in
-    let offset = float_of_int offset in
-    let max_minutes = 5 * 366 * 24 * 60 in
-    let rec loop remaining candidate =
-      if remaining <= 0
-      then None
-      else (
-        let local_ts = float_of_int candidate +. offset in
-        let tm = Unix.gmtime local_ts in
-        if cron_matches spec tm
-        then Some (float_of_int candidate)
-        else loop (remaining - 1) (candidate + 60))
-    in
-    loop max_minutes first_candidate
+let next_cron_due_after_result ~expression ~timezone ~now =
+  match parse_cron_expression expression with
+  | Error msg -> Error (Due_invalid_cron_expression msg)
+  | Ok spec ->
+    (match timezone_offset_seconds timezone with
+     | None -> Error (Due_invalid_cron_timezone timezone)
+     | Some offset ->
+       let first_candidate =
+         ((floor (now /. 60.0) *. 60.0) +. 60.0) |> int_of_float
+       in
+       let offset = float_of_int offset in
+       let max_minutes = 5 * 366 * 24 * 60 in
+       let rec loop remaining candidate =
+         if remaining <= 0
+         then Error (Due_cron_search_exhausted { expression; timezone })
+         else (
+           let local_ts = float_of_int candidate +. offset in
+           let tm = Unix.gmtime local_ts in
+           if cron_matches spec tm
+           then Ok (Some (float_of_int candidate))
+           else loop (remaining - 1) (candidate + 60))
+       in
+       loop max_minutes first_candidate)
 ;;
 
-let first_due_after ~now = function
-  | One_shot | Interval _ -> None
+let first_due_after_result ~now = function
+  | One_shot | Interval _ -> Ok None
   | Daily { hour; minute; second; timezone } ->
-    next_daily_due_after ~hour ~minute ~second ~timezone ~now
-  | Cron { expression; timezone } -> next_cron_due_after ~expression ~timezone ~now
+    next_daily_due_after_result ~hour ~minute ~second ~timezone ~now
+  | Cron { expression; timezone } ->
+    next_cron_due_after_result ~expression ~timezone ~now
 ;;
 
-let next_due_after ~now (request : schedule_request) =
+let next_due_after_result ~now (request : schedule_request) =
   match request.recurrence with
-  | One_shot -> None
+  | One_shot -> Ok None
   | Interval { interval_sec } ->
-    next_periodic_due_after
-      ~period:(float_of_int interval_sec)
-      ~now
-      ~anchor:request.due_at
+    next_interval_due_after_result ~interval_sec ~now ~anchor:request.due_at
   | Daily { hour; minute; second; timezone } ->
-    next_daily_due_after ~hour ~minute ~second ~timezone ~now
-  | Cron { expression; timezone } -> next_cron_due_after ~expression ~timezone ~now
+    next_daily_due_after_result ~hour ~minute ~second ~timezone ~now
+  | Cron { expression; timezone } ->
+    next_cron_due_after_result ~expression ~timezone ~now
 ;;
 
-let reschedule_after_due_signal ~now (request : schedule_request) =
+let reschedule_after_due_signal_result ~now (request : schedule_request) =
   match request.status with
   | Due ->
-    (match next_due_after ~now request with
-     | None -> None
-     | Some due_at -> Some { request with status = Scheduled; due_at })
+    let* due_at = next_due_after_result ~now request in
+    (match due_at with
+     | None -> Ok None
+     | Some due_at -> Ok (Some { request with status = Scheduled; due_at }))
   | Pending_approval | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled
   | Expired ->
-    None
+    Ok None
 ;;
 
 let execution_decision_to_yojson = function

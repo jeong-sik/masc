@@ -143,6 +143,15 @@ let test_turn_ref_payload_decode () =
 
 let body fields = Yojson.Safe.to_string (`Assoc fields)
 
+let test_json_of_body_result_reports_parse_error () =
+  match Ops.json_of_body_result {|{"reply":|} with
+  | Error (Ops.Body_json_parse_error detail) ->
+      check bool "parse detail captured" true (String.length detail > 0);
+      check string "compat fallback keeps raw text" {|{"reply":|}
+        Yojson.Safe.Util.(Ops.json_of_body {|{"reply":|} |> to_string)
+  | Ok json ->
+      failf "expected JSON parse error, got Ok %s" (Yojson.Safe.to_string json)
+
 let test_direct_reply_visible_text () =
   check (option string) "declared checkpoint -> None" None
     (Ops.direct_reply_visible_text
@@ -173,6 +182,15 @@ let test_direct_reply_visible_text () =
             ("turn_outcome", `String "visible_reply")
           ]))
 
+let test_direct_reply_payload_decode_reports_parse_error () =
+  match Ops.direct_reply_payload_decode {|{"reply":|} with
+  | Ops.Direct_reply_payload_parse_error detail ->
+    check bool "parse detail captured" true (String.length detail > 0);
+    check (option string) "malformed payload has no visible direct reply" None
+      (Ops.direct_reply_visible_text {|{"reply":|})
+  | Ops.Direct_reply_payload_json _ ->
+    fail "expected malformed direct reply payload to decode as parse error"
+
 let () =
   run "keeper_turn_outcome"
     [
@@ -195,7 +213,11 @@ let () =
         ] );
       ( "direct_reply",
         [
+          test_case "json_of_body parse error is typed" `Quick
+            test_json_of_body_result_reports_parse_error;
           test_case "direct_reply_visible_text" `Quick
             test_direct_reply_visible_text;
+          test_case "direct reply payload parse error" `Quick
+            test_direct_reply_payload_decode_reports_parse_error;
         ] );
     ]

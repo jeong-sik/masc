@@ -20,16 +20,30 @@ type file_report = {
   rewritten : int;
 }
 
-val backfill_line : string -> string option
-(** [backfill_line line] is [Some rewritten] when the line is a user
-    row without a [mentions] field whose content parses to at least one
-    mention id; [None] when the line needs no rewrite (kept
-    byte-for-byte), including unparseable lines. *)
+type line_result =
+  | Line_unchanged
+  | Line_rewritten of string
+  | Line_error of string
 
-val backfill_file : dry_run:bool -> string -> file_report
-(** Backfill one lane file.  With [dry_run] the file is not modified;
-    the report counts what would change. *)
+type file_error = {
+  path : string;
+  line_no : int;
+  message : string;
+}
 
-val backfill_base_path : dry_run:bool -> string -> file_report list
+val backfill_line : string -> line_result
+(** [backfill_line line] is [Line_rewritten rewritten] when the line is a user
+    row without a [mentions] field whose content parses to at least one mention
+    id. Rows that need no rewrite are [Line_unchanged]. Malformed JSON,
+    non-object rows, malformed existing [mentions], or malformed required chat
+    fields are [Line_error _]. *)
+
+val backfill_file : dry_run:bool -> string -> (file_report, file_error list) result
+(** Backfill one lane file. If any row returns [Line_error _], the file is not
+    rewritten and all row errors are returned. With [dry_run] the file is not
+    modified; the report counts what would change. *)
+
+val backfill_base_path :
+  dry_run:bool -> string -> (file_report list, file_error list) result
 (** Backfill every [.jsonl] lane under
     [<base_path>/.masc/keeper_chat/].  Missing directory returns []. *)

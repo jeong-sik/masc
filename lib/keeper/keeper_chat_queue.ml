@@ -464,6 +464,11 @@ let length ~keeper_name =
   | Some entry ->
       with_entry_lock entry (fun () -> Queue.length entry.q)
 
+let snapshot ~keeper_name =
+  match find_entry keeper_name with
+  | None -> []
+  | Some entry -> with_entry_lock entry (fun () -> queue_to_list entry.q)
+
 let clear ~keeper_name =
   match find_entry keeper_name with
   | None -> ()

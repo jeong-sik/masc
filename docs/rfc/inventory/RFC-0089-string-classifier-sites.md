@@ -26,7 +26,7 @@ PR에서 줄여나간다.
 | 5 | `lib/graphql_endpoint.ml` | scope-out (URL scheme + GraphQL protocol) |
 | 4 | `lib/tool_local_runtime_bench.ml` | scope-out (benchmark output parser) |
 | 4 | `lib/repo_manager/keeper_repo_mapping.ml` | scope-out (repo URL prefix) |
-| 4 | `lib/keeper_skill_routing/keeper_skill_routing.ml` | **scope-in (G5 pending)** |
+| 4 | `lib/keeper_tooling/keeper_skill_routing.ml` | scope-in, source-hardened locally (CI pending) |
 | 4 | `lib/ide/ide_region_tracker.ml` | scope-out (file path classifier) |
 | 4 | `lib/runtime/runtime_declarative_adapter.ml` | scope-out (TOML key matching) |
 | 4 | `lib/runtime/runtime_config.ml` | scope-out (TOML key matching) |
@@ -37,7 +37,7 @@ PR에서 줄여나간다.
 | 3 | `lib/keeper/agent_tool_execute_runtime.ml` | scope-out (shell command parser; RFC-0091 territory) |
 | 3 | `lib/keeper/keeper_execution_receipt.ml` | scope-out (round-trip) |
 | 3 | `lib/board_votes.ml` | scope-out (round-trip) |
-| 3 | `lib/audit_log.ml` | scope-out (round-trip `action_to_string`/`string_to_action`) |
+| 3 | `lib/audit_log.ml` | source-hardened locally (round-trip codec + exact/family kind filter), CI pending |
 
 ## §3.2 boundary classification — 2026-05-17 audit
 
@@ -59,22 +59,26 @@ PR에서 줄여나간다.
 
 | Domain | File(s) | Count | Status |
 |---|---|---|---|
-| G5 skill routing protocol marker | `lib/keeper_skill_routing/keeper_skill_routing.ml` | 4 | **pending PR** |
-| G6 anti-rationalization LLM output | `lib/anti_rationalization.ml` | 2 in raw scan (parse_verdict APPROVE/REJECT prefix) | **scope-in** — RFC-0089 §10 Q3 |
+| G1 tool_help_registry doc refs | `lib/tool_surface/tool_help_registry.ml` | 1 residual prefix classifier before local cleanup | source-hardened locally; doc refs now come from exact `Tool_catalog.doc_refs` metadata, CI pending |
+| G5 skill routing protocol marker | `lib/keeper_tooling/keeper_skill_routing.ml` | 4 | source-hardened locally; typed `skill_line` parser, CI pending |
+| G6 anti-rationalization LLM output | `lib/task/anti_rationalization.ml` | 2 in raw scan (parse_verdict APPROVE/REJECT prefix) | source-hardened locally; strict typed text protocol parser, CI pending |
 | Long-tail (2-site files × ~30, 1-site files × ~25) | various | ~55 | per-domain mop-up |
 
-**Active scope-in cluster: ~6-12 sites in two domains (G5 + G6).** Long-tail
-residual (~55 sites across single-site files) is dominated by URL/path/CLI
-classifiers — boundary by inspection but not bulk-audited here.
+**Active scope-in cluster: G1/G5/G6 source-hardened locally and awaiting CI proof.** Long-tail
+residual (~55 sites across single-site files) is dominated by URL/path/CLI classifiers —
+boundary by inspection but not bulk-audited here.
 
 ## Close-condition check (Meta issue #9521)
 
 Last close criterion: "잔여 §3.1 3 도메인 완료 *또는* sites <30 임계치 미만".
 
-- Path A (residual domain): G3 (audit_log) re-classified to **scope-out** in
-  this update. 잔여 §3.1 = **2 domains** (G5 skill_routing + G6
-  anti_rationalization). Smaller than the previous "3 domains" estimate.
-- Path B (sites <30): Active scope-in cluster (G5 + G6) = **~6-12 sites**.
+- Path A (residual domain): G3 audit_log, G5 skill_routing, and G6
+  anti_rationalization, plus the G1 tool_help_registry doc-ref residual, are
+  source-hardened locally and await CI proof. 잔여 §3.1 active implementation domain =
+  **0 domains** in this inventory slice. Smaller than the previous "3 domains"
+  estimate.
+- Path B (sites <30): Active pending scope-in cluster (G1/G5/G6) = **0 source sites**
+  after local hardening, pending CI proof.
   Long-tail (~55 single/dual-site files) is unaudited but pattern-wise
   boundary-heavy. Strict <30 threshold for *audited scope-in* is satisfied;
   long-tail requires single-file confirmation.

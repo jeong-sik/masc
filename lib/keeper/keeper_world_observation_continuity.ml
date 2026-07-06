@@ -73,17 +73,10 @@ let read_continuity_summary ~(config : Workspace.config) ~(meta : keeper_meta) :
       (match ctx_opt with
        | Some c ->
          let structured_snapshot =
-           match
-             Keeper_checkpoint_store.load_oas
-               ~session_dir:session.session_dir
-               ~session_id:trace_id
-           with
-           | Ok cp ->
-             (match cp.Agent_sdk.Checkpoint.working_context with
-              | Some json ->
-                Keeper_memory_policy.snapshot_of_structured_working_context json
-              | None -> None)
-           | Error _ -> None
+           match c.checkpoint.Agent_sdk.Checkpoint.working_context with
+           | Some json ->
+             Keeper_memory_policy.snapshot_of_structured_working_context json
+           | None -> None
          in
          let state_block_snapshot =
            latest_state_snapshot_from_messages (messages_of_context c)

@@ -7,7 +7,8 @@
     Data sources:
     - [Config_dir_resolver.keepers_dir_for_base_path] for request-scoped paths.
     - [Keeper_memory_os_io.list_fact_store_keeper_ids] for the keeper list.
-    - [Keeper_memory_os_io.read_facts_all] and file stat for facts count/bytes.
+    - [Keeper_memory_os_io.read_facts_all_with_errors] and file stat for facts
+      count/bytes plus malformed-row diagnostics.
     - [Keeper_memory_os_io.events_path] + file stat for events bytes.
     - [Keeper_memory_os_gc.run_gc ~dry_run:true] for TTL-expired and
       near-duplicate counts without mutating the store.
@@ -26,6 +27,18 @@ type keeper_health =
   ; ttl_expired_on_disk : int
   ; near_duplicate : int
   ; provider_slot_busy : int
+  }
+
+type keeper_health_read_error_source =
+  | Fact_store_parse
+  | Keeper_health_snapshot
+
+type keeper_health_read_error =
+  { keeper_id : string
+  ; source : keeper_health_read_error_source
+  ; path : string
+  ; line_index : int option
+  ; error : string
   }
 
 type alert_code =
@@ -67,6 +80,49 @@ let provider_slot_busy_threshold = 0.0
 
 let provider_slot_busy_metric = Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
 let provider_slot_busy_site = Keeper_librarian_runtime.memory_os_librarian_provider_slot_site
+
+let keeper_health_read_error_source_to_string = function
+  | Fact_store_parse -> "fact_store_parse"
+  | Keeper_health_snapshot -> "keeper_health_snapshot"
+;;
+
+let keeper_health_read_error_to_json error =
+  let fields =
+    [ ( "source"
+      , `String (keeper_health_read_error_source_to_string error.source) )
+    ; "keeper_id", `String error.keeper_id
+    ; "path", `String error.path
+    ; "error", `String error.error
+    ]
+  in
+  let fields =
+    match error.line_index with
+    | None -> fields
+    | Some line_index -> fields @ [ "line_index", `Int line_index ]
+  in
+  `Assoc fields
+;;
+
+let keeper_health_read_errors_of_fact_parse_errors ~keeper_id errors =
+  List.map
+    (fun (error : Keeper_memory_os_io.fact_jsonl_parse_error) ->
+      { keeper_id
+      ; source = Fact_store_parse
+      ; path = error.path
+      ; line_index = Some error.line_index
+      ; error = Keeper_memory_os_io.fact_jsonl_parse_error_to_string error
+      })
+    errors
+;;
+
+let keeper_health_snapshot_read_error ~keepers_dir ~keeper_id message =
+  { keeper_id
+  ; source = Keeper_health_snapshot
+  ; path = Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
+  ; line_index = None
+  ; error = message
+  }
+;;
 
 let alert_code_to_string = function
   | Ttl_expired_on_disk -> "ttl_expired_on_disk"
@@ -201,41 +257,68 @@ let provider_slot_busy_for_keeper keeper_id =
 ;;
 
 let keeper_health ~keepers_dir ~now keeper_id =
-  let facts =
-    (* [read_facts_all] raises on malformed JSONL — treated as a read failure
-       for this keeper; the caller catches and skips it. *)
-    Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
+  let facts_read =
+    try
+      Ok
+        (Keeper_memory_os_io.read_facts_all_with_errors_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Error
+        [ keeper_health_snapshot_read_error
+            ~keepers_dir
+            ~keeper_id
+            (Printexc.to_string exn)
+        ]
   in
-  let facts_count = List.length facts in
-  let facts_bytes =
-    file_size_bytes
-      (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  in
-  let events_p =
-    Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
-  in
-  let events_bytes = file_size_bytes events_p in
-  (* dry_run keeps the scan read-only: it reports what TTL-expiry + dedup WOULD
-     prune without rewriting the store. *)
-  let gc_report =
-    Keeper_memory_os_gc.run_gc_for_keepers_dir
-      ~keepers_dir
-      ~dry_run:true
-      ~keeper_id
-      ~now
-      ()
-  in
-  { keeper_id
-  ; facts = facts_count
-  ; facts_bytes
-  ; events = count_lines_in_file events_p
-  ; events_bytes
-  ; events_to_facts_ratio =
-      float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
-  ; ttl_expired_on_disk = gc_report.ttl_expired
-  ; near_duplicate = gc_report.dedup_removed
-  ; provider_slot_busy = provider_slot_busy_for_keeper keeper_id
-  }
+  match facts_read with
+  | Error errors -> Error errors
+  | Ok { parse_errors = _ :: _ as parse_errors; facts = _ } ->
+    Error (keeper_health_read_errors_of_fact_parse_errors ~keeper_id parse_errors)
+  | Ok { facts; parse_errors = [] } ->
+    (try
+       let facts_count = List.length facts in
+       let facts_bytes =
+         file_size_bytes
+           (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+       in
+       let events_p =
+         Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
+       in
+       let events_bytes = file_size_bytes events_p in
+       (* dry_run keeps the scan read-only: it reports what TTL-expiry + dedup WOULD
+          prune without rewriting the store. *)
+       let gc_report =
+         Keeper_memory_os_gc.run_gc_for_keepers_dir
+           ~keepers_dir
+           ~dry_run:true
+           ~keeper_id
+           ~now
+           ()
+       in
+       Ok
+         { keeper_id
+         ; facts = facts_count
+         ; facts_bytes
+         ; events = count_lines_in_file events_p
+         ; events_bytes
+         ; events_to_facts_ratio =
+             float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
+         ; ttl_expired_on_disk = gc_report.ttl_expired
+         ; near_duplicate = gc_report.dedup_removed
+         ; provider_slot_busy = provider_slot_busy_for_keeper keeper_id
+         }
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Error
+         [ keeper_health_snapshot_read_error
+             ~keepers_dir
+             ~keeper_id
+             (Printexc.to_string exn)
+         ])
 ;;
 
 let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
@@ -260,18 +343,53 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in
+  let keeper_ids_result =
+    Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir_result
+      ~keepers_dir
+  in
+  let keeper_ids_known, keeper_id_discovery_read_errors, keeper_ids =
+    match keeper_ids_result with
+    | Ok keeper_ids -> true, [], keeper_ids
+    | Error error -> false, [ error ], []
+  in
+  let healths, keeper_read_errors =
+    keeper_ids
+    |> List.fold_left
+         (fun (healths, read_errors) keeper_id ->
+           match keeper_health ~keepers_dir ~now keeper_id with
+           | Ok health -> health :: healths, read_errors
+           | Error errors ->
+             List.iter
+               (fun error ->
+                 Log.Dashboard.warn
+                   "[keeper_memory_health] keeper read error keeper=%s source=%s path=%s: %s"
+                   error.keeper_id
+                   (keeper_health_read_error_source_to_string error.source)
+                   error.path
+                   error.error)
+               errors;
+             healths, List.rev_append errors read_errors)
+         ([], [])
+  in
+  let keeper_read_errors = List.rev keeper_read_errors in
+  let keeper_read_error_jsons =
+    List.map keeper_health_read_error_to_json keeper_read_errors
+  in
+  let keeper_id_discovery_read_error_jsons =
+    List.map
+      (fun error ->
+        `Assoc
+          [ "source", `String "list_fact_store_keeper_ids_for_keepers_dir"
+          ; "path", `String keepers_dir
+          ; "error", `String error
+          ])
+      keeper_id_discovery_read_errors
+  in
+  let read_error_jsons =
+    keeper_id_discovery_read_error_jsons @ keeper_read_error_jsons
+  in
   let entries =
-    Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
-    |> List.filter_map (fun keeper_id ->
-      match keeper_health ~keepers_dir ~now keeper_id with
-      | h -> Some h
-      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-      | exception exn ->
-        Log.Dashboard.warn
-          "[keeper_memory_health] skipping keeper %s: %s"
-          keeper_id
-          (Printexc.to_string exn);
-        None)
+    healths
     |> List.map (fun h -> h, keeper_alerts h)
     (* Largest stores first so the worst offenders surface at the top. *)
     |> List.sort (fun (a, _) (b, _) -> compare b.facts_bytes a.facts_bytes)
@@ -287,6 +405,15 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   `Assoc
     [ "generated_at", `Float now
     ; "cadence_counter_entries", `Int cadence_counter_entries
+    ; "keeper_ids_known", `Bool keeper_ids_known
+    ; ( "keeper_id_discovery_read_error_count"
+      , `Int (List.length keeper_id_discovery_read_errors) )
+    ; ( "keeper_id_discovery_read_errors"
+      , `List keeper_id_discovery_read_error_jsons )
+    ; "keeper_read_error_count", `Int (List.length keeper_read_errors)
+    ; "keeper_read_errors", `List keeper_read_error_jsons
+    ; "read_error_count", `Int (List.length read_error_jsons)
+    ; "read_errors", `List read_error_jsons
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc

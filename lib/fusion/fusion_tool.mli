@@ -9,6 +9,29 @@
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §4/§6 *)
 
+(** Stable [failure_code] for a run that is stopped by structural Eio
+    cancellation. This is a producer-owned status value, not a parser
+    derived from free text. *)
+val structural_cancel_failure_code : string
+
+(** Human-readable failure payload paired with
+    {!structural_cancel_failure_code}. It is used consistently for the
+    registry failure reason and the typed [Fusion_completed] wake payload. *)
+val structural_cancel_failure : string
+
+(** Complete a structurally-cancelled fusion run and deliver the same typed
+    wake contract as other failure paths.
+
+    The registry transition is performed before any suspending operation. The
+    broadcast and [Fusion_completed] wake run under [Eio.Cancel.protect] so the
+    cancellation handler can do explicit cleanup before its caller re-raises the
+    original [Eio.Cancel.Cancelled]. *)
+val finalize_cancelled_run
+  :  base_dir:string
+  -> keeper:string
+  -> run_id:string
+  -> unit
+
 (** [masc_fusion] 호출 처리. status JSON 문자열을 반환한다.
 
     @param now_unix 현재 유닉스초 (키퍼 clock에서; run 시작 시각 기록).

@@ -142,7 +142,11 @@ let handle_registered_tool
   : string option =
   let dispatch_registered_handler () =
     match Tool_dispatch.mint_token ~name with
-    | Error _ -> None
+    | Error reason ->
+      Log.Keeper.debug ~keeper_name
+        "registered backend dispatch token mint rejected for tool=%s: %s"
+        name reason;
+      None
     | Ok token ->
       (* RFC-0084 §1.1 + §2.2 — keeper turn now routes through
          guarded_dispatch so pre-hook chain + telemetry 4-tuple emission

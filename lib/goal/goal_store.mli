@@ -144,11 +144,32 @@ val goals_path : Workspace_utils.config -> string
 
 (** {1 State I/O} *)
 
+type recovery_error =
+  | Recovery_absent
+  | Recovery_read_failed of string
+  | Recovery_decode_failed of string
+
+type read_error =
+  | Primary_read_failed of
+      { primary_err : string
+      ; recovery_err : recovery_error
+      }
+  | Primary_decode_failed of
+      { primary_err : string
+      ; recovery_err : recovery_error
+      }
+
+val read_error_to_string : read_error -> string
+
+val read_state_result : Workspace_utils.config -> (state, read_error) result
+(** Result-returning state read. Missing [goals.json] is a fresh empty state;
+    unreadable/corrupt primary data is recovered from [.last-good] when possible
+    and otherwise returned as [Error]. *)
+
 val read_state : Workspace_utils.config -> state
-(** Reads {!goals_path}; returns an empty default state on
-    missing file or parse failure.  Goals loaded from disk
-    are passed through the internal normaliser ([priority]
-    clamp + phase/status reconciliation). *)
+(** Compatibility wrapper around {!read_state_result}. Returns an empty default
+    state after logging when both primary and recovery reads fail. New
+    production callers should prefer {!read_state_result}. *)
 
 val write_state : Workspace_utils.config -> state -> unit
 (** Direct overwrite of {!goals_path} with the supplied state.
@@ -170,6 +191,9 @@ val update_state :
     (#17229). *)
 
 (** {1 Single-goal operations} *)
+
+val get_goal_result :
+  Workspace_utils.config -> goal_id:string -> (goal option, string) result
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
@@ -211,8 +235,17 @@ val list_goals :
   ?phase:Goal_phase.t ->
   unit ->
   goal list
-(** Reads the state, applies optional filters, then sorts
-    by [(priority, updated_at desc)]. *)
+(** Compatibility wrapper around {!list_goals_result}. Logs and returns [[]]
+    when both primary and recovery reads fail. *)
+
+val list_goals_result :
+  Workspace_utils.config ->
+  ?status:goal_status ->
+  ?phase:Goal_phase.t ->
+  unit ->
+  (goal list, string) result
+(** Reads the state, applies optional filters, then sorts by
+    [(priority, updated_at desc)]. *)
 
 val upsert_goal :
   Workspace_utils.config ->

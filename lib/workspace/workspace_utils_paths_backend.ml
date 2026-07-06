@@ -102,12 +102,15 @@ let backend_get_all config ~prefix =
       (match backend_list_keys config ~prefix with
        | Error e -> Error e
        | Ok keys ->
-           let pairs = List.filter_map (fun k ->
-             match backend_get config ~key:k with
-             | Ok (Some v) -> Some (k, v)
-             | Ok None | Error _ -> None
-           ) keys in
-           Ok pairs)
+           let rec collect acc = function
+             | [] -> Ok (List.rev acc)
+             | key :: rest -> (
+                 match backend_get config ~key with
+                 | Ok (Some value) -> collect ((key, value) :: acc) rest
+                 | Ok None -> Error (Backend_types.NotFound key)
+                 | Error err -> Error err)
+           in
+           collect [] keys)
 
 let backend_set_if_not_exists config ~key ~value =
   match config.backend with
@@ -196,26 +199,50 @@ let strip_prefix prefix s =
   else
     s
 
-let list_dir config path =
+let local_list_dir_result path =
+  try Ok (Sys.readdir path |> Array.to_list)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Error
+      (Printf.sprintf "failed to list local directory %s: %s"
+         path
+         (Printexc.to_string exn))
+
+let list_dir_result config path =
   match key_of_path config path with
   | None ->
       if Sys.file_exists path && Sys.is_directory path then
-        Sys.readdir path |> Array.to_list
-      else
-        []
+        local_list_dir_result path
+      else Ok []
   | Some _ when
       backend_supports_local_dir config.backend
       && Sys.file_exists path && Sys.is_directory path ->
-      Sys.readdir path |> Array.to_list
+      local_list_dir_result path
   | Some key_prefix ->
       let prefix = key_prefix ^ ":" in
       (match backend_list_keys config ~prefix with
        | Ok keys ->
-           List.map (fun key ->
-             let rest = strip_prefix prefix key in
-             String.map (fun c -> if c = ':' then '/' else c) rest
-           ) keys
-       | Error _ -> [])
+           Ok
+             (List.map
+                (fun key ->
+                   let rest = strip_prefix prefix key in
+                   String.map (fun c -> if c = ':' then '/' else c) rest)
+                keys)
+       | Error err ->
+         Error
+           (Printf.sprintf
+              "failed to list backend directory %s with prefix %s: %s"
+              path
+              prefix
+              (Backend_types.show_error err)))
+
+let list_dir config path =
+  match list_dir_result config path with
+  | Ok names -> names
+  | Error msg ->
+    Log.Workspace.warn "list_dir: %s" msg;
+    []
 
 (* ============================================ *)
 (* Initialization check                         *)

@@ -210,6 +210,16 @@ let workspace_config base_path =
   Workspace.default_config base_path
 ;;
 
+let make_path_unreadable path =
+  if Sys.file_exists path && not (Sys.is_directory path) then Sys.remove path;
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
+let make_goal_task_link_registry_unreadable config =
+  make_path_unreadable (Workspace_goal_index.goal_task_links_path config);
+  make_path_unreadable (Workspace_goal_index.goal_task_links_recovery_path config)
+;;
+
 let test_build_context_bundle_with_real_workspace () =
   let base = temp_dir "hitl_summary_ctx_" in
   Fun.protect ~finally:(fun () -> rm_rf base) (fun () ->
@@ -260,6 +270,61 @@ let test_build_context_bundle_with_real_workspace () =
        | _ -> false))
 ;;
 
+let test_build_context_bundle_reports_goal_link_read_failure () =
+  let base = temp_dir "hitl_summary_goal_link_read_error_" in
+  Fun.protect ~finally:(fun () -> rm_rf base) (fun () ->
+    let config = workspace_config base in
+    ignore (Workspace.init config ~agent_name:(Some "test-keeper"));
+    let goal, _ =
+      match
+        Goal_store.upsert_goal config ~id:"goal-link-read-error" ~title:"HITL read error goal"
+          ~priority:1 ~status:Goal_store.Active ~phase:Goal_phase.Executing ()
+      with
+      | Ok g -> g
+      | Error msg -> Alcotest.failf "upsert_goal failed: %s" msg
+    in
+    ignore
+      (Workspace.add_task
+         ~goal_id:goal.id
+         config
+         ~title:"HITL linked task"
+         ~priority:1
+         ~description:"");
+    make_goal_task_link_registry_unreadable config;
+    let entry =
+      dummy_pending_approval
+        ~task_id:"task-001"
+        ~goal_id:goal.id
+        ~audit_base_path:base
+        ()
+    in
+    let bundle = H.For_testing.build_context_bundle ~entry in
+    let member = Yojson.Safe.Util.member in
+    check yojson_t "partial_context" (`Bool true) (member "partial_context" bundle);
+    let task = member "task" bundle in
+    check bool "task found" true (Yojson.Safe.Util.to_bool (member "found" task));
+    check yojson_t "task goal_id unknown" `Null (member "goal_id" task);
+    check bool "task goal_id read error recorded" true
+      (match member "goal_id_read_error" task with
+       | `String msg ->
+         Astring.String.is_infix
+           ~affix:Workspace_goal_index.goal_task_links_read_failed_prefix
+           msg
+       | _ -> false);
+    check bool "context note records read error" true
+      (match member "context_notes" bundle with
+       | `List notes ->
+         List.exists
+           (function
+             | `String msg ->
+               Astring.String.is_infix
+                 ~affix:Workspace_goal_index.goal_task_links_read_failed_prefix
+                 msg
+             | _ -> false)
+           notes
+       | _ -> false))
+;;
+
 (* ── Provider cost/token guard tests ────────────── *)
 
 let test_provider_config_for_summary_caps_tokens_and_temperature () =
@@ -307,6 +372,10 @@ let () =
             test_build_context_bundle_includes_ids_and_partial_context
         ; test_case "build_context_bundle with real workspace is not partial" `Quick
             test_build_context_bundle_with_real_workspace
+        ; test_case
+            "build_context_bundle reports goal link read failure"
+            `Quick
+            test_build_context_bundle_reports_goal_link_read_failure
         ; test_case "provider_config_for_summary caps tokens and temperature" `Quick
             test_provider_config_for_summary_caps_tokens_and_temperature
         ] )

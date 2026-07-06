@@ -100,6 +100,32 @@ type archived_agent_meta = {
   last_event_at : string option;
 }
 
+type workspace_event_line =
+  { path : string
+  ; line_index : int
+  ; line : string
+  }
+
+let workspace_event_read_error_to_json ~path ~line_index message =
+  `Assoc
+    [ "source", `String "dashboard_briefing_workspace_events_jsonl"
+    ; "path", `String path
+    ; "line_index", `Int line_index
+    ; "message", `String message
+    ]
+
+let parse_workspace_event_line { path; line_index; line } =
+  match Yojson.Safe.from_string line with
+  | `Assoc _ as json -> Ok json
+  | other ->
+      Error
+        (workspace_event_read_error_to_json
+           ~path
+           ~line_index
+           (Printf.sprintf "expected workspace event object, got %s" (Json_util.kind_name other)))
+  | exception Yojson.Json_error message ->
+      Error (workspace_event_read_error_to_json ~path ~line_index message)
+
 let build_task_lookup config =
   if not (Workspace.is_initialized config) then
     []
@@ -148,7 +174,7 @@ let latest_message_to agent_name messages =
             if message.seq >= current.seq then Some message else best)
     None messages
 
-let read_recent_workspace_event_lines config ~limit =
+let read_recent_workspace_event_line_records config ~limit =
   let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
@@ -160,7 +186,8 @@ let read_recent_workspace_event_lines config ~limit =
     let read_lines path =
       let content = Fs_compat.load_file path in
       String.split_on_char '\n' content
-      |> List.filter (fun s -> s <> "")
+      |> List.mapi (fun line_index line -> { path; line_index; line })
+      |> List.filter (fun { line; _ } -> line <> "")
     in
     let add_lines path =
       if !remaining <= 0 then ()
@@ -194,6 +221,10 @@ let read_recent_workspace_event_lines config ~limit =
       month_dirs;
     List.rev !collected
 
+let read_recent_workspace_event_lines config ~limit =
+  read_recent_workspace_event_line_records config ~limit
+  |> List.map (fun { line; _ } -> line)
+
 let is_session_concluded (status : Dashboard_utils.session_lifecycle) =
   match status with
   | Dashboard_utils.SL_completed | SL_interrupted | SL_cancelled -> true
@@ -214,7 +245,7 @@ let archived_reason_for_session (session : session_context option) =
          else "missing from current namespace state")
   | None -> None
 
-let archived_agent_meta_map config agent_names =
+let archived_agent_meta_map_with_read_errors config agent_names =
   let wanted = Hashtbl.create (List.length agent_names) in
   List.iter (fun agent_name -> Hashtbl.replace wanted agent_name ()) agent_names;
   let table = Hashtbl.create (List.length agent_names) in
@@ -227,14 +258,16 @@ let archived_agent_meta_map config agent_names =
             last_event_at = None;
           }
         in
-        Hashtbl.add table agent_name row;
-        row
+      Hashtbl.add table agent_name row;
+      row
   in
-  read_recent_workspace_event_lines config ~limit:2000
+  let read_errors = ref [] in
+  read_recent_workspace_event_line_records config ~limit:2000
   |> List.rev
-  |> List.iter (fun line ->
-         try
-           let json = Yojson.Safe.from_string line in
+  |> List.iter (fun event_line ->
+         match parse_workspace_event_line event_line with
+         | Error error -> read_errors := error :: !read_errors
+         | Ok json ->
            let agent_name = string_field "agent" json in
            if agent_name <> "" && Hashtbl.mem wanted agent_name then (
              let row = ensure_row agent_name in
@@ -248,9 +281,11 @@ let archived_agent_meta_map config agent_names =
                then { last_event_at }
                else row
              in
-             Hashtbl.replace table agent_name row)
-         with Yojson.Json_error _ -> ());
-  table
+             Hashtbl.replace table agent_name row));
+  table, List.rev !read_errors
+
+let archived_agent_meta_map config agent_names =
+  fst (archived_agent_meta_map_with_read_errors config agent_names)
 
 let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
   let table = Hashtbl.create 8 in
@@ -265,7 +300,7 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
     keepers;
   table
 
-let build_agent_briefs config sessions attention_queue _workspace_json (keepers : Yojson.Safe.t list) =
+let build_agent_briefs_with_read_errors config sessions attention_queue _workspace_json (keepers : Yojson.Safe.t list) =
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
@@ -294,9 +329,12 @@ let build_agent_briefs config sessions attention_queue _workspace_json (keepers 
       (List.map (fun (agent : Masc_domain.agent) -> agent.name) workspace_agents
       @ List.concat_map (fun (session : session_context) -> session.member_names) sessions)
   in
-  let archived_meta_by_name = archived_agent_meta_map config agent_names in
+  let archived_meta_by_name, archived_meta_read_errors =
+    archived_agent_meta_map_with_read_errors config agent_names
+  in
   let keeper_aliases = keeper_alias_by_agent_name keepers in
-  agent_names
+  let briefs =
+    agent_names
   |> List.map (fun agent_name ->
          let agent = List.assoc_opt agent_name workspace_agent_by_name in
          let related_session =
@@ -411,3 +449,8 @@ let build_agent_briefs config sessions attention_queue _workspace_json (keepers 
            if by_status <> 0 then by_status
            else Float.compare right.last_seen_ts left.last_seen_ts)
   |> List.map (fun (row : agent_context) -> row.json)
+  in
+  briefs, archived_meta_read_errors
+
+let build_agent_briefs config sessions attention_queue workspace_json keepers =
+  fst (build_agent_briefs_with_read_errors config sessions attention_queue workspace_json keepers)

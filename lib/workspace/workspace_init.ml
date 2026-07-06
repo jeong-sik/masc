@@ -46,29 +46,45 @@ let init config ~agent_name =
       ; speculation_budget = None
       }
     in
-    write_json_root config (root_state_path config) (workspace_state_to_yojson root_state))
+    match
+      write_json_root_result config (root_state_path config)
+        (workspace_state_to_yojson root_state)
+    with
+    | Ok () -> ()
+    | Error error -> raise (Sys_error error))
   else (
     (* Sync PG state to local file on startup so filesystem fallback has fresh data *)
-    let root_json = read_json_root config (root_state_path config) in
-    match write_json_local (root_state_path config) root_json with
-    | Ok () -> ()
-    | Error msg -> Log.Workspace.warn "init: local sync of root state failed: %s" msg);
+    match read_json_root_result config (root_state_path config) with
+    | Error msg -> Log.Workspace.warn "init: root state read for local sync failed: %s" msg
+    | Ok root_json -> (
+        match write_json_local (root_state_path config) root_json with
+        | Ok () -> ()
+        | Error msg -> Log.Workspace.warn "init: local sync of root state failed: %s" msg));
   if not (path_exists_root config root_backlog_path)
   then (
     let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-    write_json_root config root_backlog_path (backlog_to_yojson root_backlog))
-  else (
-    let root_backlog_json = read_json_root config root_backlog_path in
-    match write_json_local root_backlog_path root_backlog_json with
+    match
+      write_json_root_result config root_backlog_path
+        (backlog_to_yojson root_backlog)
+    with
     | Ok () -> ()
-    | Error msg -> Log.Workspace.warn "init: local sync of root backlog failed: %s" msg);
+    | Error error -> raise (Sys_error error))
+  else (
+    match read_json_root_result config root_backlog_path with
+    | Error msg -> Log.Workspace.warn "init: root backlog read for local sync failed: %s" msg
+    | Ok root_backlog_json -> (
+        match write_json_local root_backlog_path root_backlog_json with
+        | Ok () -> ()
+        | Error msg -> Log.Workspace.warn "init: local sync of root backlog failed: %s" msg));
   if is_initialized config
   then (
     (* Sync PG scoped state to local file so filesystem fallback has fresh data *)
-    let scoped_json = read_json config (state_path config) in
-    (match write_json_local (state_path config) scoped_json with
-     | Ok () -> ()
-     | Error msg -> Log.Workspace.warn "init: local sync of scoped state failed: %s" msg);
+    (match read_json_result config (state_path config) with
+     | Error msg -> Log.Workspace.warn "init: scoped state read for local sync failed: %s" msg
+     | Ok scoped_json -> (
+         match write_json_local (state_path config) scoped_json with
+         | Ok () -> ()
+         | Error msg -> Log.Workspace.warn "init: local sync of scoped state failed: %s" msg));
     "MASC already initialized.")
   else (
     (* Create directories *)
@@ -126,11 +142,15 @@ let pause config ~by ~reason =
 ;;
 
 (** Resume workspace automation *)
-let resume config ~by =
-  let state = read_state config in
-  if not state.paused
-  then `Already_running
-  else (
+let resume_result config ~by =
+  let snapshot = read_state_snapshot config in
+  match snapshot.status with
+  | State_default_from_read_error ->
+    Error (Printf.sprintf "state read failed: %s" (String.concat "; " snapshot.read_errors))
+  | State_authoritative | State_recovered_unpersisted ->
+  if not snapshot.state.paused
+  then Ok `Already_running
+  else
     let _ =
       update_state config (fun s ->
         { s with paused = false; pause_reason = None; paused_by = None; paused_at = None })
@@ -142,7 +162,15 @@ let resume config ~by =
         ~from_agent:"system"
         ~content:(Printf.sprintf "▶️ Workspace RESUMED by %s" by)
     in
-    `Resumed)
+    Ok `Resumed
+;;
+
+let resume config ~by =
+  match resume_result config ~by with
+  | Ok result -> result
+  | Error msg ->
+    Log.Workspace.error "resume failed: %s" msg;
+    `Already_running
 ;;
 
 (** Reset workspace state - delete .masc/ folder *)

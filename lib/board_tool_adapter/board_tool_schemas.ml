@@ -91,21 +91,28 @@ let tool_post_create : Masc_domain.tool_schema =
               ; ( "visibility"
                 , `Assoc
                     [ "type", `String "string"
+                    ; ( "enum"
+                      , `List
+                          (List.map
+                             (fun s -> `String s)
+                             Board_core_classify.valid_visibility_strings) )
                     ; ( "description"
-                      , `String "public|unlisted|internal|direct (default: internal)" )
+                      , `String
+                          (Printf.sprintf
+                             "Visibility (%s; default: internal)"
+                             (String.concat
+                                " | "
+                                Board_core_classify.valid_visibility_strings)) )
                     ] )
               ; ( "post_kind"
                 , `Assoc
                     [ "type", `String "string"
                     ; ( "description"
                       , `String
-                          "Optional post classification: 'direct' = \
+                          "Required post classification: 'direct' = \
                            caller is a human user; 'automation' = caller is an agent or \
                            automated source. 'system' is reserved for platform/internal \
-                           surfaces and will be rejected if sent by an external caller. \
-                           When omitted, inferred from author: \
-                           empty/anonymous → automation; registered agent → automation; \
-                           otherwise human." )
+                           surfaces and will be rejected if sent by an external caller." )
                     ] )
               ; ( "ttl_hours"
                 , `Assoc

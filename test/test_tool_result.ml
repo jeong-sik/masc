@@ -3,6 +3,7 @@
 module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
 module Time_compat = Time_compat
+module Keeper_tools_oas_markers = Masc.Keeper_tools_oas_markers
 module Keeper_tools_oas_workflow = Masc.Keeper_tools_oas_workflow
 
 let tool_ok ?(tool_name = "") message =
@@ -175,9 +176,46 @@ let test_ok_prefixed_json_response () =
       Yojson.Safe.Util.(List.assoc "id" fields |> to_string);
     Alcotest.(check string)
       "content parsed"
-      "hello"
-      Yojson.Safe.Util.(List.assoc "content" fields |> to_string)
+       "hello"
+       Yojson.Safe.Util.(List.assoc "content" fields |> to_string)
   | _ -> Alcotest.fail "expected parsed JSON from prefixed payload"
+;;
+
+let test_structured_payload_report_surfaces_complete_json_error () =
+  let report = Tool_result.structured_payload_of_message_report "{not-json" in
+  let open Tool_result in
+  match report.payload, report.errors with
+  | None, [ Structured_payload_json_error { location = Complete_message; message } ] ->
+    Alcotest.(check bool) "parse error message is present" true (String.length message > 0)
+  | _ -> Alcotest.fail "expected complete-message JSON decode error"
+;;
+
+let test_structured_payload_report_preserves_valid_suffix_with_errors () =
+  let report =
+    Tool_result.structured_payload_of_message_report
+      "prefix\n{not-json\n{\"id\":\"post-2\",\"ok\":true}"
+  in
+  let open Tool_result in
+  match report.payload, report.errors with
+  | ( Some (`Assoc fields)
+    , [ Structured_payload_json_error
+          { location = Message_suffix { byte_offset }; message }
+      ] ) ->
+    Alcotest.(check bool) "suffix byte offset recorded" true (byte_offset > 0);
+    Alcotest.(check bool) "parse error message is present" true (String.length message > 0);
+    Alcotest.(check string)
+      "id parsed"
+      "post-2"
+      Yojson.Safe.Util.(List.assoc "id" fields |> to_string)
+  | _ -> Alcotest.fail "expected valid suffix payload plus decode error report"
+;;
+
+let test_malformed_structured_payload_legacy_fallback_string () =
+  let raw = "{not-json" in
+  let r = Tool_result.ok ~tool_name:"masc_board_post" ~start_time:0.0 raw in
+  match Tool_result.data r with
+  | `String value -> Alcotest.(check string) "raw message preserved" raw value
+  | _ -> Alcotest.fail "expected legacy string fallback"
 ;;
 
 let test_to_json () =
@@ -483,6 +521,87 @@ let test_workflow_recovery_uses_alternatives_without_tool_suggestion () =
     (str_contains instruction "retry this keeper_task_done call")
 ;;
 
+let test_workflow_rejection_info_result_surfaces_raw_json_error () =
+  match Keeper_tools_oas_workflow.workflow_rejection_info_of_raw_result "{not-json" with
+  | Error (Keeper_tools_oas_workflow.Workflow_rejection_json_parse_error { source; message }) ->
+    Alcotest.(check bool)
+      "source is raw"
+      true
+      (source = Keeper_tools_oas_workflow.Workflow_rejection_raw);
+    Alcotest.(check bool) "parse error message is present" true (String.length message > 0)
+  | Ok _ -> Alcotest.fail "expected raw workflow-rejection JSON parse error"
+;;
+
+let test_workflow_rejection_payload_result_surfaces_nested_json_error () =
+  let json = `Assoc [ "ok", `Bool false; "error", `String "{not-json" ] in
+  match Keeper_tools_oas_workflow.workflow_rejection_payload_of_json_result json with
+  | Error (Keeper_tools_oas_workflow.Workflow_rejection_json_parse_error { source; message }) ->
+    Alcotest.(check bool)
+      "source is error field"
+      true
+      (source = Keeper_tools_oas_workflow.Workflow_rejection_error_field);
+    Alcotest.(check bool) "parse error message is present" true (String.length message > 0)
+  | Ok _ -> Alcotest.fail "expected nested workflow-rejection JSON parse error"
+;;
+
+let test_workflow_rejection_info_result_keeps_plain_text_as_none () =
+  match Keeper_tools_oas_workflow.workflow_rejection_info_of_raw_result "task_id required" with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "plain text should not decode workflow rejection info"
+  | Error error ->
+    Alcotest.fail
+      (Keeper_tools_oas_workflow.workflow_rejection_parse_error_to_string error)
+;;
+
+let test_deterministic_recovery_plan_result_surfaces_raw_json_error () =
+  match
+    Keeper_tools_oas_deterministic_error.deterministic_recovery_plan_fields_result
+      "{not-json"
+  with
+  | Error
+      (Keeper_tools_oas_deterministic_error
+       .Deterministic_recovery_plan_json_decode_error message) ->
+    Alcotest.(check bool) "message is non-empty" true (String.length message > 0)
+  | Error error ->
+    Alcotest.failf
+      "expected deterministic recovery raw JSON error, got %s"
+      (Keeper_tools_oas_deterministic_error
+       .deterministic_recovery_plan_parse_error_to_string
+         error)
+  | Ok _ -> Alcotest.fail "malformed recovery-plan payload parsed successfully"
+;;
+
+let test_deterministic_recovery_plan_result_distinguishes_absent_plan () =
+  match
+    Keeper_tools_oas_deterministic_error.deterministic_recovery_plan_fields_result
+      {|{"ok":false,"error":"blocked"}|}
+  with
+  | Ok [] -> ()
+  | Ok (_ :: _) -> Alcotest.fail "payload without recovery_plan emitted fields"
+  | Error error ->
+    Alcotest.failf
+      "valid payload without recovery_plan returned error: %s"
+      (Keeper_tools_oas_deterministic_error
+       .deterministic_recovery_plan_parse_error_to_string
+         error)
+;;
+
+let test_tool_exec_result_marker_report_surfaces_output_parse_error () =
+  let report =
+    Keeper_tools_oas_markers.tool_exec_result_marker_report
+      ~input:(`Assoc [ "cmd", `String "git push origin HEAD" ])
+      ~output:"{not-json"
+  in
+  Alcotest.(check (list string))
+    "input marker preserved"
+    [ "git push" ]
+    report.markers;
+  match report.output_parse_error with
+  | Some (Keeper_tools_oas_markers.Output_marker_json_decode_error message) ->
+    Alcotest.(check bool) "parse detail captured" true (String.length message > 0)
+  | None -> Alcotest.fail "expected output marker parse error"
+;;
+
 let () =
   Alcotest.run
     "Tool_result"
@@ -513,6 +632,18 @@ let () =
             "prefixed json response"
             `Quick
             test_ok_prefixed_json_response
+        ; Alcotest.test_case
+            "structured payload report surfaces complete JSON error"
+            `Quick
+            test_structured_payload_report_surfaces_complete_json_error
+        ; Alcotest.test_case
+            "structured payload report preserves suffix with errors"
+            `Quick
+            test_structured_payload_report_preserves_valid_suffix_with_errors
+        ; Alcotest.test_case
+            "malformed structured payload legacy fallback"
+            `Quick
+            test_malformed_structured_payload_legacy_fallback_string
         ] )
     ; "to_json", [ Alcotest.test_case "fields present" `Quick test_to_json ]
     ; ( "message"
@@ -562,6 +693,30 @@ let () =
             "recovery fields use alternatives"
             `Quick
             test_workflow_recovery_uses_alternatives_without_tool_suggestion
+        ; Alcotest.test_case
+            "workflow rejection info Result surfaces raw JSON error"
+            `Quick
+            test_workflow_rejection_info_result_surfaces_raw_json_error
+        ; Alcotest.test_case
+            "workflow rejection payload Result surfaces nested JSON error"
+            `Quick
+            test_workflow_rejection_payload_result_surfaces_nested_json_error
+        ; Alcotest.test_case
+            "workflow rejection info Result keeps plain text as none"
+            `Quick
+            test_workflow_rejection_info_result_keeps_plain_text_as_none
+        ; Alcotest.test_case
+            "deterministic recovery Result surfaces raw JSON error"
+            `Quick
+            test_deterministic_recovery_plan_result_surfaces_raw_json_error
+        ; Alcotest.test_case
+            "deterministic recovery Result distinguishes absent plan"
+            `Quick
+            test_deterministic_recovery_plan_result_distinguishes_absent_plan
+        ; Alcotest.test_case
+            "tool result markers report output JSON parse errors"
+            `Quick
+            test_tool_exec_result_marker_report_surfaces_output_parse_error
         ] )
     ]
 ;;

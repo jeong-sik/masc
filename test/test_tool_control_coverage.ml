@@ -9,6 +9,29 @@ let parse_json s =
   with Yojson.Json_error err ->
     failwith ("invalid json: " ^ err ^ "; raw=" ^ s)
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > haystack_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let replace_path_with_file path content =
+  if Sys.file_exists path
+  then (
+    if Sys.is_directory path then Unix.rmdir path else Sys.remove path);
+  write_file path content
+
 let seed_keeper_meta (ctx : Tool_control.context) name ~paused =
   let meta =
     match
@@ -134,6 +157,22 @@ let () =
       | None -> failwith "dispatch returned None")
 
 let () =
+  test "dispatch_pause_status_reports_state_read_failure" (fun () ->
+      with_ctx @@ fun ctx ->
+      let state_path = Workspace.state_path ctx.config in
+      Unix.unlink state_path;
+      Unix.mkdir state_path 0o755;
+      match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+      | Some result ->
+          assert (not (Tool_result.is_success result));
+          assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+          assert
+            (String.starts_with
+               ~prefix:"Pause status failed: workspace_state read failed:"
+               (Tool_result.message result))
+      | None -> failwith "dispatch returned None")
+
+let () =
   test "dispatch_pause_status_surfaces_keeper_pause_when_workspace_running" (fun () ->
       with_ctx @@ fun ctx ->
       seed_keeper_meta ctx "paused-keeper" ~paused:true;
@@ -151,7 +190,38 @@ let () =
           assert
             (keeper_pause |> member "paused_names" |> to_list
              |> List.map to_string
-             = [ "paused-keeper" ])
+            = [ "paused-keeper" ])
+      | None -> failwith "dispatch returned None")
+
+let () =
+  test "dispatch_pause_status_surfaces_keeper_name_discovery_failure" (fun () ->
+      with_ctx @@ fun ctx ->
+      replace_path_with_file
+        (Keeper_types_profile.keeper_dir ctx.config)
+        "not a keeper directory";
+      match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+      | Some result ->
+          assert (Tool_result.is_success result);
+          let json = parse_json (Tool_result.message result) in
+          let open Yojson.Safe.Util in
+          let keeper_pause = json |> member "keeper_pause" in
+          assert (keeper_pause |> member "paused" = `Bool false);
+          assert (keeper_pause |> member "keeper_names_known" = `Bool false);
+          assert
+            (keeper_pause |> member "keeper_name_discovery_read_error_count"
+             = `Int 1);
+          let read_errors = keeper_pause |> member "read_errors" |> to_list in
+          assert (List.length read_errors = 1);
+          (match read_errors with
+           | [ error ] ->
+               assert
+                 (error |> member "source" |> to_string
+                  = "keeper_names_result");
+               assert
+                 (contains_substring
+                    (error |> member "error" |> to_string)
+                    "keepers")
+           | _ -> failwith "expected one keeper discovery read error")
       | None -> failwith "dispatch returned None")
 
 let () =

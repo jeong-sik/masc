@@ -1,13 +1,16 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardScheduledAutomation } from '../../api'
+import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
   tool_inventory: { tools: unknown[] }
   tool_usage: Record<string, unknown>
+  config_resolution?: Record<string, unknown> | null
+  runtime_resolution?: Record<string, unknown> | null
   scheduled_automation?: DashboardScheduledAutomation
+  keeper_waiting_inventory?: DashboardKeeperWaitingInventory
 }
 
 const mocks = vi.hoisted(() => ({
@@ -81,6 +84,49 @@ function sampleAutomation(): DashboardScheduledAutomation {
   }
 }
 
+function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
+  return {
+    schema: 'masc.dashboard.keeper_waiting_inventory.v1',
+    source: 'server_keeper_waiting_inventory',
+    generated_at: '2026-07-04T00:00:00Z',
+    supported_states: ['idle', 'busy', 'waiting', 'deferred'],
+    keeper_count: 1,
+    waiting_keeper_count: 1,
+    row_count: 1,
+    global_row_count: 1,
+    global_pending_confirm_count: 1,
+    source_counts: {
+      schedule_waiting: 1,
+      hitl_pending: 1,
+    },
+    keepers: [
+      {
+        keeper_name: 'sangsu',
+        state: 'waiting',
+        waiting_count: 1,
+        sources: { hitl_pending: 1 },
+        waiting_on: [
+          {
+            keeper_name: 'sangsu',
+            source: 'hitl_pending',
+            waiting_on: 'schedule approval',
+            since_iso: '2026-07-04T00:00:00Z',
+            next_action: 'operator_decision',
+          },
+        ],
+      },
+    ],
+    global_waiting_on: [
+      {
+        source: 'schedule_waiting',
+        waiting_on: 'masc.board_post',
+        due_at_iso: '2026-07-04T01:00:00Z',
+        next_action: 'schedule_runner_dispatch',
+      },
+    ],
+  }
+}
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -112,19 +158,20 @@ describe('ScheduleSurface', () => {
     expect(mocks.loadTools).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="schedule-surface"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
-      .toContain('관측 전용')
+      .toContain('운영자 승인')
     expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
-      .toContain('keeper turn을 자동 구동하지 않습니다')
+      .toContain('keeper turn을 직접 구동하지 않습니다')
     expect(container.textContent).toContain('예약 자동화')
     expect(container.textContent).toContain('예약 자동화 projection 없음')
   })
 
-  it('renders backed schedule summary and reuses read-only schedule cards', async () => {
+  it('renders backed schedule summary and reuses schedule cards with operator decision detail actions', async () => {
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
       scheduled_automation: sampleAutomation(),
+      keeper_waiting_inventory: sampleWaitingInventory(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -146,6 +193,12 @@ describe('ScheduleSurface', () => {
     expect(summary?.textContent).not.toContain('승인 차단')
     // The wake-signal feed header is renamed in v2.
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+      .toContain('Keeper Waiting Inventory')
+    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+      .toContain('sangsu')
+    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+      .toContain('masc.board_post')
     // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
     // the v2 surface (it is diagnostics-only); no equivalent element exists to
     // retarget, so this coverage is dropped rather than weakened.
@@ -154,6 +207,79 @@ describe('ScheduleSurface', () => {
     // KeeperActionCell — so this coverage is dropped (genuinely gone from v2).
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
+
+    container
+      .querySelector('[data-schedule-detail="sched-1"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+
+    expect(container.querySelector('[data-schedule-detail-panel="sched-1"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-mutation="approve"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-mutation="reject"]')).not.toBeNull()
+    const cancel = container.querySelector('[data-schedule-mutation="cancel"]') as HTMLButtonElement | null
+    expect(cancel).not.toBeNull()
+    expect(cancel?.disabled).toBe(true)
+  })
+
+  it('surfaces runtime truth warnings on the schedule screen', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      runtime_resolution: {
+        status: 'warn',
+        source_mismatch: true,
+        server_workspace_mismatch: false,
+        server_repo_git_commit: '4c2e022afd123456',
+        workspace_git_commit: '4c2e022afd123456',
+        generated_at: '2026-07-04T09:47:34Z',
+        build: {
+          release_version: '0.19.55',
+          commit: 'ad6f4e11ff987654',
+          started_at: '2026-07-04T08:30:39Z',
+          uptime_seconds: 120,
+        },
+      },
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const notice = container.querySelector('[data-testid="schedule-runtime-truth-notice"]')
+    expect(notice).not.toBeNull()
+    expect(notice?.textContent).toContain('runtime truth')
+    expect(notice?.textContent).toContain('runtime warn')
+    expect(notice?.textContent).toContain('source mismatch')
+    expect(notice?.textContent).toContain('build ad6f4e11ff')
+    expect(notice?.textContent).toContain('source 4c2e022afd')
+    expect(notice?.textContent).toContain('2026-07-04T08:30:39Z')
+    expect(notice?.querySelector('[data-status-chip]')?.getAttribute('data-status-chip-tone')).toBe('bad')
+  })
+
+  it('does not infer runtime truth severity from status substrings', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      runtime_resolution: {
+        status: 'warning_invalid_label',
+        source_mismatch: false,
+        server_workspace_mismatch: false,
+        server_repo_git_commit: '4c2e022afd123456',
+        workspace_git_commit: '4c2e022afd123456',
+        generated_at: '2026-07-04T09:47:34Z',
+      },
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const notice = container.querySelector('[data-testid="schedule-runtime-truth-notice"]')
+    expect(notice).not.toBeNull()
+    expect(notice?.textContent).toContain('runtime warning_invalid_label')
+    expect(notice?.querySelector('[data-status-chip]')?.getAttribute('data-status-chip-tone')).toBe('warn')
   })
 
   it('renders the read-only operations aside in a two-column shell', async () => {
@@ -172,7 +298,7 @@ describe('ScheduleSurface', () => {
     const aside = container.querySelector('[data-testid="schedule-aside"]')
     expect(aside).not.toBeNull()
     expect(aside?.querySelector('.wka-pulse')).not.toBeNull()
-    // The aside is derived read-only: no mutation controls anywhere on the surface.
+    // The aside is derived read-only; opening detail owns operator mutations.
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
 

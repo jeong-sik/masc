@@ -158,12 +158,6 @@ let summary_text_result_of_response response =
      | Ok json -> summary_text_result_of_json json
      | Error detail -> Error (Invalid_structured_response detail))
 
-let summary_text_of_response response =
-  match summary_text_result_of_response response with
-  | Ok summary -> Some summary
-  | Error _ -> None
-;;
-
 type 'a timeout_result =
   | Completed of 'a
   | Timed_out
@@ -242,7 +236,6 @@ let summarize_with_provider
   result
 
 module For_testing = struct
-  let summary_text_of_response = summary_text_of_response
   let summary_text_result_of_response = summary_text_result_of_response
   let record_summary_outcome = record_summary_outcome
   let summarize_with_provider = summarize_with_provider

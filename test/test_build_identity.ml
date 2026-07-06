@@ -1,5 +1,17 @@
 open Masc
 
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let git_output repo_root args =
+  let argv = Array.of_list ("git" :: "-C" :: repo_root :: args) in
+  let ic = Unix.open_process_args_in "git" argv in
+  let output = In_channel.input_all ic in
+  match Unix.close_process_in ic with
+  | status when process_exit_code status = 0 -> String_util.trim_to_option output
+  | _ -> None
+
 let test_resolve_commit_prefers_env () =
   let probe_called = ref false in
   let commit =
@@ -24,6 +36,7 @@ let test_resolve_commit_details_splits_env_and_repo_head () =
   let details =
     Build_identity.resolve_commit_details
       ~env_value:(Some " abc12345 ")
+      ~stamp_value:(Some " cafebabe ")
       ~probe:(fun () -> Some "deadbeef")
   in
   Alcotest.(check (option string)) "compat commit uses env"
@@ -38,6 +51,24 @@ let test_resolve_commit_details_splits_env_and_repo_head () =
     (Some "deadbeef") details.repo_head_commit;
   Alcotest.(check (option string)) "repo head source"
     (Some "runtime_repo_head") details.repo_head_commit_source
+
+let test_resolve_commit_details_uses_build_stamp_when_env_missing () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~env_value:None
+      ~stamp_value:(Some " cafebabe ")
+      ~probe:(fun () -> Some "deadbeef")
+  in
+  Alcotest.(check (option string)) "compat commit uses stamped binary"
+    (Some "cafebabe") details.commit;
+  Alcotest.(check (option string)) "commit source is stamp"
+    (Some "executable_build_commit_stamp") details.commit_source;
+  Alcotest.(check (option string)) "binary commit uses stamp"
+    (Some "cafebabe") details.binary_commit;
+  Alcotest.(check (option string)) "binary source is stamp"
+    (Some "executable_build_commit_stamp") details.binary_commit_source;
+  Alcotest.(check (option string)) "repo head still surfaced"
+    (Some "deadbeef") details.repo_head_commit
 
 let test_resolve_commit_details_marks_repo_head_fallback () =
   let details =
@@ -196,6 +227,24 @@ let test_commit_ts_git_status_failure_is_observed () =
         true
         (after >= before +. 1.0)
 
+let test_stamp_commit_verifier_requires_git_commit_object () =
+  match Build_identity.repo_root () with
+  | None -> ()
+  | Some repo_root ->
+      (match git_output repo_root [ "rev-parse"; "--short"; "HEAD" ] with
+       | None -> ()
+       | Some head ->
+           Alcotest.(check bool)
+             "current HEAD is accepted as a commit object"
+             true
+             (Build_identity.For_testing.stamp_commit_exists_in_runtime_repo_roots
+                head));
+      Alcotest.(check bool)
+        "arbitrary stamp text is rejected"
+        false
+        (Build_identity.For_testing.stamp_commit_exists_in_runtime_repo_roots
+           "not-a-commit")
+
 let () =
   Alcotest.run "build_identity"
     [
@@ -207,6 +256,8 @@ let () =
             test_resolve_commit_uses_probe_when_env_missing;
           Alcotest.test_case "resolve commit details splits env and repo head"
             `Quick test_resolve_commit_details_splits_env_and_repo_head;
+          Alcotest.test_case "resolve commit details uses build stamp" `Quick
+            test_resolve_commit_details_uses_build_stamp_when_env_missing;
           Alcotest.test_case
             "resolve commit details marks repo head fallback" `Quick
             test_resolve_commit_details_marks_repo_head_fallback;
@@ -233,5 +284,7 @@ let () =
             test_probe_failure_observer_increments_metric;
           Alcotest.test_case "git status failure increments metric" `Quick
             test_commit_ts_git_status_failure_is_observed;
+          Alcotest.test_case "stamp commit verifier requires git commit object"
+            `Quick test_stamp_commit_verifier_requires_git_commit_object;
         ] );
     ]

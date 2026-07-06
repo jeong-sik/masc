@@ -142,6 +142,70 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 let metric_tool_metrics_persist_dropped =
   Otel_metric_store_core.declare_counter "masc_tool_metrics_persist_dropped_total"
 
+(* RFC-0234 schedule runner liveness. The runner is the production caller that
+   turns durable schedule rows into signals/dispatches; these metrics expose
+   tick health without grepping server logs. Labels:
+   - tick_total: result in {ok,error,crash}
+   - dispatch_total: status in {succeeded,failed,unsupported,start_rejected}. *)
+let metric_schedule_runner_tick_total =
+  Otel_metric_store_core.declare_counter "masc_schedule_runner_tick_total"
+
+let metric_schedule_runner_tick_duration_seconds =
+  "masc_schedule_runner_tick_duration_seconds"
+
+let metric_schedule_runner_dispatch_total =
+  Otel_metric_store_core.declare_counter "masc_schedule_runner_dispatch_total"
+
+let metric_schedule_runner_due_lag_seconds =
+  "masc_schedule_runner_due_lag_seconds"
+
+let metric_schedule_runner_dispatch_duration_seconds =
+  "masc_schedule_runner_dispatch_duration_seconds"
+
+let metric_schedule_payload_unsupported_total =
+  Otel_metric_store_core.declare_counter "masc_schedule_payload_unsupported_total"
+
+let metric_schedule_signal_read_error_total =
+  Otel_metric_store_core.declare_counter "masc_schedule_signal_read_error_total"
+
+let metric_schedule_approval_blocked_count =
+  "masc_schedule_approval_blocked_count"
+
+let metric_schedule_approval_wait_seconds =
+  "masc_schedule_approval_wait_seconds"
+
+(* RFC-0290 / P5: background task completion wake producer. Labels:
+   - kind in {subprocess}
+   - outcome in {ok,failed}
+   The task id and exit status are intentionally not metric labels; they live
+   in structured logs / wake payloads to keep cardinality bounded. *)
+let metric_keeper_bg_completion_wake_total =
+  Otel_metric_store_core.declare_counter "masc_keeper_bg_completion_wake_total"
+
+(* P5/G8: keeper wake event-queue receipts. Labels:
+   - enqueue_total: keeper, source, outcome in {queued, persisted, duplicate}
+   - consume_total: keeper, source, outcome in {completed, requeued}
+   - delay_seconds: keeper, source for completed consumption only.
+   [source] is derived from the closed [Keeper_event_queue.stimulus_payload]
+   variant label; unbounded ids remain in the durable stimulus payload/logs. *)
+let metric_keeper_wake_enqueue_total =
+  Otel_metric_store_core.declare_counter "masc_keeper_wake_enqueue_total"
+
+let metric_keeper_wake_consume_total =
+  Otel_metric_store_core.declare_counter "masc_keeper_wake_consume_total"
+
+let metric_keeper_wake_delay_seconds = "masc_keeper_wake_delay_seconds"
+
+(* P2/G8: waiting inventory snapshot metrics. Labels are bounded:
+   - waiting_count: scope in {keeper,global}, source in waiting_source labels
+   - waiting_age_seconds: scope in {keeper,global}, source in waiting_source labels
+   - waiting_keeper_count: state in {idle,waiting,deferred}. *)
+let metric_keeper_waiting_count = "masc_keeper_waiting_count"
+
+let metric_keeper_waiting_age_seconds = "masc_keeper_waiting_age_seconds"
+
+let metric_keeper_waiting_keeper_count = "masc_keeper_waiting_keeper_count"
+
 let metric_tool_bind_required_guard =
   Otel_metric_store_core.declare_counter "masc_tool_bind_required_guard_total"
 

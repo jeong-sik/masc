@@ -15,7 +15,11 @@ let cleanup_dir dir =
         Unix.rmdir path)
       else Unix.unlink path
   in
-  try rm dir with _ -> ()
+  try rm dir with
+  | Sys_error _ | Unix.Unix_error _ -> ()
+
+let check_error_prefix ~label ~prefix msg =
+  check bool label true (String.starts_with ~prefix msg)
 
 let test_explicit_raw () =
   check string "explicit raw" "alice" (na ~context_actor:"" (Some "alice"))
@@ -58,14 +62,15 @@ let test_upsert_reports_persistence_failure () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       Workspace_utils.mkdir_p (Opc.operator_dir config);
-      Unix.mkdir (Opc.pending_confirms_path config) 0o755;
+      let path = Opc.pending_confirms_path config in
+      Unix.mkdir path 0o755;
       match Opc.upsert_pending_confirm config (pending_confirm_fixture "token-upsert") with
       | Ok () -> fail "upsert should report persistence failure"
       | Error msg ->
-          check bool "error mentions local write" true
-            (String.contains msg ':'
-            && String.contains msg Filename.dir_sep.[0]
-            && String.length msg > 0))
+          check_error_prefix
+            ~label:"error reports local write"
+            ~prefix:(Printf.sprintf "local write failed for %s:" path)
+            msg)
 
 let test_remove_reports_persistence_failure () =
   let base_dir = temp_dir () in
@@ -77,18 +82,37 @@ let test_remove_reports_persistence_failure () =
       (match
          Opc.write_pending_confirms config
            [ pending_confirm_fixture "token-remove" ]
-       with
+      with
       | Ok () -> ()
       | Error msg -> fail msg);
-      Sys.remove (Opc.pending_confirms_path config);
-      Unix.mkdir (Opc.pending_confirms_path config) 0o755;
+      let path = Opc.pending_confirms_path config in
+      Sys.remove path;
+      Unix.mkdir path 0o755;
       match Opc.remove_pending_confirm config "token-remove" with
       | Ok () -> fail "remove should report persistence failure"
       | Error msg ->
-          check bool "error mentions local write" true
-            (String.contains msg ':'
-            && String.contains msg Filename.dir_sep.[0]
-            && String.length msg > 0))
+          check_error_prefix
+            ~label:"error reports local write"
+            ~prefix:(Printf.sprintf "local write failed for %s:" path)
+            msg)
+
+let test_upsert_refuses_corrupt_existing_state () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      Workspace_utils.mkdir_p (Opc.operator_dir config);
+      let path = Opc.pending_confirms_path config in
+      Fs_compat.save_file path "{not json";
+      match Opc.upsert_pending_confirm config (pending_confirm_fixture "token-corrupt") with
+      | Ok () -> fail "upsert should refuse corrupt existing state"
+      | Error msg ->
+          check_error_prefix
+            ~label:"error reports pending-confirm read failure"
+            ~prefix:"pending confirms read failed:"
+            msg;
+          check string "corrupt file preserved" "{not json" (Fs_compat.load_file path))
 
 let tests =
   [
@@ -101,6 +125,7 @@ let tests =
     test_case "whitespace context returns unknown" `Quick test_whitespace_context_returns_unknown;
     test_case "upsert reports persistence failure" `Quick test_upsert_reports_persistence_failure;
     test_case "remove reports persistence failure" `Quick test_remove_reports_persistence_failure;
+    test_case "upsert refuses corrupt existing state" `Quick test_upsert_refuses_corrupt_existing_state;
   ]
 
 let () = run "normalized_actor" [ ("normalized_actor", tests) ]

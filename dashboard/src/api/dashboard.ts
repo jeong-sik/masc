@@ -188,6 +188,7 @@ export type {
   DashboardScheduledAutomationFsm,
   DashboardScheduledAutomationExecution,
   DashboardScheduledAutomationDispatchReceipt,
+  DashboardScheduledAutomationKeeperQueueEvidence,
   DashboardScheduledAutomationKeeperToolStatus,
   DashboardScheduledAutomationActor,
   DashboardScheduledAutomationSignal,

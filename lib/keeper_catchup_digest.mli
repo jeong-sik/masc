@@ -18,10 +18,24 @@ val digest_items_cap : int
 (** Upper bound on each [items] array ([tasks], [lifecycle]). The sibling
     count fields stay full counts, independent of this cap. *)
 
+type task_snapshot =
+  { title : string
+  ; status : string
+  ; assignee : string option
+  ; phase : string option
+  ; verifier : string option
+  ; submitted_at : string option
+  ; verification_id : string option
+  ; handoff_summary : string option
+  ; handoff_next_step : string option
+  ; handoff_evidence_refs : string list
+  }
+
 type task_item =
   { task_id : string
   ; transition : string
   ; ts : float
+  ; current_task : task_snapshot option
   }
 
 type lifecycle_item =

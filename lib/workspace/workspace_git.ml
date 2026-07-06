@@ -13,22 +13,18 @@ let exec_gate_raw_source argv =
 (* ============================================ *)
 
 (** Run argv and return first non-empty line. *)
-let run_argv_line
-      ?(timeout_sec = Env_config_runtime.Workspace_git.local_op_timeout_sec)
-      (argv : string list) : string option =
+let run_argv_line (argv : string list) : string option =
   let output =
     Masc_exec.Exec_gate.run_argv
       ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"workspace_git argv"
-      ~timeout_sec argv
+      ~timeout_sec:Env_config_runtime.Workspace_git.local_op_timeout_sec
+      argv
   in
   match String.split_on_char '\n' output |> List.map String.trim |> List.filter (fun s -> s <> "") with
       | [] -> None
       | h :: _ -> Some h
-
-let git_first_line ?timeout_sec ~repo_path args =
-  run_argv_line ?timeout_sec ("git" :: "-C" :: repo_path :: args)
 
 (** Run argv and return exit code.
     [timeout_sec] defaults to {!Env_config_runtime.Workspace_git.local_op_timeout_sec}
@@ -49,6 +45,9 @@ let run_argv_exit
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
+
+let git_first_line ~repo_path args =
+  run_argv_line ("git" :: "-C" :: repo_path :: args)
 
 (* ============================================ *)
 (* Input Validation                             *)

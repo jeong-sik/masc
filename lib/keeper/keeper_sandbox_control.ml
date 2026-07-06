@@ -483,8 +483,14 @@ let git_string_opt repo_path args =
   Cancel_safe.protect
     ~on_exn:(fun _ -> None)
     (fun () ->
-      Workspace_git.git_first_line ~timeout_sec:git_metadata_timeout_sec
-        ~repo_path args)
+      match
+        Repo_git.run_git ~cwd:repo_path
+          ~timeout_sec:git_metadata_timeout_sec args
+      with
+      | Ok (line :: _) ->
+          let trimmed = String.trim line in
+          if String.equal trimmed "" then None else Some trimmed
+      | Ok [] | Error _ -> None)
 
 let enrich_playground_repo_from_git
       ~(source : string) ~(repo_name : string) ~(repo_path : string)

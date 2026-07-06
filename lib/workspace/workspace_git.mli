@@ -19,13 +19,6 @@ val has_git_marker : string -> bool
     when the path is outside any git repo or git fails. *)
 val git_root : base_path:string -> string option
 
-(** [git_first_line ?timeout_sec ~repo_path args] runs [git -C repo_path args]
-    through the workspace git execution wrapper and returns the first non-empty
-    stdout line.  Failures raise from the underlying process wrapper; callers
-    that treat metadata as optional should catch them explicitly. *)
-val git_first_line :
-  ?timeout_sec:float -> repo_path:string -> string list -> string option
-
 (** [is_git_repo ~base_path] is [true] when {!git_root} succeeds. *)
 val is_git_repo : base_path:string -> bool
 

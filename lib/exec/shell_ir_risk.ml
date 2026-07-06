@@ -619,6 +619,55 @@ let table_risk_of_gh_family (command : string) (action : string) : risk_class =
     R1_Reversible_mutation
   else R0_Read
 
+(* Well-known gh read actions shared across families ([gh pr view], [gh repo
+   list], [gh run view], [gh pr diff], [gh pr checks], ...). Kept deliberately
+   TIGHT: an action wrongly omitted here is only over-gated to non-blocking
+   approval (safe), whereas an action wrongly included would let an unrecognized
+   mutation auto-run as a read. *)
+let gh_read_actions =
+  [ "view"; "list"; "status"; "diff"; "checks"; "browse"; "download" ]
+;;
+
+let gh_action_is_known_read (action : string) : bool =
+  List.mem (String.lowercase_ascii action) gh_read_actions
+;;
+
+(* Typed classification of a gh verb, shared by [risk_of_gh_verb] (risk axis)
+   and [Gh_capability_policy.disposition_of] (capability axis) so both read one
+   source. This closes the known-family-unknown-action gap: an action on a
+   mutating-capable family that is neither a table mutation nor a known read is
+   [Gh_unrecognized_action] — the risk axis keeps it R0 (its reversibility is
+   genuinely unknown; fabricating R1/R2 would be the #23362 policy-as-risk
+   mistake), while the capability axis routes it to non-blocking approval rather
+   than auto-running it as a read. *)
+type gh_verb_class =
+  | Gh_read (* known read action, or a bare family invocation *)
+  | Gh_reversible_mutation (* action in the reversible table *)
+  | Gh_irreversible_mutation (* action in the irreversible table *)
+  | Gh_unrecognized_action
+      (* known mutating-capable family, action neither a mutation nor a read *)
+  | Gh_string_borne (* [gh api]: risk is the -X method / graphql body (floor) *)
+  | Gh_unrecognized_family (* [Gh_verb.Other] *)
+
+let classify_gh_verb (v : Gh_verb.t) : gh_verb_class =
+  match v.Gh_verb.family with
+  | Gh_verb.Api -> Gh_string_borne
+  | Gh_verb.Other _ -> Gh_unrecognized_family
+  | ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+    | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
+    | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
+    | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as fam ->
+    (match v.Gh_verb.action with
+     | None -> Gh_read (* bare family: a read *)
+     | Some action ->
+       let command = Gh_verb.family_token fam in
+       if in_table repo_hosting_cli_irreversible_ops command action then
+         Gh_irreversible_mutation
+       else if in_table repo_hosting_cli_reversible_mutations command action then
+         Gh_reversible_mutation
+       else if gh_action_is_known_read action then Gh_read
+       else Gh_unrecognized_action)
+
 (* RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command.
 
    [risk_of_gh_verb] is the closed-sum lens over [classify_repo_hosting_cli]:
@@ -636,33 +685,29 @@ let table_risk_of_gh_family (command : string) (action : string) : risk_class =
      floor ([classify]'s [max_risk] with [classify_repo_hosting_cli]) own it,
      exactly as RFC-0208 requires.
    - a known family with a table-absent action ([gh pr view], [gh repo list]):
-     table-absent actions in a known family are overwhelmingly reads, and we
-     cannot distinguish a read from an unknown action without a reads table.
-     Fail-closing them would over-block reads, so they stay [R0_Read]. The
-     residual "known-family unknown-action" case (e.g. [gh repo upsert-magic])
-     is therefore NOT fail-closed by W1; it is deferred to W3, where an unknown
-     action routes to non-blocking approval instead of a read or a hard deny.
+     a KNOWN read stays [R0_Read]. An UNRECOGNIZED action
+     ([Gh_unrecognized_action], e.g. [gh repo upsert-magic]) also stays
+     [R0_Read] on the RISK axis — its reversibility is genuinely unknown, and
+     fabricating R1/R2 here would repeat #23362's policy-as-risk mistake. The
+     gating of unrecognized actions is a CAPABILITY decision
+     ([Gh_capability_policy.disposition_of] -> [Requires_approval]), not a risk
+     claim; both read [classify_gh_verb] so they cannot disagree.
 
    This function is the capability-identity substrate for W2 (per-keeper policy)
    and W3 (approval routing). It never returns [Destructive_protected]: gh ops
    are R0/R1/R2 only, and [Destructive_protected] is the one class the dispatch
    layer special-cases. *)
 let risk_of_gh_verb (v : Gh_verb.t) : risk_class =
-  match v.Gh_verb.family with
+  match classify_gh_verb v with
   (* string-borne: -X METHOD / graphql body owned by the word-list floor. *)
-  | Gh_verb.Api -> R0_Read
+  | Gh_string_borne -> R0_Read
   (* fail-closed: unrecognized gh area is not a known read shape. *)
-  | Gh_verb.Other _ -> R2_Irreversible
-  | ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
-    | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
-    | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
-    | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as fam ->
-    (* [None] is a bare family invocation ([gh repo]) — a read, not a hidden
-       default. Matched explicitly rather than collapsed to an empty-string
-       default so the "no action" case is a decision, not a silent fold. *)
-    (match v.Gh_verb.action with
-     | None -> R0_Read
-     | Some action -> table_risk_of_gh_family (Gh_verb.family_token fam) action)
+  | Gh_unrecognized_family -> R2_Irreversible
+  | Gh_read -> R0_Read
+  | Gh_reversible_mutation -> R1_Reversible_mutation
+  | Gh_irreversible_mutation -> R2_Irreversible
+  (* Risk genuinely unknown; capability axis gates it. Not fabricated to R1/R2. *)
+  | Gh_unrecognized_action -> R0_Read
 
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)

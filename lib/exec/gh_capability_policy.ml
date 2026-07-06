@@ -36,21 +36,30 @@ let creates_durable_remote_surface (v : Gh_verb.t) : bool =
 ;;
 
 let disposition_of (v : Gh_verb.t) : disposition =
-  match v.Gh_verb.family with
-  (* Unrecognized area: a human adjudicates. Never silently allowed. This is
-     the capability-axis counterpart of risk_of_gh_verb's Other -> R2
-     fail-close: on the risk axis Other floors, on the capability axis it asks. *)
-  | Gh_verb.Other _ -> Requires_approval
-  | Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
-  | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
-  | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run
-  | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Api ->
+  match Shell_ir_risk.classify_gh_verb v with
+  (* Unrecognized top-level area: a human adjudicates. Never silently allowed. *)
+  | Shell_ir_risk.Gh_unrecognized_family -> Requires_approval
+  (* Known mutating-capable family with an action that is neither a known read
+     nor a table mutation (e.g. [gh repo upsert-magic]). Closing this is the
+     point of the fix: instead of auto-running as an R0 read, it asks. *)
+  | Shell_ir_risk.Gh_unrecognized_action -> Requires_approval
+  (* Reads and bare invocations: allowed. *)
+  | Shell_ir_risk.Gh_read -> Allowed
+  (* Irreversible mutations are also risk-floored (R2/Destructive): denied. *)
+  | Shell_ir_risk.Gh_irreversible_mutation -> Denied
+  (* Reversible mutation: approval only when it touches a durable remote
+     surface (repo/discussion mutating action); otherwise allowed. *)
+  | Shell_ir_risk.Gh_reversible_mutation ->
+    if creates_durable_remote_surface v then Requires_approval else Allowed
+  (* [gh api]: the capability axis defers to risk (string-borne). A read-shaped
+     api call is Allowed; a destructive -X/graphql is R2 and denied by the floor
+     and by risk_of_gh_verb via the word-list, handled in the risk projection. *)
+  | Shell_ir_risk.Gh_string_borne ->
     (match Shell_ir_risk.risk_of_gh_verb v with
      | Shell_ir_risk.R2_Irreversible | Shell_ir_risk.Destructive_protected ->
        Denied
-     | Shell_ir_risk.R0_Read -> Allowed
-     | Shell_ir_risk.R1_Reversible_mutation ->
-       if creates_durable_remote_surface v then Requires_approval else Allowed)
+     | Shell_ir_risk.R1_Reversible_mutation -> Requires_approval
+     | Shell_ir_risk.R0_Read -> Allowed)
 ;;
 
 (* Body-aware disposition. [disposition_of] keys on the typed [Gh_verb.t] alone,

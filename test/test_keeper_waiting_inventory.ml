@@ -148,7 +148,7 @@ let external_attention_item ~keeper_name index : Keeper_external_attention.item 
 let record_external_attention_exn config ~keeper_name index =
   match
     Keeper_external_attention.record
-      ~base_path:config.Workspace_utils.base_path
+      ~base_path:config.Workspace_utils_backend_setup.base_path
       (external_attention_item ~keeper_name index)
   with
   | `Recorded -> ()
@@ -187,11 +187,11 @@ let test_event_queue_pending_and_inflight_are_visible () =
     stimulus ~post_id:"inflight-1" ~arrived_at:110.0 Keeper_event_queue.No_progress_recovery
   in
   Keeper_event_queue_persistence.persist
-    ~base_path:config.Workspace_utils.base_path
+    ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
     (queue_of_list [ pending ]);
   Keeper_event_queue_persistence.record_inflight
-    ~base_path:config.Workspace_utils.base_path
+    ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name [ inflight ];
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "event pending metric"
@@ -297,7 +297,7 @@ let test_turn_admission_waiting_row_is_visible () =
       Eio.Fiber.fork ~sw (fun () ->
         match
           Keeper_turn_admission.run_if_free
-            ~base_path:config.Workspace_utils.base_path
+            ~base_path:config.Workspace_utils_backend_setup.base_path
             ~keeper_name
             (fun () ->
                Eio.Promise.resolve set_autonomous_started ();
@@ -309,7 +309,7 @@ let test_turn_admission_waiting_row_is_visible () =
       Eio.Fiber.fork ~sw (fun () ->
         match
           Keeper_turn_admission.run_serialized
-            ~base_path:config.Workspace_utils.base_path
+            ~base_path:config.Workspace_utils_backend_setup.base_path
             ~keeper_name
             (fun () -> ())
         with
@@ -420,11 +420,11 @@ let test_live_turn_keeper_is_busy_without_waiting_rows () =
     (fun () ->
       ignore
         (Keeper_registry.register
-           ~base_path:config.Workspace_utils.base_path
+           ~base_path:config.Workspace_utils_backend_setup.base_path
            keeper_name
            meta);
       Keeper_registry.mark_turn_started
-        ~base_path:config.Workspace_utils.base_path
+        ~base_path:config.Workspace_utils_backend_setup.base_path
         keeper_name;
       let json = Server_keeper_waiting_inventory.dashboard_json config in
       check_metric_float "busy keeper metric"
@@ -529,7 +529,7 @@ let test_corrupt_external_attention_is_read_error () =
   ensure_keeper config keeper_name;
   save_text
     (Keeper_external_attention.attention_path
-       ~base_path:config.Workspace_utils.base_path
+       ~base_path:config.Workspace_utils_backend_setup.base_path
        ~keeper_name)
     "{not-json\n";
   let json = Server_keeper_waiting_inventory.dashboard_json config in

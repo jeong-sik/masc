@@ -860,7 +860,11 @@ let add_routes ~sw ~clock router =
              let* args = json_upsert_string_field "author" author args in
              let* args =
                if String.equal author (String.trim agent_name) then Ok args
-               else json_ensure_meta_string_field "author_raw_agent_name" agent_name args
+               else
+                 json_ensure_meta_string_field
+                   Board_tool.author_raw_agent_name_meta_key
+                   agent_name
+                   args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
              let result = Board_tool.handle_tool "masc_board_post" args in

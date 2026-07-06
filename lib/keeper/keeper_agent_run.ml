@@ -429,6 +429,18 @@ let run_turn
           [
             ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
             ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
+            ( "pre_dispatch_compaction_trigger",
+              match ctx.pre_dispatch_compaction_trigger with
+              | None -> `Null
+              | Some trigger -> `String trigger );
+            ( "pre_dispatch_compaction_before_tokens",
+              match ctx.pre_dispatch_compaction_before_tokens with
+              | None -> `Null
+              | Some tokens -> `Int tokens );
+            ( "pre_dispatch_compaction_after_tokens",
+              match ctx.pre_dispatch_compaction_after_tokens with
+              | None -> `Null
+              | Some tokens -> `Int tokens );
             ( "pre_dispatch_checkpoint_error",
               match pre_dispatch_checkpoint_error with
               | None -> `Null

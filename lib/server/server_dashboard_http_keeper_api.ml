@@ -765,6 +765,161 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
       ] )
 ;;
 
+let compaction_audit_trigger ~fallback value =
+  let value = String.trim value in
+  if String.equal value "" then fallback else value
+;;
+
+let compaction_audit_item_of_complete ~keeper_id
+    ~(complete : Keeper_compact_audit.complete_record) ?start () =
+  let trigger =
+    match start with
+    | Some (start : Keeper_compact_audit.start_record) ->
+      compaction_audit_trigger
+        ~fallback:(Keeper_compact_audit.trigger_to_string start.trigger)
+        complete.phase_hint
+    | None -> compaction_audit_trigger ~fallback:"orphan_complete" complete.phase_hint
+  in
+  compaction_snapshot_item_json
+    { id = "compact_audit:" ^ complete.compaction_id
+    ; keeper_id
+    ; ts_iso = Masc_domain.iso8601_of_unix_seconds complete.ts_unix
+    ; ts_unix = Some complete.ts_unix
+    ; trace_id = None
+    ; keeper_turn_id = None
+    ; source = "compact_audit"
+    ; trigger
+    ; runtime_id = None
+    ; before_tokens = Some complete.before_tokens
+    ; after_tokens = Some complete.after_tokens
+    ; saved_tokens = Some complete.tokens_freed
+    ; compaction_id = Some complete.compaction_id
+    ; compaction_source = Some "harness_compact"
+    ; status =
+        (match start with
+         | Some _ -> "completed"
+         | None -> "orphan_complete")
+    ; links = `Assoc []
+    }
+;;
+
+let compaction_audit_items_of_pairs ~keeper_id pairs =
+  pairs
+  |> List.filter_map (function
+    | Keeper_compact_audit.Paired { start; complete } ->
+      Some
+        (compaction_audit_item_of_complete
+           ~keeper_id
+           ~complete
+           ?start:(Some start)
+           ())
+    | Keeper_compact_audit.Orphan_complete complete ->
+      Some (compaction_audit_item_of_complete ~keeper_id ~complete ())
+    | Keeper_compact_audit.Orphan_start _ -> None)
+;;
+
+let compaction_snapshot_dedupe_strings values =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | value :: rest ->
+      if List.exists (String.equal value) seen then loop seen acc rest
+      else loop (value :: seen) (value :: acc) rest
+  in
+  loop [] [] values
+;;
+
+let compaction_audit_keeper_names ~config ~keeper_id =
+  match Keeper_meta_store.read_meta config keeper_id with
+  | Ok (Some meta) ->
+    compaction_snapshot_dedupe_strings [ keeper_id; meta.agent_name ], []
+  | Ok None -> [ keeper_id ], []
+  | Error msg ->
+    ( [ keeper_id ]
+    , [ compaction_snapshot_read_error
+          ~scope:("keeper_meta:" ^ keeper_id)
+          ~error:msg
+      ] )
+;;
+
+let compaction_audit_snapshot_items ~config ~keeper_id =
+  let keeper_names, meta_read_errors =
+    compaction_audit_keeper_names ~config ~keeper_id
+  in
+  let until = Time_compat.now () in
+  let items, read_errors =
+    List.fold_left
+      (fun (items, read_errors) audit_keeper_name ->
+         match
+           Keeper_compact_audit.read_events
+             ~base_path:config.Workspace.base_path
+             ~since:0.0
+             ~until
+             ~keeper:audit_keeper_name
+             ()
+         with
+         | Ok rows ->
+           ( compaction_audit_items_of_pairs
+               ~keeper_id
+               (Keeper_compact_audit.pair_events rows)
+             @ items
+           , read_errors )
+         | Error (Keeper_compact_audit.Io_failure msg)
+         | Error (Keeper_compact_audit.Serialize_failure msg) ->
+           ( items
+           , compaction_snapshot_read_error
+               ~scope:("compact_audit:" ^ audit_keeper_name)
+               ~error:msg
+             :: read_errors ))
+      ([], meta_read_errors)
+      keeper_names
+  in
+  List.rev items, List.rev read_errors
+;;
+
+let compaction_snapshot_json_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+;;
+
+let compaction_snapshot_json_id item =
+  match compaction_snapshot_json_field "id" item with
+  | Some (`String value) -> Some value
+  | _ -> None
+;;
+
+let compaction_snapshot_json_sort_value item =
+  match compaction_snapshot_json_field "ts_unix" item with
+  | Some (`Float value) -> value
+  | Some (`Int value) -> float_of_int value
+  | _ ->
+    (match compaction_snapshot_json_field "ts_iso" item with
+     | Some (`String value) ->
+       Option.value (Masc_domain.parse_iso8601_opt value) ~default:0.0
+     | _ -> 0.0)
+;;
+
+let compaction_snapshot_dedupe_items items =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | item :: rest ->
+      (match compaction_snapshot_json_id item with
+       | Some id when List.exists (String.equal id) seen ->
+         loop seen acc rest
+       | Some id -> loop (id :: seen) (item :: acc) rest
+       | None -> loop seen (item :: acc) rest)
+  in
+  loop [] [] items
+;;
+
+let compaction_snapshot_sort_json_items items =
+  List.sort
+    (fun a b ->
+       Float.compare
+         (compaction_snapshot_json_sort_value b)
+         (compaction_snapshot_json_sort_value a))
+    items
+;;
+
 let compaction_snapshots_json ~config ~keeper_id ~limit =
   let limit = limit |> max 1 |> min compaction_snapshot_max_limit in
   let manifest_base_dir =
@@ -792,25 +947,32 @@ let compaction_snapshots_json ~config ~keeper_id ~limit =
         (compaction_snapshot_manifest_sort_value b)
         (compaction_snapshot_manifest_sort_value a))
     |> List.filter_map (compaction_snapshot_of_manifest_row ~keeper_id)
+  in
+  let audit_items, audit_read_errors =
+    compaction_audit_snapshot_items ~config ~keeper_id
+  in
+  let meta_item, meta_read_errors =
+    keeper_meta_compaction_snapshot_json ~config ~keeper_id
+  in
+  let items =
+    manifest_items
+    @ audit_items
+    @ (match meta_item with
+       | Some item -> [ item ]
+       | None -> [])
+    |> compaction_snapshot_sort_json_items
+    |> compaction_snapshot_dedupe_items
     |> compaction_snapshot_take limit
   in
-  let items, read_errors =
-    match manifest_items with
-    | [] ->
-      let meta_item, meta_read_errors =
-        keeper_meta_compaction_snapshot_json ~config ~keeper_id
-      in
-      (match meta_item with
-       | Some item -> [ item ], manifest_read_errors @ meta_read_errors
-       | None -> [], manifest_read_errors @ meta_read_errors)
-    | _ -> manifest_items, manifest_read_errors
+  let read_errors =
+    manifest_read_errors @ audit_read_errors @ meta_read_errors
   in
   log_compaction_snapshot_read_errors ~keeper_id read_errors;
   `Assoc
     [ "schema", `String "keeper.compaction_snapshots.v1"
     ; "keeper", `String keeper_id
-    ; "source", `String "runtime_manifest|keeper_meta"
-    ; "producer", `String "keeper_runtime_manifest|keeper_meta_store"
+    ; "source", `String "runtime_manifest|compact_audit|keeper_meta"
+    ; "producer", `String "keeper_runtime_manifest|keeper_compact_audit|keeper_meta_store"
     ; "limit", `Int limit
     ; "count", `Int (List.length items)
     ; "read_error_count", `Int (List.length read_errors)

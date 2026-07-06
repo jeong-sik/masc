@@ -5928,6 +5928,75 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       [ "before_prompt"; "after_prompt"; "prompt_text"; "context_text" ])
 ;;
 
+let test_compaction_snapshots_json_reads_compact_audit () =
+  with_temp_workspace_config (fun config ->
+    let keeper_id = "memory-panel-test" in
+    let compaction_id = "cmp-audit-42" in
+    let audit_path =
+      Filename.concat
+        (Filename.concat
+           (Filename.concat config.Masc.Workspace.base_path "data")
+           "harness-compact/1970-01")
+        "01.jsonl"
+    in
+    let start =
+      `Assoc
+        [ "record_type", `String "compaction_start"
+        ; "compaction_id", `String compaction_id
+        ; "ts_unix", `Float 1.0
+        ; "keeper_name", `String keeper_id
+        ; "trigger", `String "operator"
+        ; "correlation_id", `String "corr-audit"
+        ; "run_id", `String "run-audit"
+        ]
+    in
+    let complete =
+      `Assoc
+        [ "record_type", `String "compaction_complete"
+        ; "compaction_id", `String compaction_id
+        ; "ts_unix", `Float 2.0
+        ; "keeper_name", `String keeper_id
+        ; "before_tokens", `Int 77_000
+        ; "after_tokens", `Int 31_000
+        ; "tokens_freed", `Int 46_000
+        ; "phase_hint", `String "operator"
+        ; "correlation_id", `String "corr-audit"
+        ; "run_id", `String "run-audit"
+        ]
+    in
+    write_text_file
+      audit_path
+      (Yojson.Safe.to_string start ^ "\n" ^ Yojson.Safe.to_string complete ^ "\n");
+    let top =
+      Server_dashboard_http_keeper_api.compaction_snapshots_json
+        ~config
+        ~keeper_id
+        ~limit:10
+      |> json_assoc "compaction_snapshots"
+    in
+    Alcotest.(check int) "count" 1 (json_int_field "compaction_snapshots" top "count");
+    Alcotest.(check int)
+      "read errors"
+      0
+      (List.length (json_item_list "compaction_snapshots" top "read_errors"));
+    let item =
+      match json_item_list "compaction_snapshots" top "items" with
+      | [ item ] -> json_assoc "compaction_snapshots.items[0]" item
+      | items -> Alcotest.failf "expected one compaction item, got %d" (List.length items)
+    in
+    Alcotest.(check string)
+      "source"
+      "compact_audit"
+      (json_string_field "item" item "source");
+    Alcotest.(check int) "before" 77_000 (json_int_field "item" item "before_tokens");
+    Alcotest.(check int) "after" 31_000 (json_int_field "item" item "after_tokens");
+    Alcotest.(check int) "saved" 46_000 (json_int_field "item" item "saved_tokens");
+    Alcotest.(check string)
+      "compaction id"
+      compaction_id
+      (json_string_field "item" item "compaction_id"))
+;;
+
 let runtime_manifest_json_with_event row_json event =
   match row_json with
   | `Assoc fields ->
@@ -6334,9 +6403,13 @@ let () =
             `Quick
             test_compaction_snapshot_event_classifier_covers_typed_events
         ; Alcotest.test_case
-            "dashboard compaction snapshots read runtime manifest metadata only"
+            "dashboard compaction snapshots read runtime manifest metadata"
             `Quick
             test_compaction_snapshots_json_reads_runtime_manifest
+        ; Alcotest.test_case
+            "dashboard compaction snapshots read compact audit tokens"
+            `Quick
+            test_compaction_snapshots_json_reads_compact_audit
         ; Alcotest.test_case
             "dashboard compaction snapshots skip unrelated manifest events"
             `Quick

@@ -1388,13 +1388,49 @@ function liveSupportedEvidenceBannerClass(status: LiveSupportedEvidenceStatus): 
 }
 
 function SchLiveSupportedEvidence({
+  automation,
   evidence,
   onOpen,
 }: {
+  automation: DashboardScheduledAutomation
   evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence | null | undefined
   onOpen: (scheduleId: string) => void
 }) {
-  if (!evidence) return null
+  if (!evidence) {
+    const requestCount = automation.request_count ?? automation.requests?.length ?? 0
+    return html`
+      <section
+        class="sch-banner payload warn"
+        data-schedule-live-supported-evidence="projection_contract_missing"
+        data-schedule-live-supported-count="0"
+        data-schedule-live-supported-source=${automation.source ?? 'dashboard_response'}
+        data-schedule-live-supported-schema="missing"
+      >
+        <span class="sch-banner-ico">!</span>
+        <div class="sch-banner-txt">
+          <div>
+            <b>live supported scheduler evidence</b>
+            <span class="mono"> projection contract missing</span>
+          </div>
+          <div class="sch-banner-sub">
+            <span class="mono">live_supported_non_terminal_evidence</span>
+            was absent from the dashboard response; production-base
+            <span class="mono">matched_supported_non_terminal</span> is unproven.
+          </div>
+          <div class="sch-evidence-counts" aria-label="Live supported scheduler contract gap counts">
+            <span class="sch-evidence-count">
+              <span>requests</span>
+              <span class="mono">${requestCount.toLocaleString()}</span>
+            </span>
+            <span class="sch-evidence-count">
+              <span>contract</span>
+              <span class="mono">missing</span>
+            </span>
+          </div>
+        </div>
+      </section>
+    `
+  }
   const matchedIds = evidence.matched_schedule_ids ?? []
   const status = evidence.projection_status
   return html`
@@ -1829,6 +1865,7 @@ function SchedulePrototypeSurface({
         onOpen=${setSelectedScheduleId}
       />
       <${SchLiveSupportedEvidence}
+        automation=${automation}
         evidence=${automation.live_supported_non_terminal_evidence ?? null}
         onOpen=${setSelectedScheduleId}
       />
@@ -2184,6 +2221,7 @@ export function ScheduledAutomationPanel({
         : null}
 
       <${SchLiveSupportedEvidence}
+        automation=${automation}
         evidence=${automation.live_supported_non_terminal_evidence ?? null}
         onOpen=${setSelectedScheduleId}
       />

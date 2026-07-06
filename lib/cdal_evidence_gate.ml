@@ -80,7 +80,7 @@ let evidence_entry_satisfied
 
 let unsatisfied_required_evidence
     ~notes
-    ~handoff_context
+    ~(handoff_context : Masc_domain.task_handoff_context option)
     (contract : Masc_domain.task_contract option)
   =
   match contract with

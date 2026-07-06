@@ -9,37 +9,6 @@ open Server_utils
 open Masc_domain
 module Http = Http_server_eio
 
-(* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
-
-(** GET /api/v1/ide/observations/snapshot — returns accumulated observation
-    data (tool events, PR events, turn events, write regions, annotations)
-    from {!Agent_observation.peek_snapshot}.
-
-    Usage: ?take=true resets accumulators after read (destructive),
-           default is non-destructive peek.
-
-    Callers: IDE Observation Plane frontend for real-time dashboard. *)
-
-let observation_snapshot_handler request reqd =
-  let uri = Uri.of_string request.Httpun.Request.target in
-  let take =
-    match Uri.get_query_param uri "take" with
-    | Some "true" -> true
-    | _ -> false
-  in
-  let snapshot =
-    if take then Agent_observation.take_snapshot ()
-    else Agent_observation.peek_snapshot ()
-  in
-  let json = Agent_observation.snapshot_to_json snapshot in
-  let body = json_ok json in
-  let headers =
-    Http.Response.Headers.of_list
-      [ ("content-type", "application/json"); ("x-observation-mode", if take then "take" else "peek") ]
-  in
-  Http.respond ~headers ~body:(Yojson.Safe.to_string body) reqd
-;;
-
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
@@ -215,6 +184,39 @@ let resolve_partition_for_read ~state ~uri =
 ;;
 
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
+
+(* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
+
+(** GET /api/v1/ide/observations/snapshot — returns accumulated observation
+    data (tool events, PR events, turn events, write regions, annotations)
+    from {!Agent_observation.peek_snapshot}.
+
+    Usage: ?take=true resets accumulators after read (destructive),
+           default is non-destructive peek.
+
+    Callers: IDE Observation Plane frontend for real-time dashboard. *)
+let observation_snapshot_handler request reqd =
+  let uri = Uri.of_string request.Httpun.Request.target in
+  let take =
+    match Uri.get_query_param uri "take" with
+    | Some "true" -> true
+    | _ -> false
+  in
+  let snapshot =
+    if take then Agent_observation.take_snapshot ()
+    else Agent_observation.peek_snapshot ()
+  in
+  let json = Agent_observation.snapshot_to_json snapshot in
+  let body = json_ok json in
+  let headers =
+    Http.Response.Headers.of_list
+      [ ( "content-type", "application/json" )
+      ; ( "x-observation-mode", if take then "take" else "peek" )
+      ]
+  in
+  Http.respond ~headers ~body:(Yojson.Safe.to_string body) reqd
+;;
+
 let keeper_id_not_accepted_error =
   "keeper_id is not accepted; identity is derived from the authentication token"
 

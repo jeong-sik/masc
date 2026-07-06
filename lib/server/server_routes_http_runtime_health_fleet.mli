@@ -8,11 +8,17 @@ val take : int -> 'a list -> 'a list
 
 val keeper_reaction_ledger_health_json : unit -> Yojson.Safe.t
 
+val keeper_turn_admission_health_json : unit -> Yojson.Safe.t
+
+val keeper_board_event_collection_health_json : unit -> Yojson.Safe.t
+
 val paused_keeper_count : Yojson.Safe.t -> int
 
 val bool_field : string -> Yojson.Safe.t -> bool
 
 val runtime_base_path_opt : unit -> string option
+
+val keeper_event_queue_health_json : unit -> Yojson.Safe.t
 
 val keeper_fleet_runtime_resolution_base_fields :
   ?meta_scan:Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan ->

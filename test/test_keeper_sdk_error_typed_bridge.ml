@@ -686,6 +686,93 @@ let test_provider_unavailable_records_server_error_cooldown () =
        ~window_s:BH.window_sec)
 ;;
 
+let test_soft_rate_limit_cooldown_blocks_candidate_before_dispatch () =
+  let candidate =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"pre-dispatch-rate-limit-test"
+      ~base_url:"https://pre-dispatch-rate-limit.example/v1"
+      ()
+    |> RC.of_provider_config ~max_concurrent:None
+  in
+  let keeper_name = "pre-dispatch-rate-limit-cooldown-test" in
+  let raw_provider_key =
+    match RC.health_keys candidate with
+    | [ key ] -> key
+    | keys ->
+      Alcotest.failf
+        "expected one health key, got [%s]"
+        (String.concat "; " keys)
+  in
+  let provider_key = keeper_name ^ "@" ^ raw_provider_key in
+  let err =
+    SdkE.Api
+      (Retry.RateLimited
+         { retry_after = Some 45.0; message = "transient rate limit" })
+  in
+  KTD.For_testing.record_candidate_health_error ~keeper_name candidate err;
+  let info =
+    match BH.provider_info BH.global ~provider_key with
+    | Some info -> info
+    | None -> Alcotest.failf "expected provider info for %s" provider_key
+  in
+  Alcotest.(check bool) "soft rate limit opens cooldown" true info.in_cooldown;
+  let block =
+    match KTD.For_testing.provider_cooldown_block ~keeper_name candidate with
+    | Some block -> block
+    | None -> Alcotest.fail "expected provider cooldown block"
+  in
+  Alcotest.(check (list string))
+    "blocked provider key"
+    [ provider_key ]
+    block.blocked_provider_keys;
+  Alcotest.(check bool)
+    "remaining cooldown is positive"
+    true
+    (block.cooldown_remaining_sec > 0);
+  let other_keeper_block =
+    match
+      KTD.For_testing.provider_cooldown_block
+        ~keeper_name:"pre-dispatch-rate-limit-other-keeper"
+        candidate
+    with
+    | Some block -> block
+    | None -> Alcotest.fail "expected credential-pool cooldown block"
+  in
+  Alcotest.(check (list string))
+    "credential-pool key blocks other keeper"
+    [ raw_provider_key ]
+    other_keeper_block.blocked_provider_keys;
+  let mapped =
+    KTD.For_testing.provider_cooldown_block_error
+      ~runtime_id:"runtime.pre-dispatch-rate-limit"
+      block
+  in
+  match KTD.classify_masc_internal_error mapped with
+  | Some
+      (KTD.Capacity_backpressure
+         { source = KTD.Provider_capacity
+         ; retry_after = KTD.Synthetic_default retry_after
+         ; detail
+         ; _
+         }) ->
+    Alcotest.(check string)
+      "detail is explicit"
+      "provider health cooldown active before dispatch"
+      detail;
+    Alcotest.(check bool)
+      "synthetic retry-after preserves cooldown"
+      true
+      (retry_after > 0.0)
+  | Some other ->
+    Alcotest.failf
+      "expected capacity_backpressure, got %s"
+      (KTD.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_sdk.Error.to_string mapped)
+;;
+
 let test_read_only_no_progress_rotates_to_default_runtime () =
   init_rate_limit_pool_runtime ();
   let err = read_only_no_progress_err ~scope:"same.b" in
@@ -732,6 +819,16 @@ let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
       next_runtime
   | None ->
     Alcotest.fail "expected read-only no-progress to rotate to a tool-capable runtime"
+;;
+
+let test_capacity_backpressure_does_not_cycle_candidates () =
+  (* Regression: capacity_backpressure must cap rotation rather than cycle.
+     When this reason allowed candidate cycling, two runtimes that were both
+     in capacity cooldown looped forever (2026-05-21, 2026-07-06, #23373). *)
+  Alcotest.(check bool)
+    "capacity_backpressure does not allow candidate cycle"
+    false
+    (EC.degraded_reason_allows_candidate_cycle EC.Capacity_backpressure)
 ;;
 
 let () =
@@ -807,6 +904,10 @@ let () =
             `Quick
             test_provider_unavailable_records_server_error_cooldown
         ; Alcotest.test_case
+            "soft rate limit blocks candidate before dispatch"
+            `Quick
+            test_soft_rate_limit_cooldown_blocks_candidate_before_dispatch
+        ; Alcotest.test_case
             "generic accept rejection is completion contract violation"
             `Quick
             test_generic_accept_rejected_is_completion_contract_violation
@@ -822,6 +923,10 @@ let () =
             "default runtime read-only no-progress uses tool-capable candidate"
             `Quick
             test_read_only_no_progress_default_runtime_uses_tool_capable_candidate
+        ; Alcotest.test_case
+            "capacity_backpressure does not cycle candidates"
+            `Quick
+            test_capacity_backpressure_does_not_cycle_candidates
         ] )
     ]
 ;;

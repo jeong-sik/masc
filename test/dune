@@ -192,6 +192,8 @@
   test_keeper_chat_blocks
   test_keeper_chat_media_store
   test_keeper_external_attention
+  test_keeper_board_attention_candidate
+  test_keeper_repo_claim_hitl
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -352,7 +354,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_persist_poison
-  test_keeper_relevance_check
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -538,6 +539,8 @@
   test_keeper_chat_blocks
   test_keeper_chat_media_store
   test_keeper_external_attention
+  test_keeper_board_attention_candidate
+  test_keeper_repo_claim_hitl
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -550,6 +553,8 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
+  test_ide_partition_resolution
+  test_ide_diagnostics
   test_keeper_runtime_contract
   test_schema_surface_index
   test_keeper_accountability
@@ -700,7 +705,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_persist_poison
-  test_keeper_relevance_check
   test_actionable_path_action
   test_workspace_routes_keeper
   test_workspace_tree_exclusions

@@ -5,7 +5,11 @@ import {
   type DashboardScheduleDecision,
   type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
+  type DashboardScheduledAutomationDispatchReceipt,
+  type DashboardScheduledAutomationKeeperReactionEvidence,
+  type DashboardScheduledAutomationKeeperQueueEvidence,
   type DashboardScheduledAutomationExecution,
+  type DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   type DashboardScheduledAutomationRequest,
   type DashboardScheduledAutomationSignal,
 } from '../../api'
@@ -218,10 +222,79 @@ const NON_UPCOMING_WAKE_STATUS: ReadonlySet<string> = new Set([
   'terminal',
   'expired',
   'cancelled',
+  'canceled',
   'succeeded',
   'failed',
   'rejected',
 ])
+
+function payloadSupportBlocksWake(request: DashboardScheduledAutomationRequest): boolean {
+  return request.payload_support === 'unsupported' || request.payload_support === 'unknown'
+}
+
+function canProjectUpcomingWake(request: DashboardScheduledAutomationRequest): boolean {
+  if (payloadSupportBlocksWake(request)) return false
+  const readiness = normalized(request.execution_readiness)
+  const status = normalized(effectiveStatus(request))
+  if (readiness && NON_UPCOMING_WAKE_READINESS.has(readiness)) return false
+  if (NON_UPCOMING_WAKE_STATUS.has(status)) return false
+  return true
+}
+
+function payloadBlockedScheduleIds(
+  requests: readonly DashboardScheduledAutomationRequest[],
+): ReadonlySet<string> {
+  const blockedIds = new Set<string>()
+  for (const request of requests) {
+    if (payloadSupportBlocksWake(request)) blockedIds.add(request.schedule_id)
+  }
+  return blockedIds
+}
+
+function supportedPayloadKindSet(
+  automation: DashboardScheduledAutomation,
+): ReadonlySet<string> | null {
+  const kinds = automation.payload_support?.supported_kinds
+  if (!kinds) return null
+  return new Set(kinds.map(kind => kind.trim()).filter(Boolean))
+}
+
+function durableSignalPayloadBlocksWake(
+  signal: DashboardScheduledAutomationSignal,
+  supportedKinds: ReadonlySet<string> | null,
+): boolean {
+  if (!supportedKinds) return false
+  const kind = signal.payload_kind?.trim()
+  return !kind || !supportedKinds.has(kind)
+}
+
+function selectDurableWakeSignals(
+  automation: DashboardScheduledAutomation,
+): DashboardScheduledAutomationSignal[] {
+  const blockedIds = payloadBlockedScheduleIds(automation.requests ?? [])
+  const supportedKinds = supportedPayloadKindSet(automation)
+  return [...(automation.signals ?? [])]
+    .filter(signal =>
+      !blockedIds.has(signal.schedule_id)
+      && !durableSignalPayloadBlocksWake(signal, supportedKinds))
+    .sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+}
+
+function durableWakeSignalContract(automation: DashboardScheduledAutomation): {
+  rawCount: number
+  visibleCount: number
+  hiddenByPayloadSupport: number
+  visibleSignals: DashboardScheduledAutomationSignal[]
+} {
+  const visibleSignals = selectDurableWakeSignals(automation)
+  const rawCount = automation.signals?.length ?? 0
+  return {
+    rawCount,
+    visibleCount: visibleSignals.length,
+    hiddenByPayloadSupport: Math.max(0, rawCount - visibleSignals.length),
+    visibleSignals,
+  }
+}
 
 export function selectWakeSignals(
   automation: DashboardScheduledAutomation | null | undefined,
@@ -229,13 +302,12 @@ export function selectWakeSignals(
   if (!automation) return []
   const signals: WakeSignal[] = []
   for (const request of automation.requests ?? []) {
+    if (!canProjectUpcomingWake(request)) continue
     const at = request.next_due_at ?? request.due_at ?? null
     // No concrete wake time → no signal to surface (parse, don't validate).
     if (at == null) continue
     const readiness = request.execution_readiness ?? null
     const status = request.effective_status ?? request.status
-    if (readiness != null && NON_UPCOMING_WAKE_READINESS.has(readiness)) continue
-    if (NON_UPCOMING_WAKE_STATUS.has(status)) continue
     signals.push({
       id: request.schedule_id,
       at,
@@ -325,6 +397,232 @@ function executionDetailRows(detail: unknown): Array<{ label: string; value: str
     }))
     .filter((row): row is { label: string; value: string } => Boolean(row.label && row.value))
     .slice(0, 6)
+}
+
+function dispatchReceiptTone(
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
+): StatusChipTone {
+  if (!receipt) return 'neutral'
+  return receipt.projection_status === 'recognized' ? 'ok' : 'warn'
+}
+
+function dispatchReceiptRows(
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!receipt) return []
+  const rows: Array<{ label: string; value: string | null | undefined }> = [
+    { label: 'kind', value: receipt.kind },
+    { label: 'queue', value: receipt.queue },
+    { label: 'stimulus', value: receipt.stimulus },
+    { label: 'stimulus_id', value: receipt.stimulus_id },
+    { label: 'reaction_ledger_status', value: receipt.reaction_ledger_status },
+    { label: 'reaction_ledger_error', value: receipt.reaction_ledger_error },
+    { label: 'keeper', value: receipt.keeper_name },
+    { label: 'schedule', value: receipt.schedule_id },
+    { label: 'urgency', value: receipt.urgency },
+    { label: 'post_id', value: receipt.post_id },
+    { label: 'author', value: receipt.author },
+    { label: 'hearth', value: receipt.hearth },
+    { label: 'reason', value: receipt.reason },
+  ]
+  return rows.filter((row): row is { label: string; value: string } => {
+    return typeof row.value === 'string' && row.value.trim() !== ''
+  })
+}
+
+function DispatchReceiptBlock({
+  receipt,
+  compact = false,
+}: {
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  compact?: boolean
+}) {
+  if (!receipt) return null
+  const rows = dispatchReceiptRows(receipt)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-dispatch-receipt=${receipt.projection_status}
+      data-schedule-dispatch-receipt-kind=${receipt.kind ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">dispatch_receipt</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">dispatch receipt</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${dispatchReceiptTone(receipt)} uppercase=${false}>
+            ${enumLabel(receipt.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2'} data-dispatch-receipt-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function queueEvidenceTone(
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
+): StatusChipTone {
+  if (!evidence) return 'neutral'
+  if (evidence.projection_status === 'matched_pending' || evidence.projection_status === 'matched_inflight') return 'ok'
+  if (evidence.projection_status === 'not_found' || evidence.projection_status === 'read_error') return 'warn'
+  return 'bad'
+}
+
+function queueEvidenceRows(
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!evidence) return []
+  const readErrors = (evidence.read_errors ?? [])
+    .map(error => [error.kind, error.path, error.message].filter(Boolean).join(': '))
+    .filter(value => value.trim() !== '')
+    .join(' | ')
+  const rows: Array<{ label: string; value: string | number | null | undefined }> = [
+    { label: 'source', value: evidence.source },
+    { label: 'queue', value: evidence.queue },
+    { label: 'stimulus', value: evidence.stimulus },
+    { label: 'keeper', value: evidence.keeper_name },
+    { label: 'schedule', value: evidence.schedule_id },
+    { label: 'post_id', value: evidence.post_id },
+    { label: 'pending_count', value: evidence.pending_count },
+    { label: 'inflight_count', value: evidence.inflight_count },
+    { label: 'matched_bucket', value: evidence.matched_bucket },
+    { label: 'matched_payload_kind', value: evidence.matched_payload_kind },
+    { label: 'matched_post_id', value: evidence.matched_post_id },
+    { label: 'matched_schedule_id', value: evidence.matched_schedule_id },
+    { label: 'matched_arrived_at', value: evidence.matched_arrived_at_iso },
+    { label: 'matched_age_seconds', value: evidence.matched_age_seconds },
+    { label: 'read_errors', value: readErrors },
+    { label: 'reason', value: evidence.reason },
+  ]
+  return rows
+    .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
+    .filter(row => row.value.trim() !== '')
+}
+
+function QueueEvidenceBlock({
+  evidence,
+  compact = false,
+}: {
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  compact?: boolean
+}) {
+  if (!evidence) return null
+  const rows = queueEvidenceRows(evidence)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-keeper-queue-evidence=${evidence.projection_status}
+      data-schedule-keeper-queue-evidence-source=${evidence.source ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">keeper_queue_evidence</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">keeper queue evidence</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${queueEvidenceTone(evidence)} uppercase=${false}>
+            ${enumLabel(evidence.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2'} data-keeper-queue-evidence-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function reactionEvidenceTone(
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
+): StatusChipTone {
+  if (!evidence) return 'neutral'
+  if (
+    evidence.projection_status === 'matched_consumed_ack' ||
+    evidence.projection_status === 'matched_turn_started'
+  ) return 'ok'
+  if (
+    evidence.projection_status === 'matched_stimulus' ||
+    evidence.projection_status === 'not_found' ||
+    evidence.projection_status === 'missing_stimulus_id'
+  ) return 'warn'
+  return 'bad'
+}
+
+function reactionEvidenceRows(
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!evidence) return []
+  const rows: Array<{ label: string; value: string | number | boolean | null | undefined }> = [
+    { label: 'source', value: evidence.source },
+    { label: 'keeper', value: evidence.keeper_name },
+    { label: 'schedule', value: evidence.schedule_id },
+    { label: 'post_id', value: evidence.post_id },
+    { label: 'stimulus', value: evidence.stimulus },
+    { label: 'stimulus_id', value: evidence.stimulus_id },
+    { label: 'stimulus_kind', value: evidence.stimulus_kind },
+    { label: 'reaction_kind', value: evidence.reaction_kind },
+    { label: 'stimulus_seen', value: evidence.stimulus_seen },
+    { label: 'turn_started_seen', value: evidence.turn_started_seen },
+    { label: 'event_queue_ack_seen', value: evidence.event_queue_ack_seen },
+    { label: 'matched_record_count', value: evidence.matched_record_count },
+    { label: 'stimulus_recorded_at', value: evidence.stimulus_recorded_at_iso },
+    { label: 'turn_started_recorded_at', value: evidence.turn_started_recorded_at_iso },
+    { label: 'event_queue_ack_recorded_at', value: evidence.event_queue_ack_recorded_at_iso },
+    { label: 'latest_recorded_at', value: evidence.latest_recorded_at_iso },
+    { label: 'reason', value: evidence.reason },
+  ]
+  return rows
+    .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
+    .filter(row => row.value.trim() !== '')
+}
+
+function ReactionEvidenceBlock({
+  evidence,
+  compact = false,
+}: {
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
+  compact?: boolean
+}) {
+  if (!evidence) return null
+  const rows = reactionEvidenceRows(evidence)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-keeper-reaction-evidence=${evidence.projection_status}
+      data-schedule-keeper-reaction-evidence-source=${evidence.source ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">keeper_reaction_evidence</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">keeper reaction evidence</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${reactionEvidenceTone(evidence)} uppercase=${false}>
+            ${enumLabel(evidence.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[8.5rem_minmax(0,1fr)] gap-2'} data-keeper-reaction-evidence-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
 }
 
 function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest }) {
@@ -586,7 +884,17 @@ function ScheduleCard({
   `
 }
 
-function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+function LastExecutionBlock({
+  execution,
+  dispatchReceipt,
+  queueEvidence,
+  reactionEvidence,
+}: {
+  execution: DashboardScheduledAutomationExecution | null | undefined
+  dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
+}) {
   if (!execution) {
     return html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">-</div>`
   }
@@ -625,6 +933,9 @@ function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutoma
             </div>
           `
         : null}
+      <${DispatchReceiptBlock} receipt=${dispatchReceipt} />
+      <${QueueEvidenceBlock} evidence=${queueEvidence} />
+      <${ReactionEvidenceBlock} evidence=${reactionEvidence} />
     </div>
   `
 }
@@ -713,7 +1024,12 @@ function ScheduleDetailPanel({
         </div>
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">최근 실행</div>
-          <${LastExecutionBlock} execution=${execution} />
+          <${LastExecutionBlock}
+            execution=${execution}
+            dispatchReceipt=${request.dispatch_receipt ?? null}
+            queueEvidence=${request.keeper_queue_evidence ?? null}
+            reactionEvidence=${request.keeper_reaction_evidence ?? null}
+          />
         </div>
       </div>
     </section>
@@ -1042,6 +1358,105 @@ function SchPayloadSupportBanner({
   `
 }
 
+type LiveSupportedEvidenceStatus =
+  DashboardScheduledAutomationLiveSupportedNonTerminalEvidence['projection_status']
+
+function liveSupportedEvidenceLabel(status: LiveSupportedEvidenceStatus): string {
+  switch (status) {
+    case 'matched_supported_non_terminal':
+      return 'matched supported non-terminal'
+    case 'no_supported_payload_rows':
+      return 'no supported payload rows'
+    case 'no_supported_non_terminal':
+      return 'no supported non-terminal'
+    default:
+      return assertNever(status)
+  }
+}
+
+function liveSupportedEvidenceBannerClass(status: LiveSupportedEvidenceStatus): string {
+  switch (status) {
+    case 'matched_supported_non_terminal':
+      return 'approve'
+    case 'no_supported_payload_rows':
+      return 'payload bad'
+    case 'no_supported_non_terminal':
+      return 'payload warn'
+    default:
+      return assertNever(status)
+  }
+}
+
+function SchLiveSupportedEvidence({
+  evidence,
+  onOpen,
+}: {
+  evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence | null | undefined
+  onOpen: (scheduleId: string) => void
+}) {
+  if (!evidence) return null
+  const matchedIds = evidence.matched_schedule_ids ?? []
+  const status = evidence.projection_status
+  return html`
+    <section
+      class=${`sch-banner ${liveSupportedEvidenceBannerClass(status)}`}
+      data-schedule-live-supported-evidence=${status}
+      data-schedule-live-supported-count=${evidence.supported_live_count ?? 0}
+      data-schedule-live-supported-source=${evidence.source ?? ''}
+    >
+      <span class="sch-banner-ico">${status === 'matched_supported_non_terminal' ? '✓' : '!'}</span>
+      <div class="sch-banner-txt">
+        <div>
+          <b>live supported scheduler evidence</b>
+          <span class="mono"> ${liveSupportedEvidenceLabel(status)}</span>
+        </div>
+        <div class="sch-banner-sub">
+          <span class="mono">${evidence.criteria ?? 'payload_support=supported && non-terminal'}</span>
+        </div>
+        <div class="sch-evidence-counts" aria-label="Live supported scheduler counts">
+          <span class="sch-evidence-count">
+            <span>requests</span>
+            <span class="mono">${(evidence.request_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>supported</span>
+            <span class="mono">${(evidence.supported_request_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>live</span>
+            <span class="mono">${(evidence.supported_live_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>terminal/expired</span>
+            <span class="mono">${(evidence.terminal_or_expired_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>unsupported/unknown</span>
+            <span class="mono">${((evidence.unsupported_request_count ?? 0) + (evidence.unknown_request_count ?? 0)).toLocaleString()}</span>
+          </span>
+        </div>
+        ${evidence.reason
+          ? html`<div class="sch-banner-sub">${evidence.reason}</div>`
+          : null}
+        ${matchedIds.length > 0
+          ? html`
+              <div class="sch-payload-rows" aria-label="Live supported schedule ids">
+                ${matchedIds.map(scheduleId => html`
+                  <button
+                    type="button"
+                    class="sch-payload-row mono"
+                    data-schedule-live-supported-open=${scheduleId}
+                    onClick=${() => { onOpen(scheduleId) }}
+                  >${scheduleId}</button>
+                `)}
+              </div>
+            `
+          : null}
+      </div>
+    </section>
+  `
+}
+
 // Card rail tone class. SCHED_STATUS specs only ever yield warn/info/ok/bad/dim
 // for statuses; .sch-card.st-volt is not defined, so clamp anything else to dim.
 const CARD_RAIL_TONES: ReadonlySet<string> = new Set(['ok', 'warn', 'bad', 'info', 'dim'])
@@ -1273,7 +1688,12 @@ function SchDetail({
 
           <div class="turn-sec">
             <h4>최근 실행 기록</h4>
-            <${SchExecution} execution=${execution} />
+            <${SchExecution}
+              execution=${execution}
+              dispatchReceipt=${request.dispatch_receipt ?? null}
+              queueEvidence=${request.keeper_queue_evidence ?? null}
+              reactionEvidence=${request.keeper_reaction_evidence ?? null}
+            />
           </div>
 
           <${SchDetailActions} request=${request} onResolved=${onResolved} onClose=${onClose} />
@@ -1283,7 +1703,17 @@ function SchDetail({
   `
 }
 
-function SchExecution({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+function SchExecution({
+  execution,
+  dispatchReceipt,
+  queueEvidence,
+  reactionEvidence,
+}: {
+  execution: DashboardScheduledAutomationExecution | null | undefined
+  dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
+}) {
   if (!execution) {
     return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_execution">실행 기록 없음</span></div></div>`
   }
@@ -1297,6 +1727,9 @@ function SchExecution({ execution }: { execution: DashboardScheduledAutomationEx
         <div class="sch-kv" data-execution-detail-row=${row.label}><span class="k">${row.label}</span><span class="v mono">${row.value}</span></div>
       `)}
     </div>
+    <${DispatchReceiptBlock} receipt=${dispatchReceipt} compact=${true} />
+    <${QueueEvidenceBlock} evidence=${queueEvidence} compact=${true} />
+    <${ReactionEvidenceBlock} evidence=${reactionEvidence} compact=${true} />
     ${execution.error ? html`<div class="sch-exec bad">${execution.error}</div>` : null}
   `
 }
@@ -1382,7 +1815,8 @@ function SchedulePrototypeSurface({
   const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
   const filtered = rows.filter(request => schTabMatches(tabDef, request))
   // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
-  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const durableSignalContract = durableWakeSignalContract(automation)
+  const durableSignals = durableSignalContract.visibleSignals
   const selected = selectedScheduleId
     ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
@@ -1392,6 +1826,10 @@ function SchedulePrototypeSurface({
     <div class="sch-panel">
       <${SchPayloadSupportBanner}
         summary=${payloadSummary}
+        onOpen=${setSelectedScheduleId}
+      />
+      <${SchLiveSupportedEvidence}
+        evidence=${automation.live_supported_non_terminal_evidence ?? null}
         onOpen=${setSelectedScheduleId}
       />
 
@@ -1427,10 +1865,22 @@ function SchedulePrototypeSurface({
             </div>
           `}
 
-      <section class="sch-signals">
+      <section
+        class="sch-signals"
+        data-schedule-durable-signal-contract="payload_support"
+        data-schedule-durable-signal-raw=${durableSignalContract.rawCount}
+        data-schedule-durable-signal-visible=${durableSignalContract.visibleCount}
+        data-schedule-durable-signal-hidden=${durableSignalContract.hiddenByPayloadSupport}
+      >
         <div class="ov-card-h"><h3>wake signal 피드 · schedule_runner.tick</h3></div>
         ${durableSignals.length === 0
-          ? html`<div class="sch-empty" data-stub="no durable runner signals">durable wake signal 없음</div>`
+          ? html`
+              <div class="sch-empty" data-stub="no durable runner signals">
+                ${durableSignalContract.hiddenByPayloadSupport > 0
+                  ? `payload support로 ${durableSignalContract.hiddenByPayloadSupport.toLocaleString()} durable wake signal 숨김`
+                  : 'durable wake signal 없음'}
+              </div>
+            `
           : html`
               <div class="sch-sig-list">
                 ${durableSignals.map(signal => {
@@ -1492,10 +1942,10 @@ export function ScheduleAside({
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
     normalized(effectiveStatus(request))
-  const unsupportedPayloads = requests.filter(isUnsupportedPayloadRequest)
-  const failed = requests.filter(request => asideStatus(request) === 'failed' && !isUnsupportedPayloadRequest(request))
-  const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)))
-  const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)))
+  const payloadBlocked = requests.filter(payloadSupportBlocksWake)
+  const failed = requests.filter(request => asideStatus(request) === 'failed' && !payloadSupportBlocksWake(request))
+  const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
+  const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
   const recent = requests
     .filter(request => SCHEDULE_ASIDE_TERMINAL.has(asideStatus(request)))
     .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
@@ -1510,22 +1960,26 @@ export function ScheduleAside({
           <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning > 0 ? 'volt' : ''}`}>${sum.dueRunning}</b> due·실행</span>
           <span class="wka-pulse-i"><b class=${`mono ${sum.pending > 0 ? 'warn' : ''}`}>${sum.pending}</b> 승인대기</span>
         </div>
-        ${unsupportedPayloads.length === 0 && failed.length === 0
+        ${payloadBlocked.length === 0 && failed.length === 0
           ? html`<div class="wka-calm mono">실패한 실행 없음</div>`
           : html`
               <div class="wka-list">
-                ${unsupportedPayloads.map(request => html`
-                  <button
-                    type="button"
-                    class="wka-flag st-bad"
-                    data-schedule-aside-open=${request.schedule_id}
-                    onClick=${() => { onOpen(request.schedule_id) }}
-                  >
-                    <span class="wka-flag-tag bad">payload</span>
-                    <span class="wka-flag-title">${scheduleAsideSummary(request)}</span>
-                    <span class="wka-flag-reason mono">${request.payload_kind ?? 'payload_kind 없음'}</span>
-                  </button>
-                `)}
+                ${payloadBlocked.map(request => {
+                  const support = request.payload_support === 'unknown' ? 'unknown' : 'unsupported'
+                  const tone = support === 'unknown' ? 'warn' : 'bad'
+                  return html`
+                    <button
+                      type="button"
+                      class=${`wka-flag st-${tone}`}
+                      data-schedule-aside-open=${request.schedule_id}
+                      onClick=${() => { onOpen(request.schedule_id) }}
+                    >
+                      <span class=${`wka-flag-tag ${tone}`}>payload</span>
+                      <span class="wka-flag-title">${scheduleAsideSummary(request)}</span>
+                      <span class="wka-flag-reason mono">${support} · ${request.payload_kind ?? 'payload_kind 없음'}</span>
+                    </button>
+                  `
+                })}
                 ${failed.map(request => html`
                   <button
                     type="button"
@@ -1640,8 +2094,12 @@ export function ScheduledAutomationPanel({
   const rows = automation.requests ?? []
   const wakeSignals = selectWakeSignals(automation)
   const filteredRows = rows.filter(request => filterMatches(activeFilter, request))
-  const wakeRows = [...rows].sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
-  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const wakeRows = rows
+    .filter(canProjectUpcomingWake)
+    .sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
+  const durableSignalContract = durableWakeSignalContract(automation)
+  const durableSignals = durableSignalContract.visibleSignals
+  const rawDurableSignalCount = durableSignalContract.rawCount
   const hasDurableSignals = durableSignals.length > 0
   const selectedRequest =
     rows.find(request => request.schedule_id === selectedScheduleId)
@@ -1725,6 +2183,11 @@ export function ScheduledAutomationPanel({
           `
         : null}
 
+      <${SchLiveSupportedEvidence}
+        evidence=${automation.live_supported_non_terminal_evidence ?? null}
+        onOpen=${setSelectedScheduleId}
+      />
+
       <div class="flex flex-wrap gap-2">
         ${nonzeroCounts.length > 0
           ? nonzeroCounts.map(([name, count]) => html`<${CountChip} name=${name} count=${count} />`)
@@ -1777,14 +2240,23 @@ export function ScheduledAutomationPanel({
               </div>
               <aside class="grid content-start gap-2">
                 <${ScheduleDetailPanel} request=${selectedRequest} onResolved=${onResolved} />
-                <div>
+                <div
+                  data-schedule-durable-signal-contract="payload_support"
+                  data-schedule-durable-signal-raw=${durableSignalContract.rawCount}
+                  data-schedule-durable-signal-visible=${durableSignalContract.visibleCount}
+                  data-schedule-durable-signal-hidden=${durableSignalContract.hiddenByPayloadSupport}
+                >
                   <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
                     ${hasDurableSignals ? 'durable wake signal feed' : 'request-derived wake signal feed'}
                   </div>
                   <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
                     ${hasDurableSignals
                       ? `출처 ${automation.signal_source ?? 'schedule_runner_signals'} · ${durableSignals.length.toLocaleString()} / ${(automation.signal_count ?? durableSignals.length).toLocaleString()} signals 표시`
-                      : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
+                      : durableSignalContract.hiddenByPayloadSupport > 0
+                        ? `payload support로 ${durableSignalContract.hiddenByPayloadSupport.toLocaleString()} durable runner signal 숨김 · request rows에서 파생했습니다.`
+                        : rawDurableSignalCount > 0
+                          ? '표시 가능한 durable runner signal이 없어 request rows에서 파생했습니다.'
+                        : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
                   </div>
                 </div>
                 <ul class="grid gap-2">

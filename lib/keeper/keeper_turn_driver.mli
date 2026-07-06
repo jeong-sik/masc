@@ -179,6 +179,16 @@ module For_testing : sig
   val record_candidate_health_error :
     keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
 
+  val provider_cooldown_block :
+    keeper_name:string ->
+    Runtime_candidate.t ->
+    Keeper_turn_driver_provider_attempt.provider_cooldown_block option
+
+  val provider_cooldown_block_error :
+    runtime_id:string ->
+    Keeper_turn_driver_provider_attempt.provider_cooldown_block ->
+    Agent_sdk.Error.sdk_error
+
   val apply_accept :
     ?initial_messages:Agent_sdk.Types.message list ->
     runtime_id:string ->

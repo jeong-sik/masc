@@ -2,6 +2,7 @@ type event_kind =
     Turn_started
   | Phase_gate_decided
   | Runtime_routed
+  | Runtime_execution_built
   | Runtime_completed
   | Runtime_failed
   | Pre_dispatch_blocked

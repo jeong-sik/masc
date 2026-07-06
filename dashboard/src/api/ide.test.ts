@@ -67,6 +67,36 @@ describe('ide API', () => {
     expect(url).toContain('repo_id=masc')
   })
 
+  it('fetchIdeAnnotations appends canonical_url scope without repo_id', async () => {
+    stubFetch({ ok: true, data: [annotation] })
+
+    await fetchIdeAnnotations(
+      { file_path: 'lib/a.ml' },
+      {
+        keeper: 'sangsu',
+        scope: {
+          kind: 'canonical_url',
+          canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+        },
+      },
+    )
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('/api/v1/ide/annotations?')
+    expect(url).toContain('canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git')
+    expect(url).not.toContain('repo_id=')
+  })
+
+  it('rejects conflicting IDE scope params before issuing a request', async () => {
+    stubFetch({ ok: true, data: [annotation] })
+
+    await expect(fetchIdeAnnotations({}, {
+      scope: { kind: 'repo_id', repoId: 'masc' },
+      canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+    })).rejects.toThrow('IDE scope must resolve to exactly one')
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
   it('fetchIdeAnnotations rejects failed envelopes instead of returning empty', async () => {
     stubFetch({ ok: false, error: 'repo scope unmatched' })
 

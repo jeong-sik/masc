@@ -29,26 +29,47 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
     stim
 ;;
 
-let record_recovery_stimulus_turn_started
+let record_event_queue_stimulus_reaction
       ~(ctx : _ context)
       ~keeper_name
+      ~reaction_kind
       (stimulus : Keeper_event_queue.stimulus)
   =
   try
     Keeper_reaction_ledger.record_event_queue_reaction
       ~base_path:ctx.config.base_path
       ~keeper_name
-      ~reaction_kind:Keeper_reaction_ledger.Turn_started
+      ~reaction_kind
       stimulus
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.error
-      "turn entry: failed to persist recovery stimulus reaction post_id=%s \
+      "turn entry: failed to persist event queue stimulus reaction post_id=%s \
        (keeper=%s): %s"
       stimulus.post_id
       keeper_name
       (Printexc.to_string exn)
+;;
+
+let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
+  record_event_queue_stimulus_reaction
+    ~ctx
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    stimulus
+;;
+
+let record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus =
+  record_event_queue_stimulus_reaction
+    ~ctx
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+    stimulus
+;;
+
+let record_recovery_stimulus_turn_started ~ctx ~keeper_name stimulus =
+  record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
 ;;
 
 type heartbeat_event_intake = {
@@ -76,12 +97,15 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
   | Keeper_event_queue.No_progress_recovery ->
     Some Keeper_world_observation.No_progress_recovery_stimulus
+  | Keeper_event_queue.Schedule_due _ ->
+    Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
     Some Keeper_world_observation.Connector_attention_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
-  | Keeper_event_queue.Hitl_resolved _ ->
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Goal_verification_failed _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle. Once the resolved
        approval has left the queue the keeper no longer skips on
@@ -130,6 +154,24 @@ let consume_single_heartbeat_stimulus
       (match c.bg_outcome with
        | Keeper_event_queue.Bg_ok _ -> true
        | Keeper_event_queue.Bg_failed _ -> false)
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Schedule_due sw ->
+    Log.Keeper.info
+      "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
+      sw.schedule_id
+      sw.due_at
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    (* A rejected completion claim is actionable work for the assigned keeper.
+       Promote it to a pending observation so the cycle does not wake empty. *)
+    Log.Keeper.info
+      "turn entry: goal verification failure delivered goal_id=%s request_id=%s \
+       rejected_by=%s (keeper=%s)"
+      failure.goal_id
+      failure.request_id
+      failure.rejected_by
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->

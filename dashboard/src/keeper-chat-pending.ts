@@ -1,4 +1,21 @@
-import type { KeeperConversationAttachment } from './types'
+import type {
+  ChatTraceStep,
+  KeeperConversationAttachment,
+  KeeperConversationDelivery,
+  KeeperConversationEntry,
+  KeeperConversationStreamState,
+} from './types'
+import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
+
+export interface PendingKeeperChatAssistantDraft {
+  text: string
+  rawText: string
+  delivery: KeeperConversationDelivery
+  streamState: KeeperConversationStreamState
+  timestamp?: string | null
+  traceSteps?: ChatTraceStep[]
+  error?: string | null
+}
 
 export interface PendingKeeperChatRequest {
   requestId: string
@@ -6,14 +23,23 @@ export interface PendingKeeperChatRequest {
   message: string
   submittedAt: number
   attachments?: KeeperConversationAttachment[]
+  assistantDraft?: PendingKeeperChatAssistantDraft
 }
 
 const STORAGE_KEY = 'masc_keeper_chat_pending_requests_v1'
+const KEEPER_STREAM_STATES = [
+  'opening',
+  'thinking',
+  'streaming',
+  'finalizing',
+] as const satisfies ReadonlyArray<Exclude<KeeperConversationStreamState, null>>
+const TRACE_TOOL_STATUSES = ['pending', 'ok', 'err'] as const
 
 function storage(): Storage | null {
   try {
     return typeof window === 'undefined' ? null : window.localStorage
-  } catch {
+  } catch (err) {
+    console.warn('[keeper-chat-pending] localStorage unavailable', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -27,6 +53,27 @@ function stringField(record: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function nullableStringValue(value: unknown): string | null | undefined {
+  if (value === null) return null
+  return stringValue(value)
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function parseMember<const T extends string>(
+  values: readonly T[],
+  value: unknown,
+): T | undefined {
+  if (typeof value !== 'string') return undefined
+  return values.includes(value as T) ? (value as T) : undefined
+}
+
 function normalizeAttachment(raw: unknown): KeeperConversationAttachment | null {
   if (!isRecord(raw)) return null
   const id = stringField(raw, 'id')
@@ -37,6 +84,97 @@ function normalizeAttachment(raw: unknown): KeeperConversationAttachment | null 
   const size = typeof raw.size === 'number' && Number.isFinite(raw.size) ? raw.size : 0
   if (!id || (type !== 'image' && type !== 'file') || !name || !mimeType || !data) return null
   return { id, type, name, size, mimeType, data }
+}
+
+function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
+  if (!isRecord(raw)) return null
+  const kind = stringValue(raw.kind)
+  if (kind === 'think') {
+    const text = stringValue(raw.text)
+    if (text === undefined) return null
+    const step: ChatTraceStep = { kind, text }
+    const ts = stringValue(raw.ts)
+    const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    if (ts !== undefined) step.ts = ts
+    if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
+    return step
+  }
+  if (kind === 'reason') {
+    const text = stringValue(raw.text)
+    if (text === undefined) return null
+    const step: ChatTraceStep = { kind, text }
+    const detail = stringValue(raw.detail)
+    const ts = stringValue(raw.ts)
+    if (detail !== undefined) step.detail = detail
+    if (ts !== undefined) step.ts = ts
+    return step
+  }
+  if (kind === 'tool') {
+    const name = stringValue(raw.name)
+    if (name === undefined) return null
+    const step: ChatTraceStep = { kind, name }
+    const toolCallId = stringValue(raw.toolCallId)
+    const status = parseMember(TRACE_TOOL_STATUSES, raw.status)
+    const dur = stringValue(raw.dur)
+    const args = stringValue(raw.args)
+    const result = stringValue(raw.result)
+    const ts = stringValue(raw.ts)
+    const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    if (toolCallId !== undefined) step.toolCallId = toolCallId
+    if (status !== undefined) step.status = status
+    if (dur !== undefined) step.dur = dur
+    if (args !== undefined) step.args = args
+    if (result !== undefined) step.result = result
+    if (ts !== undefined) step.ts = ts
+    if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
+    return step
+  }
+  return null
+}
+
+function normalizeTraceSteps(raw: unknown): ChatTraceStep[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const steps = raw.map(normalizeTraceStep)
+  if (steps.some(step => step === null)) return undefined
+  return steps.length > 0 ? (steps as ChatTraceStep[]) : undefined
+}
+
+function normalizeAssistantDraft(raw: unknown): PendingKeeperChatAssistantDraft | null {
+  if (!isRecord(raw)) return null
+  const text = stringValue(raw.text)
+  if (text === undefined) return null
+  const rawText = stringValue(raw.rawText) ?? text
+  const delivery = parseMember(IN_FLIGHT_DELIVERY, raw.delivery) ?? 'queued'
+  const streamState =
+    raw.streamState === null
+      ? null
+      : parseMember(KEEPER_STREAM_STATES, raw.streamState) ?? null
+  const timestamp = nullableStringValue(raw.timestamp)
+  const traceSteps = normalizeTraceSteps(raw.traceSteps)
+  const error = nullableStringValue(raw.error)
+  return {
+    text,
+    rawText,
+    delivery,
+    streamState,
+    ...(timestamp !== undefined ? { timestamp } : {}),
+    ...(traceSteps ? { traceSteps } : {}),
+    ...(error !== undefined ? { error } : {}),
+  }
+}
+
+function assistantDraftFromEntry(entry: KeeperConversationEntry): PendingKeeperChatAssistantDraft | null {
+  if (entry.role !== 'assistant') return null
+  const traceSteps = normalizeTraceSteps(entry.traceSteps)
+  return {
+    text: entry.text,
+    rawText: entry.rawText ?? entry.text,
+    delivery: entry.delivery,
+    streamState: entry.streamState ?? null,
+    timestamp: entry.timestamp ?? null,
+    ...(traceSteps ? { traceSteps } : {}),
+    ...(entry.error !== undefined ? { error: entry.error } : {}),
+  }
 }
 
 function normalizePendingRequest(raw: unknown): PendingKeeperChatRequest | null {
@@ -52,12 +190,14 @@ function normalizePendingRequest(raw: unknown): PendingKeeperChatRequest | null 
   const attachments = Array.isArray(raw.attachments)
     ? raw.attachments.map(normalizeAttachment).filter((att): att is KeeperConversationAttachment => att !== null)
     : []
+  const assistantDraft = normalizeAssistantDraft(raw.assistantDraft)
   return {
     requestId,
     keeperName,
     message,
     submittedAt,
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(assistantDraft ? { assistantDraft } : {}),
   }
 }
 
@@ -72,7 +212,8 @@ function readAll(): PendingKeeperChatRequest[] {
     return parsed
       .map(normalizePendingRequest)
       .filter((request): request is PendingKeeperChatRequest => request !== null)
-  } catch {
+  } catch (err) {
+    console.warn('[keeper-chat-pending] failed to read pending requests', err instanceof Error ? err.message : err)
     return []
   }
 }
@@ -86,8 +227,8 @@ function writeAll(requests: PendingKeeperChatRequest[]): void {
     } else {
       store.setItem(STORAGE_KEY, JSON.stringify(requests))
     }
-  } catch {
-    // Best-effort resilience only; the live stream remains the primary path.
+  } catch (err) {
+    console.warn('[keeper-chat-pending] failed to write pending requests', err instanceof Error ? err.message : err)
   }
 }
 
@@ -102,14 +243,35 @@ export function upsertPendingKeeperChatRequest(request: PendingKeeperChatRequest
   const keeperName = request.keeperName.trim()
   const message = request.message.trim()
   if (!requestId || !keeperName || !message) return
+  const assistantDraft = normalizeAssistantDraft(request.assistantDraft)
   const normalized: PendingKeeperChatRequest = {
-    ...request,
     requestId,
     keeperName,
     message,
+    submittedAt: request.submittedAt,
+    ...(request.attachments && request.attachments.length > 0 ? { attachments: request.attachments } : {}),
+    ...(assistantDraft ? { assistantDraft } : {}),
   }
   const next = readAll().filter(existing => existing.requestId !== requestId)
   next.push(normalized)
+  writeAll(next)
+}
+
+export function updatePendingKeeperChatAssistantDraft(
+  requestId: string,
+  entry: KeeperConversationEntry,
+): void {
+  const id = requestId.trim()
+  const assistantDraft = assistantDraftFromEntry(entry)
+  if (!id || !assistantDraft) return
+  const requests = readAll()
+  let found = false
+  const next = requests.map(request => {
+    if (request.requestId !== id) return request
+    found = true
+    return { ...request, assistantDraft }
+  })
+  if (!found) return
   writeAll(next)
 }
 

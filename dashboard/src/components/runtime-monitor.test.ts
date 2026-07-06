@@ -55,6 +55,9 @@ describe('RuntimeMonitor', () => {
           thinking_support: true,
           streaming: true,
           temperature: 0.7,
+          top_p: 0.91,
+          top_k: 42,
+          min_p: 0.07,
           capabilities_declared: true,
           max_output_tokens: 65536,
           supports_tool_choice: true,
@@ -206,6 +209,9 @@ describe('RuntimeMonitor', () => {
               max_thinking_budget: 32768,
               streaming: true,
               temperature: 0.65,
+              top_p: 0.91,
+              top_k: 42,
+              min_p: 0.07,
               capabilities: {
                 source: 'runtime.toml',
                 max_output_tokens: 65536,
@@ -372,8 +378,12 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('snapshot · source:runtime.toml')
     expect(container.textContent).toContain('protocol:openai-http')
     expect(container.textContent).toContain('model-temp:0.7')
+    expect(container.textContent).toContain('model-top_p:0.91')
+    expect(container.textContent).toContain('model-top_k:42')
+    expect(container.textContent).toContain('model-min_p:0.07')
     expect(container.textContent).toContain('caps:declared')
     expect(container.textContent).toContain('format:json,schema')
+    expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
     expect(container.textContent).toContain('sampling:top_k,min_p,seed')
     expect(container.textContent).toContain('tools:on · thinking:on · streaming:on')
     expect(container.textContent).toContain('multimodal:on · image:on · audio:on · video:off')

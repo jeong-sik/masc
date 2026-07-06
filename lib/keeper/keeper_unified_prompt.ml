@@ -141,7 +141,9 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Bg_completed -> "bg_completed"
+  | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
+  | Keeper_world_observation.Goal_verification_failed -> "goal_verification_failed"
 ;;
 
 let quote_prompt_field value =
@@ -177,7 +179,9 @@ let board_event_note = function
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
-  | Keeper_world_observation.External_attention -> ""
+  | Keeper_world_observation.Schedule_due
+  | Keeper_world_observation.External_attention
+  | Keeper_world_observation.Goal_verification_failed -> ""
 ;;
 
 let format_board_event_text
@@ -720,6 +724,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ~enabled:(tool_allowed "keeper_broadcast")
       Keeper_prompt_names.turn_intent_broadcast_guidance
   in
+  let pr_duplicate_search_guidance =
+    load_externalized_bullet
+      ~enabled:
+        (tool_allowed "tool_execute"
+         || tool_allowed "Execute"
+         || tool_allowed "execute")
+      Keeper_prompt_names.turn_intent_pr_duplicate_search_guidance
+  in
   let task_create_guidance =
     load_externalized_bullet
       ~enabled:show_task_create_guidance
@@ -744,6 +756,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ("board_post_guidance", board_post_guidance);
       ("board_curation_guidance", board_curation_guidance);
       ("broadcast_guidance", broadcast_guidance);
+      ("pr_duplicate_search_guidance", pr_duplicate_search_guidance);
       ("state_block_instruction", state_block_instruction_text);
     ]
   in

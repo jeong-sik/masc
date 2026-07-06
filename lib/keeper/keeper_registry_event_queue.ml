@@ -99,10 +99,12 @@ let requeue_front ~base_path name stimuli =
        loop ())
 ;;
 
+let ack_consumed_result ~base_path name stimuli =
+  Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
+;;
+
 let ack_consumed ~base_path name stimuli =
-  match
-    Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
-  with
+  match ack_consumed_result ~base_path name stimuli with
   | Ok () -> ()
   | Error msg ->
     Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg

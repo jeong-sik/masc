@@ -2,6 +2,8 @@ open Alcotest
 open Masc
 module Trace = Server_dashboard_http_keeper_api_trace
 module Types = Server_dashboard_http_keeper_api_types
+module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
+module Runtime_lens_swimlane = Server_dashboard_http_keeper_runtime_lens_swimlane
 module T = Trajectory
 
 let mk_thinking_with_turn ~turn ~ts ~redacted ~content =
@@ -210,6 +212,39 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
       (Option.is_none (trace_block_by_turn_ref disallowed_ref)))
 ;;
 
+let string_member key = function
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some (`String value) -> value
+    | Some _ -> fail (Printf.sprintf "%s is not a string" key)
+    | None -> fail (Printf.sprintf "%s missing" key))
+  | _ -> fail "expected object"
+;;
+
+let test_tool_runtime_zero_event_lane_is_not_observed () =
+  let scan =
+    Runtime_lens_scan.make_runtime_manifest_scan
+      ~path:"/tmp/empty-runtime-manifest.jsonl"
+      ~limit:10
+      ~scan_line_limit:10
+      ~scan_scope:"test"
+  in
+  let json =
+    Runtime_lens_swimlane.runtime_lens_swimlane_json
+      scan
+      []
+      ~lane:"tool_runtime"
+      ~label:"Tool Runtime"
+      ~events:[]
+      ~terminal_status:"not_observed"
+      ~synthetic_events:[]
+  in
+  check string "terminal status" "not_observed"
+    (string_member "terminal_status" json);
+  check string "empty tool-runtime lane is not complete" "not_observed"
+    (string_member "completeness" json)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
@@ -239,6 +274,12 @@ let () =
              "reads allowed trace_history trace ids"
              `Quick
              test_chat_trace_block_by_turn_ref_reads_allowed_trace_history
+         ] )
+     ; ( "runtime_lens_swimlane"
+       , [ test_case
+             "tool_runtime zero-event lane is not observed"
+             `Quick
+             test_tool_runtime_zero_event_lane_is_not_observed
          ] )
      ]
 ;;

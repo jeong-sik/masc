@@ -7,10 +7,27 @@ import { isRecord, asInt, asNumber, asNullableString, asString, asStringArray, a
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import { decodeDashboardFeedMetadata, type DashboardFeedMetadata } from './dashboard-shared'
 
-// Label helper used by the cost-matrix decoder (column fallback when the
-// server omits a model name). Mirrors the runtime-providers lane labelling.
-function runtimeLaneLabel(index: number): string {
-  return `runtime_lane_${index + 1}`
+const REDACTED_RUNTIME_LABEL = 'runtime'
+const UNKNOWN_MODEL_LABEL = 'unknown_model'
+const UNKNOWN_PROVIDER_LABEL = 'unknown_provider'
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
+
+function normalizedModelEvidence(value: string | null | undefined): string | null {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text || MODEL_PLACEHOLDERS.has(text.toLowerCase())) return null
+  return text
+}
+
+function publicRuntimeModelLabel(value: string | null | undefined): string {
+  const model = normalizedModelEvidence(value)
+  if (model == null) return UNKNOWN_MODEL_LABEL
+  if (model === REDACTED_RUNTIME_LABEL || model.startsWith('runtime_lane_')) return model
+  return REDACTED_RUNTIME_LABEL
+}
+
+function costMatrixModelLabel(value: string | undefined, index: number): string {
+  const label = publicRuntimeModelLabel(value)
+  return label === UNKNOWN_MODEL_LABEL ? `${UNKNOWN_MODEL_LABEL}_${index + 1}` : label
 }
 
 export interface KeeperCostMetric {
@@ -35,11 +52,16 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
   if (!isRecord(raw)) return null
   const keeperName = asString(raw.keeper_name)
   if (!keeperName) return null
-  const runtimeCost = Array.isArray(raw.model_breakdown)
-    ? (raw.model_breakdown as unknown[])
-        .filter(isRecord)
-        .reduce((sum, item) => sum + (asNumber(item.cost_usd) ?? 0), 0)
-    : 0
+  const modelCosts = new Map<string, number>()
+  if (Array.isArray(raw.model_breakdown)) {
+    for (const item of raw.model_breakdown) {
+      if (!isRecord(item)) continue
+      const cost = asNumber(item.cost_usd) ?? 0
+      if (!Number.isFinite(cost) || cost <= 0) continue
+      const model = publicRuntimeModelLabel(asString(item.model))
+      modelCosts.set(model, (modelCosts.get(model) ?? 0) + cost)
+    }
+  }
   return {
     keeper_name: keeperName,
     total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
@@ -49,7 +71,7 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
     p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
     p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
     sample_count: asNumber(raw.sample_count) ?? 0,
-    model_breakdown: runtimeCost > 0 ? [{ model: 'runtime', cost_usd: runtimeCost }] : [],
+    model_breakdown: Array.from(modelCosts.entries()).map(([model, cost_usd]) => ({ model, cost_usd })),
   }
 }
 
@@ -245,6 +267,7 @@ function decodeCostPerAgentRow(raw: unknown): CostPerAgentRow | null {
 function decodeCostMatrix(raw: unknown): CostMatrix | null {
   if (!isRecord(raw)) return null
   const rawModels = asStringArray(raw.models)
+  const rawProviders = asStringArray(raw.providers)
   const rawGrid = Array.isArray(raw.grid)
     ? (raw.grid as unknown[]).map(row =>
         Array.isArray(row)
@@ -257,9 +280,12 @@ function decodeCostMatrix(raw: unknown): CostMatrix | null {
     rawGrid.reduce((max, row) => Math.max(max, row.length), 0),
   )
   const models = Array.from({ length: colCount }, (_, index) =>
-    rawModels[index] ?? runtimeLaneLabel(index),
+    costMatrixModelLabel(rawModels[index], index),
   )
-  const providers = colCount > 0 || asStringArray(raw.providers).length > 0 ? ['runtime'] : []
+  const hasProviderEvidence = rawProviders.some(provider => normalizedModelEvidence(provider) != null)
+  const providers = colCount > 0 || rawProviders.length > 0
+    ? [hasProviderEvidence ? REDACTED_RUNTIME_LABEL : UNKNOWN_PROVIDER_LABEL]
+    : []
   const grid = providers.length === 0
     ? []
     : [

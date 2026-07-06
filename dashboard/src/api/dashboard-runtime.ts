@@ -134,6 +134,9 @@ export interface DashboardRuntimeDeclaredModelSpec {
   max_thinking_budget?: number | null
   streaming?: boolean
   temperature?: number | null
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
   capabilities?: DashboardRuntimeDeclaredModelCapabilities | null
   match_prefixes: string[]
 }
@@ -228,6 +231,10 @@ export interface DashboardRuntimeProviderSnapshot {
   /** Per-model sampling temperature override ([models.<id>].temperature);
    *  null when unset (runtime keeps the fleet fallback). */
   temperature?: number | null
+  /** Per-model sampling overrides from [models.<id>]; null when unset. */
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
   capabilities_declared?: boolean
   max_output_tokens?: number | null
   supports_tool_choice?: boolean
@@ -601,6 +608,9 @@ function decodeRuntimeDeclaredModelSpec(raw: unknown): DashboardRuntimeDeclaredM
     max_thinking_budget: asNumber(raw.max_thinking_budget) ?? null,
     streaming: asBoolean(raw.streaming),
     temperature: asNumber(raw.temperature) ?? null,
+    top_p: asNumber(raw.top_p) ?? null,
+    top_k: asNumber(raw.top_k) ?? null,
+    min_p: asNumber(raw.min_p) ?? null,
     capabilities: decodeRuntimeDeclaredModelCapabilities(raw.capabilities),
     match_prefixes: asStringArray(raw.match_prefixes),
   }
@@ -728,6 +738,9 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     thinking_support: asBoolean(raw.thinking_support),
     streaming: asBoolean(raw.streaming),
     temperature: asNumber(raw.temperature) ?? null,
+    top_p: asNumber(raw.top_p) ?? null,
+    top_k: asNumber(raw.top_k) ?? null,
+    min_p: asNumber(raw.min_p) ?? null,
     capabilities_declared: asBoolean(raw.capabilities_declared),
     max_output_tokens: asNumber(raw.max_output_tokens) ?? null,
     supports_tool_choice: asBoolean(raw.supports_tool_choice),

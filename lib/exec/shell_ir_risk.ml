@@ -284,7 +284,10 @@ let classify_write_detail (words : string list) : risk_class option =
 let repo_hosting_cli_irreversible_ops =
   [
     ("pr", [ "merge"; "ready" ]);
-    ("repo", [ "delete"; "archive"; "transfer"; "rename" ]);
+    ("repo", [ "create"; "delete"; "archive"; "transfer"; "rename"; "fork" ]);
+    ( "discussion",
+      [ "create"; "comment"; "edit"; "delete"; "close"; "reopen"; "lock";
+        "unlock"; "answer"; "unanswer" ] );
     ("release", [ "delete" ]);
     ("secret", [ "delete"; "remove" ]);
     ("ssh-key", [ "delete" ]);
@@ -309,7 +312,7 @@ let repo_hosting_cli_reversible_mutations =
     ("cache", [ "delete" ]);
     ("gist", [ "create"; "edit"; "clone"; "rename" ]);
     ("repo",
-     [ "create"; "clone"; "fork"; "edit"; "sync"; "set-default" ]);
+     [ "clone"; "edit"; "sync"; "set-default" ]);
     ("project",
      [ "create"; "edit"; "close"; "copy"; "link"; "unlink"; "field-create";
        "field-delete"; "item-add"; "item-archive"; "item-delete"; "item-edit" ]);
@@ -368,7 +371,12 @@ let repo_hosting_graphql_r2_fragments =
   [ "deletepullrequest"; "deleteissue"; "deletebranch"; "deleteref";
     "deleteproject"; "deletebranchprotectionrule";
     "removeouterfromorganization"; "transferrepository";
-    "archiverepository";
+    "archiverepository"; "createrepository"; "clonetemplaterepository";
+    "creatediscussion"; "adddiscussioncomment"; "adddiscussionpollvote";
+    "closediscussion"; "deletediscussion"; "deletediscussioncomment";
+    "markdiscussioncommentasanswer"; "reopendiscussion";
+    "unmarkdiscussioncommentasanswer"; "updatediscussion";
+    "updatediscussioncomment";
     (* Forward-looking verb prefixes for mutations GitHub may introduce.
        Over-block here is acceptable — under-block (silent miss) is not. *)
     "purgerepository" ]

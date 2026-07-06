@@ -349,6 +349,10 @@ let test_transport_health_json () =
     Otel_metric_store.metric_total
       (Otel_metric_store.metric_ws_dashboard_hello_latency_seconds ^ "_count")
   in
+  let external_fanout_count_before =
+    Otel_metric_store.metric_total
+      (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count")
+  in
   TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   Masc.Sse.sync_transport_snapshot ~force:true ();
@@ -377,6 +381,21 @@ let test_transport_health_json () =
     (sse_json |> U.member "relay_retry_total" |> U.to_int);
   check int "relay drops total" 4
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
+  check bool "external fanout avg surfaced" true
+    (match sse_json |> U.member "external_fanout_avg_seconds" with
+     | `Float _ | `Int _ -> true
+     | _ -> false);
+  check bool "external fanout count surfaced" true
+    (match sse_json |> U.member "external_fanout_count" with
+     | `Int _ -> true
+     | _ -> false);
+  check bool "external fanout count advances" true
+    (float_of_int (sse_json |> U.member "external_fanout_count" |> U.to_int)
+     >= external_fanout_count_before +. 1.0);
+  check bool "external fanout sum surfaced" true
+    (match sse_json |> U.member "external_fanout_sum_seconds" with
+     | `Float _ | `Int _ -> true
+     | _ -> false);
   check bool "streamable http configured field exists" true
     (match streamable_json |> U.member "configured" with
     | `Bool _ -> true

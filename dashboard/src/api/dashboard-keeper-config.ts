@@ -89,6 +89,38 @@ function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace
     .filter((item): item is KeeperConfig['workspace']['active_goals'][number] => item !== null)
 }
 
+function dedupeStringList(values: readonly string[]): string[] {
+  return Array.from(new Set(values.filter(value => value.trim() !== '').map(value => value.trim())))
+}
+
+function collectRawFieldPaths(raw: unknown, prefix = ''): string[] {
+  if (!isRecord(raw)) return []
+  const paths: string[] = []
+  for (const [key, value] of Object.entries(raw)) {
+    if (prefix === '' && key === 'field_presence') continue
+    const path = prefix === '' ? key : `${prefix}.${key}`
+    paths.push(path)
+    paths.push(...collectRawFieldPaths(value, path))
+  }
+  return paths
+}
+
+function normalizeKeeperConfigFieldPresence(data: Record<string, unknown>): KeeperConfig['field_presence'] {
+  const raw = isRecord(data.field_presence) ? data.field_presence : null
+  const presentPaths = raw
+    ? normalizeStringList(raw.present_paths)
+    : collectRawFieldPaths(data)
+  return {
+    schema: raw
+      ? asNullableString(raw.schema) ?? 'keeper.config.field_presence.v1'
+      : 'keeper.config.field_presence.client-derived.v1',
+    producer: raw
+      ? asNullableString(raw.producer) ?? 'unknown'
+      : 'dashboard-keeper-config.normalizer',
+    present_paths: dedupeStringList(presentPaths),
+  }
+}
+
 function normalizePromptBlock(raw: unknown, fallbackKey: string): { key: string; source: string; text: string } {
   if (!isRecord(raw)) {
     return {
@@ -278,6 +310,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       last_output_tokens_per_sec: asLooseNullableNumber(metrics.last_output_tokens_per_sec),
       compaction_count: asInt(metrics.compaction_count) ?? 0,
     },
+    field_presence: normalizeKeeperConfigFieldPresence(data),
   }
 }
 

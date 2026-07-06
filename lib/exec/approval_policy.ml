@@ -154,6 +154,47 @@ let arg_lit : Shell_ir.arg -> string option = function
   | Shell_ir.Var _ | Shell_ir.Concat _ -> None
 ;;
 
+let repo_hosting_arg_word : Shell_ir.arg -> string = function
+  | Shell_ir.Lit (s, _) -> s
+  | Shell_ir.Var _ | Shell_ir.Concat _ -> ""
+
+let repo_hosting_cli_is_floored (bin : Exec_program.t) (args : Shell_ir.arg list)
+  : bool
+  =
+  match Exec_program.known bin with
+  | Some Exec_program.Gh ->
+    let words = Exec_program.to_string bin :: List.map repo_hosting_arg_word args in
+    (match Shell_ir_risk.classify_repo_hosting_cli words with
+     | R2_Irreversible | Destructive_protected -> true
+     | R0_Read | R1_Reversible_mutation -> false)
+  | Some _ | None -> false
+[@@warning "-4"]
+
+(* Scan for irreversible repository-hosting CLI operations.  This reuses the
+   Shell IR risk SSOT for gh subcommands instead of maintaining a second command
+   table in approval policy.  Non-literal argv is not floored here because the
+   policy layer cannot classify values it cannot inspect; those commands remain
+   in the normal graded path.
+
+   [@@warning "-4"]: the [_ :: rest] arm is a find-first scan that
+   intentionally skips non-matching capabilities, same rationale as
+   [find_destructive_git]. *)
+let find_destructive_repo_hosting_cli (caps : Capability.t list)
+  : Exec_program.t option
+  =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      if repo_hosting_cli_is_floored bin args then Some bin else scan rest
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
 (* Pull every literal SQL string out of a database CLI's argv: the token after a
    bare [-c]/[--command] ([-e]/[--execute]), the value attached to the short
    flag ([-cSELECT...]), or after [--command=] ([--execute=]).  Non-literal
@@ -242,12 +283,15 @@ let catastrophic_floor (caps : Capability.t list) : Verdict.deny_reason option =
     (match find_write_escape caps with
      | Some ps -> Some (Verdict.Path_escape ps)
      | None ->
+       (match find_destructive_repo_hosting_cli caps with
+        | Some bin -> Some (Verdict.Destructive_repo_hosting_cli bin)
+        | None ->
        (match find_catastrophic_program caps with
         | Some bin -> Some (Verdict.Catastrophic_program bin)
         | None ->
           (match find_destructive_db caps with
            | Some op -> Some (Verdict.Destructive_db op)
-           | None -> None)))
+           | None -> None))))
 
 (* Highest program risk observed in the full cap tree. *)
 let max_risk (caps : Capability.t list) : Exec_program.risk_class =

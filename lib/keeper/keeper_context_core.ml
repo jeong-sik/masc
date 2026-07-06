@@ -820,12 +820,22 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     writes keep the checkpoint [working_context] empty. *)
 let patch_checkpoint_last_assistant
     ?snapshot
+    ?snapshot_source
     (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
   : Agent_sdk.Checkpoint.t =
-  let snapshot =
+  let snapshot, snapshot_source =
     match snapshot with
-    | Some snapshot -> Some snapshot
-    | None -> Keeper_memory_policy.parse_state_snapshot_from_reply response_text
+    | Some snapshot -> Some snapshot, snapshot_source
+    | None ->
+        (match Keeper_memory_policy.parse_state_snapshot_from_reply response_text with
+         | Some snapshot ->
+             let snapshot_source =
+               match snapshot_source with
+               | Some source -> Some source
+               | None -> Some Keeper_memory_policy.State_block
+             in
+             Some snapshot, snapshot_source
+         | None -> None, None)
   in
   let visible_response_text =
     match snapshot with
@@ -838,7 +848,9 @@ let patch_checkpoint_last_assistant
       | Some snapshot ->
           [
             ( Keeper_memory_policy.replay_metadata_key,
-              Keeper_memory_policy.replay_metadata_of_snapshot snapshot );
+              Keeper_memory_policy.replay_metadata_of_snapshot
+                ?state_snapshot_source:snapshot_source
+                snapshot );
           ]
       | None -> []
     in

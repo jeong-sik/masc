@@ -71,6 +71,12 @@ val handle_keeper_tools_post :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Handle [POST /tools] (tool-grant edits). *)
 
+val handle_keeper_catchup_judge_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
+    and starting an out-of-band Fusion judge run. *)
+
 (** {1 POST route classifier}
 
     keeper_post_route_kind ADT + classifier + path helpers live in

@@ -76,6 +76,41 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
+export interface DashboardScheduledAutomationDispatchReceipt {
+  projection_status: 'recognized' | 'unrecognized_detail'
+  kind?: string
+  queue?: string
+  stimulus?: string
+  keeper_name?: string
+  schedule_id?: string
+  urgency?: string
+  post_id?: string
+  author?: string
+  hearth?: string | null
+  reason?: string
+}
+
+export interface DashboardScheduledAutomationKeeperQueueEvidence {
+  projection_status: 'matched_pending' | 'matched_inflight' | 'not_found' | 'read_error' | 'unrecognized_receipt'
+  source?: string
+  queue?: string
+  stimulus?: string
+  keeper_name?: string
+  schedule_id?: string
+  post_id?: string
+  pending_count?: number
+  inflight_count?: number
+  matched_bucket?: string
+  matched_post_id?: string
+  matched_schedule_id?: string | null
+  matched_payload_kind?: string
+  matched_arrived_at?: number
+  matched_arrived_at_iso?: string
+  matched_age_seconds?: number
+  read_errors?: Array<{ kind?: string; path?: string | null; message?: string }>
+  reason?: string
+}
+
 export interface DashboardScheduledAutomationKeeperToolStatus {
   name: string
   registered_schema?: boolean
@@ -150,6 +185,8 @@ export interface DashboardScheduledAutomationRequest {
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
+  dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
+  keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
 }
 
 export interface DashboardScheduledAutomationPayloadSupport {

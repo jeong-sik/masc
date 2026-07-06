@@ -878,7 +878,19 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     check string "last execution status" "succeeded"
       (row |> member "last_execution" |> member "status" |> to_string);
     check string "last execution detail" "test.exec"
-      (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string)
+      (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string);
+    check string "unrecognized dispatch receipt status" "unrecognized_detail"
+      (row |> member "dispatch_receipt" |> member "projection_status" |> to_string);
+    check bool "unrecognized dispatch receipt reason" true
+      (String_util.contains_substring
+         (row |> member "dispatch_receipt" |> member "reason" |> to_string)
+         "unsupported schedule dispatch receipt kind: test.exec");
+    check string "unrecognized queue evidence status" "unrecognized_receipt"
+      (row |> member "keeper_queue_evidence" |> member "projection_status" |> to_string);
+    check bool "unrecognized queue evidence reason" true
+      (String_util.contains_substring
+         (row |> member "keeper_queue_evidence" |> member "reason" |> to_string)
+         "unsupported schedule dispatch receipt kind: test.exec")
 ;;
 
 let test_dashboard_projection_surfaces_schedule_runner_signals () =

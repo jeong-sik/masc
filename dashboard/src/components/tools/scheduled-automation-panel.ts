@@ -5,6 +5,8 @@ import {
   type DashboardScheduleDecision,
   type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
+  type DashboardScheduledAutomationDispatchReceipt,
+  type DashboardScheduledAutomationKeeperQueueEvidence,
   type DashboardScheduledAutomationExecution,
   type DashboardScheduledAutomationRequest,
   type DashboardScheduledAutomationSignal,
@@ -395,6 +397,148 @@ function executionDetailRows(detail: unknown): Array<{ label: string; value: str
     .slice(0, 6)
 }
 
+function dispatchReceiptTone(
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
+): StatusChipTone {
+  if (!receipt) return 'neutral'
+  return receipt.projection_status === 'recognized' ? 'ok' : 'warn'
+}
+
+function dispatchReceiptRows(
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!receipt) return []
+  const rows: Array<{ label: string; value: string | null | undefined }> = [
+    { label: 'kind', value: receipt.kind },
+    { label: 'queue', value: receipt.queue },
+    { label: 'stimulus', value: receipt.stimulus },
+    { label: 'keeper', value: receipt.keeper_name },
+    { label: 'schedule', value: receipt.schedule_id },
+    { label: 'urgency', value: receipt.urgency },
+    { label: 'post_id', value: receipt.post_id },
+    { label: 'author', value: receipt.author },
+    { label: 'hearth', value: receipt.hearth },
+    { label: 'reason', value: receipt.reason },
+  ]
+  return rows.filter((row): row is { label: string; value: string } => {
+    return typeof row.value === 'string' && row.value.trim() !== ''
+  })
+}
+
+function DispatchReceiptBlock({
+  receipt,
+  compact = false,
+}: {
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  compact?: boolean
+}) {
+  if (!receipt) return null
+  const rows = dispatchReceiptRows(receipt)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-dispatch-receipt=${receipt.projection_status}
+      data-schedule-dispatch-receipt-kind=${receipt.kind ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">dispatch_receipt</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">dispatch receipt</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${dispatchReceiptTone(receipt)} uppercase=${false}>
+            ${enumLabel(receipt.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2'} data-dispatch-receipt-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function queueEvidenceTone(
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
+): StatusChipTone {
+  if (!evidence) return 'neutral'
+  if (evidence.projection_status === 'matched_pending' || evidence.projection_status === 'matched_inflight') return 'ok'
+  if (evidence.projection_status === 'not_found' || evidence.projection_status === 'read_error') return 'warn'
+  return 'bad'
+}
+
+function queueEvidenceRows(
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!evidence) return []
+  const readErrors = (evidence.read_errors ?? [])
+    .map(error => [error.kind, error.path, error.message].filter(Boolean).join(': '))
+    .filter(value => value.trim() !== '')
+    .join(' | ')
+  const rows: Array<{ label: string; value: string | number | null | undefined }> = [
+    { label: 'source', value: evidence.source },
+    { label: 'queue', value: evidence.queue },
+    { label: 'stimulus', value: evidence.stimulus },
+    { label: 'keeper', value: evidence.keeper_name },
+    { label: 'schedule', value: evidence.schedule_id },
+    { label: 'post_id', value: evidence.post_id },
+    { label: 'pending_count', value: evidence.pending_count },
+    { label: 'inflight_count', value: evidence.inflight_count },
+    { label: 'matched_bucket', value: evidence.matched_bucket },
+    { label: 'matched_payload_kind', value: evidence.matched_payload_kind },
+    { label: 'matched_post_id', value: evidence.matched_post_id },
+    { label: 'matched_schedule_id', value: evidence.matched_schedule_id },
+    { label: 'matched_arrived_at', value: evidence.matched_arrived_at_iso },
+    { label: 'matched_age_seconds', value: evidence.matched_age_seconds },
+    { label: 'read_errors', value: readErrors },
+    { label: 'reason', value: evidence.reason },
+  ]
+  return rows
+    .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
+    .filter(row => row.value.trim() !== '')
+}
+
+function QueueEvidenceBlock({
+  evidence,
+  compact = false,
+}: {
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  compact?: boolean
+}) {
+  if (!evidence) return null
+  const rows = queueEvidenceRows(evidence)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-keeper-queue-evidence=${evidence.projection_status}
+      data-schedule-keeper-queue-evidence-source=${evidence.source ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">keeper_queue_evidence</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">keeper queue evidence</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${queueEvidenceTone(evidence)} uppercase=${false}>
+            ${enumLabel(evidence.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2'} data-keeper-queue-evidence-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest }) {
   const kind = request.payload_kind ?? '-'
   const target = request.payload_target?.trim() || null
@@ -654,7 +798,15 @@ function ScheduleCard({
   `
 }
 
-function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+function LastExecutionBlock({
+  execution,
+  dispatchReceipt,
+  queueEvidence,
+}: {
+  execution: DashboardScheduledAutomationExecution | null | undefined
+  dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+}) {
   if (!execution) {
     return html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">-</div>`
   }
@@ -693,6 +845,8 @@ function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutoma
             </div>
           `
         : null}
+      <${DispatchReceiptBlock} receipt=${dispatchReceipt} />
+      <${QueueEvidenceBlock} evidence=${queueEvidence} />
     </div>
   `
 }
@@ -781,7 +935,11 @@ function ScheduleDetailPanel({
         </div>
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">최근 실행</div>
-          <${LastExecutionBlock} execution=${execution} />
+          <${LastExecutionBlock}
+            execution=${execution}
+            dispatchReceipt=${request.dispatch_receipt ?? null}
+            queueEvidence=${request.keeper_queue_evidence ?? null}
+          />
         </div>
       </div>
     </section>
@@ -1341,7 +1499,11 @@ function SchDetail({
 
           <div class="turn-sec">
             <h4>최근 실행 기록</h4>
-            <${SchExecution} execution=${execution} />
+            <${SchExecution}
+              execution=${execution}
+              dispatchReceipt=${request.dispatch_receipt ?? null}
+              queueEvidence=${request.keeper_queue_evidence ?? null}
+            />
           </div>
 
           <${SchDetailActions} request=${request} onResolved=${onResolved} onClose=${onClose} />
@@ -1351,7 +1513,15 @@ function SchDetail({
   `
 }
 
-function SchExecution({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+function SchExecution({
+  execution,
+  dispatchReceipt,
+  queueEvidence,
+}: {
+  execution: DashboardScheduledAutomationExecution | null | undefined
+  dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+}) {
   if (!execution) {
     return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_execution">실행 기록 없음</span></div></div>`
   }
@@ -1365,6 +1535,8 @@ function SchExecution({ execution }: { execution: DashboardScheduledAutomationEx
         <div class="sch-kv" data-execution-detail-row=${row.label}><span class="k">${row.label}</span><span class="v mono">${row.value}</span></div>
       `)}
     </div>
+    <${DispatchReceiptBlock} receipt=${dispatchReceipt} compact=${true} />
+    <${QueueEvidenceBlock} evidence=${queueEvidence} compact=${true} />
     ${execution.error ? html`<div class="sch-exec bad">${execution.error}</div>` : null}
   `
 }

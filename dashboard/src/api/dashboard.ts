@@ -187,6 +187,8 @@ export type {
   ToolMetricsResponse,
   DashboardScheduledAutomationFsm,
   DashboardScheduledAutomationExecution,
+  DashboardScheduledAutomationDispatchReceipt,
+  DashboardScheduledAutomationKeeperQueueEvidence,
   DashboardScheduledAutomationKeeperToolStatus,
   DashboardScheduledAutomationActor,
   DashboardScheduledAutomationSignal,

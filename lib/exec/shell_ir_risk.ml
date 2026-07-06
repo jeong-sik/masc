@@ -478,6 +478,57 @@ let classify_repo_hosting_cli (words : string list) : risk_class =
     else if in_table repo_hosting_cli_reversible_mutations command sub then R1_Reversible_mutation
     else R0_Read
 
+(* RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command.
+
+   [risk_of_gh_verb] is the closed-sum lens over [classify_repo_hosting_cli]:
+   it reads the SAME subcommand tables (the risk SSOT) for known families, so
+   its opinion equals the word-list floor for every recognized [family/action]
+   pair. It differs in exactly one place — a wholly-unrecognized top-level gh
+   area ([Gh_verb.Other]) opines [R2_Irreversible] (fail-closed) instead of the
+   floor's [R0_Read] fall-through. That is the whole delta this function adds:
+   an unrecognized gh command carries a non-read typed opinion rather than
+   silently reading as R0.
+
+   Deliberately NOT fail-closed here:
+   - [Api]: the risk of [gh api] is the HTTP method / graphql body, which are
+     string-borne. [risk_of_gh_verb] returns [R0_Read] and lets the word-list
+     floor ([classify]'s [max_risk] with [classify_repo_hosting_cli]) own it,
+     exactly as RFC-0208 requires.
+   - a known family with a table-absent action ([gh pr view], [gh repo list]):
+     table-absent actions in a known family are overwhelmingly reads, and we
+     cannot distinguish a read from an unknown action without a reads table.
+     Fail-closing them would over-block reads, so they stay [R0_Read]. The
+     residual "known-family unknown-action" case (e.g. [gh repo upsert-magic])
+     is therefore NOT fail-closed by W1; it is deferred to W3, where an unknown
+     action routes to non-blocking approval instead of a read or a hard deny.
+
+   This function is the capability-identity substrate for W2 (per-keeper policy)
+   and W3 (approval routing). It never returns [Destructive_protected]: gh ops
+   are R0/R1/R2 only, and [Destructive_protected] is the one class the dispatch
+   layer special-cases. *)
+let risk_of_gh_verb (v : Gh_verb.t) : risk_class =
+  match v.Gh_verb.family with
+  (* string-borne: -X METHOD / graphql body owned by the word-list floor. *)
+  | Gh_verb.Api -> R0_Read
+  (* fail-closed: unrecognized gh area is not a known read shape. *)
+  | Gh_verb.Other _ -> R2_Irreversible
+  | ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+    | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
+    | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
+    | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as fam ->
+    (* [None] is a bare family invocation ([gh repo]) — a read, not a hidden
+       default. Matched explicitly rather than collapsed to an empty-string
+       default so the "no action" case is a decision, not a silent fold. *)
+    (match v.Gh_verb.action with
+     | None -> R0_Read
+     | Some action ->
+       let command = Gh_verb.family_token fam in
+       if in_table repo_hosting_cli_irreversible_ops command action then
+         R2_Irreversible
+       else if in_table repo_hosting_cli_reversible_mutations command action
+       then R1_Reversible_mutation
+       else R0_Read)
+
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)
 
@@ -848,20 +899,29 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
      "rm"/"git push" arms never fired (silent R0). Privilege escalation
      always requires approval. *)
   | W (Sudo _) -> Destructive_protected
-  (* RFC-0208: gh risk is irreducibly string-borne. The HTTP method
-     (-X DELETE), -f/--field key=values, the graphql mutation body, and a
-     large, evolving set of subcommands all live in argv strings, not in
-     the command's typed shape. Unlike [rm -rf] / [git reset] / [sudo],
-     whose risk IS structural and typeable, gh has no risk-bearing typed
-     shape for [risk_of_typed] to read, so it returns R0 and [classify]'s
-     word-list floor ([classify_words] -> [classify_repo_hosting_cli] on
-     the original, un-round-tripped words) owns gh risk by design. This is
-     the honest boundary: an earlier version round-tripped the IR back to
-     words here to fake a typed opinion, but the round-trip mis-parsed
-     `-X DELETE` and silently under-classified it to R0 — strictly worse
-     than the floor it duplicated. gh stays floor-owned; P7 floor
-     retirement is scoped to structurally-typed classes only. *)
-  | W (Gh _) -> R0_Read
+  (* RFC-0208 + RFC-0309 §2/§3.1 (W1): gh's string-borne risk stays
+     floor-owned, but its top-level *area* is now a closed typed family.
+
+     The HTTP method (-X DELETE), -f/--field values, and the graphql body
+     remain in argv strings; [classify]'s [max_risk] with the word-list floor
+     ([classify_repo_hosting_cli] on the original, un-round-tripped words) owns
+     that risk, so gh api / -X DELETE / graphql mutations classify exactly as
+     before. This arm does NOT re-parse those words (the round-trip that an
+     earlier version tried mis-parsed `-X DELETE` to R0 — strictly worse than
+     the floor).
+
+     What changed: instead of a blanket [R0_Read] abstention, we read the
+     already-parsed [subcommand]/[action] fields (no re-tokenization) into a
+     [Gh_verb.t] and take [risk_of_gh_verb]. For every recognized family that
+     opinion equals the floor (same tables), so [max_risk] is unchanged for
+     known gh. It differs only for an unrecognized top-level area
+     ([Gh_verb.Other]): the typed opinion is [R2_Irreversible] (fail-closed)
+     while the floor stays [R0_Read], so [max_risk] lifts an unknown gh command
+     to R2. That composed value is observability for W1 (the keeper approval
+     gate reads the word-list floor, not this opinion); it becomes enforcement
+     in W3 when unknown gh routes to non-blocking approval. *)
+  | W (Gh { subcommand; action; _ }) ->
+    risk_of_gh_verb (Gh_verb.of_fields ~subcommand ~action)
   | W (Docker _) -> R0_Read
   (* File operations — cp/mv/ln/touch are reversible or low-risk mutations *)
   | W (Cp _) -> R1_Reversible_mutation

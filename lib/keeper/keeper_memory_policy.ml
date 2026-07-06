@@ -666,13 +666,27 @@ let structured_working_context_of_snapshot
     ("state_snapshot", keeper_state_snapshot_to_json snapshot);
   ]
 
+let replay_metadata_provenance_fields = function
+  | None -> []
+  | Some state_snapshot_source ->
+      let synthetic = state_snapshot_source_is_synthetic state_snapshot_source in
+      [
+        ("state_snapshot_source", `String (state_snapshot_source_to_string state_snapshot_source));
+        ("state_snapshot_synthetic", `Bool synthetic);
+        ("state_snapshot_live_observation", `Bool (not synthetic));
+        ("state_snapshot_model_authored", `Bool (not synthetic));
+      ]
+
 let replay_metadata_of_snapshot
+    ?state_snapshot_source
     (snapshot : keeper_state_snapshot) : Yojson.Safe.t =
-  `Assoc [
-    ("kind", `String replay_metadata_kind);
-    ("version", `Int replay_metadata_version);
-    ("payload", keeper_state_snapshot_to_json snapshot);
-  ]
+  `Assoc
+    ([
+       ("kind", `String replay_metadata_kind);
+       ("version", `Int replay_metadata_version);
+       ("payload", keeper_state_snapshot_to_json snapshot);
+     ]
+     @ replay_metadata_provenance_fields state_snapshot_source)
 
 let snapshot_of_replay_metadata
     (json : Yojson.Safe.t) : keeper_state_snapshot option =
@@ -686,10 +700,12 @@ let snapshot_of_replay_metadata
   | _ -> None
 
 let with_snapshot_metadata
+    ?state_snapshot_source
     (msg : Agent_sdk.Types.message)
     (snapshot : keeper_state_snapshot) : Agent_sdk.Types.message =
   let metadata =
-    (replay_metadata_key, replay_metadata_of_snapshot snapshot)
+    ( replay_metadata_key,
+      replay_metadata_of_snapshot ?state_snapshot_source snapshot )
     :: List.remove_assoc replay_metadata_key msg.metadata
   in
   { msg with metadata }

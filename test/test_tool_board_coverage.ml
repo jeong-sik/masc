@@ -540,7 +540,10 @@ let test_inline_board_post_author_rewrites_caller_claim () =
       normalized |> member "meta" |> member "author_caller_claim" |> to_string);
   Alcotest.(check string) "raw ctx agent preserved" "keeper-velvet-hammer-agent"
     Yojson.Safe.Util.(
-      normalized |> member "meta" |> member "author_raw_agent_name" |> to_string);
+      normalized
+      |> member "meta"
+      |> member Board_tool.author_raw_agent_name_meta_key
+      |> to_string);
   Alcotest.(check string) "existing meta preserved" "probe-10297"
     Yojson.Safe.Util.(normalized |> member "meta" |> member "trace" |> to_string)
 
@@ -2365,7 +2368,9 @@ let () =
                       ; "author", `String "keeper-canonical"
                       ; ( "meta"
                         , `Assoc
-                            [ "author_raw_agent_name", `String "claude-agent" ] )
+                            [ ( Board_tool.author_raw_agent_name_meta_key
+                              , `String "claude-agent" )
+                            ] )
                       ])
                in
                Alcotest.(check bool) "post created" true ok;
@@ -2392,7 +2397,9 @@ let () =
                       ; "post_kind", `String "direct"
                       ; ( "meta"
                         , `Assoc
-                            [ "author_raw_agent_name", `String "claude-agent" ] )
+                            [ ( Board_tool.author_raw_agent_name_meta_key
+                              , `String "claude-agent" )
+                            ] )
                       ])
                in
                Alcotest.(check bool) "post rejected" false ok;

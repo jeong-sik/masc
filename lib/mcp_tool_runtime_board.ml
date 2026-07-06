@@ -150,7 +150,11 @@ let canonical_board_author raw =
 
 let record_identity_raw_surface field raw canonical fields =
   if String.equal raw "" || String.equal raw canonical then fields
-  else json_upsert_meta_string_field (field ^ "_raw_agent_name") raw fields
+  else
+    json_upsert_meta_string_field
+      (Board_tool_format.raw_agent_name_meta_key ~field)
+      raw
+      fields
 
 (** #10297: enforce that a board-tool caller cannot author / vote under
     a principal other than the runtime contract's [agent_name].  Pre-fix

@@ -11,14 +11,22 @@
       [R2_Irreversible] by PR #23362 to express a capability-policy
       decision on the risk axis. Target (G-4/G-9): R1 + external effect
       + [Requires_approval] disposition.
-    - [Defect_unknown_permissive] — gh verbs absent from both word-list
-      tables fall through to [R0_Read] and auto-run under the autonomous
-      overlay. Target (G-3): typed [Gh_unknown] fail-closed.
+    - [Defect_unknown_permissive] — gh verbs/actions absent from the
+      word-list tables that still compose to [R0_Read] and auto-run under
+      the autonomous overlay.
+    - [Fail_closed_opinion] — W1 landed: the typed gh family
+      ([Shell_ir_risk.risk_of_gh_verb]) now gives a wholly-unrecognized gh
+      area ([Gh_verb.Other]) an [R2_Irreversible] typed opinion, which
+      [classify] lifts into the composed risk. This is OBSERVABILITY only:
+      the keeper approval floor reads the word-list classifier, not this
+      composed opinion (see [test_word_list_surface], which still pins the
+      floor at [R0_Read] for the same inputs). Enforcement of these lands
+      in W3 (unknown gh -> non-blocking approval).
 
-    Update protocol: when a slice lands, move its cases from the defect
-    constructor to [Stable] with the new class, and update the ledger
-    counts in [test_ledger]. The ledger diff IS the slice's measured
-    delta; do not silence a mismatch by deleting a case. *)
+    Update protocol: when a slice lands, move its cases to the constructor
+    matching the new state and update the ledger counts in [test_ledger].
+    The ledger diff IS the slice's measured delta; do not silence a
+    mismatch by deleting a case. *)
 
 module Parsed = Masc_exec.Parsed
 module Shell_ir = Masc_exec.Shell_ir
@@ -59,11 +67,17 @@ type expectation =
           PR #23362 placed in [repo_hosting_cli_irreversible_ops] (or the
           graphql R2 fragment list) to express policy. *)
   | Defect_unknown_permissive of Shell_ir_risk.risk_class
-      (** Pinned current class for a verb/action absent from both
-          word-list tables: falls through to R0 and auto-runs. *)
+      (** Pinned current class for a verb/action absent from the word-list
+          tables that still composes to R0 and auto-runs. *)
+  | Fail_closed_opinion of Shell_ir_risk.risk_class
+      (** W1 landed: composed risk lifted by the typed [Gh_verb.Other]
+          fail-closed opinion. Observability only — the approval floor
+          (word-list) is unchanged; enforcement is W3. *)
 
 let pinned_class = function
-  | Stable c | Defect_policy_as_risk c | Defect_unknown_permissive c -> c
+  | Stable c | Defect_policy_as_risk c | Defect_unknown_permissive c
+  | Fail_closed_opinion c ->
+    c
 ;;
 
 let corpus : (string * string * expectation) list =
@@ -74,9 +88,8 @@ let corpus : (string * string * expectation) list =
     ("issue-view", "gh issue view 7", Stable Shell_ir_risk.R0_Read);
     ("repo-view", "gh repo view owner/repo", Stable Shell_ir_risk.R0_Read);
     ("api-get", "gh api repos/owner/repo", Stable Shell_ir_risk.R0_Read);
-    (* R0 by fall-through, not by decision: "discussion view" is in
-       neither table. Correct outcome, undecided path — G-1 makes it a
-       decided read. *)
+    (* Post-W1 this is a DECIDED read: the typed [Gh_verb.Discussion] family
+       with a table-absent action ("view") opines R0, matching the floor. *)
     ("discussion-view", "gh discussion view 42", Stable Shell_ir_risk.R0_Read);
     (* --- reversible mutations: stable R1 ----------------------------- *)
     ("pr-create", "gh pr create --title T --body B",
@@ -133,14 +146,20 @@ let corpus : (string * string * expectation) list =
     ("graphql-addDiscussionComment",
      "gh api graphql -f 'query=mutation{addDiscussionComment}'",
      Defect_policy_as_risk Shell_ir_risk.R2_Irreversible);
-    (* --- Defect 2: unknown verb/action auto-runs as R0 --------------- *)
+    (* --- W1: wholly-unrecognized gh area -> fail-closed typed opinion.
+       Composed risk is now R2 (was R0). Observability only: the approval
+       floor still reads these as R0 (see test_word_list_surface). --------- *)
     ("unknown-verb", "gh frobnicate now",
-     Defect_unknown_permissive Shell_ir_risk.R0_Read);
+     Fail_closed_opinion Shell_ir_risk.R2_Irreversible);
     ("unknown-verb-forced", "gh quantum entangle --force",
-     Defect_unknown_permissive Shell_ir_risk.R0_Read);
+     Fail_closed_opinion Shell_ir_risk.R2_Irreversible);
     ("unknown-verb-preview", "gh preview enable-feature x",
-     Defect_unknown_permissive Shell_ir_risk.R0_Read);
-    (* unknown ACTION under a known family also falls through *)
+     Fail_closed_opinion Shell_ir_risk.R2_Irreversible);
+    (* --- Residual defect (NOT fixed by W1): a known family with an
+       unknown action. We cannot distinguish "gh repo upsert-magic" from a
+       read ("gh repo view") without a reads table, so fail-closing here
+       would over-block reads. Stays R0; deferred to W3, where an unknown
+       action routes to non-blocking approval instead of auto-run. -------- *)
     ("unknown-repo-action", "gh repo upsert-magic owner/repo",
      Defect_unknown_permissive Shell_ir_risk.R0_Read);
   ]
@@ -168,27 +187,33 @@ let test_corpus_pinned () =
        ^ String.concat "\n" mismatches)
 ;;
 
-(* The typed path abstains on gh (RFC-0208 boundary): the Gh constructor
-   is a typed hit, but its risk opinion is R0 regardless of verb — the
-   word-list floor owns gh risk. G-1/G-3 change exactly this: verb-family
-   lower bounds (Repo_delete -> R2, Repo_create -> R1, Gh_unknown -> R2)
-   while the floor stays. *)
-let test_typed_path_abstains_on_gh () =
-  List.iter
-    (fun cmd ->
-       let opinion = typed_opinion cmd in
-       if opinion <> Shell_ir_risk.R0_Read then
-         Alcotest.failf
-           "typed opinion for %S pinned R0_Read (abstention), got %s" cmd
-           (rc opinion);
-       if not (Shell_ir_risk.typed_hit_of_ir (parse_ir cmd)) then
-         Alcotest.failf "expected %S to lower to a typed Gh hit" cmd)
-    [
-      "gh repo create owner/new-repo";
-      "gh pr merge 123";
-      "gh discussion comment 42 --body B";
-      "gh frobnicate now";
-    ]
+(* W1: the typed path no longer abstains on gh. [risk_of_typed] reads the
+   [Gh_verb] family and returns a verb-based opinion that equals the word-list
+   floor for known families and fail-closes ([Gh_verb.Other] -> R2) for an
+   unrecognized area. [Api] stays R0 (its -X/graphql risk is string-borne and
+   floor-owned). Every gh command still lowers to a typed Gh hit. *)
+let test_typed_path_verb_opinion () =
+  let check cmd expected =
+    let opinion = typed_opinion cmd in
+    if opinion <> expected then
+      Alcotest.failf "typed opinion for %S: pinned %s, got %s" cmd
+        (rc expected) (rc opinion);
+    if not (Shell_ir_risk.typed_hit_of_ir (parse_ir cmd)) then
+      Alcotest.failf "expected %S to lower to a typed Gh hit" cmd
+  in
+  check "gh pr view 123" Shell_ir_risk.R0_Read;
+  check "gh pr create --title T" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh pr merge 123" Shell_ir_risk.R2_Irreversible;
+  (* repo/create sits in the irreversible table post-#23362; W1 reads the
+     same tables, so the typed opinion is R2 here too. W2 moves it to R1
+     once the capability-policy axis can carry the "disabled" decision. *)
+  check "gh repo create owner/new-repo" Shell_ir_risk.R2_Irreversible;
+  check "gh repo delete owner/repo" Shell_ir_risk.R2_Irreversible;
+  check "gh discussion comment 42 --body B" Shell_ir_risk.R2_Irreversible;
+  (* api: typed opinion stays R0; the word-list floor owns -X/graphql risk. *)
+  check "gh api repos/owner/repo -X DELETE" Shell_ir_risk.R0_Read;
+  (* wholly-unrecognized area: fail-closed typed opinion. *)
+  check "gh frobnicate now" Shell_ir_risk.R2_Irreversible
 ;;
 
 (* Word-list surface directly (no parser): the fall-through and the
@@ -222,17 +247,27 @@ let test_ledger () =
     count (fun (_, _, e) ->
       match e with Defect_unknown_permissive _ -> true | _ -> false)
   in
+  let fail_closed_opinion =
+    count (fun (_, _, e) ->
+      match e with Fail_closed_opinion _ -> true | _ -> false)
+  in
   Printf.printf
-    "[G-0] corpus=%d R0=%d R1=%d R2=%d DP=%d | defects: policy_as_risk=%d \
-     unknown_permissive=%d\n"
-    (List.length corpus) r0 r1 r2 dp policy_as_risk unknown_permissive;
+    "[G-0->W1] corpus=%d R0=%d R1=%d R2=%d DP=%d | defects: policy_as_risk=%d \
+     unknown_permissive=%d | fail_closed_opinion=%d\n"
+    (List.length corpus) r0 r1 r2 dp policy_as_risk unknown_permissive
+    fail_closed_opinion;
   Alcotest.(check int) "corpus size" 32 (List.length corpus);
-  Alcotest.(check int) "R0 count" 10 r0;
+  (* W1 delta vs W0 baseline: 3 wholly-unknown gh areas moved R0->R2 as a
+     fail-closed typed opinion (R0 10->7, R2 17->20), leaving 1 residual
+     unknown-permissive (known-family unknown-action, deferred to W3). *)
+  Alcotest.(check int) "R0 count" 7 r0;
   Alcotest.(check int) "R1 count" 5 r1;
-  Alcotest.(check int) "R2 count" 17 r2;
+  Alcotest.(check int) "R2 count" 20 r2;
   Alcotest.(check int) "Destructive count" 0 dp;
   Alcotest.(check int) "defect: policy-as-risk" 9 policy_as_risk;
-  Alcotest.(check int) "defect: unknown-permissive" 4 unknown_permissive
+  Alcotest.(check int) "defect: unknown-permissive (residual)" 1
+    unknown_permissive;
+  Alcotest.(check int) "W1: fail-closed opinion" 3 fail_closed_opinion
 ;;
 
 let () =
@@ -241,8 +276,8 @@ let () =
       ( "g0-baseline",
         [
           Alcotest.test_case "corpus pinned" `Quick test_corpus_pinned;
-          Alcotest.test_case "typed path abstains on gh" `Quick
-            test_typed_path_abstains_on_gh;
+          Alcotest.test_case "typed path verb opinion" `Quick
+            test_typed_path_verb_opinion;
           Alcotest.test_case "word-list surface" `Quick test_word_list_surface;
           Alcotest.test_case "ledger ratchet" `Quick test_ledger;
         ] );

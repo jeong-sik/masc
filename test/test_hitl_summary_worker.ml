@@ -60,6 +60,7 @@ let dummy_pending_approval
     ?(goal_id = "goal-1")
     ?(turn_id = 42)
     ?(audit_base_path = "")
+    ?(input = `Assoc [ "arg", `String "value" ])
     ()
     : Q.pending_approval
   =
@@ -71,7 +72,7 @@ let dummy_pending_approval
   ; sandbox_target = "local"
   ; sandbox_profile = None
   ; backend = None
-  ; input = `Assoc [ "arg", `String "value" ]
+  ; input
   ; risk_level = Q.Medium
   ; requested_at = 1780587600.0
   ; turn_id = Some turn_id
@@ -227,21 +228,28 @@ let test_hitl_summary_schema_excludes_server_owned_fields () =
 
 (* ── spawn / bundle tests ───────────────────────── *)
 
-let test_spawn_no_provider_config_calls_on_failure () =
+let test_spawn_no_provider_config_uses_fallback_summary () =
   Eio.Switch.run (fun sw ->
-    let called = ref false in
-    let reason_ref = ref "" in
-    let on_summary _ = fail "on_summary should not be called" in
+    let failure_called = ref false in
+    let summary_ref = ref None in
+    let on_summary summary = summary_ref := Some summary in
     let on_failure ~reason ~retryable =
-      called := true;
-      reason_ref := reason;
+      failure_called := true;
+      ignore reason;
       ignore retryable
     in
     H.spawn ~sw ~entry:(dummy_pending_approval ()) ?provider_config:None
       ~on_summary ~on_failure ();
-    check bool "on_failure called" true !called;
-    check bool "reason mentions no provider config" true
-      (Astring.String.is_infix ~affix:"no provider config" !reason_ref))
+    check bool "on_failure not called" false !failure_called;
+    match !summary_ref with
+    | None -> fail "expected fallback summary"
+    | Some summary ->
+      check string "fallback model_run_id" "deterministic-fallback" summary.model_run_id;
+      check bool "context explains missing LLM summary" true
+        (Astring.String.is_infix ~affix:"LLM context summary unavailable"
+           summary.context_summary);
+      check int "fallback questions" 3 (List.length summary.key_questions);
+      check int "fallback options" 2 (List.length summary.suggested_options))
 ;;
 
 let test_build_context_bundle_includes_ids_and_partial_context () =
@@ -502,6 +510,38 @@ let test_plain_mode_error_outcomes_record_degradation () =
        provider_error)
 ;;
 
+let test_fallback_summary_is_redacted_and_uncertain () =
+  let entry =
+    dummy_pending_approval
+      ~input:
+        (`Assoc
+            [ "api_key", `String "sk-test-secret"
+            ; "path", `String "/tmp/example"
+            ; "content", `String "write this file"
+            ])
+      ()
+  in
+  let summary =
+    H.For_testing.fallback_summary
+      ~generated_at:1234567890.0
+      ~entry
+      ~context_bundle:(`Assoc [ "partial_context", `Bool false ])
+      ~reason:"Internal error: HTTP 429: rate limit reached"
+  in
+  check string "fallback model_run_id" "deterministic-fallback" summary.model_run_id;
+  check bool "mentions fallback reason" true
+    (Astring.String.is_infix ~affix:"HTTP 429" summary.context_summary);
+  check bool "redacts raw secret" false
+    (Astring.String.is_infix ~affix:"sk-test-secret" summary.context_summary);
+  check bool "keeps redaction marker" true
+    (Astring.String.is_infix ~affix:"[REDACTED]" summary.context_summary);
+  check bool "risk rationale present" true
+    (match summary.risk_rationale with
+     | Some text -> Astring.String.is_infix ~affix:"does not verify external state" text
+     | None -> false);
+  check (float 0.0001) "fallback uncertainty" 0.85 summary.uncertainty
+;;
+
 (* ── Runner ───────────────────────────────────── *)
 
 let () =
@@ -520,8 +560,8 @@ let () =
             test_hitl_summary_schema_excludes_server_owned_fields
         ] )
     ; ( "worker"
-      , [ test_case "spawn with no provider config calls on_failure" `Quick
-            (with_eio test_spawn_no_provider_config_calls_on_failure)
+      , [ test_case "spawn with no provider config uses fallback summary" `Quick
+            (with_eio test_spawn_no_provider_config_uses_fallback_summary)
         ; test_case "build_context_bundle includes IDs and partial_context" `Quick
             test_build_context_bundle_includes_ids_and_partial_context
         ; test_case "build_context_bundle with real workspace is not partial" `Quick
@@ -540,6 +580,8 @@ let () =
             test_summary_of_response_plain_json_text_parses_prose_wrapped
         ; test_case "plain-mode errors keep degradation observable" `Quick
             test_plain_mode_error_outcomes_record_degradation
+        ; test_case "fallback summary is redacted and uncertain" `Quick
+            test_fallback_summary_is_redacted_and_uncertain
         ] )
     ]
 ;;

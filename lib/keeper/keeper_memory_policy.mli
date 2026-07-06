@@ -297,15 +297,22 @@ val structured_working_context_of_snapshot :
   keeper_state_snapshot -> Yojson.Safe.t
 (** JSON shape consumed by the dashboard's working-context panel. *)
 
-val replay_metadata_of_snapshot : keeper_state_snapshot -> Yojson.Safe.t
+val replay_metadata_of_snapshot :
+  ?state_snapshot_source:state_snapshot_source ->
+  keeper_state_snapshot ->
+  Yojson.Safe.t
 (** JSON metadata blob attached to assistant messages so a fresh
-    keeper can hydrate the snapshot from message history. *)
+    keeper can hydrate the snapshot from message history. When the producer
+    knows the snapshot source, the metadata also carries explicit provenance
+    fields so synthetic snapshots cannot be mistaken for live model-authored
+    state. *)
 
 val snapshot_of_replay_metadata :
   Yojson.Safe.t -> keeper_state_snapshot option
 (** Inverse of [replay_metadata_of_snapshot]. *)
 
 val with_snapshot_metadata :
+  ?state_snapshot_source:state_snapshot_source ->
   Agent_sdk.Types.message ->
   keeper_state_snapshot -> Agent_sdk.Types.message
 (** Attach replay metadata to an assistant message. *)

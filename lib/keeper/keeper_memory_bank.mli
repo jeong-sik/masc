@@ -135,10 +135,14 @@ val keeper_state_snapshot_of_json :
   Yojson.Safe.t -> keeper_state_snapshot option
 val structured_working_context_of_snapshot :
   keeper_state_snapshot -> Yojson.Safe.t
-val replay_metadata_of_snapshot : keeper_state_snapshot -> Yojson.Safe.t
+val replay_metadata_of_snapshot :
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
+  keeper_state_snapshot ->
+  Yojson.Safe.t
 val snapshot_of_replay_metadata :
   Yojson.Safe.t -> keeper_state_snapshot option
 val with_snapshot_metadata :
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
   Agent_sdk.Types.message ->
   keeper_state_snapshot -> Agent_sdk.Types.message
 val snapshot_of_message_metadata :

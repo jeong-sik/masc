@@ -16,6 +16,10 @@ val run_memory_os_consolidation_tick :
   unit ->
   unit
 
+val wake_enqueue_counts_of_dispatches :
+  Schedule_runner.dispatch_result list -> Schedule_runner_status.wake_enqueue_counts
+(** Derive keeper-wake delivery counts from typed production consumer receipts. *)
+
 val start_background_maintenance :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

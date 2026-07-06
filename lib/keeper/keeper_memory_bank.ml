@@ -787,8 +787,9 @@ let append_memory_notes_from_reply
   (* [source] is the per-note provenance written to the memory-bank JSONL — a
      separate vocabulary from the turn-cascade [state_snapshot_source]. The
      turn-cascade source (when present) is rendered to its wire string and carries
-     its typed synthetic-ness; the internal fallback labels are never synthetic.
-     RFC-0242 §3.2: the candidate gate now receives the [is_synthetic] bit, not a
+     its typed synthetic-ness. The meta-goal fallback is also constructed rather
+     than model-authored, so it is marked synthetic before candidate selection.
+     RFC-0242 §3.2: the candidate gate receives the [is_synthetic] bit, not a
      string to re-classify. *)
   let (snapshot, source, is_synthetic) =
     match snapshot with
@@ -818,7 +819,7 @@ let append_memory_notes_from_reply
             open_questions = [];
             constraints = [];
           },
-          "meta_goal_fallback", false ))
+          "meta_goal_fallback", true ))
   in
   let selection =
     memory_candidates_from_snapshot_gated ~is_synthetic snapshot

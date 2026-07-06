@@ -47,7 +47,37 @@ let assert_ok ~kind result =
     Alcotest.failf
       "expected Memory_write_ok kind=%s, got Memory_write_invalid %s"
       kind
-      (Keeper_tool_memory_runtime.memory_write_error_kind_to_string r.error_kind)
+    (Keeper_tool_memory_runtime.memory_write_error_kind_to_string r.error_kind)
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let with_temp_dir f =
+  let dir = Filename.temp_file "keeper-memory-write-" ".tmp" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
+;;
+
+let make_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "trace_id", `String ("trace-" ^ name)
+        ; "goal", `String "fallback goal"
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
 ;;
 
 (* --- snapshot mapping (kind -> populated field) -------------------- *)
@@ -192,6 +222,31 @@ let test_synthetic_snapshot_source_drops_memory_candidates () =
     0
     (List.length selection.Keeper_memory_bank.selected)
 
+let test_meta_goal_fallback_writes_no_durable_memory_candidates () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "meta-goal-fallback" in
+  let count, kinds =
+    Keeper_memory_bank.append_memory_notes_from_reply
+      config
+      meta
+      ~turn:1
+      ~reply:"plain response without a state block"
+      ()
+  in
+  Alcotest.(check int)
+    "meta_goal_fallback is synthetic and writes no durable notes"
+    0
+    count;
+  Alcotest.(check (list string)) "no fallback kinds" [] kinds;
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  Alcotest.(check bool)
+    "memory bank file is not created for meta_goal_fallback"
+    false
+    (Sys.file_exists path)
+;;
+
 (* --- constants ----------------------------------------------------- *)
 
 let test_max_title_chars_constant () =
@@ -256,6 +311,10 @@ let () =
             "synthetic snapshot source drops candidates"
             `Quick
             test_synthetic_snapshot_source_drops_memory_candidates
+        ; Alcotest.test_case
+            "meta_goal_fallback writes no durable memory candidates"
+            `Quick
+            test_meta_goal_fallback_writes_no_durable_memory_candidates
         ] )
     ; ( "constants"
       , [ Alcotest.test_case "max_title_chars = 120" `Quick test_max_title_chars_constant

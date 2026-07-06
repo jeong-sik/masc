@@ -12,21 +12,22 @@ open Keeper_types_profile
    and zombie/stale assessment. *)
 let agent_staleness_threshold_s = 120.0
 
+let unknown_model_label = "unknown_model"
+
 let active_model_of_meta (m : keeper_meta) : string =
   match m.runtime.last_runtime_attempt with
   | Some record when String.trim record.provider_id <> "" -> record.provider_id
-  | _ -> Keeper_meta_contract.runtime_id_of_meta m
+  | _ -> unknown_model_label
 
 let active_model_label_of_meta (m : keeper_meta) : string =
   (* RFC-0132 PR-2: the meta surface is external (status detail); the model
      label is redacted via SSOT ([Boundary_redaction.runtime_model_label]).
-     [meta.runtime.usage] carries only [last_input_tokens] — there is no
-     separate last-model-used field — so [last_model_used_label] at the emit
-     sites mirrors this same redacted value. Splitting the two would require
-     adding a model field to [usage_metrics] plus an RFC-0132 carve-out
-     (separate change). Intentionally identical to active by design. *)
-  let _ = m in
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+     Missing runtime-attempt evidence stays explicit instead of borrowing the
+     configured/default runtime. *)
+  match m.runtime.last_runtime_attempt with
+  | Some record when String.trim record.provider_id <> "" ->
+      Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+  | _ -> unknown_model_label
 
 let next_model_hint_of_meta (m : keeper_meta) : string option =
   (* NOT-YET-IMPLEMENTED (#22080 follow-up): meta carries no field recording the

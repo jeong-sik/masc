@@ -81,12 +81,42 @@ export interface DashboardScheduledAutomationDispatchReceipt {
   kind?: string
   queue?: string
   stimulus?: string
+  stimulus_id?: string | null
+  reaction_ledger_status?: string | null
+  reaction_ledger_error?: string | null
   keeper_name?: string
   schedule_id?: string
   urgency?: string
   post_id?: string
   author?: string
   hearth?: string | null
+  reason?: string
+}
+
+export interface DashboardScheduledAutomationKeeperReactionEvidence {
+  projection_status:
+    | 'matched_turn_started'
+    | 'matched_stimulus'
+    | 'not_found'
+    | 'missing_stimulus_id'
+    | 'unrecognized_receipt'
+  source?: string
+  keeper_name?: string
+  schedule_id?: string
+  post_id?: string
+  stimulus?: string
+  stimulus_id?: string
+  stimulus_kind?: string
+  reaction_kind?: string
+  stimulus_seen?: boolean
+  turn_started_seen?: boolean
+  matched_record_count?: number
+  stimulus_recorded_at?: number | null
+  stimulus_recorded_at_iso?: string | null
+  turn_started_recorded_at?: number | null
+  turn_started_recorded_at_iso?: string | null
+  latest_recorded_at?: number | null
+  latest_recorded_at_iso?: string | null
   reason?: string
 }
 
@@ -187,6 +217,7 @@ export interface DashboardScheduledAutomationRequest {
   last_execution?: DashboardScheduledAutomationExecution | null
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
+  keeper_reaction_evidence?: DashboardScheduledAutomationKeeperReactionEvidence | null
 }
 
 export interface DashboardScheduledAutomationPayloadSupport {

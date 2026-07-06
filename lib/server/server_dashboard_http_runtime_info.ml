@@ -2807,7 +2807,15 @@ let schedule_keeper_queue_evidence_dashboard_json
         | Ok Server_schedule_consumers.Board_post_created _ -> `Null
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
-              { keeper_name; schedule_id; urgency = _; post_id; queue; stimulus }) ->
+              { keeper_name
+              ; schedule_id
+              ; urgency = _
+              ; post_id
+              ; queue
+              ; stimulus
+              ; stimulus_id = _
+              ; reaction_ledger_status = _
+              }) ->
           let due_at = execution.Schedule_domain.due_at in
           let payload_digest = execution.Schedule_domain.payload_digest in
           let snapshot =
@@ -2856,6 +2864,98 @@ let schedule_keeper_queue_evidence_dashboard_json
              `Assoc (("projection_status", `String "read_error") :: base_fields)
            | None, None, [] ->
              `Assoc (("projection_status", `String "not_found") :: base_fields))))
+;;
+
+let schedule_keeper_reaction_evidence_dashboard_json
+  (config : Workspace.config)
+  (execution : Schedule_domain.execution_record option)
+  =
+  match execution with
+  | None -> `Null
+  | Some execution ->
+    (match execution.Schedule_domain.detail with
+     | None -> `Null
+     | Some detail ->
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Error reason ->
+          `Assoc
+            [ "projection_status", `String "unrecognized_receipt"
+            ; "reason", `String reason
+            ]
+        | Ok Server_schedule_consumers.Board_post_created _ -> `Null
+        | Ok
+            (Server_schedule_consumers.Keeper_wake_enqueued
+              { keeper_name
+              ; schedule_id
+              ; urgency = _
+              ; post_id
+              ; queue = _
+              ; stimulus
+              ; stimulus_id
+              ; reaction_ledger_status = _
+              }) ->
+          let base_fields =
+            [ "source", `String "keeper_reaction_ledger"
+            ; "keeper_name", `String keeper_name
+            ; "schedule_id", `String schedule_id
+            ; "post_id", `String post_id
+            ; "stimulus", `String stimulus
+            ; ( "reaction_kind"
+              , `String
+                  (Keeper_reaction_ledger.reaction_kind_to_string
+                     Keeper_reaction_ledger.Turn_started) )
+            ; ( "stimulus_kind"
+              , `String
+                  (Keeper_reaction_ledger.stimulus_kind_to_string
+                     Keeper_reaction_ledger.Schedule_due) )
+            ]
+          in
+          (match stimulus_id with
+           | None ->
+             `Assoc
+               (("projection_status", `String "missing_stimulus_id")
+                :: ("reason", `String "dispatch receipt predates stimulus_id projection")
+                :: base_fields)
+           | Some stimulus_id ->
+             let evidence =
+               Keeper_reaction_ledger.event_queue_reaction_evidence
+                 ~base_path:config.Workspace_utils.base_path
+                 ~keeper_name
+                 ~stimulus_id
+             in
+             let projection_status =
+               if evidence.turn_started_seen
+               then "matched_turn_started"
+               else if evidence.stimulus_seen
+               then "matched_stimulus"
+               else "not_found"
+             in
+             `Assoc
+               (("projection_status", `String projection_status)
+                :: base_fields
+                @ [ "stimulus_id", `String stimulus_id
+                  ; "stimulus_seen", `Bool evidence.stimulus_seen
+                  ; "turn_started_seen", `Bool evidence.turn_started_seen
+                  ; "matched_record_count", `Int evidence.matched_record_count
+                  ; ( "stimulus_recorded_at"
+                    , match evidence.stimulus_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "stimulus_recorded_at_iso"
+                    , unix_iso_option_json evidence.stimulus_recorded_at )
+                  ; ( "turn_started_recorded_at"
+                    , match evidence.turn_started_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "turn_started_recorded_at_iso"
+                    , unix_iso_option_json evidence.turn_started_recorded_at )
+                  ; ( "latest_recorded_at"
+                    , match evidence.latest_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "latest_recorded_at_iso"
+                    , unix_iso_option_json evidence.latest_recorded_at )
+                  ]))))
 ;;
 
 let schedule_signal_projection_limit = 20
@@ -2962,6 +3062,8 @@ let schedule_request_dashboard_json
         | Some execution -> execution_record_dashboard_json execution )
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
     ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_execution
+    ; ( "keeper_reaction_evidence"
+      , schedule_keeper_reaction_evidence_dashboard_json config last_execution )
     ]
 ;;
 

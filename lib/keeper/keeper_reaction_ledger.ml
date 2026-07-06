@@ -427,6 +427,79 @@ let bool_field name json =
   | _ -> false
 ;;
 
+type event_queue_reaction_evidence =
+  { keeper_name : string
+  ; stimulus_id : string
+  ; stimulus_seen : bool
+  ; turn_started_seen : bool
+  ; stimulus_recorded_at : float option
+  ; turn_started_recorded_at : float option
+  ; latest_recorded_at : float option
+  ; matched_record_count : int
+  }
+
+let max_recorded_at current candidate =
+  match current, candidate with
+  | None, None -> None
+  | Some value, None | None, Some value -> Some value
+  | Some left, Some right -> Some (Float.max left right)
+;;
+
+let reaction_kind_field row =
+  match assoc_field "reaction" row with
+  | Some reaction ->
+    (match string_field "kind" reaction with
+     | None -> None
+     | Some kind -> Some (reaction_kind_of_string kind))
+  | None -> None
+;;
+
+let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
+  let stimulus_seen = ref false in
+  let turn_started_seen = ref false in
+  let stimulus_recorded_at = ref None in
+  let turn_started_recorded_at = ref None in
+  let latest_recorded_at = ref None in
+  let matched_record_count = ref 0 in
+  let store = store_for_base_path ~base_path ~keeper_name in
+  Dated_jsonl.iter_all store (fun row ->
+    match string_field "stimulus_id" row with
+    | Some row_stimulus_id when String.equal row_stimulus_id stimulus_id ->
+      incr matched_record_count;
+      let recorded_at = float_field "recorded_at_unix" row in
+      latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
+      (match string_field "record_kind" row with
+       | Some record_kind when String.equal record_kind "stimulus" ->
+         stimulus_seen := true;
+         stimulus_recorded_at := max_recorded_at !stimulus_recorded_at recorded_at
+       | Some record_kind when String.equal record_kind "reaction" ->
+         (match reaction_kind_field row with
+          | Some Turn_started ->
+            turn_started_seen := true;
+            turn_started_recorded_at
+              := max_recorded_at !turn_started_recorded_at recorded_at
+          | Some Execution_receipt
+          | Some Terminal_reason
+          | Some Cursor_ack
+          | Some Operator_escalation
+          | Some Supervisor_recovery_requested
+          | Some (Unknown_reaction _)
+          | None -> ())
+       | Some _
+       | None -> ())
+    | Some _
+    | None -> ());
+  { keeper_name
+  ; stimulus_id
+  ; stimulus_seen = !stimulus_seen
+  ; turn_started_seen = !turn_started_seen
+  ; stimulus_recorded_at = !stimulus_recorded_at
+  ; turn_started_recorded_at = !turn_started_recorded_at
+  ; latest_recorded_at = !latest_recorded_at
+  ; matched_record_count = !matched_record_count
+  }
+;;
+
 let string_list_field name json =
   list_field name json
   |> List.filter_map (function

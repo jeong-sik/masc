@@ -275,6 +275,12 @@ disk_full_detected() {
     | grep -Eiq 'No space left on device|dune_trace_write[(][)]|ENOSPC'
 }
 
+deterministic_test_failure_detected() {
+  [[ -f "${TEST_LOG_FILE}" ]] || return 1
+  grep -Ev '(^|[[:space:]])\[OK\][[:space:]]' "${TEST_LOG_FILE}" \
+    | grep -Eiq '\[FAIL\]|[[:digit:]]+ failure!|Test Failed|ASSERT '
+}
+
 log_disk_full_guidance() {
   if [[ "${CI_TEST_DISK_FULL_GUIDANCE_DONE}" -eq 1 ]]; then
     return 0
@@ -456,6 +462,18 @@ if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
+  && deterministic_test_failure_detected \
+  && ! disk_full_detected; then
+  log_line "[ci-run] INFO: explicit test failure detected; skipping isolated flaky retry"
+fi
+
+if [[ "${status}" -ne 0 ]] \
+  && [[ "${CI_TEST_ALLOW_FLAKY_RETRY}" = "1" ]] \
+  && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && test_cmd_needs_dune_sanitization \
+  && ! deterministic_test_failure_detected \
   && ! disk_full_detected; then
   CI_TEST_FLAKY_RETRY_DONE=1
   diag_dump "flaky_pre_retry_${status}"

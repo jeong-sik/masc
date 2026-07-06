@@ -158,6 +158,7 @@ val is_terminal : schedule_status -> bool
 val is_side_effecting : risk_class -> bool
 val requires_separate_human_grant : schedule_request -> bool
 val is_recurring : recurrence -> bool
+val validate_recurrence : recurrence -> (recurrence, string) result
 val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)

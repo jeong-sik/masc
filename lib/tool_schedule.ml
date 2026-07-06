@@ -88,12 +88,14 @@ let required_int args key =
   | None -> Error (Printf.sprintf "%s is required" key)
 ;;
 
+let validate_recurrence_arg recurrence = Schedule_domain.validate_recurrence recurrence
+
 let recurrence_of_arg args =
   match string_opt args "recurrence_kind" with
-  | None | Some "one_shot" -> Ok Schedule_domain.One_shot
+  | None | Some "one_shot" -> validate_recurrence_arg Schedule_domain.One_shot
   | Some "interval" ->
     let* interval_sec = required_int args "recurrence_interval_sec" in
-    Ok (Schedule_domain.Interval { interval_sec })
+    validate_recurrence_arg (Schedule_domain.Interval { interval_sec })
   | Some "daily" ->
     let* hour = required_int args "recurrence_hour" in
     let* minute = required_int args "recurrence_minute" in
@@ -105,11 +107,11 @@ let recurrence_of_arg args =
       | Some second -> second
     in
     let* timezone = required_string args "recurrence_timezone" in
-    Ok (Schedule_domain.Daily { hour; minute; second; timezone })
+    validate_recurrence_arg (Schedule_domain.Daily { hour; minute; second; timezone })
   | Some "cron" ->
     let* expression = required_string args "recurrence_cron" in
     let* timezone = required_string args "recurrence_timezone" in
-    Ok (Schedule_domain.Cron { expression; timezone })
+    validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
   | Some other -> Error ("unknown recurrence_kind: " ^ other)
 ;;
 

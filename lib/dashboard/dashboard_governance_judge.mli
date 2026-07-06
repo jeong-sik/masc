@@ -236,8 +236,9 @@ val resolve_governance_model_used :
 (** Picks the internal model id for empty-model diagnostics.
     [raw_model] (trimmed non-empty) wins for classification; otherwise
     falls back to [canonical_model_id], otherwise the unknown source branch.
-    The returned id is always the neutral [runtime] lane so dashboard state does
-    not expose concrete provider/model identity. *)
+    Evidence-backed model ids are projected to the neutral [runtime] lane so
+    dashboard state does not expose concrete provider/model identity. Missing
+    evidence returns ["unknown_model"] instead of fabricating runtime evidence. *)
 
 type governance_response_parse_failure =
   | Structural_error of string

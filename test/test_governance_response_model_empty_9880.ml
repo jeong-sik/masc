@@ -5,8 +5,8 @@
     visibility.
 
     The fallback resolver is tested directly so this cannot
-    degrade into a metric-only smoke test that never proves
-    [model_used] is actually filled. *)
+    degrade into a metric-only smoke test that fabricates a runtime
+    model when no model evidence exists. *)
 
 open Masc
 
@@ -53,10 +53,10 @@ let test_telemetry_resolved_branch () =
 ;;
 
 (* When neither [response.model] nor telemetry resolves the model, the writer
-   still projects the neutral runtime lane and counts under
-   [unknown_source]. Distinct rows let dashboards separate "transport leaked
-   but recovered" from "transport leaked and no recovery available" without
-   exposing concrete provider/model identity. *)
+   records an explicit unknown-model marker and counts under [unknown_source].
+   Distinct rows let dashboards separate "transport leaked but recovered" from
+   "transport leaked and no recovery available" without exposing concrete
+   provider/model identity. *)
 let test_unknown_source_branch () =
   let before = count_for ~source:"unknown_source" in
   Metrics.inc_counter metric_name ~labels:[ "source", "unknown_source" ] ();
@@ -119,7 +119,7 @@ let test_empty_everywhere_uses_unknown_source () =
     ~msg:"unknown source"
     ~raw_model:""
     ~canonical_model_id:None
-    ~expected_model:"runtime"
+    ~expected_model:"unknown_model"
     ~expected_source:"unknown_source"
 ;;
 
@@ -128,7 +128,7 @@ let test_empty_canonical_id_uses_unknown_source () =
     ~msg:"empty canonical"
     ~raw_model:""
     ~canonical_model_id:(Some "")
-    ~expected_model:"runtime"
+    ~expected_model:"unknown_model"
     ~expected_source:"unknown_source"
 ;;
 

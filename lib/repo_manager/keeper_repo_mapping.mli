@@ -55,6 +55,33 @@ val log_mapping_load_error_if_new : keeper_id:string -> string -> unit
     corruption/misconfiguration even on display-only paths that do not call
     {!is_allowed}. *)
 
+type access_denial =
+  | Access_denied_unregistered_repository of repository_id
+  | Access_denied_not_in_mapping of
+      { keeper_id : string
+      ; repository_id : repository_id
+      }
+  | Access_denied_load_error of string
+  | Access_denied_repository_store_error of
+      { repository_id : repository_id
+      ; detail : string
+      }
+
+type access_decision =
+  | Access_allowed
+  | Access_denied of access_denial
+
+val access_denial_to_string : access_denial -> string
+
+val access_decision :
+  keeper_id:string ->
+  repository_id:repository_id ->
+  base_path:string ->
+  access_decision
+(** [access_decision ~keeper_id ~repository_id ~base_path] is the typed
+    repository access gate. Use it when a caller needs to distinguish a
+    claimable selected-scope miss from hard fail-closed cases. *)
+
 type policy_decision =
   | Policy_decision_default_scope_allowed
   | Policy_decision_unregistered_repository
@@ -97,6 +124,8 @@ val apply_mapping :
     Mapping load failures still return no repositories. *)
 
 type repository_identity_mismatch
+
+val repository_identity_mismatch_message : repository_identity_mismatch -> string
 
 type repository_resolution =
   | No_repository

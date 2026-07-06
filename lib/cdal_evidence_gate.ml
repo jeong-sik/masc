@@ -11,12 +11,13 @@ let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
 let no_contract_evidence_ref_required = "handoff_context.evidence_refs"
 
 let hint_evidence_incomplete =
-  "Supply task-completion evidence: notes >= 20 chars summarising what \
-   changed AND every contract.required_evidence entry mentioned verbatim, \
-   OR at least one handoff_context.evidence_refs reference (PR number, commit \
-   hash, trace id, or reviewer-inspectable URL). Pure-placeholder \
-   notes ('done', 'ok', etc.) with no required_evidence mention and no \
-   handoff evidence_refs keep this gate closed."
+  "Supply task-completion evidence: no-contract tasks require at least one \
+   trusted handoff_context.evidence_refs reference (PR number, commit hash, \
+   trace id, or reviewer-inspectable URL). Contracted tasks require notes >= \
+   20 chars summarising what changed AND every contract.required_evidence \
+   entry mentioned verbatim, OR a trusted handoff_context.evidence_refs \
+   reference that satisfies the required evidence. Pure-placeholder notes \
+   ('done', 'ok', etc.) keep this gate closed."
 
 let reason_evidence_incomplete ~required_evidence =
   Printf.sprintf

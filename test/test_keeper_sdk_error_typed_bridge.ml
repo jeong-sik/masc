@@ -821,6 +821,16 @@ let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
     Alcotest.fail "expected read-only no-progress to rotate to a tool-capable runtime"
 ;;
 
+let test_capacity_backpressure_does_not_cycle_candidates () =
+  (* Regression: capacity_backpressure must cap rotation rather than cycle.
+     When this reason allowed candidate cycling, two runtimes that were both
+     in capacity cooldown looped forever (2026-05-21, 2026-07-06, #23373). *)
+  Alcotest.(check bool)
+    "capacity_backpressure does not allow candidate cycle"
+    false
+    (EC.degraded_reason_allows_candidate_cycle EC.Capacity_backpressure)
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -913,6 +923,10 @@ let () =
             "default runtime read-only no-progress uses tool-capable candidate"
             `Quick
             test_read_only_no_progress_default_runtime_uses_tool_capable_candidate
+        ; Alcotest.test_case
+            "capacity_backpressure does not cycle candidates"
+            `Quick
+            test_capacity_backpressure_does_not_cycle_candidates
         ] )
     ]
 ;;

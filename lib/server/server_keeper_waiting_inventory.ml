@@ -505,7 +505,7 @@ let keeper_names_or_error_rows config =
 let row_state rows =
   if List.exists (fun row -> row.source = Fusion_running || row.source = Background_task) rows
   then Deferred
-  else if List.exists (fun row -> row.source <> Read_error) rows
+  else if rows <> []
   then Waiting
   else Idle
 ;;

@@ -480,6 +480,11 @@ let test_corrupt_external_attention_is_read_error () =
     Otel_metric_store.metric_keeper_waiting_count
     ~labels:[ "scope", "keeper"; "source", "read_error" ]
     1.0;
+  check_metric_float "keeper read-error state metric"
+    Otel_metric_store.metric_keeper_waiting_keeper_count
+    ~labels:[ "state", "waiting" ]
+    1.0;
+  check int "one waiting keeper" 1 (json_int_member "waiting_keeper_count" json);
   check int "one keeper read error row" 1 (json_int_member "row_count" json);
   match find_keeper json keeper_name with
   | None -> fail "keeper row missing"

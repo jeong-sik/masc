@@ -6,6 +6,8 @@ let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
 let log_server_fiber_crash =
   Server_bootstrap_loops_fiber.log_server_fiber_crash
 
+let schedule_runner_interval_sec = Server_schedule_runner_policy.interval_sec
+
 (* Resolve the provider config for the Memory OS per-keeper consolidation pass.
    Env var takes precedence; otherwise inherit the librarian runtime so the
    consolidation LLM uses the same JSON-capable model the librarian uses.
@@ -190,16 +192,22 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~sw
     ~on_error:(log_server_fiber_crash "schedule_runner")
     (fun () ->
-      let interval = 15.0 in
       let rec loop () =
+        let started_at = Time_compat.now () in
+        Schedule_runner_status.record_tick_started ~now:started_at;
         (try
            match
              Schedule_runner.tick
                ~consumer:Server_schedule_consumers.consumer
                (Mcp_server.workspace_config state)
-               ~now:(Time_compat.now ())
+               ~now:started_at
            with
            | Ok result ->
+             let finished_at = Time_compat.now () in
+             Schedule_runner_status.record_tick_ok
+               ~started_at
+               ~finished_at
+               result;
              if result.Schedule_runner.emitted <> []
                 || result.rescheduled > 0
                 || result.dispatches <> []
@@ -211,16 +219,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  result.rescheduled
                  (List.length result.dispatches)
            | Error err ->
-             Log.Server.warn
-               "schedule_runner: tick failed: %s"
-               (Schedule_runner.runner_error_to_string err)
+             let finished_at = Time_compat.now () in
+             let error = Schedule_runner.runner_error_to_string err in
+             Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
+             Log.Server.warn "schedule_runner: tick failed: %s" error
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Log.Server.warn
-             "schedule_runner: tick crashed: %s"
-             (Printexc.to_string exn));
-        Eio.Time.sleep clock interval;
+           let finished_at = Time_compat.now () in
+           let error = Printexc.to_string exn in
+           Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
+           Log.Server.warn "schedule_runner: tick crashed: %s" error);
+        Eio.Time.sleep clock schedule_runner_interval_sec;
         loop ()
       in
       loop ());

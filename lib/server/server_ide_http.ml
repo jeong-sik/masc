@@ -205,7 +205,7 @@ let observation_snapshot_handler request reqd =
   let json = Ide_bridge.observation_snapshot_json ~take in
   let body = json_ok json in
   let headers =
-    Http.Response.Headers.of_list
+    Httpun.Headers.of_list
       [ ( "content-type", "application/json" )
       ; ( "x-observation-mode", if take then "take" else "peek" )
       ]

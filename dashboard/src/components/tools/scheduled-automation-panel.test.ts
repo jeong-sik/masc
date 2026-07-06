@@ -1069,7 +1069,7 @@ describe('ScheduledAutomationPanel', () => {
   })
 
   it('renders an explicit contract gap when live supported evidence is absent', () => {
-    const auto = payloadSupportAutomation()
+    const auto = { ...payloadSupportAutomation() }
     delete auto.live_supported_non_terminal_evidence
 
     for (const variant of [undefined, 'v2'] as const) {

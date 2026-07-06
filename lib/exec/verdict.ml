@@ -80,7 +80,7 @@ let deny_reason_to_string : deny_reason -> string = function
     Format.asprintf "destructive database operation: %a" Db_op.pp op
   | Destructive_repo_hosting_cli bin ->
     Printf.sprintf
-      "destructive repository-hosting CLI operation not permitted: %s"
+      "repository-hosting CLI operation not permitted by policy: %s"
       (Exec_program.to_string bin)
   | Catastrophic_program bin ->
     Printf.sprintf "catastrophic program not permitted: %s"

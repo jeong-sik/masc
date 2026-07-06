@@ -53,6 +53,15 @@ let int_field label fields key =
          (Yojson.Safe.to_string json))
 ;;
 
+let bool_field label fields key =
+  match field label fields key with
+  | `Bool value -> value
+  | json ->
+    fail
+      (Printf.sprintf "%s.%s: expected bool, got %s" label key
+         (Yojson.Safe.to_string json))
+;;
+
 let list_field label fields key =
   match field label fields key with
   | `List values -> values
@@ -87,12 +96,14 @@ let restore_env name = function
    scheduler for its lock/cancellation-context effects (Effect.Unhandled
    (Eio.Cancel.Get_context) otherwise) — same [Eio_main.run] +
    [Fs_compat.set_fs] wrapper test_board_dispatch.ml's [with_eio] uses. *)
-let with_isolated_base_path prefix f =
+let with_isolated_eio_base_path prefix f =
   let base_dir = temp_base_path prefix in
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
+  let old_registry = Fusion_run_registry.global () in
   Fun.protect
     ~finally:(fun () ->
+      Fusion_run_registry.set_global old_registry;
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base;
@@ -101,11 +112,16 @@ let with_isolated_base_path prefix f =
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base_dir;
       Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
+      Fusion_run_registry.set_global (Fusion_run_registry.create ());
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      f base_dir)
+      Eio.Switch.run @@ fun sw -> f env sw base_dir)
+;;
+
+let with_isolated_base_path prefix f =
+  with_isolated_eio_base_path prefix (fun _env _sw base_dir -> f base_dir)
 ;;
 
 let make_meta ?(name = "fusion-keeper") () : Keeper_meta_contract.keeper_meta =
@@ -150,6 +166,47 @@ let judge_synthesis resolved_answer : Fusion_types.judge_synthesis =
   ; blind_spots = []
   ; resolved_answer
   ; decision = Fusion_types.Answer resolved_answer
+  }
+;;
+
+let validated_preset (preset : Fusion_policy.preset) : Fusion_policy.Validated_preset.t =
+  match Fusion_policy.Validated_preset.of_preset preset with
+  | Ok preset -> preset
+  | Error _ -> fail "test setup: fusion preset literal failed validation"
+;;
+
+let fusion_tool_policy () : Fusion_policy.t =
+  let panel_group : Fusion_policy.panel_group =
+    { models = [ "panel.model" ]
+    ; label = "panel"
+    ; system_prompt = "panel system prompt"
+    ; web_tools = false
+    ; max_tool_calls = 0
+    ; max_output_tokens = None
+    ; timeout_s = Fusion_policy.default_timeout_s
+    }
+  in
+  let preset : Fusion_policy.preset =
+    { name = "unit"
+    ; panels = [ panel_group ]
+    ; judge = "judge.model"
+    ; judge_system_prompt = "judge system prompt"
+    ; judge_timeout_s = Fusion_policy.default_timeout_s
+    ; judge_max_output_tokens = None
+    ; meta_timeout_s = Fusion_policy.default_timeout_s
+    ; judges = []
+    ; min_answered = Fusion_policy.default_min_answered
+    ; judge_wave_budget_s = Float.max_float
+    ; adaptive_timeout_factor = 1.0
+    ; fallback_judge_model = None
+    }
+  in
+  { enabled = true
+  ; default_preset = preset.name
+  ; max_concurrent_panels = 1
+  ; max_concurrent_judges = Fusion_policy.default_max_concurrent_judges
+  ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
+  ; presets = [ validated_preset preset ]
   }
 ;;
 
@@ -484,6 +541,135 @@ let test_emit_success_projects_board_chat_and_registry () =
     | None -> fail "fusion run should remain visible")
 ;;
 
+let test_tool_handle_async_success_projects_running_then_completed () =
+  with_isolated_eio_base_path "fusion-tool-async-success" (fun env sw base_dir ->
+    let keeper = "fusion-tool-keeper" in
+    let run_id = Printf.sprintf "fus-tool-success-%d" (Random.bits ()) in
+    let question = "Which async fusion path should ship?" in
+    let resolved_answer = "Ship the async handler path with typed sink evidence." in
+    let panel_usage = { Fusion_types.input_tokens = 23; output_tokens = 29 } in
+    let judge_usage = { Fusion_types.input_tokens = 31; output_tokens = 37 } in
+    let synthesis = judge_synthesis resolved_answer in
+    let panel =
+      [ Fusion_types.Answered
+          { model = "panel (panel.model)"
+          ; answer = "the handler returns before background delivery"
+          ; usage = panel_usage
+          }
+      ]
+    in
+    let judges =
+      [ Fusion_types.Synthesized
+          { role = Fusion_types.Single; synthesis; usage = judge_usage }
+      ]
+    in
+    let release_promise, resolve_release = Eio.Promise.create () in
+    let completed_promise, resolve_completed = Eio.Promise.create () in
+    let run_orchestrator ~sw:_ ~net:_ ~base_dir ~policy:_ ~topology:_ ~request () =
+      Eio.Promise.await release_promise;
+      let outcome =
+        match
+          Fusion_sink.emit ~base_dir ~keeper:request.Fusion_types.keeper
+            ~run_id:request.Fusion_types.run_id ~question:request.Fusion_types.prompt
+            ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
+        with
+        | Ok () -> Fusion_orchestrator.Completed { panel; judge = Ok synthesis }
+        | Error msg -> Fusion_orchestrator.Sink_failed msg
+      in
+      Eio.Promise.resolve resolve_completed outcome;
+      outcome
+    in
+    let response =
+      Fusion_tool.For_test.handle_with_runner ~run_orchestrator ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0 ~run_id
+        ~policy:(fusion_tool_policy ())
+        ~args:(`Assoc [ ("prompt", `String question) ])
+    in
+    let response_fields =
+      Yojson.Safe.from_string response |> assoc_fields "fusion_tool.response"
+    in
+    check bool "handle response ok" true
+      (bool_field "fusion_tool.response" response_fields "ok");
+    check string "handle response status" "fusion_started"
+      (string_field "fusion_tool.response" response_fields "status");
+    check string "handle response run_id" run_id
+      (string_field "fusion_tool.response" response_fields "run_id");
+    check bool "delivery tells keeper not to poll" true
+      (contains
+         ~needle:"No need to poll masc_fusion_status"
+         (string_field "fusion_tool.response" response_fields "delivery"));
+    (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+     | Some { keeper = observed_keeper; preset; status = Fusion_run_registry.Running; _ } ->
+       check string "running keeper" keeper observed_keeper;
+       check string "running preset" "unit" preset
+     | Some { Fusion_run_registry.status = Completed _; _ } ->
+       fail "fusion run should still be Running before the background runner is released"
+     | None -> fail "fusion run should be registered as Running before completion");
+    Eio.Promise.resolve resolve_release ();
+    (match
+       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 (fun () ->
+         Eio.Promise.await completed_promise)
+     with
+     | Fusion_orchestrator.Completed { panel = observed_panel; judge = Ok observed_judge } ->
+       check int "completed panel count" 1 (List.length observed_panel);
+       check string "completed resolved answer" resolved_answer observed_judge.resolved_answer
+     | Fusion_orchestrator.Completed { judge = Error _; _ } ->
+       fail "background runner should complete with a synthesized judge"
+     | Fusion_orchestrator.Denied _ -> fail "background runner should not deny"
+     | Fusion_orchestrator.Sink_failed msg ->
+       fail (Printf.sprintf "background runner sink failed: %s" msg));
+    let post =
+      match Board.find_post_by_run_id (Board.global ()) ~run_id with
+      | Some post -> post
+      | None -> fail "background success should create a board post indexed by run_id"
+    in
+    let post_id = Board.Post_id.to_string post.id in
+    (match post.origin with
+     | Some origin ->
+       check (option string) "origin.source" (Some "fusion") origin.source;
+       check (option string) "origin.fusion_run_id" (Some run_id) origin.fusion_run_id
+     | None -> fail "background success board post should carry typed origin");
+    let dashboard_json =
+      Board_dispatch.post_to_yojson_with_karma post ~author_karma:0
+      |> assoc_fields "dashboard.post"
+    in
+    let dashboard_origin =
+      assoc_fields "dashboard.post.origin" (field "dashboard.post" dashboard_json "origin")
+    in
+    check string "dashboard origin run id" run_id
+      (string_field "dashboard.post.origin" dashboard_origin "fusion_run_id");
+    let messages = Keeper_chat_store.load ~base_dir ~keeper_name:keeper in
+    let fusion_block =
+      List.find_map
+        (fun (m : Keeper_chat_store.chat_message) ->
+           if contains ~needle:resolved_answer m.content
+           then (
+             match m.blocks with
+             | Some blocks ->
+               List.find_map
+                 (function
+                   | Keeper_chat_blocks.Fusion { board_post_id; run_id } ->
+                     Some (board_post_id, run_id)
+                   | _ -> None)
+                 blocks
+             | None -> None)
+           else None)
+        messages
+    in
+    (match fusion_block with
+     | Some (block_post_id, block_run_id) ->
+       check string "chat fusion block post id" post_id block_post_id;
+       check string "chat fusion block run id" run_id block_run_id
+     | None -> fail "chat lane should carry a Fusion block after async completion");
+    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
+    | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
+      fail "fusion run should complete ok=true"
+    | Some { Fusion_run_registry.status = Running; _ } ->
+      fail "fusion run should not remain Running after background success"
+    | None -> fail "fusion run should remain visible after background success")
+;;
+
 let test_emit_board_failure_is_best_effort () =
   with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
     let keeper = "bad/keeper" in
@@ -547,6 +733,10 @@ let () =
             "emit success projects board, chat block, and registry"
             `Quick
             test_emit_success_projects_board_chat_and_registry
+        ; test_case
+            "tool handle returns Running then async success projects evidence"
+            `Quick
+            test_tool_handle_async_success_projects_running_then_completed
         ; test_case
             "emit treats board post failure as best-effort"
             `Quick

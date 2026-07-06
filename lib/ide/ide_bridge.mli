@@ -58,6 +58,10 @@ val install_agent_observation_sinks : unit -> unit
 (** Register IDE storage as the sink for neutral [Agent_observation] events,
     including write-region observations. *)
 
+val observation_snapshot_json : take:bool -> Yojson.Safe.t
+(** Return the accumulated neutral observation snapshot as IDE-facing JSON.
+    [take=true] consumes the snapshot; [take=false] peeks without resetting. *)
+
 val ingest_tool_event :
   base_path:string ->
   ?partition:Ide_paths.partition ->

@@ -116,7 +116,9 @@ let execution_tool_preview_limit = 8
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
   take limit values
 
-let tool_audit_snapshot agent_name =
+let tool_audit_snapshot _agent_name =
+  (* TODO(task-1823): Replace with live tool audit data from keeper telemetry.
+     This stub is a fake Keeper v2 dashboard field — all values are hardcoded. *)
   {
     latest_tool_names = [];
     latest_tool_call_count = None;
@@ -342,6 +344,12 @@ let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_pr
 
 (** Get full agent profile: persona + Neo4j merged -> hardcoded fallback *)
 let get_agent_profile (name : string) : agent_profile =
+  (* TODO(task-1823): The fallback below is a fake Keeper v2 dashboard field.
+     When neither persona files nor Neo4j data exist, we return hardcoded values
+     (emoji="🤖", korean_name=name) instead of live-backed surfaces.
+     A future change should either:
+       (a) require live-backed surfaces and raise/warn when no data is found, or
+       (b) populate from a guaranteed registry so no agent falls through. *)
   let persona_name = extract_persona_name name in
   let neo4j_profile = lookup_neo4j_profile persona_name in
   let persona_profile = load_persona_profile persona_name in

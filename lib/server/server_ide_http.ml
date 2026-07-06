@@ -184,6 +184,33 @@ let resolve_partition_for_read ~state ~uri =
 ;;
 
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
+
+(* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
+
+(** GET /api/v1/ide/observations/snapshot — returns accumulated observation
+    data (tool events, PR events, turn events, write regions, annotations)
+    from the IDE bridge observation snapshot helper.
+
+    Usage: ?take=true resets accumulators after read (destructive),
+           default is non-destructive peek.
+
+    Callers: IDE Observation Plane frontend for real-time dashboard. *)
+let observation_snapshot_handler request reqd =
+  let uri = Uri.of_string request.Httpun.Request.target in
+  let take =
+    match Uri.get_query_param uri "take" with
+    | Some "true" -> true
+    | _ -> false
+  in
+  let json = Ide_bridge.observation_snapshot_json ~take in
+  let body = json_ok json in
+  Http.Response.json_value
+    ~request
+    ~extra_headers:[ "x-observation-mode", if take then "take" else "peek" ]
+    body
+    reqd
+;;
+
 let keeper_id_not_accepted_error =
   "keeper_id is not accepted; identity is derived from the authentication token"
 
@@ -439,6 +466,7 @@ let build_cursor_snapshot state uri ~partition ~limit ~offset =
 let add_routes router =
   Ide_bridge.install_agent_observation_sinks ();
   router
+  |> Http.Router.get "/api/v1/ide/observations/snapshot" observation_snapshot_handler
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->

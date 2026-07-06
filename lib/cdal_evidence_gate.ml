@@ -80,11 +80,20 @@ let evidence_entry_satisfied
 
 let unsatisfied_required_evidence
     ~notes
-    ~handoff_context
+    ~(handoff_context : Masc_domain.task_handoff_context option)
     (contract : Masc_domain.task_contract option)
   =
   match contract with
-  | None -> []
+  | None ->
+          (* task-1815: Layer 2 — reject no-contract completions without
+             evidence_refs. Uses explicit handoff_context.evidence_refs presence,
+             not heuristic classification. Blueprint-compliant. *)
+          let has_refs =
+            match handoff_context with
+            | Some hc -> hc.evidence_refs <> []
+            | None -> false
+          in
+          if has_refs then [] else [rule_id_evidence_incomplete]
   | Some c ->
     List.filter
       (fun e -> not (evidence_entry_satisfied ~notes ~handoff_context e))

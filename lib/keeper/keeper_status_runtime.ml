@@ -12,7 +12,8 @@ open Keeper_types_profile
    and zombie/stale assessment. *)
 let agent_staleness_threshold_s = 120.0
 
-let unknown_model_label = "unknown_model"
+let unknown_model_label =
+  Boundary_redaction.to_string Boundary_redaction.unknown_model_label
 
 let active_model_of_meta (m : keeper_meta) : string =
   match m.runtime.last_runtime_attempt with

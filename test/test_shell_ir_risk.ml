@@ -230,8 +230,6 @@ let test_gh_r1_reversible () =
   check "gh issue edit 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh release create v1.0.0" Shell_ir_risk.R1_Reversible_mutation;
   check "gh release upload v1.0.0 file.tgz" Shell_ir_risk.R1_Reversible_mutation;
-  check "gh repo fork owner/repo" Shell_ir_risk.R1_Reversible_mutation;
-  check "gh repo create repo-name" Shell_ir_risk.R1_Reversible_mutation;
   check "gh run cancel 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh run rerun 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh workflow enable workflow.yml" Shell_ir_risk.R1_Reversible_mutation;
@@ -254,9 +252,14 @@ let test_gh_r1_reversible () =
 let test_gh_r2_irreversible () =
   check "gh pr merge 123" Shell_ir_risk.R2_Irreversible;
   check "gh pr ready 123" Shell_ir_risk.R2_Irreversible;
+  check "gh repo create repo-name" Shell_ir_risk.R2_Irreversible;
+  check "gh repo fork owner/repo" Shell_ir_risk.R2_Irreversible;
   check "gh repo delete owner/repo" Shell_ir_risk.R2_Irreversible;
   check "gh repo archive owner/repo" Shell_ir_risk.R2_Irreversible;
   check "gh repo transfer owner/repo" Shell_ir_risk.R2_Irreversible;
+  check "gh discussion create --repo owner/repo --title T --body B"
+    Shell_ir_risk.R2_Irreversible;
+  check "gh discussion comment 123 --body B" Shell_ir_risk.R2_Irreversible;
   check "gh release delete v1.0.0" Shell_ir_risk.R2_Irreversible;
   check "gh secret delete SECRET" Shell_ir_risk.R2_Irreversible;
   check "gh secret remove SECRET" Shell_ir_risk.R2_Irreversible;
@@ -267,7 +270,14 @@ let test_gh_r2_irreversible () =
   check "gh gist delete 123" Shell_ir_risk.R2_Irreversible;
   check "gh ruleset delete 123" Shell_ir_risk.R2_Irreversible;
   check "gh api repos/owner/repo -X DELETE" Shell_ir_risk.R2_Irreversible;
-  check "gh api repos/owner/repo --method DELETE" Shell_ir_risk.R2_Irreversible
+  check "gh api repos/owner/repo --method DELETE" Shell_ir_risk.R2_Irreversible;
+  check "gh api graphql -f 'query=mutation{createRepository}'" Shell_ir_risk.R2_Irreversible;
+  check "gh api graphql -f 'query=mutation{cloneTemplateRepository}'"
+    Shell_ir_risk.R2_Irreversible;
+  check "gh api graphql -f 'query=mutation{createDiscussion}'"
+    Shell_ir_risk.R2_Irreversible;
+  check "gh api graphql -f 'query=mutation{addDiscussionComment}'"
+    Shell_ir_risk.R2_Irreversible
 ;;
 
 let () =

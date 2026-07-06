@@ -163,6 +163,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 코드 작성 / 수정 | `Read` / `Grep` -> `Edit` / `Write`, then `Execute` with typed `git` argv |
 | 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
 | GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
+| GitHub repo 생성 / GitHub Discussions mutation | Disabled by `docs/design/keeper-github-repo-create-discussion-policy.md`. Use operator action for repository creation and MASC board tools for durable discussion. |
 
 The goal lifecycle surface is descriptor/registry-driven with denylist
 filtering. Social and messaging keepers should keep board/task workspace

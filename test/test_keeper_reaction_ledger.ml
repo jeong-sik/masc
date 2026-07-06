@@ -54,6 +54,23 @@ let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   }
 ;;
 
+let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
+  Keeper_event_queue.stimulus
+  =
+  { post_id = "schedule-due:" ^ schedule_id
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = 1234.5
+  ; payload =
+      Keeper_event_queue.Schedule_due
+        { schedule_id
+        ; due_at = 1200.0
+        ; payload_digest = "payload-digest"
+        ; title = Some "Wake"
+        ; message = "Scheduled lane wake"
+        }
+  }
+;;
+
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
@@ -125,6 +142,77 @@ let test_event_queue_stimulus_and_turn_reaction () =
     "turn_started"
     "kind"
     (reaction_row |> member "reaction")
+;;
+
+let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "ledger-schedule-keeper" in
+  let stimulus = schedule_due_stimulus () in
+  let unrelated = schedule_due_stimulus ~schedule_id:"sched-ledger-other" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    unrelated;
+  let stimulus_only =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  in
+  check bool "exact stimulus seen" true stimulus_only.stimulus_seen;
+  check bool "turn reaction absent" false stimulus_only.turn_started_seen;
+  check bool "event queue ack absent" false stimulus_only.event_queue_ack_seen;
+  check int "one exact row before reaction" 1 stimulus_only.matched_record_count;
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    stimulus;
+  let reacted =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  in
+  check bool "exact stimulus still seen" true reacted.stimulus_seen;
+  check bool "turn reaction seen" true reacted.turn_started_seen;
+  check bool "event queue ack still absent" false reacted.event_queue_ack_seen;
+  check int "two exact rows after reaction" 2 reacted.matched_record_count;
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+    stimulus;
+  let acknowledged =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  in
+  check bool "event queue ack seen" true acknowledged.event_queue_ack_seen;
+  check int "three exact rows after ack" 3 acknowledged.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "summary counts event queue ack" 1
+    (summary |> member "event_queue_ack_count" |> to_int);
+  check int "event queue ack is not unknown" 0
+    (summary |> member "unknown_reaction_count" |> to_int);
+  let missing =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"stimulus:missing"
+  in
+  check bool "missing stimulus absent" false missing.stimulus_seen;
+  check bool "missing reaction absent" false missing.turn_started_seen;
+  check bool "missing ack absent" false missing.event_queue_ack_seen;
+  check int "missing exact rows" 0 missing.matched_record_count
 ;;
 
 let test_cursor_ack_is_replayable_state_entry () =
@@ -1206,6 +1294,7 @@ let test_reaction_kind_string_roundtrip () =
     (fun k ->
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
+    ; Keeper_reaction_ledger.Event_queue_ack
     ; Keeper_reaction_ledger.Execution_receipt
     ; Keeper_reaction_ledger.Terminal_reason
     ; Keeper_reaction_ledger.Cursor_ack
@@ -1225,6 +1314,10 @@ let () =
             "event queue stimulus and turn reaction are durable"
             `Quick
             test_event_queue_stimulus_and_turn_reaction
+        ; test_case
+            "event queue reaction evidence matches exact stimulus id"
+            `Quick
+            test_event_queue_reaction_evidence_matches_exact_stimulus_id
         ; test_case
             "cursor ack is replayable state entry"
             `Quick

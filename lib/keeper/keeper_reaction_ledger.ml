@@ -18,6 +18,7 @@ type stimulus_kind =
 
 type reaction_kind =
   | Turn_started
+  | Event_queue_ack
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -58,6 +59,7 @@ let stimulus_kind_of_string = function
 
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
+  | Event_queue_ack -> "event_queue_ack"
   | Execution_receipt -> "execution_receipt"
   | Terminal_reason -> "terminal_reason"
   | Cursor_ack -> "cursor_ack"
@@ -72,6 +74,7 @@ let reaction_kind_to_string = function
    추가 시 컴파일러가 분류 누락을 강제한다(stimulus와 동일한 닫힌-합 안티패턴 방지). *)
 let reaction_kind_of_string = function
   | "turn_started" -> Turn_started
+  | "event_queue_ack" -> Event_queue_ack
   | "execution_receipt" -> Execution_receipt
   | "terminal_reason" -> Terminal_reason
   | "cursor_ack" -> Cursor_ack
@@ -427,6 +430,89 @@ let bool_field name json =
   | _ -> false
 ;;
 
+type event_queue_reaction_evidence =
+  { keeper_name : string
+  ; stimulus_id : string
+  ; stimulus_seen : bool
+  ; turn_started_seen : bool
+  ; event_queue_ack_seen : bool
+  ; stimulus_recorded_at : float option
+  ; turn_started_recorded_at : float option
+  ; event_queue_ack_recorded_at : float option
+  ; latest_recorded_at : float option
+  ; matched_record_count : int
+  }
+
+let max_recorded_at current candidate =
+  match current, candidate with
+  | None, None -> None
+  | Some value, None | None, Some value -> Some value
+  | Some left, Some right -> Some (Float.max left right)
+;;
+
+let reaction_kind_field row =
+  match assoc_field "reaction" row with
+  | Some reaction ->
+    (match string_field "kind" reaction with
+     | None -> None
+     | Some kind -> Some (reaction_kind_of_string kind))
+  | None -> None
+;;
+
+let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
+  let stimulus_seen = ref false in
+  let turn_started_seen = ref false in
+  let event_queue_ack_seen = ref false in
+  let stimulus_recorded_at = ref None in
+  let turn_started_recorded_at = ref None in
+  let event_queue_ack_recorded_at = ref None in
+  let latest_recorded_at = ref None in
+  let matched_record_count = ref 0 in
+  let store = store_for_base_path ~base_path ~keeper_name in
+  Dated_jsonl.iter_all store (fun row ->
+    match string_field "stimulus_id" row with
+    | Some row_stimulus_id when String.equal row_stimulus_id stimulus_id ->
+      incr matched_record_count;
+      let recorded_at = float_field "recorded_at_unix" row in
+      latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
+      (match string_field "record_kind" row with
+       | Some record_kind when String.equal record_kind "stimulus" ->
+         stimulus_seen := true;
+         stimulus_recorded_at := max_recorded_at !stimulus_recorded_at recorded_at
+       | Some record_kind when String.equal record_kind "reaction" ->
+         (match reaction_kind_field row with
+          | Some Turn_started ->
+            turn_started_seen := true;
+            turn_started_recorded_at
+              := max_recorded_at !turn_started_recorded_at recorded_at
+          | Some Event_queue_ack ->
+            event_queue_ack_seen := true;
+            event_queue_ack_recorded_at
+              := max_recorded_at !event_queue_ack_recorded_at recorded_at
+          | Some Execution_receipt
+          | Some Terminal_reason
+          | Some Cursor_ack
+          | Some Operator_escalation
+          | Some Supervisor_recovery_requested
+          | Some (Unknown_reaction _)
+          | None -> ())
+       | Some _
+       | None -> ())
+    | Some _
+    | None -> ());
+  { keeper_name
+  ; stimulus_id
+  ; stimulus_seen = !stimulus_seen
+  ; turn_started_seen = !turn_started_seen
+  ; event_queue_ack_seen = !event_queue_ack_seen
+  ; stimulus_recorded_at = !stimulus_recorded_at
+  ; turn_started_recorded_at = !turn_started_recorded_at
+  ; event_queue_ack_recorded_at = !event_queue_ack_recorded_at
+  ; latest_recorded_at = !latest_recorded_at
+  ; matched_record_count = !matched_record_count
+  }
+;;
+
 let string_list_field name json =
   list_field name json
   |> List.filter_map (function
@@ -695,6 +781,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let stimulus_count = ref 0 in
   let reaction_count = ref 0 in
   let turn_started_count = ref 0 in
+  let event_queue_ack_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let execution_receipt_count = ref 0 in
   let terminal_reason_count = ref 0 in
@@ -785,6 +872,7 @@ let summarize_rows ~keeper_name ~limit rows =
     | Some raw ->
       (match reaction_kind_of_string raw with
        | Turn_started -> incr turn_started_count
+       | Event_queue_ack -> incr event_queue_ack_count
        | Cursor_ack -> incr cursor_ack_count
        | Execution_receipt -> incr execution_receipt_count
        | Terminal_reason -> incr terminal_reason_count
@@ -963,6 +1051,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "stimulus_count", `Int !stimulus_count
     ; "reaction_count", `Int !reaction_count
     ; "turn_started_count", `Int !turn_started_count
+    ; "event_queue_ack_count", `Int !event_queue_ack_count
     ; "cursor_ack_count", `Int !cursor_ack_count
     ; "execution_receipt_count", `Int !execution_receipt_count
     ; "terminal_reason_count", `Int !terminal_reason_count
@@ -1334,6 +1423,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "stimulus_count", `Int (total_int "stimulus_count")
     ; "reaction_count", `Int (total_int "reaction_count")
     ; "turn_started_count", `Int (total_int "turn_started_count")
+    ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "execution_receipt_count", `Int (total_int "execution_receipt_count")
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")

@@ -202,17 +202,22 @@ let run_keeper_cycle
               (Keeper_turn_fsm.Failed failure_reason);
             Error err, turn_state
           | Ok initial_execution ->
-            record_pre_dispatch_terminal_observation
-              ~config
-              ~meta
-              ~generation
-              ~runtime_id:effective_runtime_runtime_name
-              ~outcome:`Ok
-              ~terminal_reason_code:"pre_dispatch_success"
-              ~activity_kind:"keeper.turn_pre_dispatch_ok"
-              ~trajectory_outcome:Trajectory.Completed
-              ~keeper_turn_id
-              ();
+            let turn_state =
+              Keeper_unified_turn_manifest.append_manifest
+                ~config
+                ~runtime_manifest_context
+                ~turn_start
+                ~turn_state
+                ~site:"runtime_execution_built"
+                ~runtime_id:effective_runtime_runtime_name
+                ~decision:
+                  (`Assoc
+                    [ "runtime_execution_built", `Bool true
+                    ; "routing_action", `String "runtime_execution_built"
+                    ; "routing_reason", `String "pre_dispatch_success"
+                    ])
+                Keeper_runtime_manifest.Runtime_execution_built
+            in
             Keeper_event_publisher.publish_runtime_execution_built
               ~keeper_name:meta.name
               ~runtime_id:initial_execution.runtime_id

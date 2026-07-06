@@ -81,12 +81,46 @@ export interface DashboardScheduledAutomationDispatchReceipt {
   kind?: string
   queue?: string
   stimulus?: string
+  stimulus_id?: string | null
+  reaction_ledger_status?: string | null
+  reaction_ledger_error?: string | null
   keeper_name?: string
   schedule_id?: string
   urgency?: string
   post_id?: string
   author?: string
   hearth?: string | null
+  reason?: string
+}
+
+export interface DashboardScheduledAutomationKeeperReactionEvidence {
+  projection_status:
+    | 'matched_consumed_ack'
+    | 'matched_turn_started'
+    | 'matched_stimulus'
+    | 'not_found'
+    | 'missing_stimulus_id'
+    | 'unrecognized_receipt'
+  source?: string
+  keeper_name?: string
+  schedule_id?: string
+  post_id?: string
+  stimulus?: string
+  stimulus_id?: string
+  stimulus_kind?: string
+  reaction_kind?: string
+  stimulus_seen?: boolean
+  turn_started_seen?: boolean
+  event_queue_ack_seen?: boolean
+  matched_record_count?: number
+  stimulus_recorded_at?: number | null
+  stimulus_recorded_at_iso?: string | null
+  turn_started_recorded_at?: number | null
+  turn_started_recorded_at_iso?: string | null
+  event_queue_ack_recorded_at?: number | null
+  event_queue_ack_recorded_at_iso?: string | null
+  latest_recorded_at?: number | null
+  latest_recorded_at_iso?: string | null
   reason?: string
 }
 
@@ -187,6 +221,7 @@ export interface DashboardScheduledAutomationRequest {
   last_execution?: DashboardScheduledAutomationExecution | null
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
+  keeper_reaction_evidence?: DashboardScheduledAutomationKeeperReactionEvidence | null
 }
 
 export interface DashboardScheduledAutomationPayloadSupport {
@@ -194,6 +229,27 @@ export interface DashboardScheduledAutomationPayloadSupport {
   unsupported_request_count?: number
   unsupported_kinds?: Array<{ kind: string; count: number }>
   unknown_request_count?: number
+}
+
+export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
+  schema?: string
+  source?: string
+  projection_status:
+    | 'matched_supported_non_terminal'
+    | 'no_supported_payload_rows'
+    | 'no_supported_non_terminal'
+  criteria?: string
+  reason?: string
+  request_count?: number
+  supported_request_count?: number
+  supported_non_terminal_count?: number
+  supported_live_count?: number
+  supported_terminal_or_expired_count?: number
+  unsupported_request_count?: number
+  unknown_request_count?: number
+  terminal_or_expired_count?: number
+  matched_schedule_ids?: string[]
+  matched_schedule_id_limit?: number
 }
 
 export interface DashboardScheduledAutomation {
@@ -210,6 +266,7 @@ export interface DashboardScheduledAutomation {
   counts: Record<string, number>
   derived_counts?: Record<string, number>
   payload_support?: DashboardScheduledAutomationPayloadSupport
+  live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
   fsm: DashboardScheduledAutomationFsm
   requests: DashboardScheduledAutomationRequest[]
 }

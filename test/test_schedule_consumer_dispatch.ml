@@ -23,6 +23,19 @@ let rm_rf dir =
   | _ -> ()
 ;;
 
+let rec mkdir_p path =
+  if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    Unix.mkdir path 0o755)
+;;
+
+let write_empty_file path =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> ())
+;;
+
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
@@ -46,6 +59,34 @@ let human id : Schedule_domain.actor =
 
 let automated id : Schedule_domain.actor =
   { id; kind = Schedule_domain.Automated_actor; display_name = None }
+;;
+
+let keeper_meta_for_name keeper_name =
+  match
+    Keeper_meta_json_parse.meta_of_json
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String keeper_name
+        ; "trace_id", `String ("trace-" ^ keeper_name)
+        ; "last_model_used", `String "llama:auto"
+        ; "tool_access", `List []
+        ])
+  with
+  | Ok meta -> meta
+  | Error msg -> fail ("keeper meta parse failed: " ^ msg)
+;;
+
+let dashboard_schedule_row_exn dashboard ~schedule_id =
+  let open Yojson.Safe.Util in
+  match
+    dashboard
+    |> member "requests"
+    |> to_list
+    |> List.find_opt (fun row ->
+      String.equal (row |> member "schedule_id" |> to_string) schedule_id)
+  with
+  | Some row -> row
+  | None -> fail ("schedule missing from dashboard projection: " ^ schedule_id)
 ;;
 
 let board_post_payload =
@@ -78,6 +119,14 @@ let keeper_wake_payload =
     ]
 ;;
 
+let unsupported_payload =
+  `Assoc
+    [ "kind", `String "legacy.unsupported_scheduler_payload"
+    ; "schema_version", `Int 1
+    ; "body", `Assoc [ "message", `String "This payload is not in the schedule consumer catalog." ]
+    ]
+;;
+
 let create_pending_board_schedule config =
   match
     Schedule_service.create config ~schedule_id:"board-sched-1"
@@ -97,6 +146,19 @@ let create_pending_keeper_wake_schedule config =
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:keeper_wake_payload ~risk_class:Schedule_domain.Workspace_write
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let create_pending_unsupported_schedule config =
+  match
+    Schedule_service.create config ~schedule_id:"unsupported-live-sched"
+      ~requested_at:100.0 ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+      ~payload:unsupported_payload ~risk_class:Schedule_domain.Read_only
       ~source:Schedule_domain.Operator_request ()
   with
   | Ok request -> request
@@ -292,18 +354,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
-  let row =
-    dashboard
-    |> member "requests"
-    |> to_list
-    |> List.find_opt (fun row ->
-      String.equal
-        (row |> member "schedule_id" |> to_string)
-        request.schedule_id)
-  in
-  match row with
-  | None -> fail "keeper wake schedule missing from dashboard projection"
-  | Some row ->
+  let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
     let receipt = row |> member "dispatch_receipt" in
     check string "receipt recognized" "recognized"
       (receipt |> member "projection_status" |> to_string);
@@ -321,6 +372,8 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (receipt |> member "urgency" |> to_string);
     check string "receipt post id" "schedule-due:keeper-wake-sched-1"
       (receipt |> member "post_id" |> to_string);
+    check string "receipt reaction ledger recorded" "recorded"
+      (receipt |> member "reaction_ledger_status" |> to_string);
     let queue_evidence = row |> member "keeper_queue_evidence" in
     check string "queue evidence matched" "matched_pending"
       (queue_evidence |> member "projection_status" |> to_string);
@@ -438,6 +491,233 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
       (queue_evidence |> member "inflight_count" |> to_int)
 ;;
 
+let test_dashboard_live_supported_non_terminal_evidence_matches_supported_request () =
+  with_workspace
+  @@ fun config ->
+  let request = create_pending_keeper_wake_schedule config in
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
+  check string "live supported evidence matched" "matched_supported_non_terminal"
+    (evidence |> member "projection_status" |> to_string);
+  check string "live supported evidence source" "schedule_store"
+    (evidence |> member "source" |> to_string);
+  check int "one supported request" 1
+    (evidence |> member "supported_request_count" |> to_int);
+  check int "one supported non-terminal request" 1
+    (evidence |> member "supported_non_terminal_count" |> to_int);
+  check int "one supported live request" 1
+    (evidence |> member "supported_live_count" |> to_int);
+  check int "no unsupported requests" 0
+    (evidence |> member "unsupported_request_count" |> to_int);
+  check (list string) "matched schedule ids" [ request.schedule_id ]
+    (evidence |> member "matched_schedule_ids" |> to_list |> List.map to_string)
+;;
+
+let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported_payloads
+      ()
+  =
+  with_workspace
+  @@ fun config ->
+  ignore (create_pending_unsupported_schedule config : Schedule_domain.schedule_request);
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
+  check string "live supported evidence absent" "no_supported_payload_rows"
+    (evidence |> member "projection_status" |> to_string);
+  check int "no supported requests" 0
+    (evidence |> member "supported_request_count" |> to_int);
+  check int "no supported live requests" 0
+    (evidence |> member "supported_live_count" |> to_int);
+  check int "one unsupported request" 1
+    (evidence |> member "unsupported_request_count" |> to_int);
+  check int "no matched schedule ids" 0
+    (evidence |> member "matched_schedule_ids" |> to_list |> List.length)
+;;
+
+let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let meta = keeper_meta_for_name keeper_name in
+  let (_entry : Keeper_registry.registry_entry) =
+    Keeper_registry.register ~base_path:config.Workspace_utils.base_path keeper_name meta
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.unregister ~base_path:config.Workspace_utils.base_path keeper_name)
+    (fun () ->
+      let request = create_pending_keeper_wake_schedule config in
+      ignore (approve_schedule config request : Schedule_domain.schedule_request);
+      let result = tick_ok config ~now:201.0 in
+      check int "one dispatch" 1 (List.length result.dispatches);
+      check string "dispatch status" "succeeded"
+        (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+      let pending_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let open Yojson.Safe.Util in
+      let pending_evidence = pending_row |> member "keeper_queue_evidence" in
+      check string "pending evidence matched" "matched_pending"
+        (pending_evidence |> member "projection_status" |> to_string);
+      check string "pending matched bucket" "pending"
+        (pending_evidence |> member "matched_bucket" |> to_string);
+      check int "pending count before lease" 1
+        (pending_evidence |> member "pending_count" |> to_int);
+      check int "inflight count before lease" 0
+        (pending_evidence |> member "inflight_count" |> to_int);
+      let pending_receipt = pending_row |> member "dispatch_receipt" in
+      let stimulus_id = pending_receipt |> member "stimulus_id" |> to_string in
+      check bool "dispatch receipt includes stimulus id" true
+        (String.starts_with ~prefix:"stimulus:" stimulus_id);
+      let pending_reaction_evidence =
+        pending_row |> member "keeper_reaction_evidence"
+      in
+      check string "reaction evidence sees queued stimulus" "matched_stimulus"
+        (pending_reaction_evidence |> member "projection_status" |> to_string);
+      check string "reaction evidence source" "keeper_reaction_ledger"
+        (pending_reaction_evidence |> member "source" |> to_string);
+      check string "reaction evidence stimulus id" stimulus_id
+        (pending_reaction_evidence |> member "stimulus_id" |> to_string);
+      check bool "reaction evidence stimulus seen" true
+        (pending_reaction_evidence |> member "stimulus_seen" |> to_bool);
+      check bool "reaction evidence turn not started yet" false
+        (pending_reaction_evidence |> member "turn_started_seen" |> to_bool);
+      check int "one matched ledger row before turn" 1
+        (pending_reaction_evidence |> member "matched_record_count" |> to_int);
+      let leased =
+        match
+          Keeper_registry_event_queue.dequeue
+            ~base_path:config.Workspace_utils.base_path
+            keeper_name
+        with
+        | Some stimulus -> stimulus
+        | None -> fail "registered keeper should lease the scheduled wake"
+      in
+      check string "leased post id" "schedule-due:keeper-wake-sched-1" leased.post_id;
+      (match leased.payload with
+       | Keeper_event_queue.Schedule_due wake ->
+         check string "leased schedule id" request.schedule_id wake.schedule_id
+       | _ -> fail "registered keeper leased a non-schedule payload");
+      let inflight_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let inflight_evidence = inflight_row |> member "keeper_queue_evidence" in
+      check string "inflight evidence matched" "matched_inflight"
+        (inflight_evidence |> member "projection_status" |> to_string);
+      check string "inflight source" "durable_event_queue_snapshot"
+        (inflight_evidence |> member "source" |> to_string);
+      check string "inflight matched bucket" "inflight"
+        (inflight_evidence |> member "matched_bucket" |> to_string);
+      check string "inflight matched payload" "schedule_due"
+        (inflight_evidence |> member "matched_payload_kind" |> to_string);
+      check string "inflight matched schedule" request.schedule_id
+        (inflight_evidence |> member "matched_schedule_id" |> to_string);
+      check int "pending count after lease" 0
+        (inflight_evidence |> member "pending_count" |> to_int);
+      check int "inflight count after lease" 1
+        (inflight_evidence |> member "inflight_count" |> to_int);
+      Keeper_reaction_ledger.record_event_queue_reaction
+        ~base_path:config.Workspace_utils.base_path
+        ~keeper_name
+        ~reaction_kind:Keeper_reaction_ledger.Turn_started
+        leased;
+      let reacted_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let reaction_evidence = reacted_row |> member "keeper_reaction_evidence" in
+      check string "reaction evidence matched turn" "matched_turn_started"
+        (reaction_evidence |> member "projection_status" |> to_string);
+      check bool "reaction evidence turn started" true
+        (reaction_evidence |> member "turn_started_seen" |> to_bool);
+      check int "two matched ledger rows after turn" 2
+        (reaction_evidence |> member "matched_record_count" |> to_int);
+      (match
+         Keeper_registry_event_queue.ack_consumed_result
+           ~base_path:config.Workspace_utils.base_path
+           keeper_name
+           [ leased ]
+       with
+       | Ok () -> ()
+       | Error msg -> fail ("scheduled wake ack failed: " ^ msg));
+      Keeper_reaction_ledger.record_event_queue_reaction
+        ~base_path:config.Workspace_utils.base_path
+        ~keeper_name
+        ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+        leased;
+      let acked_row =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      in
+      let acked_queue_evidence = acked_row |> member "keeper_queue_evidence" in
+      check string "acked queue evidence drained" "not_found"
+        (acked_queue_evidence |> member "projection_status" |> to_string);
+      check int "pending count after ack" 0
+        (acked_queue_evidence |> member "pending_count" |> to_int);
+      check int "inflight count after ack" 0
+        (acked_queue_evidence |> member "inflight_count" |> to_int);
+      let acked_reaction_evidence = acked_row |> member "keeper_reaction_evidence" in
+      check string "reaction evidence matched ack" "matched_consumed_ack"
+        (acked_reaction_evidence |> member "projection_status" |> to_string);
+      check bool "reaction evidence event queue acked" true
+        (acked_reaction_evidence |> member "event_queue_ack_seen" |> to_bool);
+      check int "three matched ledger rows after ack" 3
+        (acked_reaction_evidence |> member "matched_record_count" |> to_int))
+;;
+
+let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+      keeper_name
+  in
+  mkdir_p keeper_dir;
+  write_empty_file (Filename.concat keeper_dir "reaction-ledger");
+  let request = create_pending_keeper_wake_schedule config in
+  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let result = tick_ok config ~now:201.0 in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "dispatch status stays succeeded" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing"
+   | Some stored ->
+     check string "schedule succeeded" "succeeded"
+       (Schedule_domain.schedule_status_to_string stored.status));
+  check int "wake remains durably queued" 1
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
+  let receipt = row |> member "dispatch_receipt" in
+  check string "receipt recognized" "recognized"
+    (receipt |> member "projection_status" |> to_string);
+  check string "ledger failure visible" "record_failed"
+    (receipt |> member "reaction_ledger_status" |> to_string);
+  check bool "ledger failure reason visible" true
+    (String.length (receipt |> member "reaction_ledger_error" |> to_string) > 0);
+  let queue_evidence = row |> member "keeper_queue_evidence" in
+  check string "queue evidence still matched" "matched_pending"
+    (queue_evidence |> member "projection_status" |> to_string);
+  let reaction_evidence = row |> member "keeper_reaction_evidence" in
+  check string "reaction ledger miss visible" "not_found"
+    (reaction_evidence |> member "projection_status" |> to_string)
+;;
+
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
   with_workspace
   @@ fun config ->
@@ -511,6 +791,16 @@ let () =
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
+        ; test_case "dashboard live supported non-terminal evidence matches supported request"
+            `Quick
+            test_dashboard_live_supported_non_terminal_evidence_matches_supported_request
+        ; test_case "dashboard live supported non-terminal evidence reports absent supported payloads"
+            `Quick
+            test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported_payloads
+        ; test_case "keeper wake dashboard tracks runtime inflight lease" `Quick
+            test_keeper_wake_dashboard_tracks_runtime_inflight_lease
+        ; test_case "keeper wake ledger failure keeps dispatch success visible" `Quick
+            test_keeper_wake_ledger_failure_keeps_dispatch_success_visible
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
         ; test_case "dashboard resolve uses authenticated operator" `Quick

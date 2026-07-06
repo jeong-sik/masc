@@ -36,6 +36,26 @@ let workspace_mutating_tool_names =
   [ "tool_edit_file"; "tool_write_file"; "create_text_file"; "edit_text_file"; "file_write" ]
 ;;
 
+let schedule_request_surface_tools =
+  [ "masc_schedule_create"
+  ; "masc_schedule_list"
+  ; "masc_schedule_get"
+  ; "masc_schedule_cancel"
+  ]
+;;
+
+let schedule_operator_decision_tools =
+  [ "masc_schedule_approve"; "masc_schedule_reject" ]
+;;
+
+let public_schedule_surface_tools = schedule_request_surface_tools
+let keeper_schedule_surface_tools = schedule_request_surface_tools
+(* TEL-OK: pure surface membership constants; tool-call telemetry is emitted by
+   the dispatch/runtime boundary. *)
+let spawned_agent_schedule_surface_tools = []
+let local_worker_schedule_surface_tools = []
+let schedule_surface_tools = schedule_request_surface_tools
+
 (* ================================================================ *)
 (* Curated tool-name lists                                          *)
 (* ================================================================ *)
@@ -86,7 +106,10 @@ let public_mcp_surface_tools =
   ; "masc_board_curation_read"
   ; "masc_board_curation_submit"
   ; "masc_board_reaction"
-  ; (* Agent discovery *)
+  ]
+  @ public_schedule_surface_tools
+  @
+  [ (* Agent discovery *)
     "masc_agent_card"
   ; (* Utility *)
     "masc_tool_help"
@@ -135,6 +158,7 @@ let spawned_agent_surface_tools =
   ; "masc_note_add"
   ; "masc_update_priority"
   ]
+  @ spawned_agent_schedule_surface_tools
 ;;
 
 let local_worker_surface_tools =
@@ -169,6 +193,7 @@ let local_worker_surface_tools =
   ; "masc_run_get"
   ; "masc_run_list"
   ]
+  @ local_worker_schedule_surface_tools
 ;;
 
 let session_min_surface_tools =

@@ -142,6 +142,14 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 let metric_tool_metrics_persist_dropped =
   Otel_metric_store_core.declare_counter "masc_tool_metrics_persist_dropped_total"
 
+(* Schedule unsupported payload counter. Labels:
+   - [phase] in {creation, dispatch}
+   - [risk_class] in [Schedule_domain.risk_class_to_string] labels.
+   Raw payload kinds are intentionally not labels; they remain in typed
+   errors/projections to avoid unbounded metric cardinality. *)
+let metric_schedule_payload_unsupported_total =
+  Otel_metric_store_core.declare_counter "masc_schedule_payload_unsupported_total"
+
 let metric_tool_bind_required_guard =
   Otel_metric_store_core.declare_counter "masc_tool_bind_required_guard_total"
 

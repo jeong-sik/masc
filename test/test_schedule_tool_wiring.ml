@@ -1,21 +1,40 @@
 open Alcotest
 open Masc
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+;;
+
 let with_config f =
   let path = Filename.temp_dir "schedule_tool_wiring_test" "" in
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () ->
+    f (Workspace.default_config path))
+;;
+
+let replace_path_with_directory path =
+  if Sys.file_exists path then rm_rf path;
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Unix.mkdir path 0o755
+;;
+
+let write_text path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
   Fun.protect
-    ~finally:(fun () ->
-      let rec rm path =
-        if Sys.file_exists path then
-          if Sys.is_directory path then begin
-            Sys.readdir path
-            |> Array.iter (fun entry -> rm (Filename.concat path entry));
-            Unix.rmdir path
-          end else
-            Sys.remove path
-      in
-      rm path)
-    (fun () -> f (Workspace.default_config path))
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let event_queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
 ;;
 
 let payload =
@@ -60,6 +79,42 @@ let automated id : Schedule_domain.actor =
   { id; kind = Schedule_domain.Automated_actor; display_name = None }
 ;;
 
+let keeper_meta_for keeper_name trace_id =
+  match
+    Keeper_meta_json_parse.meta_of_json
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String keeper_name
+        ; "trace_id", `String trace_id
+        ; "last_model_used", `String "llama:auto"
+        ; "tool_access", `List []
+        ])
+  with
+  | Ok meta -> meta
+  | Error msg -> fail ("meta parse failed: " ^ msg)
+;;
+
+let payload_exn json =
+  match Schedule_domain.payload_of_yojson json with
+  | Ok payload -> payload
+  | Error msg -> fail msg
+;;
+
+let unsupported_payload_metric_labels ~phase ~risk_class =
+  [ "phase", phase
+  ; "risk_class", Schedule_domain.risk_class_to_string risk_class
+  ]
+;;
+
+let unsupported_payload_metric_value ~phase ~risk_class =
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_schedule_payload_unsupported_total
+    ~labels:(unsupported_payload_metric_labels ~phase ~risk_class)
+    ()
+;;
+
+let metric_value name = Otel_metric_store.metric_value_or_zero name ()
+
 let create_args = `Assoc create_fields
 
 let schedule_definition action =
@@ -96,10 +151,26 @@ let operator_schedule_tool_name action =
   schema.name
 ;;
 
+let schedule_definition_names () =
+  Tool_schemas_schedule.definitions
+  |> List.map (fun (definition : Tool_schemas_schedule.definition) ->
+    let schema : Masc_domain.tool_schema = definition.schema in
+    schema.name)
+;;
+
+let json_string_list json =
+  json |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string
+;;
+
+let check_absent label names tool_name =
+  check bool label false (List.mem tool_name names)
+;;
+
 let test_schema_and_descriptor_exposed () =
   let create_name = schedule_tool_name Tool_schemas_schedule.Create_request in
   let approve_name = operator_schedule_tool_name Tool_schemas_schedule.Approve_request in
   let reject_name = operator_schedule_tool_name Tool_schemas_schedule.Reject_request in
+  let schedule_names = schedule_definition_names () in
   let approve_schema =
     (operator_schedule_definition Tool_schemas_schedule.Approve_request).schema
   in
@@ -113,6 +184,58 @@ let test_schema_and_descriptor_exposed () =
   check bool "raw schema has create" true (List.mem create_name schema_names);
   check bool "raw schema hides approve" false (List.mem approve_name schema_names);
   check bool "raw schema hides reject" false (List.mem reject_name schema_names);
+  check (list string) "schedule request tools match public definitions"
+    schedule_names
+    Tool_catalog_surfaces.schedule_request_surface_tools;
+  check (list string) "schedule compatibility alias matches request tools"
+    Tool_catalog_surfaces.schedule_request_surface_tools
+    Tool_catalog_surfaces.schedule_surface_tools;
+  check (list string) "public schedule policy"
+    schedule_names
+    Tool_catalog_surfaces.public_schedule_surface_tools;
+  check (list string) "keeper schedule policy"
+    schedule_names
+    Tool_catalog_surfaces.keeper_schedule_surface_tools;
+  check (list string) "spawned schedule policy intentionally empty"
+    []
+    Tool_catalog_surfaces.spawned_agent_schedule_surface_tools;
+  check (list string) "local worker schedule policy intentionally empty"
+    []
+    Tool_catalog_surfaces.local_worker_schedule_surface_tools;
+  check (list string) "operator schedule decision tools"
+    [ approve_name; reject_name ]
+    Tool_catalog_surfaces.schedule_operator_decision_tools;
+  List.iter
+    (fun name ->
+       check bool ("public MCP exposes " ^ name) true
+         (List.mem name Tool_catalog_surfaces.public_mcp_surface_tools))
+    schedule_names;
+  List.iter
+    (fun name ->
+       check_absent
+         ("spawned agent hides schedule tool " ^ name)
+         Tool_catalog_surfaces.spawned_agent_surface_tools
+         name;
+       check_absent
+         ("local worker hides schedule tool " ^ name)
+         Tool_catalog_surfaces.local_worker_surface_tools
+         name)
+    schedule_names;
+  List.iter
+    (fun name ->
+       check_absent
+         ("public MCP hides operator decision " ^ name)
+         Tool_catalog_surfaces.public_mcp_surface_tools
+         name;
+       check_absent
+         ("spawned agent hides operator decision " ^ name)
+         Tool_catalog_surfaces.spawned_agent_surface_tools
+         name;
+       check_absent
+         ("local worker hides operator decision " ^ name)
+         Tool_catalog_surfaces.local_worker_surface_tools
+         name)
+    Tool_catalog_surfaces.schedule_operator_decision_tools;
   check string "approve describes due grants"
     "Record a separate human execution grant for a pending or due scheduled request. Recurring side-effecting requests need a fresh grant for each due occurrence."
     approve_schema.description;
@@ -127,7 +250,51 @@ let test_schema_and_descriptor_exposed () =
   in
   check bool "descriptor has create" true (List.mem create_name descriptor_names);
   check bool "descriptor hides approve" false (List.mem approve_name descriptor_names);
-  check bool "descriptor hides reject" false (List.mem reject_name descriptor_names)
+  check bool "descriptor hides reject" false (List.mem reject_name descriptor_names);
+  let surface_snapshot = Capability_registry.surface_snapshot_json Config.raw_all_tool_schemas in
+  let member = Yojson.Safe.Util.member in
+  let public_names =
+    surface_snapshot
+    |> member "public_mcp"
+    |> member "tools"
+    |> json_string_list
+  in
+  let keeper_standard_names =
+    surface_snapshot
+    |> member "keeper_standard"
+    |> member "tools"
+    |> json_string_list
+  in
+  let spawned_names =
+    surface_snapshot
+    |> member "spawned_agent_mcp"
+    |> member "tools"
+    |> json_string_list
+  in
+  let local_worker_names =
+    surface_snapshot
+    |> member "local_worker"
+    |> member "tools"
+    |> json_string_list
+  in
+  List.iter
+    (fun name ->
+       check bool ("public snapshot includes " ^ name) true
+         (List.mem name public_names);
+       check bool ("keeper-standard snapshot includes " ^ name) true
+         (List.mem name keeper_standard_names))
+    schedule_names;
+  List.iter
+    (fun name ->
+       check_absent ("spawned snapshot hides schedule " ^ name) spawned_names name;
+       check_absent ("local-worker snapshot hides schedule " ^ name) local_worker_names name)
+    schedule_names;
+  List.iter
+    (fun name ->
+       check_absent ("keeper-standard hides operator decision " ^ name)
+         keeper_standard_names
+         name)
+    Tool_catalog_surfaces.schedule_operator_decision_tools
 ;;
 
 let schedule_ctx config : Tool_schedule.context =
@@ -145,11 +312,220 @@ let test_dispatch_create_persists_schedule () =
   | None -> fail "dispatch returned None"
   | Some result ->
     check bool "create succeeds" true (Tool_result.is_success result);
+    let open Yojson.Safe.Util in
+    check string "result payload support" "unsupported"
+      (Tool_result.data result |> member "payload_support" |> to_string);
     let state = Schedule_store.read_state config in
     check int "one schedule persisted" 1 (List.length state.schedules);
     let request = List.hd state.schedules in
     check string "status" "scheduled"
       (Schedule_domain.schedule_status_to_string request.status)
+;;
+
+let test_dispatch_get_surfaces_lifecycle_audit () =
+  with_config
+  @@ fun config ->
+  let ctx = schedule_ctx config in
+  let create_args =
+    `Assoc (("schedule_id", `String "sched-audit-tool") :: create_fields)
+  in
+  (match
+     Tool_schedule.dispatch ctx
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args:create_args
+   with
+   | Some result when Tool_result.is_success result -> ()
+   | Some result -> fail ("create failed: " ^ Tool_result.message result)
+   | None -> fail "create dispatch returned None");
+  match
+    Tool_schedule.dispatch ctx
+      ~name:(schedule_tool_name Tool_schemas_schedule.Get_request)
+      ~args:(`Assoc [ "schedule_id", `String "sched-audit-tool" ])
+  with
+  | None -> fail "get dispatch returned None"
+  | Some result ->
+    check bool "get succeeds" true (Tool_result.is_success result);
+    let open Yojson.Safe.Util in
+    let audit = Tool_result.data result |> member "lifecycle_audit" in
+    check string "payload support" "unsupported"
+      (Tool_result.data result |> member "payload_support" |> to_string);
+    check string "audit source" "schedule_lifecycle_audit_jsonl"
+      (audit |> member "source" |> to_string);
+    check string "audit status" "ok" (audit |> member "status" |> to_string);
+    check int "audit limit" Schedule_audit_log.default_projection_limit
+      (audit |> member "limit" |> to_int);
+    check int "audit event count" 1 (audit |> member "event_count" |> to_int);
+    check string "audit coverage" "events_recorded"
+      (audit |> member "coverage" |> to_string);
+    check string "audit backfill policy"
+      "not_synthesized_from_schedule_snapshot"
+      (audit |> member "backfill_policy" |> to_string);
+    let event =
+      match audit |> member "events" |> to_list with
+      | [ event ] -> event
+      | events -> failf "expected one audit event, got %d" (List.length events)
+    in
+    check string "audit action" "request_created"
+      (event |> member "action" |> to_string);
+    check string "audit schedule" "sched-audit-tool"
+      (event |> member "schedule_id" |> to_string);
+    check string "audit current status" "scheduled"
+      (event |> member "current_status" |> to_string)
+;;
+
+let test_dispatch_get_surfaces_pre_audit_no_events_policy () =
+  with_config
+  @@ fun config ->
+  let ctx = schedule_ctx config in
+  let request =
+    match
+      Schedule_domain.create_request
+        ~schedule_id:"sched-pre-audit"
+        ~requested_by:(human "operator")
+        ~scheduled_by:(human "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload
+        ~risk_class:Schedule_domain.Read_only
+        ~approval_required:false
+        ~source:Schedule_domain.Operator_request
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  Workspace_utils.mkdir_p (Workspace_utils.masc_dir config);
+  Workspace_core.write_text
+    config
+    (Schedule_store.schedules_path config)
+    (Yojson.Safe.to_string
+       (Schedule_store.state_to_yojson
+          { (Schedule_store.default_state ()) with schedules = [ request ] }));
+  match
+    Tool_schedule.dispatch ctx
+      ~name:(schedule_tool_name Tool_schemas_schedule.Get_request)
+      ~args:(`Assoc [ "schedule_id", `String "sched-pre-audit" ])
+  with
+  | None -> fail "get dispatch returned None"
+  | Some result ->
+    check bool "get succeeds" true (Tool_result.is_success result);
+    let open Yojson.Safe.Util in
+    let audit = Tool_result.data result |> member "lifecycle_audit" in
+    check string "audit status" "ok" (audit |> member "status" |> to_string);
+    check int "audit event count" 0 (audit |> member "event_count" |> to_int);
+    check string "audit coverage" "no_lifecycle_events"
+      (audit |> member "coverage" |> to_string);
+    check string "audit backfill policy"
+      "not_synthesized_from_schedule_snapshot"
+      (audit |> member "backfill_policy" |> to_string);
+    check int "audit events empty" 0 (audit |> member "events" |> to_list |> List.length)
+;;
+
+let test_dispatch_list_surfaces_payload_support_summary () =
+  with_config
+  @@ fun config ->
+  let ctx = schedule_ctx config in
+  let create name args =
+    match Tool_schedule.dispatch ctx ~name ~args with
+    | Some result when Tool_result.is_success result -> ()
+    | Some result -> fail ("create failed: " ^ Tool_result.message result)
+    | None -> fail "create dispatch returned None"
+  in
+  create
+    (schedule_tool_name Tool_schemas_schedule.Create_request)
+    (`Assoc (("schedule_id", `String "sched-unsupported") :: create_fields));
+  create
+    (schedule_tool_name Tool_schemas_schedule.Create_request)
+    (`Assoc
+       [ "schedule_id", `String "sched-supported"
+       ; "due_at_unix", `Float 200.0
+       ; "risk_class", `String "workspace_write"
+       ; "board_content", `String "supported board post"
+       ; "requested_by_id", `String "operator"
+       ; "scheduled_by_id", `String "scheduler-agent"
+       ]);
+  match
+    Tool_schedule.dispatch ctx
+      ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
+      ~args:(`Assoc [ "limit", `Int 10 ])
+  with
+  | None -> fail "list dispatch returned None"
+  | Some result ->
+    check bool "list succeeds" true (Tool_result.is_success result);
+    let open Yojson.Safe.Util in
+    let data = Tool_result.data result in
+    let payload_support = data |> member "payload_support" in
+    check string "supported kind" Schedule_supported_kinds.board_post
+      (payload_support |> member "supported_kinds" |> to_list |> List.hd |> to_string);
+    let contract =
+      payload_support |> member "supported_contracts" |> to_list |> List.hd
+    in
+    check string "supported contract kind" Schedule_supported_kinds.board_post
+      (contract |> member "kind" |> to_string);
+    check string "supported contract dispatch tool"
+      (Schedule_payload_projection.dispatch_tool_name
+         Schedule_payload_projection.Board_post)
+      (contract |> member "dispatch_tool" |> to_string);
+    check bool "supported contract side-effecting risk" true
+      (contract |> member "side_effecting_risk_required" |> to_bool);
+    check int "one unsupported request"
+      1
+      (payload_support |> member "unsupported_request_count" |> to_int);
+    let schedules = data |> member "schedules" |> to_list in
+    check bool "supported row present" true
+      (List.exists
+         (fun row ->
+            String.equal "sched-supported" (row |> member "schedule_id" |> to_string)
+            && String.equal "supported" (row |> member "payload_support" |> to_string))
+         schedules);
+    check bool "unsupported row present" true
+      (List.exists
+         (fun row ->
+            String.equal "sched-unsupported" (row |> member "schedule_id" |> to_string)
+            && String.equal "unsupported" (row |> member "payload_support" |> to_string))
+         schedules)
+;;
+
+let test_dispatch_list_reports_schedule_store_read_error () =
+  with_config
+  @@ fun config ->
+  write_text (Schedule_store.schedules_path config) "{not-json";
+  match
+    Tool_schedule.dispatch (schedule_ctx config)
+      ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
+      ~args:(`Assoc [])
+  with
+  | None -> fail "list dispatch returned None"
+  | Some result ->
+    check bool "list fails" false (Tool_result.is_success result);
+    check (option string) "failure class" (Some "runtime_failure")
+      (Option.map Tool_result.tool_failure_class_to_string
+         (Tool_result.failure_class result));
+    check bool "error is explicit schedule store read failure" true
+      (String_util.contains_substring
+         (Tool_result.message result)
+         "schedule store read failed")
+;;
+
+let test_dispatch_get_reports_schedule_store_read_error () =
+  with_config
+  @@ fun config ->
+  write_text (Schedule_store.schedules_path config) "{not-json";
+  match
+    Tool_schedule.dispatch (schedule_ctx config)
+      ~name:(schedule_tool_name Tool_schemas_schedule.Get_request)
+      ~args:(`Assoc [ "schedule_id", `String "sched-corrupt" ])
+  with
+  | None -> fail "get dispatch returned None"
+  | Some result ->
+    check bool "get fails" false (Tool_result.is_success result);
+    check (option string) "failure class" (Some "runtime_failure")
+      (Option.map Tool_result.tool_failure_class_to_string
+         (Tool_result.failure_class result));
+    check bool "error is explicit schedule store read failure" true
+      (String_util.contains_substring
+         (Tool_result.message result)
+         "schedule store read failed")
 ;;
 
 let test_dispatch_operator_decisions_are_dashboard_only () =
@@ -276,10 +652,16 @@ let test_dispatch_create_board_post_convenience_payload () =
      let open Yojson.Safe.Util in
      check string "result payload kind" "masc.board_post"
        (data |> member "payload_kind" |> to_string);
+     check string "result payload dispatch tool"
+       (Schedule_payload_projection.dispatch_tool_name
+          Schedule_payload_projection.Board_post)
+       (data |> member "payload_dispatch_tool" |> to_string);
      check string "result payload target" "hearth:ops"
        (data |> member "payload_target" |> to_string);
      check string "result payload summary" "Scheduled check-in"
        (data |> member "payload_summary" |> to_string);
+     check string "result payload support" "supported"
+       (data |> member "payload_support" |> to_string);
      check bool "result separate grant" true
        (data |> member "requires_separate_human_grant" |> to_bool));
   (match Schedule_store.get_schedule config ~schedule_id:"sched-board-post" with
@@ -313,6 +695,10 @@ let test_dispatch_create_board_post_convenience_payload () =
   in
   check string "dashboard payload kind" "masc.board_post"
     (row |> member "payload_kind" |> to_string);
+  check string "dashboard payload dispatch tool"
+    (Schedule_payload_projection.dispatch_tool_name
+       Schedule_payload_projection.Board_post)
+    (row |> member "payload_dispatch_tool" |> to_string);
   check string "dashboard payload target" "hearth:ops"
     (row |> member "payload_target" |> to_string);
   check string "dashboard payload summary" "Scheduled check-in"
@@ -563,6 +949,8 @@ let test_dispatch_create_rejects_board_payload_without_content () =
 let test_dispatch_create_rejects_unsupported_side_effecting_kind () =
   with_config
   @@ fun config ->
+  let risk_class = Schedule_domain.Workspace_write in
+  let before = unsupported_payload_metric_value ~phase:"creation" ~risk_class in
   let args =
     `Assoc
       [ "schedule_id", `String "sched-unsupported-kind"
@@ -585,15 +973,131 @@ let test_dispatch_create_rejects_unsupported_side_effecting_kind () =
        (Tool_result.is_success result);
      check (option string) "failure class" (Some "workflow_rejection")
        (Option.map Tool_result.tool_failure_class_to_string
-          (Tool_result.failure_class result)));
+          (Tool_result.failure_class result));
+     check string "message"
+       (Schedule_supported_kinds.unsupported_error "orphan_auto_release")
+       (Tool_result.message result));
   let state = Schedule_store.read_state config in
   check int "no schedule persisted for unsupported kind" 0
-    (List.length state.schedules)
+    (List.length state.schedules);
+  let after = unsupported_payload_metric_value ~phase:"creation" ~risk_class in
+  check (float 0.000001) "unsupported creation metric increments" 1.0
+    (after -. before)
+;;
+
+let test_payload_registry_matches_supported_kind_ssot () =
+  check (list string) "registry uses supported-kind SSOT"
+    Schedule_supported_kinds.supported
+    Schedule_payload_projection.supported_payload_kinds;
+  check string "board-post variant string" Schedule_supported_kinds.board_post
+    (Schedule_payload_projection.known_kind_to_string
+       Schedule_payload_projection.Board_post);
+  (match
+     Schedule_payload_projection.supported_contracts_to_yojson ()
+     |> Yojson.Safe.Util.to_list
+   with
+   | contract :: _ ->
+     let open Yojson.Safe.Util in
+     check string "registry contract kind" Schedule_supported_kinds.board_post
+       (contract |> member "kind" |> to_string);
+     check string "registry contract dispatch tool"
+       (Schedule_payload_projection.dispatch_tool_name
+          Schedule_payload_projection.Board_post)
+       (contract |> member "dispatch_tool" |> to_string);
+     check int "registry contract schema version" 1
+       (contract |> member "schema_versions" |> to_list |> List.hd |> to_int);
+     check bool "registry contract side-effecting risk" true
+       (contract |> member "side_effecting_risk_required" |> to_bool)
+   | [] -> fail "expected at least one payload contract")
+;;
+
+let test_dispatch_tool_projection_requires_dispatchable_payload () =
+  let request : Schedule_domain.schedule_request =
+    { schedule_id = "sched-readonly-board"
+    ; requested_by = human "operator"
+    ; scheduled_by = automated "scheduler-agent"
+    ; requested_at = 100.0
+    ; due_at = 200.0
+    ; expires_at = None
+    ; payload = payload_exn board_post_payload
+    ; risk_class = Schedule_domain.Read_only
+    ; approval_required = false
+    ; status = Schedule_domain.Scheduled
+    ; source = Schedule_domain.System_request
+    ; recurrence = Schedule_domain.One_shot
+    }
+  in
+  check (option string) "read-only board payload has no dispatch tool" None
+    (Schedule_payload_projection.dispatch_tool_for_request request)
+;;
+
+let test_payload_projection_result_surfaces_invalid_payload () =
+  let request : Schedule_domain.schedule_request =
+    { schedule_id = "sched-invalid-payload"
+    ; requested_by = human "operator"
+    ; scheduled_by = automated "scheduler-agent"
+    ; requested_at = 100.0
+    ; due_at = 200.0
+    ; expires_at = None
+    ; payload =
+        payload_exn
+          (`Assoc [ "schema_version", `Int 1; "body", `Assoc [ "content", `String "x" ] ])
+    ; risk_class = Schedule_domain.Workspace_write
+    ; approval_required = false
+    ; status = Schedule_domain.Scheduled
+    ; source = Schedule_domain.System_request
+    ; recurrence = Schedule_domain.One_shot
+    }
+  in
+  (match Schedule_payload_projection.support_status_result request with
+   | Error msg -> check string "support status error" "missing field: kind" msg
+   | Ok status ->
+     fail
+       ("expected support status error, got "
+        ^ Schedule_payload_projection.support_status_to_string status));
+  check string "legacy support status" "unknown"
+    (Schedule_payload_projection.support_status_to_string
+       (Schedule_payload_projection.support_status request));
+  (match Schedule_payload_projection.kind_result request with
+   | Error msg -> check string "kind error" "missing field: kind" msg
+   | Ok kind -> fail ("expected kind error, got " ^ kind));
+  (match
+     Schedule_payload_projection.kind_of_json_result
+       (`Assoc
+         [ "kind", `String "test.raw"
+         ; "schema_version", `Int 1
+         ; "body", `Assoc []
+         ])
+   with
+   | Ok kind -> check string "raw payload kind" "test.raw" kind
+   | Error msg -> fail ("expected raw payload kind, got " ^ msg));
+  (match
+     Schedule_payload_projection.kind_of_json_result
+       (`Assoc [ "schema_version", `Int 1; "body", `Assoc [] ])
+   with
+   | Error msg -> check string "raw payload kind error" "missing field: kind" msg
+   | Ok kind -> fail ("expected raw payload kind error, got " ^ kind));
+  check (option string) "legacy kind projection" None
+    (Schedule_payload_projection.kind request);
+  (match Schedule_payload_projection.dispatch_tool_for_request_result request with
+   | Error err ->
+     check string "dispatch projection error" "missing field: kind"
+       (Schedule_payload_projection.dispatch_rejection_message err)
+   | Ok tool_name -> fail ("expected dispatch projection error, got " ^ tool_name));
+  check (option string) "legacy dispatch projection" None
+    (Schedule_payload_projection.dispatch_tool_for_request request);
+  (match Schedule_payload_projection.target_summary_result request with
+   | Error msg -> check string "target summary error" "missing field: kind" msg
+   | Ok _ -> fail "expected target summary error");
+  check (pair (option string) (option string)) "legacy target summary" (None, None)
+    (Schedule_payload_projection.target_summary request)
 ;;
 
 let test_dispatch_create_rejects_read_only_board_payload () =
   with_config
   @@ fun config ->
+  let risk_class = Schedule_domain.Read_only in
+  let before = unsupported_payload_metric_value ~phase:"creation" ~risk_class in
   let args =
     `Assoc
       [ "schedule_id", `String "sched-board-readonly"
@@ -617,7 +1121,10 @@ let test_dispatch_create_rejects_read_only_board_payload () =
        "masc.board_post requires a side-effecting risk_class such as workspace_write"
        (Tool_result.message result));
   let state = Schedule_store.read_state config in
-  check int "no schedule persisted" 0 (List.length state.schedules)
+  check int "no schedule persisted" 0 (List.length state.schedules);
+  let after = unsupported_payload_metric_value ~phase:"creation" ~risk_class in
+  check (float 0.000001) "invalid supported payload is not unsupported" 0.0
+    (after -. before)
 ;;
 
 let test_dispatch_cancel_persists_status () =
@@ -651,7 +1158,26 @@ let test_dispatch_cancel_persists_status () =
     | None -> fail "schedule missing"
     | Some request ->
       check string "status" "cancelled"
-        (Schedule_domain.schedule_status_to_string request.status)
+        (Schedule_domain.schedule_status_to_string request.status);
+      (match
+         Schedule_audit_log.read_recent_for_schedule config
+           ~schedule_id:"sched-cancel" ~limit:1
+       with
+       | Error msg -> fail msg
+       | Ok [ event ] ->
+         check string "cancel audit action" "request_cancelled"
+           (Schedule_audit_log.action_to_string event.action);
+         check string "cancel audit actor" "operator"
+           (match event.actor with
+            | Some actor -> actor.id
+            | None -> "");
+         (match event.detail with
+          | Some (`Assoc fields) ->
+            (match List.assoc_opt "reason" fields with
+             | Some (`String reason) -> check string "cancel audit reason" "test cleanup" reason
+             | _ -> fail "cancel audit reason missing")
+          | _ -> fail "cancel audit detail missing")
+       | Ok events -> failf "expected one cancel audit event, got %d" (List.length events))
 ;;
 
 let create_schedule_exn
@@ -674,6 +1200,206 @@ let create_schedule_exn
   | Ok request -> request
   | Error err ->
     fail ("schedule create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let test_schedule_signals_enqueue_keeper_owned_wake () =
+  with_config
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.clear ())
+    (fun () ->
+       Keeper_registry.clear ();
+       let keeper_name = "schedule-signal-keeper" in
+       let meta = keeper_meta_for keeper_name "trace-schedule-signal" in
+       let entry = Keeper_registry.register ~base_path keeper_name meta in
+       let enqueue_labels =
+         [ "keeper", keeper_name; "source", "schedule_signal"; "outcome", "queued" ]
+       in
+       let enqueue_before =
+         Otel_metric_store.metric_value_or_zero
+           Otel_metric_store.metric_keeper_wake_enqueue_total
+           ~labels:enqueue_labels
+           ()
+       in
+       ignore
+         (create_schedule_exn config ~schedule_id:"sched-owned-signal" ~due_at:200.0
+            ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+            ~scheduled_by:(automated keeper_name)
+            ()
+          : Schedule_domain.schedule_request);
+       ignore
+         (create_schedule_exn config ~schedule_id:"sched-orphan-signal" ~due_at:200.0
+            ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+            ~scheduled_by:(automated "unknown-scheduler")
+            ()
+          : Schedule_domain.schedule_request);
+       ignore
+         (create_schedule_exn config ~schedule_id:"sched-human-signal" ~due_at:200.0
+            ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+            ~scheduled_by:(human "operator")
+            ()
+          : Schedule_domain.schedule_request);
+       let signal schedule_id signal_id : Schedule_runner.wake_signal =
+         { signal_id
+         ; kind = Schedule_runner.Due_candidate
+         ; schedule_id
+         ; emitted_at = 201.0
+         ; due_at = 200.0
+         ; risk_class = Schedule_domain.Read_only
+         ; payload_digest = "sha256:" ^ schedule_id
+         ; payload = payload
+         }
+       in
+       check bool "wake flag starts false" false (Atomic.get entry.fiber_wakeup);
+       let wake_counts : Schedule_runner_status.wake_enqueue_counts =
+         Server_bootstrap_maintenance.For_testing.enqueue_schedule_signal_keeper_wakes
+           ~config
+           [ signal "sched-owned-signal" "sig-owned"
+           ; signal "sched-orphan-signal" "sig-orphan"
+           ; signal "sched-missing-signal" "sig-missing"
+           ; signal "sched-human-signal" "sig-human"
+           ]
+       in
+       check int "one wake enqueued" 1 wake_counts.wake_enqueued;
+       check int "three wakes skipped without keeper" 3
+         wake_counts.wake_skipped_no_keeper;
+       check int "one wake skipped missing schedule" 1
+         wake_counts.wake_skipped_missing_schedule;
+       check int "one wake skipped non-keeper actor" 1
+         wake_counts.wake_skipped_non_keeper_actor;
+       check int "one wake skipped unregistered keeper" 1
+         wake_counts.wake_skipped_unregistered_keeper;
+       check int "no wake enqueue failures" 0 wake_counts.wake_failed;
+       check bool "wake flag flips" true (Atomic.get entry.fiber_wakeup);
+       let queue = Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+       check int "one keeper-owned schedule signal enqueued" 1
+         (Keeper_event_queue.length queue);
+       (match Keeper_event_queue.dequeue queue with
+        | None -> fail "missing schedule signal stimulus"
+        | Some (stimulus, rest) ->
+          check bool "queue rest empty" true (Keeper_event_queue.is_empty rest);
+          check string "stimulus post id" "schedule-signal:sig-owned"
+            stimulus.post_id;
+          (match stimulus.payload with
+           | Keeper_event_queue.Schedule_signal signal ->
+             check string "schedule id" "sched-owned-signal" signal.schedule_id;
+             check string "signal id" "sig-owned" signal.schedule_signal_id;
+             check string "signal kind" "due_candidate"
+               (Keeper_event_queue.schedule_signal_kind_to_string
+                  signal.schedule_signal_kind)
+           | _ -> fail "expected Schedule_signal payload"));
+       let enqueue_after =
+         Otel_metric_store.metric_value_or_zero
+           Otel_metric_store.metric_keeper_wake_enqueue_total
+           ~labels:enqueue_labels
+           ()
+       in
+       check (float 0.000001) "schedule signal enqueue metric increments" 1.0
+         (enqueue_after -. enqueue_before))
+;;
+
+let test_schedule_signal_wake_counts_persist_failure () =
+  with_config
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.clear ())
+    (fun () ->
+       Keeper_registry.clear ();
+       let keeper_name = "schedule-signal-persist-failure-keeper" in
+       let meta = keeper_meta_for keeper_name "trace-schedule-signal-persist-failure" in
+       let entry = Keeper_registry.register ~base_path keeper_name meta in
+       let failed_labels =
+         [ "keeper", keeper_name; "source", "schedule_signal"; "outcome", "persist_failed" ]
+       in
+       let failed_before =
+         Otel_metric_store.metric_value_or_zero
+           Otel_metric_store.metric_keeper_wake_enqueue_total
+           ~labels:failed_labels
+           ()
+       in
+       ignore
+         (create_schedule_exn config ~schedule_id:"sched-persist-failed-signal"
+            ~due_at:200.0 ~risk_class:Schedule_domain.Read_only
+            ~requested_by:(human "operator") ~scheduled_by:(automated keeper_name)
+            ()
+          : Schedule_domain.schedule_request);
+       let signal : Schedule_runner.wake_signal =
+         { signal_id = "sig-persist-failed"
+         ; kind = Schedule_runner.Due_candidate
+         ; schedule_id = "sched-persist-failed-signal"
+         ; emitted_at = 201.0
+         ; due_at = 200.0
+         ; risk_class = Schedule_domain.Read_only
+         ; payload_digest = "sha256:sched-persist-failed-signal"
+         ; payload = payload
+         }
+       in
+       check bool "wake flag starts false" false (Atomic.get entry.fiber_wakeup);
+       replace_path_with_directory
+         (event_queue_snapshot_path ~base_path ~keeper_name);
+       let wake_counts : Schedule_runner_status.wake_enqueue_counts =
+         Server_bootstrap_maintenance.For_testing.enqueue_schedule_signal_keeper_wakes
+           ~config
+           [ signal ]
+       in
+       check int "persist failure does not count as wake enqueued" 0
+         wake_counts.wake_enqueued;
+       check int "no keeper skip on owned schedule" 0
+         wake_counts.wake_skipped_no_keeper;
+       check int "persist failure counts as wake failed" 1 wake_counts.wake_failed;
+       check bool "wake hint stays false when event layer persist fails" false
+         (Atomic.get entry.fiber_wakeup);
+       let failed_after =
+         Otel_metric_store.metric_value_or_zero
+           Otel_metric_store.metric_keeper_wake_enqueue_total
+           ~labels:failed_labels
+           ()
+       in
+       check (float 0.000001) "schedule signal persist failure metric increments" 1.0
+         (failed_after -. failed_before))
+;;
+
+let test_schedule_signal_wake_counts_store_read_failure () =
+  with_config
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.clear ())
+    (fun () ->
+       Keeper_registry.clear ();
+       let keeper_name = "schedule-signal-store-read-failure-keeper" in
+       let meta = keeper_meta_for keeper_name "trace-schedule-signal-store-read-failure" in
+       let entry = Keeper_registry.register ~base_path keeper_name meta in
+       write_text (Schedule_store.schedules_path config) "{not-json";
+       let signal : Schedule_runner.wake_signal =
+         { signal_id = "sig-store-read-failed"
+         ; kind = Schedule_runner.Due_candidate
+         ; schedule_id = "sched-store-read-failed-signal"
+         ; emitted_at = 201.0
+         ; due_at = 200.0
+         ; risk_class = Schedule_domain.Read_only
+         ; payload_digest = "sha256:sched-store-read-failed-signal"
+         ; payload = payload
+         }
+       in
+       check bool "wake flag starts false" false (Atomic.get entry.fiber_wakeup);
+       let wake_counts : Schedule_runner_status.wake_enqueue_counts =
+         Server_bootstrap_maintenance.For_testing.enqueue_schedule_signal_keeper_wakes
+           ~config
+           [ signal ]
+       in
+       check int "store read failure does not count as wake enqueued" 0
+         wake_counts.wake_enqueued;
+       check int "store read failure is not a keeper ownership skip" 0
+         wake_counts.wake_skipped_no_keeper;
+       check int "store read failure counts as wake failed" 1 wake_counts.wake_failed;
+       check bool "wake hint stays false on unreadable schedule store" false
+         (Atomic.get entry.fiber_wakeup);
+       let queue = Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+       check int "no schedule signal stimulus is enqueued" 0
+         (Keeper_event_queue.length queue))
 ;;
 
 let test_dashboard_projection_surfaces_schedule_fsm () =
@@ -751,6 +1477,10 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (json |> member "derived_counts" |> member "due_effective" |> to_int);
   check int "blocked approval count" 1
     (json |> member "derived_counts" |> member "blocked_approval" |> to_int);
+  check (float 0.000001) "approval blocked count gauge" 1.0
+    (metric_value Otel_metric_store.metric_schedule_approval_blocked_count);
+  check bool "approval wait gauge is positive" true
+    (metric_value Otel_metric_store.metric_schedule_approval_wait_seconds > 0.0);
   check int "due execution ready count" 0
     (json |> member "derived_counts" |> member "due_execution_ready" |> to_int);
   check int "expired effective count" 1
@@ -766,6 +1496,14 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   check string "supported payload kind" "masc.board_post"
     (json |> member "payload_support" |> member "supported_kinds" |> to_list
      |> List.hd |> to_string);
+  let payload_contract =
+    json |> member "payload_support" |> member "supported_contracts" |> to_list
+    |> List.hd
+  in
+  check string "supported payload contract dispatch tool"
+    (Schedule_payload_projection.dispatch_tool_name
+       Schedule_payload_projection.Board_post)
+    (payload_contract |> member "dispatch_tool" |> to_string);
   (match json |> member "payload_support" |> member "unsupported_kinds" |> to_list with
    | unsupported :: _ ->
      check string "unsupported payload kind" "test.reminder"
@@ -818,8 +1556,15 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (due_tool_status |> member "direct_call_allowed" |> to_bool);
   check string "due keeper next tool default visibility" "default"
     (due_tool_status |> member "visibility" |> to_string);
-  check int "due keeper next tool has no surface projection" 0
-    (due_tool_status |> member "surface_count" |> to_int);
+  let due_tool_surfaces =
+    due_tool_status |> member "surfaces" |> json_string_list
+  in
+  check bool "due keeper next tool public surface" true
+    (List.mem "public_mcp" due_tool_surfaces);
+  check bool "due keeper next tool keeper surface" true
+    (List.mem "keeper_standard" due_tool_surfaces);
+  check bool "due keeper next tool has surface projection" true
+    ((due_tool_status |> member "surface_count" |> to_int) >= 2);
   check string "due keeper next tool read-only domain" "read_only"
     (due_tool_status |> member "effect_domain" |> to_string);
   check bool "due keeper action mentions runner tick" true
@@ -875,12 +1620,26 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
       (row |> member "effective_status" |> to_string);
     check string "terminal readiness" "terminal"
       (row |> member "execution_readiness" |> to_string);
-    check string "last execution status" "succeeded"
-      (row |> member "last_execution" |> member "status" |> to_string);
-    check string "last execution detail" "test.exec"
-      (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string);
-    check string "unrecognized dispatch receipt status" "unrecognized_detail"
-      (row |> member "dispatch_receipt" |> member "projection_status" |> to_string);
+	    check string "last execution status" "succeeded"
+	      (row |> member "last_execution" |> member "status" |> to_string);
+	    check string "last execution detail" "test.exec"
+	      (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string);
+	    let lifecycle_audit = row |> member "lifecycle_audit" in
+	    check string "lifecycle audit source" "schedule_lifecycle_audit_jsonl"
+      (lifecycle_audit |> member "source" |> to_string);
+    check string "lifecycle audit status" "ok"
+      (lifecycle_audit |> member "status" |> to_string);
+    let latest_event =
+      match lifecycle_audit |> member "events" |> to_list with
+      | event :: _ -> event
+      | [] -> fail "expected lifecycle audit event"
+    in
+    check string "latest lifecycle action" "execution_succeeded"
+	      (latest_event |> member "action" |> to_string);
+	    check string "latest lifecycle current status" "succeeded"
+	      (latest_event |> member "current_status" |> to_string);
+	    check string "unrecognized dispatch receipt status" "unrecognized_detail"
+	      (row |> member "dispatch_receipt" |> member "projection_status" |> to_string);
     check bool "unrecognized dispatch receipt reason" true
       (String_util.contains_substring
          (row |> member "dispatch_receipt" |> member "reason" |> to_string)
@@ -888,9 +1647,9 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     check string "unrecognized queue evidence status" "unrecognized_receipt"
       (row |> member "keeper_queue_evidence" |> member "projection_status" |> to_string);
     check bool "unrecognized queue evidence reason" true
-      (String_util.contains_substring
-         (row |> member "keeper_queue_evidence" |> member "reason" |> to_string)
-         "unsupported schedule dispatch receipt kind: test.exec")
+	      (String_util.contains_substring
+	         (row |> member "keeper_queue_evidence" |> member "reason" |> to_string)
+	         "unsupported schedule dispatch receipt kind: test.exec")
 ;;
 
 let test_dashboard_projection_surfaces_schedule_runner_signals () =
@@ -916,7 +1675,9 @@ let test_dashboard_projection_surfaces_schedule_runner_signals () =
   check string "signal source" "schedule_runner_signals"
     (json |> member "signal_source" |> to_string);
   check int "signal count" 1 (json |> member "signal_count" |> to_int);
+  check int "signal error count" 0 (json |> member "signal_error_count" |> to_int);
   check int "signal limit" 20 (json |> member "signal_limit" |> to_int);
+  check int "signal errors" 0 (List.length (json |> member "signal_errors" |> to_list));
   let signal =
     match json |> member "signals" |> to_list with
     | [ signal ] -> signal
@@ -940,6 +1701,79 @@ let test_dashboard_projection_surfaces_schedule_runner_signals () =
     (signal |> member "payload_kind" |> to_string);
   check string "signal payload digest" emitted.payload_digest
     (signal |> member "payload_digest" |> to_string)
+;;
+
+let test_dashboard_projection_surfaces_schedule_runner_signal_decode_errors () =
+  with_config
+  @@ fun config ->
+  let store =
+    Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ()
+  in
+  Dated_jsonl.append
+    store
+    (`Assoc
+      [ "event_type", `String "schedule.due_candidate"
+      ; "signal_id", `String "malformed-signal"
+      ]);
+  let json =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  check int "no decoded signals" 0 (json |> member "signal_count" |> to_int);
+  check int "one signal decode error" 1
+    (json |> member "signal_error_count" |> to_int);
+  let error =
+    match json |> member "signal_errors" |> to_list with
+    | [ error ] -> error
+    | errors -> failf "expected one signal error, got %d" (List.length errors)
+  in
+  check int "error ordinal" 0 (error |> member "ordinal" |> to_int);
+  check bool "error message visible" true
+    (String.length (error |> member "error" |> to_string) > 0)
+;;
+
+let test_dashboard_projection_reports_schedule_store_read_error () =
+  with_config
+  @@ fun config ->
+  write_text (Schedule_store.schedules_path config) "{not-json";
+  let json =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  check string "schema" "masc.dashboard.scheduled_automation.v1"
+    (json |> member "schema" |> to_string);
+  check string "status" "unknown" (json |> member "status" |> to_string);
+  check bool "schedule store known" false
+    (json |> member "schedule_store_known" |> to_bool);
+  check bool "read error present" true
+    (String.length (json |> member "schedule_store_read_error" |> to_string) > 0);
+  check bool "request count unknown" true
+    (json |> member "request_count" = `Null);
+  check bool "counts unknown" true (json |> member "counts" = `Null);
+  check bool "fsm active count unknown" true
+    (json |> member "fsm" |> member "active_count" = `Null);
+  check int "requests empty for unreadable store" 0
+    (List.length (json |> member "requests" |> to_list))
+;;
+
+let test_keeper_observation_reports_schedule_store_read_error () =
+  with_config
+  @@ fun config ->
+  write_text (Schedule_store.schedules_path config) "{not-json";
+  let observation =
+    Keeper_world_observation.read_scheduled_automation_observation
+      ~config
+      ~now:1_000.0
+  in
+  check bool "schedule counts unknown" false
+    (Keeper_world_observation.scheduled_automation_counts_known observation);
+  (match Keeper_world_observation.scheduled_automation_read_error observation with
+   | None -> fail "expected schedule read error"
+   | Some error ->
+     check bool "read error is visible" true (String.length error > 0));
+  check int "compat active count remains zero" 0 observation.active_count;
+  check int "compat due-ready count remains zero" 0 observation.due_ready_count;
+  check int "no attention items on unreadable store" 0 (List.length observation.items)
 ;;
 
 let test_keeper_observation_surfaces_schedule_attention () =
@@ -995,6 +1829,55 @@ let test_keeper_observation_surfaces_schedule_attention () =
    | _ -> fail "expected blocked and ready attention rows")
 ;;
 
+let test_keeper_observation_filters_schedule_attention_by_owner () =
+  with_config
+  @@ fun config ->
+  let now = 2_000.0 in
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-owned-ready" ~due_at:(now -. 10.0)
+       ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+       ()
+      : Schedule_domain.schedule_request);
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-other-ready" ~due_at:(now -. 20.0)
+       ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+       ~scheduled_by:(automated "other-keeper")
+       ()
+      : Schedule_domain.schedule_request);
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-human-ready" ~due_at:(now -. 30.0)
+       ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+       ~scheduled_by:(human "operator")
+       ()
+      : Schedule_domain.schedule_request);
+  (match Schedule_store.refresh_due config ~now with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  let global =
+    Keeper_world_observation.read_scheduled_automation_observation ~config ~now
+  in
+  check int "global sees all due-ready schedules" 3 global.due_ready_count;
+  let owned =
+    Keeper_world_observation.read_scheduled_automation_observation
+      ~config
+      ~keeper_name:"scheduler-agent"
+      ~now
+  in
+  check int "keeper sees only owned due-ready schedule" 1 owned.due_ready_count;
+  (match owned.items with
+   | [ item ] -> check string "owned schedule id" "sched-owned-ready" item.schedule_id
+   | items -> failf "expected one owned item, got %d" (List.length items));
+  let other =
+    Keeper_world_observation.read_scheduled_automation_observation
+      ~config
+      ~keeper_name:"missing-keeper"
+      ~now
+  in
+  check int "unknown keeper sees no schedule attention" 0 other.due_ready_count;
+  check int "unknown keeper has no schedule attention items" 0 (List.length other.items)
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
@@ -1002,6 +1885,16 @@ let () =
             test_schema_and_descriptor_exposed
         ; test_case "dispatch create persists schedule" `Quick
             test_dispatch_create_persists_schedule
+        ; test_case "dispatch get surfaces lifecycle audit" `Quick
+            test_dispatch_get_surfaces_lifecycle_audit
+        ; test_case "dispatch get surfaces pre-audit no-events policy" `Quick
+            test_dispatch_get_surfaces_pre_audit_no_events_policy
+        ; test_case "dispatch list surfaces payload support summary" `Quick
+            test_dispatch_list_surfaces_payload_support_summary
+        ; test_case "dispatch list reports schedule store read error" `Quick
+            test_dispatch_list_reports_schedule_store_read_error
+        ; test_case "dispatch get reports schedule store read error" `Quick
+            test_dispatch_get_reports_schedule_store_read_error
         ; test_case "operator decisions are dashboard-only" `Quick
             test_dispatch_operator_decisions_are_dashboard_only
         ; test_case "dispatch create persists recurrence" `Quick
@@ -1026,14 +1919,34 @@ let () =
             test_dispatch_create_rejects_read_only_board_payload
         ; test_case "dispatch create rejects unsupported side-effecting kind" `Quick
             test_dispatch_create_rejects_unsupported_side_effecting_kind
+        ; test_case "payload registry matches supported-kind SSOT" `Quick
+            test_payload_registry_matches_supported_kind_ssot
+        ; test_case "dispatch tool projection requires dispatchable payload" `Quick
+            test_dispatch_tool_projection_requires_dispatchable_payload
+        ; test_case "payload projection result surfaces invalid payload" `Quick
+            test_payload_projection_result_surfaces_invalid_payload
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
+        ; test_case "schedule signals enqueue keeper-owned wake" `Quick
+            test_schedule_signals_enqueue_keeper_owned_wake
+        ; test_case "schedule signal wake counts durable enqueue failure" `Quick
+            test_schedule_signal_wake_counts_persist_failure
+        ; test_case "schedule signal wake counts store read failure" `Quick
+            test_schedule_signal_wake_counts_store_read_failure
         ; test_case "dashboard projection surfaces schedule FSM" `Quick
             test_dashboard_projection_surfaces_schedule_fsm
         ; test_case "dashboard projection surfaces schedule runner signals" `Quick
             test_dashboard_projection_surfaces_schedule_runner_signals
+        ; test_case "dashboard projection surfaces schedule runner signal decode errors" `Quick
+            test_dashboard_projection_surfaces_schedule_runner_signal_decode_errors
+        ; test_case "dashboard projection reports schedule store read error" `Quick
+            test_dashboard_projection_reports_schedule_store_read_error
+        ; test_case "keeper observation reports schedule store read error" `Quick
+            test_keeper_observation_reports_schedule_store_read_error
         ; test_case "keeper observation surfaces schedule attention" `Quick
             test_keeper_observation_surfaces_schedule_attention
+        ; test_case "keeper observation filters schedule attention by owner" `Quick
+            test_keeper_observation_filters_schedule_attention_by_owner
         ] )
     ]
 ;;

@@ -37,6 +37,7 @@ let runpod_provider =
   ; is_non_interactive = true
   ; credentials = Some (Inline "rp-test-token")
   ; capabilities = None
+  ; healthcheck_path = None
   ; headers = None
   ; connect_timeout_s = None
   }
@@ -62,6 +63,7 @@ let runpod_binding =
   { Runtime_schema.provider_id = "runpod_mtp"
   ; model_id = "qwen"
   ; is_default = true
+  ; wizard_default = false
   ; max_concurrent = None
   ; price_input = None
   ; price_output = None

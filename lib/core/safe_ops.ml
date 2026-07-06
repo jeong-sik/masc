@@ -458,6 +458,25 @@ let get_env_int_logged name ~default =
       Log.Misc.warn "Invalid int for %s=%s, using default %d" name v default;
       default
 
+let parse_bool_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "1" | "true" | "yes" | "on" -> Some true
+  | "0" | "false" | "no" | "off" | "" -> Some false
+  | _ -> None
+
+let get_env_bool_logged name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some v ->
+    match parse_bool_string v with
+    | Some value -> value
+    | None ->
+      Log.Misc.warn
+        "Invalid bool for %s (value redacted), using default %b"
+        name
+        default;
+      default
+
 (** {2 JSON Value Extraction Helpers}
 
     Safe extraction from Yojson.Safe.t values with proper error handling.
@@ -502,12 +521,6 @@ let parse_float_string s =
   let trimmed = String.trim s in
   if trimmed = "" then None
   else float_of_string_opt trimmed
-
-let parse_bool_string s =
-  match String.lowercase_ascii (String.trim s) with
-  | "true" | "1" | "yes" | "on" -> Some true
-  | "false" | "0" | "no" | "off" | "" -> Some false
-  | _ -> None
 
 let json_int ?(default = 0) key json =
   match safe_member key json with

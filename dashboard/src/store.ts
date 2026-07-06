@@ -328,8 +328,10 @@ import type { FusionRunRecord } from './api/dashboard-fusion'
 // run while it is still `running`, before any board post exists.
 export const fusionBoardPosts = signal<BoardPost[]>([])
 export const fusionBoardLoading = signal(false)
+export const fusionBoardError = signal<string | null>(null)
 export const fusionRuns = signal<FusionRunRecord[]>([])
 export const fusionRunsLoading = signal(false)
+export const fusionRunsError = signal<string | null>(null)
 
 // --- OAS monitoring state ---
 
@@ -1326,6 +1328,7 @@ export async function refreshGoals(): Promise<void> {
 // present in the unfiltered board feed.
 export async function refreshFusionBoard(): Promise<void> {
   fusionBoardLoading.value = true
+  fusionBoardError.value = null
   try {
     const { fetchDashboardMemory } = await import('./api/dashboard-execution')
     const data = await timeBoardRequest('fusion_list', () => fetchDashboardMemory('recent', {
@@ -1335,6 +1338,7 @@ export async function refreshFusionBoard(): Promise<void> {
     fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, data.posts ?? [])
   } catch (err) {
     console.warn('[Fusion] board fetch error:', err)
+    fusionBoardError.value = errorMessageOr(err, 'Fusion board-sink load failed')
   } finally {
     fusionBoardLoading.value = false
   }
@@ -1346,12 +1350,14 @@ export async function refreshFusionBoard(): Promise<void> {
 // event self-heals on the next fetch.
 export async function refreshFusionRuns(): Promise<void> {
   fusionRunsLoading.value = true
+  fusionRunsError.value = null
   try {
     const { fetchFusionRuns } = await import('./api/dashboard-fusion')
     const data = await fetchFusionRuns()
     fusionRuns.value = data.runs
   } catch (err) {
     console.warn('[Fusion] runs fetch error:', err)
+    fusionRunsError.value = errorMessageOr(err, 'Fusion run registry load failed')
   } finally {
     fusionRunsLoading.value = false
   }

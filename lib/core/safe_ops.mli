@@ -161,6 +161,10 @@ val float_of_string_with_default : default:float -> string -> float
 val get_env_int_logged : string -> default:int -> int
 (** Get environment variable as int with logging when invalid. *)
 
+val get_env_bool_logged : string -> default:bool -> bool
+(** Get environment variable as bool with logging when invalid. Empty strings
+    are treated as explicit [false] so present-but-empty env overrides do not
+    accidentally enable opt-out flags. *)
 
 (** {1 JSON Value Extraction Helpers}
 
@@ -193,4 +197,3 @@ val json_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val safe_member : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Extract a JSON value by key from an object. Returns [`Null] if key is
     missing or the enclosing value is not an object. *)
-

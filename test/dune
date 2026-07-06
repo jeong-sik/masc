@@ -110,6 +110,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
+  test_keeper_memory_os_sanity_sweep
   test_keeper_user_model
   test_keeper_recall_outcome_eval
   test_keeper_memory_os_consolidation
@@ -457,6 +458,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
+  test_keeper_memory_os_sanity_sweep
   test_keeper_user_model
   test_keeper_recall_outcome_eval
   test_keeper_memory_os_consolidation
@@ -2697,7 +2699,13 @@
 (test
  (name test_install_script)
  (modules test_install_script)
- (libraries alcotest))
+ (libraries alcotest fs_compat otoml unix)
+ (deps ../bin/main_eio.exe)
+ (action
+  (setenv
+   MASC_INSTALL_TEST_MASC
+   %{dep:../bin/main_eio.exe}
+   (run %{test}))))
 
 (test
  (name test_tui_http_ast)

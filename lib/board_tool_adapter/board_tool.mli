@@ -10,9 +10,9 @@
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
     - the {b tools} list advertised to MCP clients
-      (13 schemas: post, list, get, comment, vote, stats,
-      search, comment_vote, reaction, profile, hearth_list,
-      curation_read, delete),
+      (post/list/get, comments, votes, reactions, stats,
+      search, profile, hearths, curation, cleanup/delete,
+      and sub-board operations),
     - the {b truncated-markdown detector}
       ({!detect_truncated_markdown_with_reason}) used by
       the post-create path to flag chat-suffix paste
@@ -86,6 +86,16 @@ val parse_sort_order : string -> (sort_order, string) Result.t
     {!Board_dispatch.valid_sort_order_strings} so adding
     a constructor automatically updates the user-facing
     catalogue. *)
+
+(** {1 Identity meta keys} *)
+
+val raw_agent_name_meta_key : field:string -> string
+(** Canonical board-post meta key for preserving the raw runtime
+    identity surface associated with [field]. *)
+
+val author_raw_agent_name_meta_key : string
+(** Canonical board-post meta key for the raw runtime author
+    identity preserved by HTTP/MCP identity enforcement. *)
 
 (** {1 Display formatting} *)
 

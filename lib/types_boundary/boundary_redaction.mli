@@ -27,6 +27,12 @@ val runtime_model_label : public_label
     [runtime_provider_label], while preserving the source field's meaning at
     call sites. *)
 
+val unknown_model_label : public_label
+(** Label for external model fields where no model evidence exists. This is
+    distinct from {!runtime_model_label}: ["runtime"] means model identity was
+    present and redacted, while ["unknown_model"] means there was no evidence to
+    redact. *)
+
 val to_string : public_label -> string
 
 (** Redacted lane label for external observability metric labels

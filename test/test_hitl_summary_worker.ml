@@ -477,6 +477,15 @@ let test_fallback_summary_is_redacted_and_uncertain () =
   check (float 0.0001) "fallback uncertainty" 0.85 summary.uncertainty
 ;;
 
+(* ── Policy defaults ───────────────────────────── *)
+
+let test_hitl_summary_timeout_default_is_operator_scale () =
+  check (float 0.0001)
+    "HITL summary timeout default should allow slow provider briefings"
+    120.0
+    (Keeper_config.hitl_summary_timeout_sec ())
+;;
+
 (* ── Runner ───────────────────────────────────── *)
 
 let () =
@@ -513,6 +522,10 @@ let () =
             test_plain_mode_error_outcomes_record_degradation
         ; test_case "fallback summary is redacted and uncertain" `Quick
             test_fallback_summary_is_redacted_and_uncertain
+        ] )
+    ; ( "policy"
+      , [ test_case "HITL summary timeout default is operator-scale" `Quick
+            test_hitl_summary_timeout_default_is_operator_scale
         ] )
     ]
 ;;

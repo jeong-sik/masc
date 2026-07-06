@@ -411,12 +411,14 @@ let keeper_tool_search_top_k () : int =
 
 (* ── HITL context-summary worker policy ─────────────────────── *)
 
-(** Timeout for the HITL summary LLM call. Kept short because the summary
-    is advisory and must not block operator attention. *)
+(** Timeout for the HITL summary LLM call. The summary is advisory and must
+    stay bounded, but it should not use the same fast-local timeout class as
+    dashboard probes: slow providers should still get a usable window to
+    produce the operator briefing. *)
 let hitl_summary_timeout_sec_rp =
   _rp_float ~key:"keeper.hitl_summary.timeout_sec"
     ~default:(fun () -> float_of_env_default "MASC_KEEPER_HITL_SUMMARY_TIMEOUT_SEC"
-                          ~default:30.0 ~min_v:1.0 ~max_v:300.0)
+                          ~default:120.0 ~min_v:1.0 ~max_v:300.0)
     ~min_v:1.0 ~max_v:300.0
     ~description:"HITL context-summary LLM timeout (seconds)" ()
 let hitl_summary_timeout_sec () : float =

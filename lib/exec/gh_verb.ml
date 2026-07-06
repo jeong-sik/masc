@@ -93,10 +93,12 @@ let of_fields ~(subcommand : string) ~(action : string option) : t =
 
 let classify (words : string list) : t =
   (* Tolerate a leading "gh" head so callers may pass either the full argv
-     or the args after the program name. *)
+     or the args after the program name. The head is the canonical program
+     token ("gh"); matched as a literal pattern rather than a lowercased
+     equality so this stays a boundary strip, not an enum-string classifier. *)
   let args =
     match words with
-    | head :: rest when String.lowercase_ascii head = "gh" -> rest
+    | "gh" :: rest -> rest
     | _ -> words
   in
   match drop_flags args with

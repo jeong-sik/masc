@@ -25,3 +25,37 @@ val handle
   -> policy:Fusion_policy.t
   -> args:Yojson.Safe.t
   -> string
+
+module For_test : sig
+  (** [handle]이 background fiber에서 실행하는 orchestrator contract.
+
+      기본값은 {!Fusion_orchestrator.run}이다. 테스트는 이 contract를 주입해 handler의
+      async delivery wiring(Running 등록, background 완료 후 sink/registry projection)을
+      실제 provider 호출 없이 결정적으로 검증한다. *)
+  type orchestrator_runner =
+    sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> base_dir:string
+    -> policy:Fusion_policy.t
+    -> topology:Fusion_types.fusion_topology
+    -> request:Fusion_types.fusion_request
+    -> unit
+    -> Fusion_orchestrator.outcome
+
+  (** [handle]과 같은 계약이되 background runner를 명시적으로 받는다.
+
+      Production dispatch는 {!handle}만 호출한다. 이 함수는 provider/network 시간을
+      끌어들이지 않고 handler의 async state transition을 테스트하기 위한 동일-contract
+      entrypoint다. *)
+  val handle_with_runner
+    :  run_orchestrator:orchestrator_runner
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> base_dir:string
+    -> keeper:string
+    -> now_unix:float
+    -> run_id:string
+    -> policy:Fusion_policy.t
+    -> args:Yojson.Safe.t
+    -> string
+end

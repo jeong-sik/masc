@@ -1308,6 +1308,12 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
                ( "notes",
                  `String
                    "Analysis-only task completed with implementation notes and commit:abc123." );
+               ( "handoff_context",
+                 `Assoc
+                   [
+                     ("summary", `String "Analysis-only task completed");
+                     ("evidence_refs", `List [ `String "commit:abc123" ]);
+                   ] );
              ])
        in
        assert (!gate_calls = 1);

@@ -141,7 +141,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         | None -> Board.Internal
       in
       let author_raw_agent_name =
-        meta_string_field "author_raw_agent_name" meta_json
+        meta_string_field Board_tool_format.author_raw_agent_name_meta_key meta_json
       in
       match
         Board_tool_handlers.resolve_board_post_kind

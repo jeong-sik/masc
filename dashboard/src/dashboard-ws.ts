@@ -677,10 +677,10 @@ function applyDelta(raw: unknown): void {
         bufferedAmount: socket?.bufferedAmount ?? 0,
       })
     }
-    noteDashboardWsEvent()
     // Server fan-out may split one logical delta into a shared payload frame
     // and a small per-session seq frame. A seq-only frame is an ACK checkpoint.
     if (typeof delta.slice !== 'string') return
+    noteDashboardWsEvent()
     hydrateRouteDashboardSlice(
       delta.slice,
       delta.payload,

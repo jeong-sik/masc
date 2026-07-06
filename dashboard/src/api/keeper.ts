@@ -16,6 +16,7 @@ import {
   getStoredTokenMeta,
   isRemoteAccess,
   jsonHeaders,
+  post,
   runOperatorAction,
   fetchWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
@@ -702,6 +703,47 @@ export async function fetchKeeperCatchupDigest(
     throw new Error('fetchKeeperCatchupDigest: invalid digest payload')
   }
   return digest
+}
+
+export interface KeeperCatchupJudgmentResponse {
+  ok: true
+  status: 'fusion_started'
+  runId: string
+  ownerKeeper: string
+  fusionRoute: string
+  digest: KeeperCatchupDigest
+}
+
+export async function runKeeperCatchupJudgment(
+  keeperName: string,
+  sinceUnix: number,
+): Promise<KeeperCatchupJudgmentResponse> {
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/catchup-judge`,
+    { since_unix: sinceUnix },
+  )
+  if (!isRecord(raw) || raw.ok !== true) {
+    throw new Error('runKeeperCatchupJudgment: invalid response envelope')
+  }
+  const runId = asString(raw.run_id)
+  const ownerKeeper = asString(raw.owner_keeper)
+  const fusionRoute = asString(raw.fusion_route)
+  if (!runId || !ownerKeeper || !fusionRoute) {
+    throw new Error('runKeeperCatchupJudgment: missing run metadata')
+  }
+  const { parseKeeperCatchupDigest } = await import('./schemas/keeper-catchup-digest')
+  const digest = parseKeeperCatchupDigest(raw.digest)
+  if (!digest) {
+    throw new Error('runKeeperCatchupJudgment: invalid digest payload')
+  }
+  return {
+    ok: true,
+    status: 'fusion_started',
+    runId,
+    ownerKeeper,
+    fusionRoute,
+    digest,
+  }
 }
 
 // --- Keeper observability API ---

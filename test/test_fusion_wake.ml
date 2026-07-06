@@ -21,6 +21,47 @@ let contains ~needle haystack =
   nl = 0 || go 0
 ;;
 
+let assoc_fields label = function
+  | `Assoc fields -> fields
+  | json ->
+    fail
+      (Printf.sprintf "%s: expected JSON object, got %s" label
+         (Yojson.Safe.to_string json))
+;;
+
+let field label fields key =
+  match List.assoc_opt key fields with
+  | Some value -> value
+  | None -> fail (Printf.sprintf "%s: missing field %s" label key)
+;;
+
+let string_field label fields key =
+  match field label fields key with
+  | `String value -> value
+  | json ->
+    fail
+      (Printf.sprintf "%s.%s: expected string, got %s" label key
+         (Yojson.Safe.to_string json))
+;;
+
+let int_field label fields key =
+  match field label fields key with
+  | `Int value -> value
+  | json ->
+    fail
+      (Printf.sprintf "%s.%s: expected int, got %s" label key
+         (Yojson.Safe.to_string json))
+;;
+
+let list_field label fields key =
+  match field label fields key with
+  | `List values -> values
+  | json ->
+    fail
+      (Printf.sprintf "%s.%s: expected list, got %s" label key
+         (Yojson.Safe.to_string json))
+;;
+
 let temp_base_path prefix =
   Filename.concat
     (Filename.get_temp_dir_name ())
@@ -317,6 +358,132 @@ let test_missing_board_post_id_fallback () =
   check string "synthetic fallback post id" "fusion-run:fus-9" ev.post_id
 ;;
 
+let test_emit_success_projects_board_chat_and_registry () =
+  with_isolated_base_path "fusion-success-sink" (fun base_dir ->
+    let keeper = "fusion-keeper" in
+    let run_id = Printf.sprintf "fus-success-%d" (Random.bits ()) in
+    let question = "Which implementation should ship?" in
+    let resolved_answer = "Ship the typed-origin path." in
+    let panel_usage = { Fusion_types.input_tokens = 11; output_tokens = 13 } in
+    let judge_usage = { Fusion_types.input_tokens = 17; output_tokens = 19 } in
+    let synthesis = judge_synthesis resolved_answer in
+    let panel =
+      [ Fusion_types.Answered
+          { model = "skeptic (claude)"
+          ; answer = "typed origin keeps the dashboard honest"
+          ; usage = panel_usage
+          }
+      ]
+    in
+    let judges =
+      [ Fusion_types.Synthesized
+          { role = Fusion_types.Single; synthesis; usage = judge_usage }
+      ]
+    in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
+      ~preset:"unit-test" ~started_at:2.0;
+    let result =
+      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question ~panel
+        ~judge:(Ok synthesis) ~judges ~judge_usage
+    in
+    check bool "emit succeeds" true (Result.is_ok result);
+    let post =
+      match Board.find_post_by_run_id (Board.global ()) ~run_id with
+      | Some post -> post
+      | None -> fail "fusion board post should be indexed by typed origin.fusion_run_id"
+    in
+    let post_id = Board.Post_id.to_string post.id in
+    (match post.origin with
+     | Some origin ->
+       check (option string) "origin.source" (Some "fusion") origin.source;
+       check (option string) "origin.fusion_run_id" (Some run_id) origin.fusion_run_id;
+       check bool "origin.turn_ref is not fabricated" true (Option.is_none origin.turn_ref)
+     | None -> fail "fusion board post should carry typed origin");
+    let meta =
+      match post.meta_json with
+      | Some json -> assoc_fields "board.meta" json
+      | None -> fail "fusion board post should carry meta_json"
+    in
+    check string "meta.source" "fusion" (string_field "board.meta" meta "source");
+    check string "meta.run_id" run_id (string_field "board.meta" meta "run_id");
+    check string "meta.question" question (string_field "board.meta" meta "question");
+    (match list_field "board.meta" meta "panel" with
+     | [ panel_json ] ->
+       let p = assoc_fields "board.meta.panel[0]" panel_json in
+       check string "panel model" "skeptic (claude)"
+         (string_field "board.meta.panel[0]" p "model");
+       check string "panel status" "answered"
+         (string_field "board.meta.panel[0]" p "status")
+     | other -> fail (Printf.sprintf "expected exactly one panel row, got %d" (List.length other)));
+    let judge = assoc_fields "board.meta.judge" (field "board.meta" meta "judge") in
+    check string "judge status" "synthesized"
+      (string_field "board.meta.judge" judge "status");
+    check string "judge resolved answer" resolved_answer
+      (string_field "board.meta.judge" judge "resolved_answer");
+    (match list_field "board.meta" meta "judges" with
+     | [ judge_json ] ->
+       let j = assoc_fields "board.meta.judges[0]" judge_json in
+       check string "judge node role" "single"
+         (string_field "board.meta.judges[0]" j "role");
+       check int "judge node input tokens" judge_usage.input_tokens
+         (int_field "board.meta.judges[0]" j "input_tokens")
+     | other ->
+       fail (Printf.sprintf "expected exactly one judge node, got %d" (List.length other)));
+    let observed_usage =
+      assoc_fields "board.meta.observed_usage" (field "board.meta" meta "observed_usage")
+    in
+    check int "observed input tokens" (panel_usage.input_tokens + judge_usage.input_tokens)
+      (int_field "board.meta.observed_usage" observed_usage "input_tokens");
+    check int "observed output tokens" (panel_usage.output_tokens + judge_usage.output_tokens)
+      (int_field "board.meta.observed_usage" observed_usage "output_tokens");
+    let dashboard_json =
+      Board_dispatch.post_to_yojson_with_karma post ~author_karma:0
+      |> assoc_fields "dashboard.post"
+    in
+    let dashboard_origin =
+      assoc_fields "dashboard.post.origin" (field "dashboard.post" dashboard_json "origin")
+    in
+    check string "dashboard origin source" "fusion"
+      (string_field "dashboard.post.origin" dashboard_origin "source");
+    check string "dashboard origin run id" run_id
+      (string_field "dashboard.post.origin" dashboard_origin "fusion_run_id");
+    let dashboard_meta =
+      assoc_fields "dashboard.post.meta" (field "dashboard.post" dashboard_json "meta")
+    in
+    check string "dashboard meta run id" run_id
+      (string_field "dashboard.post.meta" dashboard_meta "run_id");
+    let messages = Keeper_chat_store.load ~base_dir ~keeper_name:keeper in
+    let fusion_block =
+      List.find_map
+        (fun (m : Keeper_chat_store.chat_message) ->
+           if contains ~needle:resolved_answer m.content
+           then (
+             match m.blocks with
+             | Some blocks ->
+               List.find_map
+                 (function
+                   | Keeper_chat_blocks.Fusion { board_post_id; run_id } ->
+                     Some (board_post_id, run_id)
+                   | _ -> None)
+                 blocks
+             | None -> None)
+           else None)
+        messages
+    in
+    (match fusion_block with
+     | Some (block_post_id, block_run_id) ->
+       check string "chat fusion block post id" post_id block_post_id;
+       check string "chat fusion block run id" run_id block_run_id
+     | None -> fail "chat lane should carry a Fusion block for the board evidence");
+    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
+    | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
+      fail "fusion run should complete ok=true"
+    | Some { Fusion_run_registry.status = Running; _ } ->
+      fail "fusion run should not remain running"
+    | None -> fail "fusion run should remain visible")
+;;
+
 let test_emit_board_failure_is_best_effort () =
   with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
     let keeper = "bad/keeper" in
@@ -376,6 +543,10 @@ let () =
             "missing board_post_id falls back to fusion-run id"
             `Quick
             test_missing_board_post_id_fallback
+        ; test_case
+            "emit success projects board, chat block, and registry"
+            `Quick
+            test_emit_success_projects_board_chat_and_registry
         ; test_case
             "emit treats board post failure as best-effort"
             `Quick

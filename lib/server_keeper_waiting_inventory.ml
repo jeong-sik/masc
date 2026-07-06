@@ -192,7 +192,7 @@ let queue_read_error_rows ~keeper_name errors =
   List.map
     (fun error ->
        read_error_row
-         ~keeper_name:(Some keeper_name)
+         ~keeper_name
          ~waiting_on:"event_queue_snapshot"
          ~next_action:"inspect_queue_snapshot"
          (queue_read_error_detail error))

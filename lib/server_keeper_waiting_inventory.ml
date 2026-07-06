@@ -409,32 +409,53 @@ let background_task_rows keeper_name =
     })
 ;;
 
+let pending_confirm_row ?keeper_name
+      (entry : Workspace_hooks.operator_pending_confirm_request)
+  =
+  { keeper_name
+  ; source = Operator_pending_confirm
+  ; waiting_on = entry.action_type
+  ; wake_producer = Operator_pending_confirm_store
+  ; since = None
+  ; due_at = None
+  ; next_action = "operator_confirm_action"
+  ; detail =
+      `Assoc
+        [ "token", `String entry.token
+        ; "trace_id", `String entry.trace_id
+        ; "actor", `String entry.actor
+        ; "target_type", `String entry.target_type
+        ; "target_id", Json_util.string_opt_to_json entry.target_id
+        ; "delegated_tool", `String entry.delegated_tool
+        ; "created_at", `String entry.created_at
+        ; "expires_at", Json_util.string_opt_to_json entry.expires_at
+        ]
+  }
+;;
+
+let pending_confirm_targets_keeper keeper_names
+      (entry : Workspace_hooks.operator_pending_confirm_request)
+  =
+  match entry.target_id with
+  | Some keeper_name when List.exists (String.equal keeper_name) keeper_names -> true
+  | None | Some _ -> false
+;;
+
 let pending_confirm_rows keeper_names pending_confirms =
   pending_confirms
   |> List.filter_map (fun (entry : Workspace_hooks.operator_pending_confirm_request) ->
     match entry.target_id with
     | Some keeper_name when List.exists (String.equal keeper_name) keeper_names ->
-      Some
-        { keeper_name = Some keeper_name
-        ; source = Operator_pending_confirm
-        ; waiting_on = entry.action_type
-        ; wake_producer = Operator_pending_confirm_store
-        ; since = None
-        ; due_at = None
-        ; next_action = "operator_confirm_action"
-        ; detail =
-            `Assoc
-              [ "token", `String entry.token
-              ; "trace_id", `String entry.trace_id
-              ; "actor", `String entry.actor
-              ; "target_type", `String entry.target_type
-              ; "target_id", Json_util.string_opt_to_json entry.target_id
-              ; "delegated_tool", `String entry.delegated_tool
-              ; "created_at", `String entry.created_at
-              ; "expires_at", Json_util.string_opt_to_json entry.expires_at
-              ]
-        }
+      Some (pending_confirm_row ~keeper_name entry)
     | None | Some _ -> None)
+;;
+
+let global_pending_confirm_rows keeper_names pending_confirms =
+  pending_confirms
+  |> List.filter_map (fun entry ->
+    if pending_confirm_targets_keeper keeper_names entry
+    then None
+    else Some (pending_confirm_row entry))
 ;;
 
 let schedule_active (request : Schedule_domain.schedule_request) =
@@ -561,9 +582,7 @@ let global_pending_confirm_count keeper_names pending_confirms =
   pending_confirms
   |> List.fold_left
        (fun count (entry : Workspace_hooks.operator_pending_confirm_request) ->
-          match entry.target_id with
-          | Some keeper_name when List.exists (String.equal keeper_name) keeper_names -> count
-          | None | Some _ -> count + 1)
+          if pending_confirm_targets_keeper keeper_names entry then count else count + 1)
        0
 ;;
 
@@ -737,6 +756,7 @@ let dashboard_json config =
   in
   let global_rows =
     global_rows_from schedule_rows
+    @ global_pending_confirm_rows keeper_names pending_confirms
     @ keeper_name_read_error_rows
     @ pending_confirm_read_error_rows
   in

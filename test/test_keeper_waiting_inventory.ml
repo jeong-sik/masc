@@ -430,6 +430,26 @@ let save_text path text =
   | Error err -> fail ("save_file_atomic failed: " ^ err)
 ;;
 
+let pending_confirm_fixture ?target_id () : Operator_pending_confirm.pending_confirm =
+  { token = "confirm-goal-1"
+  ; trace_id = "trace-goal-1"
+  ; actor = "operator"
+  ; action_type = "approve_goal"
+  ; target_type = "goal"
+  ; target_id
+  ; payload = `Assoc [ "goal_id", `String "goal-123" ]
+  ; delegated_tool = "masc_goal_approve"
+  ; created_at = "2026-07-07T00:00:00Z"
+  ; expires_at = None
+  }
+;;
+
+let write_pending_confirms_exn config entries =
+  match Operator_pending_confirm.write_pending_confirms config entries with
+  | Ok () -> ()
+  | Error err -> fail ("write pending confirms failed: " ^ err)
+;;
+
 let test_corrupt_schedule_ledger_is_read_error () =
   with_workspace
   @@ fun config ->
@@ -545,6 +565,41 @@ let test_external_attention_projection_is_bounded () =
       U.(keeper |> member "waiting_on" |> to_list |> List.length)
 ;;
 
+let test_global_pending_confirm_is_actionable_row () =
+  with_workspace
+  @@ fun config ->
+  ensure_keeper config "known-keeper";
+  write_pending_confirms_exn
+    config
+    [ pending_confirm_fixture ~target_id:"goal-123" () ];
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  check_metric_float "global pending-confirm metric"
+    Otel_metric_store.metric_keeper_waiting_count
+    ~labels:[ "scope", "global"; "source", "operator_pending_confirm" ]
+    1.0;
+  check bool "pending-confirm count known" true
+    (json_bool_member "global_pending_confirm_count_known" json);
+  check int "global pending-confirm count" 1
+    (json_int_member "global_pending_confirm_count" json);
+  check int "global pending-confirm row" 1 (json_int_member "global_row_count" json);
+  match U.(json |> member "global_waiting_on" |> to_list) with
+  | [ row ] ->
+    let detail = U.(row |> member "detail") in
+    check string "source" "operator_pending_confirm" (json_string_member "source" row);
+    check string "waiting_on" "approve_goal" (json_string_member "waiting_on" row);
+    check string "wake producer" "operator_pending_confirm_store"
+      (json_string_member "wake_producer" row);
+    check string "next action" "operator_confirm_action"
+      (json_string_member "next_action" row);
+    check string "token" "confirm-goal-1" U.(detail |> member "token" |> to_string);
+    check string "trace_id" "trace-goal-1" U.(detail |> member "trace_id" |> to_string);
+    check string "target_type" "goal" U.(detail |> member "target_type" |> to_string);
+    check string "target_id" "goal-123" U.(detail |> member "target_id" |> to_string);
+    check string "delegated_tool" "masc_goal_approve"
+      U.(detail |> member "delegated_tool" |> to_string)
+  | rows -> failf "expected one global pending-confirm row, got %d" (List.length rows)
+;;
+
 let test_corrupt_pending_confirms_is_read_error () =
   with_workspace
   @@ fun config ->
@@ -593,6 +648,8 @@ let () =
             test_corrupt_external_attention_is_read_error
         ; test_case "external attention projection is bounded" `Quick
             test_external_attention_projection_is_bounded
+        ; test_case "global pending confirm is actionable row" `Quick
+            test_global_pending_confirm_is_actionable_row
         ; test_case "corrupt pending confirms is read_error" `Quick
             test_corrupt_pending_confirms_is_read_error
         ] )

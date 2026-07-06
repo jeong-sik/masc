@@ -13,6 +13,12 @@ let metric_inference_queue_rejected = Otel_metric_store_core.declare_counter "ma
 let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
 let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
 let metric_agent_stale_total = Otel_metric_store_core.declare_counter "masc_agent_stale_total"
+
+(* Scheduler runner loop liveness. Incremented once per tick completion by the
+   server maintenance fiber. Labels: [outcome] in {ok, error, crash}. *)
+let metric_schedule_runner_tick_outcomes =
+  Otel_metric_store_core.declare_counter "masc_schedule_runner_tick_outcomes_total"
+
 let metric_gc_minor_words = "masc_gc_minor_words"
 let metric_gc_major_words = "masc_gc_major_words"
 let metric_gc_heap_words = "masc_gc_heap_words"

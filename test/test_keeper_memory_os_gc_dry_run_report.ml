@@ -224,6 +224,34 @@ let test_mixed_results_keep_ok_totals_and_errors () =
       Alcotest.(check int) "ok ttl only" 1 report.ttl_expired))
 ;;
 
+(* The two expiry corners the External_state coverage in test_keeper_memory_os
+   does not pin: the boundary equality ([ts >= now] is current, so [now > ts] is
+   expired — explicit [valid_until] behavior is unchanged by the SSOT switch in
+   #23426), and explicit [valid_until] taking precedence over the legacy
+   [External_state] first_seen horizon in [fact_effective_valid_until]. *)
+let test_ttl_expired_matches_explicit_horizon_boundary () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now ~claim:"horizon boundary fixture" in
+  Alcotest.(check bool)
+    "past explicit horizon expires"
+    true
+    (GC.ttl_expired ~now { base with Types.valid_until = Some (now -. 1.0) });
+  Alcotest.(check bool)
+    "boundary ts = now stays live (ts >= now is current)"
+    false
+    (GC.ttl_expired ~now { base with Types.valid_until = Some now });
+  Alcotest.(check bool)
+    "explicit valid_until overrides the legacy External_state horizon"
+    false
+    (GC.ttl_expired
+       ~now
+       { base with
+         Types.claim_kind = Some Types.External_state
+       ; Types.first_seen = now -. Types.external_state_ttl_seconds -. 1.0
+       ; Types.valid_until = Some (now +. 60.0)
+       })
+;;
+
 let test_empty_scan_is_empty_report () =
   with_eio (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
@@ -261,6 +289,12 @@ let () =
             "empty scan is empty report"
             `Quick
             test_empty_scan_is_empty_report
+        ] )
+    ; ( "ttl boundary"
+      , [ Alcotest.test_case
+            "expiry matches explicit horizon boundary"
+            `Quick
+            test_ttl_expired_matches_explicit_horizon_boundary
         ] )
     ]
 ;;

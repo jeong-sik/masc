@@ -3,7 +3,7 @@
     for tool-call replay scoring.
 
     Snapshot files capture a single tool-call interaction (goal,
-    declared tools, OpenAI-format response, expected tool calls)
+    declared tools, response envelope, expected tool calls)
     so the harness can replay against alternative providers and
     assert tool-call equivalence offline.
 
@@ -15,10 +15,9 @@
        error messages.
 
     Provider gate: provider names must be present, but are not
-    canonicalized through runtime aliases. The seed harness validates
-    only the OpenAI-compatible chat-completions envelope; add an
-    explicit envelope variant if a future fixture deviates from that
-    shape. *)
+    canonicalized through runtime aliases. Each fixture declares its
+    wire envelope with [response_format], so validation never infers
+    parser behavior from a provider-name string. *)
 
 (** {1 Typed records} *)
 
@@ -30,10 +29,21 @@ type tool_call = {
     construct it field-by-field for synthetic snapshots
     ({!Test_tool_call_replay_harness}). *)
 
+type response_format =
+  | Openai_chat_completions
+  | Anthropic_messages
+  | Gemini_generate_content
+  | Dashscope_output_choices
+(** Declared response envelope for a replay row.  JSONL fixtures encode
+    this as one of:
+    ["openai_chat_completions"], ["anthropic_messages"],
+    ["gemini_generate_content"], or ["dashscope_output_choices"]. *)
+
 type snapshot = {
   id : string;
   provider : string;
   model : string option;
+  response_format : response_format;
   goal : string;
   tools : string list;
   response : Yojson.Safe.t;
@@ -41,7 +51,9 @@ type snapshot = {
 }
 (** Parsed snapshot.  [tools] is the declared list of tool names
     available for the call; both expected and actual tool calls
-    are validated against this set. *)
+    are validated against this set.  [response_format] selects the
+    parser explicitly from fixture data; [provider] is validated only as
+    non-empty metadata. *)
 
 (** {1 Loader} *)
 
@@ -82,10 +94,11 @@ val validate_snapshot : snapshot -> (unit, string list) Result.t
     2. [snapshot.provider] must be non-empty (otherwise:
        ["snapshot provider must be non-empty"]). The harness no longer
        calls the runtime binding registry while loading replay rows.
-    3. Response must be the OpenAI Chat Completions shape with at
-       least one [choices\[\]] entry containing
-       [message.tool_calls\[\]] (errors trace the path:
-       [response.choices[0].message.tool_calls]).
+    3. Response must match [snapshot.response_format]. Supported
+       envelopes are OpenAI-compatible chat completions, Anthropic
+       Messages, Gemini Generate Content, and DashScope output choices.
+       Errors trace the concrete response path, e.g.
+       [response.choices[0].message.tool_calls].
     4. Response tool calls must be declared in [snapshot.tools].
     5. Tool-call counts must match [List.length expected_tool_calls].
     6. Each pair (expected, actual) must agree on [name] AND on

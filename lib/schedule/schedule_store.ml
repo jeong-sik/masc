@@ -23,6 +23,12 @@ type store_error =
       ; recovery_err : string option
       }
 
+type read_error =
+  | Corrupt_read_ledger of
+      { primary_err : string
+      ; recovery_err : string option
+      }
+
 (* RFC-0234: a parsed-or-absent ledger load. [Fresh] = the file is legitimately
    absent (empty store, [default_state] is correct). [Corrupt] = the file is
    present but neither it nor the [.last-good] recovery file parses; callers must
@@ -76,6 +82,11 @@ let store_error_to_string = function
     "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
+    corrupt_message ~primary_err ~recovery_err
+;;
+
+let read_error_to_string = function
+  | Corrupt_read_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
 ;;
 
@@ -208,11 +219,18 @@ let load config : load_outcome =
    empty default (correct for an uninitialised store); [Corrupt] raises rather
    than returning an empty list, so a corrupt ledger is operator-visible instead
    of masquerading as "no schedules". Does not write to disk. *)
-let read_state config =
+let read_state_result config =
   match load config with
-  | Loaded state -> state
-  | Fresh -> default_state ()
+  | Loaded state -> Ok state
+  | Fresh -> Ok (default_state ())
   | Corrupt { primary_err; recovery_err } ->
+    Error (Corrupt_read_ledger { primary_err; recovery_err })
+;;
+
+let read_state config =
+  match read_state_result config with
+  | Ok state -> state
+  | Error (Corrupt_read_ledger { primary_err; recovery_err }) ->
     raise (Corrupt_ledger_exn { primary_err; recovery_err })
 ;;
 

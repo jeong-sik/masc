@@ -36,12 +36,14 @@ val is_keeper_meta_file : string -> bool
 
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
+val persisted_keeper_names_result : Workspace.config -> (string list, string) result
 val persisted_keeper_names : Workspace.config -> string list
 
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
 
 (** Primary keeper discovery: persisted JSON names. *)
+val keeper_names_result : Workspace.config -> (string list, string) result
 val keeper_names : Workspace.config -> string list
 
 (** Default autoboot policy when a keeper has TOML config but no

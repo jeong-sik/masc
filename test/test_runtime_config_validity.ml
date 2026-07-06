@@ -1117,6 +1117,58 @@ let test_runtime_toml_parses_optional_max_concurrent () =
          binding.Runtime_schema.max_concurrent
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
+let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.other]\n\
+     api-name = \"other\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     is-default = true\n\
+     \n\
+     [local.other]\n\
+     wizard-default = true\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse wizard-default separately:\n%s" rendered
+  | Ok cfg ->
+    let binding id =
+      cfg.Runtime_schema.bindings
+      |> List.find_opt (fun (binding : Runtime_schema.binding) ->
+        String.equal (Runtime_schema.binding_key binding) id)
+      |> function
+      | Some binding -> binding
+      | None -> failf "missing binding %s" id
+    in
+    let runtime_default = binding "local.sample" in
+    let wizard_default = binding "local.other" in
+    check bool "is-default remains runtime/default marker" true
+      runtime_default.Runtime_schema.is_default;
+    check bool "is-default does not imply wizard-default" false
+      runtime_default.Runtime_schema.wizard_default;
+    check bool "wizard-default does not imply is-default" false
+      wizard_default.Runtime_schema.is_default;
+    check bool "wizard-default parsed separately" true
+      wizard_default.Runtime_schema.wizard_default
+
 let test_runtime_toml_rejects_non_positive_max_concurrent () =
   let template n =
     Printf.sprintf
@@ -2039,6 +2091,8 @@ let () =
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick
             test_runtime_toml_parses_optional_max_concurrent;
+          test_case "wizard-default is separate from runtime default marker" `Quick
+            test_runtime_toml_separates_wizard_default_from_runtime_default_marker;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to runtime candidate" `Quick

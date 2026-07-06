@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Added
+- Interactive install wizard in `scripts/install.sh` with TTY detection,
+  typed provider catalog selection, secure API key prompting, and writing
+  `.env.local` / updating `runtime.toml` defaults.
+- `masc runtime-wizard-catalog` command that derives the install wizard
+  provider catalog from the typed `runtime.toml` config, including provider
+  healthcheck metadata.
+- Provider connectivity ping during interactive install, using healthcheck
+  paths declared in `runtime.toml`.
+- `masc runtime-default-set` typed writer used by the installer to update the
+  runtime default.
+
+### Changed
+- Runtime schema and TOML parser additions to support provider display names,
+  credentials, endpoints, healthcheck paths, and concrete runtime bindings for
+  the install wizard, with provider wizard defaults selected through explicit
+  `wizard-default` binding metadata instead of declaration order or dashboard
+  runtime default markers.
+- Installer one-touch startup now seeds the OAS model catalog, runs binary
+  smoke checks with the installed base path/catalog environment, and prints a
+  copy-paste start command with `MASC_BASE_PATH`, `OAS_MODEL_CATALOG`, and
+  `MASC_RUNTIME_EVENTS=0` wired for clean Linux/macOS installs.
+
 ## [0.19.55] - 2026-07-03
 
 ### Changed

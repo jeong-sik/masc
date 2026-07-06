@@ -48,6 +48,7 @@ type provider =
   ; is_non_interactive : bool
   ; credentials : credential option
   ; capabilities : capabilities option
+  ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
     (** Per-provider override for the OAS connect + initial-response-headers
@@ -135,6 +136,7 @@ type binding =
   { provider_id : string
   ; model_id : string
   ; is_default : bool
+  ; wizard_default : bool
   ; max_concurrent : int option
   ; price_input : float option
   ; price_output : float option

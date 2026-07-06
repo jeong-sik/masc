@@ -4,6 +4,7 @@ type public_label = string
 
 let runtime_provider_label : public_label = "runtime"
 let runtime_model_label : public_label = "runtime"
+let unknown_model_label : public_label = "unknown_model"
 
 let to_string (label : public_label) : string = label
 

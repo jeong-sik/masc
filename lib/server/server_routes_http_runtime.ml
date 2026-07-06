@@ -316,6 +316,13 @@ let otel_health_json () =
     ]
 ;;
 
+let schedule_runner_status_json () =
+  Schedule_runner_status.snapshot ()
+  |> Schedule_runner_status.snapshot_to_yojson
+       ~now:(Time_compat.now ())
+       ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
+;;
+
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
@@ -345,6 +352,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
+      ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
       ("subsystems", Subsystem_health.to_yojson ());

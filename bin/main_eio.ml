@@ -913,9 +913,199 @@ let init_cmd =
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
 
-let memory_os_gc_keeper =
+let runtime_config_path_for_base_path base_path =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let config_root =
+    Config_dir_resolver.base_path_config_root
+      ~cwd:(Config_dir_resolver.current_working_dir ())
+      base_path
+  in
+  Filename.concat config_root Config_dir_resolver.runtime_toml_filename
+
+let runtime_default_id =
+  let doc = "Concrete runtime id to write into [runtime].default" in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID" ~doc)
+
+let runtime_default_set_cmd_exit base_path runtime_id =
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  match
+    Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
+  with
+  | Ok () ->
+      Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
+        runtime_config_path;
+      0
+  | Error msg ->
+      Printf.eprintf "runtime-default-set failed: %s\n" msg;
+      1
+
+let runtime_default_set_cmd =
   let doc =
-    "Only dry-run the given keeper id. Repeatable. When omitted, all existing \
+    "Validate and update [runtime].default in runtime.toml using the runtime \
+     config writer."
+  in
+  let info = Cmd.info "runtime-default-set" ~doc in
+  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ runtime_default_id)
+
+let runtime_wizard_field ~field value =
+  if String.exists (Char.equal '\000') value
+  then Error (Printf.sprintf "runtime-wizard-catalog field %s contains a NUL byte" field)
+  else Ok value
+
+let runtime_wizard_fields fields =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (field, value) :: rest ->
+        (match runtime_wizard_field ~field value with
+         | Error _ as err -> err
+         | Ok value -> loop (value :: acc) rest)
+  in
+  loop [] fields
+
+let runtime_wizard_endpoint (provider : Runtime_schema.provider) =
+  match provider.transport with
+  | Runtime_schema.Http endpoint -> Ok endpoint
+  | Runtime_schema.Cli _ ->
+      Error
+        (Printf.sprintf
+           "provider %s uses a CLI transport; install wizard requires an HTTP endpoint"
+           provider.id)
+
+let runtime_wizard_credential_key (provider : Runtime_schema.provider) =
+  match provider.credentials with
+  | None -> Ok ""
+  | Some (Runtime_schema.Env key) -> Ok key
+  | Some (Runtime_schema.File _ | Runtime_schema.Inline _) ->
+      Error
+        (Printf.sprintf
+           "provider %s uses a non-env credential; install wizard cannot write .env.local"
+           provider.id)
+
+let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
+    (provider : Runtime_schema.provider) =
+  let bindings =
+    List.filter
+      (fun (binding : Runtime_schema.binding) ->
+         String.equal binding.provider_id provider.id)
+      cfg.bindings
+  in
+  match bindings with
+  | [] -> Error (Printf.sprintf "provider %s has no concrete runtime binding" provider.id)
+  | _ ->
+      (match List.filter (fun (binding : Runtime_schema.binding) -> binding.wizard_default) bindings with
+       | [ binding ] -> Ok binding
+       | [] ->
+           Error
+             (Printf.sprintf
+                "provider %s has no install wizard default binding; set wizard-default = true on exactly one [%s.<model>] binding"
+                provider.id provider.id)
+       | defaults ->
+           Error
+             (Printf.sprintf
+                "provider %s has %d install wizard default bindings; set wizard-default = true on exactly one [%s.<model>] binding"
+                provider.id
+                (List.length defaults)
+                provider.id))
+
+let runtime_wizard_provider_record cfg (provider : Runtime_schema.provider) =
+  match
+    ( runtime_wizard_endpoint provider
+    , runtime_wizard_credential_key provider
+    , runtime_wizard_binding_for_provider cfg provider )
+  with
+  | Error msg, _, _ | _, Error msg, _ | _, _, Error msg -> Error msg
+  | Ok endpoint, Ok credential_key, Ok binding ->
+      let runtime_id = Runtime_schema.binding_key binding in
+      runtime_wizard_fields
+        [ "kind", "provider"
+        ; "id", provider.id
+        ; "display_name", provider.display_name
+        ; "credential_key", credential_key
+        ; "endpoint", endpoint
+        ; "healthcheck_path", Option.value ~default:"" provider.healthcheck_path
+        ; "runtime_id", runtime_id
+        ]
+
+let runtime_wizard_default_record (cfg : Runtime_schema.config) =
+  match cfg.default_runtime_id with
+  | None -> Ok None
+  | Some runtime_id ->
+      (match
+         List.find_opt
+           (fun (binding : Runtime_schema.binding) ->
+              String.equal (Runtime_schema.binding_key binding) runtime_id)
+           cfg.bindings
+       with
+       | Some binding ->
+           (match
+              runtime_wizard_fields
+                [ "kind", "default-provider"; "id", binding.provider_id ]
+            with
+            | Error _ as err -> err
+            | Ok record -> Ok (Some record))
+       | None ->
+           (match
+              runtime_wizard_fields
+                [ "kind", "default-runtime-missing"; "runtime_id", runtime_id ]
+            with
+            | Error _ as err -> err
+            | Ok record -> Ok (Some record)))
+
+let runtime_wizard_catalog_records (cfg : Runtime_schema.config) =
+  let rec provider_records acc = function
+    | [] -> Ok (List.rev acc)
+    | provider :: rest ->
+        (match runtime_wizard_provider_record cfg provider with
+         | Error _ as err -> err
+         | Ok record -> provider_records (record :: acc) rest)
+  in
+  match provider_records [] cfg.providers with
+  | Error _ as err -> err
+  | Ok records ->
+      (match runtime_wizard_default_record cfg with
+       | Error _ as err -> err
+       | Ok None -> Ok records
+       | Ok (Some default_record) -> Ok (records @ [ default_record ]))
+
+let runtime_wizard_print_record fields =
+  List.iter
+    (fun field ->
+       output_string stdout field;
+       output_char stdout '\000')
+    fields
+
+let runtime_wizard_parse_errors errors =
+  errors
+  |> List.map (fun (err : Runtime_toml.parse_error) ->
+    Printf.sprintf "%s: %s" err.path err.message)
+  |> String.concat "; "
+
+let runtime_wizard_catalog_cmd_exit base_path =
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  match Runtime_toml.parse_file runtime_config_path with
+  | Error errors ->
+      Printf.eprintf "runtime-wizard-catalog failed: %s\n"
+        (runtime_wizard_parse_errors errors);
+      1
+  | Ok cfg ->
+      (match runtime_wizard_catalog_records cfg with
+       | Error msg ->
+           Printf.eprintf "runtime-wizard-catalog failed: %s\n" msg;
+           1
+       | Ok records ->
+           List.iter runtime_wizard_print_record records;
+           0)
+
+let runtime_wizard_catalog_cmd =
+  let doc =
+    "Print the typed provider catalog used by the first-run install wizard."
+  in
+  let info = Cmd.info "runtime-wizard-catalog" ~doc in
+  Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path)
+
+let memory_os_keeper =
+  let doc =
+    "Only scan the given keeper id. Repeatable. When omitted, all existing \
      non-shared keeper fact stores are scanned."
   in
   Arg.(value & opt_all string [] & info ["keeper"] ~docv:"KEEPER" ~doc)
@@ -962,7 +1152,47 @@ let memory_os_gc_dry_run_cmd =
   let info = Cmd.info "memory-os-gc-dry-run" ~doc in
   Cmd.v info
     Term.(
-      const memory_os_gc_dry_run_cmd_exit $ base_path $ memory_os_gc_keeper
+      const memory_os_gc_dry_run_cmd_exit $ base_path $ memory_os_keeper
+      $ memory_os_gc_json)
+
+let memory_os_sanity_sweep_cmd_exit base_path keeper_ids as_json =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let report =
+    Eio_main.run
+    @@ fun env ->
+    let now = Eio.Time.now (Eio.Stdenv.clock env) in
+    match keeper_ids with
+    | [] ->
+      Masc.Keeper_memory_os_sanity_sweep.run_for_keepers_dir
+        ~keepers_dir
+        ~now
+        ()
+    | ids ->
+      Masc.Keeper_memory_os_sanity_sweep.run_for_keepers_dir
+        ~keepers_dir
+        ~keeper_ids:ids
+        ~now
+        ()
+  in
+  if as_json
+  then
+    print_endline
+      (Yojson.Safe.pretty_to_string
+         (Masc.Keeper_memory_os_sanity_sweep.to_json report))
+  else print_string (Masc.Keeper_memory_os_sanity_sweep.render_text report);
+  if report.error_count > 0 then 1 else 0
+
+let memory_os_sanity_sweep_cmd =
+  let doc =
+    "Build a read-only Memory OS sanity review packet: typed current/expired \
+     fact rows, duplicate claim identities, and deterministic GC preview. It \
+     never rewrites stores and never infers obsolete facts from claim prose."
+  in
+  let info = Cmd.info "memory-os-sanity-sweep" ~doc in
+  Cmd.v info
+    Term.(
+      const memory_os_sanity_sweep_cmd_exit $ base_path $ memory_os_keeper
       $ memory_os_gc_json)
 
 let setup_gc () =
@@ -985,7 +1215,15 @@ let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ run_base_path)
-    info [ init_cmd; start_cmd; login_cmd; memory_os_gc_dry_run_cmd ]
+    info
+    [ init_cmd
+    ; start_cmd
+    ; login_cmd
+    ; runtime_default_set_cmd
+    ; runtime_wizard_catalog_cmd
+    ; memory_os_gc_dry_run_cmd
+    ; memory_os_sanity_sweep_cmd
+    ]
 
 let () =
   setup_gc ();

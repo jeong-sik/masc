@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.19.55)
+(version 0.19.56)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -25,7 +25,7 @@
  (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
  (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
  (depends
-  (ocaml (>= 5.4))
+  (ocaml (>= 5.5))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —
   ; declaring it again here makes the generated .opam emit
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).

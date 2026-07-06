@@ -123,6 +123,13 @@ let tool_spec_read_only =
   ]
 ;;
 
+let destructive_board_tool_names =
+  let open Tool_name.Board_name in
+  [ to_string Board_delete; to_string Board_cleanup ]
+;;
+
+let is_destructive_board_tool name = List.mem name destructive_board_tool_names
+
 let register () =
   let handler ~name ~args = Some (handle_tool name args) in
   let make_spec (s : Masc_domain.tool_schema) =
@@ -135,7 +142,7 @@ let register () =
       ~handler_binding:(Shared handler)
       ~is_read_only:ro
       ~is_idempotent:ro
-      ~is_destructive:(String.equal s.name "masc_board_delete")
+      ~is_destructive:(is_destructive_board_tool s.name)
       ()
   in
   Tool_spec.register_all (List.map make_spec Board_tool_registry.tools)

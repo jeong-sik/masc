@@ -182,11 +182,13 @@ val degraded_retry_after_recoverable_error :
     are excluded before attempt filtering, preserving independent-provider
     failover while avoiding same-account fan-out. If no pool function is
     supplied, no credential-pool filtering is applied. Non-contract transient
-    infrastructure errors (provider timeout, server error, capacity
-    backpressure) allow cycling through candidates again when all are exhausted,
-    because the same runtime may succeed on a subsequent attempt. Contract
-    violations, read-only no-progress accept rejections, and quota/rate-limit
-    classes cap rotation after the candidate set is exhausted.
+    infrastructure errors (provider timeout, server error) allow cycling
+    through candidates again when all are exhausted, because the same runtime
+    may succeed on a subsequent attempt. [Capacity_backpressure] caps rotation:
+    its provider retry_after is minutes-long, so cycling the same pool is
+    futile and previously looped forever (2026-05-21, 2026-07-06, #23373).
+    Contract violations, read-only no-progress accept rejections, and
+    quota/rate-limit classes cap rotation after the candidate set is exhausted.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?credential_pool_of_runtime_id:(string -> string option) ->
@@ -196,6 +198,12 @@ val degraded_rotation_after_recoverable_error :
   attempted_runtimes:string list ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
+
+(** [true] when [reason] permits re-cycling the candidate pool after every
+    candidate has been attempted. [Capacity_backpressure] returns [false]
+    (see {!degraded_rotation_after_recoverable_error}). *)
+val degraded_reason_allows_candidate_cycle :
+  degraded_retry_reason -> bool
 
 val max_transient_retries : unit -> int
 

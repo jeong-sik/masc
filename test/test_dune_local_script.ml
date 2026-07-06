@@ -116,11 +116,21 @@ let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
     - bin/opam  (fake: exists, exits 0)
 
     Returns [(bin_dir, dune_log)] where [dune_log] records each dune call. *)
-let setup_fake_repo base ~pin_check_exit_code ~pin_check_stderr_msg =
+let setup_fake_repo ?(ocaml_floor = "5.5") base ~pin_check_exit_code
+    ~pin_check_stderr_msg =
   let scripts_dir = Filename.concat base "scripts" in
   let bin_dir = Filename.concat base "bin" in
   mkdir_p scripts_dir;
   mkdir_p bin_dir;
+  write_file (Filename.concat base "dune-project")
+    (Printf.sprintf
+       {|(lang dune 3.22)
+(package
+ (name masc)
+ (depends
+  (ocaml (>= %s))))
+|}
+       ocaml_floor);
   (* Real dune-local.sh *)
   write_executable
     (Filename.concat scripts_dir "dune-local.sh")
@@ -1253,9 +1263,12 @@ let test_skip_deps_check_env_bypasses_guard () =
 
 (* --- OCaml minimum version guard tests (#13117 review) ---------------- *)
 
-let setup_repo_with_old_ocaml base =
-  let bin_dir, dune_log = setup_fake_repo base ~pin_check_exit_code:0
-                            ~pin_check_stderr_msg:"" in
+let setup_repo_with_old_ocaml ?(ocaml_floor = "5.5")
+    ?(ocaml_version = "5.4.0") base =
+  let bin_dir, dune_log =
+    setup_fake_repo base ~ocaml_floor ~pin_check_exit_code:0
+      ~pin_check_stderr_msg:""
+  in
   (* opam list --installed --short returns the dep so deps-guard passes;
      we test the OCaml branch in isolation. *)
   let opam_path = Filename.concat bin_dir "opam" in
@@ -1276,7 +1289,10 @@ exit 0
   (* Fake ocaml that reports an old version. *)
   let ocaml_path = Filename.concat bin_dir "ocaml" in
   write_executable ocaml_path
-    "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf 'The OCaml toplevel, version 5.0.0\\n'; fi\nexit 0\n";
+    (Printf.sprintf
+       "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf 'The OCaml \
+        toplevel, version %s\\n'; fi\nexit 0\n"
+       ocaml_version);
   (bin_dir, dune_log)
 
 let test_old_ocaml_aborts_build () =
@@ -1291,9 +1307,9 @@ let test_old_ocaml_aborts_build () =
     in
     check int "exits non-zero on old OCaml" 1 code;
     check bool "OCaml version message present" true
-      (contains_substring stderr "OCaml 5.0 detected");
-    check bool "minimum 5.4 mentioned" true
-      (contains_substring stderr ">= 5.4");
+      (contains_substring stderr "OCaml 5.4 detected");
+    check bool "minimum 5.5 mentioned" true
+      (contains_substring stderr ">= 5.5");
     check bool "skip hint present" true
       (contains_substring stderr "MASC_SKIP_OCAML_VERSION_CHECK=1");
     check bool "dune not invoked" false (Sys.file_exists dune_log))
@@ -1310,6 +1326,25 @@ let test_skip_ocaml_version_env_bypasses_guard () =
     in
     check int "exits zero when MASC_SKIP_OCAML_VERSION_CHECK=1" 0 code;
     check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_ocaml_floor_comes_from_dune_project () =
+  with_temp_dir "dune-local-ocaml-floor-ssot" (fun dir ->
+    let bin_dir, dune_log =
+      setup_repo_with_old_ocaml dir ~ocaml_floor:"5.6" ~ocaml_version:"5.5.0"
+    in
+    let code, _stdout, stderr =
+      run_dune_local dir bin_dir
+        ~unset_env:
+          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
+          ; "MASC_SKIP_DEPS_CHECK"; "MASC_SKIP_OCAML_VERSION_CHECK" ]
+        "build"
+    in
+    check int "exits non-zero below dune-project floor" 1 code;
+    check bool "live OCaml version message present" true
+      (contains_substring stderr "OCaml 5.5 detected");
+    check bool "dune-project floor mentioned" true
+      (contains_substring stderr ">= 5.6");
+    check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let () =
   run "dune_local_script"
@@ -1404,5 +1439,7 @@ let () =
             test_old_ocaml_aborts_build;
           test_case "MASC_SKIP_OCAML_VERSION_CHECK=1 bypasses ocaml guard"
             `Quick test_skip_ocaml_version_env_bypasses_guard;
+          test_case "OCaml floor is read from dune-project" `Quick
+            test_ocaml_floor_comes_from_dune_project;
         ] );
     ]

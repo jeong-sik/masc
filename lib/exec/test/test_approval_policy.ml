@@ -393,6 +393,48 @@ let test_gh_reversible_repo_hosting_ops_allowed_under_autonomous () =
   | Verdict.Allow t -> assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
   | _ -> Alcotest.fail "gh pr create should remain allowed under autonomous"
 
+(* Issue #23390 regression: a leading value-taking global flag ([gh --repo o/r
+   pr merge]) must not slip the destructive op past the floor. gh (Cobra)
+   accepts flags before the subcommand and consumes their values, so the
+   word-list classifier's position-based subcommand slot is wrong; the typed
+   lowering locates the real subcommand. *)
+let test_gh_leading_flag_destructive_floored_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
+         assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf "%s: leading-flag destructive op must be floored" label)
+    [ "gh --repo o/r pr merge", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
+    ; "gh --repo o/r pr ready", [ "--repo"; "o/r"; "pr"; "ready"; "123" ]
+    ; "gh --repo o/r repo delete"
+      , [ "--repo"; "o/r"; "repo"; "delete"; "o/r"; "--yes" ]
+    ]
+
+(* Control: a leading global flag on a READ must NOT be over-blocked — the fix
+   restores correct subcommand location without flooring reads. *)
+let test_gh_leading_flag_read_not_floored_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_repo_hosting_cli _; _ } ->
+         Alcotest.failf "%s: leading-flag read must not be floored" label
+       | _ -> ())
+    [ "gh --repo o/r pr view", [ "--repo"; "o/r"; "pr"; "view"; "123" ]
+    ; "gh --repo o/r pr list", [ "--repo"; "o/r"; "pr"; "list" ]
+    ]
+
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
    common force-delete-untracked form) is destructive and hits the floor.
    Probe finding 2026-06-18: [git clean -fd] was graded as plain audited git
@@ -502,6 +544,8 @@ let () =
   test_gh_irreversible_repo_hosting_ops_denied_under_autonomous ();
   test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous ();
   test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
+  test_gh_leading_flag_destructive_floored_under_autonomous ();
+  test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
   test_reset_hard_floored_under_autonomous ();

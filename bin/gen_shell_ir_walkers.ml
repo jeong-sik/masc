@@ -4188,11 +4188,19 @@ let rec parse subcmd act draft squash del_branch body title search state rest = 
                }))
      | None -> None)
   | arg :: args ->
-    (match subcmd with
-     | None -> parse (Some arg) act draft squash del_branch body title search state rest args
-     | Some _ when act = None && String.length arg > 0 && arg.[0] <> '-' ->
+    let is_flag = String.length arg > 0 && arg.[0] = '-' in
+    (match subcmd, act with
+     (* First non-flag token is the subcommand; the second is the action.
+        Flags — whether they appear BEFORE the subcommand (gh/Cobra accepts
+        global flags like [--repo o/r] ahead of the subcommand) or after it —
+        fall through to the flag handling below, which consumes value-taking
+        flags. Routing leading flags through the same handling keeps the real
+        subcommand from being shadowed by a flag or its value (issue #23390). *)
+     | None, _ when not is_flag ->
+       parse (Some arg) act draft squash del_branch body title search state rest args
+     | Some _, None when not is_flag ->
        parse subcmd (Some arg) draft squash del_branch body title search state rest args
-     | Some _ ->
+     | _ ->
        (match arg with
         | "--draft" -> parse subcmd act true squash del_branch body title search state rest args
         | "--squash" -> parse subcmd act draft true del_branch body title search state rest args

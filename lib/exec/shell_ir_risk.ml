@@ -478,6 +478,18 @@ let classify_repo_hosting_cli (words : string list) : risk_class =
     else if in_table repo_hosting_cli_reversible_mutations command sub then R1_Reversible_mutation
     else R0_Read
 
+(* Subcommand-table risk for a known gh family. Shared by [risk_of_gh_verb]
+   (typed opinion) and [repo_hosting_cli_floor_risk] (enforcement floor) so the
+   subcommand tables are the single risk source. A table-absent action is a
+   read (R0): most such actions in a known family are reads (view/list/status)
+   and we cannot distinguish them from a genuinely unknown action without a
+   reads table. *)
+let table_risk_of_gh_family (command : string) (action : string) : risk_class =
+  if in_table repo_hosting_cli_irreversible_ops command action then R2_Irreversible
+  else if in_table repo_hosting_cli_reversible_mutations command action then
+    R1_Reversible_mutation
+  else R0_Read
+
 (* RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command.
 
    [risk_of_gh_verb] is the closed-sum lens over [classify_repo_hosting_cli]:
@@ -521,13 +533,7 @@ let risk_of_gh_verb (v : Gh_verb.t) : risk_class =
        default so the "no action" case is a decision, not a silent fold. *)
     (match v.Gh_verb.action with
      | None -> R0_Read
-     | Some action ->
-       let command = Gh_verb.family_token fam in
-       if in_table repo_hosting_cli_irreversible_ops command action then
-         R2_Irreversible
-       else if in_table repo_hosting_cli_reversible_mutations command action
-       then R1_Reversible_mutation
-       else R0_Read)
+     | Some action -> table_risk_of_gh_family (Gh_verb.family_token fam) action)
 
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)
@@ -946,6 +952,54 @@ let risk_rank = function
 ;;
 
 let max_risk a b = if risk_rank a >= risk_rank b then a else b
+
+(* Enforcement-floor risk for a gh command, robust to leading global flags.
+
+   [classify_repo_hosting_cli] locates the subcommand as the first non-flag
+   token after "gh", so a leading value-taking global flag ([gh --repo o/r pr
+   merge]) shifts the flag's value ("o/r") into the subcommand slot and the
+   destructive verb ("merge") is missed — the command classifies R0 and the
+   approval catastrophic floor never fires (issue #23390: gh accepts flags
+   before the subcommand via Cobra, so the op executes). This is the floor's
+   SSOT for gh risk, so the miss is an autonomous-keeper bypass.
+
+   Fix: combine two views with [max_risk].
+   - [words]: the existing word-list classifier — retains the string-borne
+     risk it alone sees ([gh api -X DELETE], graphql mutation bodies,
+     positional-token scans).
+   - [simple]: the typed lowering ([Shell_ir_typed.of_simple], whose gh parser
+     consumes value-flags exactly like gh) yields the correctly-located
+     subcommand; [table_risk_of_gh_family] then reads the same subcommand
+     tables. [Api]/[Other]/bare family stay R0 here — this fix restores correct
+     subcommand location WITHOUT changing the historical "unknown gh subcommand
+     is R0" floor semantics (fail-closing unknown gh is RFC-0309 W3, not this
+     bug fix). *)
+let repo_hosting_cli_floor_risk (words : string list) (simple : Shell_ir.simple)
+  : risk_class
+  =
+  let word_risk = classify_repo_hosting_cli words in
+  let typed_risk =
+    (* [@warning "-4"]: only the [Gh] constructor is of interest; every other
+       typed command (and the [Generic] escape hatch for non-literal argv) is
+       not a repo-hosting op, so it floors nothing here and the word-list path
+       above already covers it. Same find-first rationale as
+       [Approval_policy.find_destructive_repo_hosting_cli]. *)
+    match Shell_ir_typed.of_simple simple with
+    | Shell_ir_typed.W (Shell_ir_typed_types.Gh { subcommand; action; _ }) -> (
+      let v = Gh_verb.of_fields ~subcommand ~action in
+      match v.Gh_verb.family, v.Gh_verb.action with
+      | (Gh_verb.Api | Gh_verb.Other _), _ | _, None -> R0_Read
+      | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+          | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key
+          | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset
+          | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as
+        fam )
+      , Some action ->
+        table_risk_of_gh_family (Gh_verb.family_token fam) action)
+    | Shell_ir_typed.W _ -> R0_Read
+  in
+  max_risk word_risk typed_risk
+[@@warning "-4"]
 
 let redirect_risk = function
   | Redirect_scope.File { mode = (Redirect_scope.Write | Redirect_scope.Append); _ } ->

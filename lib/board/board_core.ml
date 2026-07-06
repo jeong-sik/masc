@@ -478,7 +478,7 @@ let add_comment_with_status
             | Error _ as e -> e)))
 ;;
 
-let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours ?(comment_offset = 0) ?(comment_limit = 50) () :
+let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () :
   (comment, board_error) Result.t =
   match add_comment_with_status store ~post_id ~author ~content ?parent_id
           ?ttl_hours ()

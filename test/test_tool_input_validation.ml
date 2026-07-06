@@ -1638,7 +1638,15 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
   assert_not_contains
     "board get hint avoids retired name"
     capabilities
-    "keeper_board_get"
+    "keeper_board_get";
+  assert_contains
+    "keeper capabilities separates schema visibility from approval policy"
+    capabilities
+    "separate active schema visibility from approval policy";
+  assert_not_contains
+    "keeper capabilities avoids retired capacity token"
+    capabilities
+    ("repo" ^ "_cap")
 
 let test_orchestrator_prompt_pins_start_transition () =
   let prompt = read_source_file "config/prompts/system.orchestrator.md" in

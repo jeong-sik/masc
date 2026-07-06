@@ -29,6 +29,16 @@ open Tool_args
 (* RFC-0189 PR-1b.2 — handlers in this module return the typed
    [Tool_result.result] variant directly. *)
 
+let meta_string_field name = function
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt name fields with
+     | Some (`String value) ->
+       let value = String.trim value in
+       if String.equal value "" then None else Some value
+     | _ -> None)
+  | Some _ | None -> None
+;;
+
 let handle_post_create ~tool_name ~start_time args : Tool_result.result =
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles. *)
@@ -130,7 +140,15 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         | Some v -> v
         | None -> Board.Internal
       in
-      match Board_tool_handlers.resolve_board_post_kind ~author raw_post_kind with
+      let author_raw_agent_name =
+        meta_string_field "author_raw_agent_name" meta_json
+      in
+      match
+        Board_tool_handlers.resolve_board_post_kind
+          ~author
+          ?author_raw_agent_name
+          raw_post_kind
+      with
       | Error msg ->
         Tool_result.make_err
           ~tool_name

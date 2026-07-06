@@ -140,6 +140,9 @@ let () =
               check bool "masc_board_delete -> Mod_inline" true
                 (Tool_dispatch.lookup_tag "masc_board_delete"
                  = Some Tool_dispatch.Mod_inline);
+              check bool "masc_board_cleanup -> Mod_inline" true
+                (Tool_dispatch.lookup_tag "masc_board_cleanup"
+                 = Some Tool_dispatch.Mod_inline);
               check bool "masc_status -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_status"
                  = Some Tool_dispatch.Mod_state);

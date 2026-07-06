@@ -195,6 +195,7 @@ export type {
   DashboardScheduledAutomationSignal,
   DashboardScheduledAutomationRequest,
   DashboardScheduledAutomationPayloadSupport,
+  DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   DashboardScheduledAutomation,
   DashboardToolsResponse,
 } from './dashboard-tools-prompts'

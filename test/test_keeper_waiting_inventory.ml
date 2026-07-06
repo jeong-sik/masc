@@ -148,7 +148,7 @@ let external_attention_item ~keeper_name index : Keeper_external_attention.item 
 let record_external_attention_exn config ~keeper_name index =
   match
     Keeper_external_attention.record
-      ~base_path:config.Workspace.base_path
+      ~base_path:config.base_path
       (external_attention_item ~keeper_name index)
   with
   | `Recorded -> ()

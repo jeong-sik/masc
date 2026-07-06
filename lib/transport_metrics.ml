@@ -78,6 +78,12 @@ let inc_external_subscriber_callback_failure () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_sse_external_subscriber_callback_failures ()
 ;;
 
+let observe_external_subscriber_fanout_duration seconds =
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_sse_external_fanout_duration_seconds
+    (max 0.0 seconds)
+;;
+
 (* P2 silent-failure fix (transport scan):
    The OAS relay drop-marker is the operator-visible signal that an
    OAS event was dropped after exhausting retries.  If the drop marker
@@ -562,6 +568,17 @@ let transport_health_json ~config =
   let broadcast_avg =
     if broadcast_count > 0.0 then broadcast_sum /. broadcast_count else 0.0
   in
+  let external_fanout_sum =
+    v Otel_metric_store.metric_sse_external_fanout_duration_seconds ()
+  in
+  let external_fanout_count =
+    v (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count") ()
+  in
+  let external_fanout_avg =
+    if external_fanout_count > 0.0
+    then external_fanout_sum /. external_fanout_count
+    else 0.0
+  in
   let grpc_streams = v Otel_metric_store.metric_grpc_active_streams () in
   let grpc_subscribers = v Otel_metric_store.metric_grpc_subscribers () in
   let grpc_heartbeat_sum = v Otel_metric_store.metric_grpc_heartbeat_latency () in
@@ -635,6 +652,9 @@ let transport_health_json ~config =
           ; "external_subscribers", `Int sse_external_subscribers
           ; "broadcast_avg_seconds", `Float broadcast_avg
           ; "broadcast_count", `Int (int_of_float broadcast_count)
+          ; "external_fanout_avg_seconds", `Float external_fanout_avg
+          ; "external_fanout_count", `Int (int_of_float external_fanout_count)
+          ; "external_fanout_sum_seconds", `Float external_fanout_sum
           ; "queue_avg_depth", `Float sse_queue_avg
           ; "queue_max_depth", `Int sse_queue_max
           ; "relay_queue_depth", `Int relay_queue_depth

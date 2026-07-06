@@ -541,28 +541,6 @@ let reaction_receipt_field name row =
   | None -> None
 ;;
 
-let reaction_field name row =
-  match assoc_field "reaction" row with
-  | Some reaction -> assoc_field name reaction
-  | None -> None
-;;
-
-let reaction_current_task_id row =
-  match reaction_field "current_task_id" row with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
-;;
-
-let reaction_goal_ids row =
-  match assoc_field "reaction" row with
-  | Some reaction -> string_list_field "goal_ids" reaction
-  | None -> []
-;;
-
-let passive_only_without_work_scope row =
-  Option.is_none (reaction_current_task_id row) && reaction_goal_ids row = []
-;;
-
 let summary_schema = "keeper.reaction_ledger.summary.v1"
 let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v1"
 
@@ -882,9 +860,11 @@ let summarize_rows ~keeper_name ~limit rows =
   in
   let note_contract_attention_label ~result ~label =
     incr completion_contract_attention_count;
+    latest_completion_contract_attention := Some label
+  in
+  let note_contract_result_label ~result ~label =
     (match result with
-     | Receipt_result.Passive_only ->
-       incr completion_contract_passive_only_count
+     | Receipt_result.Passive_only -> incr completion_contract_passive_only_count
      | Receipt_result.Violated
      | Receipt_result.Surface_mismatch
      | Receipt_result.No_capable_provider
@@ -893,19 +873,17 @@ let summarize_rows ~keeper_name ~limit rows =
      | Receipt_result.Unknown
      | Receipt_result.Not_dispatched
      | Receipt_result.Satisfied_completion
-     | Receipt_result.Satisfied_execution ->
-       ());
+     | Receipt_result.Satisfied_execution -> ());
     increment_count completion_contract_result_counts label;
-    latest_completion_contract_attention := Some label
   in
-  let note_completion_contract_attention row =
+  let note_completion_contract_result row =
     match reaction_receipt_field "completion_contract_result" row with
     | Some result ->
       (match Receipt_result.of_string result with
        | Some typed ->
+         let label = Receipt_result.to_string typed in
+         note_contract_result_label ~result:typed ~label;
          (match contract_result_attention_of_typed typed with
-          | Contract_attention { result = Receipt_result.Passive_only; _ }
-            when passive_only_without_work_scope row -> ()
           | Contract_attention { result; label } ->
             note_contract_attention_label ~result ~label
           | Contract_no_attention -> ())
@@ -963,7 +941,7 @@ let summarize_rows ~keeper_name ~limit rows =
         incr reaction_count;
         note_reaction_time id (float_field "recorded_at_unix" row);
         note_reaction_kind (nested_string_field "reaction" "kind" row);
-        note_completion_contract_attention row;
+        note_completion_contract_result row;
         mark_reacted id
       | Some "cursor_ack", Some _id ->
         incr reaction_count;
@@ -978,7 +956,7 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some "reaction", None ->
         incr reaction_count;
         note_reaction_kind (nested_string_field "reaction" "kind" row);
-        note_completion_contract_attention row
+        note_completion_contract_result row
       | Some "cursor_ack", None ->
         incr reaction_count;
         incr cursor_ack_count;

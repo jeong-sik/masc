@@ -15,10 +15,15 @@ type gc_report =
 
 exception Fact_store_corrupt of string
 
+(** [ttl_expired ~now fact] is [not (fact_is_current ~now fact)]: expiry runs
+    on the same effective horizon ([fact_effective_valid_until] — explicit
+    [valid_until], or the RFC-0259 P7 legacy [External_state] horizon) that the
+    writer cap ([partition_expired]) and recall use, so cap, recall, and GC
+    cannot disagree on what is expired. *)
 val ttl_expired : now:float -> fact -> bool
 
 (** Run the deterministic forgetting sweep for one keeper: hard-expire facts past
-    their Ephemeral TTL, then dedup duplicate claims keeping the
+    their effective horizon, then dedup duplicate claims keeping the
     most-recently-verified, and (unless [dry_run]) rewrite the store atomically.
 
     The whole read-modify-rewrite runs under [File_lock_eio.with_lock] on the

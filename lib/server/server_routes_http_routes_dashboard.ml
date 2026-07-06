@@ -1630,6 +1630,13 @@ let add_routes ~sw ~clock router =
                    ~sw ~clock state agent_name req reqd body_str
                )
              ) request reqd
+       | Keeper_api.Keeper_post_catchup_judge ->
+           with_tool_auth ~tool_name:"masc_fusion"
+             (fun state req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_catchup_judge_post state req reqd body_str
+               )
+             ) request reqd
        | Keeper_api.Keeper_post_unknown ->
            respond_dashboard_error ~status:`Not_found reqd "not found")
 

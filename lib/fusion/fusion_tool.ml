@@ -46,7 +46,18 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
   Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
     ~resolved_answer:content ~board_post_id:""
 
-let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
+type orchestrator_runner =
+  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> base_dir:string
+  -> policy:Fusion_policy.t
+  -> topology:Fusion_types.fusion_topology
+  -> request:Fusion_types.fusion_request
+  -> unit
+  -> Fusion_orchestrator.outcome
+
+let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
+      ~policy ~args : string =
   let prompt = Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
   let web_tools = Tool_args.get_bool args "web_tools" false in
@@ -103,8 +114,7 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
          switch를 sw로 넘긴다 (turn switch면 턴 종료 시 심의가 취소됨). *)
       Eio.Fiber.fork ~sw (fun () ->
         match
-          Fusion_orchestrator.run ~sw ~net ~base_dir ~policy ~topology
-            ~request:allowed ()
+          run_orchestrator ~sw ~net ~base_dir ~policy ~topology ~request:allowed ()
         with
         | Fusion_orchestrator.Completed _ -> ()
         | Fusion_orchestrator.Denied reason ->
@@ -147,3 +157,13 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
                completes; the conclusion (or failure reason) also lands on \
                your chat lane. No need to poll masc_fusion_status." )
         ]
+
+let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
+  handle_with_runner ~run_orchestrator:Fusion_orchestrator.run ~sw ~net ~base_dir
+    ~keeper ~now_unix ~run_id ~policy ~args
+
+module For_test = struct
+  type nonrec orchestrator_runner = orchestrator_runner
+
+  let handle_with_runner = handle_with_runner
+end

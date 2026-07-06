@@ -165,6 +165,7 @@ let canonical_success_replay_checkpoint
       ~(session_id : string)
       ~(response_text : string)
       ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
+      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   if messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
@@ -208,6 +209,7 @@ let canonical_success_replay_checkpoint
           ~session_id
           ~response_text
           ?snapshot:state_snapshot
+          ~snapshot_source:state_snapshot_source
     in
     Ok
       ( checkpoint
@@ -258,6 +260,7 @@ let checkpoint_for_replay_persistence
       ~session_id
       ~response_text
       ~state_snapshot
+      ~state_snapshot_source
       checkpoint
 ;;
 
@@ -404,6 +407,7 @@ let finalize
            ~metadata:
              [ ( Keeper_memory_policy.replay_metadata_key
                , Keeper_memory_policy.replay_metadata_of_snapshot
+                   ~state_snapshot_source
                    state_snapshot )
              ]
            [ Agent_sdk.Types.Text replay_response_text ])

@@ -1,8 +1,10 @@
 (** Spawn an asynchronous HITL context-summary worker.
-    The worker is fire-and-forget: it calls [on_summary] or [on_failure] on
-    the calling fiber, and the caller is responsible for writing the result
-    back to the approval entry (e.g. via [Keeper_approval_queue.update_pending_entry]).
-    This keeps the worker decoupled from the queue and avoids a module cycle. *)
+    The worker is fire-and-forget: it calls [on_summary] with either the LLM
+    summary or a deterministic request-metadata fallback. [on_failure] is
+    reserved for unexpected worker failures where even fallback generation did
+    not run. The caller is responsible for writing the result back to the
+    approval entry (e.g. via [Keeper_approval_queue.update_pending_entry]). This
+    keeps the worker decoupled from the queue and avoids a module cycle. *)
 val spawn
   :  sw:Eio.Switch.t
   -> ?provider_config:Llm_provider.Provider_config.t
@@ -22,6 +24,13 @@ module For_testing : sig
 
   val build_context_bundle
     : entry:Keeper_approval_queue_rules_types.pending_approval -> Yojson.Safe.t
+
+  val fallback_summary
+    :  generated_at:float
+    -> entry:Keeper_approval_queue_rules_types.pending_approval
+    -> context_bundle:Yojson.Safe.t
+    -> reason:string
+    -> Keeper_approval_queue_rules_types.hitl_context_summary
 
   val parse_summary
     :  generated_at:float

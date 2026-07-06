@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { ConnectionStatus } from '../dashboard-shell'
 import { useSignalValue, useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
 import {
   activeIdeFile,
@@ -65,6 +64,12 @@ type IdeRightRailTab = 'context' | 'activity' | 'cursors'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
 
+interface IdeRightRailTabDescriptor {
+  readonly id: IdeRightRailTab
+  readonly label: string
+  readonly title: string
+}
+
 export interface IdeStatusbarChip {
   readonly id: string
   readonly label: string
@@ -104,10 +109,22 @@ const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
   'split-diff': 'SPLIT DIFF',
   blame: 'BLAME',
 }
-const IDE_RIGHT_RAIL_TABS: ReadonlyArray<{ readonly id: IdeRightRailTab; readonly label: string }> = [
-  { id: 'context', label: 'Context' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'cursors', label: 'Cursors' },
+const IDE_RIGHT_RAIL_TABS: ReadonlyArray<IdeRightRailTabDescriptor> = [
+  {
+    id: 'context',
+    label: 'Work Context',
+    title: 'Keeper work, persistence, memory, and chat scoped to the active IDE context',
+  },
+  {
+    id: 'activity',
+    label: 'Run Activity',
+    title: 'Workspace and keeper activity linked to the active file and repository',
+  },
+  {
+    id: 'cursors',
+    label: 'Keeper Cursors',
+    title: 'Live keeper file focus and cursor stream status',
+  },
 ]
 
 export function normalizeIdeTreeWidth(value: unknown): number {
@@ -325,18 +342,18 @@ function disconnectionReasonLabel(): string {
   const bootstrap = devTokenBootstrapStatus.value
 
   if (!hasToken && bootstrap === 'no_endpoint') {
-    return 'runtime · auth required'
+    return 'dashboard · auth required'
   }
   if (!hasToken && bootstrap === 'network') {
-    return 'runtime · server unreachable'
+    return 'dashboard · server unreachable'
   }
   if (!hasToken && bootstrap === 'fetching') {
-    return 'runtime · bootstrapping...'
+    return 'dashboard · bootstrapping...'
   }
   if (!hasToken) {
-    return 'runtime · no token'
+    return 'dashboard · no token'
   }
-  return 'runtime · reconnecting'
+  return 'dashboard · reconnecting'
 }
 
 function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
@@ -548,10 +565,30 @@ export function deriveIdeStatusbarModel({
     workspaceBasePath,
     chips,
     connectionLabel: dashboardConnected
-      ? 'runtime · live'
+      ? 'dashboard · live'
       : disconnectionReasonLabel(),
     connectionTone: dashboardConnected ? 'ok' : 'warn',
   }
+}
+
+function IdeDashboardConnectionChip({
+  label,
+  tone,
+}: {
+  readonly label: string
+  readonly tone: IdeConnectionTone
+}) {
+  const title = tone === 'ok'
+    ? 'Dashboard event transport is live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
+    : 'Dashboard event transport is not live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
+  return html`
+    <span
+      class=${`chip sm is-${tone}`}
+      data-testid="ide-dashboard-connection"
+      title=${title}
+      aria-label=${`${label}; ${title}`}
+    >${label}</span>
+  `
 }
 
 function paramsWithLayers(
@@ -1162,7 +1199,10 @@ export function IdeShell() {
             `)}
           </div>
           <${IdePresenceStrip} />
-          <${ConnectionStatus} />
+          <${IdeDashboardConnectionChip}
+            label=${statusbar.connectionLabel}
+            tone=${statusbar.connectionTone}
+          />
         </header>
         <${IdeToolbar}
           activeView=${activeView}
@@ -1238,6 +1278,8 @@ export function IdeShell() {
                     type="button"
                     role="tab"
                     aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
+                    aria-label=${tab.title}
+                    title=${tab.title}
                     class=${`ide-v2-rail-tab ide-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
                     onClick=${() => setRightRailTab(tab.id)}
                   >${tab.label}</button>

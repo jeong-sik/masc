@@ -3057,6 +3057,54 @@ let test_partition_expired_splits_on_valid_until () =
     (List.map (fun f -> f.Types.claim) gone)
 ;;
 
+let test_gc_ttl_expired_uses_external_state_effective_horizon () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now () in
+  let expired_external =
+    { base with
+      Types.claim = "legacy external state expired"
+    ; Types.claim_kind = Some Types.External_state
+    ; Types.first_seen = now -. Types.external_state_ttl_seconds -. 1.0
+    ; Types.valid_until = None
+    }
+  in
+  let current_external =
+    { expired_external with
+      Types.claim = "legacy external state current"
+    ; Types.first_seen = now -. Types.external_state_ttl_seconds +. 1.0
+    }
+  in
+  let durable =
+    { expired_external with
+      Types.claim = "durable legacy row"
+    ; Types.claim_kind = None
+    }
+  in
+  Alcotest.(check bool)
+    "GC expires legacy external_state via effective horizon"
+    true
+    (GC.ttl_expired ~now expired_external);
+  Alcotest.(check bool)
+    "GC keeps current legacy external_state"
+    false
+    (GC.ttl_expired ~now current_external);
+  Alcotest.(check bool)
+    "GC keeps durable no-horizon fact"
+    false
+    (GC.ttl_expired ~now durable);
+  let live, gone =
+    Types.partition_expired ~now [ expired_external; current_external; durable ]
+  in
+  Alcotest.(check (list string))
+    "partition_expired shares GC effective horizon"
+    [ "legacy external state expired" ]
+    (List.map (fun f -> f.Types.claim) gone);
+  Alcotest.(check (list string))
+    "live keeps current external + durable"
+    [ "legacy external state current"; "durable legacy row" ]
+    (List.map (fun f -> f.Types.claim) live)
+;;
+
 (* RFC-0259 §3.6 (P5): cap_facts evicts an expired row even when the store is far
    below [trigger] (the disk-leak the off-by-default GC sweep would otherwise
    miss), and never evicts a durable row. Re-running is a no-op once clean. *)
@@ -5988,6 +6036,10 @@ let () =
             "partition_expired splits on valid_until (RFC-0259 P5)"
             `Quick
             test_partition_expired_splits_on_valid_until
+        ; Alcotest.test_case
+            "GC ttl_expired uses external_state effective horizon"
+            `Quick
+            test_gc_ttl_expired_uses_external_state_effective_horizon
         ; Alcotest.test_case
             "cap_facts drops expired below trigger (RFC-0259 P5)"
             `Quick

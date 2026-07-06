@@ -30,7 +30,7 @@ let parse_ir cmd =
   match Bash.parse_string cmd with
   | Parsed.Parsed ir -> ir
   | Parsed.Parse_error _ | Parsed.Parse_aborted _ | Parsed.Too_complex _ ->
-    failwith (Printf.sprintf "failed to parse: %s" cmd)
+    Alcotest.failf "failed to parse: %s" cmd
 ;;
 
 (* Full production pipeline: parser -> classify (typed opinion max-merged
@@ -46,7 +46,7 @@ let typed_opinion cmd =
   | Shell_ir.Simple s ->
     Shell_ir_risk.risk_of_typed (Shell_ir_typed.of_simple s)
   | Shell_ir.Pipeline _ ->
-    failwith (Printf.sprintf "expected a simple command: %s" cmd)
+    Alcotest.failf "expected a simple command: %s" cmd
 ;;
 
 let rc = Shell_ir_risk.string_of_risk_class

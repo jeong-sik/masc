@@ -164,7 +164,22 @@ let repo_hosting_cli_is_floored (bin : Exec_program.t) (args : Shell_ir.arg list
   match Exec_program.known bin with
   | Some Exec_program.Gh ->
     let words = Exec_program.to_string bin :: List.map repo_hosting_arg_word args in
-    (match Shell_ir_risk.classify_repo_hosting_cli words with
+    (* Classify through [repo_hosting_cli_floor_risk], not the word-list
+       classifier alone: a leading value-taking global flag ([gh --repo o/r pr
+       merge]) shifts the subcommand out of the word-list's position-based
+       slot, so the naive classifier misses the destructive verb and the floor
+       never fires (issue #23390). The typed lowering consumes value-flags like
+       gh does, locating the real subcommand. *)
+    let simple : Shell_ir.simple =
+      { Shell_ir.bin
+      ; args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }
+    in
+    (match Shell_ir_risk.repo_hosting_cli_floor_risk words simple with
      | R2_Irreversible | Destructive_protected -> true
      | R0_Read | R1_Reversible_mutation -> false)
   | Some _ | None -> false

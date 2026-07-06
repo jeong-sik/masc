@@ -292,17 +292,50 @@ let assert_not_contains label text needle =
   check bool label false (string_contains text needle)
 ;;
 
+(* Mirror install.sh's detect_asset so the staged release names the asset the
+   script will request for this platform. *)
+let platform_release_asset () =
+  let uname flag =
+    let ic = Unix.open_process_in ("uname " ^ flag) in
+    let line = try String.trim (input_line ic) with End_of_file -> "" in
+    ignore (Unix.close_process_in ic);
+    line
+  in
+  match uname "-s", uname "-m" with
+  | "Darwin", "arm64" -> "masc-macos-arm64"
+  | "Linux", "x86_64" -> "masc-linux-x64"
+  | os, arch -> failf "unsupported test platform for release asset: %s/%s" os arch
+;;
+
+(* Stage a file:// release mirror under [base_path] so install paths that
+   download (e.g. the --force refresh) exercise the real curl+install flow
+   hermetically instead of depending on a published GitHub release for the
+   HEAD version — the forced-wizard tests broke on exactly that 404 when
+   dune-project moved past the latest published release. SHA256SUMS is
+   deliberately absent: the harness passes --allow-unverified, which
+   downgrades missing checksums to a warning. *)
+let stage_release_mirror base_path =
+  let dir = Filename.concat base_path (Filename.concat ".release" (release_tag ())) in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote dir));
+  let asset = Filename.concat dir (platform_release_asset ()) in
+  unlink_if_exists asset;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) asset;
+  "file://" ^ Filename.concat base_path ".release"
+;;
+
 let run_install_status ?(extra_env = "") args base_path =
   let root = source_root () in
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
   install_real_masc_binary prefix;
+  let release_base_url = stage_release_mirror base_path in
   let quoted_args = String.concat " " (List.map Filename.quote args) in
   let cmd =
     Printf.sprintf
-      "%s%sMASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
+      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
       extra_env
       (if String.equal extra_env "" then "" else " ")
+      (Filename.quote release_base_url)
       (Filename.quote prefix)
       (Filename.quote (release_tag ()))
       (Filename.quote base_path)
@@ -326,11 +359,14 @@ let run_install_status_with_stdin stdin args base_path =
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
   install_real_masc_binary prefix;
+  let release_base_url = stage_release_mirror base_path in
   let quoted_args = String.concat " " (List.map Filename.quote args) in
   let cmd =
     Printf.sprintf
-      "printf '%%s\\n' %s | MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
+      "printf '%%s\\n' %s | MASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s \
+       MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
       (Filename.quote stdin)
+      (Filename.quote release_base_url)
       (Filename.quote prefix)
       (Filename.quote (release_tag ()))
       (Filename.quote base_path)

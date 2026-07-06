@@ -3254,6 +3254,15 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          if schedule_blocked_approval ~now state request then count + 1 else count)
       0 schedules
   in
+  let approval_wait_seconds =
+    List.fold_left
+      (fun oldest_wait request ->
+         if schedule_blocked_approval ~now state request
+         then max oldest_wait (max 0.0 (now -. request.due_at))
+         else oldest_wait)
+      0.0
+      schedules
+  in
   let due_execution_ready_count =
     state
     |> Schedule_store.due_execution_candidates
@@ -3272,6 +3281,12 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          | _ -> 0) )
     | _ -> 0, 0
   in
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_schedule_approval_blocked_count
+    (Float.of_int blocked_approval_count);
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_schedule_approval_wait_seconds
+    approval_wait_seconds;
   let sorted =
     schedules
     |> List.sort (fun left right ->

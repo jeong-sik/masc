@@ -246,15 +246,12 @@ let chat_queue_rows keeper_name =
 ;;
 
 let turn_admission_rows ~base_path keeper_name =
-  if not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name)
+  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+  if snapshot.snapshot_waiting <= 0
   then []
   else
-    let in_flight = Keeper_turn_admission.in_flight ~base_path ~keeper_name in
-    let waiting_since =
-      Keeper_turn_admission.chat_waiting_since ~base_path ~keeper_name
-    in
     let in_flight_detail =
-      match in_flight with
+      match snapshot.snapshot_in_flight with
       | None -> `Null
       | Some (info : Keeper_turn_admission.in_flight_info) ->
         `Assoc
@@ -267,14 +264,17 @@ let turn_admission_rows ~base_path keeper_name =
       ; source = Turn_admission_waiting
       ; waiting_on = "chat"
       ; wake_producer = Keeper_turn_admission
-      ; since = waiting_since
+      ; since = None
       ; due_at = None
       ; next_action = "turn_slot_release"
       ; detail =
           `Assoc
             [ "waiting_lane", `String "chat"
-            ; "waiting_since", float_json waiting_since
-            ; "waiting_since_iso", unix_iso_json waiting_since
+            ; "waiting_since", `Null
+            ; "waiting_since_iso", `Null
+            ; "chat_waiting_count", `Int snapshot.snapshot_waiting
+            ; "chat_waiting_cap", `Int snapshot.snapshot_waiting_cap
+            ; "chat_waiting_full", `Bool snapshot.snapshot_waiting_full
             ; "in_flight", in_flight_detail
             ]
       }

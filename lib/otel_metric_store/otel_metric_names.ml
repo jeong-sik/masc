@@ -142,6 +142,16 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 let metric_tool_metrics_persist_dropped =
   Otel_metric_store_core.declare_counter "masc_tool_metrics_persist_dropped_total"
 
+let metric_keeper_waiting_count = "masc_keeper_waiting_count"
+let metric_keeper_waiting_age_seconds = "masc_keeper_waiting_age_seconds"
+let metric_keeper_waiting_keeper_count = "masc_keeper_waiting_keeper_count"
+
+let metric_schedule_approval_blocked_count =
+  "masc_schedule_approval_blocked_count"
+
+let metric_schedule_approval_wait_seconds =
+  "masc_schedule_approval_wait_seconds"
+
 (* Schedule unsupported payload counter. Labels:
    - [phase] in {creation, dispatch}
    - [risk_class] in [Schedule_domain.risk_class_to_string] labels.

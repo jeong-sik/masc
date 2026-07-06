@@ -113,6 +113,23 @@ val metric_backend_mutex_held_sec : string
 (** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
 val metric_tool_metrics_persist_dropped : string
 
+(** Gauge of waiting/deferred rows by [scope] and [source] for the keeper
+    waiting inventory dashboard projection. Labels: [scope], [source]. *)
+val metric_keeper_waiting_count : string
+
+(** Gauge of the oldest currently visible waiting-row age in seconds by
+    [scope] and [source]. Labels: [scope], [source]. *)
+val metric_keeper_waiting_age_seconds : string
+
+(** Gauge of keepers by inventory state. Labels: [state]. *)
+val metric_keeper_waiting_keeper_count : string
+
+(** Gauge of due scheduled automation requests blocked on human approval. *)
+val metric_schedule_approval_blocked_count : string
+
+(** Gauge of the oldest due scheduled automation approval wait in seconds. *)
+val metric_schedule_approval_wait_seconds : string
+
 (** Schedule unsupported payload counter. Labels: [phase] in
     {[creation | dispatch]} and [risk_class] in
     [Schedule_domain.risk_class_to_string] labels. Raw payload kinds are not

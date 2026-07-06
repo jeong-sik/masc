@@ -727,7 +727,12 @@
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution)
- (libraries masc_test_deps masc_schedule multimodal bigstringaf))
+ (libraries
+  masc_test_deps
+  masc_schedule
+  masc.keeper_external_attention
+  multimodal
+  bigstringaf))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 

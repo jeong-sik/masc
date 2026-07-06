@@ -135,7 +135,7 @@ let dedupe_key ~keeper_name ~(signal : Board_dispatch.board_signal) =
       signal_payload_fingerprint signal;
     ]
 
-let of_board_signal ~keeper_name ~recorded_at signal =
+let of_board_signal ~keeper_name ~recorded_at (signal : Board_dispatch.board_signal) =
   let signal_kind = signal_kind_of_board_signal_kind signal.kind in
   let dedupe_key = dedupe_key ~keeper_name ~signal in
   {

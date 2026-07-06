@@ -79,9 +79,12 @@ let test_sweep_projects_typed_memory_state_without_rewrite () =
         Alcotest.(check int) "row gc written" 2 row.gc_preview.written;
         (match row.duplicate_groups with
          | [ group ] ->
+           (* [claim_identity] keys are namespaced by construction ("id:" /
+              "claim:", RFC-0259 §3.7): producer-id keys and normalized-prose
+              keys stay disjoint so equal text cannot over-merge across them. *)
            Alcotest.(check string)
              "claim identity from claim_id"
-             "same-conclusion"
+             "id:same-conclusion"
              group.claim_identity;
            Alcotest.(check (list int)) "duplicate indices" [ 0; 1 ] group.member_indices
          | groups ->
@@ -129,7 +132,10 @@ let test_duplicate_groups_follow_claim_identity_only () =
   Alcotest.(check int) "only exact claim identity groups" 1 (List.length groups);
   match groups with
   | [ group ] ->
-    Alcotest.(check string) "normalized prose identity" "exact same" group.claim_identity;
+    Alcotest.(check string)
+      "normalized prose identity"
+      "claim:exact same"
+      group.claim_identity;
     Alcotest.(check (list int)) "members" [ 2; 3 ] group.member_indices
   | _ -> Alcotest.fail "unexpected duplicate group shape"
 ;;

@@ -1762,7 +1762,7 @@ let test_callback_hitl_enabled_hard_forbidden_rejects_without_queuing () =
         (AQ.pending_count ()))
 
 let test_callback_hitl_disabled_soft_forbidden_requires_approval () =
-  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+  with_env Env_config_core.disable_hitl_env_key "true" @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1792,16 +1792,14 @@ let test_callback_hitl_disabled_soft_forbidden_requires_approval () =
       yield_until (fun () ->
         Option.is_some !result
         || Option.is_some (pending_id_for_keeper ~keeper_name));
-      let queued =
-        match pending_id_for_keeper ~keeper_name with
-        | Some id ->
-          (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-           | Ok () -> ()
-           | Error err ->
-             Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-          true
-        | None -> false
-      in
+      let queued = Option.is_some (pending_id_for_keeper ~keeper_name) in
+      (match pending_id_for_keeper ~keeper_name with
+       | Some id ->
+         (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+          | Ok () -> ()
+          | Error err ->
+            Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err))
+       | None -> ());
       yield_until (fun () -> Option.is_some !result);
       Alcotest.(check bool)
         "soft destructive op still queues when HITL threshold is disabled"
@@ -1950,7 +1948,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
-  Unix.putenv "MASC_DISABLE_HITL" "false";
+  Unix.putenv Env_config_core.disable_hitl_env_key "false";
   Alcotest.run "HITL Approval" [
     ("risk_classification", [
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;

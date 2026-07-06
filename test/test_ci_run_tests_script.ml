@@ -217,6 +217,11 @@ fi
 printf '  [FAIL]        module-init          3   keeper all complete.\n' >&2
 printf 'ASSERT Keeper_metrics.all covers every constructor\n' >&2
 printf '1 failure! in 0.000s. 6 tests run.\n' >&2
+i=0
+while [ "$i" -lt 5000 ]; do
+  printf 'deterministic failure context %s\n' "$i" >&2
+  i=$((i + 1))
+done
 exit 1
 |}
   ;
@@ -246,6 +251,74 @@ exit 1
 |}
   ;
   Unix.chmod dune_path 0o755;
+  bin_dir
+
+let make_fake_dune_github_disk_warning dir =
+  let bin_dir = Filename.concat dir "bin-github-disk-warning" in
+  Unix.mkdir bin_dir 0o755;
+  let dune_path = Filename.concat bin_dir "dune" in
+  write_file dune_path
+    {|#!/bin/sh
+set -eu
+log_file="${FAKE_DUNE_LOG:?}"
+printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
+if [ "${1:-}" = "--version" ]; then
+  printf '3.21.0\n'
+  exit 0
+fi
+if [ "${1:-}" = "clean" ]; then
+  exit 0
+fi
+printf 'collect2: error: ld returned 1 exit status\n' >&2
+printf 'Error: Error during linking (exit code 1)\n' >&2
+printf '##[warning]You are running out of disk space. The runner will stop working when the machine runs out of disk space. Free space left: 14 MB\n' >&2
+exit 1
+|}
+  ;
+  Unix.chmod dune_path 0o755;
+  bin_dir
+
+let make_fake_dune_with_low_disk_df dir =
+  let bin_dir = Filename.concat dir "bin-low-disk-df" in
+  Unix.mkdir bin_dir 0o755;
+  let dune_path = Filename.concat bin_dir "dune" in
+  write_file dune_path
+    {|#!/bin/sh
+set -eu
+log_file="${FAKE_DUNE_LOG:?}"
+printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
+if [ "${1:-}" = "--version" ]; then
+  printf '3.21.0\n'
+  exit 0
+fi
+if [ "${1:-}" = "clean" ]; then
+  exit 0
+fi
+trap 'exit 143' TERM
+sleep 10
+exit 0
+|}
+  ;
+  Unix.chmod dune_path 0o755;
+  let df_path = Filename.concat bin_dir "df" in
+  write_file df_path
+    {|#!/bin/sh
+case "${1:-}" in
+  -Pm)
+    printf 'Filesystem 1048576-blocks Used Available Capacity Mounted on\n'
+    printf '/dev/root 100 99 14 99%% /\n'
+    ;;
+  -h)
+    printf 'Filesystem Size Used Avail Use%% Mounted on\n'
+    printf '/dev/root 100G 99G 14M 99%% /\n'
+    ;;
+  *)
+    /bin/df "$@"
+    ;;
+esac
+|}
+  ;
+  Unix.chmod df_path 0o755;
   bin_dir
 
 let test_rpc_retry_uses_isolated_build_dir () =
@@ -530,6 +603,117 @@ let test_disk_full_failure_skips_flaky_retry () =
           failf "expected exactly one dune invocation, got:\n%s"
             (String.concat "\n" log_lines))
 
+let test_github_disk_warning_skips_flaky_retry () =
+  with_temp_dir "ci-run-tests-gh-disk-warning" (fun dir ->
+      let cwd = Unix.realpath dir in
+      let repo_dir = Filename.concat dir "repo" in
+      Unix.mkdir repo_dir 0o755;
+      let fake_log = Filename.concat dir "fake-dune.log" in
+      let ci_log = Filename.concat dir "ci-run-tests.log" in
+      let fake_bin = make_fake_dune_github_disk_warning dir in
+      let path =
+        Printf.sprintf "%s:%s" fake_bin
+          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+      in
+      let env =
+        [
+          ("PATH", path);
+          ("DUNE_BUILD_DIR", "");
+          ("FAKE_DUNE_LOG", fake_log);
+          ("CI_TEST_HEARTBEAT_SEC", "1");
+          ("CI_TEST_TIMEOUT_SEC", "30");
+          ("CI_TEST_LOG_FILE", ci_log);
+          ("CI_CONTRACT_HARNESS_ENABLED", "0");
+          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
+        ]
+      in
+      let code, stdout, stderr =
+        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
+      in
+      check int "github disk warning exit code" 1 code;
+      let ci_log_contents = read_file ci_log in
+      let observed_output =
+        String.concat "\n" [ ci_log_contents; stdout; stderr ]
+      in
+      check bool "disk guidance present" true
+        (contains_substring observed_output
+           "detected disk exhaustion during dune build");
+      check bool "github runner warning preserved" true
+        (contains_substring observed_output "Free space left: 14 MB");
+      check bool "flaky retry skipped" false
+        (contains_substring observed_output "flaky-test mitigation");
+      let log_lines =
+        read_file fake_log
+        |> String.split_on_char '\n'
+        |> List.filter (fun line -> String.trim line <> "")
+      in
+      match log_lines with
+      | [ first ] ->
+          check string "single attempt uses repo cwd"
+            (Printf.sprintf "test||%s" cwd)
+            first
+      | _ ->
+          failf "expected exactly one dune invocation, got:\n%s"
+            (String.concat "\n" log_lines))
+
+let test_low_disk_df_stops_before_flaky_retry () =
+  with_temp_dir "ci-run-tests-low-disk-df" (fun dir ->
+      let cwd = Unix.realpath dir in
+      let repo_dir = Filename.concat dir "repo" in
+      Unix.mkdir repo_dir 0o755;
+      let fake_log = Filename.concat dir "fake-dune.log" in
+      let ci_log = Filename.concat dir "ci-run-tests.log" in
+      let fake_bin = make_fake_dune_with_low_disk_df dir in
+      let path =
+        Printf.sprintf "%s:%s" fake_bin
+          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+      in
+      let env =
+        [
+          ("PATH", path);
+          ("DUNE_BUILD_DIR", "");
+          ("FAKE_DUNE_LOG", fake_log);
+          ("CI_TEST_HEARTBEAT_SEC", "1");
+          ("CI_TEST_TIMEOUT_SEC", "30");
+          ("CI_TEST_DISK_CHECK_SEC", "1");
+          ("CI_TEST_DISK_MIN_AVAILABLE_MB", "1024");
+          ("CI_TEST_LOG_FILE", ci_log);
+          ("CI_CONTRACT_HARNESS_ENABLED", "0");
+          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
+        ]
+      in
+      let code, stdout, stderr =
+        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
+      in
+      check int "low disk pressure exit code" 75 code;
+      let ci_log_contents = read_file ci_log in
+      let observed_output =
+        String.concat "\n" [ ci_log_contents; stdout; stderr ]
+      in
+      check bool "disk pressure detail present" true
+        (contains_substring observed_output
+           "available_mb=14 min_available_mb=1024");
+      check bool "disk diagnostics present" true
+        (contains_substring observed_output "[ci-diag] reason=disk_pressure");
+      check bool "disk guidance present" true
+        (contains_substring observed_output
+           "detected disk exhaustion during dune build");
+      check bool "flaky retry skipped" false
+        (contains_substring observed_output "flaky-test mitigation");
+      let log_lines =
+        read_file fake_log
+        |> String.split_on_char '\n'
+        |> List.filter (fun line -> String.trim line <> "")
+      in
+      match log_lines with
+      | [ first ] ->
+          check string "single attempt uses repo cwd"
+            (Printf.sprintf "test||%s" cwd)
+            first
+      | _ ->
+          failf "expected exactly one dune invocation, got:\n%s"
+            (String.concat "\n" log_lines))
+
 let test_timeout_diagnostics_capture_active_process_group () =
   with_temp_dir "ci-run-tests-timeout" (fun dir ->
       let ci_log = Filename.concat dir "ci-run-tests.log" in
@@ -579,6 +763,10 @@ let () =
             test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache;
           test_case "disk full failure skips flaky retry" `Quick
             test_disk_full_failure_skips_flaky_retry;
+          test_case "github disk warning skips flaky retry" `Quick
+            test_github_disk_warning_skips_flaky_retry;
+          test_case "low disk df stops before flaky retry" `Quick
+            test_low_disk_df_stops_before_flaky_retry;
           test_case "timeout diagnostics capture active process group" `Quick
             test_timeout_diagnostics_capture_active_process_group;
         ] );

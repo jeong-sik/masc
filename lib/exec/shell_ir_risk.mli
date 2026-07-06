@@ -90,6 +90,18 @@ val classify_repo_hosting_cli : string list -> risk_class
     The current command literal is ["gh"], but the API is named for the
     Shell-IR capability boundary rather than a product-level GH helper family. *)
 
+val risk_of_gh_verb : Gh_verb.t -> risk_class
+(** RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command.
+    Reads the same subcommand tables as [classify_repo_hosting_cli] for known
+    families (so the two agree for every recognized [family/action] pair) and
+    differs only for [Gh_verb.Other] (an unrecognized top-level area), which is
+    fail-closed to [R2_Irreversible] rather than the word-list [R0_Read]
+    fall-through. [Gh_verb.Api] returns [R0_Read] — its risk is string-borne
+    (HTTP method / graphql body) and owned by the word-list floor. Known
+    families with a table-absent action stay [R0_Read] (treated as reads).
+    Never returns [Destructive_protected]. Capability-identity substrate for
+    W2 (per-keeper policy) and W3 (non-blocking approval routing). *)
+
 val literal_words_of_simple : Shell_ir.simple -> string list option
 (** Extract literal words from a single [Shell_ir.simple] stage:
     [[bin; arg0; arg1; ...]]. Non-literal args ([Concat], [Var])

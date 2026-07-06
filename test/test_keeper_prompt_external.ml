@@ -132,6 +132,7 @@ let turn_intent_bullet_keys =
     Keeper_prompt_names.turn_intent_board_curation_guidance;
     Keeper_prompt_names.turn_intent_broadcast_guidance;
     Keeper_prompt_names.turn_intent_task_create_guidance;
+    Keeper_prompt_names.turn_intent_pr_duplicate_search_guidance;
   ]
 
 let task_create_observation : WO.world_observation =

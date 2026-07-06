@@ -92,7 +92,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Npm { subcommand = "install"; save_dev = true; global = false; force = false; rest = [] })
   ; W (Cargo { subcommand = "build"; release = true; verbose = false; features = None; rest = [] })
   ; W (Go { subcommand = "build"; verbose = false; race = false; rest = [ "./..." ] })
-  ; W (Gh { subcommand = "pr"; action = Some "list"; draft = false; squash = false; delete_branch = false; body = None; title = None; rest = [] })
+  ; W (Gh { subcommand = "pr"; action = Some "list"; draft = false; squash = false; delete_branch = false; body = None; title = None; search = None; state = None; rest = [] })
   ; W (Chmod { mode = "755"; path = "/tmp/x"; recursive = false })
   ; W (Chown { owner = "root"; path = "/tmp/x"; recursive = false })
   ; W (Docker { subcommand = "run"; rm = false; privileged = false; detach = true; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [ "nginx" ] })
@@ -313,7 +313,7 @@ let test_of_simple_round_trip () =
     ; W (Npm { subcommand = "run"; save_dev = false; global = false; force = false; rest = [ "build" ] })
     ; W (Cargo { subcommand = "test"; release = false; verbose = false; features = None; rest = [ "--lib" ] })
     ; W (Go { subcommand = "run"; verbose = true; race = false; rest = [ "main.go" ] })
-    ; W (Gh { subcommand = "issue"; action = Some "create"; draft = false; squash = false; delete_branch = false; body = None; title = Some "bug"; rest = [] })
+    ; W (Gh { subcommand = "issue"; action = Some "create"; draft = false; squash = false; delete_branch = false; body = None; title = Some "bug"; search = None; state = None; rest = [] })
     ; W (Chmod { mode = "644"; path = "/etc/config"; recursive = true })
     ; W (Chown { owner = "user:group"; path = "/var/data"; recursive = true })
     ; W (Docker { subcommand = "build"; rm = false; privileged = false; detach = false; name = None; network = None; volumes = []; publish = []; env_vars = []; workdir = None; platform = None; rest = [ "myapp"; "." ] })
@@ -492,6 +492,24 @@ let test_flag_equals_parsing () =
    | W (Gh { subcommand = "pr"; action = Some "create"; body = Some "hello world"; title = Some "my pr"; draft = true; _ }) -> ()
    | w ->
      Alcotest.failf "Gh --flag=value: expected body/title parsed, got %a" pp w);
+  let gh_search =
+    of_simple
+      { (base "gh") with
+        args =
+          [ lit "pr"; lit "list"; lit "--search=task-1814"; lit "--state"; lit "all" ]
+      }
+  in
+  (match gh_search with
+   | W
+       (Gh
+          { subcommand = "pr"
+          ; action = Some "list"
+          ; search = Some "task-1814"
+          ; state = Some "all"
+          ; _
+          }) -> ()
+   | w ->
+     Alcotest.failf "Gh --search/--state: expected fields parsed, got %a" pp w);
   (* Curl: --request=POST --data=hello *)
   let curl =
     of_simple

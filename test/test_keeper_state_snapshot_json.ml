@@ -698,7 +698,7 @@ let test_attention_checkpoint_prunes_current_turn_suffix () =
     .checkpoint_for_replay_persistence
       ~history_messages:[ old_user; old_assistant ]
       ~pre_turn_working_context
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
       ~session_id:"new-session"
       ~response_text:"synthetic no-progress"
       ~state_snapshot_source:KMP.State_block
@@ -735,7 +735,7 @@ let test_attention_checkpoint_refuses_mismatched_history_prefix () =
     .checkpoint_for_replay_persistence
       ~history_messages:[ expected_old_user; old_assistant ]
       ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
       ~session_id:"new-session"
       ~response_text:"synthetic no-progress"
       ~state_snapshot_source:KMP.State_block
@@ -1019,7 +1019,7 @@ let test_attention_contract_does_not_resume_working_state_digest () =
       ~pre_dispatch_compacted:false
       ~state_snapshot_source:KMP.Synthesized
       ~stop_reason:Runtime_agent.Completed
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
   in
   Alcotest.(check bool)
     "attention contract does not restore prior prompt-digest loops"
@@ -1036,6 +1036,19 @@ let test_attention_contract_does_not_resume_working_state_digest () =
     "budget checkpoint still resumes prior prompt-digest loops"
     true
     budget_resume
+
+let test_passive_only_contract_resumes_working_state_digest () =
+  let passive_resume =
+    Finalize.should_resume_merge
+      ~pre_dispatch_compacted:false
+      ~state_snapshot_source:KMP.Synthesized
+      ~stop_reason:Runtime_agent.Completed
+      ~completion_contract_result:Receipt.Contract_passive_only
+  in
+  Alcotest.(check bool)
+    "passive-only does not block working-state resume"
+    true
+    passive_resume
 
 let test_synthetic_finalizer_preserves_generated_response_text () =
   let raw_response_text =
@@ -1089,7 +1102,7 @@ let test_contract_attention_finalizer_drops_raw_response_text () =
       ~keeper_name:"albini"
       ~goal:"PM flow"
       ~actual_keeper_tool_names:["keeper_context_status"]
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text
       ()
@@ -1451,6 +1464,10 @@ let () =
             "attention result does not resume working-state digest"
             `Quick
             test_attention_contract_does_not_resume_working_state_digest;
+          Alcotest.test_case
+            "passive-only result resumes working-state digest"
+            `Quick
+            test_passive_only_contract_resumes_working_state_digest;
           Alcotest.test_case
             "synthetic finalizer preserves generated response text"
             `Quick

@@ -180,12 +180,12 @@ let completion_contract_satisfied = function
 let completion_contract_unsatisfied = function
   | Contract_violated
   | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only -> true
+  | Contract_needs_execution_progress -> true
   | Contract_unknown
   | Contract_not_dispatched
   | Contract_surface_mismatch
   | Contract_no_capable_provider
+  | Contract_passive_only
   | Contract_satisfied_completion
   | Contract_satisfied_execution -> false
 ;;

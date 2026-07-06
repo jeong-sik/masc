@@ -27,6 +27,23 @@ let contains_substring text needle =
   in
   loop 0
 
+let json_string_field key = function
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`String value) -> Some value
+       | _ -> None)
+  | _ -> None
+
+let json_bool_field key = function
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`Bool value) -> Some value
+       | _ -> None)
+  | _ -> None
+
+let replay_metadata_of_message (msg : Agent_sdk.Types.message) =
+  List.assoc_opt KMP.replay_metadata_key msg.metadata
+
 (* ── Round-trip tests ────────────────────────────────────────────── *)
 
 let make_snapshot
@@ -123,6 +140,48 @@ let test_envelope_empty_snapshot_returns_none () =
   ] in
   let restored = KMP.snapshot_of_structured_working_context json in
   Alcotest.(check bool) "empty snapshot in envelope -> None" true (restored = None)
+
+let test_replay_metadata_marks_synthesized_snapshot_non_live () =
+  let snapshot =
+    make_snapshot
+      ~goal:(Some "Recover scheduler state")
+      ~progress:None
+      ~done_summary:None
+      ~next_summary:None
+      ~next_items:[]
+      ~decisions:[]
+      ~open_questions:[]
+      ~constraints:[]
+      ()
+  in
+  let metadata =
+    KMP.replay_metadata_of_snapshot
+      ~state_snapshot_source:KMP.Synthesized
+      snapshot
+  in
+  Alcotest.(check (option string))
+    "source"
+    (Some "synthesized")
+    (json_string_field "state_snapshot_source" metadata);
+  Alcotest.(check (option bool))
+    "synthetic"
+    (Some true)
+    (json_bool_field "state_snapshot_synthetic" metadata);
+  Alcotest.(check (option bool))
+    "live observation"
+    (Some false)
+    (json_bool_field "state_snapshot_live_observation" metadata);
+  Alcotest.(check (option bool))
+    "model authored"
+    (Some false)
+    (json_bool_field "state_snapshot_model_authored" metadata);
+  match KMP.snapshot_of_replay_metadata metadata with
+  | None -> Alcotest.fail "metadata payload no longer hydrates"
+  | Some hydrated ->
+      Alcotest.(check (option string))
+        "payload still hydrates"
+        snapshot.goal
+        hydrated.goal
 
 let test_structured_state_schema_parse_raw_snapshot_json () =
   let json =
@@ -373,6 +432,25 @@ let test_patch_stores_replay_metadata_and_clears_working_context () =
   match List.rev patched.messages with
   | [] -> Alcotest.fail "patched checkpoint has no messages"
   | last :: _ ->
+      (match replay_metadata_of_message last with
+       | None -> Alcotest.fail "assistant message missing raw replay metadata"
+       | Some metadata ->
+           Alcotest.(check (option string))
+             "metadata source"
+             (Some "model_state_block")
+             (json_string_field "state_snapshot_source" metadata);
+           Alcotest.(check (option bool))
+             "metadata synthetic"
+             (Some false)
+             (json_bool_field "state_snapshot_synthetic" metadata);
+           Alcotest.(check (option bool))
+             "metadata live observation"
+             (Some true)
+             (json_bool_field "state_snapshot_live_observation" metadata);
+           Alcotest.(check (option bool))
+             "metadata model authored"
+             (Some true)
+             (json_bool_field "state_snapshot_model_authored" metadata));
       (match KMP.snapshot_of_message_metadata last with
        | None -> Alcotest.fail "assistant message metadata missing replay snapshot"
        | Some snap ->
@@ -1295,6 +1373,10 @@ let () =
             "schema parses raw snapshot json"
             `Quick
             test_structured_state_schema_parse_raw_snapshot_json;
+          Alcotest.test_case
+            "replay metadata marks synthesized non-live"
+            `Quick
+            test_replay_metadata_marks_synthesized_snapshot_non_live;
           Alcotest.test_case
             "reply parser accepts fenced envelope"
             `Quick

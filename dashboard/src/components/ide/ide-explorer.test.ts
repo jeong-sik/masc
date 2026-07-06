@@ -166,8 +166,27 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
       repositories: () => [repo('masc', 'masc')],
     }), container)
 
-    expect(container.textContent).toContain('EXPLORER · masc')
-    expect(container.textContent).not.toContain('EXPLORER · project')
+    expect(container.querySelector('[data-testid="ide-explorer-source"]')?.textContent).toBe('masc')
+    expect(container.querySelector('[data-testid="ide-explorer-source"]')?.getAttribute('title'))
+      .toBe('Workspace source: masc')
+  })
+
+  it('labels loaded visible files distinctly from filtered results', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    const count = container.querySelector<HTMLElement>('[data-testid="ide-explorer-file-count"]')
+    expect(count?.textContent).toBe('2 VISIBLE')
+    expect(count?.getAttribute('title')).toContain('currently loaded in the visible tree')
+
+    const search = container.querySelector<HTMLInputElement>('[role="searchbox"]')
+    expect(search).not.toBeNull()
+    search!.value = 'package'
+    fireEvent.input(search!)
+
+    expect(container.querySelector('[data-testid="ide-explorer-file-count"]')?.textContent)
+      .toBe('1/2 VISIBLE')
   })
 
   it('keeps header controls outside the scrollable tree body', () => {

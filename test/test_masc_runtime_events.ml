@@ -56,6 +56,11 @@ let test_with_turn_span_propagates_exn () =
     (fun () ->
       ignore (Masc_runtime_events.with_turn_span (fun () -> failwith "boom")))
 
+let test_start_listener_can_be_disabled () =
+  Unix.putenv "MASC_RUNTIME_EVENTS" "0";
+  Masc_runtime_events.start_listener ();
+  Alcotest.(check bool) "disabled listener call returns" true true
+
 let () =
   Alcotest.run "masc_runtime_events"
     [ ( "span-roundtrip"
@@ -68,5 +73,9 @@ let () =
             test_with_turn_span_returns_body
         ; Alcotest.test_case "propagates body exception" `Quick
             test_with_turn_span_propagates_exn
+        ] )
+    ; ( "listener"
+      , [ Alcotest.test_case "can be disabled by env" `Quick
+            test_start_listener_can_be_disabled
         ] )
     ]

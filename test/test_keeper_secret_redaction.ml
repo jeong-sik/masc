@@ -151,6 +151,47 @@ let test_execute_output_redaction_uses_keeper_snapshot () =
   contains "stdout marker present" stdout "[REDACTED]";
   contains "stderr marker present" stderr "[REDACTED]"
 
+let test_stream_redaction_reassembles_split_secret () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "stream" in
+  let root = secret_root_default ~base ~keeper_name in
+  let secret = "stream.secret!" in
+  write_file (Filename.concat (Filename.concat root "env") "STREAM_TOKEN") secret;
+  let redaction = R.snapshot ~base_path:base ~keeper_name in
+  let state = R.create_stream_state () in
+  let first = R.redact_stream_chunk redaction state "prefix stream." in
+  Alcotest.(check string) "unterminated line is held" "" first;
+  let second = R.redact_stream_chunk redaction state "secret! suffix\nnext\n" in
+  not_contains "split secret hidden" second secret;
+  contains "split secret marker present" second "[REDACTED]";
+  contains "complete trailing line emitted" second "next\n";
+  Alcotest.(check string)
+    "finish after newline has no held bytes"
+    ""
+    (R.redact_stream_finish redaction state)
+
+let test_stream_redaction_finish_redacts_held_tail () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "stream-tail" in
+  let root = secret_root_default ~base ~keeper_name in
+  let secret = "tail.secret!" in
+  write_file (Filename.concat (Filename.concat root "env") "TAIL_TOKEN") secret;
+  let redaction = R.snapshot ~base_path:base ~keeper_name in
+  let state = R.create_stream_state () in
+  let emitted = R.redact_stream_chunk redaction state ("tail=" ^ secret) in
+  Alcotest.(check string) "unterminated tail is held" "" emitted;
+  let flushed = R.redact_stream_finish redaction state in
+  not_contains "held tail secret hidden" flushed secret;
+  contains "held tail marker present" flushed "[REDACTED]";
+  Alcotest.(check string)
+    "finish clears held bytes"
+    ""
+    (R.redact_stream_finish redaction state)
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -165,5 +206,9 @@ let () =
             test_json_redaction_preserves_shape;
           Alcotest.test_case "redacts Execute stdout stderr and combined output" `Quick
             test_execute_output_redaction_uses_keeper_snapshot;
+          Alcotest.test_case "reassembles split stream secrets" `Quick
+            test_stream_redaction_reassembles_split_secret;
+          Alcotest.test_case "redacts held stream tail on finish" `Quick
+            test_stream_redaction_finish_redacts_held_tail;
         ] )
     ]

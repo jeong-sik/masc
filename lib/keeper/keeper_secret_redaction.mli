@@ -18,6 +18,21 @@ val redact_text : t -> string -> string
     with [\[REDACTED\]], preserving message length semantics except for
     the replacements themselves. *)
 
+type stream_state
+
+val create_stream_state : unit -> stream_state
+
+val redact_stream_chunk : t -> stream_state -> string -> string
+(** Stateful chunk redaction for streaming output. Buffers raw bytes up to
+    the last ['\n'] so a single-line secret split across chunk boundaries is
+    reassembled into one {!redact_text} call. Returns only the bytes safe
+    to emit now; the remainder is held until the next chunk or
+    {!redact_stream_finish}. *)
+
+val redact_stream_finish : t -> stream_state -> string
+(** Flush any remaining buffered bytes at end of stream and redact them as
+    one unit. *)
+
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact all string leaves in a JSON value, preserving shape. *)
 

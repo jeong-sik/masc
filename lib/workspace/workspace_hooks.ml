@@ -176,6 +176,11 @@ let operator_pending_confirm_remove_fn
     (fun _config _token ->
       Error "operator pending-confirm callback is not connected")
 
+let operator_pending_confirm_read_all_fn
+  : (Workspace_utils_backend_setup.config -> operator_pending_confirm_request list) Atomic.t
+  =
+  Atomic.make (fun _config -> [])
+
 
 (** Auto-subscribe agent to messages on session binding — wraps Subscriptions.SubscriptionStore. *)
 let subscribe_messages_fn

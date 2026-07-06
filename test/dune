@@ -1095,6 +1095,7 @@
   test_goal_store
   test_goal_metric_unevaluated
   test_goal_verification
+  test_goal_liveness_timeout
   test_string_util
   test_prompt_asset_sync
   test_system_error_class
@@ -1291,6 +1292,7 @@
   test_goal_store
   test_goal_metric_unevaluated
   test_goal_verification
+  test_goal_liveness_timeout
   test_string_util
   test_prompt_asset_sync
   test_system_error_class

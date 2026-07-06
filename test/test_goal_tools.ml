@@ -1804,7 +1804,7 @@ let test_goal_completion_blocks_open_tasks () =
     (get_string_field error_json "error_code")
 ;;
 
-let test_goal_completion_blocks_unevaluated_metric () =
+let test_goal_completion_allows_fallback_for_unevaluated_metric () =
   with_workspace
   @@ fun config ->
   let goal, _kind =
@@ -1831,17 +1831,21 @@ let test_goal_completion_blocks_unevaluated_metric () =
             ; "actor", principal_json ~id:"planner"
             ])
   in
-  let error_json = expect_error completed in
+  let result_json =
+    match completed with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
   check
     string
-    "metric completion blocked"
-    "conflict"
-    (get_string_field error_json "error_code");
-  check
-    bool
-    "error mentions metric evaluation"
-    true
-    (contains_substring (Yojson.Safe.to_string error_json) "has not been evaluated")
+    "transition successful"
+    "ok"
+    (get_string_field result_json "status");
+  match Goal_store.get_goal config ~goal_id:goal.id with
+  | None -> fail "goal not found after transition"
+  | Some updated_goal ->
+    check string "goal phase advanced to Completed"
+      "completed" (Goal_phase.to_string updated_goal.phase)
 ;;
 
 let test_goal_completion_override_allows_empty_goal () =
@@ -1983,6 +1987,25 @@ let test_completion_approval_requires_operator_caller () =
         ()
     with
     | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let () =
+    let token = Operator_action_constants.goal_approval_token_prefix ^ goal.id in
+    let entry : Operator_pending_confirm.pending_confirm =
+      { token
+      ; trace_id = "test-trace"
+      ; actor = "planner"
+      ; action_type = Operator_action_constants.goal_completion_decision
+      ; target_type = "goal"
+      ; target_id = Some goal.id
+      ; payload = `Null
+      ; delegated_tool = Operator_action_constants.goal_transition_tool
+      ; created_at = Masc_domain.now_iso ()
+      ; expires_at = Some (Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday () +. 1800.0))
+      }
+    in
+    match Operator_pending_confirm.upsert_pending_confirm config entry with
+    | Ok () -> ()
     | Error msg -> fail msg
   in
   let approved =
@@ -2177,9 +2200,9 @@ let () =
             `Quick
             test_goal_completion_blocks_open_tasks
         ; test_case
-            "completion blocks unevaluated metric"
+            "completion allows fallback for unevaluated metric"
             `Quick
-            test_goal_completion_blocks_unevaluated_metric
+            test_goal_completion_allows_fallback_for_unevaluated_metric
         ; test_case
             "completion override allows empty goal"
             `Quick

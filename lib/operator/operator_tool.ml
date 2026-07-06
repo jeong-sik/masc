@@ -429,6 +429,23 @@ let () =
   Atomic.set
     Workspace_hooks.operator_pending_confirm_remove_fn
     Operator_pending_confirm.remove_pending_confirm;
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_read_all_fn
+    (fun config ->
+      List.map
+        (fun (entry : Operator_pending_confirm.pending_confirm) ->
+          { Workspace_hooks.token = entry.token
+          ; trace_id = entry.trace_id
+          ; actor = entry.actor
+          ; action_type = entry.action_type
+          ; target_type = entry.target_type
+          ; target_id = entry.target_id
+          ; payload = entry.payload
+          ; delegated_tool = entry.delegated_tool
+          ; created_at = entry.created_at
+          ; expires_at = entry.expires_at
+          })
+        (Operator_pending_confirm.read_pending_confirms config));
   Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
     Operator_pending_confirm.remove_pending_confirms_by_target
 ;;

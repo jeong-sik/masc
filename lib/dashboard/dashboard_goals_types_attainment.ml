@@ -383,7 +383,7 @@ let goal_completion_to_json ~effective_policy ~open_request
   let ready_to_request_completion =
     match goal.phase with
     | Goal_phase.Executing ->
-        (not metric_completion_blocked)
+        (not metric_completion_blocked || (task_count > 0 && task_open_count = 0 && task_done_count > 0))
         && (String.equal attainment_state "attained"
             || (task_count > 0 && task_open_count = 0 && task_done_count > 0))
     | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval

@@ -156,7 +156,7 @@ let test_absent_metric_in_json () =
   check string "no metric declared -> absent" "absent"
     (json_str json "metric_evaluation")
 
-let test_unevaluated_metric_does_not_enable_completion_ready () =
+let test_unevaluated_metric_allows_fallback_completion_ready () =
   let g = make_goal ~metric:"coverage %" ~target_value:"80%" "g6" "cov" in
   let attainment =
     A.build_attainment_json ~state:"attained" ~basis:"metric_target_percent"
@@ -176,9 +176,9 @@ let test_unevaluated_metric_does_not_enable_completion_ready () =
   in
   check string "metric stays unevaluated" "unevaluated"
     (json_str json "metric_evaluation");
-  check bool "unevaluated metric cannot request completion" false
+  check bool "unevaluated metric allows completion via fallback" true
     (json_bool json "ready_to_request_completion");
-  check string "task-derived attainment is not completion-ready" "in_progress"
+  check string "task-derived attainment is ready_for_completion" "ready_for_completion"
     (json_str json "state")
 
 let test_keeper_receipt_timeline_missing_runtime_stays_missing () =
@@ -214,16 +214,16 @@ let () =
       ( "metric_evaluation",
         [
           test_case "declared metric is unevaluated" `Quick
-            test_declared_metric_is_unevaluated;
+          test_declared_metric_is_unevaluated;
           test_case "absent metric is absent" `Quick test_absent_metric_is_absent;
           test_case "attained task pct still unevaluated" `Quick
-            test_attained_task_pct_still_unevaluated;
+          test_attained_task_pct_still_unevaluated;
           test_case "zero progress still unevaluated" `Quick
-            test_zero_progress_metric_unevaluated;
+          test_zero_progress_metric_unevaluated;
           test_case "absent metric in json" `Quick test_absent_metric_in_json;
-          test_case "unevaluated metric does not enable completion ready" `Quick
-            test_unevaluated_metric_does_not_enable_completion_ready;
+          test_case "unevaluated metric allows fallback completion ready" `Quick
+          test_unevaluated_metric_allows_fallback_completion_ready;
           test_case "receipt timeline does not fabricate runtime" `Quick
-            test_keeper_receipt_timeline_missing_runtime_stays_missing;
+          test_keeper_receipt_timeline_missing_runtime_stays_missing;
         ] );
     ]

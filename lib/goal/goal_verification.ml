@@ -272,6 +272,7 @@ type goal_verification_request = {
   status : request_status;
   created_at : string;
   resolved_at : string option;
+  expires_at : string option;
 }
 
 type cancel_request_result =
@@ -290,6 +291,7 @@ let goal_verification_request_to_yojson (request : goal_verification_request) =
       ("status", request_status_to_yojson request.status);
       ("created_at", `String request.created_at);
       ("resolved_at", Json_util.string_opt_to_json request.resolved_at);
+      ("expires_at", Json_util.string_opt_to_json request.expires_at);
     ]
 
 let goal_verification_request_of_yojson = function
@@ -342,6 +344,10 @@ let goal_verification_request_of_yojson = function
           created_at;
           resolved_at =
             (match Json_util.assoc_member_opt "resolved_at" json with
+             | Some (`String s) -> Some s
+             | _ -> None);
+          expires_at =
+            (match Json_util.assoc_member_opt "expires_at" json with
              | Some (`String s) -> Some s
              | _ -> None);
         })
@@ -590,6 +596,8 @@ let gen_request_id () =
 let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
     ~(policy_snapshot : policy_snapshot) =
   let created_at = Masc_domain.now_iso () in
+  let expires_at_unix = Unix.gettimeofday () +. 1800.0 in
+  let expires_at = Some (Masc_domain.iso8601_of_unix_seconds expires_at_unix) in
   let request =
     {
       id = gen_request_id ();
@@ -601,6 +609,7 @@ let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
       status = Open;
       created_at;
       resolved_at = None;
+      expires_at;
     }
   in
   let state_result =

@@ -524,14 +524,6 @@ let validate_goal_completion_ready config ~(goal : Goal_store.goal) ~override_no
   match override_note with
   | _ when goal_completion_override_present override_note -> Ok ()
   | _ ->
-    (match goal.metric with
-     | Some metric when not (String.equal (String.trim metric) "") ->
-       Error
-         (Printf.sprintf
-            "goal completion blocked: metric %S has not been evaluated; provide \
-             override_note to force"
-            metric)
-     | Some _ | None ->
     let index =
       Workspace_goal_index.build_goal_task_index_for_config
         config
@@ -551,6 +543,11 @@ let validate_goal_completion_ready config ~(goal : Goal_store.goal) ~override_no
       |> List.filter (fun (task : Masc_domain.task) ->
         Masc_domain.task_status_is_done task.task_status)
       |> List.length
+    in
+    let has_unevaluated_metric =
+      match goal.metric with
+      | Some metric when not (String.equal (String.trim metric) "") -> true
+      | _ -> false
     in
     if linked_tasks = []
     then
@@ -574,7 +571,9 @@ let validate_goal_completion_ready config ~(goal : Goal_store.goal) ~override_no
       | Some (Convergence.AllSubTasksDone _) | Some (Convergence.MetricMet _) ->
         Ok ()
       | Some (Convergence.StagnationDetected _) | None ->
-        if open_count > 0
+        if has_unevaluated_metric && open_count = 0 && done_count > 0 then
+          Ok ()
+        else if open_count > 0
         then
           Error
             (Printf.sprintf
@@ -587,9 +586,17 @@ let validate_goal_completion_ready config ~(goal : Goal_store.goal) ~override_no
             "goal completion blocked: linked tasks are terminal but none are done; \
              provide override_note to force"
         else
+          let metric_msg =
+            match goal.metric with
+            | Some m when not (String.equal (String.trim m) "") ->
+              Printf.sprintf " (metric %S has not been evaluated)" m
+            | _ -> ""
+          in
           Error
-            "goal completion blocked: linked tasks have not converged; provide \
-             override_note to force")
+            (Printf.sprintf
+               "goal completion blocked: task convergence failed%s; provide \
+                override_note to force"
+               metric_msg)
 ;;
 
 let parse_optional_string_list args field =
@@ -879,7 +886,106 @@ let goal_hygiene_apply_block ctx ~actor_id ~issues ~goal_id =
                ; "actor_id", `String actor_id
                ; "policy", `String goal_hygiene_policy_id
                ]);
-       Ok updated_goal)
+        Ok updated_goal)
+;;
+
+let sweep_expired_verifications_and_goals (ctx : context) =
+  let now_unix = Unix.gettimeofday () in
+  let goals = Goal_store.list_goals ctx.config () in
+  List.iter
+    (fun (goal : Goal_store.goal) ->
+       match goal.phase with
+       | Goal_phase.Awaiting_verification -> (
+           match goal.active_verification_request_id with
+           | None -> ()
+           | Some request_id -> (
+               match Goal_verification.find_request ctx.config ~request_id with
+               | None -> ()
+               | Some request ->
+                   if request.status = Open then (
+                     match request.expires_at with
+                     | None -> ()
+                     | Some expires_at_str -> (
+                         match Masc_domain.parse_iso8601_opt expires_at_str with
+                         | None -> ()
+                         | Some expires_unix ->
+                             if now_unix >= expires_unix then (
+                               match Goal_verification.cancel_request ctx.config ~request_id with
+                               | Error msg ->
+                                   Log.Misc.warn "Failed to cancel expired request %s: %s" request_id msg
+                               | Ok _ ->
+                                   match
+                                     Goal_store.update_goal
+                                       ctx.config
+                                       ~goal_id:goal.id
+                                       (fun g ->
+                                         { g with
+                                           phase = Goal_phase.Executing;
+                                           status = Goal_store.Active;
+                                           active_verification_request_id = None;
+                                           last_review_note = Some "Verification request expired (timeout)";
+                                         })
+                                   with
+                                   | Error msg ->
+                                       Log.Misc.warn "Failed to revert goal %s after verification timeout: %s" goal.id msg
+                                   | Ok updated_goal ->
+                                       emit_goal_event
+                                         ctx
+                                         ~goal_id:goal.id
+                                         ~event_type:"goal_phase"
+                                         ~payload:
+                                           (`Assoc
+                                               [ "phase", Goal_phase.to_yojson updated_goal.phase
+                                               ; "actor_id", `String "system"
+                                               ]);
+                                       emit_goal_event
+                                         ctx
+                                         ~goal_id:goal.id
+                                         ~event_type:"goal_verification_expired"
+                                         ~payload:(`Assoc [ "request_id", `String request_id ])
+                             )
+                       )
+                   )
+             )
+         )
+       | Goal_phase.Awaiting_approval -> (
+           let token = goal_approval_pending_confirm_token goal.id in
+           let active_confirms = (Atomic.get Workspace_hooks.operator_pending_confirm_read_all_fn) ctx.config in
+           let found = List.exists (fun (entry : Workspace_hooks.operator_pending_confirm_request) -> String.equal entry.token token) active_confirms in
+           if not found then (
+             match
+               Goal_store.update_goal
+                 ctx.config
+                 ~goal_id:goal.id
+                 (fun g ->
+                   { g with
+                     phase = Goal_phase.Executing;
+                     status = Goal_store.Active;
+                     last_review_note = Some "Goal approval request expired (timeout)";
+                   })
+             with
+             | Error msg ->
+                 Log.Misc.warn "Failed to revert goal %s after approval timeout: %s" goal.id msg
+             | Ok updated_goal ->
+                 emit_goal_event
+                   ctx
+                   ~goal_id:goal.id
+                   ~event_type:"goal_phase"
+                   ~payload:
+                     (`Assoc
+                         [ "phase", Goal_phase.to_yojson updated_goal.phase
+                         ; "actor_id", `String "system"
+                         ]);
+                 emit_goal_event
+                   ctx
+                   ~goal_id:goal.id
+                   ~event_type:"goal_approval_expired"
+                   ~payload:(`Assoc [ "token", `String token ])
+           )
+         )
+       | _ -> ()
+    )
+    goals
 ;;
 
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
@@ -890,6 +996,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
   | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok (), Ok phase ->
+    sweep_expired_verifications_and_goals ctx;
     let goals = Goal_store.list_goals ctx.config ?phase () in
     let rollup = Goal_store.compute_rollup goals in
     let hygiene_issues =
@@ -1070,6 +1177,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
   | Error err, _, _ | _, Error err, _ | _, _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some action), Ok (Some actor) ->
+    sweep_expired_verifications_and_goals ctx;
     if not (principal_matches_authenticated_caller ctx actor)
     then
       error_result_typed
@@ -1452,6 +1560,7 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
   | Error err, _, _, _ | _, Error err, _, _ | _, _, Error err, _ | _, _, _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some principal), Ok (Some decision), Ok evidence_refs ->
+    sweep_expired_verifications_and_goals ctx;
     if not (principal_matches_authenticated_caller ctx principal)
     then
       error_result_typed

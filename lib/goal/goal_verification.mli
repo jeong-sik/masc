@@ -147,6 +147,7 @@ type goal_verification_request = {
   status : request_status;
   created_at : string;
   resolved_at : string option;
+  expires_at : string option;
 }
 (** A single verifier review.  [target_phase] is the goal
     phase whose entry is gated by this request — currently

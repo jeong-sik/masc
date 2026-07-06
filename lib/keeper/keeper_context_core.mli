@@ -272,6 +272,7 @@ val load_context_from_checkpoint :
     text (state blocks stripped). *)
 val patch_checkpoint_last_assistant :
   ?snapshot:Keeper_memory_policy.keeper_state_snapshot ->
+  ?snapshot_source:Keeper_memory_policy.state_snapshot_source ->
   Agent_sdk.Checkpoint.t ->
   session_id:string ->
   response_text:string ->

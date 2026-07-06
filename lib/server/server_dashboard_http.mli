@@ -49,6 +49,13 @@ val approval_resolve_decision_required_message : string
 
 (** {1 Board / memory / governance HTTP entries} *)
 
+val handle_repository_observation_snapshot :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  unit
+
 val dashboard_board_json :
   ?config:Workspace.config ->
   ?hearth:string ->

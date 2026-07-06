@@ -207,6 +207,8 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
+  test_ide_partition_resolution
+  test_ide_diagnostics
   test_keeper_runtime_contract
   test_schema_surface_index
   test_keeper_accountability
@@ -553,6 +555,8 @@
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
+  test_ide_partition_resolution
+  test_ide_diagnostics
   test_keeper_runtime_contract
   test_schema_surface_index
   test_keeper_accountability

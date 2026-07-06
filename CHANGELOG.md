@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## [0.19.56] - 2026-07-06
+
+### Added
+- Interactive install wizard in `scripts/install.sh` with TTY detection,
+  typed provider catalog selection, secure API key prompting, and writing
+  `.env.local` / updating `runtime.toml` defaults.
+- `masc runtime-wizard-catalog` command that derives the install wizard
+  provider catalog from the typed `runtime.toml` config, including provider
+  healthcheck metadata.
+- Provider connectivity ping during interactive install, using healthcheck
+  paths declared in `runtime.toml`.
+- `masc runtime-default-set` typed writer used by the installer to update the
+  runtime default.
+
+### Changed
+- Runtime schema and TOML parser additions to support provider display names,
+  credentials, endpoints, healthcheck paths, and concrete runtime bindings for
+  the install wizard, with provider wizard defaults selected through explicit
+  `wizard-default` binding metadata instead of declaration order or dashboard
+  runtime default markers.
+- Installer one-touch startup now seeds the OAS model catalog, runs binary
+  smoke checks with the installed base path/catalog environment, and prints a
+  copy-paste start command with `MASC_BASE_PATH`, `OAS_MODEL_CATALOG`, and
+  `MASC_RUNTIME_EVENTS=0` wired for clean Linux/macOS installs.
+
+### Fixed
+- Stop keeper infinite rotation on `capacity_backpressure` (#23383, Phase A of
+  #23373). `degraded_reason_allows_candidate_cycle` now caps rotation for
+  `Capacity_backpressure`; the keeper pauses once when candidates are
+  exhausted instead of looping forever between two cooldown runtimes
+  (incidents 2026-05-21, 2026-07-06).
+- Expand rotation candidates to the full runtime catalog for transient
+  infrastructure errors (#23392, Phase B-1) so failover reaches healthy
+  runtimes outside the narrow `[base; default; phase_recovery]` set.
+- Unbreak main build after #23353 red-merge: add missing type annotation and
+  `(modules)` entry for `test_keeper_board_attention_candidate` (#23356).
 ## [0.19.55] - 2026-07-03
 
 ### Changed

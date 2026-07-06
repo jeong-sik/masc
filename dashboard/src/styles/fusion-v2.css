@@ -345,6 +345,52 @@
   overflow-wrap: anywhere;
 }
 
+.v2-fusion-surface .fus-sink-linkage {
+  display: grid;
+  gap: 3px;
+  max-width: 100%;
+  margin-top: 6px;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--color-bg-surface) 78%, transparent);
+  padding: 6px 8px;
+}
+
+.v2-fusion-surface .fus-sink-linkage.verified {
+  border-color: var(--ok-border);
+  background: var(--ok-soft);
+}
+
+.v2-fusion-surface .fus-sink-linkage.missing {
+  border-color: color-mix(in srgb, var(--warn-fg) 42%, var(--fus-line));
+  background: var(--warn-soft);
+}
+
+.v2-fusion-surface .fus-sink-linkage.mismatch {
+  border-color: var(--bad-30);
+  background: var(--bad-10);
+}
+
+.v2-fusion-surface .fus-sink-linkage-k {
+  color: var(--fus-text);
+  font-size: var(--fs-10);
+  font-weight: 800;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-sink-linkage-v {
+  color: var(--fus-muted);
+  font-size: var(--fs-11);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.v2-fusion-surface .fus-corr-sep {
+  color: var(--fus-muted);
+  margin: 0 6px;
+}
+
 .v2-fusion-surface .fus-label {
   color: var(--fus-muted);
   font-size: var(--fs-11);
@@ -849,7 +895,8 @@ button.fus-reconcile-row:hover {
   padding: 4px 0;
 }
 
-.v2-fusion-surface .fus-runs-error {
+.v2-fusion-surface .fus-runs-error,
+.v2-fusion-surface .fus-board-error {
   display: grid;
   gap: 4px;
   border: 1px solid var(--bad-30);
@@ -859,14 +906,16 @@ button.fus-reconcile-row:hover {
   padding: 8px 10px;
 }
 
-.v2-fusion-surface .fus-runs-error-k {
+.v2-fusion-surface .fus-runs-error-k,
+.v2-fusion-surface .fus-board-error-k {
   font-size: var(--fs-10);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.v2-fusion-surface .fus-runs-error-v {
+.v2-fusion-surface .fus-runs-error-v,
+.v2-fusion-surface .fus-board-error-v {
   color: var(--fus-text);
   font-size: var(--fs-12);
   line-height: 1.45;

@@ -421,6 +421,56 @@ let test_passive_only_no_work_receipt_does_not_mark_attention () =
           | _ -> false))
 ;;
 
+let test_passive_only_active_receipt_does_not_mark_attention () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       init_runtime_default_for_tests ();
+       let keeper_name = "runtime-trust-passive-only-active-task" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "passive_no_action"
+             ; "terminal_reason_code", `String "completed"
+             ; "completion_contract_result", `String "passive_only"
+             ; "current_task_id", `String "task-1844"
+             ; "goal_ids", `List [ `String "goal-pm-flow" ]
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "display disposition"
+         "Pass"
+         (snapshot |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "display reason"
+         "healthy"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check bool)
+         "needs attention"
+         false
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check bool)
+         "attention reason omitted"
+         true
+         (match snapshot |> member "attention_reason" with
+          | `Null -> true
+          | _ -> false))
+;;
+
 let test_completion_blocker_supersedes_passive_only_receipt () =
   Eio_main.run
   @@ fun env ->
@@ -770,6 +820,10 @@ let () =
             "passive-only no-work receipt does not mark attention"
             `Quick
             test_passive_only_no_work_receipt_does_not_mark_attention
+        ; Alcotest.test_case
+            "passive-only active receipt does not mark attention"
+            `Quick
+            test_passive_only_active_receipt_does_not_mark_attention
         ; Alcotest.test_case
             "runtime blocker supersedes passive-only receipt"
             `Quick

@@ -24,11 +24,14 @@ type indexed_fact =
   ; fact : fact
   }
 
-let ttl_expired ~now (fact : fact) =
-  match fact.valid_until with
-  | None -> false
-  | Some ts -> now > ts
-;;
+(* Retention boundary SSOT: the writer cap ([partition_expired]) and recall
+   both expire through [fact_is_current], whose [fact_effective_valid_until]
+   also derives the RFC-0259 P7 horizon for legacy [External_state] facts with
+   no explicit [valid_until]. Matching raw [fact.valid_until] here left GC
+   blind to that horizon — the memory-os sanity sweep asserts GC and sweep
+   agree, which broke main on 2026-07-06 (#23384). Same boundary at equality:
+   [ts >= now] current ⇔ [now > ts] expired. *)
+let ttl_expired ~now (fact : fact) = not (fact_is_current ~now fact)
 
 let bump_count key counts =
   let current =
@@ -107,8 +110,9 @@ let dedup_by_claim items =
 ;;
 
 (* RFC-0247 (purge): GC is now two structural passes only — hard-expire facts
-   past their [valid_until] horizon (a typed decision: Ephemeral TTL or
-   self-observation TTL), then dedup duplicate claims keeping the most-recently-verified.
+   past their effective horizon ([fact_effective_valid_until]: explicit
+   [valid_until], or the RFC-0259 P7 legacy [External_state] horizon), then
+   dedup duplicate claims keeping the most-recently-verified.
    The score-threshold
    discard ([decide_retention] on [score_fact <= 0.02]) was removed: a fact's
    value is not a number GC can threshold. Forgetting is the librarian's

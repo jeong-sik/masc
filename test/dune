@@ -2695,7 +2695,13 @@
 (test
  (name test_install_script)
  (modules test_install_script)
- (libraries alcotest))
+ (libraries alcotest fs_compat otoml unix)
+ (deps ../bin/main_eio.exe)
+ (action
+  (setenv
+   MASC_INSTALL_TEST_MASC
+   %{dep:../bin/main_eio.exe}
+   (run %{test}))))
 
 (test
  (name test_tui_http_ast)

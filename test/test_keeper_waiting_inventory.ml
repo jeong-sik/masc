@@ -46,6 +46,12 @@ let with_workspace f =
   f config
 ;;
 
+let operator_pending_confirms_path config =
+  Filename.concat
+    (Filename.concat (Workspace.masc_dir config) "operator")
+    "pending_confirms.json"
+;;
+
 let keeper_meta_fixture keeper_name =
   Masc_test_deps.meta_of_json_fixture
     (`Assoc
@@ -548,7 +554,7 @@ let test_external_attention_projection_is_bounded () =
 let test_corrupt_pending_confirms_is_read_error () =
   with_workspace
   @@ fun config ->
-  save_text (Operator_pending_confirm.pending_confirms_path config) "{not-json";
+  save_text (operator_pending_confirms_path config) "{not-json";
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "global pending-confirm read error metric"
     Otel_metric_store.metric_keeper_waiting_count

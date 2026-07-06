@@ -349,7 +349,7 @@ opam_pin_add neo4j_bolt_eio "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#$
 pinned_pkgs+=("neo4j_bolt_eio")
 
 if $include_bisect; then
-  # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.4 by pinning.
+  # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.
   opam_pin_add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
   pinned_pkgs+=("bisect_ppx")
 fi

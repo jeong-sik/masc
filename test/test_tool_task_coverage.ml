@@ -1293,7 +1293,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
     (fun ~task_id ~task_opt ~notes ~handoff () ->
        incr gate_calls;
        assert (String.equal task_id "task-001");
-       assert (str_contains notes "commit:abc123");
+       assert (str_contains notes "trace:task-1815");
        (match task_opt with
         | Some { Masc_domain.contract = None; _ } -> ()
         | _ -> failwith "expected analysis-only task with no contract");
@@ -1307,12 +1307,12 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
                ("action", `String "done");
                ( "notes",
                  `String
-                   "Analysis-only task completed with implementation notes and commit:abc123." );
+                   "Analysis-only task completed with implementation notes and trace:task-1815." );
                ( "handoff_context",
                  `Assoc
                    [
                      ("summary", `String "Analysis-only task completed");
-                     ("evidence_refs", `List [ `String "commit:abc123" ]);
+                     ("evidence_refs", `List [ `String "trace:task-1815" ]);
                    ] );
              ])
        in
@@ -2298,12 +2298,12 @@ let () = test "transition_done_completes_after_llm_review_and_clears_planning_cu
         [
           ("task_id", `String "task-001");
           ("action", `String "done");
-          ("notes", `String "Task scope satisfied: Transition done. Implemented the transport parity checks and verified the result. commit:abc123");
+          ("notes", `String "Task scope satisfied: Transition done. Implemented the transport parity checks and verified the result. trace:task-1815");
           ( "handoff_context",
             `Assoc
               [
                 ("summary", `String "Task scope satisfied: Transition done");
-                ("evidence_refs", `List [ `String "commit:abc123" ]);
+                ("evidence_refs", `List [ `String "trace:task-1815" ]);
               ] );
         ])
   in

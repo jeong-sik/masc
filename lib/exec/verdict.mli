@@ -49,11 +49,12 @@ type deny_reason =
           [sql_destructive] substring patterns (RFC
           eliminate-substring-destructive-classifier §3-A). *)
   | Destructive_repo_hosting_cli of Exec_program.t
-      (** An irreversible repository-hosting CLI operation (for example
-          [gh pr merge], [gh repo delete], or [gh api -X DELETE]).  Part of the
+      (** An irreversible or policy-disabled repository-hosting CLI operation
+          (for example [gh pr merge], [gh repo create], [gh repo delete],
+          [gh discussion create], or [gh api -X DELETE]).  Part of the
           trust-independent catastrophic floor so autonomous keepers cannot
-          mutate remote repository state irreversibly through the generic exec
-          surface. *)
+          mutate remote repository state irreversibly or enter disabled GitHub
+          capability surfaces through the generic exec surface. *)
   | Catastrophic_program of Exec_program.t
       (** A binary that is never legitimate for a keeper regardless of its
           arguments (e.g. the filesystem-format binary, or system-power

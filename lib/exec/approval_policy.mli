@@ -30,8 +30,9 @@ val decide :
        - any [Destructive] git op → [Deny Destructive_git];
        - a redirect [Write_path] whose scope is [Outside_workspace] or
          [Absolute_unknown] → [Deny Path_escape];
-       - an irreversible repository-hosting CLI operation ([gh pr merge],
-         [gh repo delete], [gh api -X DELETE]) → [Deny
+       - an irreversible or policy-disabled repository-hosting CLI operation
+         ([gh pr merge], [gh repo create], [gh repo delete],
+         [gh discussion create], [gh api -X DELETE]) → [Deny
          Destructive_repo_hosting_cli];
        - a catastrophic-by-identity binary (filesystem-format [mkfs], or
          system-power [shutdown]/[reboot]/[halt]/[poweroff]) → [Deny
@@ -51,9 +52,10 @@ val decide :
 
 val catastrophic_floor : Capability.t list -> Verdict.deny_reason option
 (** Stage 1 of [decide] on its own: [Some reason] for a [Destructive] git op, a
-    redirect [Write_path] escaping the workspace, an irreversible
-    repository-hosting CLI operation ([gh pr merge], [gh repo delete], [gh api
-    -X DELETE]), a catastrophic-by-identity binary (filesystem-format [mkfs] or
+    redirect [Write_path] escaping the workspace, an irreversible or
+    policy-disabled repository-hosting CLI operation ([gh pr merge], [gh repo
+    create], [gh repo delete], [gh discussion create], [gh api -X DELETE]), a
+    catastrophic-by-identity binary (filesystem-format [mkfs] or
     system-power [shutdown]/[reboot]/[halt]/[poweroff]), or a destructive SQL
     statement on a database CLI ([psql -c "drop …"]); [None] otherwise.
 

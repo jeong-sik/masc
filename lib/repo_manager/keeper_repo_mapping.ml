@@ -334,6 +334,22 @@ let log_mapping_load_error_if_new ~keeper_id msg =
   mark ()
 ;;
 
+type access_denial =
+  | Access_denied_unregistered_repository of repository_id
+  | Access_denied_not_in_mapping of
+      { keeper_id : string
+      ; repository_id : repository_id
+      }
+  | Access_denied_load_error of string
+  | Access_denied_repository_store_error of
+      { repository_id : repository_id
+      ; detail : string
+      }
+
+type access_decision =
+  | Access_allowed
+  | Access_denied of access_denial
+
 type policy_decision =
   | Policy_decision_default_scope_allowed
   | Policy_decision_unregistered_repository
@@ -379,38 +395,62 @@ let record_policy_decision ~keeper_id ?repository_id decision =
     ()
 ;;
 
-let is_allowed ~keeper_id ~repository_id ~base_path =
+let access_denial_to_string = function
+  | Access_denied_unregistered_repository repository_id ->
+    Printf.sprintf
+      "Repository %s is not registered; access not allowed"
+      repository_id
+  | Access_denied_not_in_mapping { keeper_id; repository_id } ->
+    Printf.sprintf
+      "Keeper %s is not allowed to access repository %s"
+      keeper_id
+      repository_id
+  | Access_denied_load_error detail -> detail
+  | Access_denied_repository_store_error { repository_id; detail } ->
+    Printf.sprintf
+      "Repository store load failed while validating repository %s: %s"
+      repository_id
+      detail
+;;
+
+let access_decision ~keeper_id ~repository_id ~base_path =
   match repository_registered ~base_path ~repository_id with
-  | Stdlib.Error _ ->
+  | Stdlib.Error detail ->
     record_policy_decision ~keeper_id ~repository_id
       Policy_decision_repository_store_error;
-    false
+    Access_denied
+      (Access_denied_repository_store_error { repository_id; detail })
   | Stdlib.Ok false ->
     record_policy_decision ~keeper_id ~repository_id
       Policy_decision_unregistered_repository;
-    false
+    Access_denied (Access_denied_unregistered_repository repository_id)
   | Stdlib.Ok true -> (
     match lookup_mapping ~base_path ~keeper_id with
     | Mapping_missing _ ->
       record_policy_decision ~keeper_id ~repository_id
         Policy_decision_default_scope_allowed;
-      true
+      Access_allowed
     | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
       record_policy_decision ~keeper_id Policy_decision_load_error;
-      false
+      Access_denied (Access_denied_load_error msg)
     | Mapping_found mapping ->
-      if mapping_allows_repository mapping ~repository_id then true
+      if mapping_allows_repository mapping ~repository_id then Access_allowed
       else (
         record_policy_decision ~keeper_id ~repository_id Policy_decision_not_in_mapping;
-        false))
+        Access_denied
+          (Access_denied_not_in_mapping { keeper_id; repository_id })))
+;;
+
+let is_allowed ~keeper_id ~repository_id ~base_path =
+  match access_decision ~keeper_id ~repository_id ~base_path with
+  | Access_allowed -> true
+  | Access_denied _ -> false
 
 let validate_access ~keeper_id ~repository_id ~base_path =
-  if is_allowed ~keeper_id ~repository_id ~base_path then Ok ()
-  else
-    Error
-      (Printf.sprintf "Keeper %s is not allowed to access repository %s"
-         keeper_id repository_id)
+  match access_decision ~keeper_id ~repository_id ~base_path with
+  | Access_allowed -> Ok ()
+  | Access_denied denial -> Error (access_denial_to_string denial)
 
 let save_all ~base_path mappings =
   let path = mappings_toml_path base_path in

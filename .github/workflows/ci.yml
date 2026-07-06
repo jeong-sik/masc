@@ -805,7 +805,8 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+          timeout --kill-after=30s 38m \
+            scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
       - name: Upload test diagnostics on failure
         if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}

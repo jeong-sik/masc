@@ -12,14 +12,27 @@ let string_of_disposition = function
   | Denied -> "denied"
 ;;
 
-(* G-4 externality axis, risk-independent. Exhaustive over gh_family so a new
-   family forces an explicit durable-remote decision here. *)
-let creates_durable_remote_surface : Gh_verb.gh_family -> bool = function
-  | Gh_verb.Repo | Gh_verb.Discussion -> true
-  | Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Release | Gh_verb.Secret
-  | Gh_verb.Ssh_key | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist
-  | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache
-  | Gh_verb.Project | Gh_verb.Api | Gh_verb.Other _ -> false
+(* Actions on a durable-remote family that only read or act locally — they do
+   NOT touch the durable remote surface, so they are not a capability decision.
+   [clone] copies to local disk; [view]/[list] read. *)
+let local_or_read_repo_action = function
+  | "clone" | "view" | "list" -> true
+  | _ -> false
+;;
+
+(* G-4 externality axis, risk-independent. Keyed on the whole verb: only a
+   MUTATING action on a durable-remote family counts. *)
+let creates_durable_remote_surface (v : Gh_verb.t) : bool =
+  match v.Gh_verb.family, v.Gh_verb.action with
+  | (Gh_verb.Repo | Gh_verb.Discussion), Some action ->
+    not (local_or_read_repo_action action)
+  | (Gh_verb.Repo | Gh_verb.Discussion), None -> false
+  | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Release | Gh_verb.Secret
+      | Gh_verb.Ssh_key | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist
+      | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache
+      | Gh_verb.Project | Gh_verb.Api | Gh_verb.Other _ )
+    , _ ) ->
+    false
 ;;
 
 let disposition_of (v : Gh_verb.t) : disposition =
@@ -37,6 +50,5 @@ let disposition_of (v : Gh_verb.t) : disposition =
        Denied
      | Shell_ir_risk.R0_Read -> Allowed
      | Shell_ir_risk.R1_Reversible_mutation ->
-       if creates_durable_remote_surface v.Gh_verb.family then Requires_approval
-       else Allowed)
+       if creates_durable_remote_surface v then Requires_approval else Allowed)
 ;;

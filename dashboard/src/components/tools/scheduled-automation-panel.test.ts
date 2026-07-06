@@ -1068,6 +1068,110 @@ describe('ScheduledAutomationPanel', () => {
     }
   })
 
+  it('renders current production-shaped scheduler absence as explicit row-backed evidence', async () => {
+    const auto = automation([
+      request({
+        schedule_id: 'backlog-depletion-detector-v1',
+        status: 'expired',
+        effective_status: 'expired',
+        execution_readiness: 'terminal',
+        due_at_iso: '2026-06-15T10:00:00Z',
+        payload_kind: 'backlog_depletion_check',
+        payload_support: 'unsupported',
+      }),
+      request({
+        schedule_id: 'orphan-auto-release-v1',
+        status: 'failed',
+        effective_status: 'failed',
+        execution_readiness: 'terminal',
+        due_at_iso: '2026-06-15T10:12:00Z',
+        payload_kind: 'orphan_auto_release',
+        payload_support: 'unsupported',
+      }),
+      request({
+        schedule_id: 'task-goal-generation-pipeline-v1',
+        status: 'expired',
+        effective_status: 'expired',
+        execution_readiness: 'terminal',
+        due_at_iso: '2026-06-15T10:15:00Z',
+        payload_kind: 'task_goal_generation',
+        payload_support: 'unsupported',
+      }),
+      request({
+        schedule_id: 'sangsu-test-1100',
+        status: 'failed',
+        effective_status: 'failed',
+        execution_readiness: 'terminal',
+        due_at_iso: '2026-06-20T02:00:00Z',
+        payload_kind: 'keeper_surface_post',
+        payload_support: 'unsupported',
+      }),
+    ])
+    auto.derived_counts = {
+      due_effective: 0,
+      blocked_approval: 0,
+      due_execution_ready: 0,
+      expired_effective: 2,
+      unsupported_payload_kind: 4,
+    }
+    auto.payload_support = {
+      unsupported_request_count: 4,
+      unsupported_kinds: [
+        { kind: 'backlog_depletion_check', count: 1 },
+        { kind: 'keeper_surface_post', count: 1 },
+        { kind: 'orphan_auto_release', count: 1 },
+        { kind: 'task_goal_generation', count: 1 },
+      ],
+      unknown_request_count: 0,
+    }
+    auto.live_supported_non_terminal_evidence = {
+      schema: 'masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1',
+      source: 'schedule_store',
+      projection_status: 'no_supported_payload_rows',
+      criteria: 'payload_support=supported && execution_readiness not in {terminal,expired}',
+      reason: 'current live schedule_store has no rows with a supported payload kind',
+      request_count: 4,
+      supported_request_count: 0,
+      supported_non_terminal_count: 0,
+      supported_live_count: 0,
+      supported_terminal_or_expired_count: 0,
+      unsupported_request_count: 4,
+      unknown_request_count: 0,
+      terminal_or_expired_count: 4,
+      matched_schedule_ids: [],
+      matched_schedule_id_limit: 8,
+    }
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const evidence = container.querySelector('[data-schedule-live-supported-evidence="no_supported_payload_rows"]')
+    expect(evidence).not.toBeNull()
+    expect(evidence?.getAttribute('data-schedule-live-supported-count')).toBe('0')
+    expect(evidence?.getAttribute('data-schedule-live-supported-source')).toBe('schedule_store')
+    expect(evidence?.textContent).toContain('requests')
+    expect(evidence?.textContent).toContain('4')
+    expect(evidence?.textContent).toContain('unsupported/unknown')
+    expect(evidence?.textContent).toContain('current live schedule_store has no rows')
+    expect(container.querySelector('[data-schedule-live-supported-row-integrity]')).toBeNull()
+    expect(container.querySelector('[data-schedule-live-supported-open]')).toBeNull()
+    expect(container.querySelector('[data-schedule-live-supported-evidence="projection_contract_missing"]')).toBeNull()
+
+    const allFilter = container.querySelector('[data-schedule-filter="all"]') as HTMLButtonElement
+    expect(allFilter).not.toBeNull()
+    allFilter.click()
+    await Promise.resolve()
+
+    for (const scheduleId of [
+      'backlog-depletion-detector-v1',
+      'orphan-auto-release-v1',
+      'task-goal-generation-pipeline-v1',
+      'sangsu-test-1100',
+    ]) {
+      expect(container.querySelector(`[data-schedule-payload-support-row="${scheduleId}"]`)).not.toBeNull()
+      expect(container.querySelector(`[data-schedule-id="${scheduleId}"]`)).not.toBeNull()
+    }
+  })
+
   it('renders an explicit contract gap when live supported evidence is absent', () => {
     const auto = payloadSupportAutomation()
     delete auto.live_supported_non_terminal_evidence

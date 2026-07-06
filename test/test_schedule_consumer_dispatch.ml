@@ -208,7 +208,7 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
-let runner_status_json_after_dispatches result =
+let runner_status_json_after_dispatches (result : Schedule_runner.tick_result) =
   Schedule_runner_status.reset_for_test ();
   let wake_enqueue_counts =
     Server_bootstrap_maintenance.wake_enqueue_counts_of_dispatches result.dispatches

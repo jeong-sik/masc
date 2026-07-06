@@ -281,6 +281,12 @@ deterministic_test_failure_detected() {
     | grep -Eiq '\[FAIL\]|[[:digit:]]+ failure!|Test Failed|ASSERT '
 }
 
+native_link_failure_detected() {
+  [[ -f "${TEST_LOG_FILE}" ]] || return 1
+  grep -Ev '(^|[[:space:]])\[OK\][[:space:]]' "${TEST_LOG_FILE}" \
+    | grep -Eiq 'collect2: error: ld returned 1 exit status|Error: Error during linking [(]exit code [[:digit:]]+[)]|/usr/bin/ld: final link failed'
+}
+
 log_disk_full_guidance() {
   if [[ "${CI_TEST_DISK_FULL_GUIDANCE_DONE}" -eq 1 ]]; then
     return 0
@@ -382,6 +388,16 @@ run_with_timeout() {
 
 hb_pid=""
 cleanup() {
+  if [[ -n "${ACTIVE_CMD_PID}" ]] && kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
+    kill_active_cmd_tree TERM
+    sleep 2
+    if kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
+      kill_active_cmd_tree KILL
+    fi
+    wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
+    ACTIVE_CMD_PID=""
+    ACTIVE_CMD_PGID=""
+  fi
   if [[ -n "${hb_pid}" ]]; then
     kill "${hb_pid}" >/dev/null 2>&1 || true
     wait "${hb_pid}" >/dev/null 2>&1 || true
@@ -392,6 +408,8 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 log_line "[ci-run] command: ${TEST_CMD}"
 if test_cmd_needs_dune_sanitization; then
@@ -473,7 +491,19 @@ if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
+  && native_link_failure_detected \
+  && ! disk_full_detected; then
+  log_line "[ci-run] INFO: native linker failure detected; skipping isolated flaky retry"
+fi
+
+if [[ "${status}" -ne 0 ]] \
+  && [[ "${CI_TEST_ALLOW_FLAKY_RETRY}" = "1" ]] \
+  && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && test_cmd_needs_dune_sanitization \
   && ! deterministic_test_failure_detected \
+  && ! native_link_failure_detected \
   && ! disk_full_detected; then
   CI_TEST_FLAKY_RETRY_DONE=1
   diag_dump "flaky_pre_retry_${status}"

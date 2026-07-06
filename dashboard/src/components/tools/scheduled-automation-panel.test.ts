@@ -1124,11 +1124,58 @@ describe('ScheduledAutomationPanel', () => {
     expect(evidence).not.toBeNull()
     expect(evidence?.getAttribute('data-schedule-live-supported-count')).toBe('1')
     expect(evidence?.textContent).toContain('matched supported non-terminal')
+    const integrity = container.querySelector('[data-schedule-live-supported-row-integrity="matched_rows_verified"]')
+    expect(integrity).not.toBeNull()
+    expect(integrity?.getAttribute('data-schedule-live-supported-row-integrity-count')).toBe('1')
     const open = container.querySelector('[data-schedule-live-supported-open="sched-supported-live"]') as HTMLButtonElement
     expect(open).not.toBeNull()
     open.click()
     await Promise.resolve()
     expect(container.querySelector('[data-schedule-detail-panel="sched-supported-live"]')).not.toBeNull()
+  })
+
+  it('renders a mismatch when matched live evidence contradicts response rows', () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-unsupported-row',
+        execution_readiness: 'scheduled',
+        payload_kind: 'orphan_auto_release',
+        payload_support: 'unsupported',
+      }),
+      request({
+        schedule_id: 'sched-terminal-row',
+        execution_readiness: 'terminal',
+        payload_kind: 'masc.keeper_wake',
+        payload_support: 'supported',
+      }),
+    ])
+    auto.live_supported_non_terminal_evidence = {
+      schema: 'masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1',
+      source: 'schedule_store',
+      projection_status: 'matched_supported_non_terminal',
+      criteria: 'payload_support=supported && execution_readiness not in {terminal,expired}',
+      reason: 'live schedule_store contains supported rows whose readiness is not terminal or expired',
+      request_count: 2,
+      supported_request_count: 1,
+      supported_non_terminal_count: 1,
+      supported_live_count: 1,
+      supported_terminal_or_expired_count: 1,
+      unsupported_request_count: 1,
+      unknown_request_count: 0,
+      terminal_or_expired_count: 1,
+      matched_schedule_ids: ['sched-unsupported-row', 'sched-terminal-row', 'sched-missing-row'],
+      matched_schedule_id_limit: 8,
+    }
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const mismatch = container.querySelector('[data-schedule-live-supported-row-integrity="matched_row_mismatch"]')
+    expect(mismatch).not.toBeNull()
+    expect(mismatch?.getAttribute('data-schedule-live-supported-row-integrity-count')).toBe('3')
+    expect(mismatch?.textContent).toContain('sched-unsupported-row:payload_support_not_supported')
+    expect(mismatch?.textContent).toContain('sched-terminal-row:execution_readiness_terminal_or_expired')
+    expect(mismatch?.textContent).toContain('sched-missing-row:missing_request_row')
+    expect(container.querySelector('[data-schedule-live-supported-row-integrity="matched_rows_verified"]')).toBeNull()
   })
 
   it('uses explicit ready and terminal status matching', async () => {

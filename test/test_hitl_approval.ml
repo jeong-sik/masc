@@ -1762,7 +1762,7 @@ let test_callback_hitl_enabled_hard_forbidden_rejects_without_queuing () =
         (AQ.pending_count ()))
 
 let test_callback_hitl_disabled_soft_forbidden_requires_approval () =
-  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+  with_env Env_config_core.disable_hitl_env_key "true" @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1950,7 +1950,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
-  Unix.putenv "MASC_DISABLE_HITL" "false";
+  Unix.putenv Env_config_core.disable_hitl_env_key "false";
   Alcotest.run "HITL Approval" [
     ("risk_classification", [
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;

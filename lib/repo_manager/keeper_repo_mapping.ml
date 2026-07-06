@@ -336,10 +336,6 @@ let log_mapping_load_error_if_new ~keeper_id msg =
 
 type access_denial =
   | Access_denied_unregistered_repository of repository_id
-  | Access_denied_not_in_mapping of
-      { keeper_id : string
-      ; repository_id : repository_id
-      }
   | Access_denied_load_error of string
   | Access_denied_repository_store_error of
       { repository_id : repository_id
@@ -393,11 +389,6 @@ let access_denial_to_string = function
   | Access_denied_unregistered_repository repository_id ->
     Printf.sprintf
       "Repository %s is not registered; access not allowed"
-      repository_id
-  | Access_denied_not_in_mapping { keeper_id; repository_id } ->
-    Printf.sprintf
-      "Keeper %s is not allowed to access repository %s"
-      keeper_id
       repository_id
   | Access_denied_load_error detail -> detail
   | Access_denied_repository_store_error { repository_id; detail } ->

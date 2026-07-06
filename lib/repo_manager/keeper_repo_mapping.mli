@@ -58,10 +58,6 @@ val log_mapping_load_error_if_new : keeper_id:string -> string -> unit
 
 type access_denial =
   | Access_denied_unregistered_repository of repository_id
-  | Access_denied_not_in_mapping of
-      { keeper_id : string
-      ; repository_id : repository_id
-      }
   | Access_denied_load_error of string
   | Access_denied_repository_store_error of
       { repository_id : repository_id

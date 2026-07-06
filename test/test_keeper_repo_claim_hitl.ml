@@ -106,11 +106,11 @@ let write_mapping base_path keeper_id repo_ids =
   | Error detail -> Alcotest.fail ("save_mapping failed: " ^ detail)
 ;;
 
-let test_not_in_mapping_requests_hitl_and_approval_grants_repo () =
+let test_registered_repo_outside_advisory_mapping_is_allowed () =
   AQ.For_testing.reset_audit_store ();
   Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
   with_temp_base_path @@ fun base_path ->
-  let keeper_id = "keeper-repo-claim-hitl" in
+  let keeper_id = "keeper-repo-advisory-scope" in
   let repo_a = sample_repo ~base_path "repo-a" in
   let repo_b = sample_repo ~base_path "repo-b" in
   write_repositories base_path [ repo_a; repo_b ];
@@ -122,30 +122,11 @@ let test_not_in_mapping_requests_hitl_and_approval_grants_repo () =
       ~base_path
       ~path:(Filename.concat repo_b.local_path "README.md")
   in
-  let approval_id, repository_id =
-    match result with
-    | Claim.Access_pending_approval { approval_id; repository_id } ->
-      approval_id, repository_id
-    | Claim.Access_allowed -> Alcotest.fail "expected HITL request, got allowed"
-    | Claim.Access_denied detail ->
-      Alcotest.fail ("expected HITL request, got denial: " ^ detail)
-  in
-  Alcotest.(check string) "pending repository id" repo_b.id repository_id;
-  Alcotest.(check int) "pending count increments" (pending_before + 1) (AQ.pending_count ());
-  (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
-   | Ok () -> ()
-   | Error err ->
-     Alcotest.fail ("approval resolve failed: " ^ AQ.resolve_error_to_string err));
-  Alcotest.(check int) "pending count restored" pending_before (AQ.pending_count ());
-  match
-    Keeper_repo_mapping.validate_access
-      ~keeper_id
-      ~base_path
-      ~repository_id:repo_b.id
-  with
-  | Ok () -> ()
-  | Error detail ->
-    Alcotest.fail ("approved repo claim did not update mapping: " ^ detail)
+  (match result with
+   | Claim.Access_allowed -> ()
+   | Claim.Access_denied detail ->
+     Alcotest.fail ("registered repo outside advisory mapping denied: " ^ detail));
+  Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ())
 ;;
 
 let test_unregistered_repository_does_not_request_hitl () =
@@ -167,9 +148,7 @@ let test_unregistered_repository_does_not_request_hitl () =
        "denial mentions unregistered repository"
        true
        (contains_substring detail "not-registered")
-   | Claim.Access_allowed -> Alcotest.fail "expected unregistered denial"
-   | Claim.Access_pending_approval _ ->
-     Alcotest.fail "unregistered repositories must not request HITL");
+   | Claim.Access_allowed -> Alcotest.fail "expected unregistered denial");
   Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ())
 ;;
 
@@ -178,9 +157,9 @@ let () =
     "Keeper_repo_claim_hitl"
     [ ( "repo claim"
       , [ Alcotest.test_case
-            "not-in-mapping queues HITL and approval grants repo"
+            "registered repo outside advisory mapping is allowed"
             `Quick
-            test_not_in_mapping_requests_hitl_and_approval_grants_repo
+            test_registered_repo_outside_advisory_mapping_is_allowed
         ; Alcotest.test_case
             "unregistered repository remains fail-closed"
             `Quick

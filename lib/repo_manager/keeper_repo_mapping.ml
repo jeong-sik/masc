@@ -69,7 +69,7 @@ type file_snapshot =
 
 let log_mapping_file_warning path msg =
   Log.Misc.warn
-    "[KeeperRepoMapping] mapping file %s unreadable — access denied fail-closed (%s)"
+    "[KeeperRepoMapping] mapping file %s unreadable — advisory mapping ignored (%s)"
     path msg
 ;;
 
@@ -157,7 +157,7 @@ let load_all ~base_path : (keeper_repo_mapping list, string) result =
 
 (** Cache for [load_all] results keyed by [base_path]. Each entry carries the
     mapping file stamp so out-of-process TOML edits invalidate the cache before
-    access-control decisions reuse it. Writes through this module remove the
+    repository-scope decisions reuse it. Writes through this module remove the
     entry explicitly. The immutable [Map] + [Atomic] design is fiber-safe
     without requiring an Eio mutex to be threaded through every caller. *)
 type load_all_cache_entry =
@@ -202,7 +202,7 @@ let update_load_all_cache ~base_path stamp result =
     a per-[base_path] stamp-keyed cache. The file is read once; it is parsed;
     then the file is read a second time to confirm the stamp has not changed
     before the result is cached or returned. This closes the TOCTOU window
-    where a concurrent edit would serve stale access-control data. *)
+    where a concurrent edit would serve stale repository-scope data. *)
 let rec load_all_cached_attempt ~remaining_attempts ~base_path
   : (keeper_repo_mapping list, string) result
   =
@@ -270,7 +270,7 @@ let allowed_repositories ~keeper_id ~base_path =
   match lookup_mapping ~base_path ~keeper_id with
   | Mapping_found mapping -> Ok mapping.repository_ids
   | Mapping_missing _ -> Ok ["*"]
-  | Mapping_load_error msg -> Error msg
+  | Mapping_load_error _ -> Ok ["*"]
 
 type repository_scope = Repo_manager_types.repository_scope =
   | All_repositories
@@ -327,7 +327,7 @@ let log_mapping_load_error_if_new ~keeper_id msg =
       if Atomic.compare_and_set logged_mapping_errors current next then
         Log.Misc.warn
           "[KeeperRepoMapping] mapping load error for keeper %s \
-           — access denied fail-closed (error: %s)"
+           — advisory mapping ignored (error: %s)"
           keeper_id msg
       else mark ()
   in
@@ -337,7 +337,6 @@ let log_mapping_load_error_if_new ~keeper_id msg =
 type policy_decision =
   | Policy_decision_default_scope_allowed
   | Policy_decision_unregistered_repository
-  | Policy_decision_not_in_mapping
   | Policy_decision_load_error
   | Policy_decision_repository_identity_mismatch
   | Policy_decision_repository_store_error
@@ -352,11 +351,6 @@ let record_policy_decision ~keeper_id ?repository_id decision =
         | Some r -> [("repository_id", r)] )
     | Policy_decision_unregistered_repository ->
       ( Keeper_metrics.KeeperRepoMappingDeniedUnregistered
-      , match repository_id with
-        | None -> []
-        | Some r -> [("repository_id", r)] )
-    | Policy_decision_not_in_mapping ->
-      ( Keeper_metrics.KeeperRepoMappingDeniedNotInMapping
       , match repository_id with
         | None -> []
         | Some r -> [("repository_id", r)] )
@@ -398,19 +392,33 @@ let is_allowed ~keeper_id ~repository_id ~base_path =
     | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
       record_policy_decision ~keeper_id Policy_decision_load_error;
-      false
-    | Mapping_found mapping ->
-      if mapping_allows_repository mapping ~repository_id then true
-      else (
-        record_policy_decision ~keeper_id ~repository_id Policy_decision_not_in_mapping;
-        false))
+      true
+    | Mapping_found _mapping ->
+      true)
 
 let validate_access ~keeper_id ~repository_id ~base_path =
-  if is_allowed ~keeper_id ~repository_id ~base_path then Ok ()
-  else
-    Error
-      (Printf.sprintf "Keeper %s is not allowed to access repository %s"
-         keeper_id repository_id)
+  match repository_registered ~base_path ~repository_id with
+  | Stdlib.Error msg ->
+    record_policy_decision ~keeper_id ~repository_id
+      Policy_decision_repository_store_error;
+    Stdlib.Error
+      (Printf.sprintf
+         "Repository store load failed while validating repository %s for keeper %s: %s"
+         repository_id keeper_id msg)
+  | Stdlib.Ok false ->
+    record_policy_decision ~keeper_id ~repository_id
+      Policy_decision_unregistered_repository;
+    Stdlib.Error
+      (Printf.sprintf
+         "Repository %s is not registered; keeper %s cannot use it until the repository catalog resolves it"
+         repository_id keeper_id)
+  | Stdlib.Ok true -> (
+    match lookup_mapping ~base_path ~keeper_id with
+    | Mapping_load_error msg ->
+      log_mapping_load_error_if_new ~keeper_id msg;
+      record_policy_decision ~keeper_id Policy_decision_load_error;
+      Stdlib.Ok ()
+    | Mapping_missing _ | Mapping_found _ -> Stdlib.Ok ())
 
 let save_all ~base_path mappings =
   let path = mappings_toml_path base_path in
@@ -460,7 +468,7 @@ let apply_mapping ~keeper_id ~base_path ~repositories =
   | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
       record_policy_decision ~keeper_id Policy_decision_load_error;
-      []
+      repositories
   | Mapping_found mapping ->
       filter_repos_by_mapping mapping repositories
 
@@ -630,33 +638,37 @@ let git_config_path_of_repo_root repo_root =
   else
     None
 
-let remote_origin_url_of_repo_root repo_root =
+let remote_urls_of_repo_root repo_root =
   match git_config_path_of_repo_root repo_root with
-  | None -> None
+  | None -> []
   | Some config_path -> (
       match read_git_probe_file_opt config_path with
-      | None -> None
+      | None -> []
       | Some content ->
-          let rec loop in_origin = function
-            | [] -> None
+          let rec loop in_remote acc = function
+            | [] -> List.rev acc
             | line :: rest ->
                 let line = String.trim line in
                 if String.starts_with ~prefix:"[" line then
-                  loop (String.equal line {|[remote "origin"]|}) rest
-                else if in_origin && String.starts_with ~prefix:"url" line then
+                  loop
+                    (String.starts_with ~prefix:{|[remote "|} line
+                     && String.ends_with ~suffix:{|"]|} line)
+                    acc rest
+                else if in_remote && String.starts_with ~prefix:"url" line then
                   (match String.index_opt line '=' with
-                   | None -> loop in_origin rest
+                   | None -> loop in_remote acc rest
                    | Some idx ->
                        let value =
                          String.sub line (idx + 1)
                            (String.length line - idx - 1)
                          |> String.trim
                        in
-                       if value = "" then loop in_origin rest else Some value)
+                       if value = "" then loop in_remote acc rest
+                       else loop in_remote (value :: acc) rest)
                 else
-                  loop in_origin rest
+                  loop in_remote acc rest
           in
-          loop false (String.split_on_char '\n' content))
+          loop false [] (String.split_on_char '\n' content))
 
 let repository_identity_tokens (repo : repository) =
   repo.id :: repo.name :: repo.aliases
@@ -796,19 +808,44 @@ let resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment rep
   match List.find_opt (repository_matches_token ~base_path segment) repos with
   | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
   | None -> (
-      match Option.bind repo_root remote_origin_url_of_repo_root with
-      | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
-      | Some remote_url -> (
-          match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
+      let remote_urls =
+        match repo_root with
+        | None -> []
+        | Some repo_root -> remote_urls_of_repo_root repo_root
+      in
+      match remote_urls with
+      | [] -> unresolved_repository_segment_resolution ?repo_root ~segment repos
+      | _ -> (
+          match
+            List.find_map
+              (fun remote_url ->
+                List.find_opt (fun repo -> String.equal repo.url remote_url) repos)
+              remote_urls
+          with
           | Some repo -> Repository repo.id
           | None -> (
-              match List.find_opt (repository_matches_remote_url ~remote_url) repos with
-              | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
+              match
+                List.find_map
+                  (fun remote_url ->
+                    match
+                      List.find_opt
+                        (repository_matches_remote_url ~remote_url)
+                        repos
+                    with
+                    | Some repo ->
+                        Some (repository_resolution_of_repo ?repo_root ~segment repo)
+                    | None -> None)
+                  remote_urls
+              with
+              | Some resolution -> resolution
               | None -> (
-                  let remote_basename = repository_url_basename remote_url in
                   match
-                    repository_identity_mismatch_for_url_basename_token
-                      ?repo_root ~segment remote_basename repos
+                    List.find_map
+                      (fun remote_url ->
+                        let remote_basename = repository_url_basename remote_url in
+                        repository_identity_mismatch_for_url_basename_token
+                          ?repo_root ~segment remote_basename repos)
+                      remote_urls
                   with
                   | Some mismatch -> Repository_identity_mismatch mismatch
                   | None ->
@@ -875,11 +912,12 @@ let repository_id_of_path ~base_path ~path =
   | Repository repo_id -> Some repo_id
   | No_repository | Repository_identity_mismatch _ | Repository_store_error _ -> None
 
-(** [validate_path_access ~keeper_id ~base_path ~path] checks whether
-    [keeper_id] is allowed to access the repository that contains [path].
-    If [path] is not under any registered repository, access is allowed.
-    This is the integration point for keeper execution paths that operate
-    on filesystem paths rather than explicit repository IDs. *)
+(** [validate_path_access ~keeper_id ~base_path ~path] checks that [path]
+    either is outside registered repositories or resolves to a valid
+    registered repository. Per-keeper mappings are advisory/default-scope
+    metadata and do not cap access. This is the integration point for keeper
+    execution paths that operate on filesystem paths rather than explicit
+    repository IDs. *)
 let validate_path_access ~keeper_id ~base_path ~path =
   match repository_resolution_of_path ~base_path ~path with
   | No_repository -> Ok ()

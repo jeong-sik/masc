@@ -8,7 +8,7 @@ model to the new multi-repository system introduced in Week 8.
 | Before | After |
 |--------|-------|
 | Single implicit repository at `base_path` | Multiple explicit repositories in `.masc/config/repositories.toml` |
-| All keepers see all branches | Keeper-repo mapping controls access |
+| Repository identity inferred from one root | Repository identity comes from the registered catalog and checkout remotes |
 | No URL tracking | Each repository has a remote URL and local checkout path |
 
 ## Migration Steps
@@ -58,7 +58,7 @@ aliases = ["project"]
 ```
 
 Fields to review:
-- `keepers`: List keeper IDs that should access this repository
+- `keepers`: Optional default-scope metadata for repository-oriented displays
 - `local_path`: Change if you want to keep the existing worktree location
 - `aliases`: Optional repo-evidence terms used by keeper worktree inference when
   a task says `project` but the sandbox clone directory is named differently
@@ -74,21 +74,22 @@ pointing at `base_path`. This means:
 
 ### Phase 4: Keeper-Repository Mapping
 
-After registration, restrict keeper access:
+After registration, verify repository access:
 
 ```ocaml
-(* Check if a keeper may use a repository *)
+(* Checks that the repository is registered; keeper mappings are advisory. *)
 let allowed = Keeper_repo_mapping.is_allowed
   ~keeper_id:"keeper-a"
   ~repository_id:"project-a"
   ~base_path
 ```
 
-If no mapping exists for a keeper, it inherits the default wildcard scope over
-registered repositories only. Add an explicit mapping to restrict that keeper:
-`repositories = ["*"]` preserves all registered-repository access, selected
-IDs grant only those registered repositories, and an explicit empty mapping
-grants access to no repositories. Malformed mapping files and unregistered
+Keeper repository mappings are advisory/default-scope metadata, not access
+caps. A keeper may use any registered repository; `repositories = ["*"]`
+means every registered repository is in the default scope, selected IDs narrow
+only the displayed/default scope, and an explicit empty mapping selects no
+default repositories without denying access. Malformed mapping files are
+ignored for access decisions. Malformed repository catalogs and unregistered
 repository IDs still fail closed.
 
 ## Rollback
@@ -101,5 +102,5 @@ system will immediately fall back to the single default repository.
 - [ ] `discover_repositories` finds your expected repositories
 - [ ] `register_discovered` (or manual `add`) populates TOML
 - [ ] `load_all` returns the registered repositories
-- [ ] Keeper operations still work for allowed repositories
+- [ ] Keeper operations still work for registered repositories
 - [ ] Dashboard shows the repository list correctly

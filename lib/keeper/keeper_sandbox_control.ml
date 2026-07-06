@@ -310,26 +310,28 @@ let upsert_assoc key value fields =
 
 type playground_policy_status =
   | Policy_allowed
-  | Policy_denied_not_in_mapping
+  | Policy_unregistered_repository
   | Policy_mapping_load_error
   | Policy_repository_identity_mismatch
   | Policy_repository_store_error
 
 let playground_policy_status_to_string = function
   | Policy_allowed -> "allowed"
-  | Policy_denied_not_in_mapping -> "denied_not_in_mapping"
+  | Policy_unregistered_repository -> "unregistered_repository"
   | Policy_mapping_load_error -> "mapping_load_error"
   | Policy_repository_identity_mismatch -> "repository_identity_mismatch"
   | Policy_repository_store_error -> "repository_store_error"
 
 let playground_policy_reason = function
   | Policy_allowed -> None
-  | Policy_denied_not_in_mapping ->
-      Some "repository is not listed in the keeper repository mapping"
+  | Policy_unregistered_repository ->
+      Some
+        "repository is not registered in the repository catalog; access is \
+         denied fail-closed"
   | Policy_mapping_load_error ->
       Some
-        "keeper repository mapping could not be loaded; access is denied \
-         fail-closed"
+        "keeper repository mapping could not be loaded; advisory mapping is \
+         ignored"
   | Policy_repository_identity_mismatch ->
       Some
         "repository identity does not match the playground clone; access is \
@@ -364,7 +366,8 @@ let playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
 
 let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       ~repo_name ~repo_path =
-  let field status allowed ?repository_id ?error ?(default_scope = false) () =
+  let field status allowed ?repository_id ?error ?mapping_error
+        ?(default_scope = false) () =
     let status_text = playground_policy_status_to_string status in
     let reason_fields =
       match playground_policy_reason status with
@@ -381,6 +384,11 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       | None -> []
       | Some msg -> [ ("policy_error", `String msg) ]
     in
+    let mapping_error_fields =
+      match mapping_error with
+      | None -> []
+      | Some msg -> [ ("policy_mapping_error", `String msg) ]
+    in
     let default_scope_fields =
       if default_scope then [ ("policy_default_scope", `Bool true) ] else []
     in
@@ -388,7 +396,8 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
     , `String Keeper_repo_mapping.mappings_toml_basename )
     :: ("policy_status", `String status_text)
     :: ("policy_allowed", `Bool allowed)
-    :: (default_scope_fields @ repository_id_fields @ reason_fields @ error_fields)
+    :: (default_scope_fields @ repository_id_fields @ reason_fields
+        @ error_fields @ mapping_error_fields)
   in
   let repository_id_in_catalog repository_id =
     match repo_catalog with
@@ -400,7 +409,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
              String.equal repo.id repository_id)
            repos)
   in
-  let field_default_scope () =
+  let field_resolved_registered ?mapping_error ~default_scope () =
     match
       playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
         ~repo_path
@@ -415,14 +424,15 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       (match repository_id_in_catalog repository_id with
        | Error (`Store_error msg) ->
          field Policy_repository_store_error false ~repository_id ~error:msg ()
-       | Ok true -> field Policy_allowed true ~repository_id ~default_scope:true ()
-       | Ok false -> field Policy_denied_not_in_mapping false ~repository_id ())
+       | Ok true ->
+         field Policy_allowed true ~repository_id ?mapping_error ~default_scope ()
+       | Ok false -> field Policy_unregistered_repository false ~repository_id ())
   in
   match policy with
   | Keeper_repo_mapping.Mapping_load_error msg ->
-      field Policy_mapping_load_error false ~error:msg ()
+      field_resolved_registered ~mapping_error:msg ~default_scope:true ()
   | Keeper_repo_mapping.Mapping_missing _ ->
-      field_default_scope ()
+      field_resolved_registered ~default_scope:true ()
   | Keeper_repo_mapping.Mapping_found mapping ->
       (match
        playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
@@ -438,11 +448,12 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
          (match repository_id_in_catalog repository_id with
           | Error (`Store_error msg) ->
             field Policy_repository_store_error false ~repository_id ~error:msg ()
-          | Ok false -> field Policy_denied_not_in_mapping false ~repository_id ()
+          | Ok false -> field Policy_unregistered_repository false ~repository_id ()
           | Ok true ->
-            if Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id
-            then field Policy_allowed true ~repository_id ()
-            else field Policy_denied_not_in_mapping false ~repository_id ()))
+            let default_scope =
+              Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id
+            in
+            field Policy_allowed true ~repository_id ~default_scope ()))
 
 let with_playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
       ~repo_name ~repo_path = function

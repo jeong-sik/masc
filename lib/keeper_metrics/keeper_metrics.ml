@@ -247,7 +247,6 @@ type t =
   | ToolExecutePrActionTotal    (* counter: raw tool_execute gh PR actions *)
   | KeeperRepoMappingDefaultScopeAllowed (* counter: missing mapping default-scope access allowed *)
   | KeeperRepoMappingDeniedUnregistered (* counter: repository policy denied an unregistered repo id *)
-  | KeeperRepoMappingDeniedNotInMapping (* counter: keeper repo mapping decision: repo not in mapping *)
   | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
   | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
   | KeeperRepoMappingRepositoryStoreError       (* counter: repo catalog load failure in policy projection *)
@@ -523,7 +522,6 @@ let to_string = function
     "masc_keeper_repo_mapping_default_scope_allowed_total"
   | KeeperRepoMappingDeniedUnregistered ->
     "masc_keeper_repo_mapping_denied_unregistered_total"
-  | KeeperRepoMappingDeniedNotInMapping -> "masc_keeper_repo_mapping_denied_not_in_mapping_total"
   | KeeperRepoMappingLoadError -> "masc_keeper_repo_mapping_load_error_total"
   | KeeperRepoMappingRepositoryIdentityMismatch ->
     "masc_keeper_repo_mapping_repository_identity_mismatch_total"
@@ -598,7 +596,7 @@ let all : t list =
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;
   KeeperRepoMappingDefaultScopeAllowed; KeeperRepoMappingDeniedUnregistered;
-  KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
+  KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;
   RawTraceSinkDegraded; WireCaptureResponseSuppressed; WireCaptureWriteFailures;
   WireCaptureRecordSkipped

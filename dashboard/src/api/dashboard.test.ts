@@ -2987,6 +2987,34 @@ describe('fetchKeeperCostMetrics', () => {
       { model: 'runtime', cost_usd: 0.5 },
     ])
   })
+
+  it('marks missing model breakdown labels as unknown instead of fabricating runtime', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        keepers: [
+          {
+            keeper_name: 'keeper-alpha',
+            total_cost_usd: 0.5,
+            sample_count: 2,
+            model_breakdown: [
+              { cost_usd: 0.2 },
+              { model: ' ', cost_usd: 0.3 },
+            ],
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers[0]?.model_breakdown).toEqual([
+      { model: 'unknown_model', cost_usd: 0.5 },
+    ])
+  })
 })
 
 describe('fetchKeeperDecisions', () => {
@@ -3111,6 +3139,31 @@ describe('fetchCostLatency', () => {
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])
     expect(result.matrix.models).toEqual(['runtime_lane_7'])
+  })
+
+  it('marks unlabeled cost-matrix lanes as unknown instead of synthetic runtime lanes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        perAgent: [],
+        matrix: {
+          providers: [],
+          models: [],
+          grid: [[0.01, 0.02]],
+        },
+        latencyBuckets: [],
+        total_cost_usd: 0.03,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCostLatency(60)
+
+    expect(result.matrix.providers).toEqual(['unknown_provider'])
+    expect(result.matrix.models).toEqual(['unknown_model_1', 'unknown_model_2'])
+    expect(result.matrix.grid).toEqual([[0.01, 0.02]])
   })
 })
 

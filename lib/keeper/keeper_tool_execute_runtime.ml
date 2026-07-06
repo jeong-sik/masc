@@ -490,7 +490,6 @@ let handle_tool_execute_typed
   let output_redaction =
     execute_secret_redaction ~base_path:config.base_path ~keeper_name:meta.name
   in
-  let redact_execute_text_value = redact_execute_text output_redaction in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~config
@@ -786,6 +785,12 @@ let handle_tool_execute_typed
                 "execute stream start callback failed keeper=%s: %s"
                 meta.name
                 (Printexc.to_string exn));
+          let stdout_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
+          let stderr_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
           let on_output_chunk chunk =
             if stream_dispatch
             then (
@@ -794,7 +799,15 @@ let handle_tool_execute_typed
                 | `Stdout s -> `Stdout, s
                 | `Stderr s -> `Stderr, s
               in
-              let data = redact_execute_text_value data in
+              let data =
+                match stream with
+                | `Stdout ->
+                  Keeper_secret_redaction.redact_stream_chunk
+                    output_redaction stdout_redact_state data
+                | `Stderr ->
+                  Keeper_secret_redaction.redact_stream_chunk
+                    output_redaction stderr_redact_state data
+              in
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
                   ~keeper_name:meta.name
@@ -949,6 +962,28 @@ let handle_tool_execute_typed
             in
             if stream_dispatch
             then (
+              let flush_remaining stream state =
+                let remaining =
+                  Keeper_secret_redaction.redact_stream_finish
+                    output_redaction state
+                in
+                if not (String.equal remaining "")
+                then (
+                  try
+                    Keeper_keepalive_signal.record_execute_stream_chunk
+                      ~keeper_name:meta.name
+                      ~stream
+                      remaining
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                    Log.Dashboard.warn
+                      "execute stream flush callback failed keeper=%s: %s"
+                      meta.name
+                      (Printexc.to_string exn))
+              in
+              flush_remaining `Stdout stdout_redact_state;
+              flush_remaining `Stderr stderr_redact_state;
               try
                 Keeper_keepalive_signal.record_execute_stream_end
                   ~keeper_name:meta.name

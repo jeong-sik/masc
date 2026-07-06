@@ -48,6 +48,8 @@ import {
   clearActiveStream,
   clearActiveStreamRequestId,
   finalizeAssistantEntry,
+  keeperClientObservedSseStreamContract,
+  keeperStreamContract,
   releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
   normalizeKeeperProbeResult,
@@ -351,8 +353,8 @@ async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
       toolOutputCoveredSinceMs(response.entries),
     )
   } catch (err) {
-    markToolCallOutputsHydrationFailed(keeperName)
     const message = err instanceof Error ? err.message : String(err)
+    markToolCallOutputsHydrationFailed(keeperName, message)
     console.warn(`[keeper] tool-call output hydration failed for ${keeperName}:`, message)
   }
 }
@@ -467,6 +469,11 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: new Date(request.submittedAt).toISOString(),
       delivery: 'delivered',
       streamState: null,
+      streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
+        requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
+        reason: 'restored pending queued request from browser storage',
+      }),
       attachments: request.attachments,
       details: null,
     })
@@ -482,6 +489,11 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: assistantDraft?.timestamp ?? null,
       delivery: assistantDraft?.delivery ?? 'queued',
       streamState: assistantDraft ? assistantDraft.streamState : 'opening',
+      streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
+        requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
+        reason: 'awaiting queued request poll result',
+      }),
       traceSteps: assistantDraft?.traceSteps,
       error: assistantDraft?.error ?? null,
       details: null,
@@ -594,6 +606,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
         delivery: userDelivery,
         error: errorMessage,
+        streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
+          requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
+          reason: errorMessage,
+        }),
       })
       let assistantText = reply.text
       let assistantRawText = reply.details?.replyText ?? reply.text
@@ -611,6 +628,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         timestamp: new Date().toISOString(),
         details: reply.details,
         error: errorMessage,
+        streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
+          requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
+          reason: errorMessage,
+        }),
       })
       if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
       removePendingKeeperChatRequest(request.requestId)
@@ -623,6 +645,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
         delivery: 'error',
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+        streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
+          requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
+          reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+        }),
       })
       finalizeAssistantEntry(request.keeperName, assistantId, {
         text: '',
@@ -631,6 +658,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         streamState: null,
         timestamp: new Date().toISOString(),
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+        streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
+          requestId: request.requestId,
+          deliveryReceipt: 'no_delivery_receipt',
+          reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+        }),
       })
       setRecordValue(keeperActionErrors, request.keeperName, QUEUED_KEEPER_REQUEST_LOST_MESSAGE)
       await hydrateKeeperChatHistory(request.keeperName, { force: true })
@@ -642,6 +674,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
     finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
       delivery: 'error',
       error: message,
+      streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
+        requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
+        reason: message,
+      }),
     })
     finalizeAssistantEntry(request.keeperName, assistantId, {
       text: '',
@@ -650,6 +687,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       streamState: null,
       timestamp: new Date().toISOString(),
       error: message,
+      streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
+        requestId: request.requestId,
+        deliveryReceipt: 'no_delivery_receipt',
+        reason: message,
+      }),
     })
     setRecordValue(keeperActionErrors, request.keeperName, message)
     await hydrateKeeperChatHistory(request.keeperName, { force: true })
@@ -879,6 +921,9 @@ export async function sendKeeperThreadMessage(
     timestamp: new Date().toISOString(),
     delivery: 'sending',
     streamState: null,
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      reason: 'local optimistic user row before server history confirmation',
+    }),
     attachments,
     blocks,
     details: null,
@@ -893,6 +938,9 @@ export async function sendKeeperThreadMessage(
     timestamp: null,
     delivery: 'sending',
     streamState: 'opening',
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      reason: 'local assistant placeholder before stream event',
+    }),
     details: null,
   })
   setRecordValue(keeperSending, keeperName, true)
@@ -992,6 +1040,10 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         timestamp: new Date().toISOString(),
         error: cutMessage,
+        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
+          reason: cutMessage,
+        }),
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
       if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
@@ -1011,6 +1063,10 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         timestamp: new Date().toISOString(),
         error: EMPTY_VISIBLE_REPLY_TEXT,
+        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
+          reason: EMPTY_VISIBLE_REPLY_TEXT,
+        }),
       })
       setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
       if (requestId) {
@@ -1030,6 +1086,9 @@ export async function sendKeeperThreadMessage(
       streamState: null,
       timestamp: new Date().toISOString(),
       error: null,
+      streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+        eventName: 'RUN_FINISHED',
+      }),
     })
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
     if (requestId) {
@@ -1054,6 +1113,11 @@ export async function sendKeeperThreadMessage(
       finalizeAssistantEntry(keeperName, localId, {
         delivery: 'cancelled',
         error: null,
+        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
+          requestId: requestId ?? undefined,
+          reason: KEEPER_MESSAGE_CANCELLED_TEXT,
+        }),
       })
       finalizeAssistantEntry(keeperName, assistantId, {
         text: KEEPER_MESSAGE_CANCELLED_TEXT,
@@ -1062,6 +1126,11 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         error: null,
         timestamp: new Date().toISOString(),
+        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+          deliveryReceipt: 'no_delivery_receipt',
+          requestId: requestId ?? undefined,
+          reason: KEEPER_MESSAGE_CANCELLED_TEXT,
+        }),
       })
       if (cancelSucceeded) setRecordValue(keeperActionErrors, keeperName, null)
       throw err
@@ -1074,10 +1143,20 @@ export async function sendKeeperThreadMessage(
       streamState: null,
       error: errorMessage,
       timestamp: new Date().toISOString(),
+      streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+        deliveryReceipt: 'no_delivery_receipt',
+        requestId: requestId ?? undefined,
+        reason: errorMessage,
+      }),
     })
     finalizeAssistantEntry(keeperName, localId, {
       delivery: 'error' as KeeperConversationDelivery,
       error: errorMessage,
+      streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
+        deliveryReceipt: 'no_delivery_receipt',
+        requestId: requestId ?? undefined,
+        reason: errorMessage,
+      }),
     })
     if (requestTerminalSeen && requestId) {
       removePendingKeeperChatRequest(requestId)

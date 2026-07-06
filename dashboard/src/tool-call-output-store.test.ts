@@ -2,10 +2,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ToolCallEntry } from './api/dashboard'
 import {
   lookupToolCallOutput,
+  markToolCallOutputsHydrationFailed,
   markToolCallOutputsHydrated,
   markToolCallOutputsHydrating,
   recordToolCallOutputs,
   resetToolCallOutputs,
+  toolCallOutputHydrationContract,
+  toolCallOutputHydrationFailureReason,
+  toolCallOutputHydrationStatus,
   toolCallIdFromToolEntryId,
   toolCallOutputsById,
   toolCallOutputsCoveredSinceMs,
@@ -94,10 +98,19 @@ describe('tool-call-output-store', () => {
 
   it('tracks bounded hydration coverage for tail-limited output fetches', () => {
     markToolCallOutputsHydrating('sangsu')
+    expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrating')
     markToolCallOutputsHydrated('sangsu', 2_000, 1_000)
 
     expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_000)
     expect(toolCallOutputsCoveredThroughMs('sangsu')).toBe(2_000)
+    expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
+    expect(toolCallOutputHydrationContract('sangsu')).toMatchObject({
+      source: 'tool_calls_endpoint',
+      status: 'hydrated',
+      failureReason: null,
+      coveredSinceMs: 1_000,
+      coveredThroughMs: 2_000,
+    })
   })
 
   it('merges unbounded hydration coverage without retaining an old lower bound', () => {
@@ -106,5 +119,18 @@ describe('tool-call-output-store', () => {
 
     expect(toolCallOutputsCoveredSinceMs('sangsu')).toBeNull()
     expect(toolCallOutputsCoveredThroughMs('sangsu')).toBe(3_000)
+  })
+
+  it('records hydration failure reason instead of collapsing it to pending', () => {
+    markToolCallOutputsHydrating('sangsu')
+    markToolCallOutputsHydrationFailed('sangsu', 'HTTP 502')
+
+    expect(toolCallOutputHydrationStatus('sangsu')).toBe('failed')
+    expect(toolCallOutputHydrationFailureReason('sangsu')).toBe('HTTP 502')
+    expect(toolCallOutputHydrationContract('sangsu')).toMatchObject({
+      source: 'tool_calls_endpoint',
+      status: 'failed',
+      failureReason: 'HTTP 502',
+    })
   })
 })

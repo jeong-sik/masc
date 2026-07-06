@@ -441,26 +441,14 @@ let queue_count_by_keeper_json ~now kind summary =
     ; "oldest_age_seconds", age_seconds_json ~now oldest_arrived_at
     ]
 
-let sorted_keeper_dir_names keepers_dir =
-  Sys.readdir keepers_dir
-  |> Array.to_list
-  |> List.filter (fun name ->
-       let path = Filename.concat keepers_dir name in
-       valid_keeper_name name && Sys.file_exists path && Sys.is_directory path)
-  |> List.sort String.compare
-
 let fleet_summary_json ~now ~base_path =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  let keeper_names, scan_errors =
-    if not (Sys.file_exists keepers_dir)
-    then [], []
-    else if not (Sys.is_directory keepers_dir)
-    then [], [ Printf.sprintf "keepers runtime path is not a directory: %s" keepers_dir ]
-    else
-      try sorted_keeper_dir_names keepers_dir, [] with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        [], [ Printf.sprintf "failed to list keepers runtime dir %s: %s" keepers_dir (Printexc.to_string exn) ]
+  let discovery = discover_keeper_names_with_snapshots ~base_path in
+  let keeper_names = discovery.keeper_names in
+  let scan_errors =
+    match discovery.read_error with
+    | None -> []
+    | Some msg -> [ msg ]
   in
   let keepers =
     List.map (fun keeper_name -> keeper_queue_summary ~base_path ~keeper_name) keeper_names

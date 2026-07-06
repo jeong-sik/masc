@@ -615,11 +615,22 @@ let () =
         ~base_path
         ~keeper_name:inflight_keeper
         [ inflight ];
+      let noise_keeper_dir =
+        Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
+      in
+      Unix.mkdir noise_keeper_dir 0o755;
+      let dot_noise_keeper_dir =
+        Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) ".worktrees"
+      in
+      Unix.mkdir dot_noise_keeper_dir 0o755;
       let json =
         Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
       in
       Alcotest.(check string) "summary status" "ok" (string_field "status" json);
-      Alcotest.(check int) "keeper_count" 2 (int_field "keeper_count" json);
+      Alcotest.(check int)
+        "keeper_count excludes snapshotless runtime dirs"
+        2
+        (int_field "keeper_count" json);
       Alcotest.(check int) "pending_count" 2 (int_field "pending_count" json);
       Alcotest.(check int) "inflight_count" 1 (int_field "inflight_count" json);
       Alcotest.(check int) "total_count" 3 (int_field "total_count" json);

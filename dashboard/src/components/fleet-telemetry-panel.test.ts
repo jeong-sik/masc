@@ -450,7 +450,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('1 주의')
   }, 30_000)
 
-  it('falls back to runtime model and tool audit data when quality rows are sparse', async () => {
+  it('keeps unknown model while using tool audit data when quality rows are sparse', async () => {
     const keepers = normalizeKeepers([
       {
         name: 'keeper-sparse',
@@ -486,14 +486,14 @@ describe('FleetTelemetryPanel', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       name: 'keeper-sparse',
-      model: 'runtime',
+      model: 'unknown',
       tool_calls: 3,
       tool_activity_known: true,
     })
     expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_board_post'])
   })
 
-  it('redacts display model and uses freshest keeper activity helpers for fleet rows', async () => {
+  it('keeps unknown display model and uses freshest keeper activity helpers for fleet rows', async () => {
     vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
     const keepers = normalizeKeepers([
       {
@@ -518,7 +518,7 @@ describe('FleetTelemetryPanel', () => {
     const rows = buildFleetRows(keepers, { ...toolQualityResponse, by_keeper: [] })
 
     expect(rows).toHaveLength(1)
-    expect(rows[0]?.model).toBe('runtime')
+    expect(rows[0]?.model).toBe('unknown')
     expect(rows[0]).toMatchObject({
       activity_label: '하트비트',
       activity_source: 'heartbeat',

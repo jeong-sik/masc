@@ -14,6 +14,7 @@ export interface QueuedMessage {
   id: string
   content: string
   timestamp: number
+  sequence: number
   sent: boolean
   attachments?: KeeperConversationAttachment[]
   blocks?: ChatBlock[]
@@ -27,6 +28,7 @@ export interface InputQueue {
 }
 
 const _queues = new Map<string, InputQueue>()
+let _nextQueueSequence = 0
 
 function _ensureQueue(keeperName: string): InputQueue {
   let q = _queues.get(keeperName)
@@ -94,6 +96,7 @@ export function enqueueInput(
     id: `${keeperName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     content,
     timestamp: Date.now(),
+    sequence: ++_nextQueueSequence,
     sent: false,
     ...(attachments && attachments.length > 0 ? { attachments } : {}),
     ...(blocks && blocks.length > 0 ? { blocks } : {}),
@@ -210,4 +213,5 @@ export function getQueueTotal(keeperName: string): number {
 export function _resetChatStoreForTests(): void {
   _queues.clear()
   _drafts.clear()
+  _nextQueueSequence = 0
 }

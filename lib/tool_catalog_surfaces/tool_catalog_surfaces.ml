@@ -71,6 +71,7 @@ let public_mcp_surface_tools =
   ; (* Keeper runtime front door. *)
     "masc_keeper_list"
   ; "masc_keeper_status"
+  ; "masc_keeper_waiting_inventory"
   ; "masc_keeper_up"
   ; "masc_keeper_down"
   ; (* Persona authoring is operator-visible. *)

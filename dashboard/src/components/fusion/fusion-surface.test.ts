@@ -56,6 +56,7 @@ function boardPost(overrides: Partial<BoardPost> & { id: string; meta: BoardPost
     comment_count: 0,
     created_at: '2026-06-19T01:00:00Z',
     updated_at: '2026-06-19T01:02:00Z',
+    origin: null,
     ...rest,
   }
 }
@@ -123,6 +124,10 @@ describe('FusionSurface', () => {
             output_tokens: 360,
           },
         },
+        origin: {
+          source: 'fusion',
+          fusion_run_id: 'fus-1',
+        },
       }),
     ]
 
@@ -154,7 +159,69 @@ describe('FusionSurface', () => {
     expect(container.querySelector('.fus-rdot.done')).not.toBeNull()
     expect(container.textContent).toContain('panel ×2')
     expect(container.textContent).toContain('board evidence')
+    expect(container.querySelector('[data-testid="fusion-sink-linkage"]')?.getAttribute('data-linkage-status')).toBe('verified')
+    expect(container.querySelector('[data-testid="fusion-sink-correlation"]')?.getAttribute('data-meta-run-id')).toBe('fus-1')
+    expect(container.querySelector('[data-testid="fusion-sink-correlation"]')?.getAttribute('data-origin-run-id')).toBe('fus-1')
+    expect(container.textContent).toContain('origin verified')
+    expect(container.textContent).toContain('typed origin으로 run linkage 검증')
     expect(container.textContent).not.toContain('chat · board')
+  })
+
+  it('warns when a successful fusion board post lacks typed origin linkage', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-legacy',
+        title: 'Fusion deliberation (run fus-legacy): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-legacy',
+          question: 'Legacy sink?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use meta only.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Legacy answer.' },
+        },
+        origin: null,
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const linkage = container.querySelector('[data-testid="fusion-sink-linkage"]')
+    const correlation = container.querySelector('[data-testid="fusion-sink-correlation"]')
+    expect(linkage?.getAttribute('data-linkage-status')).toBe('missing')
+    expect(linkage?.textContent).toContain('origin unverified')
+    expect(linkage?.textContent).toContain('typed board origin is absent')
+    expect(correlation?.getAttribute('data-origin-run-id')).toBe('')
+    expect(correlation?.textContent).toContain('origin unverified')
+  })
+
+  it('flags a meta/origin run-id mismatch instead of treating sink projection as verified', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-drift',
+        title: 'Fusion deliberation (run fus-meta): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-meta',
+          question: 'Drifted sink?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Mismatch.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Mismatch answer.' },
+        },
+        origin: {
+          source: 'fusion',
+          fusion_run_id: 'fus-origin',
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const linkage = container.querySelector('[data-testid="fusion-sink-linkage"]')
+    const correlation = container.querySelector('[data-testid="fusion-sink-correlation"]')
+    expect(linkage?.getAttribute('data-linkage-status')).toBe('mismatch')
+    expect(linkage?.textContent).toContain('origin mismatch')
+    expect(linkage?.textContent).toContain('origin.fusion_run_id=fus-origin')
+    expect(correlation?.getAttribute('data-meta-run-id')).toBe('fus-meta')
+    expect(correlation?.getAttribute('data-origin-run-id')).toBe('fus-origin')
   })
 
   it('renders the RFC-0284 judge-node strip for a judge-of-judges run', () => {

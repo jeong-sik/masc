@@ -41,13 +41,19 @@ val string_of_disposition : disposition -> string
 (** Stable lowercase label for logs/metrics: "allowed" | "requires_approval" |
     "denied". *)
 
-val creates_durable_remote_surface : Gh_verb.gh_family -> bool
-(** G-4 externality axis (risk-independent): [true] for gh families that create
-    or mutate a durable remote surface whose ownership, lifecycle, and
-    moderation policy are not modeled in keeper tool contracts — [Repo] and
-    [Discussion]. [Pr]/[Issue]/[Release]/etc. act within an already-owned repo,
-    so [false]. This is the fact that makes repo-create/discussion a capability
-    decision rather than an ordinary reversible mutation. *)
+val creates_durable_remote_surface : Gh_verb.t -> bool
+(** G-4 externality axis (risk-independent): [true] when this gh verb creates or
+    mutates a durable remote surface whose ownership, lifecycle, and moderation
+    policy are not modeled in keeper tool contracts.
+
+    Keyed on the whole verb (family + action), not the family alone (W3
+    per-action refinement): a [Repo]/[Discussion] verb that is a local or
+    read-only action ([repo clone] copies to the local disk, [repo view] /
+    [repo list] read) does NOT touch a durable remote surface and is [false].
+    Only the mutating actions on those families ([repo create]/[fork]/[edit]/
+    [sync]/[set-default]/[rename]; every [discussion] mutation) are [true].
+    [Pr]/[Issue]/[Release]/etc. act within an already-owned repo, so [false].
+    A [None] action (bare [gh repo]) is a read, so [false]. *)
 
 val disposition_of : Gh_verb.t -> disposition
 (** The capability disposition for a gh verb. Reads

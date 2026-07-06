@@ -165,22 +165,6 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action queue =
     })
 ;;
 
-let read_queue_rows ~base_path ~keeper_name load ~source ~next_action =
-  match load ~base_path ~keeper_name with
-  | Ok queue -> rows_for_queue_snapshot ~keeper_name ~source ~next_action queue
-  | Error err ->
-    [ { keeper_name = Some keeper_name
-      ; source = Read_error
-      ; waiting_on = source_to_string source
-      ; wake_producer = Read_model_reader
-      ; since = None
-      ; due_at = None
-      ; next_action = "inspect_queue_snapshot"
-      ; detail = `Assoc [ "error", `String err ]
-      }
-    ]
-;;
-
 let read_error_row ?keeper_name ~waiting_on ~next_action detail =
   { keeper_name
   ; source = Read_error
@@ -191,6 +175,45 @@ let read_error_row ?keeper_name ~waiting_on ~next_action detail =
   ; next_action
   ; detail
   }
+;;
+
+let queue_read_error_detail (error : Keeper_event_queue_persistence.snapshot_read_error) =
+  `Assoc
+    [ ( "kind"
+      , `String
+          (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string
+             error.kind) )
+    ; "path", Json_util.string_opt_to_json error.path
+    ; "message", `String error.message
+    ]
+;;
+
+let queue_read_error_rows ~keeper_name errors =
+  List.map
+    (fun error ->
+       read_error_row
+         ~keeper_name:(Some keeper_name)
+         ~waiting_on:"event_queue_snapshot"
+         ~next_action:"inspect_queue_snapshot"
+         (queue_read_error_detail error))
+    errors
+;;
+
+let event_queue_rows ~base_path ~keeper_name =
+  let snapshot =
+    Keeper_event_queue_persistence.load_snapshot_pair_with_errors ~base_path ~keeper_name
+  in
+  rows_for_queue_snapshot
+    ~keeper_name
+    ~source:Event_queue_pending
+    ~next_action:"keeper_drain_event_queue"
+    snapshot.pending
+  @ rows_for_queue_snapshot
+      ~keeper_name
+      ~source:Event_queue_inflight
+      ~next_action:"recover_inflight_turn"
+      snapshot.inflight
+  @ queue_read_error_rows ~keeper_name snapshot.read_errors
 ;;
 
 let schedule_read_error_detail = function
@@ -435,7 +458,7 @@ let schedule_waiting_on (request : Schedule_domain.schedule_request) =
 
 let schedule_keeper_owner keeper_names (request : Schedule_domain.schedule_request) =
   match request.scheduled_by.kind with
-  | Human_operator -> None
+  | Human_operator | System -> None
   | Automated_actor ->
     let keeper_name = request.scheduled_by.id in
     if List.exists (String.equal keeper_name) keeper_names then Some keeper_name else None
@@ -665,10 +688,7 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
       external_attention_rows ~base_path ~keeper_name
     in
     let rows =
-      read_queue_rows ~base_path ~keeper_name Keeper_event_queue_persistence.load_pending
-        ~source:Event_queue_pending ~next_action:"keeper_drain_event_queue"
-      @ read_queue_rows ~base_path ~keeper_name Keeper_event_queue_persistence.load_inflight
-          ~source:Event_queue_inflight ~next_action:"recover_inflight_turn"
+      event_queue_rows ~base_path ~keeper_name
       @ chat_queue_rows keeper_name
       @ turn_admission_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals

@@ -483,19 +483,8 @@ let git_string_opt repo_path args =
   Cancel_safe.protect
     ~on_exn:(fun _ -> None)
     (fun () ->
-      let argv = "git" :: "-C" :: repo_path :: args in
-      let status, out =
-        Masc_exec.Exec_gate.run_argv_with_status ~actor:`Workspace_git
-          ~raw_source:(String.concat " " argv)
-          ~summary:"keeper sandbox git metadata"
-          ~timeout_sec:git_metadata_timeout_sec
-          argv
-      in
-      match status with
-      | Unix.WEXITED 0 ->
-          let trimmed = String.trim out in
-          if String.equal trimmed "" then None else Some trimmed
-      | _ -> None)
+      Workspace_git.git_first_line ~timeout_sec:git_metadata_timeout_sec
+        ~repo_path args)
 
 let enrich_playground_repo_from_git
       ~(source : string) ~(repo_name : string) ~(repo_path : string)

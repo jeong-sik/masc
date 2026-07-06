@@ -13,6 +13,7 @@
   masc.operator
   masc.server
   masc.config
+  masc.runtime
   masc.config_dir_resolver
   masc.embedded_config
   masc.host_config

@@ -17,7 +17,7 @@ Local Dune wrapper for multi-agent development:
   - injects --root <repo-root> unless --root is already present
   - asserts agent_sdk opam pin matches the repo SSOT before each build
   - asserts core opam dependencies are installed in the active switch
-  - asserts OCaml is at or above the repo floor (5.5)
+  - asserts OCaml is at or above the repo floor declared in dune-project
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_DUNE_CACHE=enabled or enabled-except-user-rules to opt into the shared Dune cache.
@@ -663,12 +663,11 @@ fi
 # -----------------------------------------------------------------------
 
 # --- OCaml minimum version guard ---------------------------------------
-# dune-project line 28 and masc.opam line 14 both declare a 5.5
-# floor.  Older switches build the early lib/ deps fine but fail later
-# during opam dependency resolution or in stdlib calls added between
-# 5.1 and 5.5.  Catch the mismatch up-front so the error mentions the
-# real floor rather than the trailing symptom (e.g. an "Unbound value"
-# from a 5.5-only stdlib API).
+# dune-project declares the OCaml floor and masc.opam is generated from it.
+# Older switches build the early lib/ deps fine but fail later during opam
+# dependency resolution or in stdlib calls added by the declared floor.  Catch
+# the mismatch up-front so the error mentions the real floor rather than the
+# trailing symptom (e.g. an "Unbound value" from a newer stdlib API).
 if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${MASC_SKIP_OCAML_VERSION_CHECK:-0}" != "1" \
       && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
@@ -677,16 +676,25 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
     _ocaml_v="$(ocaml -version 2>/dev/null \
                 | sed -nE 's/.*version ([0-9]+\.[0-9]+).*/\1/p')"
     if [[ -n "${_ocaml_v}" ]]; then
+      _required_version="$(sed -nE '/^[[:space:]]*\(ocaml[[:space:]]+\(>=[[:space:]]+([0-9]+)\.([0-9]+)\)\).*$/ { s//\1.\2/; p; q; }' \
+        "${repo_root}/dune-project")"
+      if [[ -z "${_required_version}" ]]; then
+        printf '[dune-local] unable to read OCaml floor from %s\n' \
+          "${repo_root}/dune-project" >&2
+        exit 1
+      fi
+      _required_major="${_required_version%%.*}"
+      _required_minor="${_required_version##*.}"
       _major="${_ocaml_v%%.*}"
       _minor="${_ocaml_v##*.}"
-      if [[ "${_major}" -lt 5 \
-            || ( "${_major}" -eq 5 && "${_minor}" -lt 5 ) ]]; then
-        printf '[dune-local] OCaml %s detected; this repo requires >= 5.5 (dune-project:28, masc.opam:14)\n' \
-          "${_ocaml_v}" >&2
+      if [[ "${_major}" -lt "${_required_major}" \
+            || ( "${_major}" -eq "${_required_major}" && "${_minor}" -lt "${_required_minor}" ) ]]; then
+        printf '[dune-local] OCaml %s detected; this repo requires >= %s (dune-project)\n' \
+          "${_ocaml_v}" "${_required_version}" >&2
         printf '[dune-local] symptom under older switch: opam dep resolution fails or stdlib API missing\n' >&2
         printf '[dune-local] repair (run each line in turn):\n' >&2
-        printf '[dune-local]   opam switch create 5.5.0\n' >&2
-        printf '[dune-local]   eval $(opam env)\n' >&2
+        printf '[dune-local]   opam switch create %s.0\n' "${_required_version}" >&2
+        printf '[dune-local]   eval $%s\n' '(opam env)' >&2
         printf '[dune-local]   opam install . --deps-only -y\n' >&2
         printf '[dune-local] set MASC_SKIP_OCAML_VERSION_CHECK=1 to bypass this guard\n' >&2
         exit 1

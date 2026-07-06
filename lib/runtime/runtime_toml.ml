@@ -342,10 +342,26 @@ let parse_provider (id : string) (tbl : Otoml.t)
          Otoml.find_opt tbl Fun.id [ "capabilities" ]
          |> Option.map (parse_capabilities ~path)
        in
-       (* [providers.<id>.log] and [providers.<id>.healthcheck] sub-tables are
-          parse-and-ignore: their fields were dropped from
-          {!Runtime_schema.provider}, so they are neither read nor populated.
-          Leaving them in a TOML file is not an error. *)
+       let healthcheck_result =
+         match Otoml.find_opt tbl Fun.id [ "healthcheck" ] with
+         | None -> Ok None
+         | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as healthcheck_tbl) ->
+           (match Otoml.find_opt healthcheck_tbl Otoml.get_string [ "path" ] with
+            | None -> Ok None
+            | Some healthcheck_path when String.length healthcheck_path > 0
+                                      && Char.equal healthcheck_path.[0] '/' ->
+              Ok (Some healthcheck_path)
+            | Some healthcheck_path ->
+              Error
+                (error
+                   (path ^ ".healthcheck.path")
+                   (Printf.sprintf
+                      "healthcheck.path must be absolute, got %S"
+                      healthcheck_path)))
+         | Some _ ->
+           Error
+             (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
+       in
        let headers =
          match Otoml.find_opt tbl Fun.id [ "headers" ] with
          | None -> None
@@ -358,9 +374,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match connect_timeout_result with
-        | Error errs -> Error errs
-        | Ok connect_timeout_s ->
+       (match healthcheck_result, connect_timeout_result with
+        | Error errs, _ | _, Error errs -> Error errs
+        | Ok healthcheck_path, Ok connect_timeout_s ->
           Ok
             { Runtime_schema.id
             ; display_name
@@ -370,6 +386,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; is_non_interactive
             ; credentials
             ; capabilities
+            ; healthcheck_path
             ; headers
             ; connect_timeout_s
             }))
@@ -733,6 +750,9 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
      used as an omission sentinel, and negative values are meaningless. Reject
      them at load time rather than silently downgrading to "no cap". *)
   let is_default_result = typed_find "a boolean" path tbl "is-default" Otoml.get_boolean in
+  let wizard_default_result =
+    typed_find "a boolean" path tbl "wizard-default" Otoml.get_boolean
+  in
   let max_concurrent_result =
     match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
     | Ok None -> Ok None
@@ -753,6 +773,11 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let ( let* ) = Result.bind in
   let* is_default_opt = is_default_result in
   let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
+  let* wizard_default_opt = wizard_default_result in
+  let wizard_default =
+    Option.value wizard_default_opt ~default:false
+    (* DET-OK: omitted means not selected for install wizard. *)
+  in
   let* max_concurrent = max_concurrent_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
@@ -762,6 +787,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     { Runtime_schema.provider_id
     ; model_id
     ; is_default
+    ; wizard_default
     ; max_concurrent
     ; price_input
     ; price_output

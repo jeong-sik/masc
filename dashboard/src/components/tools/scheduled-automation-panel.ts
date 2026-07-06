@@ -1387,16 +1387,98 @@ function liveSupportedEvidenceBannerClass(status: LiveSupportedEvidenceStatus): 
   }
 }
 
+type LiveSupportedMatchedRowIntegrity =
+  | { status: 'not_applicable' }
+  | { status: 'matched_rows_verified'; matchedCount: number }
+  | {
+      status: 'matched_row_mismatch'
+      mismatches: Array<{ scheduleId: string; reason: string }>
+    }
+
+function liveSupportedReadinessIsTerminalOrExpired(readiness: string | null | undefined): boolean {
+  return readiness === 'terminal' || readiness === 'expired'
+}
+
+function liveSupportedMatchedRowIntegrity(
+  evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
+  requests: DashboardScheduledAutomationRequest[],
+): LiveSupportedMatchedRowIntegrity {
+  if (evidence.projection_status !== 'matched_supported_non_terminal') {
+    return { status: 'not_applicable' }
+  }
+
+  const rowByScheduleId = new Map(requests.map(request => [request.schedule_id, request]))
+  const matchedIds = evidence.matched_schedule_ids ?? []
+  const mismatches =
+    matchedIds.length === 0
+      ? [{ scheduleId: '(none)', reason: 'missing_matched_schedule_ids' }]
+      : matchedIds.flatMap(scheduleId => {
+          const row = rowByScheduleId.get(scheduleId)
+          if (!row) {
+            return [{ scheduleId, reason: 'missing_request_row' }]
+          }
+          if (row.payload_support !== 'supported') {
+            return [{ scheduleId, reason: 'payload_support_not_supported' }]
+          }
+          if (liveSupportedReadinessIsTerminalOrExpired(row.execution_readiness)) {
+            return [{ scheduleId, reason: 'execution_readiness_terminal_or_expired' }]
+          }
+          return []
+        })
+
+  if (mismatches.length > 0) {
+    return { status: 'matched_row_mismatch', mismatches }
+  }
+  return { status: 'matched_rows_verified', matchedCount: matchedIds.length }
+}
+
 function SchLiveSupportedEvidence({
+  automation,
   evidence,
   onOpen,
 }: {
+  automation: DashboardScheduledAutomation
   evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence | null | undefined
   onOpen: (scheduleId: string) => void
 }) {
-  if (!evidence) return null
+  if (!evidence) {
+    const requestCount = automation.request_count ?? automation.requests?.length ?? 0
+    return html`
+      <section
+        class="sch-banner payload warn"
+        data-schedule-live-supported-evidence="projection_contract_missing"
+        data-schedule-live-supported-count="0"
+        data-schedule-live-supported-source=${automation.source ?? 'dashboard_response'}
+        data-schedule-live-supported-schema="missing"
+      >
+        <span class="sch-banner-ico">!</span>
+        <div class="sch-banner-txt">
+          <div>
+            <b>live supported scheduler evidence</b>
+            <span class="mono"> projection contract missing</span>
+          </div>
+          <div class="sch-banner-sub">
+            <span class="mono">live_supported_non_terminal_evidence</span>
+            was absent from the dashboard response; production-base
+            <span class="mono">matched_supported_non_terminal</span> is unproven.
+          </div>
+          <div class="sch-evidence-counts" aria-label="Live supported scheduler contract gap counts">
+            <span class="sch-evidence-count">
+              <span>requests</span>
+              <span class="mono">${requestCount.toLocaleString()}</span>
+            </span>
+            <span class="sch-evidence-count">
+              <span>contract</span>
+              <span class="mono">missing</span>
+            </span>
+          </div>
+        </div>
+      </section>
+    `
+  }
   const matchedIds = evidence.matched_schedule_ids ?? []
   const status = evidence.projection_status
+  const rowIntegrity = liveSupportedMatchedRowIntegrity(evidence, automation.requests ?? [])
   return html`
     <section
       class=${`sch-banner ${liveSupportedEvidenceBannerClass(status)}`}
@@ -1438,6 +1520,30 @@ function SchLiveSupportedEvidence({
         ${evidence.reason
           ? html`<div class="sch-banner-sub">${evidence.reason}</div>`
           : null}
+        ${rowIntegrity.status === 'matched_rows_verified'
+          ? html`
+              <div
+                class="sch-banner-sub"
+                data-schedule-live-supported-row-integrity="matched_rows_verified"
+                data-schedule-live-supported-row-integrity-count=${rowIntegrity.matchedCount}
+              >
+                matched schedule rows satisfy endpoint criteria in this response
+              </div>
+            `
+          : rowIntegrity.status === 'matched_row_mismatch'
+            ? html`
+                <div
+                  class="sch-banner-sub"
+                  data-schedule-live-supported-row-integrity="matched_row_mismatch"
+                  data-schedule-live-supported-row-integrity-count=${rowIntegrity.mismatches.length}
+                >
+                  matched row mismatch:
+                  <span class="mono">
+                    ${rowIntegrity.mismatches.map(item => `${item.scheduleId}:${item.reason}`).join(', ')}
+                  </span>
+                </div>
+              `
+            : null}
         ${matchedIds.length > 0
           ? html`
               <div class="sch-payload-rows" aria-label="Live supported schedule ids">
@@ -1829,6 +1935,7 @@ function SchedulePrototypeSurface({
         onOpen=${setSelectedScheduleId}
       />
       <${SchLiveSupportedEvidence}
+        automation=${automation}
         evidence=${automation.live_supported_non_terminal_evidence ?? null}
         onOpen=${setSelectedScheduleId}
       />
@@ -2184,6 +2291,7 @@ export function ScheduledAutomationPanel({
         : null}
 
       <${SchLiveSupportedEvidence}
+        automation=${automation}
         evidence=${automation.live_supported_non_terminal_evidence ?? null}
         onOpen=${setSelectedScheduleId}
       />

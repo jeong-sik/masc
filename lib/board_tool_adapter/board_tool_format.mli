@@ -17,6 +17,8 @@ type sort_order = Board_dispatch.sort_order =
   | Discussed
 
 val strip_state_blocks_text : string -> string
+val raw_agent_name_meta_key : field:string -> string
+val author_raw_agent_name_meta_key : string
 val format_timestamp_relative : float -> string
 val board_error_to_string : Board.board_error -> string
 val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class

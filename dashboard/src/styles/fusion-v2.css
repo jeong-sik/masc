@@ -849,7 +849,8 @@ button.fus-reconcile-row:hover {
   padding: 4px 0;
 }
 
-.v2-fusion-surface .fus-runs-error {
+.v2-fusion-surface .fus-runs-error,
+.v2-fusion-surface .fus-board-error {
   display: grid;
   gap: 4px;
   border: 1px solid var(--bad-30);
@@ -859,14 +860,16 @@ button.fus-reconcile-row:hover {
   padding: 8px 10px;
 }
 
-.v2-fusion-surface .fus-runs-error-k {
+.v2-fusion-surface .fus-runs-error-k,
+.v2-fusion-surface .fus-board-error-k {
   font-size: var(--fs-10);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.v2-fusion-surface .fus-runs-error-v {
+.v2-fusion-surface .fus-runs-error-v,
+.v2-fusion-surface .fus-board-error-v {
   color: var(--fus-text);
   font-size: var(--fs-12);
   line-height: 1.45;

@@ -4,6 +4,7 @@ import type { BoardPost } from '../../types'
 import { navigate, replaceRoute, route } from '../../router'
 import { ConnectionStatus } from '../dashboard-shell'
 import {
+  fusionBoardError,
   fusionBoardLoading,
   fusionBoardPosts,
   fusionRuns,
@@ -1098,6 +1099,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
 export function FusionSurface() {
   const posts = fusionBoardPosts.value
   const runs = useMemo(() => buildFusionRuns(posts), [posts])
+  const boardError = fusionBoardError.value
   const registryRuns = fusionRuns.value
   const selectedRunId = route.value.params.run_id ?? route.value.params.run
   const selected = runs.find(run => run.runId === selectedRunId) ?? runs[0] ?? null
@@ -1130,6 +1132,20 @@ export function FusionSurface() {
       </header>
 
       <${FusionRunsPanel} />
+
+      ${boardError
+        ? html`<div
+            class="fus-board-error"
+            data-testid="fusion-board-error"
+            data-board-source="/api/v1/dashboard/board"
+            data-board-sort="recent"
+            data-board-limit="500"
+            role="alert"
+          >
+            <span class="fus-board-error-k">Board sink load failed</span>
+            <span class="fus-board-error-v">${boardError}</span>
+          </div>`
+        : null}
 
       <section class="fus-kpis" aria-label="Fusion overview">
         <${FusionMetric} label="board runs" value=${runs.length} tone=${runs.length ? 'ok' : undefined} />
@@ -1170,13 +1186,15 @@ export function FusionSurface() {
           ? html`
               <div class="fus-run-scroll" data-testid="fusion-empty">
                 <div class="fus-block">
-                  <div class="fus-block-lbl">보드 sink 대기</div>
+                  <div class="fus-block-lbl">${boardError ? '보드 sink 확인 실패' : '보드 sink 대기'}</div>
                   <div class="fus-judge-wait">
-                    No board-sink fusion posts yet.
+                    ${boardError ? 'Board-sink fusion posts are unverified.' : 'No board-sink fusion posts yet.'}
                   </div>
                   <p class="fus-rec-rationale">
-                    레지스트리 상태는 위 패널(<code>/api/v1/dashboard/fusion-runs</code>)에 표시됩니다.
-                    상세한 패널·심판 리뷰는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 나타납니다.
+                    ${boardError
+                      ? html`보드 sink read path(<code>${'/api/v1/dashboard/board?sort_by=recent&limit=500'}</code>)가 실패했습니다. 위 레지스트리 패널은 독립 소스이며, 캐시된 보드 sink 행만 상세 리뷰에 표시됩니다.`
+                      : html`레지스트리 상태는 위 패널(<code>/api/v1/dashboard/fusion-runs</code>)에 표시됩니다.
+                        상세한 패널·심판 리뷰는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 나타납니다.`}
                   </p>
                 </div>
               </div>

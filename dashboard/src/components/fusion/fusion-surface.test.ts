@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
 import {
+  fusionBoardError,
   fusionBoardLoading,
   fusionBoardPosts,
   fusionRuns,
@@ -67,6 +68,7 @@ describe('FusionSurface', () => {
     document.body.appendChild(container)
     window.location.hash = '#fusion'
     route.value = { tab: 'fusion', params: {}, postId: null }
+    fusionBoardError.value = null
     fusionBoardLoading.value = false
     fusionBoardPosts.value = []
     fusionRuns.value = []
@@ -78,6 +80,7 @@ describe('FusionSurface', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    fusionBoardError.value = null
     fusionBoardLoading.value = false
     fusionBoardPosts.value = []
     fusionRuns.value = []
@@ -599,6 +602,49 @@ describe('FusionSurface', () => {
     expect(container.querySelector('[data-testid="fusion-empty"]')).not.toBeNull()
     expect(container.textContent).toContain('No board-sink fusion posts yet')
     expect(container.textContent).toContain('/api/v1/dashboard/fusion-runs')
+  })
+
+  it('surfaces board-sink fetch failure instead of claiming an empty sink', () => {
+    fusionBoardError.value = 'HTTP 502 board sink unavailable'
+
+    render(html`<${FusionSurface} />`, container)
+
+    const error = container.querySelector('[data-testid="fusion-board-error"]')
+    expect(error).not.toBeNull()
+    expect(error?.getAttribute('data-board-source')).toBe('/api/v1/dashboard/board')
+    expect(error?.getAttribute('data-board-sort')).toBe('recent')
+    expect(error?.getAttribute('data-board-limit')).toBe('500')
+    expect(error?.textContent).toContain('Board sink load failed')
+    expect(error?.textContent).toContain('HTTP 502 board sink unavailable')
+    const empty = container.querySelector('[data-testid="fusion-empty"]')
+    expect(empty?.textContent).toContain('Board-sink fusion posts are unverified')
+    expect(empty?.textContent).toContain('/api/v1/dashboard/board?sort_by=recent&limit=500')
+    expect(empty?.textContent).not.toContain('No board-sink fusion posts yet')
+  })
+
+  it('keeps cached board-sink detail visible while showing a refresh failure', () => {
+    fusionBoardError.value = 'network offline'
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-cached',
+        title: 'Fusion deliberation (run fus-cached): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-cached',
+          question: 'Cached run?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use cached evidence.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Cached answer.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="fusion-board-error"]')?.textContent).toContain('network offline')
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).toContain('fus-cached')
+    expect(detail?.textContent).toContain('Cached answer')
+    expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
   })
 
   it('keeps registry-only running rows visible without claiming no fusion runs exist', () => {

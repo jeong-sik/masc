@@ -67,6 +67,7 @@ type IdeConnectionTone = 'ok' | 'warn'
 interface IdeRightRailTabDescriptor {
   readonly id: IdeRightRailTab
   readonly label: string
+  readonly summary: string
   readonly title: string
 }
 
@@ -113,16 +114,19 @@ const IDE_RIGHT_RAIL_TABS: ReadonlyArray<IdeRightRailTabDescriptor> = [
   {
     id: 'context',
     label: 'Work Context',
+    summary: 'keeper work · persistence · memory · chat',
     title: 'Keeper work, persistence, memory, and chat scoped to the active IDE context',
   },
   {
     id: 'activity',
     label: 'Run Activity',
+    summary: 'file activity · diff · annotations',
     title: 'Workspace and keeper activity linked to the active file and repository',
   },
   {
     id: 'cursors',
     label: 'Keeper Cursors',
+    summary: 'keeper focus · cursor stream',
     title: 'Live keeper file focus and cursor stream status',
   },
 ]
@@ -342,18 +346,18 @@ function disconnectionReasonLabel(): string {
   const bootstrap = devTokenBootstrapStatus.value
 
   if (!hasToken && bootstrap === 'no_endpoint') {
-    return 'dashboard · auth required'
+    return 'events · auth required'
   }
   if (!hasToken && bootstrap === 'network') {
-    return 'dashboard · server unreachable'
+    return 'events · server unreachable'
   }
   if (!hasToken && bootstrap === 'fetching') {
-    return 'dashboard · bootstrapping...'
+    return 'events · bootstrapping...'
   }
   if (!hasToken) {
-    return 'dashboard · no token'
+    return 'events · no token'
   }
-  return 'dashboard · reconnecting'
+  return 'events · reconnecting'
 }
 
 function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
@@ -565,7 +569,7 @@ export function deriveIdeStatusbarModel({
     workspaceBasePath,
     chips,
     connectionLabel: dashboardConnected
-      ? 'dashboard · live'
+      ? 'events · live'
       : disconnectionReasonLabel(),
     connectionTone: dashboardConnected ? 'ok' : 'warn',
   }
@@ -579,8 +583,8 @@ function IdeDashboardConnectionChip({
   readonly tone: IdeConnectionTone
 }) {
   const title = tone === 'ok'
-    ? 'Dashboard event transport is live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
-    : 'Dashboard event transport is not live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
+    ? 'Dashboard event transport is live; repository tree, LSP, and keeper cursor streams report separate status.'
+    : 'Dashboard event transport is not live; repository tree, LSP, and keeper cursor streams report separate status.'
   return html`
     <span
       class=${`chip sm is-${tone}`}
@@ -589,6 +593,10 @@ function IdeDashboardConnectionChip({
       aria-label=${`${label}; ${title}`}
     >${label}</span>
   `
+}
+
+function rightRailTabDescriptor(tabId: IdeRightRailTab): IdeRightRailTabDescriptor {
+  return IDE_RIGHT_RAIL_TABS.find(tab => tab.id === tabId) ?? IDE_RIGHT_RAIL_TABS[0]!
 }
 
 function paramsWithLayers(
@@ -1036,6 +1044,7 @@ export function IdeShell() {
   const terminalKeeper = keeperFromRoute()
   const railsCollapsed = route.value.params.rails === 'hidden'
   const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('context')
+  const rightRailActiveTab = rightRailTabDescriptor(rightRailTab)
   const [treeWidth, setTreeWidth] = useState<number>(readStoredIdeTreeWidth)
   const statusbar = deriveIdeStatusbarModel({
     activeView,
@@ -1268,7 +1277,7 @@ export function IdeShell() {
           ? null
           : html`
             <div
-              class="ide-plane-conversation ide-v2-rail v2-ide-panel"
+              class="ide-plane-right-rail ide-v2-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
               <div class="ide-v2-rail-tabs ide-rail-tabs" role="tablist" aria-label="IDE right rail">
@@ -1284,6 +1293,15 @@ export function IdeShell() {
                     onClick=${() => setRightRailTab(tab.id)}
                   >${tab.label}</button>
                 `)}
+              </div>
+              <div
+                class="ide-v2-rail-summary"
+                data-testid="ide-right-rail-summary"
+                role="status"
+                aria-label=${`${rightRailActiveTab.label}: ${rightRailActiveTab.summary}`}
+              >
+                <span>${rightRailActiveTab.label}</span>
+                <span>${rightRailActiveTab.summary}</span>
               </div>
               <div class="ide-v2-rail-scroll">
                 ${rightRailTab === 'context' ? html`

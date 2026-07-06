@@ -15,6 +15,10 @@ export function themeExt(): Extension {
     '.cm-scroller': {
       overflow: 'auto',
       minHeight: '0',
+      paddingBottom: 'var(--sp-1)',
+      scrollbarColor: 'color-mix(in srgb, var(--color-accent-fg) 42%, transparent) transparent',
+      scrollbarGutter: 'stable',
+      scrollbarWidth: 'thin',
     },
     '.cm-content': {
       caretColor: 'transparent',

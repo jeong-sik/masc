@@ -44,7 +44,7 @@
 
 .v2-ide-rail,
 .v2-ide-panel.ide-plane-tree,
-.v2-ide-panel.ide-plane-conversation,
+.v2-ide-panel.ide-plane-right-rail,
 .v2-ide-panel.ide-plane-activity {
   border-color: var(--color-border-default);
 }

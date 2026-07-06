@@ -177,8 +177,10 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     render(h(IdeExplorer, { fileTreeStore: store }), container)
 
     const count = container.querySelector<HTMLElement>('[data-testid="ide-explorer-file-count"]')
-    expect(count?.textContent).toBe('2 VISIBLE')
-    expect(count?.getAttribute('title')).toContain('currently loaded in the visible tree')
+    expect(count?.textContent).toBe('2 LOADED')
+    expect(count?.getAttribute('title')).toContain('Loaded files in the current tree snapshot')
+    expect(container.querySelector('[data-testid="ide-explorer-scope-note"]')?.textContent)
+      .toBe('loaded tree · active source')
 
     const search = container.querySelector<HTMLInputElement>('[role="searchbox"]')
     expect(search).not.toBeNull()
@@ -186,7 +188,7 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     fireEvent.input(search!)
 
     expect(container.querySelector('[data-testid="ide-explorer-file-count"]')?.textContent)
-      .toBe('1/2 VISIBLE')
+      .toBe('1/2 LOADED')
   })
 
   it('keeps header controls outside the scrollable tree body', () => {

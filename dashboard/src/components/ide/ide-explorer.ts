@@ -75,8 +75,8 @@ export function explorerFileCountLabel(
   filtering: boolean,
 ): string {
   return filtering
-    ? `${filteredFileCount}/${visibleFileCount} VISIBLE`
-    : `${visibleFileCount} VISIBLE`
+    ? `${filteredFileCount}/${visibleFileCount} LOADED`
+    : `${visibleFileCount} LOADED`
 }
 
 export function IdeExplorer({
@@ -215,7 +215,7 @@ export function IdeExplorer({
             <span>EXPLORER</span>
             <span
               data-testid="ide-explorer-file-count"
-              title="Files currently loaded in the visible tree; unopened directories load when expanded."
+              title="Loaded files in the current tree snapshot; directory children are fetched by the tree store as branches open."
               aria-label=${fileCountLabel}
               style=${{
                 flex: 'none',
@@ -237,6 +237,11 @@ export function IdeExplorer({
               whiteSpace: 'nowrap',
             }}
           >${scopeLabel.label}</span>
+          <span
+            class="ide-explorer-scope-note"
+            data-testid="ide-explorer-scope-note"
+            title="The explorer is scoped to the selected workspace source and active repository selector."
+          >loaded tree · active source</span>
         </span>
       </header>
       ${diffSummary.changedFiles > 0 ? ExplorerDiffSummary(diffSummary) : null}

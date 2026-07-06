@@ -110,6 +110,8 @@ interface FusionRunParams {
 interface FusionRunView {
   runId: string
   boardPostId: string
+  boardOriginSource: string | null
+  boardOriginRunId: string | null
   keeperName: string
   title: string
   question: string
@@ -337,6 +339,8 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   return {
     runId,
     boardPostId: post.id,
+    boardOriginSource: post.origin?.source ?? null,
+    boardOriginRunId: post.origin?.fusion_run_id ?? null,
     keeperName: keeperNameFor(post),
     title: post.title || `Fusion run ${runId}`,
     question,
@@ -875,6 +879,50 @@ function hasParams(params: FusionRunParams): boolean {
     || params.maxTokens !== null
 }
 
+type FusionSinkLinkageStatus = 'verified' | 'missing' | 'mismatch'
+
+interface FusionSinkLinkage {
+  status: FusionSinkLinkageStatus
+  label: string
+  detail: string
+}
+
+function sinkLinkageFor(run: FusionRunView): FusionSinkLinkage {
+  if (run.boardOriginSource !== FUSION_BOARD_SOURCE || !run.boardOriginRunId) {
+    return {
+      status: 'missing',
+      label: 'origin unverified',
+      detail: 'typed board origin is absent; using meta.run_id only',
+    }
+  }
+  if (run.boardOriginRunId !== run.runId) {
+    return {
+      status: 'mismatch',
+      label: 'origin mismatch',
+      detail: `origin.fusion_run_id=${run.boardOriginRunId}`,
+    }
+  }
+  return {
+    status: 'verified',
+    label: 'origin verified',
+    detail: 'origin.source=fusion and origin.fusion_run_id match meta.run_id',
+  }
+}
+
+function FusionSinkLinkageBadge({ linkage }: { linkage: FusionSinkLinkage }) {
+  return html`
+    <span
+      class=${`fus-sink-linkage ${linkage.status}`}
+      data-testid="fusion-sink-linkage"
+      data-linkage-status=${linkage.status}
+      title=${linkage.detail}
+    >
+      <span class="fus-sink-linkage-k">${linkage.label}</span>
+      <span class="fus-sink-linkage-v">${linkage.detail}</span>
+    </span>
+  `
+}
+
 // Presentation-only thresholds for clamping a long resolved_answer. These are a
 // display heuristic, not a semantic model of the rendered markdown — RichContent
 // owns markdown parsing, so this deliberately avoids counting markdown blocks and
@@ -919,6 +967,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   const tokenLabel = combinedTokenLabel(run.usage)
   const preset = run.preset ?? findPreset(run.runId)
   const shape = fusionShapeInfo(run.judges)
+  const sinkLinkage = sinkLinkageFor(run)
 
   return html`
     <div class="fus-run-scroll" data-testid="fusion-detail">
@@ -1076,7 +1125,8 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
                         class=${`fus-sink-to ${ringFocusClasses()}`}
                         onClick=${() => navigate('board', { post: run.boardPostId })}
                       >보드 포스트 #${run.boardPostId} →</button>
-                      <span class="fus-sink-d">패널 N + 심판 종합을 meta_json 증거로 발행 · run_id로 쿼리</span>
+                      <span class="fus-sink-d">패널 N + 심판 종합을 meta_json 증거로 발행 · typed origin으로 run linkage 검증</span>
+                      <${FusionSinkLinkageBadge} linkage=${sinkLinkage} />
                     </div>
                   </div>
                   <div class="fus-sink-track">
@@ -1087,7 +1137,17 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
                     </div>
                   </div>
                 </div>
-                <div class="fus-corr">correlation · <span class="mono">${run.runId}</span></div>
+                <div
+                  class="fus-corr"
+                  data-testid="fusion-sink-correlation"
+                  data-meta-run-id=${run.runId}
+                  data-origin-source=${run.boardOriginSource ?? ''}
+                  data-origin-run-id=${run.boardOriginRunId ?? ''}
+                >
+                  correlation · meta <span class="mono">${run.runId}</span>
+                  <span class="fus-corr-sep">/</span>
+                  origin <span class="mono">${run.boardOriginRunId ?? 'unverified'}</span>
+                </div>
               </div>
             </div>
           `

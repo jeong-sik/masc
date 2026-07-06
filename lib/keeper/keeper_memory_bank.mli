@@ -197,6 +197,9 @@ type candidate_selection_result = {
       (** Drops attributed to per-kind caps, by kind. *)
   dropped_by_total_cap : int;
       (** Drops attributed to the global [total_cap]. *)
+  suppressed_synthetic_candidates : int;
+      (** Otherwise valid candidates intentionally suppressed because the
+          snapshot was synthetic rather than model-authored. *)
 }
 (** Outcome of [select_memory_candidates]. *)
 
@@ -264,9 +267,11 @@ val memory_candidates_from_snapshot_gated :
   is_synthetic:bool ->
   keeper_state_snapshot ->
   candidate_selection_result
-(** Gated variant used by post-turn persistence. When [is_synthetic] (the
-    snapshot was fabricated from run metadata, not model-authored), no durable
-    memory candidates are produced — synthetic snapshots are resume aids only. *)
+  (** Gated variant used by post-turn persistence. When [is_synthetic] (the
+      snapshot was fabricated from run metadata, not model-authored), no durable
+      memory candidates are produced — synthetic snapshots are resume aids only.
+      [suppressed_synthetic_candidates] records how many otherwise valid
+      candidates were intentionally suppressed by this gate. *)
 
 (** {1 Bank wire format} *)
 

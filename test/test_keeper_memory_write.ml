@@ -220,7 +220,11 @@ let test_synthetic_snapshot_source_drops_memory_candidates () =
   Alcotest.(check int)
     "synthetic source writes no durable memory candidates"
     0
-    (List.length selection.Keeper_memory_bank.selected)
+    (List.length selection.Keeper_memory_bank.selected);
+  Alcotest.(check bool)
+    "synthetic suppression is observable"
+    true
+    (selection.Keeper_memory_bank.suppressed_synthetic_candidates > 0)
 
 let test_meta_goal_fallback_writes_no_durable_memory_candidates () =
   with_temp_dir
@@ -240,6 +244,15 @@ let test_meta_goal_fallback_writes_no_durable_memory_candidates () =
     0
     count;
   Alcotest.(check (list string)) "no fallback kinds" [] kinds;
+  let fallback_selection =
+    Keeper_memory_bank.memory_candidates_from_snapshot_gated
+      ~is_synthetic:true
+      { Keeper_memory_policy.empty_keeper_state_snapshot with goal = Some meta.goal }
+  in
+  Alcotest.(check int)
+    "meta_goal_fallback suppression count"
+    1
+    fallback_selection.Keeper_memory_bank.suppressed_synthetic_candidates;
   let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
   Alcotest.(check bool)
     "memory bank file is not created for meta_goal_fallback"

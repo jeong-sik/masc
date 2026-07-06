@@ -804,9 +804,10 @@ let append_memory_notes_from_reply
       (match parse_state_snapshot_from_reply reply with
     | Some s -> (s, "reply_state_block", false)
     | None ->
-        (* Deterministic fallback: use keeper meta fields as memory source.
-           This guarantees memory write regardless of LLM output format.
-           See RFC #3646 Section 3: Det/NonDet boundary principle. *)
+        (* Deterministic fallback: use keeper meta fields as a continuity
+           snapshot only. Because this snapshot is constructed rather than
+           model-authored, the candidate gate suppresses durable writes and
+           reports the suppression explicitly. *)
         ( {
             Keeper_memory_policy.priority = None;
             Keeper_memory_policy.goal =
@@ -825,6 +826,12 @@ let append_memory_notes_from_reply
     memory_candidates_from_snapshot_gated ~is_synthetic snapshot
   in
   let notes = selection.selected in
+  if selection.suppressed_synthetic_candidates > 0 then
+    Log.Keeper.info
+      ~keeper_name:meta.name
+      "memory_candidates suppressed source=%s synthetic_candidates=%d"
+      source
+      selection.suppressed_synthetic_candidates;
   if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then
     Log.Keeper.warn
       ~keeper_name:meta.name

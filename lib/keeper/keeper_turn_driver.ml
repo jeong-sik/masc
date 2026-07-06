@@ -150,6 +150,7 @@ let lane_retry_checkpoint
 let attempt_runtime_candidates
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
+    ?(max_attempts = 100)
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -161,6 +162,12 @@ let attempt_runtime_candidates
       Error
         (Agent_sdk.Error.Internal
            (Printf.sprintf "runtime lane %S exhausted all candidates" runtime_id))
+    | _ when idx >= max_attempts ->
+      Error
+        (Agent_sdk.Error.Internal
+           (Printf.sprintf
+              "runtime lane %S exceeded max_attempts=%d after %d attempts"
+              runtime_id max_attempts idx))
     | candidate :: rest ->
       let is_last = rest = [] in
       let attempt_runtime_id = runtime_id_of candidate in

@@ -6,6 +6,7 @@ import {
   type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
   type DashboardScheduledAutomationDispatchReceipt,
+  type DashboardScheduledAutomationKeeperReactionEvidence,
   type DashboardScheduledAutomationKeeperQueueEvidence,
   type DashboardScheduledAutomationExecution,
   type DashboardScheduledAutomationRequest,
@@ -412,6 +413,9 @@ function dispatchReceiptRows(
     { label: 'kind', value: receipt.kind },
     { label: 'queue', value: receipt.queue },
     { label: 'stimulus', value: receipt.stimulus },
+    { label: 'stimulus_id', value: receipt.stimulus_id },
+    { label: 'reaction_ledger_status', value: receipt.reaction_ledger_status },
+    { label: 'reaction_ledger_error', value: receipt.reaction_ledger_error },
     { label: 'keeper', value: receipt.keeper_name },
     { label: 'schedule', value: receipt.schedule_id },
     { label: 'urgency', value: receipt.urgency },
@@ -531,6 +535,82 @@ function QueueEvidenceBlock({
       </div>
       ${rows.map(row => html`
         <div class=${compact ? 'sch-kv' : 'grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2'} data-keeper-queue-evidence-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function reactionEvidenceTone(
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
+): StatusChipTone {
+  if (!evidence) return 'neutral'
+  if (evidence.projection_status === 'matched_turn_started') return 'ok'
+  if (
+    evidence.projection_status === 'matched_stimulus' ||
+    evidence.projection_status === 'not_found' ||
+    evidence.projection_status === 'missing_stimulus_id'
+  ) return 'warn'
+  return 'bad'
+}
+
+function reactionEvidenceRows(
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!evidence) return []
+  const rows: Array<{ label: string; value: string | number | boolean | null | undefined }> = [
+    { label: 'source', value: evidence.source },
+    { label: 'keeper', value: evidence.keeper_name },
+    { label: 'schedule', value: evidence.schedule_id },
+    { label: 'post_id', value: evidence.post_id },
+    { label: 'stimulus', value: evidence.stimulus },
+    { label: 'stimulus_id', value: evidence.stimulus_id },
+    { label: 'stimulus_kind', value: evidence.stimulus_kind },
+    { label: 'reaction_kind', value: evidence.reaction_kind },
+    { label: 'stimulus_seen', value: evidence.stimulus_seen },
+    { label: 'turn_started_seen', value: evidence.turn_started_seen },
+    { label: 'matched_record_count', value: evidence.matched_record_count },
+    { label: 'stimulus_recorded_at', value: evidence.stimulus_recorded_at_iso },
+    { label: 'turn_started_recorded_at', value: evidence.turn_started_recorded_at_iso },
+    { label: 'latest_recorded_at', value: evidence.latest_recorded_at_iso },
+    { label: 'reason', value: evidence.reason },
+  ]
+  return rows
+    .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
+    .filter(row => row.value.trim() !== '')
+}
+
+function ReactionEvidenceBlock({
+  evidence,
+  compact = false,
+}: {
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
+  compact?: boolean
+}) {
+  if (!evidence) return null
+  const rows = reactionEvidenceRows(evidence)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-keeper-reaction-evidence=${evidence.projection_status}
+      data-schedule-keeper-reaction-evidence-source=${evidence.source ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">keeper_reaction_evidence</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">keeper reaction evidence</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${reactionEvidenceTone(evidence)} uppercase=${false}>
+            ${enumLabel(evidence.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[8.5rem_minmax(0,1fr)] gap-2'} data-keeper-reaction-evidence-row=${row.label}>
           <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
           <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
         </div>
@@ -802,10 +882,12 @@ function LastExecutionBlock({
   execution,
   dispatchReceipt,
   queueEvidence,
+  reactionEvidence,
 }: {
   execution: DashboardScheduledAutomationExecution | null | undefined
   dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
   queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
 }) {
   if (!execution) {
     return html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">-</div>`
@@ -847,6 +929,7 @@ function LastExecutionBlock({
         : null}
       <${DispatchReceiptBlock} receipt=${dispatchReceipt} />
       <${QueueEvidenceBlock} evidence=${queueEvidence} />
+      <${ReactionEvidenceBlock} evidence=${reactionEvidence} />
     </div>
   `
 }
@@ -939,6 +1022,7 @@ function ScheduleDetailPanel({
             execution=${execution}
             dispatchReceipt=${request.dispatch_receipt ?? null}
             queueEvidence=${request.keeper_queue_evidence ?? null}
+            reactionEvidence=${request.keeper_reaction_evidence ?? null}
           />
         </div>
       </div>
@@ -1503,6 +1587,7 @@ function SchDetail({
               execution=${execution}
               dispatchReceipt=${request.dispatch_receipt ?? null}
               queueEvidence=${request.keeper_queue_evidence ?? null}
+              reactionEvidence=${request.keeper_reaction_evidence ?? null}
             />
           </div>
 
@@ -1517,10 +1602,12 @@ function SchExecution({
   execution,
   dispatchReceipt,
   queueEvidence,
+  reactionEvidence,
 }: {
   execution: DashboardScheduledAutomationExecution | null | undefined
   dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
   queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
 }) {
   if (!execution) {
     return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_execution">실행 기록 없음</span></div></div>`
@@ -1537,6 +1624,7 @@ function SchExecution({
     </div>
     <${DispatchReceiptBlock} receipt=${dispatchReceipt} compact=${true} />
     <${QueueEvidenceBlock} evidence=${queueEvidence} compact=${true} />
+    <${ReactionEvidenceBlock} evidence=${reactionEvidence} compact=${true} />
     ${execution.error ? html`<div class="sch-exec bad">${execution.error}</div>` : null}
   `
 }

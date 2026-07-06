@@ -30,6 +30,16 @@ val record_recovery_stimulus_turn_started
   -> Keeper_event_queue.stimulus
   -> unit
 
+(** [record_event_queue_stimulus_turn_started ~ctx ~keeper_name stim] writes
+    a generic [Turn_started] reaction for an event-queue stimulus after the
+    heartbeat scheduler has admitted a real keeper turn. Logs and swallows
+    errors except [Eio.Cancel.Cancelled]. *)
+val record_event_queue_stimulus_turn_started
+  :  ctx:_ context
+  -> keeper_name:string
+  -> Keeper_event_queue.stimulus
+  -> unit
+
 (** Result of one heartbeat intake — accumulated pending board events
     after dedup and the number of stimuli consumed from the queue. *)
 type heartbeat_event_intake = {

@@ -533,7 +533,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     |> Schedule_runner_status.snapshot_to_yojson ~now:1.5 ~stale_after_sec:10.0
   in
   check_json_string_field "running status" "running" "status" running;
-  let result =
+  let ok_result =
     { due_changed = 1
     ; emitted = []
     ; rescheduled = 2
@@ -544,16 +544,10 @@ let test_runner_status_snapshot_tracks_liveness () =
           ; error = None
           ; duration_sec = 0.125
           }
-        ; { schedule_id = "status-2"
-          ; status = Dispatch_unsupported
-          ; detail = None
-          ; error = Some "unsupported"
-          ; duration_sec = 0.0
-          }
         ]
     }
   in
-  Schedule_runner_status.record_tick_ok ~started_at:1.0 ~finished_at:1.25 result;
+  Schedule_runner_status.record_tick_ok ~started_at:1.0 ~finished_at:1.25 ok_result;
   let ok =
     Schedule_runner_status.snapshot ()
     |> Schedule_runner_status.snapshot_to_yojson ~now:2.25 ~stale_after_sec:10.0
@@ -564,14 +558,18 @@ let test_runner_status_snapshot_tracks_liveness () =
   check_json_float_field "last duration" 0.25 "last_duration_sec" ok;
   check_json_float_field "last tick age" 1.0 "last_tick_age_sec" ok;
   (match json_field "last_counts" ok with
-   | Some counts ->
-     check_json_int_field "last due count" 1 "due_changed" counts;
-     check_json_int_field "last reschedule count" 2 "rescheduled" counts;
-     check_json_int_field "last success dispatch count" 1 "dispatch_succeeded" counts;
-     check_json_int_field "last unsupported dispatch count" 1 "dispatch_unsupported" counts;
-     check_json_int_field "last wake enqueued count" 0 "wake_enqueued" counts;
-     check_json_int_field "last wake skipped missing schedule count" 0
-       "wake_skipped_missing_schedule"
+     | Some counts ->
+       check_json_int_field "last due count" 1 "due_changed" counts;
+       check_json_int_field "last reschedule count" 2 "rescheduled" counts;
+       check_json_int_field "last success dispatch count" 1 "dispatch_succeeded" counts;
+       check_json_int_field "last failed dispatch count" 0 "dispatch_failed" counts;
+       check_json_int_field "last unsupported dispatch count" 0 "dispatch_unsupported" counts;
+       check_json_int_field "last start-rejected dispatch count" 0
+         "dispatch_start_rejected"
+         counts;
+       check_json_int_field "last wake enqueued count" 0 "wake_enqueued" counts;
+       check_json_int_field "last wake skipped missing schedule count" 0
+         "wake_skipped_missing_schedule"
        counts;
      check_json_int_field "last wake skipped non-keeper actor count" 0
        "wake_skipped_non_keeper_actor"
@@ -579,8 +577,53 @@ let test_runner_status_snapshot_tracks_liveness () =
      check_json_int_field "last wake skipped unregistered keeper count" 0
        "wake_skipped_unregistered_keeper"
        counts;
-     check_json_int_field "last wake failed count" 0 "wake_failed" counts
-   | None -> fail "missing last_counts");
+       check_json_int_field "last wake failed count" 0 "wake_failed" counts
+     | None -> fail "missing last_counts");
+  let dispatch_failure_result =
+    { due_changed = 3
+    ; emitted = []
+    ; rescheduled = 0
+    ; dispatches =
+        [ { schedule_id = "status-dispatch-failed"
+          ; status = Dispatch_failed
+          ; detail = None
+          ; error = Some "dispatch failed"
+          ; duration_sec = 0.0
+          }
+        ; { schedule_id = "status-dispatch-unsupported"
+          ; status = Dispatch_unsupported
+          ; detail = None
+          ; error = Some "unsupported"
+          ; duration_sec = 0.0
+          }
+        ; { schedule_id = "status-dispatch-start-rejected"
+          ; status = Dispatch_start_rejected
+          ; detail = None
+          ; error = Some "start rejected"
+          ; duration_sec = 0.0
+          }
+        ]
+    }
+  in
+  Schedule_runner_status.record_tick_ok
+    ~started_at:2.0
+    ~finished_at:2.125
+    dispatch_failure_result;
+  let dispatch_degraded =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:2.25 ~stale_after_sec:10.0
+  in
+  check_json_string_field "dispatch failure degrades status" "degraded" "status"
+    dispatch_degraded;
+  (match json_field "last_counts" dispatch_degraded with
+   | Some counts ->
+     check_json_int_field "failed dispatch count" 1 "dispatch_failed" counts;
+     check_json_int_field "unsupported dispatch count" 1 "dispatch_unsupported" counts;
+     check_json_int_field "start-rejected dispatch count" 1
+       "dispatch_start_rejected"
+       counts;
+     check_json_int_field "dispatch failure wake failed count" 0 "wake_failed" counts
+   | None -> fail "missing dispatch failure last_counts");
   let wake_enqueue_counts : Schedule_runner_status.wake_enqueue_counts =
     { wake_enqueued = 2
     ; wake_skipped_no_keeper = 3
@@ -594,7 +637,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     ~wake_enqueue_counts
     ~started_at:2.5
     ~finished_at:2.75
-    result;
+    ok_result;
   let wake_degraded =
     Schedule_runner_status.snapshot ()
     |> Schedule_runner_status.snapshot_to_yojson ~now:3.0 ~stale_after_sec:10.0

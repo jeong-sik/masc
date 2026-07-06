@@ -100,6 +100,41 @@ let schedule_payload =
     ]
 ;;
 
+let external_attention_item ~keeper_name index : Keeper_external_attention.item =
+  let dedupe_key = Printf.sprintf "waiting-inventory-external:%s:%d" keeper_name index in
+  { event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key
+  ; dedupe_key
+  ; keeper_name
+  ; conversation =
+      { conversation_id = Printf.sprintf "conversation-%d" index
+      ; surface = Keeper_external_attention.Agent
+      }
+  ; external_message = None
+  ; source_label = "agent"
+  ; actor =
+      { actor_id = Some (Printf.sprintf "actor-%d" index)
+      ; display_name = None
+      ; authority = Keeper_chat_store.External
+      }
+  ; urgency = Keeper_external_attention.Ambient
+  ; content_preview = Printf.sprintf "attention %d" index
+  ; content_ref = None
+  ; received_at = 100.0 +. Float.of_int index
+  ; metadata = []
+  }
+;;
+
+let record_external_attention_exn config ~keeper_name index =
+  match
+    Keeper_external_attention.record
+      ~base_path:config.Workspace.base_path
+      (external_attention_item ~keeper_name index)
+  with
+  | `Recorded -> ()
+  | `Duplicate _ -> failf "duplicate external attention item: %d" index
+  | `Error err -> fail ("external attention record failed: " ^ err)
+;;
+
 let create_schedule_exn config ~schedule_id ~scheduled_by =
   match
     Schedule_service.create
@@ -466,6 +501,36 @@ let test_corrupt_external_attention_is_read_error () =
      | _first :: _second :: _rest -> fail "expected one keeper waiting row, got multiple")
 ;;
 
+let test_external_attention_projection_is_bounded () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "external-attention-bounded-keeper" in
+  ensure_keeper config keeper_name;
+  let initial_json = Server_keeper_waiting_inventory.dashboard_json config in
+  let limit = json_int_member "external_attention_row_limit" initial_json in
+  check bool "external attention row limit is positive" true (limit > 0);
+  for index = 1 to limit + 1 do
+    record_external_attention_exn config ~keeper_name index
+  done;
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  check bool "root row count reports truncation" true
+    (json_bool_member "row_count_truncated" json);
+  check int "one keeper has truncated external attention" 1
+    (json_int_member "external_attention_truncated_keeper_count" json);
+  check int "row count is capped" limit (json_int_member "row_count" json);
+  match find_keeper json keeper_name with
+  | None -> fail "keeper row missing"
+  | Some keeper ->
+    check bool "keeper waiting count reports truncation" true
+      (json_bool_member "waiting_count_truncated" keeper);
+    check bool "external attention source reports truncation" true
+      U.(keeper |> member "truncated_sources" |> member "external_attention" |> to_bool);
+    check int "keeper waiting count is capped" limit
+      (json_int_member "waiting_count" keeper);
+    check int "keeper waiting rows are capped" limit
+      U.(keeper |> member "waiting_on" |> to_list |> List.length)
+;;
+
 let test_corrupt_pending_confirms_is_read_error () =
   with_workspace
   @@ fun config ->
@@ -512,6 +577,8 @@ let () =
             test_keeper_name_discovery_failure_is_read_error
         ; test_case "corrupt external attention is read_error" `Quick
             test_corrupt_external_attention_is_read_error
+        ; test_case "external attention projection is bounded" `Quick
+            test_external_attention_projection_is_bounded
         ; test_case "corrupt pending confirms is read_error" `Quick
             test_corrupt_pending_confirms_is_read_error
         ] )

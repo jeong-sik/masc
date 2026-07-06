@@ -207,6 +207,15 @@ let latest_tick_has_wake_failure snapshot =
   | None -> false
 ;;
 
+let latest_tick_has_dispatch_failure snapshot =
+  match snapshot.last_counts with
+  | Some counts ->
+    counts.dispatch_failed > 0
+    || counts.dispatch_unsupported > 0
+    || counts.dispatch_start_rejected > 0
+  | None -> false
+;;
+
 let status ?now ?stale_after_sec snapshot =
   let stale =
     match now, stale_after_sec, snapshot.last_tick_finished_at with
@@ -220,7 +229,9 @@ let status ?now ?stale_after_sec snapshot =
   then "not_started"
   else if stale
   then "stale"
-  else if latest_error_is_newer snapshot || latest_tick_has_wake_failure snapshot
+  else if latest_error_is_newer snapshot
+          || latest_tick_has_dispatch_failure snapshot
+          || latest_tick_has_wake_failure snapshot
   then "degraded"
   else "ok"
 ;;

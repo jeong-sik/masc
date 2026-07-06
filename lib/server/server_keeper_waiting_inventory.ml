@@ -44,6 +44,8 @@ type waiting_row =
   ; detail : Yojson.Safe.t
   }
 
+let external_attention_dashboard_row_limit = 64
+
 let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
   | Event_queue_inflight -> "event_queue_inflight"
@@ -134,6 +136,16 @@ let waiting_row_json (row : waiting_row) =
     ; "next_action", `String row.next_action
     ; "detail", row.detail
     ]
+;;
+
+let take_with_truncation limit rows =
+  let limit = max 0 limit in
+  let rec loop remaining acc = function
+    | rest when remaining <= 0 -> List.rev acc, rest <> []
+    | [] -> List.rev acc, false
+    | row :: rest -> loop (remaining - 1) (row :: acc) rest
+  in
+  loop limit [] rows
 ;;
 
 let rows_for_queue_snapshot ~keeper_name ~source ~next_action queue =
@@ -295,34 +307,39 @@ let hitl_rows keeper_name pending =
 let external_attention_rows ~base_path ~keeper_name =
   match
     Keeper_external_attention.pending_for_keeper_result ~base_path ~keeper_name
-      ~limit:max_int ()
+      ~limit:(external_attention_dashboard_row_limit + 1) ()
   with
   | Error err ->
-    [ read_error_row
-        ~keeper_name:(Some keeper_name)
-        ~waiting_on:"external_attention_store"
-        ~next_action:"repair_external_attention_store"
-        (`Assoc [ "error", `String err ])
-    ]
+    ( [ read_error_row
+          ~keeper_name:(Some keeper_name)
+          ~waiting_on:"external_attention_store"
+          ~next_action:"repair_external_attention_store"
+          (`Assoc [ "error", `String err ])
+      ]
+    , false )
   | Ok pending ->
-    pending
-    |> List.map (fun (item : Keeper_external_attention.item) ->
-      { keeper_name = Some keeper_name
-      ; source = External_attention
-      ; waiting_on = item.source_label
-      ; wake_producer = External_attention_store
-      ; since = Some item.received_at
-      ; due_at = None
-      ; next_action = "keeper_process_external_attention"
-      ; detail =
-          `Assoc
-            [ "event_id", `String item.event_id
-            ; "urgency", `String (Keeper_external_attention.urgency_to_string item.urgency)
-            ; "conversation_id", `String item.conversation.conversation_id
-            ; "content_preview", `String item.content_preview
-            ; "surface", Keeper_external_attention.surface_ref_to_json item.conversation.surface
-            ]
-      })
+    let pending, truncated =
+      take_with_truncation external_attention_dashboard_row_limit pending
+    in
+    ( pending
+      |> List.map (fun (item : Keeper_external_attention.item) ->
+        { keeper_name = Some keeper_name
+        ; source = External_attention
+        ; waiting_on = item.source_label
+        ; wake_producer = External_attention_store
+        ; since = Some item.received_at
+        ; due_at = None
+        ; next_action = "keeper_process_external_attention"
+        ; detail =
+            `Assoc
+              [ "event_id", `String item.event_id
+              ; "urgency", `String (Keeper_external_attention.urgency_to_string item.urgency)
+              ; "conversation_id", `String item.conversation.conversation_id
+              ; "content_preview", `String item.content_preview
+              ; "surface", Keeper_external_attention.surface_ref_to_json item.conversation.surface
+              ]
+        })
+    , truncated )
 ;;
 
 let fusion_rows keeper_name runs =
@@ -580,7 +597,7 @@ let record_keeper_state_metrics per_keeper =
        let count =
          per_keeper
          |> List.fold_left
-              (fun total (_keeper_name, busy, rows) ->
+              (fun total (_keeper_name, busy, rows, _external_attention_truncated) ->
                  if keeper_state ~busy rows = state then total + 1 else total)
               0
        in
@@ -593,14 +610,17 @@ let record_keeper_state_metrics per_keeper =
 
 let record_metrics ~now ~per_keeper ~global_rows =
   let all_keeper_rows =
-    List.flatten (List.map (fun (_keeper_name, _busy, rows) -> rows) per_keeper)
+    List.flatten
+      (List.map
+         (fun (_keeper_name, _busy, rows, _external_attention_truncated) -> rows)
+         per_keeper)
   in
   record_scope_metrics ~now ~scope:"keeper" all_keeper_rows;
   record_scope_metrics ~now ~scope:"global" global_rows;
   record_keeper_state_metrics per_keeper
 ;;
 
-let keeper_json keeper_name ~busy rows =
+let keeper_json keeper_name ~busy ~external_attention_truncated rows =
   let state = keeper_state ~busy rows in
   let since =
     rows
@@ -617,6 +637,12 @@ let keeper_json keeper_name ~busy rows =
     ; "state", `String (keeper_state_to_string state)
     ; "waiting_on", `List (List.map waiting_row_json rows)
     ; "waiting_count", `Int (List.length rows)
+    ; "waiting_count_truncated", `Bool external_attention_truncated
+    ; ( "truncated_sources"
+      , `Assoc
+          (if external_attention_truncated
+           then [ "external_attention", `Bool true ]
+           else []) )
     ; "sources", `Assoc (source_counts rows)
     ; "since", float_json since
     ; "since_iso", unix_iso_json since
@@ -632,6 +658,9 @@ let keeper_json keeper_name ~busy rows =
 let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
   keeper_names
   |> List.map (fun keeper_name ->
+    let external_attention_rows, external_attention_truncated =
+      external_attention_rows ~base_path ~keeper_name
+    in
     let rows =
       read_queue_rows ~base_path ~keeper_name Keeper_event_queue_persistence.load_pending
         ~source:Event_queue_pending ~next_action:"keeper_drain_event_queue"
@@ -640,12 +669,12 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
       @ chat_queue_rows keeper_name
       @ turn_admission_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
-      @ external_attention_rows ~base_path ~keeper_name
+      @ external_attention_rows
       @ fusion_rows keeper_name fusion_runs
       @ background_task_rows keeper_name
       @ pending_confirm_rows [ keeper_name ] pending_confirms
     in
-    keeper_name, rows)
+    keeper_name, rows, external_attention_truncated)
 ;;
 
 let rows_for_keeper keeper_name rows =
@@ -679,9 +708,9 @@ let dashboard_json config =
   let per_keeper =
     keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
       ~pending_confirms keeper_names
-    |> List.map (fun (keeper_name, rows) ->
+    |> List.map (fun (keeper_name, rows, external_attention_truncated) ->
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in
-      keeper_name, keeper_is_busy busy_names keeper_name, rows)
+      keeper_name, keeper_is_busy busy_names keeper_name, rows, external_attention_truncated)
   in
   let global_rows =
     global_rows_from schedule_rows
@@ -690,15 +719,26 @@ let dashboard_json config =
   in
   let keeper_json_rows =
     per_keeper
-    |> List.map (fun (keeper_name, busy, rows) -> keeper_json keeper_name ~busy rows)
+    |> List.map (fun (keeper_name, busy, rows, external_attention_truncated) ->
+      keeper_json keeper_name ~busy ~external_attention_truncated rows)
   in
   let all_keeper_rows =
-    List.flatten (List.map (fun (_keeper_name, _busy, rows) -> rows) per_keeper)
+    List.flatten
+      (List.map
+         (fun (_keeper_name, _busy, rows, _external_attention_truncated) -> rows)
+         per_keeper)
+  in
+  let external_attention_truncated_keeper_count =
+    per_keeper
+    |> List.fold_left
+         (fun count (_keeper_name, _busy, _rows, external_attention_truncated) ->
+            if external_attention_truncated then count + 1 else count)
+         0
   in
   let waiting_keeper_count =
     per_keeper
     |> List.fold_left
-         (fun count (_keeper_name, busy, rows) ->
+         (fun count (_keeper_name, busy, rows, _external_attention_truncated) ->
             match keeper_state ~busy rows with
             | Idle -> count
             | Busy | Waiting | Deferred -> count + 1)
@@ -714,6 +754,10 @@ let dashboard_json config =
     ; "keeper_count", `Int (List.length keeper_names)
     ; "waiting_keeper_count", `Int waiting_keeper_count
     ; "row_count", `Int (List.length all_keeper_rows)
+    ; "row_count_truncated", `Bool (external_attention_truncated_keeper_count > 0)
+    ; "external_attention_row_limit", `Int external_attention_dashboard_row_limit
+    ; ( "external_attention_truncated_keeper_count"
+      , `Int external_attention_truncated_keeper_count )
     ; "global_row_count", `Int (List.length global_rows)
     ; ( "global_pending_confirm_count_known"
       , `Bool (List.length pending_confirm_read_error_rows = 0) )

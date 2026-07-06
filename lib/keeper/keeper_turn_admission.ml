@@ -60,7 +60,8 @@ type slot =
        non-cooperative mutex is the right choice here. *)
   ; mutable info : in_flight_info option
   ; mutable waiting : int
-  ; mutable waiting_since : float option
+  ; mutable waiting_entries : (int * float) list
+  ; mutable next_waiter_id : int
   ; mutable rejected_chat_count : int
   }
 
@@ -84,7 +85,8 @@ let slot_for ~base_path ~keeper_name =
         ; state_mu = Stdlib.Mutex.create ()
         ; info = None
         ; waiting = 0
-        ; waiting_since = None
+        ; waiting_entries = []
+        ; next_waiter_id = 0
         ; rejected_chat_count = 0
         }
       in
@@ -115,6 +117,16 @@ let run_locked slot ~lane f =
 
 let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
 
+let oldest_waiting_since entries =
+  List.fold_left
+    (fun oldest (_waiter_id, since) ->
+       match oldest with
+       | None -> Some since
+       | Some current -> Some (min current since))
+    None
+    entries
+;;
+
 let rejected_snapshot slot =
   Stdlib.Mutex.protect slot.state_mu (fun () ->
     slot.rejected_chat_count <- slot.rejected_chat_count + 1;
@@ -137,20 +149,21 @@ let run_if_free ~base_path ~keeper_name f =
 
 let run_serialized ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
-  let may_wait =
+  let waiter_id =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
       if slot.waiting >= max_waiting_chat_requests
-      then false
+      then None
       else (
-        if slot.waiting = 0 then
-          (* NDT-OK: waiter age timestamp for observability only. *)
-          slot.waiting_since <- Some (Unix.gettimeofday ());
+        let waiter_id = slot.next_waiter_id in
+        slot.next_waiter_id <- slot.next_waiter_id + 1;
+        (* NDT-OK: waiter age timestamp for observability only. *)
+        slot.waiting_entries <- (waiter_id, Unix.gettimeofday ()) :: slot.waiting_entries;
         slot.waiting <- slot.waiting + 1;
-        true))
+        Some waiter_id))
   in
-  if not may_wait
-  then `Rejected (rejected_snapshot slot)
-  else (
+  match waiter_id with
+  | None -> `Rejected (rejected_snapshot slot)
+  | Some waiter_id ->
     (* [Fun.protect] rather than [Switch.on_release]: there is no ambient
        switch here, the finally never raises and never yields, and the only
        suspension point it covers is the cancellable [Eio.Mutex.lock] wait
@@ -159,10 +172,13 @@ let run_serialized ~base_path ~keeper_name f =
     Fun.protect
       ~finally:(fun () ->
         Stdlib.Mutex.protect slot.state_mu (fun () ->
-          slot.waiting <- slot.waiting - 1;
-          if slot.waiting <= 0 then slot.waiting_since <- None))
+          slot.waiting <- max 0 (slot.waiting - 1);
+          slot.waiting_entries
+          <- List.filter
+               (fun (entry_waiter_id, _since) -> entry_waiter_id <> waiter_id)
+               slot.waiting_entries))
       (fun () -> Eio.Mutex.lock slot.turn_mu);
-    run_locked slot ~lane:Chat f)
+    run_locked slot ~lane:Chat f
 ;;
 
 let rejection_snapshot slot =
@@ -197,7 +213,9 @@ let chat_waiting_since ~base_path ~keeper_name =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
   | None -> None
-  | Some slot -> Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting_since)
+  | Some slot ->
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      oldest_waiting_since slot.waiting_entries)
 ;;
 
 let zero_snapshot ~keeper_name =
@@ -218,7 +236,7 @@ let snapshot_of_slot slot =
     ; snapshot_slot_created = true
     ; snapshot_in_flight = slot.info
     ; snapshot_waiting = slot.waiting
-    ; snapshot_waiting_since = slot.waiting_since
+    ; snapshot_waiting_since = oldest_waiting_since slot.waiting_entries
     ; snapshot_waiting_cap = max_waiting_chat_requests
     ; snapshot_waiting_full = slot.waiting >= max_waiting_chat_requests
     ; snapshot_rejected_chat_count = slot.rejected_chat_count

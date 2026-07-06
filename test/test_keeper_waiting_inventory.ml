@@ -1,6 +1,5 @@
 open Alcotest
 module U = Yojson.Safe.Util
-module Keeper_runtime = Masc.Keeper_runtime
 
 let temp_dir () =
   let path = Filename.temp_file "keeper_waiting_inventory_test" "" in
@@ -44,10 +43,25 @@ let with_workspace f =
   f config
 ;;
 
+let keeper_meta_fixture keeper_name =
+  Masc_test_deps.meta_of_json_fixture
+    (`Assoc
+      [ "name", `String keeper_name
+      ; "agent_name", `String keeper_name
+      ; "goal", `String "waiting inventory test"
+      ; "sandbox_profile", `String "local"
+      ; "network_mode", `String "inherit"
+      ])
+;;
+
 let ensure_keeper config keeper_name =
-  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  match
+    let open Result in
+    let* meta = keeper_meta_fixture keeper_name in
+    Keeper_meta_store.write_meta config meta
+  with
   | Ok _ -> ()
-  | Error err -> fail ("ensure_keeper_meta failed: " ^ err)
+  | Error err -> fail ("write keeper meta failed: " ^ err)
 ;;
 
 let keeper_meta_exn config keeper_name =

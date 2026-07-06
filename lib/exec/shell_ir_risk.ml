@@ -166,6 +166,56 @@ let rec skip_gh_global_options = function
   | parts -> parts
 ;;
 
+let shell_arg_literal = function
+  | Shell_ir.Lit (s, _) -> Some s
+  | Shell_ir.Var _ | Shell_ir.Concat _ -> None
+;;
+
+let gh_global_value_option = function
+  | "--repo" | "-R" | "--hostname" | "--config" | "--git-protocol" -> true
+  | _ -> false
+;;
+
+let gh_global_bool_option = function
+  | "--help" | "-h" | "--version" | "--debug" | "--verbose" | "--no-color"
+  | "--paginate" ->
+    true
+  | _ -> false
+;;
+
+let gh_global_eq_value_option opt =
+  String.length opt > 1
+  && opt.[0] = '-'
+  && (String.starts_with ~prefix:"--repo=" opt
+      || String.starts_with ~prefix:"-R=" opt
+      || String.starts_with ~prefix:"--hostname=" opt
+      || String.starts_with ~prefix:"--config=" opt
+      || String.starts_with ~prefix:"--git-protocol=" opt)
+;;
+
+let gh_floor_words_of_simple (simple : Shell_ir.simple) =
+  match Exec_program.known simple.bin with
+  | Some Exec_program.Gh ->
+    let rec collect acc = function
+      | [] -> Some (Exec_program.to_string simple.bin :: List.rev acc)
+      | arg :: rest ->
+        (match shell_arg_literal arg with
+         | Some opt when gh_global_value_option opt ->
+           let rest =
+             match rest with
+             | [] -> []
+             | _value :: rest -> rest
+           in
+           collect acc rest
+         | Some opt when gh_global_bool_option opt || gh_global_eq_value_option opt ->
+           collect acc rest
+         | Some word -> collect (word :: acc) rest
+         | None -> collect ("" :: acc) rest)
+    in
+    collect [] simple.args
+  | Some _ | None -> None
+;;
+
 let normalize_command_words words =
   match strip_env_prefix words with
   | "git" :: rest -> "git" :: skip_git_global_options rest
@@ -963,10 +1013,13 @@ let max_risk a b = if risk_rank a >= risk_rank b then a else b
    before the subcommand via Cobra, so the op executes). This is the floor's
    SSOT for gh risk, so the miss is an autonomous-keeper bypass.
 
-   Fix: combine two views with [max_risk].
+   Fix: combine three views with [max_risk].
    - [words]: the existing word-list classifier — retains the string-borne
      risk it alone sees ([gh api -X DELETE], graphql mutation bodies,
-     positional-token scans).
+     positional-token scans) when argv is all literal.
+   - [simple] arg words: an enforcement-only view that consumes known gh global
+     value flags directly from [Shell_ir.arg], so dynamic flag values cannot
+     shadow the real family/action slot.
    - [simple]: the typed lowering ([Shell_ir_typed.of_simple], whose gh parser
      consumes value-flags exactly like gh) yields the correctly-located
      subcommand; [table_risk_of_gh_family] then reads the same subcommand
@@ -978,6 +1031,11 @@ let repo_hosting_cli_floor_risk (words : string list) (simple : Shell_ir.simple)
   : risk_class
   =
   let word_risk = classify_repo_hosting_cli words in
+  let arg_word_risk =
+    match gh_floor_words_of_simple simple with
+    | Some words -> classify_repo_hosting_cli words
+    | None -> R0_Read
+  in
   let typed_risk =
     (* [@warning "-4"]: only the [Gh] constructor is of interest; every other
        typed command (and the [Generic] escape hatch for non-literal argv) is
@@ -998,7 +1056,7 @@ let repo_hosting_cli_floor_risk (words : string list) (simple : Shell_ir.simple)
         table_risk_of_gh_family (Gh_verb.family_token fam) action)
     | Shell_ir_typed.W _ -> R0_Read
   in
-  max_risk word_risk typed_risk
+  max_risk word_risk (max_risk arg_word_risk typed_risk)
 [@@warning "-4"]
 
 let redirect_risk = function

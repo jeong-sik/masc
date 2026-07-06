@@ -93,9 +93,11 @@ val classify_repo_hosting_cli : string list -> risk_class
 val repo_hosting_cli_floor_risk : string list -> Shell_ir.simple -> risk_class
 (** Enforcement-floor risk for a gh command, robust to leading global flags
     (issue #23390). [max] of [classify_repo_hosting_cli words] (string-borne
-    risk: [gh api -X DELETE], graphql bodies) and the typed lowering of
-    [simple] (whose gh parser consumes value-flags like gh, so the subcommand
-    is located correctly even after [gh --repo o/r pr merge]). Keeps the
+    risk: [gh api -X DELETE], graphql bodies), an enforcement-only [simple]
+    arg view that consumes known gh global value flags even when their values
+    are dynamic, and the typed lowering of [simple] (whose gh parser consumes
+    literal value-flags like gh, so the subcommand is located correctly even
+    after [gh --repo o/r pr merge]). Keeps the
     historical floor semantics — unrecognized gh subcommand / [Api] / bare
     family stay [R0_Read]; fail-closing unknown gh is RFC-0309 W3, not here.
     Used by [Approval_policy.repo_hosting_cli_is_floored]. *)

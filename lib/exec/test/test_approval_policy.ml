@@ -417,12 +417,35 @@ let test_gh_leading_flag_destructive_floored_under_autonomous () =
       , [ "--repo"; "o/r"; "repo"; "delete"; "o/r"; "--yes" ]
     ]
 
+let test_gh_leading_dynamic_flag_destructive_floored_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
+         assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf "%s: dynamic leading-flag destructive op must be floored" label)
+    [ ( "gh --repo $REPO pr merge"
+      , [ lit "--repo"; var "REPO"; lit "pr"; lit "merge"; lit "5" ] )
+    ; ( "gh --repo o/r pr merge $PR_NUMBER"
+      , [ lit "--repo"; lit "o/r"; lit "pr"; lit "merge"; var "PR_NUMBER" ] )
+    ; ( "gh --hostname $HOST api -X DELETE"
+      , [ lit "--hostname"; var "HOST"; lit "api"; lit "-X"; lit "DELETE"
+        ; lit "/repos/owner/repo"
+        ] )
+    ]
+
 (* Control: a leading global flag on a READ must NOT be over-blocked — the fix
    restores correct subcommand location without flooring reads. *)
 let test_gh_leading_flag_read_not_floored_under_autonomous () =
   List.iter
     (fun (label, args) ->
-       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let s = simple (bin_ok "gh") ~args in
        let caps = Capability_check.of_simple s in
        match
          Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
@@ -431,8 +454,10 @@ let test_gh_leading_flag_read_not_floored_under_autonomous () =
        | Verdict.Deny { reason = Destructive_repo_hosting_cli _; _ } ->
          Alcotest.failf "%s: leading-flag read must not be floored" label
        | _ -> ())
-    [ "gh --repo o/r pr view", [ "--repo"; "o/r"; "pr"; "view"; "123" ]
-    ; "gh --repo o/r pr list", [ "--repo"; "o/r"; "pr"; "list" ]
+    [ "gh --repo o/r pr view", [ lit "--repo"; lit "o/r"; lit "pr"; lit "view"; lit "123" ]
+    ; "gh --repo o/r pr list", [ lit "--repo"; lit "o/r"; lit "pr"; lit "list" ]
+    ; ( "gh --repo $REPO pr view $PR_NUMBER"
+      , [ lit "--repo"; var "REPO"; lit "pr"; lit "view"; var "PR_NUMBER" ] )
     ]
 
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
@@ -545,6 +570,7 @@ let () =
   test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous ();
   test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
   test_gh_leading_flag_destructive_floored_under_autonomous ();
+  test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)

@@ -10,7 +10,7 @@
 
 import { html } from 'htm/preact'
 import type { FusionRunRecord, FusionRunStatusLabel } from '../../api/dashboard'
-import { fusionRuns, fusionRunsLoading } from '../../store'
+import { fusionRuns, fusionRunsError, fusionRunsLoading } from '../../store'
 import { TimeAgo } from '../common/time-ago'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
@@ -116,6 +116,7 @@ function FusionRunStatusCard({ run }: { run: FusionRunRecord }) {
 export function FusionRunsPanel() {
   const runs = fusionRuns.value
   const loading = fusionRunsLoading.value
+  const error = fusionRunsError.value
   const runningCount = runs.filter(run => run.status === 'running').length
 
   return html`
@@ -131,13 +132,26 @@ export function FusionRunsPanel() {
           <span class="fus-runs-count">${runs.length}</span>
         </div>
       </header>
-      ${runs.length === 0
-        ? html`<p class="fus-runs-empty" data-testid="fusion-runs-empty">
-            ${loading ? 'Loading fusion runs...' : 'No active or recent fusion runs.'}
-          </p>`
-        : html`<ul class="fus-runs-list" aria-live="polite">
+      ${error
+        ? html`<div
+            class="fus-runs-error"
+            data-testid="fusion-runs-error"
+            data-registry-source="/api/v1/dashboard/fusion-runs"
+            role="alert"
+          >
+            <span class="fus-runs-error-k">Registry load failed</span>
+            <span class="fus-runs-error-v">${error}</span>
+          </div>`
+        : null}
+      ${runs.length > 0
+        ? html`<ul class="fus-runs-list" aria-live="polite">
             ${runs.map(run => html`<${FusionRunStatusCard} key=${run.runId} run=${run} />`)}
-          </ul>`}
+          </ul>`
+        : error
+          ? null
+          : html`<p class="fus-runs-empty" data-testid="fusion-runs-empty">
+              ${loading ? 'Loading fusion runs...' : 'No active or recent fusion runs.'}
+            </p>`}
     </section>
   `
 }

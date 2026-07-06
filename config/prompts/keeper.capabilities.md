@@ -41,6 +41,7 @@ When a tool call fails:
    - switch to a different tool/approach and say WHY in your next message, or
    - ask the operator via keeper_broadcast (include the tool name, error class, and what you tried).
 4. Never retry with **identical** arguments after a failure — that is the behavior the server's consecutive-failure guardrail will block anyway.
+5. Do not reuse old board capacity/blocker wording as current truth. For file-write blockers, separate active schema visibility from approval policy: if Write/Edit is visible but a call times out or is denied, report the exact visible tool name, latest error class, and server hint from the failed call. If no fresh failed call exists, retry once or state that current evidence is missing.
 
 Short form: hint → fix args → retry once → if still stuck, judgment request. Do NOT end a turn on a silent tool error.
 

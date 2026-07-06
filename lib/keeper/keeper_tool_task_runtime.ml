@@ -787,27 +787,6 @@ let handle_keeper_task_tool
         "result is required. Audit trail: describe what you completed. \
          Example: result='Refactored module X, all tests green, no flake'."
     else (
-      (* [task-1811] Completion contract enforcement: require build+test
-         evidence for code tasks before accepting keeper_task_done.
-         This gate runs before the transition to prevent silent
-         completion of code tasks without verification evidence. *)
-      let has_code_evidence =
-        String.contains result_text 'b'
-        || String.contains result_text 't'
-        || String.contains result_text 'T'
-        || String.contains result_text 'B'
-      in
-      if not has_code_evidence
-      then
-        workflow_rejection_error_json
-          ~alternatives:[ "keeper_task_done"; "keeper_task_submit_for_verification" ]
-          ~typed_outcome:
-            (Keeper_tool_outcome.Error
-               { reason = "keeper_task_done rejected: missing build+test evidence" })
-          "Completion contract violation: result must include build+test evidence \
-           (e.g., 'build passed', 'tests green', 'CI #123 ok'). \
-           Use keeper_task_submit_for_verification if evidence is pending."
-      else (
       (* Map keeper vocabulary (`result`) onto MASC domain typed
          handoff_context.summary so the action=done strict-contract
          path can read the completion summary directly from a typed

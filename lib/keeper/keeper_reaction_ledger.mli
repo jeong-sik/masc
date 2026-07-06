@@ -25,6 +25,7 @@ type stimulus_kind =
 
 type reaction_kind =
   | Turn_started
+  | Event_queue_ack
   | Execution_receipt
   | Terminal_reason
   | Cursor_ack
@@ -62,6 +63,25 @@ val record_event_queue_reaction :
   Keeper_event_queue.stimulus ->
   unit
 (** Append a [record_kind="reaction"] row tied to an event queue stimulus. *)
+
+type event_queue_reaction_evidence =
+  { keeper_name : string
+  ; stimulus_id : string
+  ; stimulus_seen : bool
+  ; turn_started_seen : bool
+  ; event_queue_ack_seen : bool
+  ; stimulus_recorded_at : float option
+  ; turn_started_recorded_at : float option
+  ; event_queue_ack_recorded_at : float option
+  ; latest_recorded_at : float option
+  ; matched_record_count : int
+  }
+
+val event_queue_reaction_evidence :
+  base_path:string -> keeper_name:string -> stimulus_id:string -> event_queue_reaction_evidence
+(** Stream the durable reaction ledger for exact rows sharing [stimulus_id].
+    This intentionally does not use a "recent rows" limit, because dashboards
+    use it to prove a specific queue stimulus was observed by the keeper. *)
 
 val record_board_cursor_ack :
   base_path:string ->

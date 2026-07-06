@@ -1484,6 +1484,7 @@ let test_keeper_observation_reports_schedule_store_read_error () =
   write_text (Schedule_store.schedules_path config) "{not-json";
   let observation =
     Keeper_world_observation.read_scheduled_automation_observation
+      ~keeper_name:None
       ~config
       ~now:1_000.0
   in
@@ -1518,7 +1519,10 @@ let test_keeper_observation_surfaces_schedule_attention () =
    | Ok _ -> ()
    | Error err -> fail (Schedule_store.store_error_to_string err));
   let observation =
-    Keeper_world_observation.read_scheduled_automation_observation ~config ~now
+    Keeper_world_observation.read_scheduled_automation_observation
+      ~keeper_name:None
+      ~config
+      ~now
   in
   check int "active count" 3 observation.active_count;
   check int "due ready count" 1 observation.due_ready_count;
@@ -1571,13 +1575,16 @@ let test_keeper_observation_filters_schedule_attention_by_owner () =
    | Ok _ -> ()
    | Error err -> fail (Schedule_store.store_error_to_string err));
   let global =
-    Keeper_world_observation.read_scheduled_automation_observation ~config ~now
+    Keeper_world_observation.read_scheduled_automation_observation
+      ~keeper_name:None
+      ~config
+      ~now
   in
   check int "global sees all due-ready schedules" 3 global.due_ready_count;
   let owned =
     Keeper_world_observation.read_scheduled_automation_observation
       ~config
-      ~keeper_name:"scheduler-agent"
+      ~keeper_name:(Some "scheduler-agent")
       ~now
   in
   check int "keeper sees only owned due-ready schedule" 1 owned.due_ready_count;
@@ -1587,7 +1594,7 @@ let test_keeper_observation_filters_schedule_attention_by_owner () =
   let other =
     Keeper_world_observation.read_scheduled_automation_observation
       ~config
-      ~keeper_name:"missing-keeper"
+      ~keeper_name:(Some "missing-keeper")
       ~now
   in
   check int "unknown keeper sees no schedule attention" 0 other.due_ready_count;

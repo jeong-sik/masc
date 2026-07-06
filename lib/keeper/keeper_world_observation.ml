@@ -354,7 +354,11 @@ let schedule_visible_to_keeper keeper_name (request : Schedule_domain.schedule_r
      | Schedule_domain.Human_operator | Schedule_domain.System -> false)
 ;;
 
-let read_scheduled_automation_observation ?keeper_name ~(config : Workspace.config) ~now =
+let read_scheduled_automation_observation
+      ~(keeper_name : string option)
+      ~(config : Workspace.config)
+      ~now
+  =
   try
     let state = Schedule_store.read_state config in
     let schedules =
@@ -1010,7 +1014,7 @@ let observe
   let idle_seconds = compute_idle_seconds ~meta in
   let scheduled_automation =
     read_scheduled_automation_observation
-      ~keeper_name:meta.name
+      ~keeper_name:(Some meta.name)
       ~config
       ~now:(Time_compat.now ())
   in
@@ -1067,7 +1071,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   in
   let scheduled_automation =
     read_scheduled_automation_observation
-      ~keeper_name:meta.name
+      ~keeper_name:(Some meta.name)
       ~config
       ~now:(Time_compat.now ())
   in
@@ -1150,7 +1154,7 @@ let durable_signal_present
   in
   let scheduled_automation =
     read_scheduled_automation_observation
-      ~keeper_name:meta.name
+      ~keeper_name:(Some meta.name)
       ~config
       ~now:(Time_compat.now ())
   in

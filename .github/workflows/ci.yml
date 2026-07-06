@@ -679,7 +679,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          opam exec -- dune build --root . &
+          # @default alone does not compile test dirs outside the executed
+          # runtest subset, so a PR that breaks test compilation can land
+          # green (#23196/#23211/#23353 landed that way on 2026-07-04~06).
+          # @check compiles every library/executable/test without running.
+          opam exec -- dune build --root . @default @check &
           build_pid=$!
 
           (
@@ -805,8 +809,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          timeout --kill-after=30s 38m \
-            scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+          scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
       - name: Upload test diagnostics on failure
         if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}

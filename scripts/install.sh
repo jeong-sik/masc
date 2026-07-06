@@ -28,6 +28,9 @@
 #   MASC_REPO      Override repo (default: jeong-sik/masc)
 #   MASC_PORT      Port used in the post-install local-start hint (default: 8935)
 #   MASC_ALLOW_UNVERIFIED=1  Same as --allow-unverified
+#   MASC_RELEASE_BASE_URL  Override the release asset base URL (mirror or
+#                  air-gapped install; file:// works). Defaults to
+#                  https://github.com/<repo>/releases/download
 #   OAS_MODEL_CATALOG  Override model catalog path; defaults to seeded
 #                  <base-path>/.masc/config/oas-models.toml when present.
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
@@ -40,6 +43,7 @@
 set -euo pipefail
 
 REPO="${MASC_REPO:-jeong-sik/masc}"
+RELEASE_BASE_URL="${MASC_RELEASE_BASE_URL:-https://github.com/$REPO/releases/download}"
 VERSION="${MASC_VERSION:-}"
 PREFIX="${MASC_PREFIX:-$HOME/.local/bin}"
 MASC_PORT="${MASC_PORT:-8935}"
@@ -731,7 +735,7 @@ cleanup_install_temp_files() {
 trap cleanup_install_temp_files EXIT
 CHECKSUMS_AVAILABLE=0
 CHECKSUMS_FETCHED=0
-CHECKSUMS_URL="https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
+CHECKSUMS_URL="$RELEASE_BASE_URL/$VERSION/SHA256SUMS"
 fetch_release_checksums() {
   [ "$CHECKSUMS_FETCHED" -eq 0 ] || return 0
   CHECKSUMS_FETCHED=1
@@ -755,7 +759,7 @@ fetch_release_checksums() {
 }
 
 # --- 3. download binary -------------------------------------------------------
-URL="https://github.com/$REPO/releases/download/$VERSION/$ASSET"
+URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
 
 model_catalog_env_value() {

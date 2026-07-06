@@ -44,8 +44,9 @@
 .sch-banner-go:hover { border-color: var(--volt-dim); color: var(--volt); }
 .sch-banner-x { flex: none; background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: var(--fs-12); padding: 2px 4px; }
 .sch-banner-x:hover { color: var(--text-bright); }
-.sch-payload-kinds, .sch-payload-rows { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sch-payload-kinds, .sch-payload-rows, .sch-evidence-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .sch-payload-kind { display: inline-flex; align-items: center; gap: 6px; border: 1px solid color-mix(in oklab, var(--status-bad) 32%, transparent); border-radius: var(--radius-pill); padding: 2px 8px; color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 7%, transparent); font-size: var(--fs-10); }
+.sch-evidence-count { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-main); border-radius: var(--radius-pill); padding: 2px 8px; color: var(--text-mid); background: var(--bg-sunken); font-size: var(--fs-10); }
 .sch-payload-row { border: 1px solid var(--border-main); border-radius: var(--radius-pill); background: var(--bg-sunken); color: var(--text-mid); cursor: pointer; font-size: var(--fs-10); padding: 2px 8px; }
 .sch-payload-row:hover { border-color: var(--volt-dim); color: var(--volt); }
 

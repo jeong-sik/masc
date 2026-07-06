@@ -323,6 +323,132 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.timestamp).toBeTruthy()
   })
 
+  it('preserves REST chat history provenance instead of re-inferring it away', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        source: 'world_state_prompt',
+        content: 'state snapshot',
+        ts: 1_780_000_000,
+        surface: { kind: 'dashboard', session_id: 'sess-1' },
+      },
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from channel context',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#7',
+        surface: {
+          kind: 'discord',
+          guild_id: 'guild-1',
+          channel_id: 'channel-1',
+          thread_id: 'thread-1',
+        },
+      },
+    ])
+
+    expect(entries[0]?.source).toBe('world_state_prompt')
+    expect(entries[0]?.surface).toEqual({ kind: 'dashboard', session_id: 'sess-1' })
+    expect(entries[1]?.source).toBe('direct_assistant')
+    expect(entries[1]?.surface).toEqual({
+      kind: 'discord',
+      guild_id: 'guild-1',
+      channel_id: 'channel-1',
+      thread_id: 'thread-1',
+    })
+    expect(entries[1]?.turnRef).toBe('trace-rest#7')
+  })
+
+  it('prefers backend stream contracts from REST chat history', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from retained trace',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#8',
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          turn_ref: 'trace-rest#8',
+          trace_event_count: 3,
+          delivery_receipt: 'no_delivery_receipt',
+          reason: 'turn_ref joined to retained trajectory/internal-history events',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toEqual({
+      source: 'backend_turn_trace',
+      status: 'backend_trace_join',
+      turnRef: 'trace-rest#8',
+      traceEventCount: 3,
+      deliveryReceipt: 'no_delivery_receipt',
+      reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
+  })
+
+  it('normalizes durable backend lifecycle stream contracts from REST chat history', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from durable lifecycle replay',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#9',
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-rest#9',
+          event_name: 'RUN_FINISHED',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'TEXT_MESSAGE_START',
+            'TEXT_MESSAGE_END',
+            'RUN_FINISHED',
+          ],
+          delivery_receipt: 'server_lifecycle_replay_only',
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toEqual({
+      source: 'backend_stream_lifecycle',
+      status: 'backend_lifecycle_replay',
+      turnRef: 'trace-rest#9',
+      eventName: 'RUN_FINISHED',
+      lifecycleEvents: [
+        'RUN_STARTED',
+        'TEXT_MESSAGE_START',
+        'TEXT_MESSAGE_END',
+        'RUN_FINISHED',
+      ],
+      deliveryReceipt: 'server_lifecycle_replay_only',
+      reason: 'history row records durable server stream lifecycle replay',
+    })
+  })
+
+  it('falls back explicitly when REST chat history carries an unknown stream contract', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply',
+        ts: 1_780_000_001,
+        stream_contract: {
+          source: 'future_backend_source',
+          status: 'future_status',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toMatchObject({
+      source: 'rest_history',
+      status: 'history_without_stream_events',
+    })
+  })
+
   it('preserves object payloads in persisted tool trace blocks', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

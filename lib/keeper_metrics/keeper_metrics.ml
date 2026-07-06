@@ -78,6 +78,7 @@ type t =
   | KeepaliveSignalFailures
   | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
+  | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
   | ToolsOasFailures
   | ToolsOasDeterministicFailures
@@ -334,6 +335,8 @@ let to_string = function
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
   | BoardSignalWakeupCappedTotal -> "masc_keeper_board_signal_wakeup_capped_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
+  | BoardSignalAttentionCandidateTotal ->
+    "masc_keeper_board_signal_attention_candidate_total"
   | MetaJsonFailures -> "masc_keeper_meta_json_failures_total"
   | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
   | ToolsOasDeterministicFailures ->

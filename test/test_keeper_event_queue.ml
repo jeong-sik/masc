@@ -15,6 +15,48 @@ let snapshot_path ~base_path ~keeper_name =
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
     "event-queue.json"
 
+let json_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let int_field name json =
+  match json_field name json with
+  | Some (`Int value) -> value
+  | _ -> Alcotest.failf "expected int field %S" name
+
+let bool_field name json =
+  match json_field name json with
+  | Some (`Bool value) -> value
+  | _ -> Alcotest.failf "expected bool field %S" name
+
+let float_field name json =
+  match json_field name json with
+  | Some (`Float value) -> value
+  | Some (`Int value) -> float_of_int value
+  | _ -> Alcotest.failf "expected float field %S" name
+
+let list_field name json =
+  match json_field name json with
+  | Some (`List values) -> values
+  | _ -> Alcotest.failf "expected list field %S" name
+
+let string_field name json =
+  match json_field name json with
+  | Some (`String value) -> value
+  | _ -> Alcotest.failf "expected string field %S" name
+
+let keeper_summary name json =
+  match
+    list_field "keepers" json
+    |> List.find_opt (fun item -> String.equal (string_field "keeper_name" item) name)
+  with
+  | Some item -> item
+  | None -> Alcotest.failf "expected keeper summary for %S" name
+
+let write_file path contents =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
+
 let () =
   let open Keeper_event_queue in
   let board_payload () =
@@ -138,6 +180,40 @@ let () =
          })
       "bg-run:bg-2");
 
+  (* Scheduled wake is a non-board stimulus with a stable schedule-derived
+     post id and a codec round-trip for restart replay. *)
+  let scheduled_wake =
+    { schedule_id = "sched-1"
+    ; due_at = 200.0
+    ; payload_digest = "digest-1"
+    ; title = Some "Scheduled lane wake"
+    ; message = "Run the scheduled maintenance lane now."
+    }
+  in
+  let schedule_payload () = Schedule_due scheduled_wake in
+  assert (not (is_board_signal (schedule_payload ())));
+  assert (String.equal (payload_kind_label (schedule_payload ())) "schedule_due");
+  assert (String.equal (schedule_due_post_id scheduled_wake) "schedule-due:sched-1");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = schedule_due_post_id scheduled_wake
+          ; urgency = Immediate
+          ; arrived_at = 5.0
+          ; payload = Schedule_due scheduled_wake
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Schedule_due wake ->
+        assert (String.equal wake.schedule_id "sched-1");
+        assert (Float.equal wake.due_at 200.0);
+        assert (String.equal wake.payload_digest "digest-1");
+        assert (wake.title = Some "Scheduled lane wake");
+        assert (String.equal wake.message "Run the scheduled maintenance lane now.")
+      | _ -> Alcotest.fail "Schedule_due codec round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("Schedule_due stimulus round-trip failed: " ^ msg));
+
   (* RFC-0290: Bg_completed survives the stimulus codec round-trip, preserving
      the outcome variant ([Bg_failed]) and empty board post id. *)
   (match
@@ -187,7 +263,53 @@ let () =
         assert (decision = Hitl_approved);
         assert (String.equal s.post_id "hitl-approval:appr-9")
       | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
-   | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
+  | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
+
+  (* Goal_verification_failed survives the codec round-trip: the goal-loop wake
+     must remain replayable from the durable per-keeper queue. *)
+  let goal_failure =
+    { goal_id = "goal-1"
+    ; request_id = "gvr-1"
+    ; goal_title = "Ship retry"
+    ; phase = "executing"
+    ; metric = Some "tests"
+    ; target_value = Some "pass"
+    ; rejected_by = "agent-alpha"
+    ; note = Some "receipt did not prove completion"
+    ; evidence_refs = [ "receipt:agent-alpha:turn-7" ]
+    }
+  in
+  assert (
+    String.equal
+      (goal_verification_failure_post_id goal_failure)
+      "goal-verification-failed:goal-1:gvr-1");
+  assert (
+    String.equal
+      (payload_kind_label (Goal_verification_failed goal_failure))
+      "goal_verification_failed");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = goal_verification_failure_post_id goal_failure
+          ; urgency = Immediate
+          ; arrived_at = 6.0
+          ; payload = Goal_verification_failed goal_failure
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Goal_verification_failed failure ->
+        assert (String.equal failure.goal_id "goal-1");
+        assert (String.equal failure.request_id "gvr-1");
+        assert (String.equal failure.rejected_by "agent-alpha");
+        assert (failure.metric = Some "tests");
+        assert (failure.target_value = Some "pass");
+        assert (failure.evidence_refs = [ "receipt:agent-alpha:turn-7" ])
+      | _ ->
+        Alcotest.fail
+          "Goal_verification_failed codec round-trip changed payload shape")
+   | Error msg ->
+     Alcotest.fail ("Goal_verification_failed stimulus round-trip failed: " ^ msg));
 
   (* --- queue operations preserved --- *)
   let board_stim =
@@ -275,12 +397,21 @@ let () =
                }
          }
   in
+  let queue_for_snapshot =
+    enqueue
+      queue_for_snapshot
+      { post_id = "sp1"
+      ; urgency = Normal
+      ; arrived_at = 3.5
+      ; payload = Schedule_due scheduled_wake
+      }
+  in
   let restored =
     match queue_of_yojson (queue_to_yojson queue_for_snapshot) with
     | Ok queue -> queue
     | Error msg -> Alcotest.fail ("queue snapshot round-trip failed: " ^ msg)
   in
-  assert (length restored = 4);
+  assert (length restored = 5);
   let first, restored =
     match dequeue restored with
     | Some item -> item
@@ -316,6 +447,18 @@ let () =
       && (not ok)
       && String.equal resolved_answer "denied"
       && String.equal board_post_id ""
+    | _ -> false);
+  let fifth, restored =
+    match dequeue restored with
+    | Some item -> item
+    | None -> Alcotest.fail "snapshot restore should preserve fifth item"
+  in
+  assert (String.equal fifth.post_id "sp1");
+  assert (
+    match fifth.payload with
+    | Schedule_due wake ->
+      String.equal wake.schedule_id scheduled_wake.schedule_id
+      && String.equal wake.message scheduled_wake.message
     | _ -> false);
   assert (is_empty restored);
   (match queue_of_yojson (`Assoc [ "schema", `String "wrong"; "items", `List [] ]) with
@@ -449,6 +592,110 @@ let () =
       in
       assert (String.equal remaining.post_id "bootstrap");
       assert (is_empty rest));
+
+  (* --- durable fleet summary: health can see pending, in-flight, and oldest age. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let pending_keeper = "keeper-event-queue-pending-summary-test" in
+      let inflight_keeper = "keeper-event-queue-inflight-summary-test" in
+      let old_pending = { board_stim with post_id = "old-pending"; arrived_at = 10.0 } in
+      let newer_pending =
+        { bootstrap_stim with post_id = "newer-pending"; arrived_at = 25.0 }
+      in
+      let inflight =
+        { ghost_stim with post_id = "old-inflight"; arrived_at = 5.0 }
+      in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name:pending_keeper
+        (empty |> fun q -> enqueue q old_pending |> fun q -> enqueue q newer_pending);
+      Keeper_event_queue_persistence.record_inflight
+        ~base_path
+        ~keeper_name:inflight_keeper
+        [ inflight ];
+      let noise_keeper_dir =
+        Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
+      in
+      Unix.mkdir noise_keeper_dir 0o755;
+      let dot_noise_keeper_dir =
+        Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) ".worktrees"
+      in
+      Unix.mkdir dot_noise_keeper_dir 0o755;
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+      in
+      Alcotest.(check string) "summary status" "ok" (string_field "status" json);
+      Alcotest.(check int)
+        "keeper_count excludes snapshotless runtime dirs"
+        2
+        (int_field "keeper_count" json);
+      Alcotest.(check int) "pending_count" 2 (int_field "pending_count" json);
+      Alcotest.(check int) "inflight_count" 1 (int_field "inflight_count" json);
+      Alcotest.(check int) "total_count" 3 (int_field "total_count" json);
+      Alcotest.(check (float 0.001))
+        "oldest_age_seconds"
+        25.0
+        (float_field "oldest_age_seconds" json);
+      Alcotest.(check int)
+        "pending_by_keeper count"
+        1
+        (List.length (list_field "pending_by_keeper" json));
+      Alcotest.(check int)
+        "inflight_by_keeper count"
+        1
+        (List.length (list_field "inflight_by_keeper" json));
+      let pending_summary = keeper_summary pending_keeper json in
+      let inflight_summary = keeper_summary inflight_keeper json in
+      Alcotest.(check int)
+        "pending keeper pending"
+        2
+        (int_field "pending_count" pending_summary);
+      Alcotest.(check int)
+        "inflight keeper inflight"
+        1
+        (int_field "inflight_count" inflight_summary);
+      Alcotest.(check (float 0.001))
+        "inflight keeper oldest age"
+        25.0
+        (float_field "oldest_age_seconds" inflight_summary));
+
+  (* --- durable fleet summary: corrupt queue snapshots must not look green. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary-corrupt" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-corrupt-summary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        (empty |> fun q -> enqueue q board_stim);
+      write_file (snapshot_path ~base_path ~keeper_name) "{not-json";
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+      in
+      Alcotest.(check string)
+        "corrupt summary status"
+        "degraded"
+        (string_field "status" json);
+      Alcotest.(check bool)
+        "corrupt summary requires operator action"
+        true
+        (bool_field "operator_action_required" json);
+      Alcotest.(check int)
+        "corrupt summary read error count"
+        1
+        (int_field "read_error_count" json);
+      let summary = keeper_summary keeper_name json in
+      Alcotest.(check int)
+        "corrupt keeper pending count fails closed"
+        0
+        (int_field "pending_count" summary);
+      Alcotest.(check int)
+        "corrupt keeper read errors"
+        1
+        (List.length (list_field "read_errors" summary)));
 
   let meta_for_keeper keeper_name trace_id =
     match

@@ -84,6 +84,7 @@ let event_started_at row =
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
   | Keeper_runtime_manifest.Runtime_routed
+  | Keeper_runtime_manifest.Runtime_execution_built
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
@@ -117,6 +118,7 @@ let event_finished_at row =
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
   | Keeper_runtime_manifest.Runtime_routed
+  | Keeper_runtime_manifest.Runtime_execution_built
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected

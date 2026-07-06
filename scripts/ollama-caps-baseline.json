@@ -145,6 +145,15 @@
         "vision"
       ]
     },
+    "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL": {
+      "provider": "ollama",
+      "capabilities": [
+        "tools",
+        "completion",
+        "vision",
+        "audio"
+      ]
+    },
     "kimi-k2.5": {
       "provider": "ollama_cloud",
       "capabilities": [

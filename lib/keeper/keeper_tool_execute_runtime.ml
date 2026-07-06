@@ -327,6 +327,20 @@ let record_pr_action_metric ~keeper_name ~risk_class ~status ir =
       ())
 ;;
 
+let execute_secret_redaction ~base_path ~keeper_name =
+  Keeper_secret_redaction.snapshot ~base_path ~keeper_name
+
+let redact_execute_text redaction text =
+  Keeper_secret_redaction.redact_text redaction text
+
+let redact_execute_output redaction ~stdout ~stderr =
+  let stdout = redact_execute_text redaction stdout in
+  let stderr = redact_execute_text redaction stderr in
+  let output =
+    if String.equal stderr "" then stdout else stdout ^ stderr
+  in
+  stdout, stderr, output
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let path_probe_json ~cwd path = path_probe_json ~cwd (path_probe ~cwd path)
@@ -334,6 +348,10 @@ module For_testing = struct
   let repo_cwd_relative_rewrite = repo_cwd_relative_rewrite
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
   let record_pr_action_metric = record_pr_action_metric
+  let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
+    let redaction = execute_secret_redaction ~base_path ~keeper_name in
+    redact_execute_output redaction ~stdout ~stderr
+
   let dispatch_error_deterministic_retry_fields =
     dispatch_error_deterministic_retry_fields
 end
@@ -469,6 +487,9 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
+  let output_redaction =
+    execute_secret_redaction ~base_path:config.base_path ~keeper_name:meta.name
+  in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~config
@@ -764,6 +785,12 @@ let handle_tool_execute_typed
                 "execute stream start callback failed keeper=%s: %s"
                 meta.name
                 (Printexc.to_string exn));
+          let stdout_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
+          let stderr_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
           let on_output_chunk chunk =
             if stream_dispatch
             then (
@@ -771,6 +798,15 @@ let handle_tool_execute_typed
                 match chunk with
                 | `Stdout s -> `Stdout, s
                 | `Stderr s -> `Stderr, s
+              in
+              let data =
+                match stream with
+                | `Stdout ->
+                  Keeper_secret_redaction.redact_stream_chunk
+                    output_redaction stdout_redact_state data
+                | `Stderr ->
+                  Keeper_secret_redaction.redact_stream_chunk
+                    output_redaction stderr_redact_state data
               in
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
@@ -916,16 +952,38 @@ let handle_tool_execute_typed
                    ]
                    ())
               effects;
-            let output =
-              if String.equal result.stderr ""
-              then result.stdout
-              else result.stdout ^ result.stderr
+            let stdout, stderr, output =
+              redact_execute_output output_redaction
+                ~stdout:result.stdout
+                ~stderr:result.stderr
             in
             let status_json =
               Keeper_alerting_path.process_status_to_json result.status
             in
             if stream_dispatch
             then (
+              let flush_remaining stream state =
+                let remaining =
+                  Keeper_secret_redaction.redact_stream_finish
+                    output_redaction state
+                in
+                if not (String.equal remaining "")
+                then (
+                  try
+                    Keeper_keepalive_signal.record_execute_stream_chunk
+                      ~keeper_name:meta.name
+                      ~stream
+                      remaining
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                    Log.Dashboard.warn
+                      "execute stream flush callback failed keeper=%s: %s"
+                      meta.name
+                      (Printexc.to_string exn))
+              in
+              flush_remaining `Stdout stdout_redact_state;
+              flush_remaining `Stderr stderr_redact_state;
               try
                 Keeper_keepalive_signal.record_execute_stream_end
                   ~keeper_name:meta.name
@@ -942,8 +1000,8 @@ let handle_tool_execute_typed
                Keeper_keepalive_signal.record_execute_output
                  ~keeper_name:meta.name
                  ~task_id
-                 ~stdout:result.stdout
-                 ~stderr:result.stderr
+                 ~stdout
+                 ~stderr
                  ~status:status_json
                  ~streamed:stream_dispatch
              with
@@ -954,7 +1012,7 @@ let handle_tool_execute_typed
                  meta.name
                  (Printexc.to_string exn));
             let failure_error_fields =
-              match result.status, String.trim result.stderr with
+              match result.status, String.trim stderr with
               | Unix.WEXITED 0, _ | _, "" -> []
               | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
             in
@@ -962,7 +1020,7 @@ let handle_tool_execute_typed
               Masc_exec.Shell_ir_diagnostics.glob_literal_failure_fields
                 ~ir
                 ~status:result.status
-                ~stderr:result.stderr
+                ~stderr
             in
             let classification = Exec_core.classify_command_of_ir ir in
             (* Only include command_descriptor on success — errors already carry

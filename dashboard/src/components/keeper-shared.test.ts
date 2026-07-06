@@ -27,6 +27,9 @@ vi.mock('../keeper-actions', () => ({
 
 vi.mock('../keeper-state', async () => {
   const { signal } = await import('@preact/signals')
+  const withoutUndefined = (record: Record<string, unknown>): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined))
+
   return {
     keeperActionErrors: signal({}),
     keeperHydrating: signal({}),
@@ -37,6 +40,20 @@ vi.mock('../keeper-state', async () => {
     keeperStreamStartedAt: signal({}),
     keeperStreamLastEventAt: signal({}),
     keeperThreads: signal({}),
+    keeperStreamContract: (source: string, status: string, opts: Record<string, unknown> = {}) => withoutUndefined({
+      source,
+      status,
+      eventName: opts.eventName ?? undefined,
+      requestId: opts.requestId ?? undefined,
+      turnRef: opts.turnRef ?? undefined,
+      traceEventCount: opts.traceEventCount ?? undefined,
+      lifecycleEvents: opts.lifecycleEvents ?? undefined,
+      deliveryReceipt: opts.deliveryReceipt ?? undefined,
+      reason: opts.reason ?? undefined,
+    }),
+    setRecordValue: (state: { value: Record<string, unknown> }, key: string, value: unknown) => {
+      state.value = { ...state.value, [key]: value }
+    },
     isDefaultVisibleConversationEntry: vi.fn((entry: { role?: string; source?: string }) =>
       entry.role === 'tool'
         || ((entry.role === 'user' || entry.role === 'assistant')
@@ -75,8 +92,13 @@ import {
   sendKeeperThreadMessage,
 } from '../keeper-actions'
 import { _resetChatStoreForTests, enqueueInput, getQueuedMessages, getQueueLength } from '../keeper-chat-store'
+import {
+  markToolCallOutputsHydrationFailed,
+  markToolCallOutputsHydrating,
+  resetToolCallOutputs,
+} from '../tool-call-output-store'
 import { shellAuthSummary } from '../store'
-import type { ChatBlock, KeeperConversationEntry } from '../types'
+import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry, KeeperUserInputBlock } from '../types'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -169,6 +191,7 @@ describe('KeeperConversationPanel', () => {
     render(null, container)
     container.remove()
     _resetChatStoreForTests()
+    resetToolCallOutputs()
     vi.unstubAllGlobals()
   })
 
@@ -436,6 +459,131 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
   })
 
+  it('renders queue card and transcript placeholder with the same FIFO identity', async () => {
+    keeperSending.value = { sangsu: true }
+    enqueueInput('sangsu', 'queued first', undefined, 'queued-click-1')
+    enqueueInput('sangsu', 'queued second', undefined, 'queued-click-2')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const queueCards = [...container.querySelectorAll('[data-chat-queue-item]')] as HTMLElement[]
+    const queuedBubbles = [...container.querySelectorAll('[data-chat-entry-id^="queued-user-"]')] as HTMLElement[]
+
+    expect(queueCards.map(node => node.getAttribute('data-chat-queue-seq'))).toEqual(['1', '2'])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-queue-seq'))).toEqual(['1', '2'])
+    expect(queueCards.map(node => node.getAttribute('data-chat-queue-client-action-id'))).toEqual([
+      'queued-click-1',
+      'queued-click-2',
+    ])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-queue-client-action-id'))).toEqual([
+      'queued-click-1',
+      'queued-click-2',
+    ])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt'))).toEqual([
+      'no_delivery_receipt',
+      'no_delivery_receipt',
+    ])
+    expect(queuedBubbles.map(node => node.getAttribute('data-chat-stream-contract-reason'))).toEqual([
+      'client-side composer queue item; not yet submitted to keeper runtime',
+      'client-side composer queue item; not yet submitted to keeper runtime',
+    ])
+  })
+
+  it('wires the live tool-output hydration contract store into the transcript', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'tool-tc-live-hydration',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'keeper_context_status',
+          text: '{}',
+          rawText: '{}',
+          timestamp: '2026-03-24T00:00:01.000Z',
+          turnRef: 'trace-live-hydration#1',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'assistant-live-hydration',
+          role: 'assistant',
+          source: 'direct_assistant',
+          label: 'sangsu',
+          text: '도구 출력을 확인했습니다.',
+          rawText: '도구 출력을 확인했습니다.',
+          timestamp: '2026-03-24T00:00:02.000Z',
+          turnRef: 'trace-live-hydration#1',
+          delivery: 'history',
+          streamState: null,
+          streamContract: {
+            source: 'sse_event',
+            status: 'backend_terminal_event',
+            eventName: 'RUN_FINISHED',
+          },
+          traceSteps: [
+            {
+              kind: 'tool',
+              name: 'keeper_context_status',
+              toolCallId: 'tc-live-hydration',
+              ts: '2026-03-24T00:00:01.000Z',
+            },
+          ],
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const traceSelector = '[data-chat-work-trace][data-chat-tool-output-hydration-source="tool_calls_endpoint"]'
+    await waitFor(() => {
+      const trace = container.querySelector(traceSelector)
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('idle')
+    })
+
+    const initialStep = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-live-hydration"]',
+    ) as HTMLElement
+    expect(initialStep.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(initialStep.getAttribute('data-chat-trace-output-coverage')).toBe('not-hydrated')
+
+    markToolCallOutputsHydrating('sangsu')
+    markToolCallOutputsHydrationFailed('sangsu', 'HTTP 502')
+
+    await waitFor(() => {
+      const trace = container.querySelector(traceSelector)
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 502')
+
+      const step = container.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-live-hydration"]',
+      ) as HTMLElement
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+      expect(container.textContent).toContain('출력 hydration 실패 1')
+    })
+
+    const failedStep = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-live-hydration"]',
+    ) as HTMLElement
+    fireEvent.click(failedStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+
+    await waitFor(() => {
+      expect(failedStep.textContent).toContain('출력 hydration 실패 — HTTP 502')
+    })
+  })
+
   it('renders queued voice draft display blocks inside the transcript', async () => {
     keeperSending.value = { sangsu: true }
     const voiceBlocks: ChatBlock[] = [
@@ -460,6 +608,58 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
     expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
     expect(container.textContent).toContain('hello voice')
+  })
+
+  it('keeps queued attachment drafts visible with multimodal provenance and no delivery receipt', async () => {
+    keeperSending.value = { sangsu: true }
+    const attachments: KeeperConversationAttachment[] = [
+      {
+        id: 'queued-att',
+        type: 'image',
+        name: 'queued.png',
+        size: 1024,
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,iVBORw0KGgo=',
+      },
+    ]
+    const displayBlocks: ChatBlock[] = [
+      {
+        t: 'attach',
+        id: 'queued-att',
+        name: 'queued.png',
+        kind: 'image',
+        src: 'data:image/png;base64,iVBORw0KGgo=',
+        mimeType: 'image/png',
+        sizeBytes: 1024,
+      },
+    ]
+    const userBlocks: KeeperUserInputBlock[] = [
+      {
+        type: 'image',
+        attachmentId: 'queued-att',
+        name: 'queued.png',
+        mimeType: 'image/png',
+        size: 1024,
+      },
+    ]
+    enqueueInput('sangsu', '', attachments, 'queued-attachment-1', displayBlocks, userBlocks)
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const bubble = container.querySelector('[data-chat-entry-id^="queued-user-"]') as HTMLElement
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('queued')
+    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
+    expect(bubble.getAttribute('data-chat-attachment-count')).toBe('1')
+    expect(bubble.getAttribute('data-chat-server-attach-block-count')).toBe('1')
+    expect(bubble.getAttribute('data-chat-multimodal-sources')).toBe('persisted_attachment,server_block')
+    expect(bubble.getAttribute('data-chat-multimodal-kinds')).toBe('image')
+    expect(bubble.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
+    expect(bubble.querySelector('[data-chat-attachment-card="queued-att"]')).not.toBeNull()
+    expect(bubble.querySelector('[data-chat-block="attach"][data-chat-multimodal-source="server_block"]')).not.toBeNull()
   })
 
   it('renders queued drafts with invalid timestamps without throwing', async () => {

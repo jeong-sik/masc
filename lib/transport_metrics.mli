@@ -67,6 +67,12 @@ val inc_broadcast_failure : ?target:string -> unit -> unit
     the warn log line. *)
 val inc_external_subscriber_callback_failure : unit -> unit
 
+(** Records the synchronous duration of
+    [Sse.notify_external_subscribers] for one durable broadcast.  This is the
+    Wave-A main-domain occupancy probe for the external subscriber fan-out
+    section that delivers dashboard WebSocket deltas. *)
+val observe_external_subscriber_fanout_duration : float -> unit
+
 (** Increments [masc_oas_sse_relay_drop_marker_failures_total].
     Distinct from {!inc_broadcast_failure} so the
     recovery-path failure rate is isolated from normal broadcast
@@ -241,6 +247,12 @@ val observe_ws_message_bytes_recv : int -> unit
 
 (** Increments [masc_ws_delta_built]. *)
 val inc_ws_delta_built : unit -> unit
+
+(** Increments [masc_ws_delta_payload_serializations_total] once when a
+    broadcast's shared dashboard/delta payload frame is serialized.  This is
+    the Wave-A proof counter for keeping payload serialization independent of
+    subscribed WS session count. *)
+val inc_ws_delta_payload_serialization : unit -> unit
 
 (** {1 Transport listen state} *)
 

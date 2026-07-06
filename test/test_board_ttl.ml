@@ -111,6 +111,41 @@ let test_sweeper_skips_permanent () =
   let (removed_posts, _) = sweep store in
   Alcotest.(check int) "sweeper removed 0 permanent posts" 0 removed_posts
 
+let test_sweep_reclaims_orphaned_reactions_and_votes () =
+  let store = create_store () in
+  let post_id =
+    match
+      create_post store ~author:"test-agent"
+        ~content:"Post with a reaction and a vote" ~post_kind:Human_post
+        ~ttl_hours:1 ()
+    with
+    | Ok post -> Post_id.to_string post.id
+    | Error e -> Alcotest.fail (show_board_error e)
+  in
+  (match
+     toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
+       ~user_id:"reactor-agent" ~emoji:"👍"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (show_board_error e));
+  (match vote store ~voter:"voter-agent" ~post_id ~direction:Up with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (show_board_error e));
+  Alcotest.(check bool) "reaction present before sweep" true
+    (Hashtbl.length store.reactions > 0);
+  Alcotest.(check bool) "vote present before sweep" true
+    (Hashtbl.length store.vote_log > 0);
+  (* Simulate the post already gone — expired and swept in an earlier pass, or
+     reloaded as an orphan on boot.  A per-removal hook could never revisit its
+     reactions/votes because the post is no longer in [store.posts]; the
+     existence-based reclaim in [sweep] must still collect them. *)
+  Hashtbl.remove store.posts post_id;
+  let _ = sweep store in
+  Alcotest.(check int) "orphaned reactions reclaimed" 0
+    (Hashtbl.length store.reactions);
+  Alcotest.(check int) "orphaned votes reclaimed" 0
+    (Hashtbl.length store.vote_log)
+
 let schedule_reset_timestamp_for_test = 0.0
 
 let reset_sweep_schedule_for_test =
@@ -305,6 +340,9 @@ let () =
             (with_eio test_expiring_post);
           Alcotest.test_case "sweeper skips permanent" `Quick
             (with_eio test_sweeper_skips_permanent);
+          Alcotest.test_case "sweep reclaims orphaned reactions and votes"
+            `Quick
+            (with_eio test_sweep_reclaims_orphaned_reactions_and_votes);
           Alcotest.test_case "maybe_sweep schedules once" `Quick
             (with_eio test_maybe_sweep_updates_schedule_once);
           Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick

@@ -123,6 +123,20 @@ let annotation_body ~file_path =
        ])
 ;;
 
+let masc_remote = "https://github.com/jeong-sik/masc.git"
+let masc_scope_query = "canonical_url=" ^ Uri.pct_encode masc_remote
+
+let scoped_ide_path path =
+  let separator = if String.contains path '?' then "&" else "?" in
+  path ^ separator ^ masc_scope_query
+;;
+
+let masc_partition () =
+  match Ide_paths.canonical_url_of_remote masc_remote with
+  | Some slug -> Ide_paths.By_url slug
+  | None -> fail "test remote must produce a canonical IDE partition slug"
+;;
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Fun.protect
@@ -266,6 +280,13 @@ let error_message_of_response response =
   |> json_string_member "error response" "error"
 ;;
 
+let error_code_of_response response =
+  response
+  |> response_body
+  |> Yojson.Safe.from_string
+  |> json_string_member "error response" "code"
+;;
+
 let annotation_count router path =
   let request = http_request ~meth:`GET ~path () in
   let response = dispatch router request in
@@ -324,7 +345,12 @@ let test_post_cursors_rejects_invalid_focus_mode () =
       string
       "invalid focus_mode error"
       "focus_mode must be one of reading, editing, reviewing, planning"
-      (json_string_member "invalid focus_mode response" "error" json))
+      (json_string_member "invalid focus_mode response" "error" json);
+    check
+      string
+      "invalid focus_mode code"
+      "invalid_focus_mode"
+      (json_string_member "invalid focus_mode response" "code" json))
 ;;
 
 let test_post_cursors_rejects_negative_column () =
@@ -349,11 +375,18 @@ let test_post_cursors_persists_valid_focus_mode () =
     let token = create_worker_token base_path "alice" in
     let body = {|{"file_path":"lib/a.ml","line":7,"focus_mode":"reviewing"}|} in
     let post_request =
-      http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) ()
+      http_request
+        ~meth:`POST
+        ~path:(scoped_ide_path "/api/v1/ide/cursors")
+        ~body
+        ~token:(Some token)
+        ()
     in
     let post_response = dispatch router post_request in
     check_status "POST cursor with valid focus_mode returns 201" 201 post_response;
-    let get_request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors" () in
+    let get_request =
+      http_request ~meth:`GET ~path:(scoped_ide_path "/api/v1/ide/cursors") ()
+    in
     let get_response = dispatch router get_request in
     check_status "GET cursors after POST succeeds" 200 get_response;
     let json = get_response |> response_body |> Yojson.Safe.from_string in
@@ -382,14 +415,16 @@ let test_post_cursors_honors_canonical_url_scope () =
     check_status "POST cursor with canonical_url scope returns 201" 201 post_response;
     let unscoped_request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors" () in
     let unscoped_response = dispatch router unscoped_request in
-    check_status "GET unscoped cursors succeeds" 200 unscoped_response;
-    let unscoped_json = unscoped_response |> response_body |> Yojson.Safe.from_string in
-    let unscoped_data = Json.member "data" unscoped_json in
     check
       int
-      "scoped cursor is not written to legacy_default"
-      0
-      (List.length (json_list_member "unscoped cursor snapshot" "cursors" unscoped_data));
+      "GET unscoped cursors rejects missing scope"
+      400
+      (status_of_response unscoped_response);
+    check
+      string
+      "GET unscoped cursors error code"
+      "missing_ide_scope"
+      (error_code_of_response unscoped_response);
     let scoped_request = http_request ~meth:`GET ~path:scoped_path () in
     let scoped_response = dispatch router scoped_request in
     check_status "GET scoped cursors succeeds" 200 scoped_response;
@@ -449,6 +484,11 @@ let test_post_annotations_rejects_repo_scope_mismatch () =
       "file_path does not belong to requested repo_id"
       (error_message_of_response response);
     check
+      string
+      "repo scope mismatch code"
+      "repo_mismatch"
+      (error_code_of_response response);
+    check
       int
       "mismatched annotation is not written to requested partition"
       0
@@ -483,7 +523,12 @@ let test_post_annotations_rejects_canonical_scope_mismatch () =
       string
       "canonical scope mismatch error"
       "file_path does not belong to requested canonical_url"
-      (error_message_of_response response))
+      (error_message_of_response response);
+    check
+      string
+      "canonical scope mismatch code"
+      "canonical_url_mismatch"
+      (error_code_of_response response))
 ;;
 
 let test_post_annotations_requires_auth () =
@@ -501,40 +546,81 @@ let test_delete_annotation_requires_auth () =
     check int "DELETE without token returns 401/403" 401 (status_of_response response))
 ;;
 
-let orphan_read_count reason =
-  Masc.Otel_metric_store.metric_value_or_zero
-    Masc.Otel_metric_store.metric_ide_orphan_reads
-    ~labels:[ "reason", reason ]
-    ()
-;;
-
-let test_read_annotations_records_legacy_default_orphan_metric () =
+let test_read_annotations_rejects_missing_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let before = orphan_read_count "legacy_default" in
     let request = http_request ~meth:`GET ~path:"/api/v1/ide/annotations" () in
     let response = dispatch router request in
-    check int "GET annotations succeeds" 200 (status_of_response response);
-    let after = orphan_read_count "legacy_default" in
-    check (float 0.0001) "legacy_default orphan read increments" (before +. 1.0) after)
+    check_status "GET annotations without scope returns 400" 400 response;
+    check
+      string
+      "missing scope error"
+      "IDE scope is required; pass repo_id or canonical_url"
+      (error_message_of_response response);
+    check
+      string
+      "missing scope code"
+      "missing_ide_scope"
+      (error_code_of_response response))
 ;;
 
-let test_read_cursors_records_unmatched_repo_orphan_metric () =
+let test_read_cursors_rejects_unmatched_repo_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let before = orphan_read_count "unmatched" in
     let request =
       http_request ~meth:`GET ~path:"/api/v1/ide/cursors?repo_id=missing-repo" ()
     in
     let response = dispatch router request in
-    check int "GET cursors succeeds" 200 (status_of_response response);
-    let after = orphan_read_count "unmatched" in
-    check (float 0.0001) "unmatched orphan read increments" (before +. 1.0) after)
+    check_status "GET cursors with unmatched repo_id returns 400" 400 response;
+    check
+      string
+      "unmatched repo error code"
+      "unmatched_repo_id"
+      (error_code_of_response response))
+;;
+
+let test_get_events_rejects_invalid_canonical_scope () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/events?canonical_url=not-a-url" ()
+    in
+    let response = dispatch router request in
+    check_status "GET events with invalid canonical_url returns 400" 400 response;
+    check
+      string
+      "invalid canonical_url code"
+      "invalid_canonical_url"
+      (error_code_of_response response))
+;;
+
+let test_post_annotations_rejects_missing_scope () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let body = annotation_body ~file_path:"lib/a.ml" in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations"
+        ~body
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "POST annotation without scope returns 400" 400 response;
+    check
+      string
+      "POST annotation missing scope code"
+      "missing_ide_scope"
+      (error_code_of_response response))
 ;;
 
 let test_cursor_stream_accepts_query_token_under_strict_auth () =
   with_env "MASC_HTTP_BASE_URL" (Some "https://masc.example.test") (fun () ->
     with_ide_server (fun ~base_path ~state:_ ~router ->
       let token = create_worker_token base_path "alice" in
-      let path = "/api/v1/ide/cursors/stream?repo_id=masc&token=" ^ Uri.pct_encode token in
+      let path =
+        scoped_ide_path "/api/v1/ide/cursors/stream"
+        ^ "&token="
+        ^ Uri.pct_encode token
+      in
       let request = http_request ~meth:`GET ~path () in
       let response = dispatch router request in
       check_status "GET cursor stream with query token succeeds" 200 response))
@@ -545,6 +631,7 @@ let test_memory_response_declares_annotation_source_contract () =
     (match
        Ide_annotations.create
          ~base_dir:base_path
+         ~partition:(masc_partition ())
          ~keeper_id:"alice"
          ~file_path:"lib/a.ml"
          ~line_start:1
@@ -556,7 +643,10 @@ let test_memory_response_declares_annotation_source_contract () =
      | Ok _ -> ()
      | Error msg -> failf "create annotation failed: %s" msg);
     let request =
-      http_request ~meth:`GET ~path:"/api/v1/ide/memory?keeper_id=alice" ()
+      http_request
+        ~meth:`GET
+        ~path:(scoped_ide_path "/api/v1/ide/memory?keeper_id=alice")
+        ()
     in
     let response = dispatch router request in
     check int "GET memory succeeds" 200 (status_of_response response);
@@ -596,16 +686,10 @@ let test_memory_response_declares_annotation_source_contract () =
 
 let test_memory_response_honors_canonical_url_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let remote = "https://github.com/jeong-sik/masc.git" in
-    let slug =
-      match Ide_paths.canonical_url_of_remote remote with
-      | Some slug -> slug
-      | None -> fail "test remote must produce a canonical IDE partition slug"
-    in
     (match
        Ide_annotations.create
          ~base_dir:base_path
-         ~partition:(Ide_paths.By_url slug)
+         ~partition:(masc_partition ())
          ~keeper_id:"alice"
          ~file_path:"lib/scoped.ml"
          ~line_start:4
@@ -620,16 +704,17 @@ let test_memory_response_honors_canonical_url_scope () =
       http_request ~meth:`GET ~path:"/api/v1/ide/memory?keeper_id=alice" ()
     in
     let unscoped_response = dispatch router unscoped_request in
-    check int "GET unscoped memory succeeds" 200 (status_of_response unscoped_response);
-    let unscoped_json = unscoped_response |> response_body |> Yojson.Safe.from_string in
     check
       int
-      "scoped annotation is not exposed through legacy memory partition"
-      0
-      (List.length (json_list_member "unscoped memory" "entries" unscoped_json));
-    let scoped_path =
-      "/api/v1/ide/memory?keeper_id=alice&canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
-    in
+      "GET unscoped memory rejects missing scope"
+      400
+      (status_of_response unscoped_response);
+    check
+      string
+      "GET unscoped memory error code"
+      "missing_ide_scope"
+      (error_code_of_response unscoped_response);
+    let scoped_path = scoped_ide_path "/api/v1/ide/memory?keeper_id=alice" in
     let scoped_request = http_request ~meth:`GET ~path:scoped_path () in
     let scoped_response = dispatch router scoped_request in
     check int "GET scoped memory succeeds" 200 (status_of_response scoped_response);
@@ -688,15 +773,23 @@ let () =
             test_post_cursors_route_is_registered
         ; test_case "read routes stay public" `Quick test_read_routes_stay_public
         ] )
-    ; ( "read_metrics"
+    ; ( "scope_contract"
       , [ test_case
-            "GET annotations records legacy_default orphan read metric"
+            "GET annotations rejects missing scope"
             `Quick
-            test_read_annotations_records_legacy_default_orphan_metric
+            test_read_annotations_rejects_missing_scope
         ; test_case
-            "GET cursors records unmatched repo orphan read metric"
+            "GET cursors rejects unmatched repo scope"
             `Quick
-            test_read_cursors_records_unmatched_repo_orphan_metric
+            test_read_cursors_rejects_unmatched_repo_scope
+        ; test_case
+            "GET events rejects invalid canonical_url scope"
+            `Quick
+            test_get_events_rejects_invalid_canonical_scope
+        ; test_case
+            "POST annotation rejects missing scope"
+            `Quick
+            test_post_annotations_rejects_missing_scope
         ; test_case
             "GET cursor stream accepts query token under strict auth"
             `Quick

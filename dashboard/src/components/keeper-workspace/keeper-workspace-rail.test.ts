@@ -330,6 +330,9 @@ describe('KeeperWorkspaceRail', () => {
               max_thinking_budget: 32768,
               streaming: true,
               temperature: 0.65,
+              top_p: 0.91,
+              top_k: 42,
+              min_p: 0.07,
               capabilities: {
                 source: 'runtime.toml',
                 max_output_tokens: 65536,
@@ -406,6 +409,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('transport http')
     expect(container.textContent).toContain('headers 1')
     expect(container.textContent).toContain('temp 0.65')
+    expect(container.textContent).toContain('sampling config top_p 0.91,top_k 42,min_p 0.07')
     expect(container.textContent).toContain('budget 32768')
     expect(container.textContent).toContain('behavior inline-tools,keeper-bridge')
     expect(container.textContent).toContain(

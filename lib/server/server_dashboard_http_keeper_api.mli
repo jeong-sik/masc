@@ -112,6 +112,35 @@ val keeper_runtime_trace_json :
   [ `Not_found | `OK ] * Yojson.Safe.t
 (** Runtime manifest + receipt evidence chain for [GET /runtime-trace]. *)
 
+val offline_keeper_composite_json :
+  config:Workspace.config ->
+  string -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Offline/paused composite fallback for keepers missing from the live
+    registry. Exposed so dashboard tests can pin the JSON shape. *)
+
+(** {1 Keeper state diagram runtime projection} *)
+
+type state_diagram_runtime_projection =
+  { runtime_models : string list
+  ; last_provider_result : string option
+  ; runtime_models_source : string
+  ; last_provider_result_source : string
+  ; effective_runtime_reason : string option
+  }
+
+val state_diagram_runtime_projection :
+  Keeper_meta_contract.keeper_meta option -> state_diagram_runtime_projection
+(** Redacted runtime/provider projection for [GET /state-diagram].
+    It never exposes concrete OAS provider or model identifiers. *)
+
+val state_diagram_runtime_projection_json :
+  state_diagram_runtime_projection -> Yojson.Safe.t
+(** JSON fields embedded in the [GET /state-diagram] response. *)
+
+val state_diagram_runtime_fsm_mermaid :
+  state_diagram_runtime_projection -> string
+(** Runtime FSM Mermaid rendered from the redacted projection. *)
+
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit

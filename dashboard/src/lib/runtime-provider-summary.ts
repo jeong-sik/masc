@@ -50,6 +50,9 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
     typeof item.max_context === 'number' ? `ctx:${item.max_context}` : null,
     typeof item.max_output_tokens === 'number' ? `out:${item.max_output_tokens}` : null,
     typeof item.temperature === 'number' ? `model-temp:${item.temperature}` : null,
+    typeof item.top_p === 'number' ? `model-top_p:${item.top_p}` : null,
+    typeof item.top_k === 'number' ? `model-top_k:${item.top_k}` : null,
+    typeof item.min_p === 'number' ? `model-min_p:${item.min_p}` : null,
     typeof item.capabilities_declared === 'boolean'
       ? `caps:${item.capabilities_declared ? 'declared' : 'missing'}`
       : null,
@@ -168,6 +171,11 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
   const spec = item.declared_spec
   if (!spec) return null
   const caps = spec.model?.capabilities
+  const samplingConfig = nonEmptyParts([
+    typeof spec.model?.top_p === 'number' ? `top_p:${spec.model.top_p}` : null,
+    typeof spec.model?.top_k === 'number' ? `top_k:${spec.model.top_k}` : null,
+    typeof spec.model?.min_p === 'number' ? `min_p:${spec.model.min_p}` : null,
+  ])
   const sampling = nonEmptyParts([
     caps?.supports_top_k ? 'top_k' : null,
     caps?.supports_min_p ? 'min_p' : null,
@@ -241,6 +249,7 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     typeof caps?.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null,
     formats.length > 0 ? `format:${formats.join(',')}` : null,
     inputs.length > 0 ? `input:${inputs.join(',')}` : null,
+    samplingConfig.length > 0 ? `sampling-config:${samplingConfig.join(',')}` : null,
     sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
     controls.length > 0 ? `controls:${controls.join(',')}` : null,
     spec.model?.match_prefixes.length ? `match:${spec.model.match_prefixes.join(',')}` : null,

@@ -253,15 +253,23 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     [/health] keeps the richer paused keeper object.  The
     [keeper_reaction_ledger] field keeps the same summary object as
     [/health] so the dashboard can render pending durable stimuli without a
-    second endpoint.  [fd_accountant] is also projected here so the dashboard
-    shell can show the same backpressure source as [/health] without scraping
+    second endpoint.  [keeper_turn_admission] mirrors the [/health] admission
+    pressure component so the shell can show in-flight lane, chat waiting
+    count/cap/full state, and rejected-chat counters without polling a second
+    endpoint.  [keeper_board_event_collection] mirrors the [/health] board
+    scanner failure component so the shell can show a reactive-board ingestion
+    fault without scraping logs or metrics.  [fd_accountant] is also projected here so the dashboard shell
+    can show the same backpressure source as [/health] without scraping
     Otel_metric_store. *)
 
 val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list
 (** Like {!keeper_fleet_runtime_resolution_fields}, but omits the
     reaction-ledger JSONL scan for the [/api/v1/dashboard/shell?light=true]
-    header hot path. *)
+    header hot path.  It keeps [keeper_turn_admission] because admission
+    pressure is in-memory and cheap to read, and keeps
+    [keeper_board_event_collection] because the failure snapshot is in-memory
+    and cheap to read. *)
 
 val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** [health_handler request reqd] writes {!make_health_response_json} as the

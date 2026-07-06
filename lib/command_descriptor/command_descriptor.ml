@@ -1,5 +1,6 @@
 type t =
   | Gh_pr_create of { title : string; base : string; draft : bool }
+  | Gh_pr_search of { query : string; state : string option }
   | Gh_pr_merge of { pr_number : int; squash : bool }
   | Gh_pr_comment of { pr_number : int; body : string }
   | Gh_pr_close of { pr_number : int }
@@ -20,6 +21,7 @@ type pr_action_surface =
 
 type pr_action =
   | Create
+  | Search
   | Merge
   | Comment
   | Close
@@ -39,6 +41,7 @@ let pr_action_surface_to_string = function
 
 let pr_action_to_string = function
   | Create -> "create"
+  | Search -> "search"
   | Merge -> "merge"
   | Comment -> "comment"
   | Close -> "close"
@@ -55,6 +58,13 @@ let to_json = function
       ; "title", `String title
       ; "base", `String base
       ; "draft", `Bool draft
+      ]
+  | Gh_pr_search { query; state } ->
+    `Assoc
+      [ "kind", `String "gh_pr_search"
+      ; "query", `String query
+      ; "state", (match state with Some s -> `String s | None -> `Null)
+      ; "duplicate_search", `Bool true
       ]
   | Gh_pr_merge { pr_number; squash } ->
     `Assoc
@@ -164,11 +174,15 @@ let pr_action_of_gh_action = function
 ;;
 
 let compute_typed : type i o r s. (i, o, r, s) Typed.command -> t = function
-  | Typed.Gh { subcommand; action; title; draft; squash; body; rest; _ } ->
+  | Typed.Gh { subcommand; action; title; draft; squash; body; search; state; rest; _ } ->
     (match subcommand, action with
      | "pr", Some "create" ->
        let base = extract_flag_from_rest rest ~flag:"--base" ~short:(Some "-b") ~default:"main" in
        Gh_pr_create { title = string_or "" title; base; draft }
+     | "pr", Some "list" ->
+       (match search with
+        | Some query -> Gh_pr_search { query; state }
+        | None -> Generic)
      | "pr", Some "merge" -> Gh_pr_merge { pr_number = extract_number_from_rest rest; squash }
      | "pr", Some "comment" ->
        Gh_pr_comment { pr_number = extract_number_from_rest rest; body = string_or "" body }
@@ -364,6 +378,7 @@ let rec compute ir =
              Pipe_chain { first_cmd; last_cmd; length }
            | (None, Some _) | (Some _, None) | (None, None) -> Generic)
         | ( Gh_pr_create _
+          | Gh_pr_search _
           | Gh_pr_merge _
           | Gh_pr_comment _
           | Gh_pr_close _
@@ -383,6 +398,10 @@ let rec compute ir =
 let pr_action_event_of_typed
   : type i o r s. (i, o, r, s) Typed.command -> pr_action_event option
   = function
+  | Typed.Gh { subcommand; action = Some "list"; search = Some _; _ }
+    when String.equal subcommand "pr" -> Some { surface = Gh_cli; action = Search }
+  | Typed.Gh { subcommand; action = Some "list"; search = None; _ }
+    when String.equal subcommand "pr" -> None
   | Typed.Gh { subcommand; action; _ } when String.equal subcommand "pr" ->
     Option.map (fun action -> { surface = Gh_cli; action }) (pr_action_of_gh_action action)
   | Typed.Gh _

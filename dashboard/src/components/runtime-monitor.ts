@@ -375,11 +375,18 @@ function runtimeParameterDetailRows(
         typeof request.min_p === 'number' ? `min_p ${request.min_p}` : null,
       ])
     : null
-  const declaredSampling = declaredCaps
+  const hasDeclaredSampling = Boolean(declaredCaps)
+    || typeof declaredModel?.top_p === 'number'
+    || typeof declaredModel?.top_k === 'number'
+    || typeof declaredModel?.min_p === 'number'
+  const declaredSampling = hasDeclaredSampling
     ? textList([
-        flagText(declaredCaps.supports_top_k, 'top_k'),
-        flagText(declaredCaps.supports_min_p, 'min_p'),
-        flagText(declaredCaps.supports_seed, 'seed'),
+        typeof declaredModel?.top_p === 'number' ? `top_p ${declaredModel.top_p}` : null,
+        typeof declaredModel?.top_k === 'number' ? `top_k ${declaredModel.top_k}` : null,
+        typeof declaredModel?.min_p === 'number' ? `min_p ${declaredModel.min_p}` : null,
+        flagText(declaredCaps?.supports_top_k, 'top_k'),
+        flagText(declaredCaps?.supports_min_p, 'min_p'),
+        flagText(declaredCaps?.supports_seed, 'seed'),
       ])
     : null
   const effectiveSampling = caps
@@ -465,11 +472,11 @@ function runtimeParameterDetailRows(
     detailRow('declared model', 'preserve thinking', onOffText(declaredModel?.preserve_thinking)),
     detailRow('declared model', 'thinking budget', numberText(declaredModel?.max_thinking_budget)),
     detailRow('declared model', 'temperature', numberText(declaredModel?.temperature)),
+    detailRow('declared model', 'sampling', declaredSampling),
     detailRow('declared model', 'capability source', declaredCaps?.source),
     detailRow('declared model', 'max output', numberText(declaredCaps?.max_output_tokens)),
     detailRow('declared model', 'thinking wire', declaredCaps?.thinking_control_format),
     detailRow('declared model', 'format', declaredFormat),
-    detailRow('declared model', 'sampling', declaredSampling),
     detailRow('declared model', 'inputs', runtimeDeclaredInputText(provider)),
     detailRow('declared model', 'controls', runtimeDeclaredModelControlText(provider)),
     detailRow('declared model', 'match prefixes', stringArrayText(declaredModel?.match_prefixes)),

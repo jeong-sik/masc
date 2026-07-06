@@ -48,9 +48,25 @@ let board_summary body =
   | None, None -> None
 ;;
 
+let keeper_wake_target body =
+  match assoc_string "keeper_name" body with
+  | Some keeper_name -> Some ("keeper:" ^ keeper_name)
+  | None -> None
+;;
+
+let keeper_wake_summary body =
+  match assoc_string "title" body, assoc_string "message" body with
+  | Some title, _ -> Some (truncate_summary title)
+  | None, Some message -> Some (truncate_summary message)
+  | None, None -> None
+;;
+
 let target_summary_of_payload payload =
   match kind_of_payload payload, body_fields payload with
-  | Some "masc.board_post", Some body -> board_target body, board_summary body
+  | Some kind, Some body when String.equal kind Schedule_supported_kinds.board_post ->
+    board_target body, board_summary body
+  | Some kind, Some body when String.equal kind Schedule_supported_kinds.keeper_wake ->
+    keeper_wake_target body, keeper_wake_summary body
   | _ -> None, None
 ;;
 

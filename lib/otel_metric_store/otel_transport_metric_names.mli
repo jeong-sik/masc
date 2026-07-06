@@ -9,6 +9,7 @@ val metric_sse_broadcast_duration : string
 val metric_sse_broadcast_events : string
 val metric_sse_broadcast_failures : string
 val metric_sse_external_subscriber_callback_failures : string
+val metric_sse_external_fanout_duration_seconds : string
 val metric_oas_sse_relay_drop_marker_failures : string
 val metric_sse_stream_queue_depth : string
 val metric_sse_queue_depth_avg : string
@@ -148,6 +149,7 @@ val metric_ws_slice_fanout_skipped : string
 val metric_ws_bytes_sent : string
 val metric_grpc_bytes_sent : string
 val metric_ws_delta_built : string
+val metric_ws_delta_payload_serializations : string
 
 (** Histogram of WebSocket message payload size in bytes, observed at
     the wire boundary. Labels: [direction = send | recv]. Complements

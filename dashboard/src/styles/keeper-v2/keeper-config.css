@@ -60,6 +60,98 @@
 .kcf-fact-v { font-size: var(--fs-13); color: var(--text-bright); word-break: break-word; }
 .kcf-fact-v.mono { font-family: var(--font-mono); font-size: var(--fs-12); }
 
+/* ── source/control backing ledger ── */
+.kcf-control-ledger {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-well);
+  margin: 0 0 18px;
+  max-width: 860px;
+  overflow: hidden;
+}
+.kcf-control-ledger-h {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-mid);
+  display: flex;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  justify-content: space-between;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+.kcf-control-ledger-grid {
+  display: grid;
+  gap: 0;
+}
+.kcf-control-ledger-row {
+  align-items: start;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(88px, 0.65fr) minmax(130px, 0.9fr) minmax(160px, 1fr) minmax(160px, 1fr) minmax(180px, 1.15fr);
+  min-width: 0;
+  padding: 9px 10px;
+}
+.kcf-control-ledger-row:first-child { border-top: 0; }
+.kcf-control-kind {
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  display: inline-flex;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  justify-content: center;
+  line-height: 1.2;
+  padding: 3px 6px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+.kcf-control-ledger-row.live-write .kcf-control-kind {
+  border-color: color-mix(in oklab, var(--status-ok) 45%, transparent);
+  color: var(--status-ok);
+}
+.kcf-control-ledger-row.browser-local .kcf-control-kind {
+  border-color: color-mix(in oklab, var(--status-warn) 45%, transparent);
+  color: var(--status-warn);
+}
+.kcf-control-ledger-row.unsupported .kcf-control-kind {
+  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
+  color: var(--status-fail);
+}
+.kcf-control-ledger-row.missing-config-field .kcf-control-contracts {
+  color: var(--status-warn);
+}
+.kcf-control-label {
+  color: var(--text-primary);
+  font-size: var(--fs-12);
+  min-width: 0;
+}
+.kcf-control-source,
+.kcf-control-action,
+.kcf-control-contracts {
+  color: var(--text-dim);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kcf-inline-row {
+  min-width: 0;
+}
+.kcf-inline-row > span {
+  min-width: 0;
+}
+.kcf-inline-control {
+  max-width: 100%;
+  min-width: 0;
+}
+select.kcf-inline-control {
+  max-width: min(340px, 100%);
+  min-width: min(260px, 100%);
+}
+
 /* ── plan / readonly badges ── */
 .kcf-plan { display: inline-flex; align-items: center; gap: 2px; font-size: 9.5px; letter-spacing: 0.06em; font-weight: 400; color: var(--text-dim); background: color-mix(in oklab, var(--info) 12%, transparent); border: 1px solid color-mix(in oklab, var(--info) 30%, transparent); border-radius: var(--radius-xs); padding: 2px 7px; }
 .kcf-plan em { font-style: normal; color: var(--text-dim); font-size: var(--fs-11); letter-spacing: 0; margin-left: 4px; }
@@ -174,6 +266,11 @@
   .kcf-overlay { padding: 0; }
   .kcf-tabs { width: 56px; padding: 10px 6px; }
   .kcf-tab-lbl { display: none; }
+  .kcf-control-ledger-row { grid-template-columns: 1fr; }
+  .kcf-inline-row { align-items: stretch; flex-direction: column; }
+  .kcf-inline-row > .kcf-inline-control { width: 100%; }
+  .kcf-inline-control input { width: min(8rem, 100%); }
+  select.kcf-inline-control { min-width: 0; width: 100%; }
   .kcf-facts, .kcf-tool { grid-template-columns: 1fr; }
   .kcf-tool { grid-template-columns: auto 1fr; }
 }

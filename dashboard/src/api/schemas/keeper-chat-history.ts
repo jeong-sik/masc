@@ -89,6 +89,35 @@ const KeeperChatTableCellSchema = union([
   }),
 ])
 
+const KeeperChatTraceStepSchema = union([
+  object({
+    kind: literal('think'),
+    text: string(),
+    ts: optional(string()),
+    oas_block_index: optional(number()),
+    oasBlockIndex: optional(number()),
+  }),
+  object({
+    kind: literal('reason'),
+    text: string(),
+    detail: optional(string()),
+    ts: optional(string()),
+  }),
+  object({
+    kind: literal('tool'),
+    name: string(),
+    tool_call_id: optional(string()),
+    toolCallId: optional(string()),
+    status: optional(union([literal('pending'), literal('ok'), literal('err')])),
+    dur: optional(string()),
+    args: optional(unknown()),
+    result: optional(unknown()),
+    ts: optional(string()),
+    oas_block_index: optional(number()),
+    oasBlockIndex: optional(number()),
+  }),
+])
+
 // RFC-0235 P3: server-parsed rich chat blocks carried on persisted history
 // rows. Keep this aligned with keeper_chat_blocks.ml and the dashboard
 // renderer's ChatBlock union; malformed block arrays cause the whole row to be
@@ -174,9 +203,38 @@ export const KeeperChatBlockSchema = union([
     board_post_id: string(),
     run_id: optional(string()),
   }),
+  object({
+    t: literal('trace'),
+    trace: array(KeeperChatTraceStepSchema),
+  }),
+  object({
+    t: literal('thinking'),
+    content: string(),
+    redacted: optional(boolean()),
+  }),
 ])
 
 export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>
+
+export const KeeperChatHistoryStreamContractSchema = object({
+  source: string(),
+  status: string(),
+  event_name: optional(string()),
+  eventName: optional(string()),
+  request_id: optional(string()),
+  requestId: optional(string()),
+  turn_ref: optional(string()),
+  turnRef: optional(string()),
+  trace_event_count: optional(number()),
+  traceEventCount: optional(number()),
+  lifecycle_events: optional(array(string())),
+  lifecycleEvents: optional(array(string())),
+  delivery_receipt: optional(string()),
+  deliveryReceipt: optional(string()),
+  reason: optional(string()),
+})
+
+export type KeeperChatHistoryStreamContract = InferOutput<typeof KeeperChatHistoryStreamContractSchema>
 
 export const KeeperChatHistoryMessageSchema = object({
   // R3: producer-assigned stable message id (keeper_chat_store.ml mints it
@@ -234,6 +292,11 @@ export const KeeperChatHistoryMessageSchema = object({
   // so a reload can tell a failed request apart from a real keeper reply;
   // open string() per the same deploy-window rationale as `role`.
   kind: optional(string()),
+  // K1e read model: backend-owned provenance for what a history row can prove
+  // about the stream/turn lifecycle. Kept optional for deploy windows and
+  // legacy endpoints; consumers fall back to explicit "history without stream
+  // events" instead of inventing a lifecycle.
+  stream_contract: optional(KeeperChatHistoryStreamContractSchema),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

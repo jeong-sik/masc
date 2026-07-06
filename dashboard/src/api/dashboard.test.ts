@@ -2078,6 +2078,70 @@ describe('fetchKeeperConfig', () => {
     expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
+    expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
+    expect(result.field_presence?.present_paths).toContain('tools.tool_access')
+    expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')
+  })
+
+  it('tracks raw keeper config field presence before defaults are normalized', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          prompt: {
+            goal: 'raw goal only',
+          },
+          metrics: {},
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.prompt.goal).toBe('raw goal only')
+    expect(result.prompt.instructions).toBe('')
+    expect(result.metrics.last_model_used).toBe('')
+    expect(result.field_presence?.present_paths).toContain('prompt.goal')
+    expect(result.field_presence?.present_paths).toContain('metrics')
+    expect(result.field_presence?.present_paths).not.toContain('prompt.instructions')
+    expect(result.field_presence?.present_paths).not.toContain('metrics.last_model_used')
+  })
+
+  it('preserves backend keeper config field-presence proof when supplied', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          field_presence: {
+            schema: 'keeper.config.field_presence.v1',
+            producer: 'dashboard_http_keeper_snapshot',
+            present_paths: ['name', 'prompt', 'prompt.goal'],
+          },
+          prompt: {
+            goal: 'server proof',
+            instructions: 'present but intentionally absent from proof',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.field_presence).toEqual({
+      schema: 'keeper.config.field_presence.v1',
+      producer: 'dashboard_http_keeper_snapshot',
+      present_paths: ['name', 'prompt', 'prompt.goal'],
+    })
   })
 
   it('normalizes default per-provider timeout mode without legacy label', async () => {
@@ -2423,6 +2487,9 @@ describe('fetchRuntimeProviders', () => {
             model_count: 1,
             models: ['Qwen/Qwen3-32B'],
             temperature: 0.65,
+            top_p: 0.91,
+            top_k: 42,
+            min_p: 0.07,
             max_output_tokens: 65536,
             supports_tool_choice: true,
             supports_required_tool_choice: true,
@@ -2572,6 +2639,9 @@ describe('fetchRuntimeProviders', () => {
                 max_thinking_budget: 32768,
                 streaming: true,
                 temperature: 0.65,
+                top_p: 0.91,
+                top_k: 42,
+                min_p: 0.07,
                 capabilities: {
                   source: 'runtime.toml',
                   max_output_tokens: 65536,
@@ -2700,6 +2770,9 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.temperature).toBe(0.65)
+    expect(result.providers[0]?.top_p).toBe(0.91)
+    expect(result.providers[0]?.top_k).toBe(42)
+    expect(result.providers[0]?.min_p).toBe(0.07)
     expect(result.providers[0]?.max_output_tokens).toBe(65536)
     expect(result.providers[0]?.supports_tool_choice).toBe(true)
     expect(result.providers[0]?.supports_required_tool_choice).toBe(true)
@@ -2755,6 +2828,9 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_system_prompt).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_seed_with_images).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_code_execution).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.top_p).toBe(0.91)
+    expect(result.providers[0]?.declared_spec?.model?.top_k).toBe(42)
+    expect(result.providers[0]?.declared_spec?.model?.min_p).toBe(0.07)
     expect(result.providers[0]?.declared_spec?.binding?.max_concurrent).toBe(4)
     expect(result.providers[1]?.temperature).toBeNull()
     expect(result.providers[0]?.discovery?.discovered_model).toBe('Qwen/Qwen3-32B')
@@ -2911,6 +2987,34 @@ describe('fetchKeeperCostMetrics', () => {
       { model: 'runtime', cost_usd: 0.5 },
     ])
   })
+
+  it('marks missing model breakdown labels as unknown instead of fabricating runtime', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        keepers: [
+          {
+            keeper_name: 'keeper-alpha',
+            total_cost_usd: 0.5,
+            sample_count: 2,
+            model_breakdown: [
+              { cost_usd: 0.2 },
+              { model: ' ', cost_usd: 0.3 },
+            ],
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers[0]?.model_breakdown).toEqual([
+      { model: 'unknown_model', cost_usd: 0.5 },
+    ])
+  })
 })
 
 describe('fetchKeeperDecisions', () => {
@@ -3035,6 +3139,31 @@ describe('fetchCostLatency', () => {
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])
     expect(result.matrix.models).toEqual(['runtime_lane_7'])
+  })
+
+  it('marks unlabeled cost-matrix lanes as unknown instead of synthetic runtime lanes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        perAgent: [],
+        matrix: {
+          providers: [],
+          models: [],
+          grid: [[0.01, 0.02]],
+        },
+        latencyBuckets: [],
+        total_cost_usd: 0.03,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCostLatency(60)
+
+    expect(result.matrix.providers).toEqual(['unknown_provider'])
+    expect(result.matrix.models).toEqual(['unknown_model_1', 'unknown_model_2'])
+    expect(result.matrix.grid).toEqual([[0.01, 0.02]])
   })
 })
 

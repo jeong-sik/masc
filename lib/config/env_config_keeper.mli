@@ -214,6 +214,25 @@ module KeeperVisibilityGate : sig
   val enabled : bool
 end
 
+(** {1 Keeper turn admission policy} *)
+
+module KeeperTurnAdmission : sig
+  val max_waiting_chat_requests : int
+end
+
+(** {1 Keeper health policy} *)
+
+module KeeperHealth : sig
+  val durable_queue_stale_sec : unit -> float
+end
+
+(** {1 Keeper proactive scheduler policy} *)
+
+module KeeperProactivePolicy : sig
+  val noop_backoff_max_shift : int
+  val idle_decay_max_periods : int
+end
+
 (** {1 Keeper keepalive loop} *)
 
 module KeeperKeepalive : sig

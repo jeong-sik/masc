@@ -433,27 +433,27 @@ let pending_confirm_row ?keeper_name
   }
 ;;
 
-let pending_confirm_targets_keeper keeper_names
+let pending_confirm_keeper_target keeper_names
       (entry : Workspace_hooks.operator_pending_confirm_request)
   =
-  match entry.target_id with
-  | Some keeper_name when List.exists (String.equal keeper_name) keeper_names -> true
-  | None | Some _ -> false
+  match entry.target_type, entry.target_id with
+  | "keeper", Some keeper_name when List.exists (String.equal keeper_name) keeper_names ->
+    Some keeper_name
+  | _, (None | Some _) -> None
 ;;
 
 let pending_confirm_rows keeper_names pending_confirms =
   pending_confirms
   |> List.filter_map (fun (entry : Workspace_hooks.operator_pending_confirm_request) ->
-    match entry.target_id with
-    | Some keeper_name when List.exists (String.equal keeper_name) keeper_names ->
-      Some (pending_confirm_row ~keeper_name entry)
-    | None | Some _ -> None)
+    match pending_confirm_keeper_target keeper_names entry with
+    | Some keeper_name -> Some (pending_confirm_row ~keeper_name entry)
+    | None -> None)
 ;;
 
 let global_pending_confirm_rows keeper_names pending_confirms =
   pending_confirms
   |> List.filter_map (fun entry ->
-    if pending_confirm_targets_keeper keeper_names entry
+    if Option.is_some (pending_confirm_keeper_target keeper_names entry)
     then None
     else Some (pending_confirm_row entry))
 ;;
@@ -582,7 +582,9 @@ let global_pending_confirm_count keeper_names pending_confirms =
   pending_confirms
   |> List.fold_left
        (fun count (entry : Workspace_hooks.operator_pending_confirm_request) ->
-          if pending_confirm_targets_keeper keeper_names entry then count else count + 1)
+          if Option.is_some (pending_confirm_keeper_target keeper_names entry)
+          then count
+          else count + 1)
        0
 ;;
 

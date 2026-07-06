@@ -431,12 +431,14 @@ let save_text path text =
   | Error err -> fail ("save_file_atomic failed: " ^ err)
 ;;
 
-let pending_confirm_fixture ?target_id () : Operator_pending_confirm.pending_confirm =
+let pending_confirm_fixture ?(target_type = "goal") ?target_id ()
+      : Operator_pending_confirm.pending_confirm
+  =
   { token = "confirm-goal-1"
   ; trace_id = "trace-goal-1"
   ; actor = "operator"
   ; action_type = "approve_goal"
-  ; target_type = "goal"
+  ; target_type
   ; target_id
   ; payload = `Assoc [ "goal_id", `String "goal-123" ]
   ; delegated_tool = "masc_goal_approve"
@@ -601,6 +603,34 @@ let test_global_pending_confirm_is_actionable_row () =
   | rows -> failf "expected one global pending-confirm row, got %d" (List.length rows)
 ;;
 
+let test_goal_pending_confirm_id_collision_stays_global () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "colliding-keeper" in
+  ensure_keeper config keeper_name;
+  write_pending_confirms_exn
+    config
+    [ pending_confirm_fixture ~target_type:"goal" ~target_id:keeper_name () ];
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  check_metric_float "global collision pending-confirm metric"
+    Otel_metric_store.metric_keeper_waiting_count
+    ~labels:[ "scope", "global"; "source", "operator_pending_confirm" ]
+    1.0;
+  check int "global collision pending-confirm row" 1
+    (json_int_member "global_row_count" json);
+  (match find_keeper json keeper_name with
+   | None -> fail "keeper row missing"
+   | Some keeper ->
+     check int "keeper lane remains empty" 0 (json_int_member "waiting_count" keeper));
+  match U.(json |> member "global_waiting_on" |> to_list) with
+  | [ row ] ->
+    let detail = U.(row |> member "detail") in
+    check string "source" "operator_pending_confirm" (json_string_member "source" row);
+    check string "target_type" "goal" U.(detail |> member "target_type" |> to_string);
+    check string "target_id" keeper_name U.(detail |> member "target_id" |> to_string)
+  | rows -> failf "expected one global pending-confirm row, got %d" (List.length rows)
+;;
+
 let test_corrupt_pending_confirms_is_read_error () =
   with_workspace
   @@ fun config ->
@@ -651,6 +681,8 @@ let () =
             test_external_attention_projection_is_bounded
         ; test_case "global pending confirm is actionable row" `Quick
             test_global_pending_confirm_is_actionable_row
+        ; test_case "goal pending confirm id collision stays global" `Quick
+            test_goal_pending_confirm_id_collision_stays_global
         ; test_case "corrupt pending confirms is read_error" `Quick
             test_corrupt_pending_confirms_is_read_error
         ] )

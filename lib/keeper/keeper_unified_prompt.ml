@@ -724,6 +724,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ~enabled:(tool_allowed "keeper_broadcast")
       Keeper_prompt_names.turn_intent_broadcast_guidance
   in
+  let pr_duplicate_search_guidance =
+    load_externalized_bullet
+      ~enabled:
+        (tool_allowed "tool_execute"
+         || tool_allowed "Execute"
+         || tool_allowed "execute")
+      Keeper_prompt_names.turn_intent_pr_duplicate_search_guidance
+  in
   let task_create_guidance =
     load_externalized_bullet
       ~enabled:show_task_create_guidance
@@ -748,6 +756,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ("board_post_guidance", board_post_guidance);
       ("board_curation_guidance", board_curation_guidance);
       ("broadcast_guidance", broadcast_guidance);
+      ("pr_duplicate_search_guidance", pr_duplicate_search_guidance);
       ("state_block_instruction", state_block_instruction_text);
     ]
   in

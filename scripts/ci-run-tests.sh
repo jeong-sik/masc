@@ -272,7 +272,9 @@ agent_sdk_interface_mismatch_detected() {
 disk_full_detected() {
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
   grep -Ev '(^|[[:space:]])\[OK\][[:space:]]' "${TEST_LOG_FILE}" \
-    | grep -Eiq 'No space left on device|dune_trace_write[(][)]|ENOSPC'
+    | grep -Eiq \
+      -e 'No space left on device|dune_trace_write[(][)]|ENOSPC' \
+      -e '##\[warning\].*(You are running out of disk space|Free space left:[[:space:]]*[0-9]+[[:space:]]*(MB|MiB))'
 }
 
 deterministic_test_failure_detected() {

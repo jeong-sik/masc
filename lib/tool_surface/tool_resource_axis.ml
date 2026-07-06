@@ -222,6 +222,7 @@ let classify_catalog_tool ~tool_name =
      | "masc_dashboard"
      | "masc_get_metrics"
      | "masc_goal_list"
+     | "masc_keeper_waiting_inventory"
      | "masc_messages"
      | "masc_operator_digest"
      | "masc_operator_snapshot"

@@ -718,6 +718,18 @@ let test_masc_dashboard_schema () =
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
 
+let test_masc_keeper_waiting_inventory_schema () =
+  match find_registered_tool "masc_keeper_waiting_inventory" with
+  | None -> Alcotest.fail "masc_keeper_waiting_inventory not found"
+  | Some schema ->
+      (match get_json_assoc "properties" schema.input_schema with
+       | Some props ->
+           Alcotest.(check int)
+             "masc_keeper_waiting_inventory has no parameters"
+             0
+             (List.length props)
+       | None -> Alcotest.fail "masc_keeper_waiting_inventory missing properties")
+
 let test_masc_agent_fitness_schema () =
   match find_registered_tool "masc_agent_fitness" with
   | None -> Alcotest.fail "masc_agent_fitness not found"
@@ -870,6 +882,8 @@ let () =
     ];
     "dashboard_tools", [
       Alcotest.test_case "dashboard" `Quick test_masc_dashboard_schema;
+      Alcotest.test_case "keeper_waiting_inventory" `Quick
+        test_masc_keeper_waiting_inventory_schema;
       Alcotest.test_case "agent_fitness" `Quick test_masc_agent_fitness_schema;
       Alcotest.test_case "get_metrics" `Quick test_masc_get_metrics_schema;
       Alcotest.test_case "agent_card" `Quick test_masc_agent_card_schema;

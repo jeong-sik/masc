@@ -247,6 +247,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_update", broadcast_tool);
     ("masc_keeper_list", read_state_tool);
     ("masc_keeper_status", read_state_tool);
+    ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
     ( "masc_keeper_down",
       with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace

@@ -197,6 +197,9 @@ export type {
   DashboardScheduledAutomationPayloadSupport,
   DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   DashboardScheduledAutomation,
+  DashboardKeeperWaitingRow,
+  DashboardKeeperWaitingKeeper,
+  DashboardKeeperWaitingInventory,
   DashboardToolsResponse,
 } from './dashboard-tools-prompts'
 

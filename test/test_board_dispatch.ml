@@ -465,6 +465,12 @@ let test_list_posts () =
   let posts = Board_dispatch.list_posts ~limit:10 () in
   Alcotest.(check bool) "at least 2 posts" true (List.length posts >= 2)
 
+let test_list_posts_negative_limit_returns_empty () =
+  ignore (Board_dispatch.create_post ~author:"negative-limit"
+            ~content:"negative limit probe" ~post_kind:Board.Human_post ());
+  let posts = Board_dispatch.list_posts ~limit:(-1) () in
+  Alcotest.(check int) "negative limit closes to empty" 0 (List.length posts)
+
 let test_list_posts_with_sort () =
   let posts_hot = Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:5 () in
   let posts_recent = Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5 () in
@@ -1773,6 +1779,8 @@ let () =
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
+      Alcotest.test_case "negative list limit" `Quick
+        (with_eio test_list_posts_negative_limit_returns_empty);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
       Alcotest.test_case "recent bypasses hot cutoff" `Quick
         (with_eio test_recent_sort_bypasses_hot_cutoff);

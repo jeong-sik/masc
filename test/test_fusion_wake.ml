@@ -70,7 +70,6 @@ let list_field label fields key =
       (Printf.sprintf "%s.%s: expected list, got %s" label key
          (Yojson.Safe.to_string json))
 ;;
-
 let temp_base_path prefix =
   Filename.concat
     (Filename.get_temp_dir_name ())
@@ -669,7 +668,6 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       fail "fusion run should not remain Running after background success"
     | None -> fail "fusion run should remain visible after background success")
 ;;
-
 let test_emit_board_failure_is_best_effort () =
   with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
     let keeper = "bad/keeper" in

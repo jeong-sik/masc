@@ -140,6 +140,15 @@ let request target =
 let request_with_headers target headers =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
 
+let test_keeper_post_route_classifies_catchup_judge () =
+  let path = "/api/v1/keepers/idealist/catchup-judge" in
+  check bool "catchup judge route kind" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_catchup_judge);
+  check string "keeper name extracted" "idealist"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
+       Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
+
 let with_test_env f =
   let dir = test_dir () in
 	Fun.protect
@@ -1772,6 +1781,8 @@ let () =
             test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
           test_case "state diagram runtime projection stays empty without meta" `Quick
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
+          test_case "keeper catch-up judge route is classified" `Quick
+            test_keeper_post_route_classifies_catchup_judge;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick

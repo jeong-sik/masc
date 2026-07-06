@@ -35,10 +35,16 @@ type candidate_selection_result = {
   selected: (string * string * int) list;
   dropped_by_kind: (string * int) list;
   dropped_by_total_cap: int;
+  suppressed_synthetic_candidates: int;
 }
 
 let empty_candidate_selection =
-  { selected = []; dropped_by_kind = []; dropped_by_total_cap = 0 }
+  {
+    selected = [];
+    dropped_by_kind = [];
+    dropped_by_total_cap = 0;
+    suppressed_synthetic_candidates = 0;
+  }
 
 let select_memory_candidates
     (rows : (string * string * int) list) : candidate_selection_result =
@@ -56,6 +62,7 @@ let select_memory_candidates
             |> List.of_seq
             |> List.sort (fun (a, _) (b, _) -> String.compare a b);
           dropped_by_total_cap = dropped_total;
+          suppressed_synthetic_candidates = 0;
         }
     | _ when List.length acc >= total_cap ->
         {
@@ -65,6 +72,7 @@ let select_memory_candidates
             |> List.of_seq
             |> List.sort (fun (a, _) (b, _) -> String.compare a b);
           dropped_by_total_cap = dropped_total + List.length rest;
+          suppressed_synthetic_candidates = 0;
         }
     | (kind, text, pr) :: rest' ->
         let cap = cap_for_kind kind_caps kind in
@@ -282,5 +290,17 @@ let memory_candidates_from_snapshot
 
 let memory_candidates_from_snapshot_gated ~is_synthetic snapshot =
   if is_synthetic
-  then empty_candidate_selection
+  then
+    let ungated = memory_candidates_from_snapshot snapshot in
+    let dropped_by_kind =
+      List.fold_left
+        (fun total (_, count) -> total + count)
+        0
+        ungated.dropped_by_kind
+    in
+    {
+      empty_candidate_selection with
+      suppressed_synthetic_candidates =
+        List.length ungated.selected + ungated.dropped_by_total_cap + dropped_by_kind;
+    }
   else memory_candidates_from_snapshot snapshot

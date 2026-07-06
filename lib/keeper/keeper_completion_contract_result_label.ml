@@ -48,11 +48,11 @@ let requires_attention = function
   | Surface_mismatch
   | No_capable_provider
   | Claim_only_after_owned_task
-  | Needs_execution_progress
-  | Passive_only ->
+  | Needs_execution_progress ->
     true
   | Unknown
   | Not_dispatched
+  | Passive_only
   | Satisfied_completion
   | Satisfied_execution ->
     false

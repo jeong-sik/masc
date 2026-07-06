@@ -75,6 +75,16 @@ let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
 
+let result_count_by_label json label =
+  json
+  |> member "completion_contract_result_counts"
+  |> to_list
+  |> List.find_opt (fun item ->
+    match item |> member "result" with
+    | `String value -> String.equal value label
+    | _ -> false)
+;;
+
 let check_list_has_string label expected json =
   check bool label true
     (json
@@ -280,7 +290,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
     (reaction |> member "receipt")
 ;;
 
-let test_summary_counts_completion_contract_attention_receipts () =
+let test_summary_observes_passive_only_without_attention () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "contract-attention-keeper" in
@@ -324,21 +334,25 @@ let test_summary_counts_completion_contract_attention_receipts () =
     ~current_task_id:"task-satisfied"
     ~completion_contract_result:"satisfied_execution"
     ();
+  record
+    ~trace_id:"trace-violated"
+    ~current_task_id:"task-violated"
+    ~completion_contract_result:"violated"
+    ();
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
   check_member_string "contract summary remains mechanically ok" "ok" "status" summary;
-  check int "completion contract attention count" 2
+  check int "completion contract attention count" 1
     (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only count" 2
+  check int "passive-only observation count" 2
     (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check string "latest contract attention" "passive_only"
+  check string "latest contract attention" "violated"
     (summary |> member "latest_completion_contract_attention" |> to_string);
   let result_count =
-    summary
-    |> member "completion_contract_result_counts"
-    |> to_list
-    |> List.hd
+    match result_count_by_label summary "passive_only" with
+    | Some value -> value
+    | None -> fail "passive_only observation count missing"
   in
   check_member_string "contract result label" "passive_only" "result" result_count;
   check int "contract result count" 2 (result_count |> member "count" |> to_int);
@@ -348,9 +362,9 @@ let test_summary_counts_completion_contract_attention_receipts () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check int "fleet contract attention count" 2
+  check int "fleet contract attention count" 1
     (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only count" 2
+  check int "fleet passive-only observation count" 2
     (fleet |> member "completion_contract_passive_only_count" |> to_int);
   let keeper_attention =
     fleet
@@ -363,7 +377,7 @@ let test_summary_counts_completion_contract_attention_receipts () =
     keeper_name
     "keeper_name"
     keeper_attention;
-  check int "fleet keeper contract attention count" 2
+  check int "fleet keeper contract attention count" 1
     (keeper_attention |> member "completion_contract_attention_count" |> to_int)
 ;;
 
@@ -463,7 +477,7 @@ let test_completion_contract_result_canonical_roundtrip () =
     ; Receipt.Contract_no_capable_provider, true
     ; Receipt.Contract_claim_only_after_owned_task, true
     ; Receipt.Contract_needs_execution_progress, true
-    ; Receipt.Contract_passive_only, true
+    ; Receipt.Contract_passive_only, false
     ; Receipt.Contract_satisfied_completion, false
     ; Receipt.Contract_satisfied_execution, false
     ]
@@ -494,7 +508,7 @@ let test_completion_contract_result_canonical_roundtrip () =
      |> Option.map Receipt.completion_contract_result_to_string)
 ;;
 
-let test_summary_ignores_passive_only_without_work_scope () =
+let test_summary_observes_passive_only_without_work_scope_attention () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "passive-no-work-keeper" in
@@ -525,7 +539,7 @@ let test_summary_ignores_passive_only_without_work_scope () =
   in
   check int "passive-only no-work attention not counted" 0
     (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only no-work passive count not counted" 0
+  check int "passive-only no-work observation counted" 1
     (summary |> member "completion_contract_passive_only_count" |> to_int);
   check
     string
@@ -540,7 +554,7 @@ let test_summary_ignores_passive_only_without_work_scope () =
   in
   check int "fleet passive-only no-work attention not counted" 0
     (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only no-work passive count not counted" 0
+  check int "fleet passive-only no-work observation counted" 1
     (fleet |> member "completion_contract_passive_only_count" |> to_int)
 ;;
 
@@ -822,7 +836,7 @@ let test_no_progress_recovery_cursor_ack_does_not_clear_pending () =
     (cursor_only_summary |> member "cursor_swept_stimulus_count" |> to_int)
 ;;
 
-let test_summary_links_passive_only_attention_to_pending_recovery () =
+let test_summary_links_passive_only_observation_to_pending_recovery () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "passive-recovery-keeper" in
@@ -855,8 +869,10 @@ let test_summary_links_passive_only_attention_to_pending_recovery () =
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
-  check int "passive-only attention counted" 1
+  check int "passive-only observation counted" 1
     (summary |> member "completion_contract_passive_only_count" |> to_int);
+  check int "passive-only does not count as attention" 0
+    (summary |> member "completion_contract_attention_count" |> to_int);
   check int "pending no-progress recovery counted" 1
     (summary |> member "pending_no_progress_recovery_count" |> to_int);
   let fleet =
@@ -865,8 +881,10 @@ let test_summary_links_passive_only_attention_to_pending_recovery () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check int "fleet passive-only attention counted" 1
+  check int "fleet passive-only observation counted" 1
     (fleet |> member "completion_contract_passive_only_count" |> to_int);
+  check int "fleet passive-only does not count as attention" 0
+    (fleet |> member "completion_contract_attention_count" |> to_int);
   check int "fleet pending no-progress recovery counted" 1
     (fleet |> member "pending_no_progress_recovery_count" |> to_int);
   let recovery_keeper =
@@ -1327,9 +1345,9 @@ let () =
             `Quick
             test_execution_receipt_links_to_reaction_ledger
         ; test_case
-            "summary counts completion-contract attention receipts"
+            "summary observes passive-only without attention"
             `Quick
-            test_summary_counts_completion_contract_attention_receipts
+            test_summary_observes_passive_only_without_attention
         ; test_case
             "summary degrades unknown completion-contract result"
             `Quick
@@ -1339,9 +1357,9 @@ let () =
             `Quick
             test_completion_contract_result_canonical_roundtrip
         ; test_case
-            "summary ignores passive-only receipts without work scope"
+            "summary observes passive-only without work-scope attention"
             `Quick
-            test_summary_ignores_passive_only_without_work_scope
+            test_summary_observes_passive_only_without_work_scope_attention
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick
@@ -1371,9 +1389,9 @@ let () =
             `Quick
             test_no_progress_recovery_cursor_ack_does_not_clear_pending
         ; test_case
-            "summary links passive-only attention to pending recovery"
+            "summary links passive-only observation to pending recovery"
             `Quick
-            test_summary_links_passive_only_attention_to_pending_recovery
+            test_summary_links_passive_only_observation_to_pending_recovery
         ; test_case
             "fleet summary surfaces durable event queue backlog"
             `Quick

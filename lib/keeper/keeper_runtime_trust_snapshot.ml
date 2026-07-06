@@ -74,16 +74,6 @@ let terminal_reason_from_decision json =
           Keeper_turn_terminal.of_code ~source:"decision_log" code)
         (json_string_opt_member "terminal_reason_code" json)
 
-let receipt_passive_only_without_work_scope receipt =
-  match
-    json_string_opt_member "completion_contract_result" receipt
-    |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
-  with
-  | Some "passive_only" ->
-      Option.is_none (json_string_opt_member "current_task_id" receipt)
-      && goal_ids_of_json receipt = []
-  | Some _ | None -> false
-
 let terminal_reason_from_receipt receipt =
   let terminal_reason_code = json_string_opt_member "terminal_reason_code" receipt in
   let operator_disposition_reason =
@@ -94,8 +84,6 @@ let terminal_reason_from_receipt receipt =
   let receipt_requires_tool_attention =
     match operator_disposition_reason, completion_contract_result with
     | Some "tool_route_recoverable_failure", _ -> true
-    | _, Some Completion_contract_result.Passive_only ->
-      not (receipt_passive_only_without_work_scope receipt)
     | _, Some result -> Completion_contract_result.requires_attention result
     | _ -> false
   in
@@ -127,14 +115,10 @@ let receipt_contract_attention_reason receipt =
     "completion_contract_result:" ^ Completion_contract_result.to_string result
   in
   match completion_contract_result with
-  | Some Completion_contract_result.Passive_only
-    when receipt_passive_only_without_work_scope receipt ->
-      None
   | Some
       ( Completion_contract_result.Violated
       | Completion_contract_result.Claim_only_after_owned_task
-      | Completion_contract_result.Needs_execution_progress
-      | Completion_contract_result.Passive_only as result ) ->
+      | Completion_contract_result.Needs_execution_progress as result ) ->
       Some (attention_reason result)
   | Some
       ( Completion_contract_result.Unknown

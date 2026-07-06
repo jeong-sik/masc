@@ -55,11 +55,7 @@ let keeper_meta_fixture keeper_name =
 ;;
 
 let ensure_keeper config keeper_name =
-  match
-    let open Result in
-    let* meta = keeper_meta_fixture keeper_name in
-    Keeper_meta_store.write_meta config meta
-  with
+  match Result.bind (keeper_meta_fixture keeper_name) (Keeper_meta_store.write_meta config) with
   | Ok _ -> ()
   | Error err -> fail ("write keeper meta failed: " ^ err)
 ;;

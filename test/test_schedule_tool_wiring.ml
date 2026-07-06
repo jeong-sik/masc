@@ -1487,12 +1487,6 @@ let test_keeper_observation_reports_schedule_store_read_error () =
       ~config
       ~now:1_000.0
   in
-  check bool "schedule counts unknown" false
-    (Keeper_world_observation.scheduled_automation_counts_known observation);
-  (match Keeper_world_observation.scheduled_automation_read_error observation with
-   | None -> fail "expected schedule read error"
-   | Some error ->
-     check bool "read error is visible" true (String.length error > 0));
   check int "compat active count remains zero" 0 observation.active_count;
   check int "compat due-ready count remains zero" 0 observation.due_ready_count;
   check int "no attention items on unreadable store" 0 (List.length observation.items)

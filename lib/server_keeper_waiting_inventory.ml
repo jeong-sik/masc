@@ -314,7 +314,7 @@ let external_attention_rows ~base_path ~keeper_name =
   with
   | Error err ->
     ( [ read_error_row
-          ~keeper_name:(Some keeper_name)
+          ~keeper_name
           ~waiting_on:"external_attention_store"
           ~next_action:"repair_external_attention_store"
           (`Assoc [ "error", `String err ])

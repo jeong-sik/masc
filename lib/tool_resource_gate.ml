@@ -41,13 +41,7 @@ type gates =
   }
 
 let env_bool ?(default = false) name =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-    (match String.lowercase_ascii (String.trim raw) with
-     | "1" | "true" | "yes" | "on" -> true
-     | "0" | "false" | "no" | "off" -> false
-     | _ -> default)
+  Safe_ops.get_env_bool_logged name ~default
 ;;
 
 let env_int ?(min_v = 1) name default =

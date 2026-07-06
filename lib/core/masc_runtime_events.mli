@@ -34,4 +34,6 @@ val start_listener : unit -> unit
 (** Install the Runtime_events ring buffer listener.
 
     Idempotent-safe per [Runtime_events] semantics. Should be called
-    once, early inside the [Eio_main.run] entry. *)
+    once, early inside the [Eio_main.run] entry. Set
+    [MASC_RUNTIME_EVENTS=0] to skip the listener on hosts where the OCaml
+    runtime event ring cannot be opened. *)

@@ -77,6 +77,15 @@ let has_prefix ~prefix value =
   String.length value >= prefix_len
   && String.equal prefix (String.sub value 0 prefix_len)
 
+let contains_substring ~needle value =
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  let rec loop i =
+    i + needle_len <= value_len
+    && (String.equal needle (String.sub value i needle_len) || loop (i + 1))
+  in
+  String.equal needle "" || loop 0
+
 let test_parse_json_safe_rate_limits_repeated_utf8_repair_logs () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
@@ -323,6 +332,61 @@ let test_get_env_int_logged_invalid () =
   let result = get_env_int_logged "MASC_TEST_INT_VAR_BAD" ~default:99 in
   check int "default on invalid" 99 result
 
+let test_get_env_bool_logged_missing () =
+  let open Safe_ops in
+  let result =
+    get_env_bool_logged "MASC_TEST_NONEXISTENT_BOOL_VAR_12345" ~default:true
+  in
+  check bool "default on missing" true result
+
+let test_get_env_bool_logged_true_tokens () =
+  let open Safe_ops in
+  Unix.putenv "MASC_TEST_BOOL_TRUE_VAR" "on";
+  check bool "on parses true" true
+    (get_env_bool_logged "MASC_TEST_BOOL_TRUE_VAR" ~default:false);
+  Unix.putenv "MASC_TEST_BOOL_TRUE_VAR" "YES";
+  check bool "YES parses true" true
+    (get_env_bool_logged "MASC_TEST_BOOL_TRUE_VAR" ~default:false)
+
+let test_get_env_bool_logged_false_tokens () =
+  let open Safe_ops in
+  Unix.putenv "MASC_TEST_BOOL_FALSE_VAR" "off";
+  check bool "off parses false" false
+    (get_env_bool_logged "MASC_TEST_BOOL_FALSE_VAR" ~default:true);
+  Unix.putenv "MASC_TEST_BOOL_FALSE_VAR" "";
+  check bool "empty parses false" false
+    (get_env_bool_logged "MASC_TEST_BOOL_FALSE_VAR" ~default:true)
+
+let test_get_env_bool_logged_invalid_uses_default () =
+  let open Safe_ops in
+  Unix.putenv "MASC_TEST_BOOL_BAD_VAR" "maybe";
+  check bool "invalid uses true default" true
+    (get_env_bool_logged "MASC_TEST_BOOL_BAD_VAR" ~default:true);
+  check bool "invalid uses false default" false
+    (get_env_bool_logged "MASC_TEST_BOOL_BAD_VAR" ~default:false)
+
+let test_get_env_bool_logged_invalid_redacts_value () =
+  let open Safe_ops in
+  let baseline = latest_log_seq () in
+  Unix.putenv "MASC_TEST_BOOL_SECRET_VAR" "secret-token-value";
+  check bool "invalid uses default" true
+    (get_env_bool_logged "MASC_TEST_BOOL_SECRET_VAR" ~default:true);
+  let logs =
+    Log.Ring.recent ~limit:20 ~module_filter:"Misc" ~since_seq:baseline ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+      contains_substring ~needle:"MASC_TEST_BOOL_SECRET_VAR" entry.message)
+  in
+  check int "invalid bool warning emitted" 1 (List.length logs);
+  let message =
+    match logs with
+    | [ entry ] -> entry.message
+    | _ -> fail "expected exactly one invalid bool warning"
+  in
+  check bool "raw value is redacted" false
+    (contains_substring ~needle:"secret-token-value" message);
+  check bool "redaction is explicit" true
+    (contains_substring ~needle:"value redacted" message)
+
 
 (* json_int_opt *)
 let test_json_int_opt_present () =
@@ -512,6 +576,15 @@ let () =
       test_case "missing" `Quick test_get_env_int_logged_missing;
       test_case "valid" `Quick test_get_env_int_logged_valid;
       test_case "invalid" `Quick test_get_env_int_logged_invalid;
+    ];
+    "get_env_bool_logged", [
+      test_case "missing" `Quick test_get_env_bool_logged_missing;
+      test_case "true tokens" `Quick test_get_env_bool_logged_true_tokens;
+      test_case "false tokens" `Quick test_get_env_bool_logged_false_tokens;
+      test_case "invalid uses default" `Quick
+        test_get_env_bool_logged_invalid_uses_default;
+      test_case "invalid redacts value" `Quick
+        test_get_env_bool_logged_invalid_redacts_value;
     ];
     "json_extraction", [
       test_case "string" `Quick test_json_string;

@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardFusionRunsResponse } from './api/dashboard-fusion'
+import type { BoardPost } from './types'
 
 const fusionApiMocks = vi.hoisted(() => ({
+  fetchDashboardMemory: vi.fn<() => Promise<{ posts: BoardPost[] }>>(),
   fetchFusionRuns: vi.fn<() => Promise<DashboardFusionRunsResponse>>(),
 }))
 
@@ -12,6 +14,10 @@ vi.mock('./api/dashboard-fusion', async importOriginal => {
     fetchFusionRuns: fusionApiMocks.fetchFusionRuns,
   }
 })
+
+vi.mock('./api/dashboard-execution', () => ({
+  fetchDashboardMemory: fusionApiMocks.fetchDashboardMemory,
+}))
 
 vi.mock('./api/dashboard-hot', () => ({
   fetchDashboardBootstrap: vi.fn(),
@@ -29,13 +35,20 @@ vi.mock('./components/common/toast', () => ({
 }))
 
 import {
+  fusionBoardError,
+  fusionBoardLoading,
+  fusionBoardPosts,
   fusionRuns,
   fusionRunsError,
   fusionRunsLoading,
+  refreshFusionBoard,
   refreshFusionRuns,
 } from './store'
 
 beforeEach(() => {
+  fusionBoardPosts.value = []
+  fusionBoardError.value = null
+  fusionBoardLoading.value = false
   fusionRuns.value = []
   fusionRunsError.value = null
   fusionRunsLoading.value = false
@@ -43,9 +56,62 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  fusionBoardPosts.value = []
+  fusionBoardError.value = null
+  fusionBoardLoading.value = false
   fusionRuns.value = []
   fusionRunsError.value = null
   fusionRunsLoading.value = false
+})
+
+function fusionPost(id: string): BoardPost {
+  return {
+    id,
+    author: 'fusion-keeper',
+    post_kind: 'automation',
+    pinned: false,
+    title: `Fusion ${id}`,
+    body: '',
+    content: '',
+    meta: { source: 'fusion', run_id: id },
+    tags: [],
+    votes: null,
+    comment_count: 0,
+    created_at: '2026-07-06T04:00:00Z',
+    updated_at: '2026-07-06T04:00:00Z',
+  } as BoardPost
+}
+
+describe('refreshFusionBoard', () => {
+  it('hydrates board-sink rows and clears a prior error', async () => {
+    fusionBoardError.value = 'previous board error'
+    fusionApiMocks.fetchDashboardMemory.mockResolvedValue({
+      posts: [fusionPost('fus-board-ok')],
+    })
+
+    await refreshFusionBoard()
+
+    expect(fusionBoardError.value).toBeNull()
+    expect(fusionBoardPosts.value).toHaveLength(1)
+    expect(fusionBoardPosts.value[0]?.id).toBe('fus-board-ok')
+    expect(fusionApiMocks.fetchDashboardMemory).toHaveBeenCalledWith('recent', {
+      limit: 500,
+      offset: 0,
+    })
+    expect(fusionBoardLoading.value).toBe(false)
+  })
+
+  it('surfaces board-sink refresh failure without dropping cached posts', async () => {
+    fusionBoardPosts.value = [fusionPost('fus-board-cached')]
+    fusionApiMocks.fetchDashboardMemory.mockRejectedValue(new Error('HTTP 502 board sink unavailable'))
+
+    await refreshFusionBoard()
+
+    expect(fusionBoardError.value).toBe('HTTP 502 board sink unavailable')
+    expect(fusionBoardPosts.value).toHaveLength(1)
+    expect(fusionBoardPosts.value[0]?.id).toBe('fus-board-cached')
+    expect(fusionBoardLoading.value).toBe(false)
+  })
 })
 
 describe('refreshFusionRuns', () => {

@@ -17,24 +17,12 @@ let with_config f =
     f (Workspace.default_config path))
 ;;
 
-let replace_path_with_directory path =
-  if Sys.file_exists path then rm_rf path;
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Unix.mkdir path 0o755
-;;
-
 let write_text path content =
   Fs_compat.mkdir_p (Filename.dirname path);
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
-;;
-
-let event_queue_snapshot_path ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue.json"
 ;;
 
 let payload =
@@ -320,105 +308,6 @@ let test_dispatch_create_persists_schedule () =
     let request = List.hd state.schedules in
     check string "status" "scheduled"
       (Schedule_domain.schedule_status_to_string request.status)
-;;
-
-let test_dispatch_get_surfaces_lifecycle_audit () =
-  with_config
-  @@ fun config ->
-  let ctx = schedule_ctx config in
-  let create_args =
-    `Assoc (("schedule_id", `String "sched-audit-tool") :: create_fields)
-  in
-  (match
-     Tool_schedule.dispatch ctx
-       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
-       ~args:create_args
-   with
-   | Some result when Tool_result.is_success result -> ()
-   | Some result -> fail ("create failed: " ^ Tool_result.message result)
-   | None -> fail "create dispatch returned None");
-  match
-    Tool_schedule.dispatch ctx
-      ~name:(schedule_tool_name Tool_schemas_schedule.Get_request)
-      ~args:(`Assoc [ "schedule_id", `String "sched-audit-tool" ])
-  with
-  | None -> fail "get dispatch returned None"
-  | Some result ->
-    check bool "get succeeds" true (Tool_result.is_success result);
-    let open Yojson.Safe.Util in
-    let audit = Tool_result.data result |> member "lifecycle_audit" in
-    check string "payload support" "unsupported"
-      (Tool_result.data result |> member "payload_support" |> to_string);
-    check string "audit source" "schedule_lifecycle_audit_jsonl"
-      (audit |> member "source" |> to_string);
-    check string "audit status" "ok" (audit |> member "status" |> to_string);
-    check int "audit limit" Schedule_audit_log.default_projection_limit
-      (audit |> member "limit" |> to_int);
-    check int "audit event count" 1 (audit |> member "event_count" |> to_int);
-    check string "audit coverage" "events_recorded"
-      (audit |> member "coverage" |> to_string);
-    check string "audit backfill policy"
-      "not_synthesized_from_schedule_snapshot"
-      (audit |> member "backfill_policy" |> to_string);
-    let event =
-      match audit |> member "events" |> to_list with
-      | [ event ] -> event
-      | events -> failf "expected one audit event, got %d" (List.length events)
-    in
-    check string "audit action" "request_created"
-      (event |> member "action" |> to_string);
-    check string "audit schedule" "sched-audit-tool"
-      (event |> member "schedule_id" |> to_string);
-    check string "audit current status" "scheduled"
-      (event |> member "current_status" |> to_string)
-;;
-
-let test_dispatch_get_surfaces_pre_audit_no_events_policy () =
-  with_config
-  @@ fun config ->
-  let ctx = schedule_ctx config in
-  let request =
-    match
-      Schedule_domain.create_request
-        ~schedule_id:"sched-pre-audit"
-        ~requested_by:(human "operator")
-        ~scheduled_by:(human "scheduler")
-        ~requested_at:100.0
-        ~due_at:200.0
-        ~payload
-        ~risk_class:Schedule_domain.Read_only
-        ~approval_required:false
-        ~source:Schedule_domain.Operator_request
-        ()
-    with
-    | Ok request -> request
-    | Error msg -> fail msg
-  in
-  Workspace_utils.mkdir_p (Workspace_utils.masc_dir config);
-  Workspace_core.write_text
-    config
-    (Schedule_store.schedules_path config)
-    (Yojson.Safe.to_string
-       (Schedule_store.state_to_yojson
-          { (Schedule_store.default_state ()) with schedules = [ request ] }));
-  match
-    Tool_schedule.dispatch ctx
-      ~name:(schedule_tool_name Tool_schemas_schedule.Get_request)
-      ~args:(`Assoc [ "schedule_id", `String "sched-pre-audit" ])
-  with
-  | None -> fail "get dispatch returned None"
-  | Some result ->
-    check bool "get succeeds" true (Tool_result.is_success result);
-    let open Yojson.Safe.Util in
-    let audit = Tool_result.data result |> member "lifecycle_audit" in
-    check string "audit status" "ok" (audit |> member "status" |> to_string);
-    check int "audit event count" 0 (audit |> member "event_count" |> to_int);
-    check string "audit coverage" "no_lifecycle_events"
-      (audit |> member "coverage" |> to_string);
-    check string "audit backfill policy"
-      "not_synthesized_from_schedule_snapshot"
-      (audit |> member "backfill_policy" |> to_string);
-    check int "audit events empty" 0 (audit |> member "events" |> to_list |> List.length)
 ;;
 
 let test_dispatch_list_surfaces_payload_support_summary () =
@@ -1158,26 +1047,7 @@ let test_dispatch_cancel_persists_status () =
     | None -> fail "schedule missing"
     | Some request ->
       check string "status" "cancelled"
-        (Schedule_domain.schedule_status_to_string request.status);
-      (match
-         Schedule_audit_log.read_recent_for_schedule config
-           ~schedule_id:"sched-cancel" ~limit:1
-       with
-       | Error msg -> fail msg
-       | Ok [ event ] ->
-         check string "cancel audit action" "request_cancelled"
-           (Schedule_audit_log.action_to_string event.action);
-         check string "cancel audit actor" "operator"
-           (match event.actor with
-            | Some actor -> actor.id
-            | None -> "");
-         (match event.detail with
-          | Some (`Assoc fields) ->
-            (match List.assoc_opt "reason" fields with
-             | Some (`String reason) -> check string "cancel audit reason" "test cleanup" reason
-             | _ -> fail "cancel audit reason missing")
-          | _ -> fail "cancel audit detail missing")
-       | Ok events -> failf "expected one cancel audit event, got %d" (List.length events))
+        (Schedule_domain.schedule_status_to_string request.status)
 ;;
 
 let create_schedule_exn
@@ -1202,7 +1072,7 @@ let create_schedule_exn
     fail ("schedule create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let test_schedule_signals_enqueue_keeper_owned_wake () =
+let test_schedule_runner_dispatch_enqueues_keeper_due_wake () =
   with_config
   @@ fun config ->
   let base_path = config.Workspace.base_path in
@@ -1210,196 +1080,62 @@ let test_schedule_signals_enqueue_keeper_owned_wake () =
     ~finally:(fun () -> Keeper_registry.clear ())
     (fun () ->
        Keeper_registry.clear ();
-       let keeper_name = "schedule-signal-keeper" in
-       let meta = keeper_meta_for keeper_name "trace-schedule-signal" in
+       let keeper_name = "schedule-keeper" in
+       let meta = keeper_meta_for keeper_name "trace-schedule-due" in
        let entry = Keeper_registry.register ~base_path keeper_name meta in
-       let enqueue_labels =
-         [ "keeper", keeper_name; "source", "schedule_signal"; "outcome", "queued" ]
-       in
-       let enqueue_before =
-         Otel_metric_store.metric_value_or_zero
-           Otel_metric_store.metric_keeper_wake_enqueue_total
-           ~labels:enqueue_labels
+       let (_ : Schedule_domain.schedule_request) =
+         create_schedule_exn config ~schedule_id:"sched-keeper-due" ~due_at:200.0
+           ~payload:
+             (`Assoc
+               [ "kind", `String "masc.keeper_wake"
+               ; "schema_version", `Int 1
+               ; "body", keeper_wake_payload_body
+               ])
+           ~risk_class:Schedule_domain.Workspace_write
+           ~requested_by:(human "operator")
+           ~scheduled_by:(automated keeper_name)
            ()
        in
-       ignore
-         (create_schedule_exn config ~schedule_id:"sched-owned-signal" ~due_at:200.0
-            ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
-            ~scheduled_by:(automated keeper_name)
-            ()
-          : Schedule_domain.schedule_request);
-       ignore
-         (create_schedule_exn config ~schedule_id:"sched-orphan-signal" ~due_at:200.0
-            ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
-            ~scheduled_by:(automated "unknown-scheduler")
-            ()
-          : Schedule_domain.schedule_request);
-       ignore
-         (create_schedule_exn config ~schedule_id:"sched-human-signal" ~due_at:200.0
-            ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
-            ~scheduled_by:(human "operator")
-            ()
-          : Schedule_domain.schedule_request);
-       let signal schedule_id signal_id : Schedule_runner.wake_signal =
-         { signal_id
-         ; kind = Schedule_runner.Due_candidate
-         ; schedule_id
-         ; emitted_at = 201.0
-         ; due_at = 200.0
-         ; risk_class = Schedule_domain.Read_only
-         ; payload_digest = "sha256:" ^ schedule_id
-         ; payload = payload
-         }
-       in
+       (match
+          Schedule_service.approve config ~schedule_id:"sched-keeper-due"
+            ~approved_by:(human "approver") ~approved_at:150.0 ()
+        with
+        | Ok _ -> ()
+        | Error err ->
+          fail ("schedule approve failed: " ^ Schedule_service.service_error_to_string err));
        check bool "wake flag starts false" false (Atomic.get entry.fiber_wakeup);
-       let wake_counts : Schedule_runner_status.wake_enqueue_counts =
-         Server_bootstrap_maintenance.For_testing.enqueue_schedule_signal_keeper_wakes
-           ~config
-           [ signal "sched-owned-signal" "sig-owned"
-           ; signal "sched-orphan-signal" "sig-orphan"
-           ; signal "sched-missing-signal" "sig-missing"
-           ; signal "sched-human-signal" "sig-human"
-           ]
+       let result =
+         match
+           Schedule_runner.tick config ~now:201.0
+             ~consumer:Server_schedule_consumers.consumer
+         with
+         | Ok result -> result
+         | Error err -> fail (Schedule_runner.runner_error_to_string err)
+       in
+       let wake_counts =
+         Server_bootstrap_maintenance.wake_enqueue_counts_of_dispatches
+           result.dispatches
        in
        check int "one wake enqueued" 1 wake_counts.wake_enqueued;
-       check int "three wakes skipped without keeper" 3
-         wake_counts.wake_skipped_no_keeper;
-       check int "one wake skipped missing schedule" 1
-         wake_counts.wake_skipped_missing_schedule;
-       check int "one wake skipped non-keeper actor" 1
-         wake_counts.wake_skipped_non_keeper_actor;
-       check int "one wake skipped unregistered keeper" 1
-         wake_counts.wake_skipped_unregistered_keeper;
        check int "no wake enqueue failures" 0 wake_counts.wake_failed;
        check bool "wake flag flips" true (Atomic.get entry.fiber_wakeup);
        let queue = Keeper_registry_event_queue.snapshot ~base_path keeper_name in
-       check int "one keeper-owned schedule signal enqueued" 1
+       check int "one keeper-owned schedule due wake enqueued" 1
          (Keeper_event_queue.length queue);
        (match Keeper_event_queue.dequeue queue with
-        | None -> fail "missing schedule signal stimulus"
+        | None -> fail "missing schedule due stimulus"
         | Some (stimulus, rest) ->
           check bool "queue rest empty" true (Keeper_event_queue.is_empty rest);
-          check string "stimulus post id" "schedule-signal:sig-owned"
+          check string "stimulus post id" "schedule-due:sched-keeper-due"
             stimulus.post_id;
           (match stimulus.payload with
-           | Keeper_event_queue.Schedule_signal signal ->
-             check string "schedule id" "sched-owned-signal" signal.schedule_id;
-             check string "signal id" "sig-owned" signal.schedule_signal_id;
-             check string "signal kind" "due_candidate"
-               (Keeper_event_queue.schedule_signal_kind_to_string
-                  signal.schedule_signal_kind)
-           | _ -> fail "expected Schedule_signal payload"));
-       let enqueue_after =
-         Otel_metric_store.metric_value_or_zero
-           Otel_metric_store.metric_keeper_wake_enqueue_total
-           ~labels:enqueue_labels
-           ()
-       in
-       check (float 0.000001) "schedule signal enqueue metric increments" 1.0
-         (enqueue_after -. enqueue_before))
-;;
-
-let test_schedule_signal_wake_counts_persist_failure () =
-  with_config
-  @@ fun config ->
-  let base_path = config.Workspace.base_path in
-  Fun.protect
-    ~finally:(fun () -> Keeper_registry.clear ())
-    (fun () ->
-       Keeper_registry.clear ();
-       let keeper_name = "schedule-signal-persist-failure-keeper" in
-       let meta = keeper_meta_for keeper_name "trace-schedule-signal-persist-failure" in
-       let entry = Keeper_registry.register ~base_path keeper_name meta in
-       let failed_labels =
-         [ "keeper", keeper_name; "source", "schedule_signal"; "outcome", "persist_failed" ]
-       in
-       let failed_before =
-         Otel_metric_store.metric_value_or_zero
-           Otel_metric_store.metric_keeper_wake_enqueue_total
-           ~labels:failed_labels
-           ()
-       in
-       ignore
-         (create_schedule_exn config ~schedule_id:"sched-persist-failed-signal"
-            ~due_at:200.0 ~risk_class:Schedule_domain.Read_only
-            ~requested_by:(human "operator") ~scheduled_by:(automated keeper_name)
-            ()
-          : Schedule_domain.schedule_request);
-       let signal : Schedule_runner.wake_signal =
-         { signal_id = "sig-persist-failed"
-         ; kind = Schedule_runner.Due_candidate
-         ; schedule_id = "sched-persist-failed-signal"
-         ; emitted_at = 201.0
-         ; due_at = 200.0
-         ; risk_class = Schedule_domain.Read_only
-         ; payload_digest = "sha256:sched-persist-failed-signal"
-         ; payload = payload
-         }
-       in
-       check bool "wake flag starts false" false (Atomic.get entry.fiber_wakeup);
-       replace_path_with_directory
-         (event_queue_snapshot_path ~base_path ~keeper_name);
-       let wake_counts : Schedule_runner_status.wake_enqueue_counts =
-         Server_bootstrap_maintenance.For_testing.enqueue_schedule_signal_keeper_wakes
-           ~config
-           [ signal ]
-       in
-       check int "persist failure does not count as wake enqueued" 0
-         wake_counts.wake_enqueued;
-       check int "no keeper skip on owned schedule" 0
-         wake_counts.wake_skipped_no_keeper;
-       check int "persist failure counts as wake failed" 1 wake_counts.wake_failed;
-       check bool "wake hint stays false when event layer persist fails" false
-         (Atomic.get entry.fiber_wakeup);
-       let failed_after =
-         Otel_metric_store.metric_value_or_zero
-           Otel_metric_store.metric_keeper_wake_enqueue_total
-           ~labels:failed_labels
-           ()
-       in
-       check (float 0.000001) "schedule signal persist failure metric increments" 1.0
-         (failed_after -. failed_before))
-;;
-
-let test_schedule_signal_wake_counts_store_read_failure () =
-  with_config
-  @@ fun config ->
-  let base_path = config.Workspace.base_path in
-  Fun.protect
-    ~finally:(fun () -> Keeper_registry.clear ())
-    (fun () ->
-       Keeper_registry.clear ();
-       let keeper_name = "schedule-signal-store-read-failure-keeper" in
-       let meta = keeper_meta_for keeper_name "trace-schedule-signal-store-read-failure" in
-       let entry = Keeper_registry.register ~base_path keeper_name meta in
-       write_text (Schedule_store.schedules_path config) "{not-json";
-       let signal : Schedule_runner.wake_signal =
-         { signal_id = "sig-store-read-failed"
-         ; kind = Schedule_runner.Due_candidate
-         ; schedule_id = "sched-store-read-failed-signal"
-         ; emitted_at = 201.0
-         ; due_at = 200.0
-         ; risk_class = Schedule_domain.Read_only
-         ; payload_digest = "sha256:sched-store-read-failed-signal"
-         ; payload = payload
-         }
-       in
-       check bool "wake flag starts false" false (Atomic.get entry.fiber_wakeup);
-       let wake_counts : Schedule_runner_status.wake_enqueue_counts =
-         Server_bootstrap_maintenance.For_testing.enqueue_schedule_signal_keeper_wakes
-           ~config
-           [ signal ]
-       in
-       check int "store read failure does not count as wake enqueued" 0
-         wake_counts.wake_enqueued;
-       check int "store read failure is not a keeper ownership skip" 0
-         wake_counts.wake_skipped_no_keeper;
-       check int "store read failure counts as wake failed" 1 wake_counts.wake_failed;
-       check bool "wake hint stays false on unreadable schedule store" false
-         (Atomic.get entry.fiber_wakeup);
-       let queue = Keeper_registry_event_queue.snapshot ~base_path keeper_name in
-       check int "no schedule signal stimulus is enqueued" 0
-         (Keeper_event_queue.length queue))
+           | Keeper_event_queue.Schedule_due wake ->
+             check string "schedule id" "sched-keeper-due" wake.schedule_id;
+             check string "wake message" "Run the scheduled maintenance lane now."
+               wake.message;
+             check (option string) "wake title" (Some "Scheduled lane wake")
+               wake.title
+           | _ -> fail "expected Schedule_due payload")))
 ;;
 
 let test_dashboard_projection_surfaces_schedule_fsm () =
@@ -1620,26 +1356,12 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
       (row |> member "effective_status" |> to_string);
     check string "terminal readiness" "terminal"
       (row |> member "execution_readiness" |> to_string);
-	    check string "last execution status" "succeeded"
-	      (row |> member "last_execution" |> member "status" |> to_string);
-	    check string "last execution detail" "test.exec"
-	      (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string);
-	    let lifecycle_audit = row |> member "lifecycle_audit" in
-	    check string "lifecycle audit source" "schedule_lifecycle_audit_jsonl"
-      (lifecycle_audit |> member "source" |> to_string);
-    check string "lifecycle audit status" "ok"
-      (lifecycle_audit |> member "status" |> to_string);
-    let latest_event =
-      match lifecycle_audit |> member "events" |> to_list with
-      | event :: _ -> event
-      | [] -> fail "expected lifecycle audit event"
-    in
-    check string "latest lifecycle action" "execution_succeeded"
-	      (latest_event |> member "action" |> to_string);
-	    check string "latest lifecycle current status" "succeeded"
-	      (latest_event |> member "current_status" |> to_string);
-	    check string "unrecognized dispatch receipt status" "unrecognized_detail"
-	      (row |> member "dispatch_receipt" |> member "projection_status" |> to_string);
+    check string "last execution status" "succeeded"
+      (row |> member "last_execution" |> member "status" |> to_string);
+    check string "last execution detail" "test.exec"
+      (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string);
+    check string "unrecognized dispatch receipt status" "unrecognized_detail"
+      (row |> member "dispatch_receipt" |> member "projection_status" |> to_string);
     check bool "unrecognized dispatch receipt reason" true
       (String_util.contains_substring
          (row |> member "dispatch_receipt" |> member "reason" |> to_string)
@@ -1885,10 +1607,6 @@ let () =
             test_schema_and_descriptor_exposed
         ; test_case "dispatch create persists schedule" `Quick
             test_dispatch_create_persists_schedule
-        ; test_case "dispatch get surfaces lifecycle audit" `Quick
-            test_dispatch_get_surfaces_lifecycle_audit
-        ; test_case "dispatch get surfaces pre-audit no-events policy" `Quick
-            test_dispatch_get_surfaces_pre_audit_no_events_policy
         ; test_case "dispatch list surfaces payload support summary" `Quick
             test_dispatch_list_surfaces_payload_support_summary
         ; test_case "dispatch list reports schedule store read error" `Quick
@@ -1927,12 +1645,8 @@ let () =
             test_payload_projection_result_surfaces_invalid_payload
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
-        ; test_case "schedule signals enqueue keeper-owned wake" `Quick
-            test_schedule_signals_enqueue_keeper_owned_wake
-        ; test_case "schedule signal wake counts durable enqueue failure" `Quick
-            test_schedule_signal_wake_counts_persist_failure
-        ; test_case "schedule signal wake counts store read failure" `Quick
-            test_schedule_signal_wake_counts_store_read_failure
+        ; test_case "schedule runner dispatch enqueues keeper due wake" `Quick
+            test_schedule_runner_dispatch_enqueues_keeper_due_wake
         ; test_case "dashboard projection surfaces schedule FSM" `Quick
             test_dashboard_projection_surfaces_schedule_fsm
         ; test_case "dashboard projection surfaces schedule runner signals" `Quick

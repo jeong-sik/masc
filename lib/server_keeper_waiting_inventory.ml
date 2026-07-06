@@ -31,6 +31,7 @@ type wake_producer =
   | Schedule_runner
   | Keeper_turn_admission
   | Operator_pending_confirm_store
+  | Goal_verification_store
   | Read_model_reader
 
 type waiting_row =
@@ -98,6 +99,7 @@ let wake_producer_to_string = function
   | Schedule_runner -> "schedule_runner"
   | Keeper_turn_admission -> "keeper_turn_admission"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
+  | Goal_verification_store -> "goal_verification_store"
   | Read_model_reader -> "read_model_reader"
 ;;
 
@@ -108,9 +110,10 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | No_progress_recovery -> Keeper_no_progress_recovery
   | Fusion_completed _ -> Fusion_sink
   | Bg_completed _ -> Bg_task_completion
-  | Schedule_signal _ -> Schedule_runner
+  | Schedule_due _ -> Schedule_runner
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
+  | Goal_verification_failed _ -> Goal_verification_store
 ;;
 
 let unix_iso_json = function
@@ -505,7 +508,7 @@ let keeper_names_or_error_rows config =
 let row_state rows =
   if List.exists (fun row -> row.source = Fusion_running || row.source = Background_task) rows
   then Deferred
-  else if List.exists (fun row -> row.source <> Read_error) rows
+  else if rows <> []
   then Waiting
   else Idle
 ;;

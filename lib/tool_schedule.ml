@@ -273,27 +273,13 @@ let validate_known_payload_request ~payload ~risk_class =
     Error (Schedule_payload_projection.creation_rejection_message rejection)
 ;;
 
-let schedule_request_json
-      ?last_execution
-      ?lifecycle_audit
-      (request : Schedule_domain.schedule_request)
-  =
+let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
   let next_due_at =
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
   let requires_grant = Schedule_domain.requires_separate_human_grant request in
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request
-  in
-  let lifecycle_audit_fields =
-    match lifecycle_audit with
-    | None -> []
-    | Some audit ->
-      [ ( "lifecycle_audit"
-        , Schedule_audit_log.projection_to_yojson
-            ~limit:Schedule_audit_log.default_projection_limit
-            audit )
-      ]
   in
   match Schedule_domain.schedule_request_to_yojson request with
   | `Assoc fields ->
@@ -349,8 +335,7 @@ let schedule_request_json
              | None -> `Null
              | Some execution -> Schedule_domain.execution_record_to_yojson execution
            )
-         ]
-       @ lifecycle_audit_fields)
+         ])
   | other -> other
 ;;
 
@@ -452,7 +437,6 @@ let handle_list ~tool_name ~start_time ctx args =
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
      | Ok state ->
-       let audit_source = Schedule_audit_log.read_all ctx.config in
        let request_rows =
          (match status with
           | None -> state.Schedule_store.schedules
@@ -471,13 +455,7 @@ let handle_list ~tool_name ~start_time ctx args =
                state
                ~schedule_id:request.Schedule_domain.schedule_id
            in
-           let lifecycle_audit =
-             Schedule_audit_log.projection_for_schedule
-               audit_source
-               ~schedule_id:request.Schedule_domain.schedule_id
-               ~limit:Schedule_audit_log.default_projection_limit
-           in
-           schedule_request_json ?last_execution ~lifecycle_audit request)
+           schedule_request_json ?last_execution request)
        in
        ok ~tool_name ~start_time
          (`Assoc
@@ -508,16 +486,7 @@ let handle_get ~tool_name ~start_time ctx args =
          Schedule_store.last_execution_for_schedule state
            ~schedule_id:request.Schedule_domain.schedule_id
        in
-       let lifecycle_audit =
-         Schedule_audit_log.read_recent_for_schedule
-           ctx.config
-           ~schedule_id:request.Schedule_domain.schedule_id
-           ~limit:Schedule_audit_log.default_projection_limit
-       in
-       ok
-         ~tool_name
-         ~start_time
-         (schedule_request_json ?last_execution ~lifecycle_audit request))
+       ok ~tool_name ~start_time (schedule_request_json ?last_execution request))
 ;;
 
 let handle_cancel ~tool_name ~start_time ctx args =

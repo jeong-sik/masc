@@ -213,7 +213,38 @@ let gh_floor_words_of_simple (simple : Shell_ir.simple) =
          | None -> collect ("" :: acc) rest)
     in
     collect [] simple.args
-  | Some _ | None -> None
+  | Some
+      ( Exec_program.Ls | Exec_program.Cat | Exec_program.Pwd | Exec_program.Echo
+      | Exec_program.Head | Exec_program.Tail | Exec_program.Rg | Exec_program.Grep
+      | Exec_program.Find | Exec_program.Which | Exec_program.Test
+      | Exec_program.Basename | Exec_program.Dirname | Exec_program.Stat
+      | Exec_program.Du | Exec_program.Df | Exec_program.Sort | Exec_program.Uniq
+      | Exec_program.Wc | Exec_program.Cut | Exec_program.Tr | Exec_program.File
+      | Exec_program.Printf | Exec_program.Date | Exec_program.Env
+      | Exec_program.Printenv | Exec_program.Hostname | Exec_program.Whoami
+      | Exec_program.Uname | Exec_program.Ps | Exec_program.Tty | Exec_program.Cp
+      | Exec_program.Mv | Exec_program.Ln | Exec_program.Touch | Exec_program.Tee
+      | Exec_program.Awk | Exec_program.Xargs | Exec_program.Git
+      | Exec_program.Docker | Exec_program.Curl | Exec_program.Wget | Exec_program.Ssh
+      | Exec_program.Scp | Exec_program.Tar | Exec_program.Rsync | Exec_program.Make
+      | Exec_program.Cmake | Exec_program.Dune_local_sh | Exec_program.Diff
+      | Exec_program.Patch | Exec_program.Mkdir | Exec_program.Npm | Exec_program.Node
+      | Exec_program.Npx | Exec_program.Yarn | Exec_program.Pnpm | Exec_program.Pip
+      | Exec_program.Python | Exec_program.Python3 | Exec_program.Pytest
+      | Exec_program.Pyright | Exec_program.Ruff | Exec_program.Opam
+      | Exec_program.Ocamlfind | Exec_program.Tsc | Exec_program.Cargo
+      | Exec_program.Rustc | Exec_program.Go | Exec_program.Gofmt | Exec_program.Gradle
+      | Exec_program.Java | Exec_program.Javac | Exec_program.Mvn | Exec_program.Ninja
+      | Exec_program.Sed | Exec_program.Uv | Exec_program.Glab
+      | Exec_program.Terminal_notifier | Exec_program.Osascript | Exec_program.Play
+      | Exec_program.Rec | Exec_program.Ffplay | Exec_program.Mpg123 | Exec_program.Open
+      | Exec_program.Psql | Exec_program.Mysql | Exec_program.Mariadb
+      | Exec_program.Cockroach | Exec_program.Sudo | Exec_program.Su
+      | Exec_program.Chmod | Exec_program.Chown | Exec_program.Rm | Exec_program.Dd
+      | Exec_program.Mkfs | Exec_program.Shutdown | Exec_program.Reboot
+      | Exec_program.Halt | Exec_program.Poweroff ) ->
+    None
+  | None -> None
 ;;
 
 let normalize_command_words words =

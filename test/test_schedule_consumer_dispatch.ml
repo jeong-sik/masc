@@ -208,6 +208,20 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
+let runner_status_json_after_dispatches result =
+  Schedule_runner_status.reset_for_test ();
+  let wake_enqueue_counts =
+    Server_bootstrap_maintenance.wake_enqueue_counts_of_dispatches result.dispatches
+  in
+  Schedule_runner_status.record_tick_ok
+    ~wake_enqueue_counts
+    ~started_at:201.0
+    ~finished_at:201.25
+    result;
+  Schedule_runner_status.snapshot ()
+  |> Schedule_runner_status.snapshot_to_yojson ~now:201.5 ~stale_after_sec:10.0
+;;
+
 let test_board_post_consumer_creates_post_and_succeeds_schedule () =
   with_workspace
   @@ fun config ->
@@ -303,6 +317,16 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "succeeded"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  let runner_status = runner_status_json_after_dispatches result in
+  let runner_counts =
+    Yojson.Safe.Util.(runner_status |> member "last_counts")
+  in
+  check string "runner health stays ok" "ok"
+    Yojson.Safe.Util.(runner_status |> member "status" |> to_string);
+  check int "runner wake enqueued from production receipt" 1
+    Yojson.Safe.Util.(runner_counts |> member "wake_enqueued" |> to_int);
+  check int "runner wake failed stays zero" 0
+    Yojson.Safe.Util.(runner_counts |> member "wake_failed" |> to_int);
   (match
      Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
        ~schedule_id:request.schedule_id
@@ -690,6 +714,16 @@ let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status stays succeeded" "succeeded"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  let runner_status = runner_status_json_after_dispatches result in
+  let runner_counts =
+    Yojson.Safe.Util.(runner_status |> member "last_counts")
+  in
+  check string "ledger failure degrades runner health" "degraded"
+    Yojson.Safe.Util.(runner_status |> member "status" |> to_string);
+  check int "ledger failure still counts wake enqueue" 1
+    Yojson.Safe.Util.(runner_counts |> member "wake_enqueued" |> to_int);
+  check int "ledger failure increments wake failure" 1
+    Yojson.Safe.Util.(runner_counts |> member "wake_failed" |> to_int);
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->

@@ -15,6 +15,36 @@ let record_schedule_runner_tick_outcome outcome =
     ()
 ;;
 
+let wake_enqueue_counts_of_dispatches dispatches =
+  let module Consumers = Server_schedule_consumers in
+  let bump_wake_failed
+        (counts : Schedule_runner_status.wake_enqueue_counts)
+    =
+    { counts with wake_failed = counts.wake_failed + 1 }
+  in
+  let bump_wake_enqueued
+        (counts : Schedule_runner_status.wake_enqueue_counts)
+    =
+    { counts with wake_enqueued = counts.wake_enqueued + 1 }
+  in
+  List.fold_left
+    (fun counts (dispatch : Schedule_runner.dispatch_result) ->
+       match dispatch.detail with
+       | None -> counts
+       | Some detail ->
+         (match Consumers.dispatch_receipt_of_detail detail with
+          | Error _ | Ok (Consumers.Board_post_created _) -> counts
+          | Ok (Consumers.Keeper_wake_enqueued { reaction_ledger_status; _ }) ->
+            let counts = bump_wake_enqueued counts in
+            (match reaction_ledger_status with
+             | Some (Consumers.Keeper_wake_reaction_ledger_record_failed _) ->
+               bump_wake_failed counts
+             | None | Some Consumers.Keeper_wake_reaction_ledger_recorded ->
+               counts)))
+    Schedule_runner_status.empty_wake_enqueue_counts
+    dispatches
+;;
+
 (* Resolve the provider config for the Memory OS per-keeper consolidation pass.
    Env var takes precedence; otherwise inherit the librarian runtime so the
    consolidation LLM uses the same JSON-capable model the librarian uses.
@@ -211,7 +241,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            with
            | Ok result ->
              let finished_at = Time_compat.now () in
+             let wake_enqueue_counts =
+               wake_enqueue_counts_of_dispatches result.dispatches
+             in
              Schedule_runner_status.record_tick_ok
+               ~wake_enqueue_counts
                ~started_at
                ~finished_at
                result;

@@ -53,6 +53,9 @@ let strip_state_blocks_text (s : string) : string =
 
 (** {1 Helpers} *)
 
+let raw_agent_name_meta_key ~field = field ^ "_raw_agent_name"
+let author_raw_agent_name_meta_key = raw_agent_name_meta_key ~field:"author"
+
 let format_timestamp_relative ts =
   let now = Time_compat.now () in
   let diff = now -. ts in

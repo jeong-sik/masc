@@ -18,6 +18,7 @@ NOW_UNIX="$(date +%s)"
 DUE_AT_UNIX="$((NOW_UNIX + 3600))"
 DASHBOARD_JSON="$(mcp_mktemp_file "masc-scheduler-live-supported-dashboard" ".json")"
 AUTH_HEADER_FILE=""
+CREATED_SCHEDULE_ID=""
 
 canonical_base="$(cd "$BASE_PATH" && pwd -P)"
 canonical_tmp_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
@@ -37,7 +38,42 @@ case "$canonical_base" in
 esac
 
 cleanup() {
+  local status=$?
+  local cleanup_status=0
+  if [[ -n "${CREATED_SCHEDULE_ID:-}" ]]; then
+    local cancel_payload cancel_response cancel_status ok_status
+    cancel_payload="$(
+      jq -cn \
+        --arg schedule_id "$CREATED_SCHEDULE_ID" \
+        --arg cancelled_by_id "contract-scheduler" \
+        --arg reason "contract harness cleanup" \
+        '{
+          schedule_id: $schedule_id,
+          cancelled_by_id: $cancelled_by_id,
+          reason: $reason
+        }'
+    )"
+    set +e
+    cancel_response="$(call_tool 6102 "masc_schedule_cancel" "$cancel_payload" 2>&1)"
+    cancel_status=$?
+    if [[ "$cancel_status" -eq 0 ]]; then
+      require_ok "$cancel_response"
+      ok_status=$?
+    else
+      ok_status=$cancel_status
+    fi
+    set -e
+    if [[ "$ok_status" -ne 0 ]]; then
+      cleanup_status=1
+      echo "FAIL: failed to cancel schedule created by contract harness: ${CREATED_SCHEDULE_ID}" >&2
+      printf '%s\n' "$cancel_response" >&2
+    fi
+  fi
   rm -f "$DASHBOARD_JSON" "$AUTH_HEADER_FILE"
+  if [[ "$status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
+    exit "$cleanup_status"
+  fi
+  exit "$status"
 }
 trap cleanup EXIT
 
@@ -119,6 +155,9 @@ created_schedule_id="$(
     | extract_result \
     | jq -r '.schedule_id // empty'
 )"
+if [[ -n "$created_schedule_id" ]]; then
+  CREATED_SCHEDULE_ID="$created_schedule_id"
+fi
 if [[ "$created_schedule_id" != "$SCHEDULE_ID" ]]; then
   mcp_fail_with_context \
     "masc_schedule_create returned unexpected schedule_id" \

@@ -569,6 +569,14 @@ let default_degraded_rotation_candidates
       (Runtime.get_default_runtime_id ())
   in
   let default_candidates = [ normalized_base; default_runtime; phase_recovery_runtime ] in
+  let catalog_runtimes =
+    Runtime.get_runtimes ()
+    |> List.map (fun (runtime : Runtime.t) ->
+           normalized_runtime_id ~catalog_names runtime.id)
+  in
+  let candidates_with_catalog =
+    dedupe_keep_order (default_candidates @ catalog_runtimes)
+  in
   match fallback_reason with
   | Some (Read_only_no_progress | Empty_no_progress | Thinking_only_no_progress) ->
     let tool_capable =
@@ -579,17 +587,24 @@ let default_degraded_rotation_candidates
     in
     dedupe_keep_order (default_candidates @ tool_capable)
   | Some
-      ( Hard_quota
-      | Resumable_cli_session
-      | Admission_queue_timeout
+      ( Capacity_backpressure
       | Provider_timeout
-      | Turn_timeout
-      | Runtime_candidates_filtered
-      | Runtime_exhausted
-      | Capacity_backpressure
-      | Rate_limit
       | Server_error
-      | Auth_error )
+      | Auth_error
+      | Runtime_exhausted
+      | Runtime_candidates_filtered
+      | Turn_timeout
+      | Resumable_cli_session
+      | Admission_queue_timeout ) ->
+    (* Phase B-1: include the full runtime catalog so transient infrastructure
+       failures (notably capacity_backpressure) can fail over to a healthy
+       runtime outside the narrow [base; default; phase_recovery] set.
+       Without this, two runtimes in cooldown had nowhere to go (#23373,
+       incidents 2026-05-21 / 2026-07-06). Credential-pool filtering is
+       applied downstream by [degraded_rotation_after_recoverable_error] via
+       [filter_quota_pool_rotation_candidates]. *)
+    candidates_with_catalog
+  | Some (Hard_quota | Rate_limit)
   | None ->
     default_candidates
 
@@ -676,6 +691,12 @@ let is_completion_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
 let degraded_reason_allows_candidate_cycle = function
   | Hard_quota
   | Rate_limit
+  (* Capacity_backpressure: provider retry_after is minutes-long, so cycling
+     the same candidate pool at the turn retry cadence just hammers the
+     provider and loops forever (incidents 2026-05-21, 2026-07-06, #23373).
+     Cap rotation here; the keeper pauses after candidates are exhausted and
+     retries on a later turn once the provider actually recovers. *)
+  | Capacity_backpressure
   | Read_only_no_progress
   | Empty_no_progress
   | Thinking_only_no_progress -> false
@@ -685,7 +706,6 @@ let degraded_reason_allows_candidate_cycle = function
   | Turn_timeout
   | Runtime_candidates_filtered
   | Runtime_exhausted
-  | Capacity_backpressure
   | Server_error
   | Auth_error -> true
 

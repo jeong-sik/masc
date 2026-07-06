@@ -68,6 +68,7 @@ let masc_board_tools_with_keeper_wrappers =
   [
     "masc_board_comment";
     "masc_board_curation_submit";
+    "masc_board_cleanup";
     "masc_board_post";
     "masc_board_vote";
     "masc_board_delete";

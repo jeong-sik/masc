@@ -59,7 +59,7 @@ let assert_tool_in_line ~group ~tool line =
     true
     (String_util.contains_substring line needle)
 
-let test_repo_capability_groups_present () =
+let test_tool_access_groups_present () =
   let path = locate_tool_policy_toml () in
   let content = read_file path in
   List.iter
@@ -70,7 +70,7 @@ let test_repo_capability_groups_present () =
         (String_util.contains_substring content ("[groups." ^ group ^ "]")))
     [ "filesystem"; "workspace_write"; "search_files"; "execute" ]
 
-let test_repo_capability_groups_include_expected_tools () =
+let test_tool_access_groups_include_expected_tools () =
   let path = locate_tool_policy_toml () in
   let content = read_file path in
   let check_group group tools =
@@ -88,9 +88,9 @@ let () =
     [
       ( "tool_access_groups",
         [
-          Alcotest.test_case "repo capability groups present" `Quick
-            test_repo_capability_groups_present;
-          Alcotest.test_case "repo capability groups include expected tools" `Quick
-            test_repo_capability_groups_include_expected_tools;
+          Alcotest.test_case "tool access groups present" `Quick
+            test_tool_access_groups_present;
+          Alcotest.test_case "tool access groups include expected tools" `Quick
+            test_tool_access_groups_include_expected_tools;
         ] );
     ]

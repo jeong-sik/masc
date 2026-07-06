@@ -1192,7 +1192,6 @@ describe('ScheduledAutomationPanel', () => {
       expect(evidence?.textContent).toContain('3')
     }
   })
-
   it('renders matched live supported non-terminal evidence and opens matched rows', async () => {
     const auto = automation([
       request({

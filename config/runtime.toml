@@ -44,6 +44,9 @@ endpoint = "https://ollama.com/v1"
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
 
+[providers.ollama_cloud.healthcheck]
+path = "/models"
+
 [providers.ollama_cloud.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
@@ -56,6 +59,9 @@ endpoint = "https://ollama.com"
 # output, not OpenAI-compatible /v1/chat/completions.
 connect-timeout-s = 600.0
 
+[providers.ollama_cloud_native.healthcheck]
+path = "/api/tags"
+
 [providers.ollama_cloud_native.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
@@ -64,6 +70,9 @@ key = "OLLAMA_CLOUD_API_KEY"
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
 endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.healthcheck]
+path = "/models"
 
 [providers.deepseek.credentials]
 type = "env"
@@ -74,6 +83,9 @@ display-name = "GLM Coding Plan"
 protocol = "openai-compatible-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
+[providers.glm-coding.healthcheck]
+path = "/models"
+
 [providers.glm-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY_SB"
@@ -82,6 +94,9 @@ key = "ZAI_API_KEY_SB"
 display-name = "Local Ollama"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
 
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
@@ -183,12 +198,15 @@ supports-audio-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
+wizard-default = true
 
 [deepseek.deepseek-v4-pro]
 
 [deepseek.deepseek-v4-flash]
+wizard-default = true
 
 [glm-coding.glm-4-7-coding]
+wizard-default = true
 
 [models.glm-5-turbo]
 api-name = "GLM-5-Turbo"
@@ -263,6 +281,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud_native.minimax-m3-native-structured]
+wizard-default = true
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
 # is kept separate from Kimi's direct API route; OAS owns provider/model wire
@@ -936,6 +955,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-rnj-1-8b]
 
 [ollama.gemma4-26b-a4b-qat]
+wizard-default = true
 max-concurrent = 1
 
 [ollama.gemma4-e2b-it-qat]

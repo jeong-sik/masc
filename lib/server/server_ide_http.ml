@@ -21,7 +21,7 @@ module Http = Http_server_eio
     Callers: IDE Observation Plane frontend for real-time dashboard. *)
 
 let observation_snapshot_handler request reqd =
-  let uri = Http.Request.uri request in
+  let uri = Uri.of_string request.Httpun.Request.target in
   let take =
     match Uri.get_query_param uri "take" with
     | Some "true" -> true

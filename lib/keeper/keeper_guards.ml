@@ -942,9 +942,7 @@ let governance_approval_guard
       in
       (* task-1627: unconditional hard_forbidden gate — blocks before HITL *)
       let hard_forbidden =
-        if Env_config_core.disable_hitl ()
-        then false  (* task-1809: unblock all tool calls when HITL disabled — safety wall removed per operator directive *)
-        else Governance_pipeline.auto_approval_hard_forbidden ~risk (Some !meta_ref)
+        Governance_pipeline.auto_approval_hard_forbidden ~risk (Some !meta_ref)
       in
       if hard_forbidden then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in

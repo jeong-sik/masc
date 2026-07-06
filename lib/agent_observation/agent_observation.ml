@@ -254,19 +254,36 @@ let register_annotation_sink sink = Atomic.set annotation_sink sink
 (* ── Observation snapshot accumulator (task-1686) ──────────────────── *)
 
 type snapshot =
-  { mutable tool_events : tool_event list
-  ; mutable pr_events : pr_event list
-  ; mutable turn_events : turn_event list
-  ; mutable write_regions : write_region_event list
-  ; mutable annotations : annotation_request list
+  { tool_events : tool_event list
+  ; pr_events : pr_event list
+  ; turn_events : turn_event list
+  ; write_regions : write_region_event list
+  ; annotations : annotation_request list
   }
 
-let current_snapshot =
+let empty_snapshot =
   { tool_events = []
   ; pr_events = []
   ; turn_events = []
   ; write_regions = []
   ; annotations = []
+  }
+;;
+
+let current_snapshot = Atomic.make empty_snapshot
+
+let rec update_snapshot f =
+  let before = Atomic.get current_snapshot in
+  let after = f before in
+  if not (Atomic.compare_and_set current_snapshot before after) then update_snapshot f
+;;
+
+let reverse_snapshot snap =
+  { tool_events = List.rev snap.tool_events
+  ; pr_events = List.rev snap.pr_events
+  ; turn_events = List.rev snap.turn_events
+  ; write_regions = List.rev snap.write_regions
+  ; annotations = List.rev snap.annotations
   }
 ;;
 
@@ -313,11 +330,11 @@ let turn_event_to_json (e : turn_event) =
 
 let write_region_to_json (e : write_region_event) =
   `Assoc
-    [ ("file_path", `String e.file_path)
-    ; ("line_start", `Int e.line_start)
-    ; ("line_end", `Int e.line_end)
-    ; ("keeper_id", `String e.keeper_id)
+    [ ("base_path", `String e.base_path)
     ; ("partition", partition_to_json e.partition)
+    ; ("keeper_id", `String e.keeper_id)
+    ; ("turn", `Int e.turn)
+    ; ("tool_call", e.tool_call_json)
     ]
 ;;
 
@@ -351,55 +368,32 @@ let snapshot_to_json (snap : snapshot) =
     ]
 ;;
 
-let take_snapshot () =
-  let snap =
-    { tool_events = List.rev current_snapshot.tool_events
-    ; pr_events = List.rev current_snapshot.pr_events
-    ; turn_events = List.rev current_snapshot.turn_events
-    ; write_regions = List.rev current_snapshot.write_regions
-    ; annotations = List.rev current_snapshot.annotations
-    }
-  in
-  current_snapshot.tool_events <- [];
-  current_snapshot.pr_events <- [];
-  current_snapshot.turn_events <- [];
-  current_snapshot.write_regions <- [];
-  current_snapshot.annotations <- [];
-  snap
-;;
-
-let peek_snapshot () =
-  { tool_events = List.rev current_snapshot.tool_events
-  ; pr_events = List.rev current_snapshot.pr_events
-  ; turn_events = List.rev current_snapshot.turn_events
-  ; write_regions = List.rev current_snapshot.write_regions
-  ; annotations = List.rev current_snapshot.annotations
-  }
-;;
+let take_snapshot () = Atomic.exchange current_snapshot empty_snapshot |> reverse_snapshot
+let peek_snapshot () = Atomic.get current_snapshot |> reverse_snapshot
 
 (* Emit wrappers: accumulate into snapshot + forward to registered sink. *)
 let emit_tool_event event =
-  current_snapshot.tool_events <- event :: current_snapshot.tool_events;
+  update_snapshot (fun snap -> { snap with tool_events = event :: snap.tool_events });
   Atomic.get tool_event_sink event
 ;;
 
 let emit_pr_event event =
-  current_snapshot.pr_events <- event :: current_snapshot.pr_events;
+  update_snapshot (fun snap -> { snap with pr_events = event :: snap.pr_events });
   Atomic.get pr_event_sink event
 ;;
 
 let emit_turn_event event =
-  current_snapshot.turn_events <- event :: current_snapshot.turn_events;
+  update_snapshot (fun snap -> { snap with turn_events = event :: snap.turn_events });
   Atomic.get turn_event_sink event
 ;;
 
 let emit_write_region_event event =
-  current_snapshot.write_regions <- event :: current_snapshot.write_regions;
+  update_snapshot (fun snap -> { snap with write_regions = event :: snap.write_regions });
   Atomic.get write_region_sink event
 ;;
 
 let emit_annotation_request request =
-  current_snapshot.annotations <- request :: current_snapshot.annotations;
+  update_snapshot (fun snap -> { snap with annotations = request :: snap.annotations });
   Atomic.get annotation_sink request
 ;;
 
@@ -408,5 +402,6 @@ let reset_for_testing () =
   Atomic.set pr_event_sink noop_pr_event_sink;
   Atomic.set turn_event_sink noop_turn_event_sink;
   Atomic.set write_region_sink noop_write_region_sink;
-  Atomic.set annotation_sink noop_annotation_sink
+  Atomic.set annotation_sink noop_annotation_sink;
+  Atomic.set current_snapshot empty_snapshot
 ;;

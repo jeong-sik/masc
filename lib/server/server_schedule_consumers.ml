@@ -334,6 +334,7 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     ~base_path:config.Workspace_utils.base_path
     keeper_name
     stimulus;
+  Keeper_registry.wakeup ~base_path:config.Workspace_utils.base_path keeper_name;
   let reaction_ledger_status =
     record_keeper_wake_stimulus
       ~base_path:config.Workspace_utils.base_path

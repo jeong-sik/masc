@@ -921,6 +921,15 @@ let test_dispatch_tool_projection_requires_dispatchable_payload () =
 ;;
 
 let test_payload_projection_result_surfaces_invalid_payload () =
+  let invalid_payload =
+    `Assoc [ "schema_version", `Int 1; "body", `Assoc [ "content", `String "x" ] ]
+  in
+  (match Schedule_domain.payload_of_yojson invalid_payload with
+   | Error msg -> check string "domain payload error" "missing field: kind" msg
+   | Ok _ -> fail "expected domain payload error");
+  (match Schedule_payload_projection.kind_of_json_result invalid_payload with
+   | Error msg -> check string "raw payload kind error" "missing field: kind" msg
+   | Ok kind -> fail ("expected raw payload kind error, got " ^ kind));
   let request : Schedule_domain.schedule_request =
     { schedule_id = "sched-invalid-payload"
     ; requested_by = human "operator"
@@ -930,7 +939,11 @@ let test_payload_projection_result_surfaces_invalid_payload () =
     ; expires_at = None
     ; payload =
         payload_exn
-          (`Assoc [ "schema_version", `Int 1; "body", `Assoc [ "content", `String "x" ] ])
+          (`Assoc
+            [ "kind", `String "test.raw"
+            ; "schema_version", `Int 1
+            ; "body", `Assoc [ "content", `String "x" ]
+            ])
     ; risk_class = Schedule_domain.Workspace_write
     ; approval_required = false
     ; status = Schedule_domain.Scheduled
@@ -939,17 +952,16 @@ let test_payload_projection_result_surfaces_invalid_payload () =
     }
   in
   (match Schedule_payload_projection.support_status_result request with
-   | Error msg -> check string "support status error" "missing field: kind" msg
+   | Error msg -> fail ("expected unsupported status, got " ^ msg)
    | Ok status ->
-     fail
-       ("expected support status error, got "
-        ^ Schedule_payload_projection.support_status_to_string status));
-  check string "legacy support status" "unknown"
+     check string "support status" "unsupported"
+       (Schedule_payload_projection.support_status_to_string status));
+  check string "legacy support status" "unsupported"
     (Schedule_payload_projection.support_status_to_string
        (Schedule_payload_projection.support_status request));
   (match Schedule_payload_projection.kind_result request with
-   | Error msg -> check string "kind error" "missing field: kind" msg
-   | Ok kind -> fail ("expected kind error, got " ^ kind));
+   | Error msg -> fail ("expected kind projection, got " ^ msg)
+   | Ok kind -> check string "kind projection" "test.raw" kind);
   (match
      Schedule_payload_projection.kind_of_json_result
        (`Assoc
@@ -960,24 +972,22 @@ let test_payload_projection_result_surfaces_invalid_payload () =
    with
    | Ok kind -> check string "raw payload kind" "test.raw" kind
    | Error msg -> fail ("expected raw payload kind, got " ^ msg));
-  (match
-     Schedule_payload_projection.kind_of_json_result
-       (`Assoc [ "schema_version", `Int 1; "body", `Assoc [] ])
-   with
-   | Error msg -> check string "raw payload kind error" "missing field: kind" msg
-   | Ok kind -> fail ("expected raw payload kind error, got " ^ kind));
-  check (option string) "legacy kind projection" None
+  check (option string) "legacy kind projection" (Some "test.raw")
     (Schedule_payload_projection.kind request);
   (match Schedule_payload_projection.dispatch_tool_for_request_result request with
    | Error err ->
-     check string "dispatch projection error" "missing field: kind"
+     check string "dispatch projection error"
+       "unsupported schedule payload kind: test.raw"
        (Schedule_payload_projection.dispatch_rejection_message err)
    | Ok tool_name -> fail ("expected dispatch projection error, got " ^ tool_name));
   check (option string) "legacy dispatch projection" None
     (Schedule_payload_projection.dispatch_tool_for_request request);
   (match Schedule_payload_projection.target_summary_result request with
-   | Error msg -> check string "target summary error" "missing field: kind" msg
-   | Ok _ -> fail "expected target summary error");
+   | Error msg -> fail ("expected target summary, got " ^ msg)
+   | Ok target_summary ->
+     check (pair (option string) (option string)) "target summary"
+       (None, None)
+       target_summary);
   check (pair (option string) (option string)) "legacy target summary" (None, None)
     (Schedule_payload_projection.target_summary request)
 ;;

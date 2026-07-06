@@ -2411,24 +2411,16 @@ let schedule_counts_json schedules =
        Schedule_domain.all_schedule_statuses)
 ;;
 
-let schedule_supported_payload_kinds =
-  List.sort_uniq String.compare Server_schedule_consumers.supported_payload_kinds
-;;
-
-let schedule_payload_kind_supported kind =
-  List.exists (String.equal kind) schedule_supported_payload_kinds
-;;
-
 type schedule_payload_support =
   | Supported
   | Unsupported
   | Unknown
 
 let schedule_payload_support (request : Schedule_domain.schedule_request) =
-  match Schedule_payload_projection.kind request with
-  | Some kind when schedule_payload_kind_supported kind -> Supported
-  | Some _ -> Unsupported
-  | None -> Unknown
+  match Schedule_payload_projection.support_status request with
+  | Schedule_payload_projection.Supported -> Supported
+  | Schedule_payload_projection.Unsupported -> Unsupported
+  | Schedule_payload_projection.Unknown -> Unknown
 ;;
 
 let schedule_payload_support_to_string = function
@@ -2442,42 +2434,7 @@ let schedule_payload_support_status request =
 ;;
 
 let schedule_payload_support_json schedules =
-  let bump kind counts =
-    let rec loop acc = function
-      | [] -> List.rev ((kind, 1) :: acc)
-      | (existing, count) :: rest when String.equal existing kind ->
-        List.rev_append acc ((existing, count + 1) :: rest)
-      | item :: rest -> loop (item :: acc) rest
-    in
-    loop [] counts
-  in
-  let unsupported_request_count, unknown_request_count, unsupported_kinds =
-    List.fold_left
-      (fun (unsupported_count, unknown_count, kind_counts)
-        (request : Schedule_domain.schedule_request) ->
-         match Schedule_payload_projection.kind request with
-         | Some kind when schedule_payload_kind_supported kind ->
-           unsupported_count, unknown_count, kind_counts
-         | Some kind -> unsupported_count + 1, unknown_count, bump kind kind_counts
-         | None -> unsupported_count, unknown_count + 1, kind_counts)
-      (0, 0, []) schedules
-  in
-  let unsupported_kinds =
-    unsupported_kinds
-    |> List.sort (fun (left_kind, left_count) (right_kind, right_count) ->
-      match compare right_count left_count with
-      | 0 -> String.compare left_kind right_kind
-      | order -> order)
-    |> List.map (fun (kind, count) ->
-      `Assoc [ "kind", `String kind; "count", `Int count ])
-  in
-  `Assoc
-    [ ( "supported_kinds"
-      , `List (List.map (fun kind -> `String kind) schedule_supported_payload_kinds) )
-    ; "unsupported_request_count", `Int unsupported_request_count
-    ; "unsupported_kinds", `List unsupported_kinds
-    ; "unknown_request_count", `Int unknown_request_count
-    ]
+  Schedule_payload_projection.support_summary_to_yojson schedules
 ;;
 
 let schedule_request_active (request : Schedule_domain.schedule_request) =
@@ -3022,6 +2979,34 @@ let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
     ]
 ;;
 
+type schedule_signal_projection_entry =
+  | Decoded_schedule_signal of Schedule_runner.wake_signal
+  | Schedule_signal_decode_error of int * string
+
+let schedule_signal_decode_error_dashboard_json ordinal error =
+  `Assoc [ "ordinal", `Int ordinal; "error", `String error ]
+;;
+
+let schedule_signal_rows_and_errors config limit =
+  let entries =
+    Dated_jsonl.read_recent
+      (Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ())
+      limit
+    |> List.mapi (fun ordinal json ->
+      match Schedule_runner.wake_signal_of_yojson json with
+      | Ok signal -> Decoded_schedule_signal signal
+      | Error error -> Schedule_signal_decode_error (ordinal, error))
+  in
+  List.fold_right
+    (fun entry (signals, errors) ->
+       match entry with
+       | Decoded_schedule_signal signal -> signal :: signals, errors
+       | Schedule_signal_decode_error (ordinal, error) ->
+         signals, schedule_signal_decode_error_dashboard_json ordinal error :: errors)
+    entries
+    ([], [])
+;;
+
 let schedule_request_dashboard_json
   ~now
   ~config
@@ -3084,6 +3069,10 @@ let schedule_request_dashboard_json
         | None -> `Null
         | Some kind -> `String kind )
     ; "payload_support", `String (schedule_payload_support_status request)
+    ; ( "payload_dispatch_tool"
+      , match Schedule_payload_projection.dispatch_tool_for_request request with
+        | None -> `Null
+        | Some tool_name -> `String tool_name )
     ; ( "payload_target"
       , match payload_target with
         | None -> `Null
@@ -3305,8 +3294,8 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
       | _ -> String.compare left.schedule_id right.schedule_id)
   in
   let request_rows = take schedule_projection_request_limit sorted in
-  let signal_rows =
-    Schedule_runner.read_recent_signals config schedule_signal_projection_limit
+  let signal_rows, signal_errors =
+    schedule_signal_rows_and_errors config schedule_signal_projection_limit
   in
   `Assoc
     [ "schema", `String "masc.dashboard.scheduled_automation.v1"
@@ -3317,8 +3306,10 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
     ; "signal_source", `String "schedule_runner_signals"
     ; "signal_count", `Int (List.length signal_rows)
+    ; "signal_error_count", `Int (List.length signal_errors)
     ; "signal_limit", `Int schedule_signal_projection_limit
     ; "signals", `List (List.map schedule_signal_dashboard_json signal_rows)
+    ; "signal_errors", `List signal_errors
     ; "counts", schedule_counts_json schedules
     ; ( "derived_counts"
       , `Assoc

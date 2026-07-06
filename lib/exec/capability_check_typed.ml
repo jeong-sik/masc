@@ -487,7 +487,19 @@ let of_command = function
     let args = if race then args @ [ arg "-race" ] else args in
     let args = args @ List.map arg rest in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Go, args) ]
-  | Shell_ir_typed.W (Gh { subcommand; action; draft; squash; delete_branch; body; title; rest }) ->
+  | Shell_ir_typed.W
+      (Gh
+        { subcommand
+        ; action
+        ; draft
+        ; squash
+        ; delete_branch
+        ; body
+        ; title
+        ; search
+        ; state
+        ; rest
+        }) ->
     let args = [ arg subcommand ] in
     let args = match action with Some a -> args @ [ arg a ] | None -> args in
     let args = if draft then args @ [ arg "--draft" ] else args in
@@ -495,6 +507,8 @@ let of_command = function
     let args = if delete_branch then args @ [ arg "--delete-branch" ] else args in
     let args = match body with Some b -> args @ [ arg "--body"; arg b ] | None -> args in
     let args = match title with Some t -> args @ [ arg "--title"; arg t ] | None -> args in
+    let args = match search with Some q -> args @ [ arg "--search"; arg q ] | None -> args in
+    let args = match state with Some s -> args @ [ arg "--state"; arg s ] | None -> args in
     let args = args @ List.map arg rest in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Gh, args) ]
   | Shell_ir_typed.W (Chmod { mode; path; recursive }) ->

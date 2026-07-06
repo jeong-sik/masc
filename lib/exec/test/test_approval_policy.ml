@@ -364,8 +364,15 @@ let test_gh_irreversible_repo_hosting_ops_denied_under_autonomous () =
          assert (Exec_program.to_string bin = "gh")
        | _ -> Alcotest.failf "%s: expected gh irreversible op to be denied" label)
     [ "gh pr merge", [ "pr"; "merge"; "123"; "--squash" ]
+    ; "gh repo create", [ "repo"; "create"; "owner/new-repo" ]
+    ; "gh repo fork", [ "repo"; "fork"; "owner/repo" ]
     ; "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
+    ; "gh discussion create", [ "discussion"; "create"; "--title"; "T" ]
     ; "gh api delete", [ "api"; "-X"; "DELETE"; "/repos/owner/repo" ]
+    ; "gh graphql createRepository"
+      , [ "api"; "graphql"; "-f"; "query=mutation{createRepository}" ]
+    ; "gh graphql createDiscussion"
+      , [ "api"; "graphql"; "-f"; "query=mutation{createDiscussion}" ]
     ]
 
 let test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous () =

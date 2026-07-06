@@ -77,6 +77,23 @@ let check_dispatch_status label expected actual =
   check string label (dispatch_status_to_string expected) (dispatch_status_to_string actual)
 ;;
 
+let json_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let check_json_string_field label expected name json =
+  match json_field name json with
+  | Some (`String actual) -> check string label expected actual
+  | _ -> failf "missing string field %s" name
+;;
+
+let check_json_int_field label expected name json =
+  match json_field name json with
+  | Some (`Int actual) -> check int label expected actual
+  | _ -> failf "missing int field %s" name
+;;
+
 let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
   let dispatch_result =
     Option.value
@@ -335,6 +352,115 @@ let test_tick_marks_dispatch_failure_failed () =
        execution.error)
 ;;
 
+let status_dispatch schedule_id status ?error () : Schedule_runner.dispatch_result =
+  { schedule_id; status; detail = None; error }
+;;
+
+let status_result dispatches : Schedule_runner.tick_result =
+  { due_changed = 1; emitted = []; rescheduled = 0; dispatches }
+;;
+
+let test_runner_status_snapshot_tracks_liveness () =
+  Schedule_runner_status.reset_for_test ();
+  let initial =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:0.0 ~stale_after_sec:10.0
+  in
+  check_json_string_field "initial status" "not_started" "status" initial;
+  Schedule_runner_status.record_tick_started ~now:1.0;
+  let running =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:1.5 ~stale_after_sec:10.0
+  in
+  check_json_string_field "running status" "running" "status" running;
+  let ok_result =
+    status_result [ status_dispatch "status-ok" Dispatch_succeeded () ]
+  in
+  Schedule_runner_status.record_tick_ok ~started_at:1.0 ~finished_at:1.25 ok_result;
+  let ok =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:2.25 ~stale_after_sec:10.0
+  in
+  check_json_string_field "ok status" "ok" "status" ok;
+  check_json_int_field "tick count" 1 "tick_count" ok;
+  check_json_int_field "success count" 1 "success_count" ok;
+  (match json_field "last_counts" ok with
+   | Some counts ->
+     check_json_int_field "last success dispatch count" 1 "dispatch_succeeded" counts;
+     check_json_int_field "last failed dispatch count" 0 "dispatch_failed" counts;
+     check_json_int_field "last unsupported dispatch count" 0 "dispatch_unsupported" counts;
+     check_json_int_field "last start-rejected dispatch count" 0
+       "dispatch_start_rejected"
+       counts;
+     check_json_int_field "last wake failed count" 0 "wake_failed" counts
+   | None -> fail "missing last_counts");
+  let dispatch_failure_result =
+    status_result
+      [ status_dispatch "status-dispatch-failed" Dispatch_failed
+          ~error:"dispatch failed"
+          ()
+      ; status_dispatch "status-dispatch-unsupported" Dispatch_unsupported
+          ~error:"unsupported"
+          ()
+      ; status_dispatch "status-dispatch-start-rejected" Dispatch_start_rejected
+          ~error:"start rejected"
+          ()
+      ]
+  in
+  Schedule_runner_status.record_tick_ok
+    ~started_at:2.0
+    ~finished_at:2.125
+    dispatch_failure_result;
+  let dispatch_degraded =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:2.25 ~stale_after_sec:10.0
+  in
+  check_json_string_field "dispatch failure degrades status" "degraded" "status"
+    dispatch_degraded;
+  (match json_field "last_counts" dispatch_degraded with
+   | Some counts ->
+     check_json_int_field "failed dispatch count" 1 "dispatch_failed" counts;
+     check_json_int_field "unsupported dispatch count" 1 "dispatch_unsupported" counts;
+     check_json_int_field "start-rejected dispatch count" 1
+       "dispatch_start_rejected"
+       counts;
+     check_json_int_field "dispatch failure wake failed count" 0 "wake_failed" counts
+   | None -> fail "missing dispatch failure last_counts");
+  let wake_enqueue_counts : Schedule_runner_status.wake_enqueue_counts =
+    { wake_enqueued = 2
+    ; wake_skipped_no_keeper = 3
+    ; wake_skipped_missing_schedule = 1
+    ; wake_skipped_non_keeper_actor = 1
+    ; wake_skipped_unregistered_keeper = 1
+    ; wake_failed = 1
+    }
+  in
+  Schedule_runner_status.record_tick_ok
+    ~wake_enqueue_counts
+    ~started_at:2.5
+    ~finished_at:2.75
+    ok_result;
+  let wake_degraded =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:3.0 ~stale_after_sec:10.0
+  in
+  check_json_string_field "wake failure degrades status" "degraded" "status" wake_degraded;
+  Schedule_runner_status.record_tick_error ~started_at:3.0 ~finished_at:3.5 "boom";
+  let error_degraded =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:4.0 ~stale_after_sec:10.0
+  in
+  check_json_string_field "tick error degrades status" "degraded" "status" error_degraded;
+  check_json_int_field "failure count" 1 "failure_count" error_degraded;
+  Schedule_runner_status.record_tick_crash ~started_at:5.0 ~finished_at:5.5 "crash";
+  let stale =
+    Schedule_runner_status.snapshot ()
+    |> Schedule_runner_status.snapshot_to_yojson ~now:20.0 ~stale_after_sec:10.0
+  in
+  check_json_string_field "stale status" "stale" "status" stale;
+  check_json_int_field "crash count" 1 "crash_count" stale
+;;
+
 let () =
   run "Schedule_runner"
     [ ( "tick",
@@ -354,6 +480,8 @@ let () =
             test_tick_blocks_recurring_side_effect_until_fresh_grant
         ; test_case "marks dispatch failure failed" `Quick
             test_tick_marks_dispatch_failure_failed
+        ; test_case "runner status snapshot tracks liveness" `Quick
+            test_runner_status_snapshot_tracks_liveness
         ] )
     ]
 ;;

@@ -192,14 +192,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     (fun () ->
       let interval = 15.0 in
       let rec loop () =
+        let started_at = Time_compat.now () in
+        Schedule_runner_status.record_tick_started ~now:started_at;
         (try
            match
              Schedule_runner.tick
                ~consumer:Server_schedule_consumers.consumer
                (Mcp_server.workspace_config state)
-               ~now:(Time_compat.now ())
+               ~now:started_at
            with
            | Ok result ->
+             let finished_at = Time_compat.now () in
+             Schedule_runner_status.record_tick_ok ~started_at ~finished_at result;
              if result.Schedule_runner.emitted <> []
                 || result.rescheduled > 0
                 || result.dispatches <> []
@@ -211,15 +215,21 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  result.rescheduled
                  (List.length result.dispatches)
            | Error err ->
+             let finished_at = Time_compat.now () in
+             let error = Schedule_runner.runner_error_to_string err in
+             Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
              Log.Server.warn
                "schedule_runner: tick failed: %s"
-               (Schedule_runner.runner_error_to_string err)
+               error
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
+           let finished_at = Time_compat.now () in
+           let error = Printexc.to_string exn in
+           Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
            Log.Server.warn
              "schedule_runner: tick crashed: %s"
-             (Printexc.to_string exn));
+             error);
         Eio.Time.sleep clock interval;
         loop ()
       in

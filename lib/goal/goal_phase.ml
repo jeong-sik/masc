@@ -6,6 +6,7 @@ type t =
   | Paused
   | Completed
   | Dropped
+  | Metric_unevaluated
 
 let to_string = function
   | Executing -> "executing"
@@ -15,6 +16,7 @@ let to_string = function
   | Paused -> "paused"
   | Completed -> "completed"
   | Dropped -> "dropped"
+  | Metric_unevaluated -> "metric_unevaluated"
 
 let of_string = function
   | "executing" -> Some Executing
@@ -24,6 +26,7 @@ let of_string = function
   | "paused" -> Some Paused
   | "completed" -> Some Completed
   | "dropped" -> Some Dropped
+  | "metric_unevaluated" -> Some Metric_unevaluated
   | _ -> None
 
 let parse s =
@@ -52,6 +55,7 @@ let all =
   ; Paused
   ; Completed
   ; Dropped
+  ; Metric_unevaluated
   ]
 
 type action =
@@ -124,6 +128,13 @@ let decide_transition ~phase ~(action : action) ~has_effective_verifier_policy
   | Executing, Pause -> Ok (Move_to Paused)
   | Executing, Operator_block -> Ok (Move_to Blocked)
   | Executing, Drop -> Ok (Move_to Dropped)
+  | Metric_unevaluated, Request_complete ->
+      if has_effective_verifier_policy then
+        Ok Open_verification
+      else if require_completion_approval then
+        Ok Open_approval
+      else
+        Ok Complete
   | Paused, Resume -> Ok (Move_to Executing)
   | Paused, Drop -> Ok (Move_to Dropped)
   | Blocked, Operator_unblock -> Ok (Move_to Executing)

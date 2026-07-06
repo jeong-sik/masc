@@ -465,6 +465,8 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
   let author = get_string_opt args "author" |> Option.map String.trim in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
+  let comment_offset = get_int args "comment_offset" 0 in
+  let comment_limit = get_int args "comment_limit" 50 in
   if String.equal (String.trim post_id) ""
   then
     Tool_result.make_err
@@ -507,6 +509,8 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
         ~content
         ?parent_id
         ~ttl_hours
+        ~comment_offset
+        ~comment_limit
         ()
     with
     | Ok comment ->

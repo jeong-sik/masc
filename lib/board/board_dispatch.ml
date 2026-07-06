@@ -480,7 +480,7 @@ let get_post_and_comments ~post_id ?comment_offset ?comment_limit () =
   match backend () with
   | Jsonl store -> Board.get_post_and_comments store ~post_id ?comment_offset ?comment_limit ()
 
-let add_comment ~post_id ~author ~content ?parent_id
+let add_comment ~post_id ~author ~content ?parent_id ?(comment_offset = 0) ?(comment_limit = 50)
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   match backend () with
   | Jsonl store ->

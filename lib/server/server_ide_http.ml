@@ -189,7 +189,7 @@ let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 
 (** GET /api/v1/ide/observations/snapshot — returns accumulated observation
     data (tool events, PR events, turn events, write regions, annotations)
-    from {!Agent_observation.peek_snapshot}.
+    from the IDE bridge observation snapshot helper.
 
     Usage: ?take=true resets accumulators after read (destructive),
            default is non-destructive peek.
@@ -202,11 +202,7 @@ let observation_snapshot_handler request reqd =
     | Some "true" -> true
     | _ -> false
   in
-  let snapshot =
-    if take then Agent_observation.take_snapshot ()
-    else Agent_observation.peek_snapshot ()
-  in
-  let json = Agent_observation.snapshot_to_json snapshot in
+  let json = Ide_bridge.observation_snapshot_json ~take in
   let body = json_ok json in
   let headers =
     Http.Response.Headers.of_list

@@ -152,7 +152,6 @@
   masc.masc_tool_dispatch
   masc_thompson
   masc.config
-  masc.agent_observation
   masc.ide
   masc.dashboard_utils
   masc.masc_dashboard_api_types

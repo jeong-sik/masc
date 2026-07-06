@@ -6,6 +6,7 @@ module Keeper_external_attention = Masc.Keeper_external_attention
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_turn_admission = Masc.Keeper_turn_admission
+module Keeper_types_profile = Masc.Keeper_types_profile
 module Otel_metric_store = Masc.Otel_metric_store
 module Server_keeper_waiting_inventory = Masc.Server_keeper_waiting_inventory
 

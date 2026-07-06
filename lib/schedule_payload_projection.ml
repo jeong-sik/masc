@@ -187,7 +187,7 @@ let validate_board_post_for_creation ~risk_class view =
       view
 ;;
 
-let validate_board_post_for_dispatch request view =
+let validate_board_post_for_dispatch (request : Schedule_domain.schedule_request) view =
   let* () = board_schema_version_error ~creation:false view.schema_version in
   if not (Schedule_domain.is_side_effecting request.Schedule_domain.risk_class)
   then Error (board_post_kind ^ " requires a side-effecting risk_class")
@@ -233,7 +233,7 @@ let validate_keeper_wake_for_creation ~risk_class view =
   else validate_keeper_wake_body view.body
 ;;
 
-let validate_keeper_wake_for_dispatch request view =
+let validate_keeper_wake_for_dispatch (request : Schedule_domain.schedule_request) view =
   let* () = keeper_wake_schema_version_error ~creation:false view.schema_version in
   if not (Schedule_domain.is_side_effecting request.Schedule_domain.risk_class)
   then Error (keeper_wake_kind ^ " requires a side-effecting risk_class")

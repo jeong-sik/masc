@@ -41,13 +41,9 @@ let resolve_due_at ~requested_at recurrence args =
   match due_at with
   | Some due_at -> Ok due_at
   | None ->
-    (match Schedule_domain.first_due_after_result ~now:requested_at recurrence with
-     | Error err ->
-       Error
-         ("recurrence due_at calculation failed: "
-          ^ Schedule_domain.due_calculation_error_to_string err)
-     | Ok (Some due_at) -> Ok due_at
-     | Ok None ->
+    (match Schedule_domain.first_due_after ~now:requested_at recurrence with
+     | Some due_at -> Ok due_at
+     | None ->
        Error
          "one of due_at_unix or due_at_iso is required unless recurrence_kind is daily or cron")
 ;;

@@ -393,6 +393,85 @@ let test_gh_reversible_repo_hosting_ops_allowed_under_autonomous () =
   | Verdict.Allow t -> assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
   | _ -> Alcotest.fail "gh pr create should remain allowed under autonomous"
 
+(* RFC-0309 W3 (G-6/G-8): the capability axis escalates a durable-remote gh
+   mutation to [Ask] even under the autonomous (all-Observe) overlay — the
+   non-blocking HITL queue is the resolver. This is the enable path: instead of
+   auto-running (old autonomous behavior) or being disabled (#23362), a
+   [Requires_approval] verb asks. *)
+let test_gh_durable_remote_asks_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } ->
+         assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf "%s: durable-remote gh op must Ask under autonomous"
+           label)
+    (* R1 durable-remote mutations that exist TODAY (repo reversible table).
+       discussion mutations and repo create/fork are R2 under #23362, so they
+       Deny (not Ask) until W4/G-9 moves them to R1 — asserted separately in
+       [test_gh_r2_durable_remote_denies_pending_w4]. *)
+    [ "gh repo edit", [ "repo"; "edit"; "--description"; "d" ]
+    ; "gh repo sync", [ "repo"; "sync" ]
+    ; "gh repo set-default", [ "repo"; "set-default"; "o/r" ]
+    ; "gh frobnicate (unknown -> Requires_approval)", [ "frobnicate"; "now" ]
+    ]
+
+(* #23362 keeps discussion mutations and repo create/fork at R2, so the
+   capability disposition is [Denied] and they take the floor Deny path, NOT
+   the W3 Ask path. Pinned here so W4/G-9 (R2 -> R1) produces a visible delta:
+   these flip from Deny to Ask. *)
+let test_gh_r2_durable_remote_denies_pending_w4 () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_repo_hosting_cli _; _ } -> ()
+       | _ ->
+         Alcotest.failf "%s: R2 durable-remote must Deny under autonomous (W4 -> Ask)"
+           label)
+    [ "gh discussion comment", [ "discussion"; "comment"; "42"; "--body"; "B" ]
+    ; "gh repo create", [ "repo"; "create"; "o/new" ]
+    ]
+
+(* Regression guard: the W3 capability layer is ADDITIVE. Reads and local /
+   in-repo reversible mutations stay [Allow] under autonomous — no over-block of
+   routine keeper work. *)
+let test_gh_reads_and_local_still_allowed_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Allow _ -> ()
+       | _ -> Alcotest.failf "%s: should stay Allow under autonomous" label)
+    [ "gh pr view", [ "pr"; "view"; "1" ]
+    ; "gh pr create", [ "pr"; "create"; "--title"; "T" ]
+    ; "gh issue comment", [ "issue"; "comment"; "5"; "--body"; "B" ]
+    ; "gh repo clone (local)", [ "repo"; "clone"; "o/r" ]
+    ; "gh repo view", [ "repo"; "view"; "o/r" ]
+    ]
+
+(* Non-gh commands are untouched by the capability layer. *)
+let test_non_gh_unaffected_by_capability_layer () =
+  let s = simple (bin_ok "ls") ~args:[ lit "-la" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Allow _ -> ()
+  | _ -> Alcotest.fail "ls should stay Allow under autonomous"
+
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
    common force-delete-untracked form) is destructive and hits the floor.
    Probe finding 2026-06-18: [git clean -fd] was graded as plain audited git
@@ -502,6 +581,10 @@ let () =
   test_gh_irreversible_repo_hosting_ops_denied_under_autonomous ();
   test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous ();
   test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
+  test_gh_durable_remote_asks_under_autonomous ();
+  test_gh_r2_durable_remote_denies_pending_w4 ();
+  test_gh_reads_and_local_still_allowed_under_autonomous ();
+  test_non_gh_unaffected_by_capability_layer ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
   test_reset_hard_floored_under_autonomous ();

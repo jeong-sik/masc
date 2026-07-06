@@ -26,26 +26,37 @@ let check label v expected =
       (dstr expected)
 ;;
 
-(* --- externality axis (G-4): exactly Repo + Discussion ------------------- *)
+(* --- externality axis (G-4): per-action durable-remote (W3 refinement) ---- *)
 let test_durable_remote_surface () =
-  let yes = [ Gh_verb.Repo; Gh_verb.Discussion ] in
+  (* mutating actions on a durable-remote family -> true *)
+  let yes =
+    [ ("repo", "create"); ("repo", "fork"); ("repo", "edit"); ("repo", "sync")
+    ; ("repo", "rename"); ("discussion", "create"); ("discussion", "comment")
+    ; ("discussion", "edit"); ("discussion", "delete") ]
+  in
+  (* local / read actions on the SAME families, and any non-durable family,
+     and bare invocations -> false *)
   let no =
-    [ Gh_verb.Pr; Gh_verb.Issue; Gh_verb.Release; Gh_verb.Secret
-    ; Gh_verb.Ssh_key; Gh_verb.Workflow; Gh_verb.Auth; Gh_verb.Gist
-    ; Gh_verb.Ruleset; Gh_verb.Label; Gh_verb.Run; Gh_verb.Cache
-    ; Gh_verb.Project; Gh_verb.Api; Gh_verb.Other "x" ]
+    [ ("repo", "clone"); ("repo", "view"); ("repo", "list")
+    ; ("discussion", "view"); ("discussion", "list")
+    ; ("pr", "merge"); ("issue", "create"); ("release", "create")
+    ; ("api", "graphql"); ("frobnicate", "now") ]
   in
   List.iter
-    (fun f ->
-       if not (Pol.creates_durable_remote_surface f) then
-         Alcotest.failf "%s should be durable-remote" (Gh_verb.string_of_family f))
+    (fun (sub, act) ->
+       let v = verb ~sub ~act () in
+       if not (Pol.creates_durable_remote_surface v) then
+         Alcotest.failf "gh %s %s should be durable-remote" sub act)
     yes;
   List.iter
-    (fun f ->
-       if Pol.creates_durable_remote_surface f then
-         Alcotest.failf "%s should NOT be durable-remote"
-           (Gh_verb.string_of_family f))
-    no
+    (fun (sub, act) ->
+       let v = verb ~sub ~act () in
+       if Pol.creates_durable_remote_surface v then
+         Alcotest.failf "gh %s %s should NOT be durable-remote" sub act)
+    no;
+  (* bare families (no action) are reads -> false *)
+  if Pol.creates_durable_remote_surface (verb ~sub:"repo" ()) then
+    Alcotest.fail "bare 'gh repo' should NOT be durable-remote"
 ;;
 
 (* --- current dispositions (with #23362 tables in force) ------------------- *)
@@ -72,13 +83,14 @@ let test_current_dispositions () =
     Pol.Denied;
   check "discussion create (W4->requires_approval)"
     (verb ~sub:"discussion" ~act:"create" ()) Pol.Denied;
-  (* durable-remote R1 that already exists today -> Requires_approval. NOTE
-     coarseness: this is family-level, so a local-only op like [repo clone]
-     (R1, Repo) also lands here. W3 refines the externality to per-action; for
-     an unenforced spec, conservative over-approval is safe. *)
+  (* durable-remote R1 mutation -> Requires_approval *)
   check "repo edit" (verb ~sub:"repo" ~act:"edit" ()) Pol.Requires_approval;
-  check "repo clone (coarse: local op, refine in W3)"
-    (verb ~sub:"repo" ~act:"clone" ()) Pol.Requires_approval;
+  check "repo sync" (verb ~sub:"repo" ~act:"sync" ()) Pol.Requires_approval;
+  (* W3 per-action refinement: repo clone is a LOCAL op (copies to disk), not a
+     durable-remote mutation, so it stays Allowed — no over-approval of routine
+     work. *)
+  check "repo clone (local -> Allowed)" (verb ~sub:"repo" ~act:"clone" ())
+    Pol.Allowed;
   (* unrecognized area: a human adjudicates *)
   check "unknown verb" (verb ~sub:"frobnicate" ~act:"now" ()) Pol.Requires_approval;
   check "unknown action in known family"

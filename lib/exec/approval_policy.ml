@@ -322,6 +322,27 @@ let ask_of policy ~caps ~bin : Verdict.t =
       raw_source = policy.raw_source;
     }
 
+(* RFC-0309 W3 (G-6/G-8): the capability axis, consulted between the
+   catastrophic floor and the risk-graded trust overlay. It is ORTHOGONAL to
+   risk and to the overlay: a gh verb whose [Gh_capability_policy.disposition]
+   is [Requires_approval] produces [Ask] even under the autonomous (all-Observe)
+   overlay, because the non-blocking HITL queue is the resolver the overlay
+   comment (approval_config.ml) said did not exist. [Allowed]/[Denied] verbs are
+   left to the existing risk grading ([Denied] verbs are R2/Destructive, already
+   floored or Ask-graded; [Allowed] verbs fall through to the overlay), so this
+   layer only ADDS an approval requirement, never removes one. Non-gh commands
+   are unaffected. *)
+let gh_verb_of_simple (simple : Shell_ir.simple) : Gh_verb.t option =
+  match Exec_program.known simple.Shell_ir.bin with
+  | Some Exec_program.Gh ->
+    let words =
+      Exec_program.to_string simple.Shell_ir.bin
+      :: List.map repo_hosting_arg_word simple.Shell_ir.args
+    in
+    Some (Gh_verb.classify words)
+  | Some _ | None -> None
+[@@warning "-4"]
+
 let trust_dispatch ~trust_level ~caps ~policy ~bin ~simple : Verdict.t =
   match trust_level with
   | Approval_config.Enforced -> ask_of policy ~caps ~bin
@@ -341,6 +362,16 @@ let decide (policy : t)
   | Some reason ->
     (* Trust-independent: denied regardless of [overlay] (RFC-0254 §5.3). *)
     Verdict.Deny { caps; reason }
+  | None when
+      (match gh_verb_of_simple simple with
+       | Some v ->
+         Gh_capability_policy.disposition_of v
+         = Gh_capability_policy.Requires_approval
+       | None -> false) ->
+    (* RFC-0309 W3: a gh verb the capability axis marks [Requires_approval] is
+       escalated to [Ask] regardless of overlay. Additive only — reached solely
+       for gh, and only to REQUIRE approval the risk grading would not. *)
+    ask_of policy ~caps ~bin:simple.bin
   | None ->
     (* Non-catastrophic: graded by the per-actor trust overlay.  Under the
        autonomous overlay every level is [Observe] => [Allow] + telemetry;

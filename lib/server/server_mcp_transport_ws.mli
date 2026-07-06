@@ -41,9 +41,9 @@
     ([sha1], [sessions_mutex], [slice_index] +
     [slice_index_*] family, [__test_*] hooks,
     [inbound_message_handler],
-    [log_ws_delivery_dropped], [send_frame_bytes] /
+    [log_ws_delivery_dropped], [send_text_bigstring] /
     [websocket_text_payload] / [send_text] /
-    [bytes_cache] / [bytes_of_shared_text] /
+    [bigstring_cache] / [bigstring_of_shared_text] /
     [send_text_shared] / [send_text_*_checked] /
     [send_json_checked], [jsonrpc_notification],
     [next_dashboard_seq], [valid_dashboard_slice] /
@@ -458,8 +458,8 @@ val slice_index_subscribers : string -> string list
 (** Session ids subscribed to [slice].  Returns [\[\]]
     when [slice] is unknown or has no subscribers. *)
 
-val bytes_of_shared_text : string -> Bytes.t
-(** Returns the WebSocket frame bytes for [text],
+val bigstring_of_shared_text : string -> Bigstringaf.t
+(** Returns the WebSocket text payload for [text],
     re-using a single-entry physical-equality cache so
     the per-broadcast fanout collapses to one encoding
     pass. *)

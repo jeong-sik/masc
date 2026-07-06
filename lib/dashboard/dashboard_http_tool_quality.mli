@@ -22,6 +22,11 @@ val classify_failure_output : string -> string
     normalised free-text classification or to ["parse_error"] /
     ["unknown_error"] / ["empty_output"] when nothing matches. *)
 
+val unknown_runtime_profile_bucket : string
+(** Bucket emitted by {!aggregate} when a tool-call record carries no
+    [runtime_profile] evidence at either the top level or in
+    [runtime_contract]. *)
+
 val aggregate :
   ?n:int -> ?window_hours:float -> unit -> Yojson.Safe.t
 (** Build the dashboard payload from the most recent [n] keeper

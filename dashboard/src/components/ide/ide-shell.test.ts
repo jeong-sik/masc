@@ -346,7 +346,7 @@ describe('IdeShell', () => {
     })
 
     expect(model.workspaceLabel).toBe('masc')
-    expect(model.connectionLabel).toBe('runtime · live')
+    expect(model.connectionLabel).toBe('dashboard · live')
     expect(model.connectionTone).toBe('ok')
     expect(model.chips.map(chip => chip.label)).toEqual([
       'SPLIT DIFF',
@@ -924,7 +924,13 @@ describe('IdeShell', () => {
     expect(contextStack).not.toBeNull()
     expect(primaryRail).not.toBeNull()
     expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
-    expect(buttonByText(container, 'Context').getAttribute('aria-selected')).toBe('true')
+    expect(buttonByText(container, 'Work Context').getAttribute('aria-selected')).toBe('true')
+    expect(buttonByText(container, 'Run Activity').getAttribute('title'))
+      .toBe('Workspace and keeper activity linked to the active file and repository')
+    expect(buttonByText(container, 'Keeper Cursors').getAttribute('title'))
+      .toBe('Live keeper file focus and cursor stream status')
+    expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
+      .toContain('Dashboard event transport')
     expect(container.querySelector('.ide-plane-activity')).toBeNull()
     expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
   })
@@ -977,13 +983,13 @@ describe('IdeShell', () => {
       },
     }
 
-    fireEvent.click(buttonByText(container, 'Activity'))
-    expect(buttonByText(container, 'Activity').getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(buttonByText(container, 'Run Activity'))
+    expect(buttonByText(container, 'Run Activity').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
     expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
 
-    fireEvent.click(buttonByText(container, 'Cursors'))
-    expect(buttonByText(container, 'Cursors').getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(buttonByText(container, 'Keeper Cursors'))
+    expect(buttonByText(container, 'Keeper Cursors').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('.ide-plane-activity')).toBeNull()
     expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
     const cursorRail = container.querySelector('[data-testid="ide-cursor-rail"]')

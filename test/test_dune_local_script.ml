@@ -1295,7 +1295,7 @@ let test_old_ocaml_aborts_build () =
     in
     check int "exits non-zero on old OCaml" 1 code;
     check_contains "OCaml version message present" stderr "OCaml 5.0 detected";
-    check_contains "minimum 5.4 mentioned" stderr "5.4";
+    check_contains "minimum 5.5 mentioned" stderr "5.5";
     check_contains "skip hint present" stderr
       "MASC_SKIP_OCAML_VERSION_CHECK=1";
     check bool "dune not invoked" false (Sys.file_exists dune_log))

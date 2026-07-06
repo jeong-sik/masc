@@ -69,6 +69,16 @@ export function explorerScopeLabel(
   }
 }
 
+export function explorerFileCountLabel(
+  visibleFileCount: number,
+  filteredFileCount: number,
+  filtering: boolean,
+): string {
+  return filtering
+    ? `${filteredFileCount}/${visibleFileCount} VISIBLE`
+    : `${visibleFileCount} VISIBLE`
+}
+
 export function IdeExplorer({
   fileTreeStore: store,
   workspaceSource,
@@ -149,7 +159,10 @@ export function IdeExplorer({
     if (needle === '') return visible
     return visible.filter(n => n.label.toLowerCase().includes(needle))
   }, [visible, filter])
-  const fileCount = filtered.filter(n => !n.hasChildren).length
+  const filtering = filter.trim() !== ''
+  const visibleFileCount = visible.filter(n => !n.hasChildren).length
+  const filteredFileCount = filtered.filter(n => !n.hasChildren).length
+  const fileCountLabel = explorerFileCountLabel(visibleFileCount, filteredFileCount, filtering)
   const diffSummary = useMemo(() => store.diffSummary(), [store, tick])
   const scopeLabel = explorerScopeLabel(source, keeperName, repoList)
 
@@ -170,7 +183,7 @@ export function IdeExplorer({
     <div
       class="ide-explorer"
       role="region"
-      aria-label="EXPLORER"
+      aria-label=${`EXPLORER ${scopeLabel.label}; ${fileCountLabel}`}
     >
       <header
         style=${{
@@ -182,14 +195,49 @@ export function IdeExplorer({
           borderBottom: '1px solid var(--color-border-divider)',
         }}
       >
-        <span>EXPLORER · <span
+        <span
+          style=${{
+            display: 'grid',
+            gap: 'var(--sp-1)',
+            minWidth: 0,
+            width: '100%',
+          }}
+        >
+          <span
+            style=${{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--sp-2)',
+              minWidth: 0,
+            }}
+          >
+            <span>EXPLORER</span>
+            <span
+              data-testid="ide-explorer-file-count"
+              title="Files currently loaded in the visible tree; unopened directories load when expanded."
+              aria-label=${fileCountLabel}
+              style=${{
+                flex: 'none',
+                letterSpacing: '0.08em',
+                whiteSpace: 'nowrap',
+              }}
+            >${fileCountLabel}</span>
+          </span>
+          <span
+            data-testid="ide-explorer-source"
+            title=${`Workspace source: ${scopeLabel.label}`}
             style=${{
               color: scopeLabel.tone === 'accent'
                 ? 'var(--color-accent-fg)'
                 : 'var(--color-fg-muted)',
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
-          >${scopeLabel.label}</span></span>
-        <span>${fileCount} FILES</span>
+          >${scopeLabel.label}</span>
+        </span>
       </header>
       ${diffSummary.changedFiles > 0 ? ExplorerDiffSummary(diffSummary) : null}
       ${repoList.length > 0 || onRepositoryScan ? html`

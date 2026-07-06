@@ -90,6 +90,21 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
 ;;
 
+let test_active_model_missing_attempt_is_unknown () =
+  let meta = make_meta "status-runtime-missing-attempt" in
+  let unknown_model_label =
+    Boundary_redaction.to_string Boundary_redaction.unknown_model_label
+  in
+  Alcotest.(check string)
+    "missing runtime attempt is explicit unknown"
+    unknown_model_label
+    (Masc.Keeper_status_runtime.active_model_of_meta meta);
+  Alcotest.(check string)
+    "missing runtime attempt label is explicit unknown"
+    unknown_model_label
+    (Masc.Keeper_status_runtime.active_model_label_of_meta meta)
+;;
+
 let drop_value reason =
   P.metric_value_or_zero
     P.metric_persistence_read_drops
@@ -589,25 +604,25 @@ let test_model_observability_uses_runtime_trust_selected_model () =
   in
   let open Yojson.Safe.Util in
   Alcotest.(check bool)
-    "runtime-trust model counts as recent observation"
-    true
+    "runtime-trust model alone is not a scoped runtime observation"
+    false
     (json |> member "recent_turn_observation" |> to_bool);
   Alcotest.(check string)
     "selected model falls through to model_observability"
     "receipt-model"
     (json |> member "selected_model" |> to_string);
   Alcotest.(check bool)
-    "runtime contract marks selected model proof verified"
-    true
+    "runtime contract does not verify weak selected-model hint"
+    false
     (json |> member "runtime_contract" |> member "verified" |> to_bool);
   Alcotest.(check string)
     "runtime contract source records trust field"
     "runtime_trust.selected_model"
     (json |> member "runtime_contract" |> member "source" |> to_string);
-  Alcotest.(check string)
-    "runtime contract exposes observed selected model"
-    "receipt-model"
-    (json |> member "runtime_contract" |> member "actual_model_id" |> to_string)
+  Alcotest.(check bool)
+    "runtime contract does not expose selected model as actual model"
+    true
+    (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
 ;;
 
 let test_model_observability_uses_runtime_trust_execution_selected_model () =
@@ -626,31 +641,109 @@ let test_model_observability_uses_runtime_trust_execution_selected_model () =
   in
   let open Yojson.Safe.Util in
   Alcotest.(check bool)
-    "runtime-trust execution model counts as recent observation"
-    true
+    "runtime-trust execution model alone is not a scoped runtime observation"
+    false
     (json |> member "recent_turn_observation" |> to_bool);
   Alcotest.(check string)
     "execution selected model falls through to model_observability"
     "execution-model"
     (json |> member "selected_model" |> to_string);
   Alcotest.(check bool)
-    "runtime contract marks execution selected model proof verified"
-    true
+    "runtime contract does not verify weak execution selected-model hint"
+    false
     (json |> member "runtime_contract" |> member "verified" |> to_bool);
   Alcotest.(check string)
     "runtime contract source records execution trust field"
     "runtime_trust.execution.provider_selected_model"
     (json |> member "runtime_contract" |> member "source" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract does not expose execution hint as actual model"
+    true
+    (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
+;;
+
+let test_model_observability_missing_runtime_id_is_unscoped () =
+  let latest_metrics =
+    Some
+      (`Assoc
+        [ ( "runtime"
+          , `Assoc
+              [ "attempts", `List [ `Assoc [ "status", `String "ok" ] ]
+              ; "selected_index", `Int 0
+              ] )
+        ])
+  in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_fields:[]
+      ~runtime_trust:(`Assoc [])
+      latest_metrics
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "missing runtime_id is not current-runtime observation"
+    false
+    (json |> member "recent_turn_observation" |> to_bool);
   Alcotest.(check string)
-    "runtime contract exposes observed execution selected model"
-    "execution-model"
-    (json |> member "runtime_contract" |> member "actual_model_id" |> to_string)
+    "runtime observation scope is explicit"
+    "missing_runtime_id"
+    (json |> member "runtime_observation_scope" |> to_string);
+  Alcotest.(check bool)
+    "missing runtime_id does not verify runtime contract"
+    false
+    (json |> member "runtime_contract" |> member "verified" |> to_bool)
+;;
+
+let test_model_observability_runtime_match_does_not_promote_model_hint () =
+  let latest_metrics =
+    Some
+      (`Assoc
+        [ ( "runtime"
+          , `Assoc
+              [ "runtime_id", `String "runtime-test"
+              ; "attempts", `List [ `Assoc [ "status", `String "ok" ] ]
+              ; "selected_index", `Int 0
+              ] )
+        ])
+  in
+  let runtime_trust = `Assoc [ "selected_model", `String "receipt-model" ] in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_fields:[]
+      ~runtime_trust
+      latest_metrics
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "matched runtime row is a scoped runtime observation"
+    true
+    (json |> member "recent_turn_observation" |> to_bool);
+  Alcotest.(check string)
+    "runtime observation scope is matched"
+    "matched"
+    (json |> member "runtime_observation_scope" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract scope is verified"
+    true
+    (json |> member "runtime_contract" |> member "verified" |> to_bool);
+  Alcotest.(check bool)
+    "weak selected-model hint is not promoted to actual model"
+    true
+    (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
 ;;
 
 let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
-    [ ( "decision_log_read_drops"
+    [ ( "status_runtime_provenance"
+      , [ Alcotest.test_case
+            "missing runtime attempt does not fabricate active_model"
+            `Quick
+            test_active_model_missing_attempt_is_unknown
+        ] )
+    ; ( "decision_log_read_drops"
       , [ Alcotest.test_case
             "malformed decision rows increment drop metrics"
             `Quick
@@ -705,6 +798,14 @@ let () =
             "status model observability reuses runtime-trust execution selected model"
             `Quick
             test_model_observability_uses_runtime_trust_execution_selected_model
+        ; Alcotest.test_case
+            "status model observability treats missing runtime_id as unscoped"
+            `Quick
+            test_model_observability_missing_runtime_id_is_unscoped
+        ; Alcotest.test_case
+            "status model observability keeps matched weak model hint non-actual"
+            `Quick
+            test_model_observability_runtime_match_does_not_promote_model_hint
         ] )
     ]
 ;;

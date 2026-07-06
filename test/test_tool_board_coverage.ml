@@ -1853,7 +1853,12 @@ let test_tools_count () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "20 tool schemas" 20 (List.length Board_tool.tools)
+  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) Board_tool.tools in
+  Alcotest.(check int) "21 tool schemas" 21 (List.length names);
+  Alcotest.(check bool)
+    "cleanup schema advertised"
+    true
+    (List.mem "masc_board_cleanup" names)
 
 let test_tools_names_unique () =
   with_eio @@ fun env ->
@@ -2253,6 +2258,85 @@ let () =
             Alcotest.(check string) "classified as automation" "automation"
               Yojson.Safe.Util.(
                 parse_create_response_json msg |> member "post_kind" |> to_string));
+          Alcotest.test_case
+            "with hook: agent direct post_kind rejected"
+            `Quick
+            (fun () ->
+               with_eio @@ fun env ->
+               Fs_compat.set_fs (Eio.Stdenv.fs env);
+               cleanup ();
+               Board_tool.set_agent_lookup (fun name -> name = "claude-agent");
+               let ok, msg =
+                 dispatch
+                   "masc_board_post"
+                   (make_args
+                      [ "title", `String "test"
+                      ; "content", `String "hello"
+                      ; "author", `String "claude-agent"
+                      ; "post_kind", `String "direct"
+                      ])
+               in
+               Alcotest.(check bool) "post rejected" false ok;
+               Alcotest.(check bool)
+                 "agent direct rejection surfaced"
+                 true
+               (contains_substring
+                  msg
+                  "registered agent authors cannot create direct board posts"));
+          Alcotest.test_case
+            "with hook: raw agent meta classifies canonical keeper as automation"
+            `Quick
+            (fun () ->
+               with_eio @@ fun env ->
+               Fs_compat.set_fs (Eio.Stdenv.fs env);
+               cleanup ();
+               Board_tool.set_agent_lookup (fun name -> name = "claude-agent");
+               let ok, msg =
+                 dispatch
+                   "masc_board_post"
+                   (make_args
+                      [ "title", `String "test"
+                      ; "content", `String "hello"
+                      ; "author", `String "keeper-canonical"
+                      ; ( "meta"
+                        , `Assoc
+                            [ "author_raw_agent_name", `String "claude-agent" ] )
+                      ])
+               in
+               Alcotest.(check bool) "post created" true ok;
+               Alcotest.(check string)
+                 "classified as automation"
+                 "automation"
+                 Yojson.Safe.Util.(
+                   parse_create_response_json msg |> member "post_kind" |> to_string));
+          Alcotest.test_case
+            "with hook: raw agent meta direct post_kind rejected"
+            `Quick
+            (fun () ->
+               with_eio @@ fun env ->
+               Fs_compat.set_fs (Eio.Stdenv.fs env);
+               cleanup ();
+               Board_tool.set_agent_lookup (fun name -> name = "claude-agent");
+               let ok, msg =
+                 dispatch
+                   "masc_board_post"
+                   (make_args
+                      [ "title", `String "test"
+                      ; "content", `String "hello"
+                      ; "author", `String "keeper-canonical"
+                      ; "post_kind", `String "direct"
+                      ; ( "meta"
+                        , `Assoc
+                            [ "author_raw_agent_name", `String "claude-agent" ] )
+                      ])
+               in
+               Alcotest.(check bool) "post rejected" false ok;
+               Alcotest.(check bool)
+                 "agent direct rejection surfaced"
+                 true
+                 (contains_substring
+                    msg
+                    "registered agent authors cannot create direct board posts"));
           Alcotest.test_case "with hook: non-agent stays direct" `Quick (fun () ->
             with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);

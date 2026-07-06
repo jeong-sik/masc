@@ -10,9 +10,9 @@
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
     - the {b tools} list advertised to MCP clients
-      (13 schemas: post, list, get, comment, vote, stats,
-      search, comment_vote, reaction, profile, hearth_list,
-      curation_read, delete),
+      (post/list/get, comments, votes, reactions, stats,
+      search, profile, hearths, curation, cleanup/delete,
+      and sub-board operations),
     - the {b truncated-markdown detector}
       ({!detect_truncated_markdown_with_reason}) used by
       the post-create path to flag chat-suffix paste

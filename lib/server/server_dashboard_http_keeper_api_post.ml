@@ -65,6 +65,122 @@ let error_json ?ok message =
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 
+let keeper_catchup_judge_prompt ~keeper_name ~(digest : Keeper_catchup_digest.t) =
+  let digest_json = Keeper_catchup_digest.to_json digest in
+  Printf.sprintf
+    {|You are a strict MASC activity judge.
+
+Write the assessment in Korean. Judge only the activity digest below. Do not invent unseen messages, hidden intent, or external context.
+This assessment is advisory and non-blocking: do not claim it gates merge, keeper progress, task ownership, or user access. A FAIL verdict means immediate operator attention is recommended, not an automatic stop.
+
+Rubric:
+- Outcome quality: did the keeper make observable progress, or only produce motion?
+- Risk: are there failed turns, crashes, transport failures, read errors, or lower-bound coverage warnings?
+- Responsiveness: do the message/turn/board/task counts suggest useful engagement?
+- Improvement: name concrete next actions an operator or keeper should take.
+
+Return concise Markdown with these sections:
+1. Verdict: one of PASS, WATCH, or FAIL, with one sentence.
+2. Evidence: 3-5 bullets tied to exact digest fields.
+3. Improvement points: 2-4 concrete recommendations.
+4. Missing evidence: note any coverage/read limitations.
+
+Keeper: %s
+Digest JSON:
+```json
+%s
+```|}
+    keeper_name
+    (Yojson.Safe.pretty_to_string digest_json)
+;;
+
+let parse_fusion_result text =
+  try Yojson.Safe.from_string text with
+  | Yojson.Json_error _ -> `Assoc [ "ok", `Bool false; "error", `String text ]
+;;
+
+let is_finite_float value =
+  match classify_float value with
+  | FP_normal | FP_subnormal | FP_zero -> true
+  | FP_infinite | FP_nan -> false
+;;
+
+let handle_keeper_catchup_judge_post state req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_catchup_judge in
+  if name = "" then respond_error reqd "keeper name required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    try
+      let args = Yojson.Safe.from_string body_str in
+      let since_unix = Safe_ops.json_float_opt "since_unix" args in
+      match since_unix with
+      | None -> respond_error reqd "since_unix is required"
+      | Some since_unix when not (is_finite_float since_unix) ->
+        respond_error reqd "since_unix must be a finite unix-seconds float"
+      | Some since_unix when since_unix < 0.0 ->
+        respond_error reqd "since_unix must be non-negative"
+      | Some since_unix ->
+        let config = Mcp_server.workspace_config state in
+        let now_unix = Time_compat.now () in
+        let digest =
+          Keeper_catchup_digest.build ~base_path:config.base_path
+            ~keeper_name:name ~since_unix ~now_unix
+        in
+        let prompt = keeper_catchup_judge_prompt ~keeper_name:name ~digest in
+        (match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
+         | None, _ | _, None ->
+           respond_error reqd "fusion requires the server root switch + net (unavailable)"
+         | Some sw, Some net ->
+           (match Fusion_config_loader.load ~base_path:config.base_path with
+            | Error msg -> respond_error reqd msg
+            | Ok policy ->
+              let fusion_args =
+                `Assoc
+                  [ "prompt", `String prompt
+                  ; "web_tools", `Bool false
+                  ; "topology", `String "simple"
+                  ]
+              in
+              let run_id = Random_id.prefixed ~prefix:"fus-" ~bytes:16 in
+              let raw =
+                Fusion_tool.handle
+                  ~sw
+                  ~net
+                  ~base_dir:config.base_path
+                  ~keeper:name
+                  ~now_unix
+                  ~run_id
+                  ~policy
+                  ~args:fusion_args
+              in
+              let fusion_json = parse_fusion_result raw in
+              (match Json_util.assoc_member_opt "ok" fusion_json with
+               | Some (`Bool true) ->
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      [ "ok", `Bool true
+                      ; "status", `String "fusion_started"
+                      ; "run_id", `String run_id
+                      ; "owner_keeper", `String name
+                      ; "fusion_route", `String ("/#fusion?run_id=" ^ run_id)
+                      ; "digest", Keeper_catchup_digest.to_json digest
+                      ])
+                   reqd
+               | _ ->
+                 let message =
+                   match Json_util.assoc_member_opt "error" fusion_json with
+                   | Some (`String msg) -> msg
+                   | _ -> Yojson.Safe.to_string fusion_json
+                 in
+                 respond_error reqd message)))
+    with
+    | Yojson.Json_error msg -> respond_error reqd ("invalid json: " ^ msg)
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> respond_error reqd (Printexc.to_string exn)
+;;
+
 (** Handle POST /api/v1/keepers/:name/tools.
     Extracted so it can be called from any prefix_post handler that
     catches POST /api/v1/keepers/* requests. *)

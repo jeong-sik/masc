@@ -170,6 +170,7 @@ type candidate_selection_result = {
   selected : (string * string * int) list;
   dropped_by_kind : (string * int) list;
   dropped_by_total_cap : int;
+  suppressed_synthetic_candidates : int;
 }
 val select_memory_candidates :
   (string * string * int) list -> candidate_selection_result
@@ -203,4 +204,6 @@ val memory_candidates_from_snapshot_gated :
   candidate_selection_result
   (** Gated variant used by post-turn persistence. When [is_synthetic] (the
       snapshot was fabricated from run metadata, not model-authored), no durable
-      memory candidates are produced — synthetic snapshots are resume aids only. *)
+      memory candidates are produced — synthetic snapshots are resume aids only.
+      [suppressed_synthetic_candidates] records how many otherwise valid
+      candidates were intentionally suppressed by this gate. *)

@@ -28,6 +28,10 @@ val metric_inference_queue_max_concurrent : string
 val metric_agent_heartbeat_age_seconds : string
 val metric_agent_stale_total : string
 
+(** Scheduler runner loop completions. Labels: [outcome] in
+    {[ok | error | crash]}. *)
+val metric_schedule_runner_tick_outcomes : string
+
 (** {1 OCaml GC sampler gauges}
 
     Populated by {!module:Gc_sampler} once per sampling interval from

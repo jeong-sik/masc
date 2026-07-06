@@ -804,9 +804,11 @@ if [ -e "$DEST" ]; then
   # ask the binary directly first, then capture its output.
   if masc_responds_to_version "$DEST"; then
     existing_ver=$(masc_reported_version "$DEST")
-    if [ "$existing_ver" = "${VERSION#v}" ]; then
+    if [ "$existing_ver" = "${VERSION#v}" ] && [ "$FORCE" -eq 0 ]; then
       log "already at $VERSION ($DEST), skipping download"
       SKIP_DL=1
+    elif [ "$existing_ver" = "${VERSION#v}" ]; then
+      warn "existing $DEST already reports $existing_ver; refreshing because --force is set"
     elif [ "$FORCE" -eq 0 ]; then
       warn "existing $DEST is version $existing_ver, target is ${VERSION#v}; pass --force to overwrite"
       exit 1

@@ -468,6 +468,25 @@ let test_binary_checks_use_install_environment () =
     {|reported=$("$DEST" --version 2>/dev/null | tail -n1)|}
 ;;
 
+let test_force_refreshes_same_version_existing_binary () =
+  let tmpdir = Filename.temp_file "masc-install-force-refresh-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+       let output = run_install [ "--dry-run"; "--force"; "--no-wizard" ] tmpdir in
+       assert_contains
+         "force refreshes same-version binary"
+         output
+         "refreshing because --force is set";
+       assert_contains
+         "force reaches download path"
+         output
+         "[dry-run] would download to";
+       assert_not_contains "force does not skip binary download" output "skipping download")
+;;
+
 let test_wizard_flags_exist () =
   let script = install_script () in
   assert_contains "wizard flag" script "--wizard";
@@ -1169,6 +1188,10 @@ let () =
             "binary checks use install environment"
             `Quick
             test_binary_checks_use_install_environment
+        ; test_case
+            "--force refreshes same-version existing binary"
+            `Quick
+            test_force_refreshes_same_version_existing_binary
         ; test_case
             "release checksums include model catalog seed"
             `Quick

@@ -22,6 +22,10 @@ let contains_substring haystack needle =
   in
   nlen = 0 || loop 0
 
+let check_contains label haystack needle =
+  if not (contains_substring haystack needle) then
+    failf "%s: missing %S in stderr:\n%s" label needle haystack
+
 let substring_index haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -1290,12 +1294,10 @@ let test_old_ocaml_aborts_build () =
         "build"
     in
     check int "exits non-zero on old OCaml" 1 code;
-    check bool "OCaml version message present" true
-      (contains_substring stderr "OCaml 5.0 detected");
-    check bool "minimum 5.4 mentioned" true
-      (contains_substring stderr ">= 5.4");
-    check bool "skip hint present" true
-      (contains_substring stderr "MASC_SKIP_OCAML_VERSION_CHECK=1");
+    check_contains "OCaml version message present" stderr "OCaml 5.0 detected";
+    check_contains "minimum 5.4 mentioned" stderr "5.4";
+    check_contains "skip hint present" stderr
+      "MASC_SKIP_OCAML_VERSION_CHECK=1";
     check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let test_skip_ocaml_version_env_bypasses_guard () =

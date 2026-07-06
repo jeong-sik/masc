@@ -113,6 +113,13 @@ val metric_backend_mutex_held_sec : string
 (** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
 val metric_tool_metrics_persist_dropped : string
 
+(** Schedule unsupported payload counter. Labels: [phase] in
+    {[creation | dispatch]} and [risk_class] in
+    [Schedule_domain.risk_class_to_string] labels. Raw payload kinds are not
+    labels; they remain in typed errors/projections to avoid unbounded metric
+    cardinality. *)
+val metric_schedule_payload_unsupported_total : string
+
 (** Counter for bind-required guard rejects. Labels: [tool],
     [agent_name], and [reason]. *)
 val metric_tool_bind_required_guard : string

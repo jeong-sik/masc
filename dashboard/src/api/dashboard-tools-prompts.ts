@@ -271,6 +271,54 @@ export interface DashboardScheduledAutomation {
   requests: DashboardScheduledAutomationRequest[]
 }
 
+export interface DashboardKeeperWaitingRow {
+  keeper_name?: string | null
+  source: string
+  waiting_on: string
+  wake_producer?: string | null
+  since?: number | null
+  since_iso?: string | null
+  due_at?: number | null
+  due_at_iso?: string | null
+  next_action: string
+  detail?: unknown
+}
+
+export interface DashboardKeeperWaitingKeeper {
+  keeper_name: string
+  state: 'idle' | 'busy' | 'waiting' | 'deferred' | string
+  waiting_on: DashboardKeeperWaitingRow[]
+  waiting_count: number
+  waiting_count_truncated?: boolean
+  truncated_sources?: Record<string, boolean>
+  sources?: Record<string, number>
+  since?: number | null
+  since_iso?: string | null
+  due_at?: number | null
+  due_at_iso?: string | null
+  next_action?: string | null
+}
+
+export interface DashboardKeeperWaitingInventory {
+  schema?: string
+  source?: string
+  generated_at?: string
+  supported_states?: string[]
+  keeper_count_known?: boolean
+  keeper_count: number
+  waiting_keeper_count: number
+  row_count: number
+  row_count_truncated?: boolean
+  external_attention_row_limit?: number
+  external_attention_truncated_keeper_count?: number
+  global_row_count?: number
+  global_pending_confirm_count_known?: boolean
+  global_pending_confirm_count?: number
+  source_counts?: Record<string, number>
+  keepers: DashboardKeeperWaitingKeeper[]
+  global_waiting_on?: DashboardKeeperWaitingRow[]
+}
+
 export interface DashboardToolsResponse {
   generated_at?: string
   status?: string
@@ -281,6 +329,7 @@ export interface DashboardToolsResponse {
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
   scheduled_automation?: DashboardScheduledAutomation
+  keeper_waiting_inventory?: DashboardKeeperWaitingInventory
 }
 
 // --- Runtime probe (KV-cache / model load probe) ---

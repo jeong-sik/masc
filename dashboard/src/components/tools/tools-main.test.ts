@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardScheduledAutomation } from '../../api'
+import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -12,6 +12,7 @@ type MockToolsResponse = {
     never_called_count: number
   }
   scheduled_automation?: DashboardScheduledAutomation
+  keeper_waiting_inventory?: DashboardKeeperWaitingInventory
 }
 
 const mocks = vi.hoisted(() => ({
@@ -58,6 +59,35 @@ vi.mock('../tool-executor/tool-executor', () => ({
 }))
 
 import { Tools } from './tools-main'
+
+function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
+  return {
+    schema: 'masc.dashboard.keeper_waiting_inventory.v1',
+    source: 'server_keeper_waiting_inventory',
+    keeper_count_known: true,
+    keeper_count: 1,
+    waiting_keeper_count: 1,
+    row_count: 1,
+    global_row_count: 0,
+    keepers: [
+      {
+        keeper_name: 'sangsu',
+        state: 'waiting',
+        waiting_count: 1,
+        waiting_on: [
+          {
+            keeper_name: 'sangsu',
+            source: 'event_queue_pending',
+            waiting_on: 'bootstrap',
+            wake_producer: 'keeper_supervisor',
+            next_action: 'keeper_drain_event_queue',
+          },
+        ],
+      },
+    ],
+    global_waiting_on: [],
+  }
+}
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
@@ -179,6 +209,7 @@ describe('Tools', () => {
           },
         ],
       },
+      keeper_waiting_inventory: waitingInventoryFixture(),
     }
 
     render(html`<${Tools} />`, container)
@@ -204,6 +235,9 @@ describe('Tools', () => {
     expect(container.textContent).toContain('wake signal feed')
     expect(container.textContent).toContain('키퍼 다음 단계')
     expect(container.textContent).toContain('operator (human operator)')
+    expect(container.textContent).toContain('Keeper Waiting Inventory')
+    expect(container.textContent).toContain('sangsu')
+    expect(container.textContent).toContain('event queue pending')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelector('.v2-lab-card')).not.toBeNull()
   })

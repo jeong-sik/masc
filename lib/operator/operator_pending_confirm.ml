@@ -135,17 +135,34 @@ let pending_confirm_of_yojson json =
       }
   with Failure msg -> Error msg
 
+let decode_pending_confirm_entries entries =
+  let rec loop index acc = function
+    | [] -> Ok (List.rev acc)
+    | json :: rest ->
+      (match pending_confirm_of_yojson json with
+       | Ok entry -> loop (index + 1) (entry :: acc) rest
+       | Error msg ->
+         Error
+           (Printf.sprintf
+              "pending_confirms[%d] decode failed: %s"
+              index
+              msg))
+  in
+  loop 0 [] entries
+
+let raw_pending_confirms_result config : (pending_confirm list, string) result =
+  match Workspace_utils.read_json_opt_result config (pending_confirms_path config) with
+  | Error msg -> Error (Printf.sprintf "pending confirms read failed: %s" msg)
+  | Ok None -> Ok []
+  | Ok (Some (`List entries)) -> decode_pending_confirm_entries entries
+  | Ok (Some _) -> Error "pending confirms decode failed: expected JSON list"
+
 let raw_pending_confirms config : pending_confirm list =
-  match Workspace_utils.read_json_opt config (pending_confirms_path config) with
-  | None -> []
-  | Some (`List entries) ->
-      List.filter_map
-        (fun json ->
-          match pending_confirm_of_yojson json with
-          | Ok entry -> Some entry
-          | Error _ -> None)
-        entries
-  | Some _ -> []
+  match raw_pending_confirms_result config with
+  | Ok entries -> entries
+  | Error msg ->
+    Log.Misc.warn "[operator_pending_confirm] %s" msg;
+    []
 
 let pending_confirms_to_yojson entries =
   `List (List.map pending_confirm_to_yojson entries)
@@ -159,33 +176,47 @@ let pending_confirm_expired (entry : pending_confirm) =
   | Some exp -> Masc_domain.now_iso () > exp
   | None -> false
 
-let read_pending_confirms config : pending_confirm list =
-  let entries = raw_pending_confirms config in
+let read_pending_confirms_result config =
+  match raw_pending_confirms_result config with
+  | Error _ as error -> error
+  | Ok entries ->
   let active = List.filter (fun entry -> not (pending_confirm_expired entry)) entries in
-  let () =
-    if List.length active <> List.length entries then
-      match write_pending_confirms config active with
-      | Ok () -> ()
-      | Error msg ->
-        Log.Misc.warn
-          "[operator_pending_confirm] failed to persist expired cleanup: %s"
-          msg
-  in
-  active
+  if List.length active <> List.length entries then
+    match write_pending_confirms config active with
+    | Ok () -> Ok active
+    | Error msg ->
+      Error
+        (Printf.sprintf
+           "failed to persist expired pending-confirm cleanup: %s"
+           msg)
+  else Ok active
+
+let read_pending_confirms config : pending_confirm list =
+  match read_pending_confirms_result config with
+  | Ok entries -> entries
+  | Error msg ->
+    Log.Misc.warn "[operator_pending_confirm] %s" msg;
+    []
 
 let upsert_pending_confirm config entry =
-  let remaining =
-    read_pending_confirms config
-    |> List.filter (fun existing -> not (String.equal existing.token entry.token))
-  in
-  write_pending_confirms config (entry :: remaining)
+  match read_pending_confirms_result config with
+  | Error _ as error -> error
+  | Ok entries ->
+    let remaining =
+      entries
+      |> List.filter (fun existing -> not (String.equal existing.token entry.token))
+    in
+    write_pending_confirms config (entry :: remaining)
 
 let remove_pending_confirm config token =
-  let remaining =
-    read_pending_confirms config
-    |> List.filter (fun existing -> not (String.equal existing.token token))
-  in
-  write_pending_confirms config remaining
+  match read_pending_confirms_result config with
+  | Error _ as error -> error
+  | Ok entries ->
+    let remaining =
+      entries
+      |> List.filter (fun existing -> not (String.equal existing.token token))
+    in
+    write_pending_confirms config remaining
 
 let remove_pending_confirms_by_target config ~target_type ~target_id =
   let all = raw_pending_confirms config in

@@ -78,6 +78,10 @@ let record_tick_started ~now =
     state := { !state with tick_in_flight = true; last_tick_started_at = Some now })
 ;;
 
+(* TEL-OK: this module is a pure process-local projection over
+   [Schedule_runner.tick_result]. The server maintenance loop owns concrete Log
+   and Otel_metric_store emission at the same tick record call sites, while
+   [/health?full=1] reads this snapshot for the structured health surface. *)
 let tick_counts_of_result
       ~(wake_enqueue_counts : wake_enqueue_counts)
       (result : Schedule_runner.tick_result)

@@ -8,6 +8,13 @@ let log_server_fiber_crash =
 
 let schedule_runner_interval_sec = Server_schedule_runner_policy.interval_sec
 
+let record_schedule_runner_tick_outcome outcome =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_schedule_runner_tick_outcomes
+    ~labels:[ "outcome", outcome ]
+    ()
+;;
+
 (* Resolve the provider config for the Memory OS per-keeper consolidation pass.
    Env var takes precedence; otherwise inherit the librarian runtime so the
    consolidation LLM uses the same JSON-capable model the librarian uses.
@@ -208,6 +215,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                ~started_at
                ~finished_at
                result;
+             record_schedule_runner_tick_outcome "ok";
              if result.Schedule_runner.emitted <> []
                 || result.rescheduled > 0
                 || result.dispatches <> []
@@ -222,6 +230,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              let finished_at = Time_compat.now () in
              let error = Schedule_runner.runner_error_to_string err in
              Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
+             record_schedule_runner_tick_outcome "error";
              Log.Server.warn "schedule_runner: tick failed: %s" error
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -229,6 +238,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            let finished_at = Time_compat.now () in
            let error = Printexc.to_string exn in
            Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
+           record_schedule_runner_tick_outcome "crash";
            Log.Server.warn "schedule_runner: tick crashed: %s" error);
         Eio.Time.sleep clock schedule_runner_interval_sec;
         loop ()

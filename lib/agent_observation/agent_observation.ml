@@ -251,11 +251,157 @@ let register_turn_event_sink sink = Atomic.set turn_event_sink sink
 let register_write_region_sink sink = Atomic.set write_region_sink sink
 let register_annotation_sink sink = Atomic.set annotation_sink sink
 
-let emit_tool_event event = Atomic.get tool_event_sink event
-let emit_pr_event event = Atomic.get pr_event_sink event
-let emit_turn_event event = Atomic.get turn_event_sink event
-let emit_write_region_event event = Atomic.get write_region_sink event
-let emit_annotation_request request = Atomic.get annotation_sink request
+(* ── Observation snapshot accumulator (task-1686) ──────────────────── *)
+
+type snapshot =
+  { mutable tool_events : tool_event list
+  ; mutable pr_events : pr_event list
+  ; mutable turn_events : turn_event list
+  ; mutable write_regions : write_region_event list
+  ; mutable annotations : annotation_request list
+  }
+
+let current_snapshot =
+  { tool_events = []
+  ; pr_events = []
+  ; turn_events = []
+  ; write_regions = []
+  ; annotations = []
+  }
+;;
+
+let partition_to_json = function
+  | By_url slug -> `Assoc [ ("type", `String "By_url"); ("slug", `String slug) ]
+  | No_canonical_url -> `String "No_canonical_url"
+  | Unmatched -> `String "Unmatched"
+  | Base_unresolved -> `String "Base_unresolved"
+  | Legacy_default -> `String "Legacy_default"
+;;
+
+let tool_event_to_json (e : tool_event) =
+  `Assoc
+    [ ("base_path", `String e.base_path)
+    ; ("partition", partition_to_json e.partition)
+    ; ("tool_name", `String e.tool_name)
+    ; ("keeper_id", `String e.keeper_id)
+    ; ("turn_id", `String e.turn_id)
+    ; ("outcome", `String e.outcome)
+    ; ("duration_ms", `Float e.duration_ms)
+    ]
+;;
+
+let pr_event_to_json (e : pr_event) =
+  `Assoc
+    [ ("base_path", `String e.base_path)
+    ; ("partition", partition_to_json e.partition)
+    ; ("keeper_id", `String e.keeper_id)
+    ; ("tool_name", `String e.tool_name)
+    ; ("success", `Bool e.success)
+    ]
+;;
+
+let turn_event_to_json (e : turn_event) =
+  `Assoc
+    [ ("base_path", `String e.base_path)
+    ; ("partition", partition_to_json e.partition)
+    ; ("turn_id", `String e.turn_id)
+    ; ("keeper_id", `String e.keeper_id)
+    ; ("phase", `String e.phase)
+    ; ("timestamp_ms", `Int (Int64.to_int e.timestamp_ms))
+    ]
+;;
+
+let write_region_to_json (e : write_region_event) =
+  `Assoc
+    [ ("file_path", `String e.file_path)
+    ; ("line_start", `Int e.line_start)
+    ; ("line_end", `Int e.line_end)
+    ; ("keeper_id", `String e.keeper_id)
+    ; ("partition", partition_to_json e.partition)
+    ]
+;;
+
+let annotation_to_json (a : annotation_request) =
+  `Assoc
+    [ ("file_path", `String a.file_path)
+    ; ("line_start", `Int a.line_start)
+    ; ("line_end", `Int a.line_end)
+    ; ("keeper_id", `String a.keeper_id)
+    ; ("kind", `String (annotation_kind_to_string a.kind))
+    ; ("content", `String a.content)
+    ; ("partition", partition_to_json a.partition)
+    ]
+;;
+
+let snapshot_to_json (snap : snapshot) =
+  `Assoc
+    [ ("tool_events", `List (List.map tool_event_to_json snap.tool_events))
+    ; ("pr_events", `List (List.map pr_event_to_json snap.pr_events))
+    ; ("turn_events", `List (List.map turn_event_to_json snap.turn_events))
+    ; ("write_regions", `List (List.map write_region_to_json snap.write_regions))
+    ; ("annotations", `List (List.map annotation_to_json snap.annotations))
+    ; ( "summary"
+      , `Assoc
+          [ ("tool_event_count", `Int (List.length snap.tool_events))
+          ; ("pr_event_count", `Int (List.length snap.pr_events))
+          ; ("turn_event_count", `Int (List.length snap.turn_events))
+          ; ("write_region_count", `Int (List.length snap.write_regions))
+          ; ("annotation_count", `Int (List.length snap.annotations))
+          ] )
+    ]
+;;
+
+let take_snapshot () =
+  let snap =
+    { tool_events = List.rev current_snapshot.tool_events
+    ; pr_events = List.rev current_snapshot.pr_events
+    ; turn_events = List.rev current_snapshot.turn_events
+    ; write_regions = List.rev current_snapshot.write_regions
+    ; annotations = List.rev current_snapshot.annotations
+    }
+  in
+  current_snapshot.tool_events <- [];
+  current_snapshot.pr_events <- [];
+  current_snapshot.turn_events <- [];
+  current_snapshot.write_regions <- [];
+  current_snapshot.annotations <- [];
+  snap
+;;
+
+let peek_snapshot () =
+  { tool_events = List.rev current_snapshot.tool_events
+  ; pr_events = List.rev current_snapshot.pr_events
+  ; turn_events = List.rev current_snapshot.turn_events
+  ; write_regions = List.rev current_snapshot.write_regions
+  ; annotations = List.rev current_snapshot.annotations
+  }
+;;
+
+(* Emit wrappers: accumulate into snapshot + forward to registered sink. *)
+let emit_tool_event event =
+  current_snapshot.tool_events <- event :: current_snapshot.tool_events;
+  Atomic.get tool_event_sink event
+;;
+
+let emit_pr_event event =
+  current_snapshot.pr_events <- event :: current_snapshot.pr_events;
+  Atomic.get pr_event_sink event
+;;
+
+let emit_turn_event event =
+  current_snapshot.turn_events <- event :: current_snapshot.turn_events;
+  Atomic.get turn_event_sink event
+;;
+
+let emit_write_region_event event =
+  current_snapshot.write_regions <- event :: current_snapshot.write_regions;
+  Atomic.get write_region_sink event
+;;
+
+let emit_annotation_request request =
+  current_snapshot.annotations <- request :: current_snapshot.annotations;
+  Atomic.get annotation_sink request
+;;
 
 let reset_for_testing () =
   Atomic.set tool_event_sink noop_tool_event_sink;

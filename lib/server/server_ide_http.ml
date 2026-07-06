@@ -9,6 +9,37 @@ open Server_utils
 open Masc_domain
 module Http = Http_server_eio
 
+(* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
+
+(** GET /api/v1/ide/observations/snapshot — returns accumulated observation
+    data (tool events, PR events, turn events, write regions, annotations)
+    from {!Agent_observation.peek_snapshot}.
+
+    Usage: ?take=true resets accumulators after read (destructive),
+           default is non-destructive peek.
+
+    Callers: IDE Observation Plane frontend for real-time dashboard. *)
+
+let observation_snapshot_handler request reqd =
+  let uri = Http.Request.uri request in
+  let take =
+    match Uri.get_query_param uri "take" with
+    | Some "true" -> true
+    | _ -> false
+  in
+  let snapshot =
+    if take then Agent_observation.take_snapshot ()
+    else Agent_observation.peek_snapshot ()
+  in
+  let json = Agent_observation.snapshot_to_json snapshot in
+  let body = json_ok json in
+  let headers =
+    Http.Response.Headers.of_list
+      [ ("content-type", "application/json"); ("x-observation-mode", if take then "take" else "peek") ]
+  in
+  Http.respond ~headers ~body:(Yojson.Safe.to_string body) reqd
+;;
+
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
@@ -414,6 +445,7 @@ let build_cursor_snapshot state uri ~limit ~offset =
 let add_routes router =
   Ide_bridge.install_agent_observation_sinks ();
   router
+  |> Http.Router.get "/api/v1/ide/observations/snapshot" observation_snapshot_handler
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->

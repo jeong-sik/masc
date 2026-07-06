@@ -1068,6 +1068,27 @@ describe('ScheduledAutomationPanel', () => {
     }
   })
 
+  it('renders an explicit contract gap when live supported evidence is absent', () => {
+    const auto = payloadSupportAutomation()
+    delete auto.live_supported_non_terminal_evidence
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      const evidence = container.querySelector('[data-schedule-live-supported-evidence="projection_contract_missing"]')
+      expect(evidence).not.toBeNull()
+      expect(evidence?.getAttribute('data-schedule-live-supported-count')).toBe('0')
+      expect(evidence?.getAttribute('data-schedule-live-supported-source')).toBe('schedule_store')
+      expect(evidence?.getAttribute('data-schedule-live-supported-schema')).toBe('missing')
+      expect(evidence?.textContent).toContain('projection contract missing')
+      expect(evidence?.textContent).toContain('live_supported_non_terminal_evidence')
+      expect(evidence?.textContent).toContain('matched_supported_non_terminal')
+      expect(evidence?.textContent).toContain('unproven')
+      expect(evidence?.textContent).toContain('3')
+    }
+  })
+
   it('renders matched live supported non-terminal evidence and opens matched rows', async () => {
     const auto = automation([
       request({

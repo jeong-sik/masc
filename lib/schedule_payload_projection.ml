@@ -42,20 +42,67 @@ let trim_nonempty value =
   if String.equal trimmed "" then None else Some trimmed
 ;;
 
+let keeper_wake_kind = "masc.keeper_wake"
+
+type keeper_wake_urgency =
+  | Keeper_wake_immediate
+  | Keeper_wake_normal
+  | Keeper_wake_low
+
+let default_keeper_wake_urgency = Keeper_wake_normal
+
+type keeper_wake_urgency_spec =
+  { label : string
+  ; value : keeper_wake_urgency
+  }
+
+let keeper_wake_urgencies =
+  [ { label = "immediate"; value = Keeper_wake_immediate }
+  ; { label = "normal"; value = Keeper_wake_normal }
+  ; { label = "low"; value = Keeper_wake_low }
+  ]
+;;
+
+let keeper_wake_urgency_to_string = function
+  | Keeper_wake_immediate -> "immediate"
+  | Keeper_wake_normal -> "normal"
+  | Keeper_wake_low -> "low"
+;;
+
+let keeper_wake_urgency_of_string value =
+  match List.find_opt (fun spec -> String.equal spec.label value) keeper_wake_urgencies with
+  | Some spec -> Ok spec.value
+  | None -> Error (Printf.sprintf "unknown urgency: %s" value)
+;;
+
+let valid_keeper_wake_target_name = Safe_identifier.is_portable_name
+
+let keeper_wake_target_name_error ~field =
+  Safe_identifier.portable_name_error ~field
+;;
+
 let known_kind_to_string = function
   | Board_post -> Schedule_supported_kinds.board_post
-  | Keeper_wake -> Schedule_supported_kinds.keeper_wake
+  | Keeper_wake -> keeper_wake_kind
 ;;
 
 let dispatch_tool_name = function
   | Board_post -> Tool_name.Board_name.(to_string Board_post)
-  | Keeper_wake -> Schedule_supported_kinds.keeper_wake
+  | Keeper_wake -> keeper_wake_kind
 ;;
 
 let known_kinds = [ Board_post; Keeper_wake ]
 let supported_payload_kinds = List.map known_kind_to_string known_kinds
 let board_post_kind = known_kind_to_string Board_post
-let keeper_wake_kind = known_kind_to_string Keeper_wake
+
+let supported_list_string () = String.concat ", " supported_payload_kinds
+
+let unsupported_error kind =
+  Printf.sprintf
+    "unsupported schedule payload kind: %s; supported: %s"
+    kind
+    (supported_list_string ())
+;;
 
 let support_status_to_string = function
   | Supported -> "supported"
@@ -67,7 +114,7 @@ let creation_rejection_message = function
   | Creation_invalid_payload msg -> msg
   | Creation_invalid_supported_payload (_, msg) -> msg
   | Creation_unsupported_side_effecting_kind raw_kind ->
-    Schedule_supported_kinds.unsupported_error raw_kind
+    unsupported_error raw_kind
 ;;
 
 let dispatch_rejection_message = function
@@ -206,18 +253,15 @@ let validate_keeper_wake_body body =
   match assoc_string "keeper_name" body, assoc_string "message" body with
   | None, _ -> Error (keeper_wake_kind ^ " payload requires non-empty body.keeper_name")
   | _, None -> Error (keeper_wake_kind ^ " payload requires non-empty body.message")
-  | Some keeper_name, Some _
-    when not (Schedule_supported_kinds.valid_keeper_wake_target_name keeper_name) ->
+  | Some keeper_name, Some _ when not (valid_keeper_wake_target_name keeper_name) ->
     Error
-      (Schedule_supported_kinds.keeper_wake_target_name_error
-         ~field:(keeper_wake_kind ^ " payload body.keeper_name"))
+      (keeper_wake_target_name_error ~field:(keeper_wake_kind ^ " payload body.keeper_name"))
   | Some _, Some _ ->
     (match optional_string_field "urgency" body with
      | Error msg -> Error msg
      | Ok None -> Ok ()
      | Ok (Some raw) ->
-       Schedule_supported_kinds.keeper_wake_urgency_of_string raw
-       |> Result.map (fun _ -> ()))
+       keeper_wake_urgency_of_string raw |> Result.map (fun _ -> ()))
 ;;
 
 let validate_keeper_wake_for_creation ~risk_class view =

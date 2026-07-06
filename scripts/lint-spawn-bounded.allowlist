@@ -33,7 +33,7 @@ lib/process/process_eio.ml:580
 # run_argv_pipeline_with_status_split.
 lib/process/process_eio.ml:1160
 
-# lib/server/lsp_process_manager.ml:170 — LSP child process. Lifetime is
+# lib/server/lsp_process_manager.ml:192 — LSP child process. Lifetime is
 # bound to the LSP session switch; idle eviction handled by the LSP
 # manager itself. Bounded by session scope, not by per-call timeout.
-lib/server/lsp_process_manager.ml:170
+lib/server/lsp_process_manager.ml:192

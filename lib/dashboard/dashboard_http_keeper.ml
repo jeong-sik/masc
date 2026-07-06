@@ -176,7 +176,7 @@ let degraded_keeper_dashboard_row
 
 let keeper_dashboard_read_error_row ~name ~source message =
   let read_error = keeper_name_read_error_json ~source ~keeper:name message in
-  `Assoc
+  Tool_args.error_assoc
     [
       ("name", `String name);
       ("agent_name", `Null);
@@ -187,7 +187,6 @@ let keeper_dashboard_read_error_row ~name ~source message =
       ("active_goal_ids", `List []);
       ("phase", `String "read_error");
       ("pipeline_stage", `String "read_error");
-      ("status", `String "error");
       ("read_error", read_error);
       ( "trust",
         `Assoc

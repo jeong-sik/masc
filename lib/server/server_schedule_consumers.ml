@@ -55,24 +55,22 @@ let optional_keeper_wake_urgency_field name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
   | Some (`String value) ->
-    let* urgency =
-      Schedule_supported_kinds.keeper_wake_urgency_of_string (String.trim value)
-    in
+    let* urgency = Schedule_payload_projection.keeper_wake_urgency_of_string (String.trim value) in
     Ok (Some urgency)
   | Some _ -> Error ("expected string field: " ^ name)
 ;;
 
 let keeper_name_field name fields =
   let* value = string_field name fields in
-  if Schedule_supported_kinds.valid_keeper_wake_target_name value
+  if Schedule_payload_projection.valid_keeper_wake_target_name value
   then Ok value
-  else Error (Schedule_supported_kinds.keeper_wake_target_name_error ~field:name)
+  else Error (Schedule_payload_projection.keeper_wake_target_name_error ~field:name)
 ;;
 
 let keeper_queue_urgency_of_schedule_urgency = function
-  | Schedule_supported_kinds.Keeper_wake_immediate -> Keeper_event_queue.Immediate
-  | Schedule_supported_kinds.Keeper_wake_normal -> Keeper_event_queue.Normal
-  | Schedule_supported_kinds.Keeper_wake_low -> Keeper_event_queue.Low
+  | Schedule_payload_projection.Keeper_wake_immediate -> Keeper_event_queue.Immediate
+  | Schedule_payload_projection.Keeper_wake_normal -> Keeper_event_queue.Normal
+  | Schedule_payload_projection.Keeper_wake_low -> Keeper_event_queue.Low
 ;;
 
 type keeper_wake_reaction_ledger_status =
@@ -273,11 +271,11 @@ let body_keeper_name payload =
   let* keeper_name =
     Schedule_payload_projection.body_required_string payload "keeper_name"
   in
-  if Schedule_supported_kinds.valid_keeper_wake_target_name keeper_name
+  if Schedule_payload_projection.valid_keeper_wake_target_name keeper_name
   then Ok keeper_name
   else
     Error
-      (Schedule_supported_kinds.keeper_wake_target_name_error ~field:"keeper_name")
+      (Schedule_payload_projection.keeper_wake_target_name_error ~field:"keeper_name")
 ;;
 
 let body_keeper_wake_urgency payload =
@@ -285,7 +283,7 @@ let body_keeper_wake_urgency payload =
   match raw with
   | None -> Ok None
   | Some value ->
-    let* urgency = Schedule_supported_kinds.keeper_wake_urgency_of_string value in
+    let* urgency = Schedule_payload_projection.keeper_wake_urgency_of_string value in
     Ok (Some urgency)
 ;;
 
@@ -311,7 +309,7 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     urgency
     (* DET-OK: absent masc.keeper_wake urgency is the schema-v1 default;
        invalid or unknown urgency strings are rejected above. *)
-    |> Option.value ~default:Schedule_supported_kinds.default_keeper_wake_urgency
+    |> Option.value ~default:Schedule_payload_projection.default_keeper_wake_urgency
     |> keeper_queue_urgency_of_schedule_urgency
   in
   let wake : Keeper_event_queue.scheduled_wake =

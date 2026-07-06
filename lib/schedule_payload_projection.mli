@@ -40,6 +40,18 @@ type support_summary =
 val known_kind_to_string : known_kind -> string
 val dispatch_tool_name : known_kind -> string
 val supported_payload_kinds : string list
+
+type keeper_wake_urgency =
+  | Keeper_wake_immediate
+  | Keeper_wake_normal
+  | Keeper_wake_low
+
+val default_keeper_wake_urgency : keeper_wake_urgency
+val keeper_wake_urgency_to_string : keeper_wake_urgency -> string
+val keeper_wake_urgency_of_string : string -> (keeper_wake_urgency, string) result
+val valid_keeper_wake_target_name : string -> bool
+val keeper_wake_target_name_error : field:string -> string
+
 val support_status_to_string : support_status -> string
 val creation_rejection_message : creation_rejection -> string
 val dispatch_rejection_message : dispatch_rejection -> string

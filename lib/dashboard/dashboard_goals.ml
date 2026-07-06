@@ -581,10 +581,9 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
         |> List.filter (fun (goal : Goal_store.goal) -> goal.status = Goal_store.Active)
         |> List.length
       in
-      `Assoc
+      Tool_args.ok_assoc
         [
           ("generated_at", `String (Masc_domain.now_iso ()));
-          ("status", `String "ok");
           ("goal_store_known", `Bool true);
           ("goal_store_read_error", `Null);
           ("goal_task_links_known", `Bool true);

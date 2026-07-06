@@ -842,7 +842,7 @@ let test_dispatch_create_rejects_keeper_wake_invalid_target_name () =
        (Option.map Tool_result.tool_failure_class_to_string
           (Tool_result.failure_class result));
      check string "message"
-       (Schedule_supported_kinds.keeper_wake_target_name_error
+       (Schedule_payload_projection.keeper_wake_target_name_error
           ~field:"masc.keeper_wake payload body.keeper_name")
        (Tool_result.message result));
   let state = Schedule_store.read_state config in
@@ -943,7 +943,7 @@ let test_dispatch_create_rejects_board_payload_without_content () =
 ;;
 
 (* A side-effecting payload kind the consumer cannot dispatch must be rejected
-   at creation. The supported set is the SSOT in schedule_supported_kinds.ml;
+   at creation. The supported set is the SSOT in Schedule_payload_projection;
    read-only/reminder kinds stay opaque (allowed), only side-effecting work is
    gated. *)
 let test_dispatch_create_rejects_unsupported_side_effecting_kind () =
@@ -975,7 +975,9 @@ let test_dispatch_create_rejects_unsupported_side_effecting_kind () =
        (Option.map Tool_result.tool_failure_class_to_string
           (Tool_result.failure_class result));
      check string "message"
-       (Schedule_supported_kinds.unsupported_error "orphan_auto_release")
+       (Schedule_payload_projection.creation_rejection_message
+          (Schedule_payload_projection.Creation_unsupported_side_effecting_kind
+             "orphan_auto_release"))
        (Tool_result.message result));
   let state = Schedule_store.read_state config in
   check int "no schedule persisted for unsupported kind" 0
@@ -987,7 +989,11 @@ let test_dispatch_create_rejects_unsupported_side_effecting_kind () =
 
 let test_payload_registry_matches_supported_kind_ssot () =
   check (list string) "registry uses supported-kind SSOT"
-    Schedule_supported_kinds.supported
+    [ Schedule_payload_projection.known_kind_to_string
+        Schedule_payload_projection.Board_post
+    ; Schedule_payload_projection.known_kind_to_string
+        Schedule_payload_projection.Keeper_wake
+    ]
     Schedule_payload_projection.supported_payload_kinds;
   check string "board-post variant string" Schedule_supported_kinds.board_post
     (Schedule_payload_projection.known_kind_to_string

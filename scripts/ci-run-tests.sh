@@ -36,6 +36,9 @@ CI_TEST_RPC_RETRY_DONE=0
 CI_TEST_ALLOW_FLAKY_RETRY="${CI_TEST_ALLOW_FLAKY_RETRY:-1}"
 CI_TEST_FLAKY_RETRY_DONE=0
 CI_TEST_DISK_FULL_GUIDANCE_DONE=0
+CI_TEST_DISK_PRESSURE_DONE=0
+CI_TEST_DISK_MIN_AVAILABLE_MB="${CI_TEST_DISK_MIN_AVAILABLE_MB:-1024}"
+CI_TEST_DISK_CHECK_SEC="${CI_TEST_DISK_CHECK_SEC:-10}"
 CI_TEST_ISOLATED_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR:-.ci_build}"
 CI_CONTRACT_HARNESS_ENABLED="${CI_CONTRACT_HARNESS_ENABLED:-0}"
 CI_CONTRACT_HARNESS_CMD="${CI_CONTRACT_HARNESS_CMD:-scripts/harness/contract/run_all.sh}"
@@ -135,6 +138,39 @@ fi
 if [[ -z "${HEARTBEAT_SEC}" || "${HEARTBEAT_SEC}" -le 0 ]]; then
   HEARTBEAT_SEC=30
 fi
+if [[ -z "${CI_TEST_DISK_MIN_AVAILABLE_MB}" || "${CI_TEST_DISK_MIN_AVAILABLE_MB}" -lt 0 ]]; then
+  CI_TEST_DISK_MIN_AVAILABLE_MB=1024
+fi
+if [[ -z "${CI_TEST_DISK_CHECK_SEC}" || "${CI_TEST_DISK_CHECK_SEC}" -le 0 ]]; then
+  CI_TEST_DISK_CHECK_SEC=10
+fi
+
+disk_available_mb() {
+  local path="${1:-${DUNE_SOURCEROOT}}"
+  df -Pm "${path}" 2>/dev/null \
+    | awk 'NR == 2 { print $4; found=1 } END { if (!found) print "" }'
+}
+
+disk_pressure_detected() {
+  [[ "${CI_TEST_DISK_MIN_AVAILABLE_MB}" -gt 0 ]] || return 1
+
+  local avail_mb=""
+  avail_mb="$(disk_available_mb "${DUNE_SOURCEROOT}")"
+  [[ "${avail_mb}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${avail_mb}" -le "${CI_TEST_DISK_MIN_AVAILABLE_MB}" ]]
+}
+
+disk_pressure_detail() {
+  local avail_mb=""
+  avail_mb="$(disk_available_mb "${DUNE_SOURCEROOT}")"
+  if [[ "${avail_mb}" =~ ^[0-9]+$ ]]; then
+    printf 'path=%s available_mb=%s min_available_mb=%s' \
+      "${DUNE_SOURCEROOT}" "${avail_mb}" "${CI_TEST_DISK_MIN_AVAILABLE_MB}"
+  else
+    printf 'path=%s available_mb=unknown min_available_mb=%s' \
+      "${DUNE_SOURCEROOT}" "${CI_TEST_DISK_MIN_AVAILABLE_MB}"
+  fi
+}
 
 diag_dump() {
   local reason="${1:-unknown}"
@@ -269,24 +305,31 @@ agent_sdk_interface_mismatch_detected() {
     "${TEST_LOG_FILE}"
 }
 
-disk_full_detected() {
+filtered_test_log_contains() {
+  local pattern="${1}"
+  local filtered_log=""
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
+  filtered_log="$(mktemp_ci_log)"
   grep -Ev '(^|[[:space:]])\[OK\][[:space:]]' "${TEST_LOG_FILE}" \
-    | grep -Eiq \
-      -e 'No space left on device|dune_trace_write[(][)]|ENOSPC' \
-      -e '##\[warning\].*(You are running out of disk space|Free space left:[[:space:]]*[0-9]+[[:space:]]*(MB|MiB))'
+    > "${filtered_log}" || true
+  grep -Eiq "${pattern}" "${filtered_log}"
+  local status=$?
+  rm -f "${filtered_log}"
+  return "${status}"
+}
+
+disk_full_detected() {
+  filtered_test_log_contains \
+    'No space left on device|dune_trace_write[(][)]|ENOSPC|##\[warning\].*(You are running out of disk space|Free space left:[[:space:]]*[0-9]+[[:space:]]*(MB|MiB))'
 }
 
 deterministic_test_failure_detected() {
-  [[ -f "${TEST_LOG_FILE}" ]] || return 1
-  grep -Ev '(^|[[:space:]])\[OK\][[:space:]]' "${TEST_LOG_FILE}" \
-    | grep -Eiq '\[FAIL\]|[[:digit:]]+ failure!|Test Failed|ASSERT '
+  filtered_test_log_contains '\[FAIL\]|[[:digit:]]+ failure!|Test Failed|ASSERT '
 }
 
 native_link_failure_detected() {
-  [[ -f "${TEST_LOG_FILE}" ]] || return 1
-  grep -Ev '(^|[[:space:]])\[OK\][[:space:]]' "${TEST_LOG_FILE}" \
-    | grep -Eiq 'collect2: error: ld returned 1 exit status|Error: Error during linking [(]exit code [[:digit:]]+[)]|/usr/bin/ld: final link failed'
+  filtered_test_log_contains \
+    'collect2: error: ld returned 1 exit status|Error: Error during linking [(]exit code [[:digit:]]+[)]|/usr/bin/ld: final link failed'
 }
 
 log_disk_full_guidance() {
@@ -334,6 +377,8 @@ run_with_timeout() {
   local deadline=0
   local status=0
   local kill_grace_sec=5
+  local next_disk_check
+  next_disk_check=$(( $(date +%s) + CI_TEST_DISK_CHECK_SEC ))
 
   ACTIVE_CMD_PID=""
   ACTIVE_CMD_PGID=""
@@ -355,6 +400,8 @@ run_with_timeout() {
   fi
 
   while kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; do
+    local now_epoch
+    now_epoch="$(date +%s)"
     if [[ "${deadline}" -gt 0 ]] && [[ "$(date +%s)" -ge "${deadline}" ]]; then
       CI_LAST_TIMEOUT_DIAG_DONE=1
       diag_dump "timeout"
@@ -372,6 +419,29 @@ run_with_timeout() {
       ACTIVE_CMD_PGID=""
       ACTIVE_LOG_TAIL_PID=""
       return 124
+    fi
+    if [[ "${now_epoch}" -ge "${next_disk_check}" ]]; then
+      next_disk_check=$((now_epoch + CI_TEST_DISK_CHECK_SEC))
+      if disk_pressure_detected; then
+        CI_TEST_DISK_PRESSURE_DONE=1
+        log_line "[ci-run] ERROR: disk pressure while running test command: $(disk_pressure_detail)"
+        log_disk_full_guidance
+        diag_dump "disk_pressure"
+        kill_active_cmd_tree TERM
+        sleep "${kill_grace_sec}"
+        if kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
+          kill_active_cmd_tree KILL
+        fi
+        wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
+        if [[ -n "${ACTIVE_LOG_TAIL_PID}" ]]; then
+          kill "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
+          wait "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
+        fi
+        ACTIVE_CMD_PID=""
+        ACTIVE_CMD_PGID=""
+        ACTIVE_LOG_TAIL_PID=""
+        return 75
+      fi
     fi
     sleep 1
   done
@@ -418,6 +488,7 @@ if test_cmd_needs_dune_sanitization; then
   log_line "[ci-run] sanitized_command: $(effective_test_cmd)"
 fi
 log_line "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC} heartbeat_sec=${HEARTBEAT_SEC}"
+log_line "[ci-run] disk_min_available_mb=${CI_TEST_DISK_MIN_AVAILABLE_MB} disk_check_sec=${CI_TEST_DISK_CHECK_SEC}"
 log_line "[ci-run] started_at=$(iso_now)"
 log_line "[ci-run] log_file=${TEST_LOG_FILE}"
 log_line "[ci-run] source_root=${DUNE_SOURCEROOT}"
@@ -436,10 +507,14 @@ set -e
 if [[ "${status}" -ne 0 ]] && disk_full_detected; then
   log_disk_full_guidance
 fi
+if [[ "${status}" -ne 0 ]] && [[ "${CI_TEST_DISK_PRESSURE_DONE}" -eq 1 ]]; then
+  log_disk_full_guidance
+fi
 
 if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_ALLOW_RPC_RETRY}" = "1" ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_DISK_PRESSURE_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
   && ! test_cmd_has_explicit_build_dir \
   && rpc_server_not_running_detected; then
@@ -458,6 +533,7 @@ fi
 if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_ALLOW_CLEAN_RETRY}" = "1" ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_DISK_PRESSURE_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
   && agent_sdk_interface_mismatch_detected; then
   run_agent_sdk_clean_retry
@@ -481,6 +557,7 @@ if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_DISK_PRESSURE_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
   && deterministic_test_failure_detected \
   && ! disk_full_detected; then
@@ -492,6 +569,7 @@ if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_DISK_PRESSURE_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
   && native_link_failure_detected \
   && ! disk_full_detected; then
@@ -503,6 +581,7 @@ if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && [[ "${CI_TEST_DISK_PRESSURE_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
   && ! deterministic_test_failure_detected \
   && ! native_link_failure_detected \
@@ -532,7 +611,7 @@ if [[ "${status}" -ne 0 ]] \
 fi
 
 if [[ "${status}" -ne 0 ]]; then
-  if disk_full_detected; then
+  if [[ "${CI_TEST_DISK_PRESSURE_DONE}" -eq 1 ]] || disk_full_detected; then
     log_disk_full_guidance
   fi
   diag_dump "nonzero_exit_${status}"

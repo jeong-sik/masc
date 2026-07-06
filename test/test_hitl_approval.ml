@@ -1789,24 +1789,34 @@ let test_callback_hitl_disabled_soft_forbidden_requires_approval () =
         in
         let decision = cb ~tool_name:"masc_status" ~input in
         result := Some decision);
-      yield_until (fun () -> Option.is_some !result);
+      yield_until (fun () ->
+        Option.is_some !result
+        || Option.is_some (pending_id_for_keeper ~keeper_name));
       let queued = Option.is_some (pending_id_for_keeper ~keeper_name) in
+      (match pending_id_for_keeper ~keeper_name with
+       | Some id ->
+         (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+          | Ok () -> ()
+          | Error err ->
+            Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err))
+       | None -> ());
+      yield_until (fun () -> Option.is_some !result);
       Alcotest.(check bool)
-        "soft destructive op is not queued when HITL is disabled"
-        false
+        "soft destructive op still queues when HITL threshold is disabled"
+        true
         queued;
       Alcotest.(check int)
-        "pending count remains unchanged"
+        "pending count restored after operator resolution"
         initial_pending
         (AQ.pending_count ());
       match !result with
       | Some Agent_sdk.Hooks.Approve -> ()
       | Some Agent_sdk.Hooks.Reject reason ->
-        Alcotest.fail ("expected auto-approved soft match, got reject: " ^ reason)
+        Alcotest.fail ("expected operator-approved soft match, got reject: " ^ reason)
       | Some Agent_sdk.Hooks.Edit _ ->
-        Alcotest.fail "expected auto-approved soft match, got edit"
+        Alcotest.fail "expected operator-approved soft match, got edit"
       | None ->
-        Alcotest.fail "HITL-disabled soft-forbidden callback did not return")
+        Alcotest.fail "HITL-disabled soft-forbidden callback did not return after approval")
 
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun base_path ->

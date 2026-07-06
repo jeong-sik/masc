@@ -676,6 +676,12 @@ let is_completion_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
 let degraded_reason_allows_candidate_cycle = function
   | Hard_quota
   | Rate_limit
+  (* Capacity_backpressure: provider retry_after is minutes-long, so cycling
+     the same candidate pool at the turn retry cadence just hammers the
+     provider and loops forever (incidents 2026-05-21, 2026-07-06, #23373).
+     Cap rotation here; the keeper pauses after candidates are exhausted and
+     retries on a later turn once the provider actually recovers. *)
+  | Capacity_backpressure
   | Read_only_no_progress
   | Empty_no_progress
   | Thinking_only_no_progress -> false
@@ -685,7 +691,6 @@ let degraded_reason_allows_candidate_cycle = function
   | Turn_timeout
   | Runtime_candidates_filtered
   | Runtime_exhausted
-  | Capacity_backpressure
   | Server_error
   | Auth_error -> true
 

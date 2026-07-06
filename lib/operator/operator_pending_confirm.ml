@@ -151,11 +151,14 @@ let decode_pending_confirm_entries entries =
   loop 0 [] entries
 
 let raw_pending_confirms_result config : (pending_confirm list, string) result =
-  match Workspace_utils.read_json_opt_result config (pending_confirms_path config) with
-  | Error msg -> Error (Printf.sprintf "pending confirms read failed: %s" msg)
-  | Ok None -> Ok []
-  | Ok (Some (`List entries)) -> decode_pending_confirm_entries entries
-  | Ok (Some _) -> Error "pending confirms decode failed: expected JSON list"
+  let path = pending_confirms_path config in
+  if not (Workspace_utils.path_exists config path)
+  then Ok []
+  else
+    match Workspace_utils.read_json_result config path with
+    | Error msg -> Error (Printf.sprintf "pending confirms read failed: %s" msg)
+    | Ok (`List entries) -> decode_pending_confirm_entries entries
+    | Ok _ -> Error "pending confirms decode failed: expected JSON list"
 
 let raw_pending_confirms config : pending_confirm list =
   match raw_pending_confirms_result config with

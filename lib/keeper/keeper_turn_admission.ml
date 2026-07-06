@@ -19,6 +19,7 @@ type slot_snapshot =
   ; snapshot_slot_created : bool
   ; snapshot_in_flight : in_flight_info option
   ; snapshot_waiting : int
+  ; snapshot_waiting_since : float option
   ; snapshot_waiting_cap : int
   ; snapshot_waiting_full : bool
   ; snapshot_rejected_chat_count : int
@@ -59,6 +60,7 @@ type slot =
        non-cooperative mutex is the right choice here. *)
   ; mutable info : in_flight_info option
   ; mutable waiting : int
+  ; mutable waiting_since : float option
   ; mutable rejected_chat_count : int
   }
 
@@ -82,6 +84,7 @@ let slot_for ~base_path ~keeper_name =
         ; state_mu = Stdlib.Mutex.create ()
         ; info = None
         ; waiting = 0
+        ; waiting_since = None
         ; rejected_chat_count = 0
         }
       in
@@ -139,6 +142,9 @@ let run_serialized ~base_path ~keeper_name f =
       if slot.waiting >= max_waiting_chat_requests
       then false
       else (
+        if slot.waiting = 0 then
+          (* NDT-OK: waiter age timestamp for observability only. *)
+          slot.waiting_since <- Some (Unix.gettimeofday ());
         slot.waiting <- slot.waiting + 1;
         true))
   in
@@ -152,7 +158,9 @@ let run_serialized ~base_path ~keeper_name f =
        counting as waiting once it holds the slot. *)
     Fun.protect
       ~finally:(fun () ->
-        Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting <- slot.waiting - 1))
+        Stdlib.Mutex.protect slot.state_mu (fun () ->
+          slot.waiting <- slot.waiting - 1;
+          if slot.waiting <= 0 then slot.waiting_since <- None))
       (fun () -> Eio.Mutex.lock slot.turn_mu);
     run_locked slot ~lane:Chat f)
 ;;
@@ -185,11 +193,19 @@ let chat_waiting ~base_path ~keeper_name =
   | Some slot -> waiting_count slot > 0
 ;;
 
+let chat_waiting_since ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
+  | None -> None
+  | Some slot -> Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting_since)
+;;
+
 let zero_snapshot ~keeper_name =
   { snapshot_keeper_name = keeper_name
   ; snapshot_slot_created = false
   ; snapshot_in_flight = None
   ; snapshot_waiting = 0
+  ; snapshot_waiting_since = None
   ; snapshot_waiting_cap = max_waiting_chat_requests
   ; snapshot_waiting_full = false
   ; snapshot_rejected_chat_count = 0
@@ -202,6 +218,7 @@ let snapshot_of_slot slot =
     ; snapshot_slot_created = true
     ; snapshot_in_flight = slot.info
     ; snapshot_waiting = slot.waiting
+    ; snapshot_waiting_since = slot.waiting_since
     ; snapshot_waiting_cap = max_waiting_chat_requests
     ; snapshot_waiting_full = slot.waiting >= max_waiting_chat_requests
     ; snapshot_rejected_chat_count = slot.rejected_chat_count

@@ -264,14 +264,14 @@ let turn_admission_rows ~base_path keeper_name =
       ; source = Turn_admission_waiting
       ; waiting_on = "chat"
       ; wake_producer = Keeper_turn_admission
-      ; since = None
+      ; since = snapshot.snapshot_waiting_since
       ; due_at = None
       ; next_action = "turn_slot_release"
       ; detail =
           `Assoc
             [ "waiting_lane", `String "chat"
-            ; "waiting_since", `Null
-            ; "waiting_since_iso", `Null
+            ; "waiting_since", float_json snapshot.snapshot_waiting_since
+            ; "waiting_since_iso", unix_iso_json snapshot.snapshot_waiting_since
             ; "chat_waiting_count", `Int snapshot.snapshot_waiting
             ; "chat_waiting_cap", `Int snapshot.snapshot_waiting_cap
             ; "chat_waiting_full", `Bool snapshot.snapshot_waiting_full

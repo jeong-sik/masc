@@ -162,6 +162,10 @@ and hitl_resolution_decision =
 and hitl_resolution = {
   approval_id : string;
   decision : hitl_resolution_decision;
+  channel : Keeper_continuation_channel.t;
+      (** RFC-0320: the connector this resolution should continue the
+          conversation on. [Unrouted] when no originating connector was
+          captured at approval-submission time. *)
 }
 (** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
     pending-approval queue entry; [decision] is the resolved label
@@ -169,7 +173,12 @@ and hitl_resolution = {
     re-evaluates from its own state once the approval leaves the queue, so the
     decision is not itself control flow. *)
 
-and connector_attention = { event_id : string }
+and connector_attention = {
+  event_id : string;
+  channel : Keeper_continuation_channel.t;
+      (** RFC-0320: the connector that raised this attention, so a woken keeper
+          replies into the same channel. [Unrouted] when unknown. *)
+}
 (** RFC-connector-ambient-attention-wake payload for [Connector_attention]:
     [event_id] is the pointer into [Keeper_external_attention] for the ambient
     message; content/surface are read from that store on the turn path. *)

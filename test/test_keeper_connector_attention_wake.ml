@@ -166,7 +166,13 @@ let test_connector_attention_codec_roundtrips () =
     { Q.post_id = "evt-77"
     ; urgency = Q.Normal
     ; arrived_at = 1.0
-    ; payload = Q.Connector_attention { event_id = "evt-77" }
+    ; payload =
+        Q.Connector_attention
+          { event_id = "evt-77"
+          ; channel =
+              Keeper_continuation_channel.Discord
+                { channel_id = "chan-77"; user_id = "user-77" }
+          }
     }
   in
   match Q.stimulus_of_yojson (Q.stimulus_to_yojson s) with

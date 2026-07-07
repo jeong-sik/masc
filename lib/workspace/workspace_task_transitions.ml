@@ -237,22 +237,22 @@ let transition_task_outcome_r
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
         let* () =
-          match action, new_status with
-          | Masc_domain.Submit_for_verification, Masc_domain.AwaitingVerification _
+          match action with
+          | Masc_domain.Submit_for_verification
             when String.length (String.trim notes) = 0 ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     "submit_for_verification requires non-empty notes describing the \
                      deliverable and evidence references"))
-          | ( Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Done_action
-            | Masc_domain.Cancel
-            | Masc_domain.Release
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification ), _ -> Ok ()
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel
+          | Masc_domain.Release
+          | Masc_domain.Submit_for_verification
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification -> Ok ()
         in
         (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =

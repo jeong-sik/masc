@@ -77,7 +77,7 @@ export function scheduledPendingApprovalCount(
   return Math.max(fromCounts, fromRequests)
 }
 
-function automationTone(status: string | null | undefined): StatusChipTone {
+export function automationTone(status: string | null | undefined): StatusChipTone {
   switch (normalized(status)) {
     case 'running':
     case 'scheduled':
@@ -165,7 +165,7 @@ function CountChip({ name, count }: { name: string; count: number }) {
   `
 }
 
-function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
+export function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
   if (request.recurrence_summary?.trim()) return request.recurrence_summary
   const recurrence = request.recurrence
   const kind = recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
@@ -1919,7 +1919,7 @@ function SchCard({
 }
 
 /** Detail overlay `.turn-overlay > .turn-drawer.sch-drawer` (audit P0 #4). */
-function SchDetail({
+export function SchDetail({
   request,
   onClose,
   onResolved,

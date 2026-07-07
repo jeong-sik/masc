@@ -40,6 +40,11 @@ val recall_default_max_shared_facts : int
 (** Episode tail scan used before current/prompt-recallable filtering. *)
 val recall_episode_tail_scan : int
 
+(** Maximum age (seconds) before a Durable_knowledge fact with no explicit
+    [valid_until] is considered too stale for consensus promotion.
+    Only enforced when [fact_effective_valid_until] returns [None]. *)
+val max_consensus_staleness : float
+
 (** Structural retention rank for the bounded store cap (RFC-0247 §-1). NOT a
     relevance score: a deterministic two-tier order — durable categories outrank
     Ephemeral, then most-recently-verified (else first-seen) wins. Used only to

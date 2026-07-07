@@ -744,6 +744,7 @@ let start_container (t : t) ~timeout_sec =
             ~base_path:t.config.base_path
             ~keeper_name:t.meta.name
             ~container_name
+            ()
         with
         | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
         | Ok secret_projection ->

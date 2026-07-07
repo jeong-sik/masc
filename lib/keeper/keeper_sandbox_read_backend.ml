@@ -160,6 +160,7 @@ let run_command_with_status ?turn_sandbox_factory
             ~base_path:config.base_path
             ~keeper_name:meta.name
             ~container_name
+            ()
         with
         | Error err -> Error ("docker_read_failed: secret_projection: " ^ err)
         | Ok secret_projection ->

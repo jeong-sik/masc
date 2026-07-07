@@ -52,11 +52,47 @@ let describe = function
       user_id
   | Unrouted { reason } -> Printf.sprintf "unrouted (%s)" reason
 
+let same_string_option = Option.equal String.equal
+
 let same_route a b =
   match a, b with
-  | Dashboard x, Dashboard y -> String.equal x.thread_id y.thread_id
-  | Discord x, Discord y -> x = y
-  | Slack x, Slack y -> x = y
+  | Dashboard { thread_id = left }, Dashboard { thread_id = right } ->
+    String.equal left right
+  | ( Discord
+        { guild_id = left_guild
+        ; channel_id = left_channel
+        ; parent_channel_id = left_parent
+        ; thread_id = left_thread
+        ; user_id = left_user
+        }
+    , Discord
+        { guild_id = right_guild
+        ; channel_id = right_channel
+        ; parent_channel_id = right_parent
+        ; thread_id = right_thread
+        ; user_id = right_user
+        } ) ->
+    same_string_option left_guild right_guild
+    && String.equal left_channel right_channel
+    && same_string_option left_parent right_parent
+    && same_string_option left_thread right_thread
+    && String.equal left_user right_user
+  | ( Slack
+        { team_id = left_team
+        ; channel_id = left_channel
+        ; thread_ts = left_thread
+        ; user_id = left_user
+        }
+    , Slack
+        { team_id = right_team
+        ; channel_id = right_channel
+        ; thread_ts = right_thread
+        ; user_id = right_user
+        } ) ->
+    same_string_option left_team right_team
+    && String.equal left_channel right_channel
+    && same_string_option left_thread right_thread
+    && String.equal left_user right_user
   | Unrouted _, Unrouted _ -> false
   (* Distinct-constructor pairs share no route. Listing the constructors
      explicitly (not [_]) keeps this exhaustive: a new variant forces a

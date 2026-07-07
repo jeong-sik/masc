@@ -1006,6 +1006,7 @@ dominant source of the observed CAS race exhaustion after
                     ~meta
                     ~updated_meta
                     ~is_auto_recoverable
+                    ~pacing_enforced:(Keeper_pacing_shadow.pacing_enforced ())
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths

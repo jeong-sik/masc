@@ -3,7 +3,7 @@ rfc: "0236"
 title: "Keeper git credential helper: make the ambient GH_TOKEN usable by git-over-HTTPS"
 status: Draft
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-07-07
 author: vincent
 supersedes: []
 related: ["RFC-0074", "RFC-0007"]
@@ -83,10 +83,74 @@ MASC keeper sandbox only (`lib/keeper/keeper_sandbox_runtime_setup.ml`, `lib/kee
 ## 8. Scope / non-goals
 
 - In scope: Docker container git-config setup; Local per-keeper `GIT_CONFIG_GLOBAL` + credential helper; verification.
-- Non-goal: rotating/validating the provisioned tokens (separate ops concern — some 146 failures may also include expired/wrong-scope tokens; this RFC fixes the *config* gap, not token lifecycle).
+- Non-goal (refined by §10): token **rotation/validation policy** (explicit expiry checks, scope auditing) remains a separate ops concern. Token **source diversification** — replacing the shared PAT with per-keeper short-lived installation tokens — moves in scope under §10.
 - Non-goal: SSH auth (the `Identity file id_ed not accessible` cases are a separate, smaller class).
 
 ## 9. Open questions
 
 - Does any keeper run git in a cwd outside the playground where `GIT_CONFIG_GLOBAL` would not apply? (Audit keeper git cwd before implementation.)
 - Should the helper be restricted to `github.com` only (yes — scope to the host to avoid sending the token to other remotes).
+
+## 10. Token source extension — GitHub App installation token (per keeper)
+
+### 10.1 Problem (this amendment)
+
+Section 8 deferred "rotating/validating the provisioned tokens" as a non-goal. The operational state that motivated this amendment (audited 2026-07-07): **every keeper shares the same classic Personal Access Token** materialised at `secrets/<keeper>/env/GH_TOKEN`. The blast radius of a single leak is the full fleet's GitHub authority; the token is long-lived with no expiry pressure; there is no per-keeper separation. This is the "expired/wrong-scope" class §8 pointed at, now concrete.
+
+### 10.2 Proposal
+
+Replace the shared PAT source with a **per-keeper GitHub App installation access token**, without changing RFC-0236's credential-helper contract. The helper `!gh auth git-credential` continues to read `GH_TOKEN` from the ambient env; only the *source* of that env value changes — from a static file to a short-lived, installation-scoped token minted at projection time.
+
+GitHub App installation tokens (per [GitHub docs](https://docs.github.com/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)):
+- minted by `POST /app/installations/{installation_id}/access_tokens`, authenticated with a RS256-signed JWT bearing the App's credentials;
+- expire after **1 hour**;
+- scoped to the installation's repositories and the App's permissions.
+
+### 10.3 Architecture
+
+New modules under `lib/keeper/`:
+
+- `keeper_github_app_jwt.ml`: signs a GitHub App JWT (RS256) from the App ID + PEM-encoded RSA private key. Header `{"alg":"RS256","typ":"JWT"}`, payload `iss=<app_id>; iat=now-60s; exp=now+9min` (GitHub recommends backdating `iat` by 60 seconds and rejects JWTs whose `exp` is more than 10 minutes in the future; this keeps `exp - iat = 10min`). RSA signing via `mirage-crypto-pk` (already in opam at 1.2.0; add to `dune-project` + `lib/keeper/dune`), base64url via the existing `base64` dependency.
+- `keeper_github_app_installation_token.ml`: requests the installation token via `Masc_http_client.post_sync` using the Eio clock and the shared HTTP pool connect-timeout boundary. It parses the returned token, relies on GitHub's documented 1-hour token lifetime, and caches per keeper in a `Mutex`-protected `Hashtbl` until `now + 1h - 5min`. The mutex guards only cache lookup/store and is not held across the HTTP request. Mint errors surface as `Result.Error` (fail-closed — a configured App token must mint successfully; static `GH_TOKEN` compatibility applies only when no App config is configured).
+
+Projection insertion (`keeper_secret_projection.ml`):
+- In `local_env_for_keeper` / `docker_args_for_keeper`, immediately after `merge_env_entries roots`, if the keeper has GitHub App config loaded, mint (or reuse cached) the installation token, remove any existing `GH_TOKEN`/`GITHUB_TOKEN` entries, and insert a single `("GH_TOKEN", token)` entry. This overlay flips `has_github_token` true, so the §3 git-config helper activates on the installation token exactly as it does on a PAT — no change to the credential-helper path.
+
+Per-keeper config storage:
+- PEM private key: `secrets/<keeper>/files/github-app/private-key.pem` (PEM is multiline, rejected by `validate_env_value`'s single-line env rule). This path is projection-layer-only material: `keeper_secret_projection` reads it to mint the installation token and explicitly excludes it from Docker file mounts, so the keeper sandbox receives the short-lived `GH_TOKEN` rather than the App signing key.
+- `MASC_GITHUB_APP_ID` and `MASC_GITHUB_APP_INSTALLATION_ID`: numeric, single-line, valid as env at `secrets/<keeper>/env/`.
+
+Redaction (`observability_redact.ml`): redact complete or truncated PEM private-key blocks delimited by `-----BEGIN PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----` markers so leaked keys do not reach logs/argv.
+
+### 10.4 Security analysis
+
+- An installation-token leak exposes at most 1 hour of installation-scoped authority, not the years-long PAT.
+- Per-keeper App config means one keeper's PEM is not another's — isolation the shared PAT cannot provide.
+- The PEM lives on disk under `files/` as projection-layer-only material; it is never mounted into the keeper container and is never inlined into env or argv. Redaction denies it from logs if it appears in observability text.
+- The token still flows through the §3 credential helper — git resolves it from env at call time, nothing secret is written to git config (RFC-0236 §5 preserved).
+- Fail-closed on mint failure: projection rejects the env materialisation rather than silently keeping a static PAT fallback. Operators see the failure in the projection result and can rotate or repair the App config.
+
+### 10.5 Alternatives considered
+
+| Approach | Rejected because |
+|---|---|
+| Keep the shared classic PAT | Blast radius = full fleet; long-lived; no per-keeper separation (the problem this section exists to solve). |
+| Per-keeper fine-grained PATs | Still long-lived (no 1h expiry); rotation stays manual; finer repo scoping but the expiry posture is unchanged. |
+| OAuth user token per keeper | User-scoped, not installation-scoped; conflates keeper identity with a human account; harder to provision per keeper. |
+| Mint the token inside the keeper container | Requires the PEM and signing logic inside the sandbox — larger trust surface; the projection layer already handles secrets and is the right boundary. |
+
+### 10.6 Verification plan (additions to §7)
+
+- JWT RS256 unit test cross-checked with `openssl dgst -sha256 -sign` against the same PEM.
+- Installation-token mint + cache: mock GitHub API returns a token; assert reuse within the documented 1-hour lifetime window and re-mint after expiry.
+- Docker projection regression: App PEM is absent from `-v` mounts while the minted installation token is present as the only GitHub token env entry.
+- Redaction regression: PEM private-key literals are masked by `test_observability_redact_github_tokens`.
+- Integration: a keeper whose `files/github-app/private-key.pem` is populated pushes over HTTPS using the minted installation token (the §3 helper consumes it).
+- Census: `git_gh_auth_error` continues to drop; a new metric `keeper_github_app_mint_error` is watched over 168h.
+
+### 10.7 Scope / non-goals (this amendment)
+
+- In scope: JWT + installation-token modules, projection overlay, PEM redaction, per-keeper config storage contract, BE verification.
+- Non-goal: dashboard UI for keeper App config (separate follow-up PR — operators provision via `secrets/<keeper>/` files until then).
+- Non-goal: per-keeper installation scoping (a single installation covers the repos the App can see; finer per-keeper scoping needs multiple installations or Apps).
+- Non-goal: token rotation/validation policy (the 1h expiry is the rotation; explicit validation remains a separate ops concern).

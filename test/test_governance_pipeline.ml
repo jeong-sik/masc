@@ -932,6 +932,7 @@ let make_test_meta ?(last_blocker = None) () =
   ; proactive = { enabled = false; idle_sec = 0; cooldown_sec = 0 }
   ; compaction =
       { profile = ""
+      ; mode = Masc.Keeper_config.Deterministic
       ; ratio_gate = 0.0
       ; message_gate = 0
       ; token_gate = 0

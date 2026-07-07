@@ -14,13 +14,48 @@ let check_bool label expected actual =
 
 let test_checkpoint_compaction_uses_summarize_old () =
   let strategies =
-    KCP.checkpoint_compaction_strategies ()
+    KCP.checkpoint_compaction_strategies ~mode:Keeper_config.Deterministic
     |> List.map Context_compact_oas.strategy_name
   in
   Alcotest.(check (list string))
     "checkpoint compaction summarizes old context before importance pruning"
     [ "PruneToolOutputs"; "MergeContiguous"; "SummarizeOld"; "DropLowImportance" ]
     strategies
+
+(* ── compaction_mode (RFC-0313-adjacent W1) ──────────────────────────── *)
+
+(* W1 invariant: [Llm] mode must not change behavior yet — until W2 wires
+   the librarian-lane summarizer, it delegates to the identical
+   deterministic chain. If this ever diverges, W2 landed and this test
+   must be updated deliberately (not a silent behavior flip). *)
+let test_llm_mode_delegates_to_deterministic_in_w1 () =
+  let names mode =
+    KCP.checkpoint_compaction_strategies ~mode
+    |> List.map Context_compact_oas.strategy_name
+  in
+  Alcotest.(check (list string))
+    "W1: Llm mode delegates to the deterministic chain"
+    (names Keeper_config.Deterministic)
+    (names Keeper_config.Llm)
+
+let test_compaction_mode_parse_canonical () =
+  let parse raw =
+    match Keeper_config.compaction_mode_of_string raw with
+    | Ok m -> Keeper_config.compaction_mode_to_string m
+    | Error e -> "error:" ^ e
+  in
+  check_string "deterministic canonical" "deterministic" (parse "deterministic");
+  check_string "extractive alias → deterministic" "deterministic" (parse "EXTRACTIVE");
+  check_string "llm canonical" "llm" (parse "llm");
+  check_string "summarizer alias → llm" "llm" (parse " Summarizer ")
+
+let test_compaction_mode_parse_unknown_is_error () =
+  match Keeper_config.compaction_mode_of_string "aggressive" with
+  | Ok _ -> Alcotest.fail "unknown compaction_mode must not parse to a mode"
+  | Error msg ->
+    Alcotest.(check bool)
+      "unknown mode error names the input" true
+      (Astring.String.is_infix ~affix:"aggressive" msg)
 
 (* ── compaction_decision_to_string ───────────────────────────────────── *)
 
@@ -225,6 +260,15 @@ let () =
         [
           Alcotest.test_case "checkpoint compaction summarizes old context"
             `Quick test_checkpoint_compaction_uses_summarize_old;
+          Alcotest.test_case "W1: Llm mode delegates to deterministic"
+            `Quick test_llm_mode_delegates_to_deterministic_in_w1;
+        ] );
+      ( "compaction_mode",
+        [
+          Alcotest.test_case "canonical + alias parse" `Quick
+            test_compaction_mode_parse_canonical;
+          Alcotest.test_case "unknown mode is a config error" `Quick
+            test_compaction_mode_parse_unknown_is_error;
         ] );
       ( "decide_compaction",
         [

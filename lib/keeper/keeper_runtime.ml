@@ -802,8 +802,12 @@ let start_supervisor_sweep ctx =
         let should_act _beat = true
         let on_beat _beat =
           (try
+             (* RFC-0313 W3: pacing mode is read once per sweep at this
+                boundary and injected, so policy arms inside the sweep stay
+                free of hidden config reads. *)
              Keeper_supervisor.sweep_and_recover
                ~load_or_materialize_keeper_meta
+               ~pacing_enforced:(Keeper_pacing_shadow.pacing_enforced ())
                ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Otel_metric_store.inc_counter

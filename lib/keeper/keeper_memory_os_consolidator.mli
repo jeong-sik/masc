@@ -15,6 +15,17 @@ open Keeper_memory_os_types
 (** Minimum distinct keepers required before a claim is shared (2). *)
 val default_min_keepers : int
 
+(** Whether a fact is recent enough for consensus promotion.  Delegates to
+    [fact_effective_valid_until] when present; otherwise applies the
+    [max_consensus_staleness] policy bound against [last_verified_at] (or
+    [first_seen] for unverified facts). *)
+val not_stale : now:float -> fact -> bool
+
+(** Whether a fact passes all promotion eligibility criteria: category is
+    promotable and outcome-positive, fact is not stale, and claim kind is
+    objective ([Durable_knowledge] or legacy [None]). *)
+val eligible : now:float -> fact -> bool
+
 type report =
   { keepers_scanned : int
   ; claims_considered : int

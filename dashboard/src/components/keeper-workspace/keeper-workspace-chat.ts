@@ -10,12 +10,9 @@ import {
   ChevronLeft,
   Info,
   MoreHorizontal,
-  Pause,
   Play,
-  RotateCcw,
   Search,
   Settings,
-  Square,
 } from 'lucide-preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
@@ -27,7 +24,7 @@ import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperThreads } from '../../keeper-state'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
-import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
+import { KEEPER_ACTION_LABELS, runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { Pill } from '../v2/primitives-v2'
 import {
   WorkspaceSigil,
@@ -60,40 +57,11 @@ interface WorkspaceCommand {
   onClick: () => void | Promise<void>
 }
 
-const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
-  pause: {
-    label: '일시정지',
-    title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
-    icon: Pause,
-  },
-  resume: {
-    label: '재개',
-    title: '재개: 일시정지된 keeper 를 다시 실행합니다',
-    icon: Play,
-  },
-  wakeup: {
-    label: '깨우기',
-    title: '깨우기: 다음 turn 을 즉시 시도합니다',
-    icon: RotateCcw,
-  },
-  boot: {
-    label: '기동',
-    title: '기동: offline keeper 를 다시 시작합니다',
-    icon: Play,
-  },
-  shutdown: {
-    label: '종료',
-    title: '종료: keeper 를 완전 종료합니다',
-    icon: Square,
-    danger: true,
-  },
-}
-
 const COMMAND_GLYPHS: Partial<Record<WorkspaceCommandId, string>> = {
   pause: 'Ⅱ',
   resume: '▶',
   wakeup: '↻',
-  boot: '▶',
+  boot: '⏻',
   shutdown: '■',
   turn: '⌕',
   artifacts: '▣',
@@ -111,7 +79,7 @@ function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
   if (visibility.canShutdown) keys.push('shutdown')
 
   return keys.map(key => {
-    const copy = LIFECYCLE_COPY[key]
+    const copy = KEEPER_ACTION_LABELS[key]
     return {
       id: key,
       label: copy.label,
@@ -173,11 +141,11 @@ function workspaceUtilityCommands({
 }
 
 function workspaceCommandGroup(command: WorkspaceCommand): string {
-  return command.id in LIFECYCLE_COPY ? '명령' : '이동'
+  return command.id in KEEPER_ACTION_LABELS ? '명령' : '이동'
 }
 
 function isLifecycleWorkspaceCommand(command: WorkspaceCommand): boolean {
-  return command.id in LIFECYCLE_COPY
+  return command.id in KEEPER_ACTION_LABELS
 }
 
 function WorkspaceCommandButtons({
@@ -281,26 +249,36 @@ function WorkspaceCommandButtons({
     `
   }
 
+  const renderIcon = (command: WorkspaceCommand): VNode => {
+    const Icon = command.icon
+    return html`
+      <button
+        key=${command.id}
+        type="button"
+        class=${`kw-chat-command-icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
+        aria-label=${command.label}
+        aria-pressed=${command.active ? 'true' : undefined}
+        title=${command.title}
+        disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
+        onClick=${() => { void run(command) }}
+        data-testid=${`kw-chat-command-${command.id}`}
+      >
+        <${Icon} size=${14} aria-hidden="true" />
+      </button>
+    `
+  }
+
+  // Lifecycle (명령) and navigation (이동) commands render as two visually
+  // separated clusters — one flat row of 7 look-alike icons was unreadable.
+  const lifecycle = commands.filter(isLifecycleWorkspaceCommand)
+  const utility = commands.filter(command => !isLifecycleWorkspaceCommand(command))
   return html`
     <div class="kw-chat-command-icons" data-testid="kw-chat-command-icons">
-      ${commands.map(command => {
-        const Icon = command.icon
-        return html`
-          <button
-            key=${command.id}
-            type="button"
-            class=${`kw-chat-command-icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
-            aria-label=${command.label}
-            aria-pressed=${command.active ? 'true' : undefined}
-            title=${command.title}
-            disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
-            onClick=${() => { void run(command) }}
-            data-testid=${`kw-chat-command-${command.id}`}
-          >
-            <${Icon} size=${14} aria-hidden="true" />
-          </button>
-        `
-      })}
+      ${lifecycle.map(renderIcon)}
+      ${lifecycle.length > 0 && utility.length > 0
+        ? html`<span class="kw-chat-command-sep" role="separator" aria-orientation="vertical"></span>`
+        : null}
+      ${utility.map(renderIcon)}
     </div>
   `
 }

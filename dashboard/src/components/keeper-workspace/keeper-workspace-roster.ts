@@ -8,12 +8,8 @@ import { html } from 'htm/preact'
 import {
   MessageSquare,
   MoreVertical,
-  Pause,
-  Play,
-  RotateCcw,
   Search,
   Settings,
-  Square,
 } from 'lucide-preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
@@ -28,7 +24,7 @@ import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import { sortByRecency } from '../../lib/keeper-recency'
 import type { Keeper } from '../../types'
-import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
+import { KEEPER_ACTION_LABELS, runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { VirtualList } from '../common/virtual-list'
 import {
   WorkspaceSigil,
@@ -45,7 +41,6 @@ type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'recent' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
-type IconComponent = typeof Play
 type RosterHeaderBucket = KeeperBucket | 'attention'
 type RosterFleetSummary = {
   total: number
@@ -57,34 +52,6 @@ type RosterFleetSummary = {
   highContext: number
 }
 
-const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
-  pause: {
-    label: '일시정지',
-    title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
-    icon: Pause,
-  },
-  resume: {
-    label: '재개',
-    title: '재개: 일시정지된 keeper 를 다시 실행합니다',
-    icon: Play,
-  },
-  wakeup: {
-    label: '깨우기',
-    title: '깨우기: 다음 turn 을 즉시 시도합니다',
-    icon: RotateCcw,
-  },
-  boot: {
-    label: '기동',
-    title: '기동: offline keeper 를 다시 시작합니다',
-    icon: Play,
-  },
-  shutdown: {
-    label: '종료',
-    title: '종료: keeper 를 완전 종료합니다',
-    icon: Square,
-    danger: true,
-  },
-}
 const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
 const MENU_VIEWPORT_MARGIN = 8
@@ -472,7 +439,7 @@ function KeeperRosterMenu({
         <span>대화 열기</span>
       </button>
       ${actions.map(action => {
-        const copy = LIFECYCLE_COPY[action]
+        const copy = KEEPER_ACTION_LABELS[action]
         const Icon = copy.icon
         return html`
           <button

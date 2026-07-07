@@ -614,6 +614,53 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-state-pill.off { color: var(--color-fg-muted); }
 
 .kw-chat-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+/* Desktop header command row. These classes were referenced by
+   keeper-workspace-chat.ts but never defined — the buttons rendered as bare
+   UA-styled elements, which is why lifecycle / inspect / config commands were
+   visually indistinguishable. */
+.kw-chat-command-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.kw-chat-command-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--color-fg-secondary);
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.kw-chat-command-icon:hover {
+  color: var(--color-fg-primary);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-surface);
+}
+.kw-chat-command-icon:disabled { opacity: 0.5; cursor: not-allowed; }
+.kw-chat-command-icon.active {
+  color: var(--color-accent-fg);
+  border-color: var(--color-accent-fg-dim);
+  background: var(--accent-10);
+}
+.kw-chat-command-icon.danger { color: var(--color-status-err); }
+.kw-chat-command-icon.danger:hover {
+  border-color: rgb(var(--color-status-err-glow) / 0.5);
+  background: rgb(var(--color-status-err-glow) / 0.10);
+}
+/* Divider between the lifecycle (명령) and navigation (이동) clusters. */
+.kw-chat-command-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--color-border-default);
+  flex: none;
+}
 .kw-chat-mobile-actions {
   display: inline-flex;
   align-items: center;

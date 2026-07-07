@@ -77,7 +77,10 @@ async function loadChat() {
       canWake: false,
     }),
   }))
-  vi.doMock('../keeper-action-panel', () => ({
+  vi.doMock('../keeper-action-panel', async (importOriginal) => ({
+    // Keep the real KEEPER_ACTION_LABELS (label/icon/title SSOT); only the
+    // side-effecting action runner is stubbed.
+    ...(await importOriginal<typeof import('../keeper-action-panel')>()),
     runKeeperAction: vi.fn(async () => undefined),
   }))
   vi.doMock('../keeper-detail-state', () => ({

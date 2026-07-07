@@ -152,13 +152,15 @@ export function keeperIsStuckOnRecoverableBlocker(keeper: Keeper): boolean {
   return typeof cls === 'string' && WAKEUP_RECOVERABLE_BLOCKERS.has(cls)
 }
 
-/** Wakeup is meaningful when the keeper is stuck on one of the
- *  recoverable blocker classes *or* it is in a non-paused, non-offline
- *  state where the operator may want to kick the next turn. */
+/** Wakeup only kicks the next turn, so it is offered for every live
+ *  (non-paused, non-offline) keeper — including ones stuck on a
+ *  recoverable blocker. The blocker classes no longer gate this
+ *  predicate (the old `if stuck return true; return true` had collapsed
+ *  into a constant); keeperIsStuckOnRecoverableBlocker remains the
+ *  advisory signal for surfaces that want to highlight *why* a wakeup
+ *  is worth trying. */
 export function keeperCanWakeup(keeper: Keeper): boolean {
-  if (isKeeperPaused(keeper) || isKeeperOffline(keeper)) return false
-  if (keeperIsStuckOnRecoverableBlocker(keeper)) return true
-  return true
+  return !isKeeperPaused(keeper) && !isKeeperOffline(keeper)
 }
 
 export interface KeeperActionVisibility {

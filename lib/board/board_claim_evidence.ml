@@ -169,7 +169,7 @@ let projection_of_counters c =
   }
 ;;
 
-let projection_to_yojson p =
+let projection_to_yojson (p : projection) =
   `Assoc
     (List.concat
        [ [ "source", `String sidecar_filename

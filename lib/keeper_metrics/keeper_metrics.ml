@@ -22,6 +22,7 @@ type t =
   | PacingShadowEvents
   | PacingShadowNextDueSec
   | FailureRoute
+  | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped
@@ -236,6 +237,7 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
+  | MemoryOsReobserveEchoSuppressed
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
@@ -281,6 +283,7 @@ let to_string = function
   | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
   | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
   | FailureRoute -> "masc_keeper_failure_route_total"
+  | FailureDrivenPause -> "masc_keeper_failure_driven_pause_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
@@ -516,6 +519,8 @@ let to_string = function
       "masc_keeper_memory_recall_read_errors_total"
   | MemoryOsRecallUnavailable ->
       "masc_keeper_memory_os_recall_unavailable_total"
+  | MemoryOsReobserveEchoSuppressed ->
+      "masc_keeper_memory_os_reobserve_echo_suppressed_total"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"
   | VisionAnalyze -> "masc_keeper_vision_analyze_total"
@@ -556,7 +561,7 @@ let to_string = function
 let all : t list =
   [ Turns; InputTokens; OutputTokens; CacheCreationTokens;
     CacheReadTokens; UsageAnomalies; TotalCostUsd; TurnScheduled;
-    TurnCompleted; PacingShadowEvents; PacingShadowNextDueSec; FailureRoute; IdleSeconds; ContractViolations; MetricEmitDropped;
+    TurnCompleted; PacingShadowEvents; PacingShadowNextDueSec; FailureRoute; FailureDrivenPause; IdleSeconds; ContractViolations; MetricEmitDropped;
     ContextMaxObserved; TurnStarts; TurnReattempts; TurnRegressions;
     TurnLivelockBlocks; TurnLivelockBlocksRepeated; TurnLivelockBlocksThresholdPark; TurnLatencyBucket;
     TurnLatencyByModelBucket; ProviderCooldownSkip; ProviderCooldownRemainingSec; ProviderBlockDurationSec;
@@ -607,7 +612,7 @@ let all : t list =
     TurnGateRejectedTerminal; ReceiptUnmappedDisposition; ExecuteNetworkUpgrade; ExecuteLocalExecution;
     DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; NoProgressStreak; UsageTrust;
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
-    TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
+    TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; MemoryOsReobserveEchoSuppressed; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;
     GhClassificationTotal; GatedGhLifecycleTotal; GatedGhBlockTimeSeconds;

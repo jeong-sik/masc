@@ -20,14 +20,6 @@ type policy =
   ; cap_sec : float (** hard bound: no revisit exceeds now + cap_sec *)
   }
 
-val default_policy : policy
-(** base 30s, x2 per consecutive failure, cap 3600s. Single named
-    site for the shadow phase; RFC-0313 W3 moves the policy to
-    config/runtime.toml [pacing] when pacing becomes enforcing. With
-    these values the 2026-07-06 storm fixture window (300s) admits at
-    most ~7 attempts per runtime vs the 1,002 recorded
-    (test/fixtures/pacing_storm_20260706/). *)
-
 type revisit =
   { eligible_at : float (** unix seconds; runtime may be tried at/after this *)
   ; consecutive : int

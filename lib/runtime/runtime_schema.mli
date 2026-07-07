@@ -158,6 +158,32 @@ type pause_threshold =
 
 val pause_threshold_default : pause_threshold
 
+(** {1 Pacing (RFC-0313 W3)}
+
+    Per-runtime failure revisit pacing: failure outcomes modulate {i when}
+    the next turn runs, never whether the keeper exists. *)
+
+type pacing_mode =
+  | Pacing_shadow
+    (** Pacing is computed and logged but the legacy failure-driven pause
+        paths and the cycle-cap matrix stay live. Kill-switch position for
+        one release (RFC-0313 W3); the switch is removed in W4. *)
+  | Pacing_enforce
+    (** Failure-driven pause paths are skipped and the scheduler delays the
+        keeper's next turn until the earliest per-runtime revisit becomes
+        eligible. *)
+[@@deriving show, eq]
+
+type pacing =
+  { pacing_mode : pacing_mode
+  ; pacing_base_sec : float
+  ; pacing_multiplier : float
+  ; pacing_cap_sec : float
+  }
+[@@deriving show, eq]
+
+val pacing_default : pacing
+
 (** {1 Lanes}
 
     Ordered failover candidate lists declared in [runtime.lanes.<id>].
@@ -225,6 +251,11 @@ type config =
   ; pause_threshold : pause_threshold
     (** [\[pause\]] — typed SSOT for keeper pause / regime threshold knobs.
         Missing or wrong-typed values fall back to [pause_threshold_default]. *)
+  ; pacing : pacing
+    (** [\[pacing\]] (RFC-0313 W3) — failure revisit pacing policy plus the
+        shadow/enforce switch. Missing section → [pacing_default]. Numeric
+        knobs fail soft like [\[pause\]]; an unknown [mode] value aborts
+        config parse (fail-closed). *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

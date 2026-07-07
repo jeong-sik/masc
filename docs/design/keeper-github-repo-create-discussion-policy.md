@@ -1,36 +1,37 @@
 ---
 title: "Keeper GitHub repo-create and Discussions policy"
-status: Draft
+status: Superseded
 created: 2026-07-06
-updated: 2026-07-06
+updated: 2026-07-07
 author: codex
 supersedes: []
-superseded_by: null
-related: ["0008", "0160", "0254", "0255"]
+superseded_by: "0309"
+related: ["0008", "0160", "0254", "0255", "0309"]
 implementation_prs: []
 ---
 
 # Keeper GitHub repo-create and Discussions policy
 
-Status: Draft · Capability decision · G-WDECIDE
+Status: Superseded by RFC-0309 · Historical capability decision · G-WDECIDE
 
 ## 1. Decision
 
-Keeper autonomous execution does not expose GitHub repository creation or
-GitHub Discussions mutation as supported capabilities.
+This document records the earlier disable decision. RFC-0309 supersedes it:
+keeper execution may request reversible GitHub repository creation and GitHub
+Discussions mutations through typed Shell IR plus non-blocking HITL approval.
+They are not autonomous auto-run operations.
 
 - GitHub PR and issue work remains supported through `Execute` with `gh` in a
   bound repository context.
-- Remote repository creation is disabled for keepers. Operators may still create
-  repositories outside keeper autonomous execution.
-- GitHub Discussions mutation is disabled for keepers. Durable workspace
-  discussion stays on MASC board tools, which are typed, observable, and scoped
-  to the workspace.
-
-The generic `gh` execution path must fail closed for this decision. A command
-that would create a remote GitHub repository or mutate GitHub Discussions is
-classified as a repository-hosting policy floor violation, not as an ordinary
-reversible mutation.
+- Reversible remote repository creation/fork/edit/sync/rename requests route to
+  `Requires_approval` and enqueue a non-blocking HITL approval entry.
+- Reversible GitHub Discussions create/comment/edit/close/reopen/lock/unlock
+  requests route to `Requires_approval` and enqueue a non-blocking HITL approval
+  entry.
+- Repo delete, PR merge, destructive API calls, and irreversible discussion
+  deletion remain denied by the trust-independent Shell IR floor.
+- Durable workspace discussion still prefers MASC board tools unless the task
+  explicitly requires a GitHub Discussion artifact.
 
 ## 2. Evidence
 
@@ -54,7 +55,8 @@ ownership, lifecycle, and moderation policy are not represented in the current
 keeper tool contracts. Leaving them reachable only because an ambient `gh` token
 has broad scope is a silent capability decision.
 
-Disabling both surfaces is the smaller production decision:
+The superseded disable decision was the smaller production decision before the
+approval queue was wired into the Shell IR approval verdict:
 
 - no new GitHub credential materialization path;
 - no new cross-repo ownership model;
@@ -62,38 +64,42 @@ Disabling both surfaces is the smaller production decision:
 - no prompt affordance that suggests an unsupported tool;
 - no dependence on removing broad operator `repo` scope from local `gh` auth.
 
-## 4. Enforcement
+## 4. Current Enforcement
 
-The Shell IR repo-hosting classifier treats these forms as R2/policy-floor
-operations:
+The current Shell IR path separates risk from capability policy:
 
-- `gh repo create ...`
-- `gh repo fork ...`
-- `gh discussion create|comment|edit|delete|close|reopen|lock|unlock|answer|unanswer ...`
-- `gh api graphql` bodies containing the live GitHub mutation names for
-  repository creation or Discussions mutation.
+- `gh repo create|fork|edit|sync|rename ...` -> `Requires_approval`
+- `gh discussion create|comment|edit|close|reopen|lock|unlock|answer|unanswer ...`
+  -> `Requires_approval`
+- `gh api graphql` bodies containing durable repository/discussion create or
+  comment mutations -> `Requires_approval`
+- `gh repo delete`, `gh pr merge`, destructive REST/GraphQL deletes, and
+  irreversible discussion deletion -> `Deny`
 
-The deny reason remains `Destructive_repo_hosting_cli` because the floor is the
-same remote repository-hosting policy boundary used for irreversible PR/repo
-operations. The user-facing text states that the operation is not permitted by
-policy.
+`Requires_approval` creates a pending HITL approval entry and returns immediately
+to the keeper turn. The keeper must not block waiting for the operator decision;
+resolution is delivered later through the HITL wake path. Resolution only wakes
+the keeper to observe the resolved state; it does not execute the stored command,
+create a one-shot approval grant, or authorize an automatic retry.
 
 ## 5. Non-goals
 
 - This decision does not remove the operator's local `repo` token scope.
-- This decision does not add a dedicated repo-create tool.
-- This decision does not add GitHub Discussions read or write tools.
+- This decision does not add a dedicated repo-create tool; the surface remains
+  typed `Execute` with `gh`.
+- This decision does not allow autonomous repository creation or Discussion
+  mutation without HITL approval.
 - This decision does not change MASC board discussion semantics.
 
 ## 6. Verification
 
-- `test/test_shell_ir_risk.ml` proves `gh repo create`, `gh repo fork`,
-  `gh discussion create/comment`, `createRepository`, `cloneTemplateRepository`,
-  `createDiscussion`, and `addDiscussionComment` classify as R2.
-- `lib/exec/test/test_shell_ir_risk_repo_hosting_cli_stress.ml` covers the
-  direct repo-hosting classifier.
-- `lib/exec/test/test_approval_policy.ml` proves autonomous approval denies
-  repo-create, repo-fork, discussion-create, and GraphQL create mutations.
+- `lib/exec/test/test_approval_policy.ml` proves autonomous approval emits
+  `Ask` for durable reversible repo/discussion operations and still denies
+  irreversible operations.
+- `test/test_keeper_tool_execute_retry_deterministic_close.ml` proves the
+  runtime helper enqueues a non-blocking pending approval entry for gh
+  capability approval, and that resolving the entry does not install an implicit
+  grant for a later retry.
 - Keeper capability docs and prompts state the decision directly: PR/issue work
-  is supported, while remote repo creation and GitHub Discussions mutation are
-  not keeper affordances.
+  is supported, remote repo/discussion reversible mutations require HITL, and
+  irreversible repo/discussion operations remain denied.

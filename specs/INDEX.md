@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-07-01T11:41:13Z (HEAD: 6d33177e062)
+Generated: 2026-07-07T05:10:27Z (HEAD: db58d82025)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 93 |
-| Manual specs | 93 |
+| Total .tla files | 94 |
+| Manual specs | 94 |
 | TTrace (auto-generated) | 0 |
 | Directories | 18 |
-| Total .cfg files | 192 |
-| Buggy .cfg (bug-model pair) | 98 |
+| Total .cfg files | 194 |
+| Buggy .cfg (bug-model pair) | 99 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -62,7 +62,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | ToolCallContract.tla | ToolCallContract | manual | 2 | 1 | clean={inv:Safety} buggy={inv:NeverDropSilently} | a33a3185f14e |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:OasBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | 0790cfbf9572 |
 
-### specs/bug-models (23 specs)
+### specs/bug-models (24 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -89,6 +89,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | baa8b016ef40 |
 | ShellIRApprovalFloor.tla | ShellIRApprovalFloor | manual | 2 | 1 | clean={inv:TypeOK, inv:CatastrophicNeverAllowed} buggy={inv:TypeOK, inv:CatastrophicNeverAllowed} | 29efda8572e5 |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 5d3029adffa6 |
+| TypedGhCapabilityGating.tla | TypedGhCapabilityGating | manual | 2 | 1 | clean={inv:TypeOK, inv:CatastrophicNeverAllowed, inv:NonBlockingApproval, inv:UnknownGhVerbNeverAutoRun} buggy={inv:TypeOK, inv:CatastrophicNeverAllowed, inv:NonBlockingApproval, inv:UnknownGhVerbNeverAutoRun} | 8a0213f27794 |
 
 ### specs/checkpoint-trim (1 specs)
 

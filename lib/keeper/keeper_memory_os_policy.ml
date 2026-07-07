@@ -27,6 +27,12 @@ let recall_default_max_episodes = 2
 let recall_default_max_shared_facts = 4
 let recall_episode_tail_scan = 32
 
+(** Maximum age (seconds) before a Durable_knowledge fact with no explicit
+    [valid_until] is considered too stale for consensus promotion.
+    Only enforced when [fact_effective_valid_until] returns [None].
+    Per task-1855 AC-3: default 24h. *)
+let max_consensus_staleness = 86400.
+
 (* RFC-0247 §-1: structural retention rank for the bounded store cap. This is NOT
    a relevance score — it is a deterministic two-tier lexicographic order used
    ONLY to decide which rows the size cap drops when the store grows past its

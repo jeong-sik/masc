@@ -114,14 +114,92 @@ let repos_json repos =
   `List (List.map (fun repo -> `String ("repos/" ^ repo)) repos)
 ;;
 
-let registered_repository_ids ~base_path =
+let repo_identity_tokens (repo : Repo_manager_types.repository) =
+  repo.id :: repo.name :: repo.aliases
+  |> List.map String.trim
+  |> List.filter (fun token -> not (String.equal token ""))
+  |> List.sort_uniq String.compare
+;;
+
+let repo_identity_paths repo =
+  repo_identity_tokens repo |> List.map (fun token -> "repos/" ^ token)
+;;
+
+let requested_repo_of_raw_path raw_path =
+  match String.split_on_char '/' (String.trim raw_path) with
+  | "repos" :: repo :: _ when not (String.equal repo "") -> Some repo
+  | _ -> None
+;;
+
+type registered_repository_projection_snapshot =
+  { repositories : Repo_manager_types.repository list
+  ; registered_repos : string list
+  ; registered_repo_paths : string list
+  ; registered_repo_aliases : Yojson.Safe.t list
+  }
+
+let registered_repository_projection ~base_path =
   match Repo_store.load_all ~base_path with
   | Ok repos ->
+    let registered_repos =
+      repos
+      |> List.map (fun (repo : Repo_manager_types.repository) -> repo.id)
+      |> List.sort_uniq String.compare
+    in
+    let registered_repo_paths =
+      repos
+      |> List.concat_map repo_identity_paths
+      |> List.sort_uniq String.compare
+    in
+    let registered_repo_aliases =
+      repos
+      |> List.concat_map (fun (repo : Repo_manager_types.repository) ->
+        repo.aliases
+        |> List.map String.trim
+        |> List.filter (fun alias -> not (String.equal alias ""))
+        |> List.sort_uniq String.compare
+        |> List.map (fun alias ->
+          `Assoc
+            [ "repo_id", `String repo.id
+            ; "alias", `String alias
+            ; "path", `String ("repos/" ^ alias)
+            ; "canonical_path", `String ("repos/" ^ repo.id)
+            ]))
+    in
     Ok
-      (repos
-       |> List.map (fun (repo : Repo_manager_types.repository) -> repo.id)
-       |> List.sort String.compare)
+      { repositories = repos
+      ; registered_repos
+      ; registered_repo_paths
+      ; registered_repo_aliases
+      }
   | Error msg -> Error msg
+;;
+
+let requested_repo_registration_fields ~repositories ~raw_path =
+  match requested_repo_of_raw_path raw_path with
+  | None -> []
+  | Some requested_repo ->
+    let matching_repo =
+      List.find_opt
+        (fun repo ->
+           List.exists (String.equal requested_repo) (repo_identity_tokens repo))
+        repositories
+    in
+    let requested_repo_fields =
+      [ "requested_repo", `String requested_repo
+      ; "requested_repo_path", `String ("repos/" ^ requested_repo)
+      ]
+    in
+    (match matching_repo with
+     | None ->
+       requested_repo_fields
+       @ [ "requested_repo_registered", `Bool false ]
+     | Some repo ->
+       requested_repo_fields
+       @ [ "requested_repo_registered", `Bool true
+         ; "canonical_repo_id", `String repo.id
+         ; "canonical_repo_path", `String ("repos/" ^ repo.id)
+         ])
 ;;
 
 (** Actionable error for path resolution failures.
@@ -154,14 +232,25 @@ let actionable_path_error
   let base_path = Keeper_alerting_path.project_root_of_config config in
   let available_repos = visible_sandbox_repositories ~config meta in
   let repo_hint = visible_repo_hint available_repos in
-  let registered_repo_fields, registered_repo_next_action =
-    match registered_repository_ids ~base_path with
-    | Ok registered_repos ->
-      ( [ "registered_repos", repos_json registered_repos ]
+  let registered_repo_fields, requested_repo_registration_fields, registered_repo_next_action =
+    match registered_repository_projection ~base_path with
+    | Ok
+        { repositories
+        ; registered_repos
+        ; registered_repo_paths
+        ; registered_repo_aliases
+        } ->
+      ( [ "registered_repos", repos_json registered_repos
+        ; ( "registered_repo_paths"
+          , `List (List.map (fun path -> `String path) registered_repo_paths) )
+        ; "registered_repo_aliases", `List registered_repo_aliases
+        ]
+      , requested_repo_registration_fields ~repositories ~raw_path
       , "Retry with a registered repos/<id> path, or register the visible \
          checkout name as an explicit repository alias before retrying." )
     | Error msg ->
       ( [ "registered_repos_error", `String msg ]
+      , []
       , "Repository catalog could not be loaded; repair \
          .masc/config/repositories.toml before retrying repo alias hints." )
   in
@@ -188,6 +277,8 @@ let actionable_path_error
                 , `String
                     "Grep resolves path against the keeper sandbox, then validates \
                      repository identity against repositories.toml id/name/aliases." )
+              ; ( "requested_repo_registration"
+                , `Assoc requested_repo_registration_fields )
               ; ( "next_action"
                 , `String registered_repo_next_action )
               ] )

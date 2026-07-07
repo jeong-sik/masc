@@ -102,12 +102,13 @@ let save_repositories base_path repositories =
   | Ok () -> ()
   | Error msg -> fail ("save_repositories failed: " ^ msg)
 
-let repository_fixture ~id ~name ~url ~local_path : Repo_manager_types.repository =
+let repository_fixture ?(aliases = []) ~id ~name ~url ~local_path
+  : Repo_manager_types.repository =
   { id
   ; name
   ; url
   ; local_path
-  ; aliases = []
+  ; aliases
   ; default_branch = "main"
   ; keepers = []
   ; status = Repo_manager_types.Active
@@ -193,6 +194,27 @@ let test_invalid_repo_name () =
   in
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "invalid_repo_name" (json_string "state" json)
+
+let test_find_repo_url_uses_registered_alias () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  let config = Masc.Workspace.default_config base_path in
+  let repo_path = Filename.concat base_path ".masc/repos/masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+        ~aliases:[ "masc-mcp" ]
+    ];
+  match
+    Masc.Playground_repo_readiness.find_repo_url
+      ~config
+      ~repo_name:"masc-mcp"
+  with
+  | Some url ->
+    check string "alias repo url" "https://github.com/jeong-sik/masc.git" url
+  | None -> fail "expected repository URL through explicit alias"
 
 let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
@@ -717,6 +739,8 @@ let () =
         test_case "parent git checkout is not clone" `Quick
           test_parent_git_checkout_does_not_count_as_clone;
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
+        test_case "find repo url uses registered alias" `Quick
+          test_find_repo_url_uses_registered_alias;
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;
       ];

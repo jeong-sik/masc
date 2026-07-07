@@ -755,6 +755,7 @@ let add_routes ~sw ~clock router =
                    Http.Response.json_value ~status:`Not_found
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                      reqd)))
+         )
          request reqd)
 
   |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->

@@ -252,10 +252,6 @@ export function AgentDetailOverlay() {
     >
       <div class="p-6 flex flex-col gap-5">
         <div class="flex justify-between items-start gap-4">
-          <div class="flex items-center gap-2">
-            <button class="btn btn-sm btn-ghost" onclick="${refreshAgentDetail}" title="Refresh">⟳</button>
-            <button class="btn btn-sm btn-ghost" onclick="${closeAgentDetail}" title="Close">✕</button>
-          </div>
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
               ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xl shadow-inset">${agentEmoji}</div>` : ''}
@@ -267,7 +263,7 @@ export function AgentDetailOverlay() {
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
-                  <${KeeperPhaseBadge} phase=${keeper.phase} compact=${true} />
+                  ${keeper ? html`<${KeeperPhaseBadge} phase=${keeper.phase} compact=${true} />` : null}
                   ${unified.description !== unified.label ? html`<span class="text-2xs font-medium py-1 px-2 border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)] whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
                   ${!agent && missionBrief?.archived_reason

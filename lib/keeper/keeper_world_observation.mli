@@ -57,6 +57,9 @@ type pending_board_event_kind =
   | Schedule_due
   | External_attention
   | Goal_verification_failed
+  | Failure_judgment
+      (** RFC-0313 W2: deterministic turn failure escalated for an
+          LLM-boundary verdict on the keeper's next turn. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;

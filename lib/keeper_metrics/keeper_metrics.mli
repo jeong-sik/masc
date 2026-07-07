@@ -12,6 +12,7 @@ type t =
   | TurnCompleted
   | PacingShadowEvents
   | PacingShadowNextDueSec
+  | FailureRoute
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped

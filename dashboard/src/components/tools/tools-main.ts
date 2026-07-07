@@ -19,6 +19,7 @@ import { ToolExecutor } from '../tool-executor/tool-executor'
 import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
+import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
@@ -62,6 +63,10 @@ export function Tools() {
 
       <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
         <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} onResolved=${loadTools} />
+      <//>
+
+      <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">
+        <${KeeperWaitingInventoryPanel} inventory=${data?.keeper_waiting_inventory ?? null} />
       <//>
 
       <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">

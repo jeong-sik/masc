@@ -126,6 +126,43 @@ let test_masc_dashboard_input_schema_matches () =
     gen.input_schema
 ;;
 
+let test_masc_keeper_waiting_inventory_name_matches () =
+  let gen =
+    find_by_name "masc_keeper_waiting_inventory" Tool_descriptors_gen.schemas
+  in
+  let hand =
+    find_by_name "masc_keeper_waiting_inventory" Tool_schemas_misc.schemas
+  in
+  Alcotest.(check string) "masc_keeper_waiting_inventory name" hand.name gen.name
+;;
+
+let test_masc_keeper_waiting_inventory_description_matches () =
+  let gen =
+    find_by_name "masc_keeper_waiting_inventory" Tool_descriptors_gen.schemas
+  in
+  let hand =
+    find_by_name "masc_keeper_waiting_inventory" Tool_schemas_misc.schemas
+  in
+  Alcotest.(check string)
+    "masc_keeper_waiting_inventory description"
+    hand.description
+    gen.description
+;;
+
+let test_masc_keeper_waiting_inventory_input_schema_matches () =
+  let gen =
+    find_by_name "masc_keeper_waiting_inventory" Tool_descriptors_gen.schemas
+  in
+  let hand =
+    find_by_name "masc_keeper_waiting_inventory" Tool_schemas_misc.schemas
+  in
+  Alcotest.check
+    yojson_testable
+    "masc_keeper_waiting_inventory input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
 let test_masc_gc_name_matches () =
   let gen = find_by_name "masc_gc" Tool_descriptors_gen.schemas in
   let hand = find_by_name "masc_gc" Tool_schemas_misc.schemas in
@@ -313,6 +350,20 @@ let () =
             "input_schema"
             `Quick
             test_masc_dashboard_input_schema_matches
+        ] )
+    ; ( "masc_keeper_waiting_inventory field-by-field"
+      , [ Alcotest.test_case
+            "name"
+            `Quick
+            test_masc_keeper_waiting_inventory_name_matches
+        ; Alcotest.test_case
+            "description"
+            `Quick
+            test_masc_keeper_waiting_inventory_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_keeper_waiting_inventory_input_schema_matches
         ] )
     ; ( "masc_gc field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_gc_name_matches

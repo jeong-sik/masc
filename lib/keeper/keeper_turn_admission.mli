@@ -34,6 +34,7 @@ type slot_snapshot =
   ; snapshot_slot_created : bool
   ; snapshot_in_flight : in_flight_info option
   ; snapshot_waiting : int
+  ; snapshot_waiting_since : float option
   ; snapshot_waiting_cap : int
   ; snapshot_waiting_full : bool
   ; snapshot_rejected_chat_count : int
@@ -89,6 +90,11 @@ val chat_waiting : base_path:string -> keeper_name:string -> bool
     turn's longer budget. Only counts *parked* waiters, never an already
     admitted (in-flight) turn — an admitted chat holds the slot and is no
     longer waiting. *)
+
+val chat_waiting_since : base_path:string -> keeper_name:string -> float option
+(** Unix epoch seconds for the oldest currently parked chat waiter on this
+    keeper's slot, or [None] when no chat request is waiting or the keeper slot
+    is unknown. *)
 
 val run_serialized
   :  base_path:string

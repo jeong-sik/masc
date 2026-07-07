@@ -169,6 +169,14 @@ let operator_pending_confirm_upsert_fn
     (fun _config _entry ->
       Error "operator pending-confirm callback is not connected")
 
+let operator_pending_confirm_read_result_fn
+  : (Workspace_utils_backend_setup.config ->
+     (operator_pending_confirm_request list, string) result)
+      Atomic.t
+  =
+  Atomic.make
+    (fun _config -> Error "operator pending-confirm callback is not connected")
+
 let operator_pending_confirm_remove_fn
   : (Workspace_utils_backend_setup.config -> string -> (unit, string) result) Atomic.t
   =

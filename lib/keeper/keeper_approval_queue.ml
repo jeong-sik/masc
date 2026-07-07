@@ -1376,6 +1376,11 @@ let list_pending_dashboard_json () : Yojson.Safe.t =
   `List (sort_entries_by_requested_at entries)
 ;;
 
+let list_pending_entries () : pending_approval list =
+  SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []
+  |> List.sort (fun left right -> Float.compare left.requested_at right.requested_at)
+;;
+
 let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =
   `Assoc
     (pending_entry_json_fields

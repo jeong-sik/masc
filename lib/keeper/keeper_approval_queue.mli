@@ -348,6 +348,7 @@ val resolve :
 
 val list_pending_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json : unit -> Yojson.Safe.t
+val list_pending_entries : unit -> pending_approval list
 
 (** Detail view of a single pending entry with input + runtime
     contract included. *)

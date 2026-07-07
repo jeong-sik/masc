@@ -344,18 +344,34 @@ let schedule_query_failure_message = function
   | exn -> Printexc.to_string exn
 ;;
 
-let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
+let schedule_visible_to_keeper keeper_name (request : Schedule_domain.schedule_request)
+  =
+  match keeper_name with
+  | None -> true
+  | Some keeper_name ->
+    (match request.scheduled_by.kind with
+     | Schedule_domain.Automated_actor -> String.equal request.scheduled_by.id keeper_name
+     | Schedule_domain.Human_operator | Schedule_domain.System -> false)
+;;
+
+let read_scheduled_automation_observation
+      ~(keeper_name : string option)
+      ~(config : Workspace.config)
+      ~now
+  =
   try
     let state = Schedule_store.read_state config in
+    let schedules =
+      List.filter (schedule_visible_to_keeper keeper_name) state.schedules
+    in
     let due_ready =
       Schedule_store.due_execution_candidates state
+      |> List.filter (schedule_visible_to_keeper keeper_name)
       |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
     in
-    let blocked =
-      state.schedules |> List.filter (schedule_blocked_approval ~now state)
-    in
+    let blocked = schedules |> List.filter (schedule_blocked_approval ~now state) in
     let active_count =
-      state.schedules
+      schedules
       |> List.fold_left
            (fun count request ->
               if schedule_effectively_active ~now request then count + 1 else count)
@@ -372,7 +388,7 @@ let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
     { active_count
     ; due_ready_count = List.length due_ready
     ; blocked_approval_count = List.length blocked
-    ; next_due_at = next_active_schedule_due_at ~now state.schedules
+    ; next_due_at = next_active_schedule_due_at ~now schedules
     ; items =
         due_items @ blocked_items
         |> List.sort compare_schedule_attention_item
@@ -997,7 +1013,10 @@ let observe
   let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~keeper_name:(Some meta.name)
+      ~config
+      ~now:(Time_compat.now ())
   in
   (* Defer the checkpoint load (file read + Yojson parse + sanitize + O(n)
      tool-pair repair) out of [observe]. Most cycles are no-op skips where
@@ -1051,7 +1070,10 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
   in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~keeper_name:(Some meta.name)
+      ~config
+      ~now:(Time_compat.now ())
   in
   { pending_mentions = []
   ; pending_board_events = []
@@ -1131,7 +1153,10 @@ let durable_signal_present
       events
   in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~keeper_name:(Some meta.name)
+      ~config
+      ~now:(Time_compat.now ())
   in
   pending_mentions <> []
   || pending_board_events <> []

@@ -428,7 +428,17 @@ let test_dispatch_list_surfaces_payload_support_summary () =
     check (list string)
       "dashboard display does not log dispatch projection warnings"
       []
-      (dispatch_projection_warn_messages_since before_dashboard)
+      (dispatch_projection_warn_messages_since before_dashboard);
+    let before_repeat_poll = latest_log_seq () in
+    ignore
+      (Tool_schedule.dispatch ctx
+         ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
+         ~args:(`Assoc [ "limit", `Int 10 ]));
+    ignore (Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config);
+    check (list string)
+      "repeated display poll does not log dispatch projection warnings"
+      []
+      (dispatch_projection_warn_messages_since before_repeat_poll)
 ;;
 
 let test_dispatch_list_reports_schedule_store_read_error () =

@@ -1083,11 +1083,31 @@
   gap: 3px 9px;
   padding: 8px 11px;
   border: 1px solid var(--color-border-subtle);
+  border-left-width: 2px;
   border-radius: var(--radius-sm, 4px);
   background: var(--color-bg-surface);
   cursor: pointer;
   transition: border-color 0.16s ease, background 0.16s ease;
   width: 100%;
+}
+
+.wka-todo.approve {
+  border-left-color: var(--color-volt-strong, var(--color-accent));
+  background: color-mix(in oklab, var(--color-volt-wash, var(--color-accent-soft)) 18%, var(--color-bg-surface));
+}
+
+.wka-todo.verify {
+  border-left-color: var(--color-status-info, var(--color-info));
+}
+
+.wka-todo.block {
+  border-left-color: var(--color-status-bad);
+  background: color-mix(in oklab, var(--color-status-bad) 7%, var(--color-bg-surface));
+}
+
+.wka-todo.claim {
+  border-left-color: var(--color-status-warn);
+  background: color-mix(in oklab, var(--color-status-warn) 6%, var(--color-bg-surface));
 }
 
 .wka-todo:hover,

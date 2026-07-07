@@ -289,7 +289,7 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
       // Five KPI summary cells
       expect(screen.getByTestId('work-kpis').children.length).toBe(5)
-      expect(screen.getByText(/미배정 task는 claim/).textContent).toContain('claim')
+      expect(screen.getByText(/미배정 task는 백로그에서 claim/).textContent).toContain('claim')
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
 
@@ -307,6 +307,7 @@ describe('Work', () => {
       const kpis = screen.getByTestId('work-kpis')
       expect(kpis.textContent).toContain('활성 목표')
       expect(kpis.textContent).toContain('전체 작업')
+      expect(kpis.textContent).toContain('백로그')
       expect(kpis.textContent).not.toContain('목표 TASK')
       expect(kpis.textContent).not.toContain('Task')
       expect(kpis.textContent).not.toContain('TASK')
@@ -448,7 +449,7 @@ describe('Work', () => {
 
       const backlog = screen.getByTestId('work-backlog')
       expect(backlog).toBeTruthy()
-      expect(backlog.textContent).toContain('미배정 Task')
+      expect(backlog.textContent).toContain('클레임 가능 백로그')
       expect(backlog.textContent).toContain('2')
       expect(backlog.querySelectorAll('.wk-task-claim').length).toBe(2)
       expect(screen.getByText('Orphan job')).toBeTruthy()
@@ -724,6 +725,7 @@ describe('Work', () => {
         render(html`<${Work} />`)
 
         const aside = screen.getByTestId('work-aside')
+        expect(aside.querySelector('.wka-hud')?.textContent).toContain('백로그')
         // "지금 상황" calm state
         expect(aside.querySelector('[data-testid="wka-flagged-calm"]')?.textContent).toContain('주의 목표 없음')
         // "해야 할 일" calm state
@@ -791,6 +793,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const approvalItems = aside.querySelectorAll('[data-testid="wka-approval-item"]')
         expect(approvalItems.length).toBe(1)
+        expect(approvalItems[0]?.classList.contains('approve')).toBe(true)
         expect(approvalItems[0]?.textContent).toContain('Approval Goal')
         expect(approvalItems[0]?.textContent).toContain('lead-keeper')
       })
@@ -817,6 +820,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const verifyItems = aside.querySelectorAll('[data-testid="wka-verify-item"]')
         expect(verifyItems.length).toBe(1)
+        expect(verifyItems[0]?.classList.contains('verify')).toBe(true)
         expect(verifyItems[0]?.textContent).toContain('Verify Me')
         // 1 unsatisfied gate (done=blocked, inspect=ready → 1 open)
         expect(verifyItems[0]?.textContent).toContain('1 미충족')
@@ -841,6 +845,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const blockerItems = aside.querySelectorAll('[data-testid="wka-blocker-item"]')
         expect(blockerItems.length).toBe(1)
+        expect(blockerItems[0]?.classList.contains('block')).toBe(true)
         expect(blockerItems[0]?.textContent).toContain('Blocked Task')
         expect(blockerItems[0]?.textContent).toContain('dependency unavailable')
       })
@@ -860,6 +865,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const backlogItem = aside.querySelector('[data-testid="wka-backlog-item"]')
         expect(backlogItem).toBeTruthy()
+        expect(backlogItem?.classList.contains('claim')).toBe(true)
         expect(backlogItem?.textContent).toContain('미배정 task 2건')
       })
 

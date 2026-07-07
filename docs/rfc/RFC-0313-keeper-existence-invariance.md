@@ -4,7 +4,7 @@
 - Area: `lib/keeper/` (turn failure post-processing, supervisor sweep/launch, pause policy, error classification, rotation), `lib/keeper_failure_policy/`, `lib/runtime/` ([pause] knobs), dashboard pacing projection
 - Supersedes: the failure-driven halves of RFC-0152 (auto-resume taxonomy), RFC-0246 remnants; extends RFC-0303 (which retired heuristic no-progress pause) to *all* failure-driven existence changes
 - Builds on / touches: RFC-0303 (stimulus-gated wake, "판단은 LLM 경계"), RFC-0260 / PR #22970 (failover chain restoration), #23452 (supervisor honors Pause_keeper), #23456 (cooldown cause preservation), RFC-0002 (originally: Paused = operator-paused only)
-- Evidence base: 6-lens audit 2026-07-07 (88 findings, 23/24 adversarially confirmed), 48h live logs `~/me/.masc/logs/system_log_2026-07-05..07.jsonl`
+- Evidence base: 6-lens audit 2026-07-07 (88 findings, 23/24 adversarially confirmed), 48h live logs `<base-path>/.masc/logs/system_log_2026-07-05..07.jsonl`
 
 ## Operator principle (verbatim intent)
 

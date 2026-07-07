@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { formatContextTokens } from '../lib/format-number'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import {
@@ -175,10 +176,10 @@ function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransport
   return provider.transportKind === 'command' ? 'command' : 'endpoint'
 }
 
-// Prototype rt-model-ctx label — runtime-editor.jsx:176 `(max/1000).toFixed(0)}k ctx`.
+// Prototype rt-model-ctx label (runtime-editor.jsx:176) — now via the shared
+// formatContextTokens SSOT so 1M-class contexts read '1M ctx', not '1000k ctx'.
 function protoContext(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '— ctx'
-  return `${(value / 1000).toFixed(0)}k ctx`
+  return formatContextTokens(value) ?? '— ctx'
 }
 
 function parseOptionalPositiveInteger(raw: string): number | null | undefined {

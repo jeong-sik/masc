@@ -37,7 +37,7 @@ Runtime은 하나의 완전히 materialize된 (Provider × Model × Binding) tri
 | `api_format` | `Messages_api \| Chat_completions_api \| Ollama_api` | `runtime_api_format` |
 | `transport` | `Http of string \| Cli of string` | `runtime_transport` |
 | `credential` | `Env of string \| File of string \| Inline of string` | `runtime_credential` |
-| `thinking_control_format` | OAS `Llm_provider.Capabilities.thinking_control_format` re-export (`No_thinking_control`, `Thinking_object`, `Thinking_object_only`, `Chat_template_kwargs`, `Chat_template_token`, `Ollama_think`, `Reasoning_effort`, `Enable_thinking`) | `runtime_thinking_control_format` |
+| `thinking_control_format` | OAS `Llm_provider.Capabilities.thinking_control_format` re-export (`No_thinking_control`, `Thinking_object`, `Thinking_object_adaptive`, `Thinking_object_only`, `Chat_template_kwargs`, `Chat_template_token of string`, `Ollama_think`, `Reasoning_effort`, `Enable_thinking`) | `runtime_thinking_control_format` |
 | `capabilities` | 10-field provider 행동 record + `capabilities_default` | `runtime_capabilities` |
 | `model_capabilities` | 24-field record (`Llm_provider.Capabilities` 미러) + default | `runtime_model_capabilities` |
 | `provider` | Layer 1 record (id/display_name/protocol/api_format/transport/is_non_interactive/credentials/capabilities/headers). log·healthcheck sub-record는 v1에서 parse-and-ignore | `runtime_provider` |

@@ -2241,6 +2241,102 @@ let test_provider_timeout_loop_pause_skips_restart () =
       check bool "registry entry unregistered after provider timeout loop pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
+(* ── #23439: turn-failure-streak auto-pause ──────────────────────── *)
+
+(* [Keeper_failure_policy] returns a typed [Pause_keeper] verdict for a
+   [Turn_failure_streak] (keeper_failure_policy.ml).  Before #23439 the
+   supervisor re-matched [failure_reason] and routed
+   [Turn_consecutive_failures] into [queue_standard_restart], discarding the
+   verdict; the restart then zeroed [turn_consecutive_failures]
+   (keeper_registry_setup.ml) so the identical "Keeper turn failed N
+   consecutive cycle(s)" blocker regenerated every sweep.  sweep_and_recover
+   must now:
+   1. Skip the [to_restart] enqueue (no RestartAttempts for this keeper).
+   2. Persist [meta.paused = true] on disk.
+   3. Enable auto-resume with back-off ([auto_resume_after_sec = Some _],
+      unlike the stale-storm manual pause which leaves it [None]).
+   4. Increment [masc_keeper_turn_failure_streak_paused_total].
+   5. Not mark the keeper dead. *)
+let test_turn_failure_streak_pause_skips_restart () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "turn-failure-streak-keeper" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      resolve_done_for_test reg (`Crashed "synthetic turn failure streak");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Turn_consecutive_failures 3));
+      let attempt_labels = [ ("keeper", name) ] in
+      let baseline_pause =
+        Masc.Otel_metric_store.metric_total
+          "masc_keeper_turn_failure_streak_paused_total"
+      in
+      let baseline_dead =
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
+      in
+      let baseline_restart_attempts =
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartAttempts)
+          ~labels:attempt_labels ()
+      in
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      let after_pause =
+        Masc.Otel_metric_store.metric_total
+          "masc_keeper_turn_failure_streak_paused_total"
+      in
+      let after_dead =
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
+      in
+      let after_restart_attempts =
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartAttempts)
+          ~labels:attempt_labels ()
+      in
+      check (float 0.001) "turn_failure_streak_paused counter incremented by 1"
+        (baseline_pause +. 1.0) after_pause;
+      check (float 0.001)
+        "restart attempt NOT incremented (Pause_keeper verdict honored)"
+        baseline_restart_attempts after_restart_attempts;
+      check (float 0.001) "dead counter NOT incremented (streak is a pause)"
+        baseline_dead after_dead;
+      (match Keeper_meta_store.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = true after turn failure streak pause"
+             true m.paused;
+           check bool "turn failure streak pause enables auto-resume back-off"
+             true (Option.is_some m.auto_resume_after_sec)
+       | Ok None -> fail "meta missing after turn failure streak pause"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      check bool "registry entry unregistered after turn failure streak pause"
+        false (Reg.is_registered ~base_path:config.base_path name))
+
 (* Fail-closed pause commit: when [paused=true] cannot be persisted (here:
    meta missing on disk), the pause must not commit — no pause counter, no
    Paused publish, and the registry entry must stay registered so the pause
@@ -3581,6 +3677,8 @@ let () =
         test_legacy_stale_fleet_batch_routes_to_restart_budget;
       test_case "Provider timeout loop skips restart, persists paused, increments counter" `Quick
         test_provider_timeout_loop_pause_skips_restart;
+      test_case "Turn failure streak honors Pause_keeper verdict, skips restart (#23439)" `Quick
+        test_turn_failure_streak_pause_skips_restart;
       test_case "storm pause persist failure keeps entry registered (fail-closed)" `Quick
         test_stale_storm_pause_persist_failure_keeps_entry_registered;
       test_case "terminal-state launch reject does not announce Running" `Quick

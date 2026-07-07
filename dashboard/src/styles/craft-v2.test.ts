@@ -58,11 +58,13 @@ describe('craft-v2.css density chat console (retargeted to live classes)', () =>
     )
     expect(bubble.padding).toBe('16px 20px')
     expect(bubble['line-height']).toBe('1.7')
-    expect(declarationsForSelector(
+    // Ownership contract: outer composer spacing belongs to .kw-composer-wrap
+    // alone (keeper-workspace.css). Density rules must NOT re-pad the inner —
+    // the removed 16px 30px 24px was the second layer of a 62px bottom gap.
+    expect(() => declarationsForSelector(
       css,
       '.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .kw-composer-inner',
-    ).padding)
-      .toBe('16px 30px 24px')
+    )).toThrow('Selector not found')
   })
 
   it('applies the compact chat values to the live .kw-*/.chat-* classes', () => {
@@ -73,11 +75,10 @@ describe('craft-v2.css density chat console (retargeted to live classes)', () =>
       '.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .chat-transcript',
     ).padding)
       .toBe('14px 24px 6px')
-    expect(declarationsForSelector(
+    expect(() => declarationsForSelector(
       css,
       '.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .kw-composer-inner',
-    ).padding)
-      .toBe('10px 20px 12px')
+    )).toThrow('Selector not found')
   })
 
   it('applies context-rail + roster spacious values to live classes', () => {

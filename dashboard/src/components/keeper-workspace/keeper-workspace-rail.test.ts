@@ -6,7 +6,7 @@ import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
 import { fetchKeeperCompactionSnapshots, fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
-import { KeeperWorkspaceRail } from './keeper-workspace-rail'
+import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
@@ -96,6 +96,7 @@ afterEach(() => {
   tasks.value = []
   shellAuthSummary.value = null
   compactionSnapshots.value = {}
+  runtimeRawSpecOpen.value = false
   vi.clearAllMocks()
   vi.useRealTimers()
   resetRuntimeCatalog()
@@ -396,38 +397,55 @@ describe('KeeperWorkspaceRail', () => {
     const effort = container.querySelector('[data-effort-mode="reasoning-effort"]')
     expect(effort?.textContent).toContain('reasoning-effort')
     expect(effort?.textContent).toContain('조정 가능')
-    expect(container.textContent).toContain('params')
-    expect(container.textContent).toContain('chat_template_kwargs · preserve_always')
+
+    // Raw catalog rows are collapsed by default — only the curated block shows.
+    expect(container.textContent).not.toContain('params')
+    expect(container.textContent).not.toContain('declared')
+    const rawToggle = container.querySelector('[data-testid="runtime-raw-toggle"]') as HTMLButtonElement
+    expect(rawToggle).not.toBeNull()
+    expect(rawToggle.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(rawToggle)
+    await waitFor(() => {
+      expect(container.textContent).toContain('params')
+    })
+    expect(
+      container.querySelector('[data-testid="runtime-raw-toggle"]')?.getAttribute('aria-expanded'),
+    ).toBe('true')
+
+    // Raw rows render via the shared lib/runtime-provider-summary formatters
+    // (colon-separated tokens) — the rail no longer ships its own copies.
+    expect(container.textContent).toContain('wire:chat_template_kwargs · replay:preserve_always')
     expect(container.textContent).toContain('request')
     expect(container.textContent).toContain(
-      'openai_compat · source oas-provider-config · path /chat/completions · out 65536 · ctx 131072',
+      'kind:openai_compat · source:oas-provider-config · path:/chat/completions · out:65536 · ctx:131072',
     )
-    expect(container.textContent).toContain('system prompt')
-    expect(container.textContent).toContain('tool required')
+    expect(container.textContent).toContain('system-prompt')
+    expect(container.textContent).toContain('tool:required')
     expect(container.textContent).toContain('declared')
-    expect(container.textContent).toContain('chat-completions · openai-compatible-http')
-    expect(container.textContent).toContain('transport http')
-    expect(container.textContent).toContain('headers 1')
-    expect(container.textContent).toContain('temp 0.65')
-    expect(container.textContent).toContain('sampling config top_p 0.91,top_k 42,min_p 0.07')
-    expect(container.textContent).toContain('budget 32768')
-    expect(container.textContent).toContain('behavior inline-tools,keeper-bridge')
+    expect(container.textContent).toContain('api:chat-completions · protocol:openai-compatible-http')
+    expect(container.textContent).toContain('transport:http')
+    expect(container.textContent).toContain('headers:1')
+    expect(container.textContent).toContain('temp:0.65')
+    expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
+    expect(container.textContent).toContain('budget:32768')
+    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
     expect(container.textContent).toContain(
-      'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
-    expect(container.textContent).toContain('source oas-provider-config-model')
-    expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
-    expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
-    expect(container.textContent).toContain('input multimodal,image,audio')
-    expect(container.textContent).toContain('modality visual-first')
-    expect(container.textContent).toContain('tool-content null')
-    expect(container.textContent).toContain('extended thinking')
-    expect(container.textContent).toContain('reasoning budget')
-    expect(container.textContent).toContain('effort low,medium,high')
-    expect(container.textContent).toContain('wire chat-template-kwargs')
-    expect(container.textContent).toContain('preserve always-preserved')
-    expect(container.textContent).toContain('reasoning-stream delta-reasoning-field:reasoning_content')
-    expect(container.textContent).toContain('task transcription · native-stream')
+    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
+    expect(container.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
+    expect(container.textContent).toContain('input:multimodal,image,audio')
+    expect(container.textContent).toContain('modality:visual-first')
+    expect(container.textContent).toContain('tool-content:null')
+    expect(container.textContent).toContain('extended-thinking')
+    expect(container.textContent).toContain('reasoning-budget')
+    expect(container.textContent).toContain('effort:low,medium,high')
+    expect(container.textContent).toContain('wire:chat-template-kwargs')
+    expect(container.textContent).toContain('preserve:always-preserved')
+    expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
+    expect(container.textContent).toContain('task:transcription · native-stream')
     // the "no source" stub is replaced once the catalog reports capabilities
     expect(container.textContent).not.toContain('조정 정보 미수신')
   })
@@ -466,6 +484,9 @@ describe('KeeperWorkspaceRail', () => {
     )
     expect(multimodalFlag).not.toBeUndefined()
     expect(multimodalFlag?.textContent).toContain('—')
+    // unknown renders with the dedicated 'na' class, not a false 'off' claim
+    expect(multimodalFlag?.className).toContain('na')
+    expect(multimodalFlag?.className).not.toContain('off')
     // effort is likewise unknown, not the definitive "effort 제어 없음" claim that
     // the default-filled thinking_control_format ('none') would otherwise imply.
     expect(container.textContent).toContain('조정 정보 미수신')

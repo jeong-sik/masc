@@ -219,7 +219,7 @@ let transition_task_outcome_r
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
-              | Masc_domain.Submit_for_verification, _
+              | _, Masc_domain.Submit_for_verification
                 when String.length (String.trim notes) = 0 ->
                 " Remediation: submit_for_verification requires non-empty notes \
                  describing the deliverable. Provide a summary of what was done \

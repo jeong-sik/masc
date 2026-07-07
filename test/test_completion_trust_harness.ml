@@ -49,6 +49,7 @@ open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
 module Workspace = Masc.Workspace
+module Task_completion_gate = Masc.Task_completion_gate
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -424,6 +425,22 @@ let () =
      deterministic: notes below [min_notes_length] short-circuit before the
      Gate-3 LLM call, so no model runtime is ever invoked. *)
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
+  (* Wire the REAL evidence gate into the completion hook. The hook defaults to a
+     permissive stub (workspace_hooks.ml: always Pass); the running server swaps
+     in the deterministic gate at boot via Workspace_metric_hooks. Left unwired,
+     every done attempt passes the gate vacuously — a completion-with-evidence
+     test would go green without the gate ever running, and a fake-evidence
+     reject could never be observed. This replicates the boot adapter so the
+     reject/recover oracle (and the evidence_refs-success test) exercise the
+     gate itself rather than the stub. *)
+  Atomic.set Workspace_hooks.task_completion_gate_decide_fn
+    (fun ~task_id ~task_opt ~notes ~handoff () ->
+      match
+        Task_completion_gate.decide ~task_id ~task_opt ~notes ~handoff_context:handoff ()
+      with
+      | Task_completion_gate.Pass -> Workspace_hooks.Pass
+      | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
+        Workspace_hooks.Reject { reason; rule_id; hint; payload_json });
   run "Completion_trust_harness"
     [ ( "completion_trust_dispatch_oracle"
       , [ test_case "non-owner completion is denied (ownership gate)" `Quick

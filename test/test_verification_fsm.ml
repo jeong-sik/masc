@@ -276,7 +276,7 @@ let test_submit_phase_e_no_substring_reject_at_transition () =
   (* RFC-0109 Phase E (2026-05-27): the transition layer no longer
      applies a substring classifier to reject submissions with
      "placeholder-only" notes. Gating for contracted tasks lives in
-     [Cdal_evidence_gate.decide] (see test/test_cdal_evidence_gate.ml).
+     [Task_completion_gate.decide] (see test/test_task_completion_gate.ml).
      transition_task_r called directly forwards typed evidence refs as
      observability metadata and lets the verifier protocol observe what
      the keeper actually wrote. *)

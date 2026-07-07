@@ -230,9 +230,12 @@ val post_of_create_post_outcome : create_post_outcome -> post
     dedup hit, or a status-only automation rollup.  Same validation and
     persistence semantics as {!create_post}; fresh posts append JSONL + earn
     credits, while dedup/rollup hits return the existing post without those
-    create-side effects. *)
+    create-side effects.  [after_rollup_persist] runs after a rollup snapshot is
+    saved and before the caller observes success; if it fails, the previous post
+    snapshot is restored and the failure is returned explicitly. *)
 val create_post_with_outcome
-  :  store
+  :  ?after_rollup_persist:(post -> (unit, string) Result.t)
+  -> store
   -> author:string
   -> content:string
   -> ?title:string

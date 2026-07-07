@@ -23,6 +23,9 @@ import {
   boardActorAvatarKey,
   boardActorDisplayName,
   boardActorTitle,
+  boardClaimEvidenceBadgeClass,
+  boardClaimEvidenceLabel,
+  boardClaimEvidenceTitle,
   contributorQualityBadgeClass,
   contributorQualityBandLabel,
   contributorQualityPercent,
@@ -547,6 +550,8 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const qualityTitle = qualityPercent === null
     ? undefined
     : `기여자 품질 ${qualityPercent}점 · ${qualityBand}`
+  const claimEvidenceLabel = boardClaimEvidenceLabel(post.claim_evidence)
+  const claimEvidenceTitle = boardClaimEvidenceTitle(post.claim_evidence)
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
   const postVoteLabel = post.vote_blind ? '투표 후 공개' : `${post.votes ?? 0} votes`
@@ -621,7 +626,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <!-- Badges -->
-          ${(post.pinned || post.flair || post.hearth || post.visibility || post.expires_at || post.classification_reason || qualityPercent !== null || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
+          ${(post.pinned || post.flair || post.hearth || post.visibility || post.expires_at || post.classification_reason || qualityPercent !== null || claimEvidenceLabel !== null || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
@@ -636,6 +641,13 @@ export function PostDetail({ post }: { post: BoardPost }) {
                         aria-label=${qualityTitle}
                         title=${qualityTitle}
                       >품질 ${qualityPercent}</span>
+                    ` : null}
+                    ${claimEvidenceLabel !== null ? html`
+                      <span
+                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${boardClaimEvidenceBadgeClass(post.claim_evidence)}`}
+                        aria-label=${claimEvidenceTitle}
+                        title=${claimEvidenceTitle}
+                      >${claimEvidenceLabel}</span>
                     ` : null}
                     ${expiryChip(post)}
                     <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />

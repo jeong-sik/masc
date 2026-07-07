@@ -14,6 +14,7 @@
  (wrapped false)
  (private_modules
   board_tool_cache
+  board_claim_gate
   board_tool_curation
   board_tool_handlers
   board_tool_post
@@ -21,6 +22,7 @@
  (modules
   board_tool
   board_tool_cache
+  board_claim_gate
   board_tool_curation
   board_tool_dispatch
   board_tool_format
@@ -31,10 +33,12 @@
   board_tool_sub_board)
  (libraries
   eio
+  digestif
   re
   time_compat
   yojson
   masc.config
+  masc.fs_compat
   masc.masc_core
   masc.masc_log
   masc.board_handlers

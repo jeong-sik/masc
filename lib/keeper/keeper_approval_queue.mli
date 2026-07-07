@@ -204,6 +204,7 @@ val audit_approval_event :
   ?rule_match:rule_match ->
   ?source_approval_id:string ->
   ?auto_approved:bool ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?decision:approval_audit_decision ->
   unit ->
   unit

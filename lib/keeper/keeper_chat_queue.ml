@@ -61,22 +61,10 @@ let snapshot_path ~base_path ~keeper_name =
 let source_to_yojson = Keeper_chat_connector.to_yojson
 
 let source_of_yojson json =
-  match Keeper_chat_connector.of_yojson json with
+  match Keeper_chat_connector.of_yojson_with_error json with
   | Ok source -> Ok source
-  | Error "chat connector requires kind" -> Error "chat queue source requires kind"
-  | Error "discord chat connector requires channel_id and user_id" ->
-    Error "discord chat queue source requires channel_id and user_id"
-  | Error "slack chat connector requires channel and user_id" ->
-    Error "slack chat queue source requires channel and user_id"
   | Error err ->
-    let prefix = "unsupported chat connector kind: " in
-    if String.starts_with ~prefix err
-    then
-      let kind =
-        String.sub err (String.length prefix) (String.length err - String.length prefix)
-      in
-      Error (Printf.sprintf "unsupported chat queue source kind: %s" kind)
-    else Error err
+    Error (Keeper_chat_connector.decode_error_to_chat_queue_source_string err)
 
 let queued_message_to_yojson (msg : queued_message) =
   `Assoc

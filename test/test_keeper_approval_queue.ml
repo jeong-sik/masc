@@ -176,8 +176,11 @@ let test_resolve_fires_keeper_wake_hook () =
 
 let test_approval_entry_carries_continuation_channel () =
   let base_path = temp_dir () in
+  AQ.For_testing.reset_audit_store ();
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
     (fun () ->
        let keeper_name = "approval-continuation-channel-test" in
        let channel =
@@ -226,7 +229,39 @@ let test_approval_entry_carries_continuation_channel () =
        (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
         | Ok () -> ()
         | Error err ->
-          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err)))
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       let find_audit_event event =
+         AQ.read_recent_audit ~base_path ~n:10 ()
+         |> List.find_opt (fun row ->
+           String.equal id (row |> member "id" |> to_string)
+           && String.equal event (row |> member "event" |> to_string))
+       in
+       let check_audit_channel label row =
+         let audit_channel = row |> member "continuation_channel" in
+         Alcotest.(check string)
+           (label ^ " audit channel kind")
+           "slack"
+           (audit_channel |> member "kind" |> to_string);
+         Alcotest.(check string)
+           (label ^ " audit channel id")
+           "C123"
+           (audit_channel |> member "channel" |> to_string)
+       in
+       let pending_audit =
+         match find_audit_event AQ.approval_audit_pending_event with
+         | Some row -> row
+         | None -> Alcotest.fail "pending audit row missing"
+       in
+       let resolved_audit =
+         match find_audit_event AQ.approval_audit_resolved_event with
+         | Some row -> row
+         | None -> Alcotest.fail "resolved audit row missing"
+       in
+       check_audit_channel "pending" pending_audit;
+       check_audit_channel "resolved" resolved_audit;
+       match AQ.list_recent_resolved_json ~base_path ~n:1 () with
+       | [ resolved ] -> check_audit_channel "resolved history" resolved
+       | _ -> Alcotest.fail "resolved history row missing")
 ;;
 
 let test_critical_entry_phase_becomes_escalated_after_timer () =

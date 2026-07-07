@@ -211,6 +211,24 @@ let test_unknown_continuation_kind_fails_closed () =
   | Ok (Continuation.Routed _) -> fail "unknown kind decoded as a routed channel"
   | Error err -> fail ("unknown kind should be Unrouted, got error: " ^ err)
 
+let test_connector_decode_error_contract () =
+  let queue_error =
+    Connector.decode_error_to_chat_queue_source_string Connector.Missing_kind
+  in
+  check string "queue source missing-kind error is explicit"
+    "chat queue source requires kind" queue_error;
+  match Connector.of_yojson_with_error (`Assoc [ ("kind", `String "teams") ]) with
+  | Error (Connector.Unsupported_kind "teams") ->
+    check string "unsupported kind queue error is explicit"
+      "unsupported chat queue source kind: teams"
+      (Connector.decode_error_to_chat_queue_source_string
+         (Connector.Unsupported_kind "teams"))
+  | Error err ->
+    fail
+      ("unexpected typed connector decode error: "
+       ^ Connector.decode_error_to_string err)
+  | Ok _ -> fail "unsupported connector kind decoded successfully"
+
 let test_external_attention_projects_to_prompt_event () =
   let meta = make_meta "conn-keeper" in
   let item = external_attention_item () in
@@ -244,6 +262,8 @@ let () =
             test_continuation_channel_codec_roundtrips
         ; test_case "unknown continuation kind becomes Unrouted" `Quick
             test_unknown_continuation_kind_fails_closed
+        ; test_case "connector decode errors have queue mapping" `Quick
+            test_connector_decode_error_contract
         ] )
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick

@@ -180,6 +180,7 @@ let audit_approval_event
       ?rule_match
       ?source_approval_id
       ?auto_approved
+      ?continuation_channel
       ?decision
       ()
   =
@@ -221,6 +222,10 @@ let audit_approval_event
          ; "disposition", Json_util.string_opt_to_json disposition
          ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
          ]
+         @ (match continuation_channel with
+            | Some channel ->
+              [ "continuation_channel", Keeper_continuation_channel.to_yojson channel ]
+            | None -> [])
          @ (match runtime_contract with
             | Some json -> [ "runtime_contract", json ]
             | None -> [])
@@ -369,6 +374,7 @@ let resolved_approval_json_of_audit_event json =
     ; "task_id", json_member_or_null "task_id" json
     ; "goal_id", json_member_or_null "goal_id" json
     ; "goal_ids", json_member_or_null "goal_ids" json
+    ; "continuation_channel", json_member_or_null "continuation_channel" json
     ; "sandbox_target", json_member_or_null "sandbox_target" json
     ; "disposition", json_member_or_null "disposition" json
     ; "disposition_reason", json_member_or_null "disposition_reason" json
@@ -658,6 +664,7 @@ let record_pending (entry : pending_approval) =
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
     ?disposition_reason:entry.disposition_reason
+    ~continuation_channel:entry.continuation_channel
     ();
   broadcast_pending entry
 ;;
@@ -881,6 +888,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
     ?disposition_reason:entry.disposition_reason
+    ~continuation_channel:entry.continuation_channel
     ~decision:(Approval_resolved decision)
     ();
   (match entry.resolver with
@@ -1107,6 +1115,7 @@ let submit_and_await
            ~sandbox_target:entry.sandbox_target
            ?runtime_contract
            ?selected_model
+           ~continuation_channel:entry.continuation_channel
            ~decision:(Approval_expired reason)
            ();
          (* Mirror expire_stale's teardown, but preserve any concurrent
@@ -1137,6 +1146,7 @@ let submit_and_await
            ~sandbox_target:entry.sandbox_target
            ?runtime_contract
            ?selected_model
+           ~continuation_channel:entry.continuation_channel
            ~audit_disposition:(Approval_escalated reason)
            ();
          (match update_pending_phase ~id Escalated with
@@ -1168,6 +1178,7 @@ let submit_and_await
            ?selected_model
            ?disposition
            ?disposition_reason
+           ~continuation_channel:entry.continuation_channel
            ~decision:(Approval_expired reason)
            ());
       atomic_update pending (fun map -> SMap.remove id map)))
@@ -1505,6 +1516,7 @@ let expire_stale ~max_wait_s =
          ?selected_model:entry.selected_model
          ?disposition:entry.disposition
          ?disposition_reason:entry.disposition_reason
+         ~continuation_channel:entry.continuation_channel
          ~decision:(Approval_expired reason)
          ();
        (* Expiry clears the [Approval_pending] skip just like a resolution, so

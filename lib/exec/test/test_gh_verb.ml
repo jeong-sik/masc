@@ -144,6 +144,41 @@ let test_api_left_to_floor () =
     Alcotest.failf "floor should still catch api -X DELETE: got %s" (rc f)
 ;;
 
+(* The gating rationale surfaced on operator approval prompts (RFC-0309
+   visibility): each verb class maps to a distinct human-readable label, and a
+   real irreversible command (pr merge) yields the mutation label. *)
+let test_verb_class_to_string () =
+  let label words =
+    Shell_ir_risk.gh_verb_class_to_string
+      (Shell_ir_risk.classify_gh_verb (Gh_verb.classify words))
+  in
+  Alcotest.(check string)
+    "pr merge is an irreversible mutation"
+    "irreversible mutation"
+    (label [ "gh"; "pr"; "merge" ]);
+  Alcotest.(check string)
+    "pr view is a read"
+    "read"
+    (label [ "gh"; "pr"; "view"; "1" ]);
+  (* every class label is non-empty and distinct *)
+  let classes =
+    [ Shell_ir_risk.Gh_read
+    ; Shell_ir_risk.Gh_reversible_mutation
+    ; Shell_ir_risk.Gh_irreversible_mutation
+    ; Shell_ir_risk.Gh_unrecognized_action
+    ; Shell_ir_risk.Gh_string_borne
+    ; Shell_ir_risk.Gh_unrecognized_family
+    ]
+  in
+  let labels = List.map Shell_ir_risk.gh_verb_class_to_string classes in
+  List.iter
+    (fun s -> if s = "" then Alcotest.fail "verb class label must be non-empty")
+    labels;
+  Alcotest.(check int)
+    "all six labels distinct"
+    (List.length classes)
+    (List.length (List.sort_uniq String.compare labels))
+
 let () =
   Alcotest.run "gh_verb"
     [
@@ -153,6 +188,8 @@ let () =
           Alcotest.test_case "of_fields (real pipeline)" `Quick test_of_fields;
           Alcotest.test_case "family_token round-trip" `Quick
             test_family_token_round_trip;
+          Alcotest.test_case "verb class to_string labels" `Quick
+            test_verb_class_to_string;
         ] );
       ( "risk-agreement",
         [

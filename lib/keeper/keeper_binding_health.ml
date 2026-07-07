@@ -78,6 +78,31 @@ type outcome =
   | Soft_rate_limited
   | Capacity_backpressure
 
+(* Public mirror of [outcome].  Defined here (rather than beside
+   [recent_outcome_count] where it originated) so [build_info_locked] can expose
+   the cooldown-arming outcome on [provider_info] without leaking the internal
+   [outcome] type.  See [outcome_matches] for the paired exhaustive match that
+   guards against the two types drifting. *)
+type outcome_kind =
+  | Outcome_success
+  | Outcome_failure
+  | Outcome_rejected
+  | Outcome_hard_quota
+  | Outcome_terminal_failure
+  | Outcome_server_error
+  | Outcome_soft_rate_limited
+  | Outcome_capacity_backpressure
+
+let outcome_kind_of_outcome = function
+  | Success -> Outcome_success
+  | Failure -> Outcome_failure
+  | Rejected -> Outcome_rejected
+  | Hard_quota -> Outcome_hard_quota
+  | Terminal_failure -> Outcome_terminal_failure
+  | Server_error -> Outcome_server_error
+  | Soft_rate_limited -> Outcome_soft_rate_limited
+  | Capacity_backpressure -> Outcome_capacity_backpressure
+
 type event = {
   time: float;  (* Unix timestamp *)
   outcome: outcome;
@@ -87,6 +112,13 @@ type provider_state = {
   mutable events: event list;  (* newest first *)
   mutable consecutive_failures: int;
   mutable cooldown_until: float;  (* 0.0 = not in cooldown *)
+  mutable cooldown_cause: outcome option;
+  (* The outcome that armed the current cooldown window (set wherever
+     [cooldown_until] is advanced, cleared on success/expiry).  [None] when
+     not in cooldown, or for a cooldown restored from persistence (the cause is
+     not persisted; it is re-armed on the next real failure).  Read by the
+     pre-dispatch cooldown gate so a deterministic arming cause escalates
+     instead of oscillating.  #23438. *)
   fingerprint_counts: (string, int) Hashtbl.t;
   (* Per-fingerprint cumulative counter (lifetime, no rolling decay).
      Phase 0 observability anchor for "which error keeps recurring".
@@ -178,6 +210,7 @@ let get_or_create_state t key =
       events = [];
       consecutive_failures = 0;
       cooldown_until = 0.0;
+      cooldown_cause = None;
       fingerprint_counts = Hashtbl.create 4;
       last_failure_at = 0.0;
       latency_ring = None;
@@ -244,6 +277,9 @@ let restore_providers t providers =
           <- (match finite_positive row.restore_cooldown_until with
               | Some ts when ts > now -> ts
               | _ -> 0.0);
+          (* The arming cause is not persisted; a restored cooldown reports no
+             cause until the next real failure re-arms it.  #23438. *)
+          state.cooldown_cause <- None;
           state.last_failure_at
           <- (match finite_positive row.restore_last_failure_at with
               | Some ts -> ts
@@ -380,6 +416,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       state.consecutive_failures <- 0;
       (* Clear cooldown on success — provider recovered *)
       state.cooldown_until <- 0.0;
+      state.cooldown_cause <- None;
       (* Append latency sample when caller provided one.  Non-success
          outcomes don't contribute to the percentile — a 200ms timeout
          and a 200ms successful response are not the same signal. *)
@@ -406,6 +443,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         let new_until = now +. cooldown_dur in
         if new_until > state.cooldown_until then begin
           state.cooldown_until <- new_until;
+          state.cooldown_cause <- Some outcome;
           Runtime_metrics.on_provider_cooldown
             ~provider:provider_key ~reason:"failure_threshold";
           Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
@@ -433,6 +471,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. cooldown_dur in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        state.cooldown_cause <- Some outcome;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"soft_rate_limit";
         Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
@@ -453,6 +492,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. cooldown_dur in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        state.cooldown_cause <- Some outcome;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"capacity_backpressure";
         Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
@@ -470,6 +510,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. hard_quota_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        state.cooldown_cause <- Some outcome;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"hard_quota";
         Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
@@ -488,6 +529,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        state.cooldown_cause <- Some outcome;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"terminal_failure";
         Otel_metric_store.observe_histogram
@@ -505,6 +547,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. server_error_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        state.cooldown_cause <- Some outcome;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"server_error";
         Otel_metric_store.observe_histogram
@@ -582,6 +625,7 @@ let is_in_cooldown t ~provider_key =
         (* Expired cooldown — clear it *)
         if state.cooldown_until > 0.0 then
           state.cooldown_until <- 0.0;
+        state.cooldown_cause <- None;
         false
       end)
 
@@ -617,6 +661,7 @@ let check_circuit_breaker t ~provider_key =
       else begin
         if state.cooldown_until > 0.0 then
           state.cooldown_until <- 0.0;
+        state.cooldown_cause <- None;
         Ok ()
       end)
 
@@ -657,6 +702,7 @@ type provider_info = {
   consecutive_failures : int;
   in_cooldown : bool;
   cooldown_expires_at : float option;
+  cooldown_cause : outcome_kind option;
   events_in_window : int;
   rejected_in_window : int;
   top_fingerprints : (string * int) list;
@@ -819,6 +865,10 @@ let build_info_locked ~now ~key state =
     consecutive_failures = state.consecutive_failures;
     in_cooldown = in_cd;
     cooldown_expires_at = (if in_cd then Some state.cooldown_until else None);
+    cooldown_cause =
+      (if in_cd
+       then Option.map outcome_kind_of_outcome state.cooldown_cause
+       else None);
     events_in_window = total;
     rejected_in_window = rejected;
     top_fingerprints;
@@ -876,15 +926,8 @@ let all_providers t =
 
 (* ── Outcome window queries ────────────────────── *)
 
-type outcome_kind =
-  | Outcome_success
-  | Outcome_failure
-  | Outcome_rejected
-  | Outcome_hard_quota
-  | Outcome_terminal_failure
-  | Outcome_server_error
-  | Outcome_soft_rate_limited
-  | Outcome_capacity_backpressure
+(* [type outcome_kind] and [outcome_kind_of_outcome] are defined near [type
+   outcome] so [build_info_locked] can use them. *)
 
 let outcome_matches kind ev =
   (* Enumerate every [outcome_kind] x [outcome] pair so the compiler

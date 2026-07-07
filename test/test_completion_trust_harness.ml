@@ -468,9 +468,9 @@ let () =
      reject/recover oracle (and the evidence_refs-success test) exercise the
      gate itself rather than the stub. *)
   Atomic.set Workspace_hooks.task_completion_gate_decide_fn
-    (fun ~task_id ~task_opt ~notes ~handoff () ->
+    (fun ~base_path ~task_id ~task_opt ~notes ~handoff () ->
       match
-        Task_completion_gate.decide ~task_id ~task_opt ~notes ~handoff_context:handoff ()
+        Task_completion_gate.decide ~base_path ~task_id ~task_opt ~notes ~handoff_context:handoff ()
       with
       | Task_completion_gate.Pass -> Workspace_hooks.Pass
       | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->

@@ -40,6 +40,7 @@ let record_failure_and_maybe_escalate
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(updated_meta : Keeper_meta_contract.keeper_meta)
       ~is_auto_recoverable
+      ~pacing_enforced
       ~err
       ~error_text
   =
@@ -76,8 +77,10 @@ let record_failure_and_maybe_escalate
      [paused=true] — the failure was already recorded as pacing (revisit
      widening) and, for judgment classes, as a [Failure_judgment] stimulus at
      the routing site in [Keeper_unified_turn]. The three auto-pause flags
-     below stay reachable only in shadow mode (kill-switch, removed in W4). *)
-  let pacing_enforced = Keeper_pacing_shadow.pacing_enforced () in
+     below stay reachable only in shadow mode (kill-switch, removed in W4).
+     [pacing_enforced] is injected by the caller (production wires
+     [Keeper_pacing_shadow.pacing_enforced ()]) so the mode is an explicit
+     input at the boundary, not a hidden config read inside policy code. *)
   let runtime_auto_paused =
     (not pacing_enforced)
     && EC.is_runtime_exhausted_error err

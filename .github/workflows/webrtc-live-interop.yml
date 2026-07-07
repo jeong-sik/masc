@@ -31,7 +31,7 @@ jobs:
           node-version: '22'
 
       - name: Refresh system package index
-        run: sudo apt-get update -qq
+        run: bash scripts/ci/apt-refresh.sh
 
       - name: Install OS dependencies
         run: sudo apt-get install -y jq

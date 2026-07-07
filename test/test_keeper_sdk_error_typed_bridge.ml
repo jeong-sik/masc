@@ -309,6 +309,38 @@ let test_payment_required_is_hard_quota () =
   | None -> Alcotest.fail "expected hard_quota recoverable reason"
 ;;
 
+(* Regression: a transient Overloaded (529/CapacityExhausted) whose prose
+   coincidentally contains a hard-quota indicator must NOT be classified as hard
+   quota. The typed variant already says transient; the message scan previously
+   overrode it to permanent (immediate pool-wide 1h cooldown). Fails PRE-fix
+   (true), passes POST-fix (false). *)
+let test_overloaded_with_quota_prose_is_not_hard_quota () =
+  let message =
+    "You have exhausted your capacity on this model. Your quota will reset after \
+     4h41m7s. reason=QUOTA_EXHAUSTED"
+  in
+  let err = SdkE.Api (Retry.Overloaded { message }) in
+  Alcotest.(check bool)
+    "transient overload with quota prose is not hard quota"
+    false
+    (KTD.sdk_error_is_hard_quota err)
+;;
+
+(* Deleting the month-hardcoded "resets apr " indicator loses no coverage: the
+   real signal is carried by the month-agnostic "you've hit your limit" /
+   "monthly usage limit" indicators. This also fixes the 11-months-of-the-year
+   false negative the April literal caused. *)
+let test_hit_your_limit_is_month_agnostic_hard_quota () =
+  List.iter
+    (fun month_variant ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s is hard quota (month-agnostic)" month_variant)
+         true
+         (KTD.message_looks_like_cli_wrapped_hard_quota
+            (Printf.sprintf "You've hit your limit \194\183 %s" month_variant)))
+    [ "resets Apr 24 at 4am"; "resets May 3 at 4am"; "resets Dec 31 at 4am" ]
+;;
+
 let test_soft_rate_limit_classifies_as_rate_limit () =
   let api_err =
     SdkE.Api
@@ -982,6 +1014,14 @@ let () =
             "payment required is classified as hard quota"
             `Quick
             test_payment_required_is_hard_quota
+        ; Alcotest.test_case
+            "transient overload with quota prose is not hard quota"
+            `Quick
+            test_overloaded_with_quota_prose_is_not_hard_quota
+        ; Alcotest.test_case
+            "hit-your-limit hard quota is month-agnostic"
+            `Quick
+            test_hit_your_limit_is_month_agnostic_hard_quota
         ; Alcotest.test_case
             "soft rate limits skip same credential-pool candidates"
             `Quick

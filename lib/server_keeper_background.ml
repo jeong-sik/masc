@@ -56,7 +56,7 @@ let loop_json (entry : Keeper_registry.registry_entry) =
   let started_at = ts_opt_of_positive entry.started_at in
   let last_restart = ts_opt_of_positive entry.last_restart_ts in
   `Assoc
-    [ "phase", `String (Keeper_state_machine.n entry.phase)
+    [ "phase", `String (Keeper_state_machine.phase_to_string entry.phase)
     ; "started_at", float_opt_json started_at
     ; "started_at_iso", iso_of_ts_opt started_at
     ; "restart_count", `Int entry.restart_count

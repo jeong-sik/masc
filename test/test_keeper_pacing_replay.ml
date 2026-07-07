@@ -1,10 +1,11 @@
-(** RFC-0313 W3 gate — storm replay over the 2026-07-06 fixture.
+(** RFC-0313 W3 gate — storm pacing contrast over the 2026-07-06 fixture.
 
-    Replays the highest-density 5-minute window of the 07-06 rotation storm
-    (test/fixtures/pacing_storm_20260706/) against [Keeper_pacing] with the
-    default policy and pins the contrast: the recorded ping-pong produced
-    2,004 rotation attempts across two runtimes in ~300s; per-runtime
-    revisit pacing admits a fixed, small schedule instead. W3 flips
+    Uses the highest-density 5-minute window of the 07-06 rotation storm
+    (test/fixtures/pacing_storm_20260706/) as the recorded baseline and runtime
+    catalog, then runs an all-failing keeper against [Keeper_pacing] with the
+    default policy over the same 300s window. This pins the contrast: the
+    recorded ping-pong produced 2,004 rotation attempts across two runtimes;
+    per-runtime revisit pacing admits a fixed, small schedule instead. W3 flips
     enforcement only with this gate green.
 
     The simulation passes [retry_after:None] (pure exponential widening).
@@ -70,8 +71,9 @@ let distinct_runtimes events =
 (* Enforced-pacing semantics (RFC-0313 §1-2): a failure widens only the
    failed runtime's revisit; the next attempt runs on the earliest-eligible
    runtime; when every runtime is paced the keeper waits until the minimum
-   deadline. Every attempt in the storm window failed, so the replay marks
-   every admitted attempt as a failure. *)
+   deadline. The fixture supplies the runtime catalog, 300s window, and recorded
+   attempt count; this simulator intentionally models the all-failing pacing
+   schedule instead of consuming the fixture event timestamps. *)
 let simulate ~catalog ~policy ~window_sec =
   let eligible_at state runtime_id now =
     match KP.revisit_of ~runtime_id state with

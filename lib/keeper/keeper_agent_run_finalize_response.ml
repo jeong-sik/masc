@@ -518,7 +518,7 @@ let finalize
   | Error e -> Error e
   | Ok saved_checkpoint ->
     (* Contract-verification proof evaluation / verdict-ledger persistence removed: task/goal
-       completion is verified by [Cdal_evidence_gate] (evidence-substantiveness),
+       completion is verified by [Task_completion_gate] (evidence-substantiveness),
        not by an internal proof/verdict pipeline. *)
     let librarian_messages =
       match saved_checkpoint with

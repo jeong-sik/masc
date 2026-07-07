@@ -18,6 +18,14 @@ export interface IdeApiOptions extends GetOptions {
 export type IdeScope =
   | { readonly kind: 'repo_id'; readonly repoId: string }
   | { readonly kind: 'canonical_url'; readonly canonicalUrl: string }
+  /**
+   * Read-only scope over the repo-unattributed observation lane. Keeper
+   * turn/coordination events carry no file, so the server stores them
+   * outside any repo partition; this scope is the only address for that
+   * data. Mutations sent with it are refused server-side
+   * (keeper_lane_read_only).
+   */
+  | { readonly kind: 'keeper_lane'; readonly keeperId: string }
 
 export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'repoId' | 'canonicalUrl'>
 
@@ -149,6 +157,11 @@ export function ideScopeFromCanonicalUrl(canonicalUrl: string | null | undefined
   return trimmed ? { kind: 'canonical_url', canonicalUrl: trimmed } : null
 }
 
+export function ideScopeFromKeeperLane(keeperId: string | null | undefined): IdeScope | null {
+  const trimmed = trimmedNonEmpty(keeperId)
+  return trimmed ? { kind: 'keeper_lane', keeperId: trimmed } : null
+}
+
 function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
   const candidates: IdeScope[] = []
   if (opts.scope) candidates.push(opts.scope)
@@ -157,7 +170,9 @@ function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
   const canonicalScope = ideScopeFromCanonicalUrl(opts.canonicalUrl)
   if (canonicalScope) candidates.push(canonicalScope)
   if (candidates.length > 1) {
-    throw new Error('IDE scope must resolve to exactly one of repo_id or canonical_url')
+    throw new Error(
+      'IDE scope must resolve to exactly one of repo_id, canonical_url, or keeper_lane',
+    )
   }
   return candidates[0] ?? null
 }
@@ -165,8 +180,17 @@ function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
 export function appendIdeScopeParams(params: URLSearchParams, opts: IdeScopeOptions): void {
   const scope = resolveIdeScope(opts)
   if (!scope) return
-  if (scope.kind === 'repo_id') params.set('repo_id', scope.repoId)
-  else params.set('canonical_url', scope.canonicalUrl)
+  switch (scope.kind) {
+    case 'repo_id':
+      params.set('repo_id', scope.repoId)
+      break
+    case 'canonical_url':
+      params.set('canonical_url', scope.canonicalUrl)
+      break
+    case 'keeper_lane':
+      params.set('keeper_lane', scope.keeperId)
+      break
+  }
 }
 
 function appendWorkspaceParams(

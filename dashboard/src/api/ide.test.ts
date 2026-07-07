@@ -243,6 +243,31 @@ describe('ide API', () => {
     })])
   })
 
+  it('fetchIdeEvents serializes keeper_lane scope without repo params', async () => {
+    stubFetch({ ok: true, data: { events: [] } })
+
+    await fetchIdeEvents({
+      limit: 50,
+      scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
+    })
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('/api/v1/ide/events?')
+    expect(url).toContain('keeper_lane=sangsu')
+    expect(url).not.toContain('repo_id=')
+    expect(url).not.toContain('canonical_url=')
+  })
+
+  it('rejects keeper_lane scope combined with repo_id before issuing a request', async () => {
+    stubFetch({ ok: true, data: { events: [] } })
+
+    await expect(fetchIdeEvents({
+      scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
+      repoId: 'masc',
+    })).rejects.toThrow('IDE scope must resolve to exactly one')
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
   it('fetchIdeEvents rejects malformed event rows instead of dropping them', async () => {
     stubFetch({
       ok: true,

@@ -18,8 +18,13 @@ install_os_packages() {
   local started_at
   started_at="$(date +%s)"
   echo "Refreshing apt package index..."
-  sudo apt-get update -qq
-  log_elapsed "Refreshed apt package index" "${started_at}"
+  if sudo apt-get update -qq; then
+    log_elapsed "Refreshed apt package index" "${started_at}"
+  else
+    echo \
+      "::warning::apt package index refresh failed; attempting install with existing package index" \
+      >&2
+  fi
 
   started_at="$(date +%s)"
   declare -a package_args=()

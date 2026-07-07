@@ -22,6 +22,9 @@ let tmp_progress_path () =
 
 let remove_if_exists path = if Sys.file_exists path then Sys.remove path
 
+let write_text path text =
+  Out_channel.with_open_text path (fun oc -> output_string oc text)
+
 let read_snapshot path =
   match MP.progress_snapshot_cache_of_text (In_channel.with_open_text path In_channel.input_all) with
   | Some cache -> cache.MP.snapshot
@@ -82,6 +85,15 @@ let test_consecutive_turns_do_not_stack_duplicates () =
   in
   check int "note appears exactly once" 1 occurrences
 
+let test_malformed_progress_is_not_overwritten () =
+  let path = tmp_progress_path () in
+  remove_if_exists path;
+  let malformed = "not a progress snapshot\n" in
+  write_text path malformed;
+  augment path;
+  check string "malformed progress left untouched" malformed
+    (In_channel.with_open_text path In_channel.input_all)
+
 let () =
   run "keeper_post_turn_interruption_note"
     [
@@ -93,5 +105,7 @@ let () =
             test_existing_forward_content_survives;
           test_case "consecutive no-STATE turns dedupe" `Quick
             test_consecutive_turns_do_not_stack_duplicates;
+          test_case "malformed progress is not overwritten" `Quick
+            test_malformed_progress_is_not_overwritten;
         ] );
     ]

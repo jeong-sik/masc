@@ -452,6 +452,38 @@ let no_state_interruption_note =
    backlog, and messages against live state, then act or defer with a \
    stated reason."
 
+type interruption_progress_snapshot =
+  | No_existing_progress_snapshot
+  | Existing_progress_snapshot of Keeper_memory_policy.keeper_state_snapshot
+  | Existing_progress_snapshot_read_failed of string
+  | Existing_progress_snapshot_parse_failed
+
+let read_existing_interruption_progress_snapshot ~(progress_path : string) =
+  if not (Fs_compat.file_exists progress_path) then
+    No_existing_progress_snapshot
+  else
+    match Fs_compat.load_file progress_path with
+    | exception Eio.Cancel.Cancelled _ as e -> raise e
+    | exception exn ->
+        Existing_progress_snapshot_read_failed (Printexc.to_string exn)
+    | text -> (
+        match Keeper_memory_policy.progress_snapshot_cache_of_text text with
+        | Some (cache : Keeper_memory_policy.progress_snapshot_cache) ->
+            Existing_progress_snapshot cache.snapshot
+        | None -> Existing_progress_snapshot_parse_failed)
+
+let record_interruption_progress_snapshot_read_failure
+    ~(keeper_name : string)
+    ~(reason : string)
+    ~(detail : string) : unit =
+  Log.Keeper.warn
+    "keeper:%s interruption-note snapshot read failed (%s): %s"
+    keeper_name reason detail;
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string SnapshotReadFailures)
+    ~labels:[("keeper", keeper_name); ("phase", "interruption_note"); ("reason", reason)]
+    ()
+
 (* RFC-0315 P2a: a no-[STATE] turn is exactly the turn whose replay suffix
    the checkpoint layer prunes (synthetic-empty / requires-attention), and
    it also writes zero memory-bank notes — so without a note the next turn
@@ -465,54 +497,57 @@ let augment_progress_with_interruption_note
     ~(generation : int)
     ~(updated_at : string)
     ~(keeper_name : string) : unit =
-  let existing_snapshot =
-    if Fs_compat.file_exists progress_path then (
-      try
-        Option.map
-          (fun (cache : Keeper_memory_policy.progress_snapshot_cache) ->
-            cache.snapshot)
-          (Keeper_memory_policy.progress_snapshot_cache_of_text
-             (Fs_compat.load_file progress_path))
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> None)
-    else None
-  in
   let base_snapshot =
-    match existing_snapshot with
-    | Some snapshot -> snapshot
-    | None -> Keeper_memory_policy.empty_keeper_state_snapshot
+    match read_existing_interruption_progress_snapshot ~progress_path with
+    | No_existing_progress_snapshot ->
+        Some Keeper_memory_policy.empty_keeper_state_snapshot
+    | Existing_progress_snapshot snapshot -> Some snapshot
+    | Existing_progress_snapshot_read_failed detail ->
+        record_interruption_progress_snapshot_read_failure
+          ~keeper_name
+          ~reason:"read_failed"
+          ~detail;
+        None
+    | Existing_progress_snapshot_parse_failed ->
+        record_interruption_progress_snapshot_read_failure
+          ~keeper_name
+          ~reason:"parse_failed"
+          ~detail:progress_path;
+        None
   in
-  if
-    not
-      (List.mem no_state_interruption_note
-         base_snapshot.Keeper_memory_policy.open_questions)
-  then (
-    let augmented =
-      Keeper_memory_policy.cap_snapshot
-        {
-          base_snapshot with
-          Keeper_memory_policy.open_questions =
-            no_state_interruption_note
-            :: base_snapshot.Keeper_memory_policy.open_questions;
-        }
-    in
-    match
-      Keeper_memory_policy.write_progress_snapshot_path
-        ~path:progress_path
-        ~generation
-        ~updated_at
-        (Keeper_memory_policy.forward_looking_snapshot augmented)
-    with
-    | Ok () -> ()
-    | Error err ->
-        Log.Keeper.warn
-          "keeper:%s interruption-note snapshot write failed: %s"
-          keeper_name err;
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string SnapshotWriteFailures)
-          ~labels:[("keeper", keeper_name)]
-          ())
+  match base_snapshot with
+  | None -> ()
+  | Some base_snapshot ->
+      if
+        not
+          (List.mem no_state_interruption_note
+             base_snapshot.Keeper_memory_policy.open_questions)
+      then (
+        let augmented =
+          Keeper_memory_policy.cap_snapshot
+            {
+              base_snapshot with
+              Keeper_memory_policy.open_questions =
+                no_state_interruption_note
+                :: base_snapshot.Keeper_memory_policy.open_questions;
+            }
+        in
+        match
+          Keeper_memory_policy.write_progress_snapshot_path
+            ~path:progress_path
+            ~generation
+            ~updated_at
+            (Keeper_memory_policy.forward_looking_snapshot augmented)
+        with
+        | Ok () -> ()
+        | Error err ->
+            Log.Keeper.warn
+              "keeper:%s interruption-note snapshot write failed: %s"
+              keeper_name err;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string SnapshotWriteFailures)
+              ~labels:[("keeper", keeper_name)]
+              ())
 
 let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)

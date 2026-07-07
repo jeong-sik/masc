@@ -8,12 +8,8 @@ import { html } from 'htm/preact'
 import {
   MessageSquare,
   MoreVertical,
-  Pause,
-  Play,
-  RotateCcw,
   Search,
   Settings,
-  Square,
 } from 'lucide-preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
@@ -22,12 +18,13 @@ import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { formatRelativeSec } from '../../lib/format-time'
+import { persistentSignal } from '../../lib/persistent-signal'
 import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import { sortByRecency } from '../../lib/keeper-recency'
 import type { Keeper } from '../../types'
-import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
+import { KEEPER_ACTION_LABELS, runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { VirtualList } from '../common/virtual-list'
 import {
   WorkspaceSigil,
@@ -44,7 +41,6 @@ type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'recent' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
-type IconComponent = typeof Play
 type RosterHeaderBucket = KeeperBucket | 'attention'
 type RosterFleetSummary = {
   total: number
@@ -56,37 +52,37 @@ type RosterFleetSummary = {
   highContext: number
 }
 
-const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
-  pause: {
-    label: '일시정지',
-    title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
-    icon: Pause,
-  },
-  resume: {
-    label: '재개',
-    title: '재개: 일시정지된 keeper 를 다시 실행합니다',
-    icon: Play,
-  },
-  wakeup: {
-    label: '깨우기',
-    title: '깨우기: 다음 turn 을 즉시 시도합니다',
-    icon: RotateCcw,
-  },
-  boot: {
-    label: '기동',
-    title: '기동: offline keeper 를 다시 시작합니다',
-    icon: Play,
-  },
-  shutdown: {
-    label: '종료',
-    title: '종료: keeper 를 완전 종료합니다',
-    icon: Square,
-    danger: true,
-  },
-}
 const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
 const MENU_VIEWPORT_MARGIN = 8
+
+const ROSTER_FILTER_VALUES: readonly RosterFilter[] = ['all', 'run', 'att']
+const ROSTER_SORT_VALUES: readonly RosterSort[] = ['status', 'recent', 'name', 'att']
+
+function memberOr<T extends string>(allowed: readonly T[], fallback: T): (raw: string) => T {
+  return raw => {
+    const parsed: unknown = JSON.parse(raw)
+    return typeof parsed === 'string' && (allowed as readonly string[]).includes(parsed)
+      ? (parsed as T)
+      : fallback
+  }
+}
+
+// View preferences survive reload (persistentSignal SSOT). Previously
+// component-local useState: every remount snapped back to all/최근순.
+export const rosterFilterPref = persistentSignal<RosterFilter>({
+  key: 'dashboard:kw-roster:filter-v1',
+  defaultValue: 'all',
+  deserialize: memberOr(ROSTER_FILTER_VALUES, 'all'),
+})
+// Default '최근순' (most-recent-first): returning to #keepers should surface the
+// keeper that just did something, not an alphabetically-first name. 상태순 remains
+// available in the sort menu for operators who want running-first grouping.
+export const rosterSortPref = persistentSignal<RosterSort>({
+  key: 'dashboard:kw-roster:sort-v1',
+  defaultValue: 'recent',
+  deserialize: memberOr(ROSTER_SORT_VALUES, 'recent'),
+})
 
 const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
   { bucket: 'running', label: '실행 중' },
@@ -219,7 +215,10 @@ function keeperRecentTool(keeper: Keeper): { label: string; title: string } | nu
   const count = keeper.latest_tool_call_count
   const hasCount = typeof count === 'number' && Number.isFinite(count) && count > 0
   if (recent.length === 0 && !hasCount) return null
-  const label = recent[0] ?? `${count} tool calls`
+  // "+N" makes the hidden tail visible even when CSS end-ellipsis clips the
+  // first name; the full comma-joined list stays in the hover title.
+  const overflow = recent.length > 1 ? ` +${recent.length - 1}` : ''
+  const label = recent[0] != null ? `${recent[0]}${overflow}` : `${count} tool calls`
   const countSuffix = hasCount ? ` · ${count} calls` : ''
   return {
     label,
@@ -291,11 +290,20 @@ function RosterRow({
         </div>
         ${contextPct !== null
           ? html`
-              <div class="kw-kp-context" title=${`context ${contextPct}%`}>
+              <div
+                class="kw-kp-context"
+                role="meter"
+                aria-label=${`컨텍스트 사용률 ${contextPct}%`}
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow=${contextPct}
+                title=${`컨텍스트 사용률 ${contextPct}%`}
+              >
+                <span class="kw-kp-tool-k" aria-hidden="true">ctx</span>
                 <div class="kw-kp-context-bar" aria-hidden="true">
                   <span class=${contextHot ? 'hot' : ''} style=${{ width: `${contextPct}%` }}></span>
                 </div>
-                <span class=${`kw-kp-context-val${contextHot ? ' hot' : ''}`}>${contextPct}%</span>
+                <span class=${`kw-kp-context-val${contextHot ? ' hot' : ''}`} aria-hidden="true">${contextPct}%</span>
               </div>
             `
           : null}
@@ -376,7 +384,10 @@ async function runRosterKeeperAction(name: string, action: KeeperActionKey): Pro
 
 function rosterActivityText(activity: KeeperActivityDisplay): string | null {
   if (activity.source === 'none' || activity.ageSeconds === null) return null
-  return `${activity.label} ${formatRelativeSec(activity.ageSeconds)}`
+  const base = `${activity.label} ${formatRelativeSec(activity.ageSeconds)}`
+  // Name the activity when the server identified it (live_activity.tool):
+  // "도구 활동 13초 전 · masc_status" instead of a bare category + clock.
+  return activity.detail ? `${base} · ${activity.detail}` : base
 }
 
 function groupBucketClass(bucket: RosterHeaderBucket): string {
@@ -428,7 +439,7 @@ function KeeperRosterMenu({
         <span>대화 열기</span>
       </button>
       ${actions.map(action => {
-        const copy = LIFECYCLE_COPY[action]
+        const copy = KEEPER_ACTION_LABELS[action]
         const Icon = copy.icon
         return html`
           <button
@@ -475,11 +486,14 @@ export function KeeperWorkspaceRoster({
 }): VNode {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [filter, setFilter] = useState<RosterFilter>('all')
-  // Default '최근순' (most-recent-first): returning to #keepers should surface the
-  // keeper that just did something, not an alphabetically-first name. 상태순 remains
-  // available in the sort menu for operators who want running-first grouping.
-  const [sort, setSort] = useState<RosterSort>('recent')
+  const filter = rosterFilterPref.value
+  const sort = rosterSortPref.value
+  const setFilter = (next: RosterFilter) => {
+    rosterFilterPref.value = next
+  }
+  const setSort = (next: RosterSort) => {
+    rosterSortPref.value = next
+  }
   const [menu, setMenu] = useState<RosterMenuState>(null)
 
   useEffect(() => {
@@ -573,10 +587,14 @@ export function KeeperWorkspaceRoster({
     })
   }
 
-  const filterChips: { id: RosterFilter; label: string }[] = [
-    { id: 'all', label: '전체' },
-    { id: 'run', label: '실행' },
-    { id: 'att', label: '주의' },
+  // 주의 is a cross-cutting flag over the same fleet, not a third lifecycle
+  // state — a keeper counted under 실행 usually also carries the 주의 flag.
+  // The chip gets the attention tone + an explaining title so the row of
+  // three does not read as a partition.
+  const filterChips: { id: RosterFilter; label: string; tone: '' | 'att'; title: string }[] = [
+    { id: 'all', label: '전체', tone: '', title: '모든 키퍼' },
+    { id: 'run', label: '실행', tone: '', title: '실행 중인 키퍼' },
+    { id: 'att', label: '주의', tone: 'att', title: '주의 신호가 있는 키퍼 — 실행 중 키퍼도 포함되는 교차 집계' },
   ]
 
   // Flatten to [{ type: 'header'|'row', ... }] for windowing. 'status' keeps the
@@ -651,8 +669,9 @@ export function KeeperWorkspaceRoster({
               ${filterChips.map(chip => html`
                 <button
                   type="button"
-                  class="kw-rfilter rfilter v2-monitoring-action"
+                  class=${`kw-rfilter rfilter v2-monitoring-action${chip.tone ? ` ${chip.tone}` : ''}`}
                   aria-pressed=${filter === chip.id ? 'true' : 'false'}
+                  title=${chip.title}
                   onClick=${() => setFilter(chip.id)}
                 >
                   ${chip.label}<span class="n">${counts[chip.id]}</span>

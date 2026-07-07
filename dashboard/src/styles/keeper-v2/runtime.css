@@ -159,6 +159,27 @@
 .rtc-flag { font-family: var(--font-mono); font-size: var(--fs-10); padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
 .rtc-flag.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 32%, transparent); }
 .rtc-flag.off { color: var(--text-dim); }
+/* Undeclared capability: distinct from a declared "off" — dashed border reads
+   as "unknown" next to the em-dash glyph. */
+.rtc-flag.na { color: var(--text-dim); border-style: dashed; }
+/* Disclosure for the raw catalog projection rows (params/request/declared/
+   caps). Collapsed by default; state persists via runtimeRawSpecOpen. */
+.rtc-raw-toggle {
+  margin-top: 10px;
+  padding: 3px 9px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-9);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: 0.14s;
+}
+.rtc-raw-toggle:hover { color: var(--text-mid); border-color: var(--border-main); }
+.rtc-raw-toggle[aria-expanded="true"] { color: var(--text-mid); }
 .rtc-effort { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border-soft); }
 .rtc-effort-k { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
 .rtc-eff-seg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-sm); overflow: hidden; }

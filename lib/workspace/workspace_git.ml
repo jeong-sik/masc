@@ -23,8 +23,8 @@ let run_argv_line (argv : string list) : string option =
       argv
   in
   match String.split_on_char '\n' output |> List.map String.trim |> List.filter (fun s -> s <> "") with
-  | [] -> None
-  | h :: _ -> Some h
+      | [] -> None
+      | h :: _ -> Some h
 
 (** Run argv and return exit code.
     [timeout_sec] defaults to {!Env_config_runtime.Workspace_git.local_op_timeout_sec}
@@ -45,6 +45,9 @@ let run_argv_exit
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
+
+let git_first_line ~repo_path args =
+  run_argv_line ("git" :: "-C" :: repo_path :: args)
 
 (* ============================================ *)
 (* Input Validation                             *)
@@ -82,7 +85,7 @@ let has_git_marker path =
 (** Get git root directory *)
 let git_root ~base_path =
   if not (has_git_marker base_path) then None
-  else run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"]
+  else git_first_line ~repo_path:base_path [ "rev-parse"; "--show-toplevel" ]
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

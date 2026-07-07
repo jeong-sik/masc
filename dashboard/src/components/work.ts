@@ -54,11 +54,11 @@ type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification'
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
 const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  ['todo',                  '미배정', 'todo'],
-  ['claimed',               '클레임', 'claimed'],
-  ['in_progress',           '진행',   'wip'],
-  ['awaiting_verification', '검증',   'verify'],
-  ['done',                  '완료',   'done'],
+  ['todo',                  '미배정',   'todo'],
+  ['claimed',               '클레임됨', 'claimed'],
+  ['in_progress',           '진행 중',  'wip'],
+  ['awaiting_verification', '검증 대기', 'verify'],
+  ['done',                  '완료',     'done'],
 ] as const
 
 interface JobState {
@@ -406,7 +406,7 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
                 ＋ claim
               </button>
             `
-            : html`<span class="wk-task-kp none mono">미배정</span>`}
+            : html`<span class="wk-task-kp none mono">담당 없음</span>`}
       </div>
       ${open && hasDetail ? html`
         <div class="wk-task-detail">
@@ -758,7 +758,7 @@ function KanbanCard({
                 onClick=${(e: Event) => { e.stopPropagation(); onClaim(task.id) }}
               >＋</button>
             `
-            : html`<span class="wk-kcard-kp none mono">미배정</span>`}
+            : html`<span class="wk-kcard-kp none mono">담당 없음</span>`}
       </div>
     </article>
   `
@@ -773,32 +773,45 @@ function KanbanView({
   onClaim: (id: string) => void
   onJumpGoal: (goalId: string) => void
 }) {
+  const total = kanbanTasks.length
   return html`
-    <div class="wk-kanban" data-testid="work-kanban">
-      ${KANBAN_COLUMNS.map(([status, label, cls]) => {
-        const col = kanbanTasks.filter(t => t.status === status)
-        return html`
-          <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
-            <div class="wk-kcol-h">
-              <span class="wk-kcol-title">${label}</span>
-              <span class="wk-kcol-count">${col.length}</span>
-            </div>
-            <div class="wk-kcol-body">
-              ${col.length === 0
-                ? html`<div class="wk-kcol-empty mono">—</div>`
-                : col.map(t => html`
-                  <${KanbanCard}
-                    key=${t.id}
-                    task=${t}
-                    onClaim=${onClaim}
-                    onJumpGoal=${onJumpGoal}
-                  />
-                `)}
-            </div>
+    <section class="wk-board-section" data-testid="work-board-section">
+      <div class="wk-board-head">
+        <div>
+          <div class="wk-board-title">
+            <span class="wk-board-glyph" aria-hidden="true">▦</span>
+            칸반 · 상태별
+            <span class="wk-board-count mono">${total}</span>
           </div>
-        `
-      })}
-    </div>
+        </div>
+        <div class="wk-board-flow mono">todo → claimed → in_progress → verify → done</div>
+      </div>
+      <div class="wk-kanban" data-testid="work-kanban">
+        ${KANBAN_COLUMNS.map(([status, label, cls]) => {
+          const col = kanbanTasks.filter(t => t.status === status)
+          return html`
+            <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
+              <div class="wk-kcol-h">
+                <span class="wk-kcol-title">${label}</span>
+                <span class="wk-kcol-count">${col.length}</span>
+              </div>
+              <div class="wk-kcol-body">
+                ${col.length === 0
+                  ? html`<div class="wk-kcol-empty mono">—</div>`
+                  : col.map(t => html`
+                    <${KanbanCard}
+                      key=${t.id}
+                      task=${t}
+                      onClaim=${onClaim}
+                      onJumpGoal=${onJumpGoal}
+                    />
+                  `)}
+              </div>
+            </div>
+          `
+        })}
+      </div>
+    </section>
   `
 }
 
@@ -1331,7 +1344,7 @@ function WorkSurfaceV2() {
           <div>
             <span class="ov-eyebrow">GOAL STORE</span>
             <h1>작업 · 목표</h1>
-            <p class="ov-sub">Goal → Task → keeper · 우선순위 순 정렬과 게이트 증거로 검증</p>
+            <p class="ov-sub">Goals · Tasks · Keepers · 우선순위와 검증 상태</p>
           </div>
           <div class="wk-head-r">
             <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">
@@ -1370,7 +1383,7 @@ function WorkSurfaceV2() {
               <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">목표 TASK</div>
+              <div class="wk-kpi-k">전체 작업</div>
               <div class="wk-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
             </div>
             <div class="wk-kpi">
@@ -1391,7 +1404,7 @@ function WorkSurfaceV2() {
             <section class="wk-backlog" data-testid="work-backlog">
               <div class="wk-backlog-h">
                 <span class="wk-backlog-glyph" aria-hidden="true">⊕</span>
-                클레임 가능 미배정
+                미배정 Task
                 <span class="n">${backlogTasks.length}</span>
                 <span class="wk-backlog-sub mono">keeper_task_claim — 미배정 task</span>
               </div>
@@ -1438,7 +1451,7 @@ function WorkSurfaceV2() {
               />
             `}
 
-          <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 claim</div>
+          <div class="wk-foot mono">목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 claim</div>
       </div>
       ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
         <${WorkAside}

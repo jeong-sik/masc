@@ -289,8 +289,43 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
       // Five KPI summary cells
       expect(screen.getByTestId('work-kpis').children.length).toBe(5)
-      expect(screen.getByText(/미배정 task 는 claim/).textContent).toContain('claim')
+      expect(screen.getByText(/미배정 task는 claim/).textContent).toContain('claim')
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
+    })
+
+    it('avoids repeating Task scope labels across the KPI row and kanban columns', () => {
+      goals.value = [
+        { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
+        { id: 'T-claim', title: 'Claimed item', goal_id: 'G-1', status: 'claimed', assignee: 'keeper-x' },
+      ]
+
+      render(html`<${Work} />`)
+
+      const kpis = screen.getByTestId('work-kpis')
+      expect(kpis.textContent).toContain('활성 목표')
+      expect(kpis.textContent).toContain('전체 작업')
+      expect(kpis.textContent).not.toContain('목표 TASK')
+      expect(kpis.textContent).not.toContain('Task')
+      expect(kpis.textContent).not.toContain('TASK')
+
+      fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+      const section = screen.getByTestId('work-board-section')
+      expect(section.textContent).toContain('칸반 · 상태별')
+      expect(section.textContent).toContain('todo → claimed → in_progress → verify → done')
+
+      const todoCol = screen.getByTestId('kanban-col-todo')
+      const claimedCol = screen.getByTestId('kanban-col-claimed')
+      expect(todoCol.querySelector('.wk-kcol-title')?.textContent).toBe('미배정')
+      expect(todoCol.textContent).not.toContain('TASK')
+      expect(claimedCol.querySelector('.wk-kcol-title')?.textContent).toBe('클레임됨')
+      expect(claimedCol.textContent).not.toContain('TASK')
+
+      fireEvent.click(screen.getByTestId('work-view-list'))
+      expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
     })
 
     it('renders the new-goal button as enabled and opens the form on click', () => {
@@ -409,7 +444,7 @@ describe('Work', () => {
 
       const backlog = screen.getByTestId('work-backlog')
       expect(backlog).toBeTruthy()
-      expect(backlog.textContent).toContain('클\uB808\uC784 가능 미배정')
+      expect(backlog.textContent).toContain('미배정 Task')
       expect(backlog.textContent).toContain('2')
       expect(backlog.querySelectorAll('.wk-task-claim').length).toBe(2)
       expect(screen.getByText('Orphan job')).toBeTruthy()
@@ -941,6 +976,7 @@ describe('Work', () => {
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
         // Kanban board present; list view gone
+        expect(screen.getByTestId('work-board-section').textContent).toContain('칸반 · 상태별')
         const board = screen.getByTestId('work-kanban')
         expect(board).toBeTruthy()
         expect(screen.queryByTestId('work-goal-list')).toBeNull()

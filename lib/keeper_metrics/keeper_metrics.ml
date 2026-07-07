@@ -120,6 +120,7 @@ type t =
   | SelfPreservationUniversal
   | StaleStormPaused
   | ProviderTimeoutLoopPaused
+  | TurnFailureStreakPaused
   | CycleExceptions
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
@@ -247,7 +248,6 @@ type t =
   | ToolExecutePrActionTotal    (* counter: raw tool_execute gh PR actions *)
   | KeeperRepoMappingDefaultScopeAllowed (* counter: missing mapping default-scope access allowed *)
   | KeeperRepoMappingDeniedUnregistered (* counter: repository policy denied an unregistered repo id *)
-  | KeeperRepoMappingDeniedNotInMapping (* counter: keeper repo mapping decision: repo not in mapping *)
   | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
   | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
   | KeeperRepoMappingRepositoryStoreError       (* counter: repo catalog load failure in policy projection *)
@@ -380,6 +380,7 @@ let to_string = function
   | SelfPreservationUniversal -> "masc_keeper_self_preservation_universal_total"
   | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
   | ProviderTimeoutLoopPaused -> "masc_keeper_provider_timeout_loop_paused_total"
+  | TurnFailureStreakPaused -> "masc_keeper_turn_failure_streak_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
   | StateSnapshotSkippedNoState ->
@@ -523,7 +524,6 @@ let to_string = function
     "masc_keeper_repo_mapping_default_scope_allowed_total"
   | KeeperRepoMappingDeniedUnregistered ->
     "masc_keeper_repo_mapping_denied_unregistered_total"
-  | KeeperRepoMappingDeniedNotInMapping -> "masc_keeper_repo_mapping_denied_not_in_mapping_total"
   | KeeperRepoMappingLoadError -> "masc_keeper_repo_mapping_load_error_total"
   | KeeperRepoMappingRepositoryIdentityMismatch ->
     "masc_keeper_repo_mapping_repository_identity_mismatch_total"
@@ -569,6 +569,7 @@ let all : t list =
     ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
+    TurnFailureStreakPaused;
     CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; StateSnapshotInvalidGoal; PromptUnknownToolTokens;
     PromptTokenStripped;
     ProgressUpdatedLineFailures;
@@ -598,7 +599,7 @@ let all : t list =
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;
   KeeperRepoMappingDefaultScopeAllowed; KeeperRepoMappingDeniedUnregistered;
-  KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
+  KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;
   RawTraceSinkDegraded; WireCaptureResponseSuppressed; WireCaptureWriteFailures;
   WireCaptureRecordSkipped

@@ -163,8 +163,6 @@ let json_response_with_source_and_base ~status ~source ~base_path req reqd json 
 
 (* --- Safe path --- *)
 
-let is_digit c = c >= '0' && c <= '9'
-
 (* Confidentiality SSOT (task-1734). A single path component is
    confidential when serving or listing it leaks secrets (.env,
    credentials, .ssh) or the agent's internal state (.git config URLs,
@@ -627,33 +625,61 @@ end
 
 type blame_entry = { bl_line: int; bl_author: string; bl_time: int64 }
 
+(* [git blame --porcelain] emits one header line per source line:
+   "<40-hex sha> <orig-line> <final-line>[ <group-size>]". The commit
+   metadata block (author, author-time, ...) follows only the FIRST header
+   of each sha; later occurrences repeat the bare header. So line->commit
+   pairs and sha->metadata must be collected separately and joined at the
+   end — attributing metadata to whichever header happened to precede it
+   assigns lines to the wrong commit. *)
+let is_hex_digit = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false
+
+let parse_blame_header line =
+  match String.split_on_char ' ' line with
+  | sha :: _orig_line :: final_line :: _rest
+    when String.length sha = 40 && String.for_all is_hex_digit sha -> (
+      match int_of_string_opt final_line with
+      | Some n when n > 0 -> Some (sha, n)
+      | Some _ | None -> None)
+  | _ -> None
+
 let parse_blame_porcelain lines =
-  let rec go cur_author cur_time acc remaining =
+  let metadata : (string, string option * int64 option) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  let update_metadata sha f =
+    let current =
+      match Hashtbl.find_opt metadata sha with
+      | Some value -> value
+      | None -> (None, None)
+    in
+    Hashtbl.replace metadata sha (f current)
+  in
+  let rec collect cur_sha acc remaining =
     match remaining with
     | [] -> List.rev acc
-    | hd :: tl ->
-      if String.starts_with ~prefix:"author " hd then
-        let a = String.sub hd 7 (String.length hd - 7) in
-        go (Some a) cur_time acc tl
-      else if String.starts_with ~prefix:"author-time " hd then
-        let ts = String.sub hd 12 (String.length hd - 12) in
-        (match Int64.of_string_opt ts with
-         | Some n -> go cur_author (Some n) acc tl
-         | None -> go cur_author cur_time acc tl)
-      else if String.length hd > 0 && is_digit (String.get hd 0)
-              && String.contains hd ' ' then
-        let sp = String.index hd ' ' in
-        let line_num_str = String.sub hd 0 sp in
-        (match int_of_string_opt line_num_str with
-         | Some ln ->
-           let a = Option.value cur_author ~default:"unknown" in
-           let t = Option.value cur_time ~default:0L in
-           go cur_author cur_time ({ bl_line = ln; bl_author = a; bl_time = t } :: acc) tl
-         | None -> go cur_author cur_time acc tl)
-      else
-        go cur_author cur_time acc tl
+    | hd :: tl -> (
+      match parse_blame_header hd with
+      | Some (sha, final_line) -> collect (Some sha) ((final_line, sha) :: acc) tl
+      | None ->
+        (match cur_sha with
+         | Some sha when String.starts_with ~prefix:"author " hd ->
+           let author = String.sub hd 7 (String.length hd - 7) in
+           update_metadata sha (fun (_, time) -> (Some author, time))
+         | Some sha when String.starts_with ~prefix:"author-time " hd ->
+           let ts = String.sub hd 12 (String.length hd - 12) in
+           (match Int64.of_string_opt ts with
+            | Some n -> update_metadata sha (fun (author, _) -> (author, Some n))
+            | None -> ())
+         | Some _ | None -> ());
+        collect cur_sha acc tl)
   in
-  go None None [] lines
+  collect None [] lines
+  |> List.filter_map (fun (line, sha) ->
+       match Hashtbl.find_opt metadata sha with
+       | Some (Some author, Some time) ->
+         Some { bl_line = line; bl_author = author; bl_time = time }
+       | Some (None, _) | Some (_, None) | None -> None)
 
 let blame_entry_to_json file_path ~line_start ~line_end ~author ~time =
   `Assoc [ ("file_path", `String file_path)
@@ -687,6 +713,18 @@ let group_blame_entries file_path entries =
         go (Some hd.bl_line) hd.bl_line hd.bl_author hd.bl_time acc tl
   in
   go None 0 "" 0L [] sorted
+
+module For_testing_blame = struct
+  type entry = blame_entry = {
+    bl_line : int;
+    bl_author : string;
+    bl_time : int64;
+  }
+
+  let parse_blame_header = parse_blame_header
+  let parse_blame_porcelain = parse_blame_porcelain
+  let group_blame_entries = group_blame_entries
+end
 
 (* --- Diff parsing --- *)
 

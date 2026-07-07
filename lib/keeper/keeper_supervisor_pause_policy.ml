@@ -383,6 +383,46 @@ let handle_provider_timeout_pause
          count)
 ;;
 
+let handle_turn_failure_streak_pause
+      ~publish_phase_lifecycle
+      (ctx : _ context)
+      (entry : Keeper_registry.registry_entry)
+      ~count
+  =
+  (* #23439: [Keeper_failure_policy] returns a typed [Pause_keeper] verdict
+     for a [Turn_failure_streak] (keeper_failure_policy.ml).  Route it to the
+     same crash-auto-pause path the stale-storm / provider-timeout arms use
+     instead of restarting.  [No_progress_loop] is the accurate blocker class
+     (the keeper keeps running turns but none complete), and unlike a
+     provider timeout the failures are not a slow-provider blip, so pausing
+     surfaces the streak to operators as [Paused].  Auto-resume with
+     exponential back-off (same policy as the provider-timeout turn-level
+     pause): a transient cause self-heals after the back-off, while a
+     persistent cause re-pauses with a doubled delay rather than restarting
+     every sweep.  The blocker can still recur after an auto-resume cycle
+     because resume clears the streak evidence (see #23439 RFC half — latched
+     typed failure episode); this arm only stops the restart-driven
+     regeneration by honoring the pause verdict. *)
+  handle_crash_auto_pause
+    ~publish_phase_lifecycle
+    ctx
+    entry
+    ~reason_tag:"turn_failure_streak"
+    ~metric_name:Keeper_metrics.(to_string TurnFailureStreakPaused)
+    ~lifecycle_detail:(Printf.sprintf "turn_failure_streak count=%d" count)
+    ~blocker_class:(Some No_progress_loop)
+    ~resume_policy:Auto_resume_with_backoff
+    ~log_message:
+      (Printf.sprintf
+         "TURN FAILURE STREAK AUTO-PAUSED (count=%d consecutive turn failures). \
+          Supervisor honors the failure-policy Pause_keeper verdict instead of \
+          restarting; auto-resume with exponential back-off (see \
+          MASC_KEEPER_AUTO_RESUME_INITIAL_SEC) retries once the back-off delay \
+          elapses. Operator may inspect the keeper's turn failures and resume \
+          manually via masc_keeper_up. See issue #23439."
+         count)
+;;
+
 let failure_reason_policy_decision
       (reason : Keeper_registry.failure_reason option)
   : Keeper_failure_policy.decision option

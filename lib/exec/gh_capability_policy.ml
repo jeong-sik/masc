@@ -129,6 +129,11 @@ let is_field_flag = function
   | _ -> false
 ;;
 
+let is_external_field_flag = function
+  | "-F" | "--field" -> true
+  | _ -> false
+;;
+
 let strip_attached_field_flag tok =
   let lower = String.lowercase_ascii tok in
   let strip prefix =
@@ -140,6 +145,18 @@ let strip_attached_field_flag tok =
     Some (strip "--raw-field=")
   else if String.starts_with ~prefix:"-f" tok && not (String.equal tok "-f") then
     Some (strip "-f")
+  else if String.starts_with ~prefix:"-F" tok && not (String.equal tok "-F") then
+    Some (strip "-F")
+  else None
+;;
+
+let strip_attached_external_field_flag tok =
+  let lower = String.lowercase_ascii tok in
+  let strip prefix =
+    let n = String.length prefix in
+    String.sub tok n (String.length tok - n)
+  in
+  if String.starts_with ~prefix:"--field=" lower then Some (strip "--field=")
   else if String.starts_with ~prefix:"-F" tok && not (String.equal tok "-F") then
     Some (strip "-F")
   else None
@@ -171,16 +188,67 @@ let attached_opaque_field_may_be_query (arg : Shell_ir.arg) : bool =
      | None -> false)
 ;;
 
+(* A [query] field whose value is read from an EXTERNAL source: gh reads a
+   -F/--field value beginning with '@' from that file ('@-' = stdin). The
+   mutation text is therefore not in argv, so the literal body scanners
+   ([body_contains_r2_mutation]/[gh_api_graphql_creates_durable_remote]) cannot
+   see it and would R0-Allow it. This is the literal-argv counterpart of the
+   Var/Concat opacity above; both mark the body opaque so the capability axis
+   asks. The file is NEVER read (no TOCTOU).
+
+   [-f/--raw-field] is intentionally excluded here: gh treats [@...] as a raw
+   static string for that flag family, not as file/stdin input. *)
+let field_value_is_external_query field_prefix =
+  String.starts_with ~prefix:"query=@" (String.lowercase_ascii field_prefix)
+;;
+
+let separate_field_value_is_external_query (arg : Shell_ir.arg) : bool =
+  match arg_literal arg with
+  | Some value -> field_value_is_external_query value
+  | None -> false
+;;
+
+let attached_field_is_external_query (arg : Shell_ir.arg) : bool =
+  match arg_literal arg with
+  | Some tok ->
+    (match strip_attached_external_field_flag tok with
+     | Some field_prefix -> field_value_is_external_query field_prefix
+     | None -> false)
+  | None -> false
+;;
+
+(* [gh api graphql --input FILE] (or [--input -]) delivers the whole request
+   body — including the graphql [query] — from a file or stdin. As with the '@'
+   sigil, the mutation text never reaches argv, so treat its presence as an
+   opaque body. Matches both the separate ([--input file]) and attached
+   ([--input=file]) forms. *)
+let arg_is_input_flag (arg : Shell_ir.arg) : bool =
+  match arg_leading_literal arg with
+  | Some tok ->
+    let lower = String.lowercase_ascii tok in
+    String.equal lower "--input" || String.starts_with ~prefix:"--input=" lower
+  | None -> false
+;;
+
 let graphql_query_body_is_opaque (args : Shell_ir.arg list) : bool =
   let rec scan = function
     | [] -> false
     | arg :: rest ->
-      (match arg_literal arg with
-       | Some tok when is_field_flag tok ->
-         (match rest with
-          | value :: tail -> opaque_field_arg_may_be_query value || scan tail
-          | [] -> false)
-       | Some _ | None -> attached_opaque_field_may_be_query arg || scan rest)
+      if arg_is_input_flag arg then true
+      else (
+        match arg_literal arg with
+        | Some tok when is_field_flag tok ->
+          (match rest with
+           | value :: tail ->
+             opaque_field_arg_may_be_query value
+             || (is_external_field_flag tok
+                 && separate_field_value_is_external_query value)
+             || scan tail
+           | [] -> false)
+        | Some _ | None ->
+          attached_opaque_field_may_be_query arg
+          || attached_field_is_external_query arg
+          || scan rest)
   in
   scan args
 ;;

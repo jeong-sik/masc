@@ -114,6 +114,11 @@ let cancel config ~schedule_id =
   Schedule_store.cancel_request config ~schedule_id |> map_store
 ;;
 
+let update config ~schedule_id ~due_at ~expires_at ~payload =
+  Schedule_store.update_request config ~schedule_id ~due_at ~expires_at ~payload
+  |> map_store
+;;
+
 let due_candidates config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Store_error err)

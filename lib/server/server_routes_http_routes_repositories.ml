@@ -65,6 +65,31 @@ let git_status_json ~base_path (repo : Repo_manager_types.repository) =
           ("error", `String msg);
         ]
 
+(* Currency of the managed clone versus its fetched remote default branch.
+   [behind > 0] means readers of this repository (IDE workspace tree, file,
+   diff, blame) are looking at an out-of-date working tree — surfaced here so
+   the dashboard can render staleness instead of implying "no changes". *)
+let sync_currency_json ~base_path (repo : Repo_manager_types.repository) =
+  let abs_local_path = Repo_store.local_path ~base_path repo in
+  let repo_for_git = { repo with local_path = abs_local_path } in
+  let target_ref = "origin/" ^ repo.default_branch in
+  match Repo_git.ahead_behind ~repository:repo_for_git ~target_ref with
+  | Ok (behind, ahead) ->
+      `Assoc
+        [
+          ("state", `String "available");
+          ("target_ref", `String target_ref);
+          ("behind", `Int behind);
+          ("ahead", `Int ahead);
+        ]
+  | Error msg ->
+      `Assoc
+        [
+          ("state", `String "unavailable");
+          ("target_ref", `String target_ref);
+          ("error", `String msg);
+        ]
+
 let repository_json ~base_path (repo : Repo_manager_types.repository) =
   let status, error = status_json repo.status in
   let fields =
@@ -82,6 +107,7 @@ let repository_json ~base_path (repo : Repo_manager_types.repository) =
       ("created_at", timestamp_json repo.created_at);
       ("updated_at", timestamp_json repo.updated_at);
       ("git_status", git_status_json ~base_path repo);
+      ("sync_currency", sync_currency_json ~base_path repo);
     ]
   in
   let fields =
@@ -370,7 +396,29 @@ let handle_sync_repository state _agent_name req reqd =
           | Error msg ->
               json_response ~status:`Internal_server_error req reqd
                 (json_error msg)
-          | Ok () ->
+          | Ok outcome ->
+              let advance_fields =
+                match outcome with
+                | Repo_sync.Advanced { behind } -> [ ("behind", `Int behind) ]
+                | Repo_sync.Already_current -> []
+                | Repo_sync.Skipped_dirty { staged; unstaged; conflicted } ->
+                    [
+                      ("staged", `Int staged);
+                      ("unstaged", `Int unstaged);
+                      ("conflicted", `Int conflicted);
+                    ]
+                | Repo_sync.Skipped_not_on_default_branch { current } ->
+                    [ ("current_branch", `String current) ]
+                | Repo_sync.Fast_forward_refused { behind; reason } ->
+                    [ ("behind", `Int behind); ("reason", `String reason) ]
+                | Repo_sync.Advance_inspect_failed { reason } ->
+                    [ ("reason", `String reason) ]
+              in
+              let advance_json =
+                `Assoc
+                  (("state", `String (Repo_sync.advance_outcome_label outcome))
+                   :: advance_fields)
+              in
               let branches =
                 match Repo_store.list_branches ~base_path id with
                 | Ok branches ->
@@ -385,6 +433,7 @@ let handle_sync_repository state _agent_name req reqd =
                   [
                     ("id", `String id);
                     ("status", `String "active");
+                    ("advance", advance_json);
                     ("branches", branches);
                   ]
               in

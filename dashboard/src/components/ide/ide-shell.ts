@@ -1307,6 +1307,7 @@ export function IdeShell() {
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
                       repoId=${activeRepositoryId}
+                      keeperLane=${terminalKeeper}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}

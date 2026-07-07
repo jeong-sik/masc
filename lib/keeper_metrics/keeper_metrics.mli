@@ -111,6 +111,7 @@ type t =
   | SelfPreservationUniversal
   | StaleStormPaused
   | ProviderTimeoutLoopPaused
+  | TurnFailureStreakPaused
   | CycleExceptions
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
@@ -237,7 +238,6 @@ type t =
   | ToolExecutePrActionTotal
   | KeeperRepoMappingDefaultScopeAllowed
   | KeeperRepoMappingDeniedUnregistered
-  | KeeperRepoMappingDeniedNotInMapping
   | KeeperRepoMappingLoadError
   | KeeperRepoMappingRepositoryIdentityMismatch
   | KeeperRepoMappingRepositoryStoreError

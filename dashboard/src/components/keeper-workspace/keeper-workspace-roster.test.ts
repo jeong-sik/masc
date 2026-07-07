@@ -7,7 +7,10 @@ vi.mock('../../router', async (orig) => ({
   ...(await orig<typeof import('../../router')>()),
   navigate: vi.fn(),
 }))
-vi.mock('../keeper-action-panel', () => ({
+vi.mock('../keeper-action-panel', async (importOriginal) => ({
+  // Keep the real KEEPER_ACTION_LABELS (label/icon/title SSOT); only the
+  // side-effecting action runner is stubbed.
+  ...(await importOriginal<typeof import('../keeper-action-panel')>()),
   runKeeperAction: vi.fn(async () => undefined),
 }))
 vi.mock('../keeper-detail-helpers', () => ({

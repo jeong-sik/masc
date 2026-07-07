@@ -80,10 +80,21 @@ let test_all_dropped_rejected () =
     true
     (is_error (C.plan_of_json ~message_count:2 json))
 
-let test_empty_summary_rejected () =
+(* The summary is only consumed when there are summarized indices. A blank
+   summary with an empty [summarized] set is a legitimate "keep everything"
+   plan and must be accepted — rejecting it spuriously falls back to the
+   deterministic chain. *)
+let test_empty_summary_accepted_when_nothing_summarized () =
   let json = plan_json ~summary:"   " ~kept:[ 0; 1 ] ~summarized:[] ~dropped:[] in
   Alcotest.(check bool)
-    "a blank summary is rejected"
+    "a blank summary is accepted when nothing is summarized"
+    true
+    (is_ok (C.plan_of_json ~message_count:2 json))
+
+let test_empty_summary_rejected_when_summarizing () =
+  let json = plan_json ~summary:"   " ~kept:[ 1 ] ~summarized:[ 0 ] ~dropped:[] in
+  Alcotest.(check bool)
+    "a blank summary is rejected when there are summarized indices to fold"
     true
     (is_error (C.plan_of_json ~message_count:2 json))
 
@@ -153,7 +164,10 @@ let () =
         ; Alcotest.test_case "duplicate rejected" `Quick test_duplicate_rejected
         ; Alcotest.test_case "missing index rejected" `Quick test_missing_index_rejected
         ; Alcotest.test_case "all dropped rejected" `Quick test_all_dropped_rejected
-        ; Alcotest.test_case "empty summary rejected" `Quick test_empty_summary_rejected
+        ; Alcotest.test_case "empty summary accepted when nothing summarized" `Quick
+            test_empty_summary_accepted_when_nothing_summarized
+        ; Alcotest.test_case "empty summary rejected when summarizing" `Quick
+            test_empty_summary_rejected_when_summarizing
         ; Alcotest.test_case "missing field rejected" `Quick test_missing_field_rejected
         ] )
     ; ( "apply"

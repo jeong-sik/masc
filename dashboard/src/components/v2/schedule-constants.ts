@@ -11,26 +11,26 @@ export interface SchedStatusSpec {
 }
 
 export const SCHED_STATUS: Readonly<Record<string, SchedStatusSpec>> = {
-  Pending_approval: { lbl: '승인 대기', cls: 'warn', glyph: '◷' },
-  Scheduled: { lbl: '예약됨', cls: 'info', glyph: '◈' },
-  Due: { lbl: 'due', cls: 'warn', glyph: '◉' },
-  Running: { lbl: '실행 중', cls: 'ok', glyph: '▶' },
-  Succeeded: { lbl: '완료', cls: 'ok', glyph: '✓' },
-  Failed: { lbl: '실패', cls: 'bad', glyph: '✕' },
-  Rejected: { lbl: '거부됨', cls: 'bad', glyph: '⊘' },
-  Cancelled: { lbl: '취소됨', cls: 'dim', glyph: '◌' },
-  Expired: { lbl: '만료', cls: 'dim', glyph: '⊗' },
+  pending_approval: { lbl: '승인 대기', cls: 'warn', glyph: '◷' },
+  scheduled: { lbl: '예약됨', cls: 'info', glyph: '◈' },
+  due: { lbl: 'due', cls: 'warn', glyph: '◉' },
+  running: { lbl: '실행 중', cls: 'ok', glyph: '▶' },
+  succeeded: { lbl: '완료', cls: 'ok', glyph: '✓' },
+  failed: { lbl: '실패', cls: 'bad', glyph: '✕' },
+  rejected: { lbl: '거부됨', cls: 'bad', glyph: '⊘' },
+  cancelled: { lbl: '취소됨', cls: 'dim', glyph: '◌' },
+  expired: { lbl: '만료', cls: 'dim', glyph: '⊗' },
 }
 
-export const SCHED_TERMINAL: readonly string[] = ['Succeeded', 'Failed', 'Rejected', 'Cancelled', 'Expired']
+export const SCHED_TERMINAL: readonly string[] = ['succeeded', 'failed', 'rejected', 'cancelled', 'expired']
 
 export const SCHED_RISK: Readonly<Record<string, { lbl: string; cls: string }>> = {
-  Reminder_only: { lbl: 'reminder', cls: 'dim' },
-  Read_only: { lbl: 'read-only', cls: 'ok' },
-  Workspace_write: { lbl: 'workspace-write', cls: 'info' },
-  External_write: { lbl: 'external-write', cls: 'warn' },
-  Destructive: { lbl: 'destructive', cls: 'bad' },
-  Cost_bearing: { lbl: 'cost-bearing', cls: 'volt' },
+  reminder_only: { lbl: 'reminder', cls: 'dim' },
+  read_only: { lbl: 'read-only', cls: 'ok' },
+  workspace_write: { lbl: 'workspace-write', cls: 'info' },
+  external_write: { lbl: 'external-write', cls: 'warn' },
+  destructive: { lbl: 'destructive', cls: 'bad' },
+  cost_bearing: { lbl: 'cost-bearing', cls: 'volt' },
 }
 
 export const SCHED_PAYLOAD: Readonly<Record<string, { glyph: string; lbl: string }>> = {
@@ -44,8 +44,6 @@ export const SCHED_PAYLOAD: Readonly<Record<string, { glyph: string; lbl: string
   'archive.purge': { glyph: '⊗', lbl: '아카이브 정리' },
 }
 
-/** Status spec lookup with a neutral fallback (total function — unknown live
- * statuses render as a dim chip rather than throwing). */
 export function schedStatusSpec(status: string | null | undefined): SchedStatusSpec {
   return (status && SCHED_STATUS[status]) || { lbl: status || '알 수 없음', cls: 'dim', glyph: '◌' }
 }

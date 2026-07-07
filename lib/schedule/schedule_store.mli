@@ -176,3 +176,9 @@ val has_current_approved_grant :
     request's current [schedule_id], payload digest, [risk_class], and [due_at].
     Recurring requests therefore need fresh approval for each new occurrence
     when they require a separate human grant. *)
+
+val prune_completed :
+  Workspace_utils.config ->
+  (state * int, store_error) result
+(** Deletes all terminal (succeeded, failed, rejected, cancelled, expired) schedule requests
+    and their associated execution records and grants. *)

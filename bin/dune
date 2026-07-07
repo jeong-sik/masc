@@ -47,6 +47,7 @@
   cohttp
   cohttp-eio
   masc.prompt_registry
+  masc.masc_schedule
   agent_sdk
   agent_sdk.llm_provider))
 

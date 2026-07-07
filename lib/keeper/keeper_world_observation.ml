@@ -49,6 +49,7 @@ type pending_board_event_kind =
   | Goal_verification_failed
   | Failure_judgment
   | Goal_assigned
+  | Goal_stagnation
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -808,6 +809,41 @@ let pending_board_event_of_goal_assignment
   }
 ;;
 
+let pending_board_event_of_goal_stagnation
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (gs : Keeper_event_queue.goal_stagnation)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let author = "goal_loop" in
+  { event_kind = Goal_stagnation
+  ; post_id = Keeper_event_queue.goal_stagnation_post_id gs
+  ; author
+  ; title = Printf.sprintf "Goal stalled: %s" gs.gs_goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Goal %s has had no progress since %s. Resume it now — advance one \
+            concrete step, or if you are blocked, post a progress note \
+            recording what is blocking and hand off. Do not leave it \
+            untouched."
+           gs.gs_goal_id
+           gs.gs_stale_since)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some author
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -843,6 +879,12 @@ let pending_board_event_of_stimulus
          ~meta
          ~arrived_at:stimulus.arrived_at
          ga)
+  | Keeper_event_queue.Goal_stagnation gs ->
+    Some
+      (pending_board_event_of_goal_stagnation
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         gs)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
   | Keeper_event_queue.Connector_attention _

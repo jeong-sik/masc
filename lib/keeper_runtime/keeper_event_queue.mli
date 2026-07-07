@@ -108,6 +108,13 @@ type stimulus_payload =
           actionable turn input. Follows the [Goal_verification_failed]
           precedent: no dedicated turn_reason; the injected pending
           observation drives the turn. *)
+  | Goal_stagnation of goal_stagnation
+      (** RFC-0310 §3.3: a live goal has been untouched past the stagnation
+          threshold. Wakes the responsible keeper once per stale episode
+          (episode key = goal_id + [gs_stale_since]) so it can resume the
+          goal or hand off a progress note. An edge, not a blind clock:
+          advancing the goal bumps [updated_at] and opens a fresh episode;
+          an unadvanced goal never re-wakes within one episode. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -214,6 +221,16 @@ and goal_assignment = {
     are stripped from queue identity so repeat assignments of the same goal
     dedup regardless of actor. *)
 
+and goal_stagnation = {
+  gs_goal_id : string;
+  gs_stale_since : string;
+  gs_goal_title : string;
+}
+(** RFC-0310 §3.3 payload for [Goal_stagnation]. [gs_stale_since] is the
+    goal's [updated_at] at detection — the episode key kept in queue identity
+    so advancing the goal opens a fresh episode. [gs_goal_title] is
+    display-only and stripped from queue identity. *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
     sink created a board evidence post, otherwise falls back to
@@ -239,6 +256,12 @@ val failure_judgment_post_id : failure_judgment -> post_id
     ["failure-judgment:<runtime_id>:<class label>"]. Stable per
     (runtime, class) so repeats of the same deterministic failure collapse
     under queue identity dedup instead of accumulating a backlog. *)
+
+val goal_stagnation_post_id : goal_stagnation -> post_id
+(** Dedup/correlation id for [Goal_stagnation]:
+    ["goal-stagnation:<goal_id>:<stale_since>"]. Stable per stale episode so
+    repeated scans collapse under queue identity dedup and a re-stale goal
+    (new [gs_stale_since]) opens a new episode. *)
 
 val goal_assignment_post_id : goal_assignment -> post_id
 (** Dedup/correlation id for [Goal_assigned]: ["goal-assigned:<goal_id>"].

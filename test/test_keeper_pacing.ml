@@ -88,6 +88,22 @@ let test_shadow_snapshot_isolated_by_keeper () =
     0
     (List.length (Keeper_pacing_shadow.snapshot ~keeper_name))
 
+let test_shadow_next_due_uses_observed_failures_only () =
+  Eio_main.run
+  @@ fun _env ->
+  let keeper_name = "test-keeper-pacing-shadow-observed-failures-only" in
+  Keeper_pacing_shadow.observe_failure
+    ~keeper_name
+    ~runtime_id:"observed-runtime"
+    ~retry_after:(Some 30.0);
+  match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
+  | Some remaining ->
+    Alcotest.(check bool)
+      "observed failure blocks despite unrelated catalog entries"
+      true
+      (remaining > 0.0)
+  | None -> Alcotest.fail "observed pending failure should pace next turn"
+
 let () =
   Alcotest.run
     "keeper_pacing"
@@ -105,5 +121,10 @@ let () =
         ; Alcotest.test_case "always finite" `Quick test_next_turn_due_always_finite
         ] )
     ; ( "shadow"
-      , [ Alcotest.test_case "snapshot isolated by keeper" `Quick test_shadow_snapshot_isolated_by_keeper ] )
+      , [ Alcotest.test_case "snapshot isolated by keeper" `Quick test_shadow_snapshot_isolated_by_keeper
+        ; Alcotest.test_case
+            "next due uses observed failures only"
+            `Quick
+            test_shadow_next_due_uses_observed_failures_only
+        ] )
     ]

@@ -3,10 +3,15 @@
 let mu = Eio.Mutex.create ()
 let table : (string, Keeper_pacing.t) Hashtbl.t = Hashtbl.create 64
 
-let catalog_runtime_ids () =
-  match Runtime.get_runtime_ids () with
-  | [] -> []
-  | ids -> ids
+let observed_runtime_ids state = List.map fst state
+
+let next_due_remaining_of_state ~now state =
+  match observed_runtime_ids state with
+  | [] -> None
+  | catalog ->
+    let due = Keeper_pacing.next_turn_due ~catalog ~now state in
+    let remaining = due -. now in
+    if remaining > 0.0 then Some remaining else None
 
 let policy_of_runtime () =
   let p = Runtime.pacing () in
@@ -25,14 +30,17 @@ let emit_telemetry ~keeper_name ~runtime_id ~kind ~state ~now =
     Keeper_metrics.(to_string PacingShadowEvents)
     ~labels:[ "keeper", keeper_name; "runtime", runtime_id; "kind", kind ]
     ();
-  match catalog_runtime_ids () with
-  | [] -> ()
-  | catalog ->
-    let due = Keeper_pacing.next_turn_due ~catalog ~now state in
+  match next_due_remaining_of_state ~now state with
+  | None ->
     Otel_metric_store.set_gauge
       Keeper_metrics.(to_string PacingShadowNextDueSec)
       ~labels:[ "keeper", keeper_name ]
-      (Float.max 0.0 (due -. now))
+      0.0
+  | Some remaining ->
+    Otel_metric_store.set_gauge
+      Keeper_metrics.(to_string PacingShadowNextDueSec)
+      ~labels:[ "keeper", keeper_name ]
+      remaining
 
 let update ~keeper_name ~runtime_id ~kind f =
   let now = Time_compat.now () in
@@ -75,10 +83,4 @@ let next_due_remaining ~keeper_name =
   in
   match state with
   | None -> None
-  | Some state ->
-    (match catalog_runtime_ids () with
-     | [] -> None
-     | catalog ->
-       let due = Keeper_pacing.next_turn_due ~catalog ~now state in
-       let remaining = due -. now in
-       if remaining > 0.0 then Some remaining else None)
+  | Some state -> next_due_remaining_of_state ~now state

@@ -14,9 +14,11 @@
     - counter [Keeper_metrics.PacingShadowEvents]
       labels keeper / runtime / kind (failure | success)
     - gauge [Keeper_metrics.PacingShadowNextDueSec]
-      labels keeper — seconds until the keeper's next turn is due under
-      pacing (0 when some runtime is eligible now), computed over the
-      live runtime catalog. *)
+      labels keeper — seconds until the keeper's next observed failure
+      revisit is due under pacing (0 when no observed failure is pending).
+      The scheduler consumes the same observed pacing state, not the global
+      runtime catalog, so unrelated configured runtimes cannot admit a
+      keeper whose failed runtime still has a revisit delay. *)
 
 val policy_of_runtime : unit -> Keeper_pacing.policy
 (** Pacing policy from runtime.toml [pacing] (defaults when absent). *)
@@ -42,7 +44,7 @@ val snapshot : keeper_name:string -> (string * Keeper_pacing.revisit) list
     is exposed. *)
 
 val next_due_remaining : keeper_name:string -> float option
-(** Seconds until the keeper's earliest runtime revisit becomes eligible,
-    over the live runtime catalog. [None] when the keeper may run now:
-    no failures observed, some runtime already eligible, or the runtime
-    catalog is empty (pacing cannot gate what it cannot enumerate). *)
+(** Seconds until the keeper's earliest observed runtime revisit becomes
+    eligible. [None] when no failure is pending or an observed revisit is
+    already eligible. The query intentionally ignores unrelated runtime
+    catalog entries with no pacing state. *)

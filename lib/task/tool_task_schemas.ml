@@ -253,7 +253,7 @@ they do not route normal completion through the verifier agent."
         ]);
         ("handoff_context", `Assoc [
           ("type", `String "object");
-          ("description", `String "Typed handoff payload used when action='release' on strict contract tasks. 'summary' is REQUIRED and must be a non-empty string. Example: {\"summary\": \"tests green, PR #123 pending review\", \"next_step\": \"wait for CI\", \"evidence_refs\": [\"PR#123\"]}.");
+          ("description", `String "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class actions (done / submit_for_verification / release / cancel). On action='done' or 'submit_for_verification', include 'evidence_refs' with at least one trusted reference (PR number, commit hash, trace id, or reviewer-inspectable URL): the task-completion evidence gate accepts a completion only when such a reference is present — completion notes alone do NOT satisfy it. Example: {\"summary\": \"tests green, PR #123 merged\", \"evidence_refs\": [\"PR#123\"]}.");
           ("properties", `Assoc [
             ("summary", `Assoc [
               ("type", `String "string");
@@ -280,7 +280,7 @@ they do not route normal completion through the verifier agent."
             ("evidence_refs", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String "PR numbers, file paths, log links substantiating summary.");
+              ("description", `String "Trusted references substantiating completion: PR number (PR#123), commit hash, trace id (trace:/turn:/receipt:), or reviewer-inspectable URL. At least one trusted reference is required to pass the task-completion evidence gate on done/submit_for_verification. File paths and file:// URIs are recorded but NOT accepted as proof by the gate.");
             ]);
           ]);
           ("required", `List [`String "summary"]);

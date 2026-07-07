@@ -433,6 +433,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ( "result",
             `String
               "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
+          ("evidence_refs", `List [ `String "trace:tool-matrix-task-done" ]);
         ]
   | "keeper_task_create" ->
       `Assoc

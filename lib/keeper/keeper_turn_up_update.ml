@@ -258,6 +258,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
     };
     compaction = {
       profile = compaction_profile;
+      mode = old.compaction.mode;
       ratio_gate = compaction_ratio_gate;
       message_gate = compaction_message_gate;
       token_gate = compaction_token_gate;

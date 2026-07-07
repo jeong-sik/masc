@@ -29,8 +29,8 @@ type source_post_snapshot =
   ; read_tool_call_id : string option
   }
 
-(** Resolution of one claimed artifact reference. [Exists] carries the
-    content [digest] when the file is readable. *)
+(** Resolution of one claimed artifact reference. [Exists] carries the content
+    [digest] when the file is readable. *)
 type artifact_resolution =
   | Exists of
       { ref_ : string
@@ -38,15 +38,23 @@ type artifact_resolution =
       ; checked_at : float
       ; digest : string option
       }
-  | Missing of { ref_ : string; checked_at : float; reason : string }
-  | Unknown of { ref_ : string; checked_at : float; reason : string }
+  | Missing of
+      { ref_ : string
+      ; checked_at : float
+      ; reason : string
+      }
+  | Unknown of
+      { ref_ : string
+      ; checked_at : float
+      ; reason : string
+      }
 
 type gate_decision =
   | Allow
   | Reject of string
 
-(** Outcome of a pre-write check: either nothing to record, or a resolved
-    claim bundle to persist alongside the write. *)
+(** Outcome of a pre-write check: either nothing to record, or a resolved claim
+    bundle to persist alongside the write. *)
 type prechecked_write =
   | No_record
   | Record of
@@ -67,27 +75,27 @@ val resolve_file_path : string -> artifact_resolution
 val source_snapshot_of_post : Masc_board_handlers.Board.post -> Yojson.Safe.t
 
 (** Gate a comment write; [Error] rejects with a human-readable reason. *)
-val check_comment
-  :  tool_name:string
-  -> author:string
-  -> post_id:string
-  -> content:string
-  -> args:Yojson.Safe.t
-  -> (unit, string) result
+val check_comment :
+  tool_name:string ->
+  author:string ->
+  post_id:string ->
+  content:string ->
+  args:Yojson.Safe.t ->
+  (unit, string) result
 
 (** Gate a post-create write, returning the resolved claim bundle to record. *)
-val check_post_create
-  :  tool_name:string
-  -> author:string
-  -> content:string
-  -> args:Yojson.Safe.t
-  -> (prechecked_write, string) result
+val check_post_create :
+  tool_name:string ->
+  author:string ->
+  content:string ->
+  args:Yojson.Safe.t ->
+  (prechecked_write, string) result
 
 (** Persist a [prechecked_write] produced by {!check_post_create}. *)
-val record_post_create
-  :  tool_name:string
-  -> author:string
-  -> target_post_id:string
-  -> content:string
-  -> prechecked_write
-  -> (unit, string) result
+val record_post_create :
+  tool_name:string ->
+  author:string ->
+  target_post_id:string ->
+  content:string ->
+  prechecked_write ->
+  (unit, string) result

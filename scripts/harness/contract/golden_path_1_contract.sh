@@ -149,8 +149,12 @@ fi
 
 # ── Step 8/8: done ──
 echo "[8/8] masc_transition (done)"
-done_notes="completion_notes: Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success. Task scope satisfied: ${task_title} - Automated golden path 1 contract verification. reviewable_evidence_ref: contract-harness golden_path_1_contract live MCP transcript."
-r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes}')")"
+# RFC-0311 Phase 1: the completion gate requires a trusted, reviewer-inspectable
+# evidence_refs entry on done (notes alone no longer satisfy it). A trace ref
+# naming this harness run is the appropriate evidence for a live MCP sweep.
+done_notes="Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success."
+done_summary="GP1 contract flow verified end to end via live MCP transcript"
+r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:["trace:golden_path_1_contract"]}}')")"
 if require_ok "$r8"; then
   CLEANUP_TASK_FINALIZED=1
   step_pass

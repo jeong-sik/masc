@@ -256,6 +256,13 @@ let keeper_id_not_accepted_error =
 
 let annotation_delete_rejected_error = "annotation delete rejected"
 
+(* Machine-readable code for the 403 above. [Ide_annotations.delete]
+   flattens not-found and keeper mismatch into one rejection, and the
+   auth layer also answers 403 when the token tier lacks the permission
+   — the code lets clients tell this rejection apart from a
+   credential-tier 403 without matching on the human message. *)
+let annotation_delete_rejected_code = "annotation_delete_rejected"
+
 let parse_json_body body_str =
   match Yojson.Safe.from_string body_str with
   | json -> Ok json
@@ -820,7 +827,9 @@ let add_routes router =
                    Http.Response.json_value
                      ~status:`Forbidden
                      ~request
-                     (json_error annotation_delete_rejected_error)
+                     (json_error
+                        ~code:annotation_delete_rejected_code
+                        annotation_delete_rejected_error)
                      reqd)))
            request
            reqd)

@@ -1,9 +1,11 @@
-(** Task_completion_gate — evidence-substantiveness decision tests.
+(** Task_completion_gate — L1 evidence-gate decision tests (RFC-0311 Phase 1).
 
-    The gate verifies explicit verification submissions by the presence of
-    evidence a reviewer can inspect downstream: substantive notes plus the
-    contract's required_evidence, or a handoff reference. There is no verdict
-    ledger; the gate consults only the task + notes + handoff. *)
+    The gate accepts a completion iff the caller supplies at least one trusted,
+    reviewer-inspectable evidence reference on handoff_context.evidence_refs
+    (PR / commit / trace id / URL). Completion notes are IGNORED for the
+    decision, the contract's required_evidence entries are NOT consulted, and a
+    missing live task fails closed. These tests pin those invariants and guard
+    against a regression to notes/substring matching. *)
 
 open Alcotest
 open Masc
@@ -62,8 +64,19 @@ let handoff_with_refs refs : Masc_domain.task_handoff_context =
   ; updated_by = None
   }
 
+(* Assert the reject payload names the one missing thing: a trusted evidence
+   reference on handoff_context.evidence_refs. This token is uniform across
+   contract/no-contract rejects in Phase 1. *)
+let check_missing_evidence_payload payload_json =
+  match payload_json with
+  | `Assoc fields ->
+    (match List.assoc_opt "required_evidence_unsatisfied" fields with
+     | Some (`List [ `String "handoff_context.evidence_refs" ]) -> ()
+     | _ -> fail "payload did not identify the missing trusted evidence_refs")
+  | _ -> fail "payload is not Assoc"
+
 (* ─────────────────────────────────────────────────────────────── *)
-(* No contract -> explicit handoff evidence_refs required            *)
+(* No contract -> a trusted handoff evidence_ref is required          *)
 (* ─────────────────────────────────────────────────────────────── *)
 let test_no_contract_without_handoff_refs_rejects () =
   let cases =
@@ -78,19 +91,14 @@ let test_no_contract_without_handoff_refs_rejects () =
          Gate.decide
            ~task_id:"task-analysis"
            ~task_opt:(Some (make_task ()))
-           ~notes:"substantive notes alone do not satisfy no-contract evidence"
+           ~notes:"substantive notes alone do not satisfy the evidence gate"
            ~handoff_context
            ()
        with
-       | Gate.Pass -> fail "no-contract task without evidence_refs must Reject"
+       | Gate.Pass -> fail "task without evidence_refs must Reject"
        | Gate.Reject { rule_id; payload_json; _ } ->
          check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
-         (match payload_json with
-          | `Assoc fields ->
-            (match List.assoc_opt "required_evidence_unsatisfied" fields with
-             | Some (`List [ `String "handoff_context.evidence_refs" ]) -> ()
-             | _ -> fail "payload did not identify missing handoff evidence_refs")
-          | _ -> fail "payload is not Assoc"))
+         check_missing_evidence_payload payload_json)
     cases
 
 let test_no_contract_with_handoff_refs_passes () =
@@ -104,7 +112,7 @@ let test_no_contract_with_handoff_refs_passes () =
   with
   | Gate.Pass -> ()
   | Gate.Reject { rule_id; _ } ->
-    failf "no-contract task with evidence_refs should Pass, got Reject rule_id=%s" rule_id
+    failf "task with a trusted evidence_ref should Pass, got Reject rule_id=%s" rule_id
 
 let test_no_contract_with_untrusted_handoff_refs_rejects () =
   List.iter
@@ -113,23 +121,20 @@ let test_no_contract_with_untrusted_handoff_refs_rejects () =
          Gate.decide
            ~task_id:"task-analysis"
            ~task_opt:(Some (make_task ()))
-           ~notes:"substantive notes alone do not satisfy no-contract evidence"
+           ~notes:"substantive notes alone do not satisfy the evidence gate"
            ~handoff_context:(Some (handoff_with_refs [ ref_ ]))
            ()
        with
        | Gate.Pass ->
-         failf "untrusted no-contract handoff ref %S must not Pass" ref_
+         failf "untrusted handoff ref %S must not Pass" ref_
        | Gate.Reject { rule_id; payload_json; _ } ->
          check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
-         (match payload_json with
-          | `Assoc fields ->
-            (match List.assoc_opt "required_evidence_unsatisfied" fields with
-             | Some (`List [ `String "handoff_context.evidence_refs" ]) -> ()
-             | _ -> fail "payload did not identify missing trusted handoff ref")
-          | _ -> fail "payload is not Assoc"))
+         check_missing_evidence_payload payload_json)
     [ "done"; "n/a"; "local prose"; "logs/output.json" ]
 
-let test_no_task_passes () =
+(* A missing live task fails closed (defense-in-depth; the production caller
+   rejects a missing task before the gate). *)
+let test_no_task_rejects () =
   match
     Gate.decide
       ~task_id:"task-ghost"
@@ -138,42 +143,43 @@ let test_no_task_passes () =
       ~handoff_context:None
       ()
   with
-  | Gate.Pass -> ()
+  | Gate.Pass -> fail "missing task must Reject (fail closed)"
   | Gate.Reject { rule_id; _ } ->
-    failf "missing task should Pass, got Reject rule_id=%s" rule_id
+    check string "rule_id" Gate.rule_id_evidence_incomplete rule_id
 
-(* Contract + all required_evidence mentioned + substantive notes → Pass *)
-let test_required_evidence_satisfied_passes () =
+(* A contracted task passes on a trusted handoff ref, empty notes. *)
+let test_contract_with_handoff_ref_passes () =
   let contract = make_contract ~required_evidence:[ "src/main.ml" ] () in
   let task = make_task ~contract:(Some contract) () in
   match
     Gate.decide
       ~task_id:"task-ev"
       ~task_opt:(Some task)
-      ~notes:"completed work on src/main.ml"
-      ~handoff_context:None
+      ~notes:""
+      ~handoff_context:(Some (handoff_with_refs [ "PR#123" ]))
       ()
   with
   | Gate.Pass -> ()
   | Gate.Reject { rule_id; _ } ->
-    failf "satisfied required_evidence should Pass, got Reject rule_id=%s" rule_id
+    failf "contracted task with a trusted ref should Pass, got Reject rule_id=%s" rule_id
 
-(* Contract (no required_evidence) + substantive notes → Pass *)
-let test_substantive_notes_pass () =
+(* TRIPWIRE (RFC-0311 §6): substantive notes ALONE must not pass. The old gate
+   accepted a >=20-char note; the new gate ignores notes entirely. *)
+let test_substantive_notes_alone_reject () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   match
     Gate.decide
       ~task_id:"task-notes"
       ~task_opt:(Some task)
-      ~notes:"see commit abc123 for the typed evidence-gate collapse"
+      ~notes:"see commit abc123 for the typed evidence-gate collapse, all green"
       ~handoff_context:None
       ()
   with
-  | Gate.Pass -> ()
-  | Gate.Reject { rule_id; _ } ->
-    failf "substantive notes should Pass, got Reject rule_id=%s" rule_id
+  | Gate.Pass -> fail "substantive notes alone must Reject (notes are not proof)"
+  | Gate.Reject { rule_id; payload_json; _ } ->
+    check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
+    check_missing_evidence_payload payload_json
 
-(* Contract (no required_evidence) + handoff reference url, empty notes → Pass *)
 let test_handoff_reference_passes () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   match
@@ -187,7 +193,7 @@ let test_handoff_reference_passes () =
   with
   | Gate.Pass -> ()
   | Gate.Reject { rule_id; _ } ->
-    failf "handoff reference should Pass, got Reject rule_id=%s" rule_id
+    failf "trusted handoff reference should Pass, got Reject rule_id=%s" rule_id
 
 let test_plain_handoff_reference_rejects () =
   let task = make_task ~contract:(Some (make_contract ())) () in
@@ -202,7 +208,7 @@ let test_plain_handoff_reference_rejects () =
            ()
        with
        | Gate.Pass ->
-         failf "plain handoff text %S must not count as concrete evidence" ref_
+         failf "plain handoff text %S must not count as trusted evidence" ref_
        | Gate.Reject { rule_id; _ } ->
          check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
     [ "see retro"; "see retro." ]
@@ -244,55 +250,6 @@ let test_unvalidated_file_handoff_reference_rejects () =
        | Gate.Reject { rule_id; _ } ->
          check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
     [ "logs/output.json"; "a/b"; "x.txt"; "file://logs/output.json"; "file:///tmp/proof.log" ]
-
-let test_unvalidated_file_required_evidence_rejects () =
-  List.iter
-    (fun ref_ ->
-       let contract = make_contract ~required_evidence:[ ref_ ] () in
-       let task = make_task ~contract:(Some contract) () in
-       match
-         Gate.decide
-           ~task_id:"task-file-required"
-           ~task_opt:(Some task)
-           ~notes:"substantive completion notes without the file-shaped reference"
-           ~handoff_context:(Some (handoff_with_refs [ ref_ ]))
-           ()
-       with
-       | Gate.Pass ->
-         failf
-           "unvalidated file-shaped handoff ref %S must not satisfy required_evidence"
-           ref_
-       | Gate.Reject { rule_id; payload_json; _ } ->
-         check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
-         (match payload_json with
-          | `Assoc fields ->
-            (match List.assoc_opt "required_evidence_unsatisfied" fields with
-             | Some (`List [ `String actual ]) -> check string "unsatisfied" ref_ actual
-             | _ -> fail "payload did not preserve unsatisfied file evidence")
-          | _ -> fail "payload is not Assoc"))
-    [ "logs/output.json"; "a/b"; "x.txt"; "file://logs/output.json" ]
-
-let test_placeholder_required_evidence_reference_rejects () =
-  let contract = make_contract ~required_evidence:[ "trace:" ] () in
-  let task = make_task ~contract:(Some contract) () in
-  match
-    Gate.decide
-      ~task_id:"task-placeholder-required-ref"
-      ~task_opt:(Some task)
-      ~notes:"substantive completion notes are present here"
-      ~handoff_context:(Some (handoff_with_refs [ "trace:" ]))
-      ()
-  with
-  | Gate.Pass ->
-    fail "placeholder required_evidence reference must remain unsatisfied"
-  | Gate.Reject { rule_id; payload_json; _ } ->
-    check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
-    (match payload_json with
-     | `Assoc fields ->
-       (match List.assoc_opt "required_evidence_unsatisfied" fields with
-        | Some (`List [ `String "trace:" ]) -> ()
-        | _ -> fail "payload did not preserve placeholder evidence entry")
-     | _ -> fail "payload is not Assoc")
 
 let test_evidence_ref_parser_ssot () =
   let parses_as label expected = function
@@ -340,29 +297,9 @@ let test_evidence_ref_parser_ssot () =
     ; "signed PR number", "PR#+42"
     ]
 
-let test_blank_required_evidence_rejects () =
-  let contract = make_contract ~required_evidence:[ "  " ] () in
-  let task = make_task ~contract:(Some contract) () in
-  match
-    Gate.decide
-      ~task_id:"task-blank-required"
-      ~task_opt:(Some task)
-      ~notes:"substantive completion notes are present here"
-      ~handoff_context:None
-      ()
-  with
-  | Gate.Pass -> fail "blank required_evidence entry must not auto-satisfy"
-  | Gate.Reject { rule_id; payload_json; _ } ->
-    check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
-    (match payload_json with
-     | `Assoc fields ->
-       (match List.assoc_opt "required_evidence_unsatisfied" fields with
-        | Some (`List xs) -> check int "blank unsatisfied count" 1 (List.length xs)
-        | _ -> fail "payload missing required_evidence_unsatisfied")
-     | _ -> fail "payload is not Assoc")
-
-(* Contract + required_evidence unsatisfied → Reject *)
-let test_required_evidence_unsatisfied_rejects () =
+(* TRIPWIRE (RFC-0311 §6): a contract whose required_evidence names the work is
+   NOT rescued by notes that mention it — only a trusted handoff ref passes. *)
+let test_contract_without_trusted_ref_rejects () =
   let contract =
     make_contract ~required_evidence:[ "test_results"; "coverage_report" ] ()
   in
@@ -371,110 +308,21 @@ let test_required_evidence_unsatisfied_rejects () =
     Gate.decide
       ~task_id:"task-missing"
       ~task_opt:(Some task)
-      ~notes:"finished the work, see PR"
+      ~notes:"finished the work, updated test_results and coverage_report, see PR"
       ~handoff_context:None
       ()
   with
-  | Gate.Pass -> fail "unsatisfied required_evidence must Reject"
+  | Gate.Pass -> fail "contract without a trusted handoff ref must Reject"
   | Gate.Reject { rule_id; payload_json; _ } ->
     check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
+    check_missing_evidence_payload payload_json;
     (match payload_json with
      | `Assoc fields ->
-       (match List.assoc_opt "required_evidence_unsatisfied" fields with
-        | Some (`List xs) -> check int "unsatisfied count" 2 (List.length xs)
-        | _ -> fail "payload missing required_evidence_unsatisfied");
        (match List.assoc_opt "evidence_summary" fields with
         | Some (`Assoc _) -> ()
         | _ -> fail "payload missing evidence_summary")
      | _ -> fail "payload is not Assoc")
 
-let test_required_evidence_embedded_substring_rejects () =
-  let contract = make_contract ~required_evidence:[ "error" ] () in
-  let task = make_task ~contract:(Some contract) () in
-  match
-    Gate.decide
-      ~task_id:"task-embedded-substring"
-      ~task_opt:(Some task)
-      ~notes:"completed an errorless run with enough context"
-      ~handoff_context:None
-      ()
-  with
-  | Gate.Pass -> fail "embedded substring must not satisfy required_evidence"
-  | Gate.Reject { rule_id; payload_json; _ } ->
-    check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
-    (match payload_json with
-     | `Assoc fields ->
-       (match List.assoc_opt "required_evidence_unsatisfied" fields with
-        | Some (`List [ `String "error" ]) -> ()
-        | _ -> fail "payload did not preserve unsatisfied evidence entry")
-     | _ -> fail "payload is not Assoc")
-
-let test_required_evidence_extended_reference_rejects () =
-  let cases =
-    [ "src/main.ml", "completed work in src/main.ml.bak with enough notes"
-    ; "file.tar", "completed work in file.tar.gz with enough notes"
-    ; ( "https://example.test/pr/42"
-      , "completed work in https://example.test/pr/42.extra with enough notes" )
-    ; "trace:run-123", "completed work in trace:run-123:retry with enough notes"
-    ]
-  in
-  List.iter
-    (fun (required, notes) ->
-       let contract = make_contract ~required_evidence:[ required ] () in
-       let task = make_task ~contract:(Some contract) () in
-       match
-         Gate.decide
-           ~task_id:"task-extended-reference"
-           ~task_opt:(Some task)
-           ~notes
-           ~handoff_context:None
-           ()
-       with
-       | Gate.Pass ->
-         failf
-           "longer reference in notes must not satisfy required_evidence %S"
-           required
-       | Gate.Reject { rule_id; payload_json; _ } ->
-         check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
-         (match payload_json with
-          | `Assoc fields ->
-            (match List.assoc_opt "required_evidence_unsatisfied" fields with
-             | Some (`List [ `String actual ]) -> check string "unsatisfied" required actual
-             | _ -> fail "payload did not preserve unsatisfied evidence entry")
-          | _ -> fail "payload is not Assoc"))
-    cases
-
-let test_required_evidence_path_with_punctuation_passes () =
-  let contract = make_contract ~required_evidence:[ "src/main.ml" ] () in
-  let task = make_task ~contract:(Some contract) () in
-  match
-    Gate.decide
-      ~task_id:"task-path-boundary"
-      ~task_opt:(Some task)
-      ~notes:"implemented the fix in src/main.ml. review notes attached"
-      ~handoff_context:None
-      ()
-  with
-  | Gate.Pass -> ()
-  | Gate.Reject { rule_id; _ } ->
-    failf "path mention followed by punctuation should Pass, got %s" rule_id
-
-let test_required_evidence_word_with_colon_passes () =
-  let contract = make_contract ~required_evidence:[ "error" ] () in
-  let task = make_task ~contract:(Some contract) () in
-  match
-    Gate.decide
-      ~task_id:"task-word-colon-boundary"
-      ~task_opt:(Some task)
-      ~notes:"Error: reproduced and fixed with detailed validation notes"
-      ~handoff_context:None
-      ()
-  with
-  | Gate.Pass -> ()
-  | Gate.Reject { rule_id; _ } ->
-    failf "word mention followed by colon should Pass, got %s" rule_id
-
-(* Contract (no required_evidence) + placeholder notes, no handoff → Reject *)
 let test_placeholder_notes_reject () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   List.iter
@@ -500,41 +348,29 @@ let test_rule_id_constant_stable () =
 let () =
   Alcotest.run
     "task_completion_gate"
-    [ ( "evidence-substantiveness"
+    [ ( "evidence-gate"
       , [ test_case "no contract without handoff refs → Reject" `Quick
             test_no_contract_without_handoff_refs_rejects
-        ; test_case "no contract with handoff refs → Pass" `Quick
+        ; test_case "no contract with trusted handoff ref → Pass" `Quick
             test_no_contract_with_handoff_refs_passes
         ; test_case "no contract with untrusted handoff refs → Reject" `Quick
             test_no_contract_with_untrusted_handoff_refs_rejects
-        ; test_case "no task → Pass" `Quick test_no_task_passes
-        ; test_case "required_evidence satisfied → Pass" `Quick
-            test_required_evidence_satisfied_passes
-        ; test_case "substantive notes → Pass" `Quick test_substantive_notes_pass
-        ; test_case "handoff reference → Pass" `Quick test_handoff_reference_passes
+        ; test_case "no task → Reject (fail closed)" `Quick test_no_task_rejects
+        ; test_case "contract with trusted handoff ref → Pass" `Quick
+            test_contract_with_handoff_ref_passes
+        ; test_case "substantive notes alone → Reject" `Quick
+            test_substantive_notes_alone_reject
+        ; test_case "trusted handoff reference → Pass" `Quick
+            test_handoff_reference_passes
         ; test_case "plain handoff text → Reject" `Quick
             test_plain_handoff_reference_rejects
         ; test_case "placeholder handoff ref → Reject" `Quick
             test_placeholder_handoff_reference_rejects
         ; test_case "unvalidated file handoff ref → Reject" `Quick
             test_unvalidated_file_handoff_reference_rejects
-        ; test_case "unvalidated file required ref → Reject" `Quick
-            test_unvalidated_file_required_evidence_rejects
-        ; test_case "placeholder required ref → Reject" `Quick
-            test_placeholder_required_evidence_reference_rejects
         ; test_case "evidence ref parser SSOT" `Quick test_evidence_ref_parser_ssot
-        ; test_case "blank required_evidence → Reject" `Quick
-            test_blank_required_evidence_rejects
-        ; test_case "required_evidence unsatisfied → Reject" `Quick
-            test_required_evidence_unsatisfied_rejects
-        ; test_case "embedded required_evidence substring → Reject" `Quick
-            test_required_evidence_embedded_substring_rejects
-        ; test_case "extended required_evidence reference → Reject" `Quick
-            test_required_evidence_extended_reference_rejects
-        ; test_case "required_evidence path punctuation → Pass" `Quick
-            test_required_evidence_path_with_punctuation_passes
-        ; test_case "required_evidence word colon → Pass" `Quick
-            test_required_evidence_word_with_colon_passes
+        ; test_case "contract without trusted ref → Reject" `Quick
+            test_contract_without_trusted_ref_rejects
         ; test_case "placeholder notes → Reject" `Quick
             test_placeholder_notes_reject
         ] )

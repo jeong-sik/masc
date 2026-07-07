@@ -213,6 +213,30 @@ let memory_bank_summary_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+(* Compaction plan (RFC-0313-adjacent W2). The LLM classifies each working-set
+   message by 0-based index into kept / summarized / dropped, and returns one
+   [summary] prose block that stands in for the summarized indices. Index-based
+   (not free-text rewrite) so the original messages are never fabricated — the
+   consumer reconstructs the context by index, matching the
+   [consolidation_plan] member_indices/drop_indices precedent. Field names are
+   exported as constants so the parser shares this SSOT. *)
+let compaction_plan_field_summary = "summary"
+let compaction_plan_field_kept_indices = "kept_indices"
+let compaction_plan_field_summarized_indices = "summarized_indices"
+let compaction_plan_field_dropped_indices = "dropped_indices"
+
+let compaction_plan_output_schema =
+  let int_array = `Assoc [ "type", `String "array"; "items", integer_schema ] in
+  let fields =
+    [ compaction_plan_field_summary, string_schema
+    ; compaction_plan_field_kept_indices, int_array
+    ; compaction_plan_field_summarized_indices, int_array
+    ; compaction_plan_field_dropped_indices, int_array
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let vision_analyze_output_schema =
   let fields = [ "text", string_schema ] in
   object_schema ~required:(List.map fst fields) fields

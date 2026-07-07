@@ -3427,12 +3427,16 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
     let keeper_waiting_inventory =
       run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
     in
+    let keeper_background =
+      run Tools_compute (fun () -> Server_keeper_background.dashboard_json config)
+    in
     match json with
     | `Assoc fields ->
       `Assoc
         (fields
          @ [ "scheduled_automation", scheduled_automation
            ; "keeper_waiting_inventory", keeper_waiting_inventory
+           ; "keeper_background", keeper_background
            ])
     | other -> other
   in

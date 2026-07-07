@@ -190,6 +190,16 @@ const ConnectorBindingSummarySchema = object({
 
 export type ConnectorBindingSummary = InferOutput<typeof ConnectorBindingSummarySchema>
 
+export type ConnectorSourceHealthState = 'present' | 'fallback' | 'missing'
+
+export interface ConnectorSourceHealth {
+  storage_paths: ConnectorSourceHealthState
+  runtime_summary: ConnectorSourceHealthState
+  binding_summary: ConnectorSourceHealthState
+  names: ConnectorSourceHealthState
+  observed_channel: ConnectorSourceHealthState
+}
+
 // --- Connector info ---
 
 const GateConnectorInfoRawSchema = object({
@@ -271,6 +281,7 @@ export interface GateConnectorInfo {
   storage_paths: ConnectorStoragePaths
   runtime_summary: ConnectorRuntimeSummary
   binding_summary: ConnectorBindingSummary
+  source_health: ConnectorSourceHealth
   observed_channel?: ChannelInfo | null
   names_path: string
   names: ConnectorNames
@@ -320,6 +331,16 @@ function parseObservedChannel(raw: unknown): ChannelInfo | null {
   if (raw === undefined || raw === null) return null
   const parsed = safeParseChannelInfo(raw)
   return parsed.success ? parsed.output : null
+}
+
+function sourceHealthForObject(raw: unknown): ConnectorSourceHealthState {
+  return isRecord(raw) ? 'present' : 'fallback'
+}
+
+function sourceHealthForObservedChannel(raw: unknown): ConnectorSourceHealthState {
+  if (raw === undefined || raw === null) return 'missing'
+  const parsed = safeParseChannelInfo(raw)
+  return parsed.success ? 'present' : 'fallback'
 }
 
 function parseGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
@@ -372,6 +393,13 @@ function parseGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
       outer.output.binding_summary,
       configured_bindings.length,
     ),
+    source_health: {
+      storage_paths: sourceHealthForObject(outer.output.storage_paths),
+      runtime_summary: sourceHealthForObject(outer.output.runtime_summary),
+      binding_summary: sourceHealthForObject(outer.output.binding_summary),
+      names: sourceHealthForObject(outer.output.names),
+      observed_channel: sourceHealthForObservedChannel(outer.output.observed_channel),
+    },
     observed_channel: parseObservedChannel(outer.output.observed_channel),
     names_path: outer.output.names_path,
     names: parseConnectorNames(outer.output.names),

@@ -53,7 +53,8 @@ export interface Task {
   id: string
   title: string
   goal_id?: string | null
-  status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled'
+  status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled' | 'blocked' | 'paused' | 'unknown'
+  status_raw?: string | null
   priority?: number
   assignee?: string
   assignee_kind?: string | null
@@ -98,7 +99,8 @@ interface TaskGateCheck {
 }
 
 export interface TaskGateEvaluation {
-  status: 'ready' | 'blocked' | 'inconclusive'
+  status: 'ready' | 'blocked' | 'inconclusive' | 'unknown'
+  status_raw?: string | null
   checks?: TaskGateCheck[]
   reasons?: string[]
 }

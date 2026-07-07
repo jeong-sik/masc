@@ -141,6 +141,50 @@ type gh_capability_policy_result =
   | Gh_policy_approval_required of Masc_exec.Exec_program.t
   | Gh_policy_denied of string
 
+(* Surface WHY a gh command is gated on the operator approval prompt: the gh
+   family/action and its verb classification (read / reversible / irreversible
+   mutation / …). Returns [None] when the command's words are not literally
+   recoverable (env/redirect/$VAR present) so no rationale is fabricated. *)
+let gh_gating_detail ir =
+  match last_simple_of_ir ir with
+  | None -> None
+  | Some simple ->
+    (match Masc_exec.Shell_ir_risk.literal_words_of_simple simple with
+     | None -> None
+     | Some words ->
+       let verb = Masc_exec.Gh_verb.classify words in
+       let verb_class = Masc_exec.Shell_ir_risk.classify_gh_verb verb in
+       let family = Masc_exec.Gh_verb.string_of_family verb.Masc_exec.Gh_verb.family in
+       let action = Option.value ~default:"" verb.Masc_exec.Gh_verb.action in
+       let subject = String.trim (family ^ " " ^ action) in
+       let subject = if subject = "" then "gh" else "gh " ^ subject in
+       Some
+         (Printf.sprintf
+            "%s: %s"
+            subject
+            (Masc_exec.Shell_ir_risk.gh_verb_class_to_string verb_class)))
+;;
+
+let approval_required_summary ir bin =
+  let bin_text = Masc_exec.Exec_program.to_string bin in
+  match Masc_exec.Exec_program.known bin with
+  | Some Masc_exec.Exec_program.Gh ->
+    (match gh_gating_detail ir with
+     | Some detail ->
+       Printf.sprintf
+         "command '%s' requires approval — %s (audited/privileged risk class)"
+         bin_text
+         detail
+     | None ->
+       Printf.sprintf
+         "command '%s' requires approval (audited/privileged risk class)"
+         bin_text)
+  | Some _ | None ->
+    Printf.sprintf
+      "command '%s' requires approval (audited/privileged risk class)"
+      bin_text
+;;
+
 let gh_capability_policy_result ir ~caps =
   match last_simple_of_ir ir with
   | None -> Gh_policy_noop
@@ -194,16 +238,11 @@ let dispatch_classified
     (match gh_capability_policy_result ir ~caps with
      | Gh_policy_denied reason -> Error (Policy_denied { reason })
      | Gh_policy_approval_required bin ->
+       let summary = approval_required_summary ir bin in
        let bin = Masc_exec.Exec_program.to_string bin in
        Error
          (Approval_required
-            { summary =
-                Printf.sprintf
-                  "command '%s' requires approval (audited/privileged risk class)"
-                  bin
-            ; bin
-            ; kind = Gh_capability_requires_approval
-            })
+            { summary; bin; kind = Gh_capability_requires_approval })
      | Gh_policy_noop ->
        (match first_privileged_program caps with
         | Some bin ->
@@ -322,16 +361,10 @@ let dispatch_classified_with_approval
          | Some _ | None -> Privileged_program_floor
        in
        let bin = Masc_exec.Exec_program.to_string request_bin in
+       let summary = approval_required_summary ir request_bin in
        Error
          (Approval_required
-            { summary =
-                Printf.sprintf
-                  "command '%s' requires approval (audited/privileged risk \
-                   class)"
-                  bin
-            ; bin
-            ; kind
-            })
+            { summary; bin; kind })
      | Deny { reason; caps = _ } ->
        Error
          (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason }))

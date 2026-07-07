@@ -1,4 +1,4 @@
-(** Unit tests for [Compaction_llm_summarizer] (RFC-0313-adjacent W2).
+(** Unit tests for [Keeper_compaction_llm_summarizer] (RFC-0313-adjacent W2).
 
     Covers the pure surface: structured-plan parsing/validation
     ([plan_of_json]) and plan application ([apply]). The provider call in
@@ -6,7 +6,7 @@
     integration, not here. *)
 
 open Masc
-module C = Compaction_llm_summarizer
+module C = Keeper_compaction_llm_summarizer
 
 let plan_json ~summary ~kept ~summarized ~dropped : Yojson.Safe.t =
   let ints xs = `List (List.map (fun i -> `Int i) xs) in

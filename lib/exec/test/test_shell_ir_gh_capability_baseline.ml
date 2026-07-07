@@ -96,6 +96,13 @@ let corpus : (string * string * expectation) list =
      Stable Shell_ir_risk.R1_Reversible_mutation);
     ("pr-comment", "gh pr comment 123 --body B",
      Stable Shell_ir_risk.R1_Reversible_mutation);
+    (* W4/G-9 FIXED (deferred [pr ready] case resolved): [pr ready] is reversible
+       ([--undo] toggles back to draft). Its CI/notification side-effects are an
+       externality shared with [pr create] (already R1/Allowed), not a
+       reversibility fact — the G-4 externality axis this comment previously
+       deferred to is the capability axis, and [pr ready] on the [Pr] family does
+       not touch a durable remote surface, so it stays Allowed there. *)
+    ("pr-ready", "gh pr ready 123", Stable Shell_ir_risk.R1_Reversible_mutation);
     ("issue-create", "gh issue create --title T",
      Stable Shell_ir_risk.R1_Reversible_mutation);
     ("issue-edit", "gh issue edit 123",
@@ -105,10 +112,6 @@ let corpus : (string * string * expectation) list =
     (* --- genuinely irreversible: stable R2 (floor stands, RFC-0309
        does not soften Deny) ------------------------------------------- *)
     ("pr-merge", "gh pr merge 123 --squash", Stable Shell_ir_risk.R2_Irreversible);
-    (* pre-existing floor: `pr ready --undo` exists, but ready triggers
-       external side-effects (CI, notifications). Revisit under the G-4
-       externality axis; out of W0 scope. *)
-    ("pr-ready", "gh pr ready 123", Stable Shell_ir_risk.R2_Irreversible);
     ("repo-delete", "gh repo delete owner/repo --yes",
      Stable Shell_ir_risk.R2_Irreversible);
     ("repo-archive", "gh repo archive owner/repo",

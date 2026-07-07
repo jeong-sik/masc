@@ -11,7 +11,9 @@ import {
   patchKeeperConfig,
   setKeeperToolPolicy,
 } from '../api/dashboard'
-import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
+import { fetchKeeperComposite, pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
+import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
+import type { KeeperSecretProjection } from '../api/schemas/keeper-composite'
 import type { DashboardRuntimeProviderSnapshot, DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
@@ -139,6 +141,15 @@ export type KeeperConfigControlInventoryItem = {
 }
 
 const kcfTab = signal<KcfTabId>('identity')
+
+// Deep-link entry point: focus a specific config tab before the modal opens.
+// `kcfTab` is reset to 'identity' only on panel teardown (see
+// resetKeeperConfigPanelDrafts), never on mount, so a value set here survives the
+// next open. Used by the read-only runtime card (keeper-runtime-model-editor) to
+// land the operator on the 런타임 tab where runtime_id is actually edited.
+export function focusKeeperConfigTab(tab: KcfTabId): void {
+  kcfTab.value = tab
+}
 
 // ── State ────────────────────────────────────────────────
 
@@ -1681,6 +1692,23 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
+  // GitHub App credentials live in the keeper secret projection, which the
+  // config payload does not carry. Fetch it once per keeper (same source the
+  // monitoring detail reads via composite.secret_projection) so the access-tab
+  // panel can detect existing config; mutations return the fresh projection and
+  // update this state without a refetch.
+  const [secretProjection, setSecretProjection] = useState<KeeperSecretProjection | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchKeeperComposite(keeperName, { signal: controller.signal })
+      .then((snapshot) => setSecretProjection(snapshot.secret_projection ?? null))
+      .catch(() => {
+        // A failed/aborted secret fetch leaves the panel in its empty-projection
+        // state (save still works); it must not break the rest of the config UI.
+      })
+    return () => controller.abort()
+  }, [keeperName])
+
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
     void loadKeeperConfig(keeperName)
@@ -2346,6 +2374,17 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
       <${ModelList} models=${c.workspace.bound_workspace_ids} />
     </div>
+
+    ${'' /* GitHub App per-keeper credentials — surfaced here in 설정 → 권한·샌드박스
+       alongside the monitoring detail's 진단/운영 copy, because credentials are a
+       settings concept and this is where operators look for them. Both call sites
+       render the same KeeperGithubAppConfigPanel against secret_projection. */}
+    <${MajorSectionHeader} title="GitHub App 자격증명" />
+    <${KeeperGithubAppConfigPanel}
+      keeperName=${keeperName}
+      projection=${secretProjection}
+      onProjectionChange=${setSecretProjection}
+    />
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)

@@ -364,7 +364,15 @@ let classify_write_detail (words : string list) : risk_class option =
 
 let repo_hosting_cli_irreversible_ops =
   [
-    ("pr", [ "merge"; "ready" ]);
+    (* RFC-0309 W4/G-9 (completing the deferred [pr ready] case): only [merge]
+       is factually irreversible (it writes the base branch history). [ready]
+       toggles a PR between draft and ready-for-review and is reversible via
+       [gh pr ready --undo], so it moves to the reversible table below. Its
+       CI/notification side-effects are an externality (a capability concern,
+       identical to [pr create] which is already Allowed), NOT a reversibility
+       fact — encoding them as R2 here was the same policy-as-risk mistake W4/G-9
+       closed for repo create/fork/discussion. *)
+    ("pr", [ "merge" ]);
     (* RFC-0309 W4/G-9: repo create/fork are factually REVERSIBLE (a created or
        forked repo can be deleted), so they move to the reversible table below.
        Only the genuinely irreversible repo ops stay here. This restores the
@@ -390,7 +398,7 @@ let repo_hosting_cli_reversible_mutations =
   [
     ("pr",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock"; "checkout";
-       "unlock" ]);
+       "unlock"; "ready" ]);
     ("issue",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "lock"; "unlock";
        "develop"; "pin"; "unpin" ]);
@@ -708,6 +716,17 @@ let risk_of_gh_verb (v : Gh_verb.t) : risk_class =
   | Gh_irreversible_mutation -> R2_Irreversible
   (* Risk genuinely unknown; capability axis gates it. Not fabricated to R1/R2. *)
   | Gh_unrecognized_action -> R0_Read
+
+(* Human-readable label for the gh verb classification, for surfacing the
+   gating rationale on operator approval prompts (why this gh command needs
+   approval). *)
+let gh_verb_class_to_string = function
+  | Gh_read -> "read"
+  | Gh_reversible_mutation -> "reversible mutation"
+  | Gh_irreversible_mutation -> "irreversible mutation"
+  | Gh_unrecognized_action -> "unrecognized action (capability-gated)"
+  | Gh_string_borne -> "string-borne (word-list floor)"
+  | Gh_unrecognized_family -> "unrecognized family (fail-closed)"
 
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)

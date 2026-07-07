@@ -424,6 +424,14 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
     match String.trim result.block with
     | "" -> None
     | block ->
+      (* RFC-0285 §8: record what this turn's prompt actually contains so the
+         librarian write path can tell a recalled echo from an independent
+         re-observation. This in-memory window is the load-bearing counterpart
+         of the append-only ledger below (which stays telemetry-only). *)
+      Keeper_recall_injection_window.note
+        ~keeper_id
+        ~turn
+        ~keys:result.injected_fact_keys;
       Keeper_recall_injection_ledger.append
         ?failure_reason:(Option.map unavailable_reason_to_label result.failure_reason)
         ~masc_root

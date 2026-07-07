@@ -476,6 +476,36 @@ let cancel_request config ~schedule_id =
         Ok updated_request)
 ;;
 
+let update_request config ~schedule_id ~due_at ~expires_at ~payload =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if Schedule_domain.is_terminal request.status
+         || request.status = Running
+         || request.status = Due
+      then
+        Error
+          (Invalid_status_transition
+             "only pending or scheduled requests can be updated")
+      else
+        let updated_request =
+          { request with
+            Schedule_domain.due_at
+          ; expires_at
+          ; payload
+          }
+        in
+        let schedules = replace_schedule state.schedules updated_request in
+        let next_state =
+          bump_state state ~schedules ~grants:state.grants
+            ~executions:state.executions
+        in
+        let* () = write_state config next_state in
+        Ok updated_request)
+;;
+
 let refresh_due config ~now =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in

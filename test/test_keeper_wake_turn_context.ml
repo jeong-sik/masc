@@ -259,6 +259,22 @@ let test_goal_summaries_render_titles () =
   check bool "legacy has no title" false
     (contains ~needle:"Improve wake context" bare)
 
+let test_partial_goal_summaries_preserve_missing_ids () =
+  let observation =
+    { base_observation with active_goals = [ "goal-a"; "goal-b" ] }
+  in
+  let user =
+    user_message
+      ~active_goal_summaries:[ ("goal-a", "Improve wake context") ]
+      observation
+  in
+  check bool "header keeps full active-goal count" true
+    (contains ~needle:"### Active Goals (2)" user);
+  check bool "resolved goal title renders" true
+    (contains ~needle:"- goal-a — Improve wake context" user);
+  check bool "missing title falls back to bare id" true
+    (contains ~needle:"- goal-b" user)
+
 (* --- 4. Open loops layer --- *)
 
 let make_loop ~id ~title ~what =
@@ -344,6 +360,8 @@ let () =
         [
           test_case "summaries render titles, bare ids stay legacy" `Quick
             test_goal_summaries_render_titles;
+          test_case "partial summaries preserve missing goal ids" `Quick
+            test_partial_goal_summaries_preserve_missing_ids;
           test_case "goal holder gets self-direction directive" `Quick
             test_goal_holder_gets_self_direction_directive;
         ] );

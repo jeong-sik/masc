@@ -50,6 +50,17 @@ let format_goal_summaries (summaries : (string * string) list) : string =
          else Printf.sprintf "- %s — %s" gid title)
        summaries)
 
+let format_goal_summaries_for_active_goals
+    ~(active_goal_ids : string list)
+    (summaries : (string * string) list) : string =
+  let title_for goal_id =
+    match List.assoc_opt goal_id summaries with
+    | Some title -> title
+    | None -> ""
+  in
+  format_goal_summaries
+    (List.map (fun goal_id -> (goal_id, title_for goal_id)) active_goal_ids)
+
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     A claimed task is what admits scheduled-autonomous turns
     ([proactive_work_signal_present] counts [current_task_id] as the
@@ -943,16 +954,19 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
-       resolved them (RFC-0315); bare ids remain the fallback so legacy
-       callers keep their output. *)
+       resolved them (RFC-0315); every id from the world observation remains
+       rendered even when title enrichment is partial. *)
     | Keeper_context_layers.Active_goals ->
       if observation.active_goals <> [] then
         Some
           (Printf.sprintf "### Active Goals (%d)\n"
              (List.length observation.active_goals)
           ^ (match active_goal_summaries with
-             | Some (_ :: _ as summaries) -> format_goal_summaries summaries
-             | Some [] | None -> format_goals observation.active_goals)
+             | Some summaries ->
+                 format_goal_summaries_for_active_goals
+                   ~active_goal_ids:observation.active_goals
+                   summaries
+             | None -> format_goals observation.active_goals)
           ^ "\n\n")
       else None
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).

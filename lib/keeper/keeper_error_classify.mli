@@ -189,10 +189,18 @@ val degraded_retry_after_recoverable_error :
     futile and previously looped forever (2026-05-21, 2026-07-06, #23373).
     Contract violations, read-only no-progress accept rejections, and
     quota/rate-limit classes cap rotation after the candidate set is exhausted.
+
+    RFC-0313 W3: with [pacing_enforced:true] the class-based cycle cap is
+    bypassed — every recoverable class may re-cycle the (pool-filtered)
+    candidate set within the turn's cycle budget, because revisit pacing now
+    spaces the retries the cap used to suppress. [pacing_enforced:false]
+    keeps the legacy cap (kill-switch; the cap and this parameter go away in
+    W4). Contract violations never cycle in either mode.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?credential_pool_of_runtime_id:(string -> string option) ->
   ?fallback_hint:string ->
+  pacing_enforced:bool ->
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->

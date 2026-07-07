@@ -24,10 +24,14 @@ let test_api_rate_limited_threads_hint () =
           { retry_after = Some 30.0; message = "slow down" }))
 
 let test_api_hard_quota_message_wins () =
+  (* The message must be one [Retry.hard_quota_indicators] actually lists —
+     "monthly quota reached" is not an indicator, so the original fixture
+     asserted a classification the OAS predicate never made (surfaced on
+     main once #23495's cancelled PR run finally executed this exe). *)
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.RateLimited
-         { retry_after = None; message = "monthly quota reached" })
+         { retry_after = None; message = "You have exceeded your current quota." })
   in
   match KFR.route_of_error err with
   | KFR.Retry_after_pacing { pacing = KFR.Hard_quota; _ } -> ()
@@ -177,6 +181,18 @@ let test_non_provider_families_judge () =
    | KFR.Escalate_judgment { judgment = KFR.Internal_opaque; _ } -> ()
    | other ->
      Alcotest.failf "raw Internal should judge, got %s" (KFR.route_kind_label other));
+  (* RFC-0313 W3: an idle loop is a behavioral contract judgment, not an
+     opaque internal error (it was the legacy ladder's manual-resume pause
+     class). *)
+  (match
+     KFR.route_of_error
+       (Agent_sdk.Error.Agent
+          (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 3 }))
+   with
+   | KFR.Escalate_judgment { judgment = KFR.Contract_violation; _ } -> ()
+   | other ->
+     Alcotest.failf "idle loop should judge contract, got %s"
+       (KFR.route_kind_label other));
   match
     KFR.route_of_error
       (Agent_sdk.Error.Mcp (Agent_sdk.Error.InitializeFailed { detail = "handshake" }))

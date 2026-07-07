@@ -1201,7 +1201,11 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   in
   Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
   let submitted = Yojson.Safe.from_string submit_body in
-  Alcotest.(check string) "MCP runtime submitted_by persisted" "mcp-runtime-curator"
+  (* #23489 routes curation_submit through [enforce_caller_identity]:
+     a same-keeper surface form ("mcp-runtime-curator") is stored as the
+     canonical keeper name via [Server_utils.board_actor_author_for_write],
+     with the raw surface preserved in meta. *)
+  Alcotest.(check string) "MCP runtime submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
     require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
@@ -2209,6 +2213,48 @@ let test_comment_claim_gate_rejects_unknown_claim_kind () =
   Alcotest.(check bool) "unknown claim named" true
     (contains_substring (Tool_result.message result) "invalid_claim_kind")
 
+let test_resolve_file_path_records_content_digest () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  (* Create a real artifact at the exact path [resolve_file_path] computes.
+     [Board_core.board_base_path] is the public alias of the gate's internal
+     [Board_paths.board_base_path] (a wrapped-library module the test cannot
+     name), so the test is robust to whatever the harness sets as base_path.
+     Before [digest_of_file], the Exists arm returned [digest=None] —
+     "evidence" meant only "any file under the base existed". *)
+  let artifact_rel = Filename.concat Common.masc_dirname "claim_gate_digest_fixture.ml" in
+  let artifact_content = "let proof = \"digest-fixture-v1\"\n" in
+  let artifact_path = Filename.concat (Board_core.board_base_path ()) artifact_rel in
+  (try Unix.mkdir (Filename.dirname artifact_path) 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  Out_channel.with_open_bin artifact_path (fun oc -> output_string oc artifact_content);
+  let expected = Some ("sha256:" ^ sha256_hex artifact_content) in
+  let got_digest =
+    match Board_claim_gate.resolve_file_path artifact_rel with
+    | Board_claim_gate.Exists { digest; _ } -> digest
+    | _ -> None
+  in
+  Alcotest.(check (option string)) "exists arm records content digest" expected got_digest
+
+let test_resolve_file_path_rejects_digest_unavailable () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let artifact_rel = Filename.concat Common.masc_dirname "claim_gate_digest_dir" in
+  let artifact_path = Filename.concat (Board_core.board_base_path ()) artifact_rel in
+  (try Unix.mkdir (Filename.dirname artifact_path) 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  (try Unix.mkdir artifact_path 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  match Board_claim_gate.resolve_file_path artifact_rel with
+  | Board_claim_gate.Unknown { reason; _ } ->
+    Alcotest.(check string)
+      "digest unavailable is explicit"
+      "file_path_digest_unavailable"
+      reason
+  | Board_claim_gate.Exists _ ->
+    Alcotest.fail "digest-unavailable artifact must not resolve as existing evidence"
+  | Board_claim_gate.Missing _ ->
+    Alcotest.fail "digest-unavailable fixture should exist as a path"
+
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2676,6 +2722,10 @@ let () =
             test_board_dashboard_json_embeds_claim_evidence_projection;
           Alcotest.test_case "claim gate rejects unknown claim kind" `Quick
             test_comment_claim_gate_rejects_unknown_claim_kind;
+          Alcotest.test_case "claim gate resolves artifact content digest" `Quick
+            test_resolve_file_path_records_content_digest;
+          Alcotest.test_case "claim gate rejects digest-unavailable artifact" `Quick
+            test_resolve_file_path_rejects_digest_unavailable;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;

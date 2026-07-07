@@ -744,54 +744,89 @@ let record_completion_contract_attention_failure
     ~agent_name:updated_meta.name
     ~reason:(Keeper_types_profile.short_preview detail);
   let count = Keeper_registry.get_turn_failures ~base_path updated_meta.name in
-  let pause_threshold = Runtime.pause_threshold () in
-  let turn_fail_streak_threshold =
-    pause_threshold.Runtime_schema.turn_fail_streak_threshold
-  in
-  if count >= turn_fail_streak_threshold && not updated_meta.paused
+  if Keeper_pacing_shadow.pacing_enforced ()
   then (
-    let blocker =
-      Keeper_meta_contract.blocker_info_of_class
-        ~detail:(Keeper_types_profile.short_preview detail)
-        Keeper_meta_contract.Completion_contract_violation
-    in
-    let pause_meta =
-      { updated_meta with
-        runtime = { updated_meta.runtime with last_blocker = Some blocker }
+    (* RFC-0313 W3: contract attention after a runtime success is a judgment
+       stimulus, not a pause. The keeper keeps running; its own next turn
+       receives the typed [Failure_judgment] as input (identity-deduped in
+       the queue, no dedicated turn_reason, scheduling cadence unchanged). *)
+    let fj : Keeper_event_queue.failure_judgment =
+      { fj_runtime_id = Keeper_meta_contract.runtime_id_of_meta updated_meta
+      ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
+      ; fj_detail = detail
       }
     in
-    match
-      KCB.sync_keeper_paused_state_with_resume_policy
-        ~config
-        ~meta:pause_meta
-        ~paused:true
-        ~resume_policy:Keeper_supervisor_pause_policy.Manual_resume_required
-    with
-    | Ok paused_meta ->
-      Log.Keeper.warn
-        "%s: auto-paused after %d completion contract attention failures \
-         (pause_threshold=%d, reason=%s); operator must inspect provider/model \
-         reasoning/tool interleave before resuming"
-        updated_meta.name
-        count
-        turn_fail_streak_threshold
-        reason_code;
-      paused_meta
-    | Error sync_err ->
-      Log.Keeper.error
-        "%s: completion contract attention auto-pause sync failed: %s \
-         (persistent failure remains counted)"
-        updated_meta.name
-        sync_err;
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string RuntimeSyncFailures)
-        ~labels:
-          [ "keeper", updated_meta.name
-          ; "site", "completion_contract_attention_auto_pause"
-          ]
-        ();
-      pause_meta)
-  else updated_meta
+    Keeper_registry_event_queue.enqueue
+      ~base_path
+      updated_meta.name
+      { post_id = Keeper_event_queue.failure_judgment_post_id fj
+      ; urgency = Keeper_event_queue.Normal
+      ; arrived_at = Time_compat.now ()
+      ; payload = Keeper_event_queue.Failure_judgment fj
+      };
+    Log.Keeper.warn
+      "%s: completion contract attention (streak=%d, reason=%s) escalated as \
+       judgment stimulus; keeper keeps running (RFC-0313 W3)"
+      updated_meta.name
+      count
+      reason_code;
+    updated_meta)
+  else (
+    let pause_threshold = Runtime.pause_threshold () in
+    let turn_fail_streak_threshold =
+      pause_threshold.Runtime_schema.turn_fail_streak_threshold
+    in
+    if count >= turn_fail_streak_threshold && not updated_meta.paused
+    then (
+      let blocker =
+        Keeper_meta_contract.blocker_info_of_class
+          ~detail:(Keeper_types_profile.short_preview detail)
+          Keeper_meta_contract.Completion_contract_violation
+      in
+      let pause_meta =
+        { updated_meta with
+          runtime = { updated_meta.runtime with last_blocker = Some blocker }
+        }
+      in
+      match
+        KCB.sync_keeper_paused_state_with_resume_policy
+          ~config
+          ~meta:pause_meta
+          ~paused:true
+          ~resume_policy:Keeper_supervisor_pause_policy.Manual_resume_required
+      with
+      | Ok paused_meta ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string FailureDrivenPause)
+          ~labels:
+            [ "keeper", updated_meta.name
+            ; "site", "completion_contract_attention"
+            ]
+          ();
+        Log.Keeper.warn
+          "%s: auto-paused after %d completion contract attention failures \
+           (pause_threshold=%d, reason=%s); operator must inspect provider/model \
+           reasoning/tool interleave before resuming"
+          updated_meta.name
+          count
+          turn_fail_streak_threshold
+          reason_code;
+        paused_meta
+      | Error sync_err ->
+        Log.Keeper.error
+          "%s: completion contract attention auto-pause sync failed: %s \
+           (persistent failure remains counted)"
+          updated_meta.name
+          sync_err;
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string RuntimeSyncFailures)
+          ~labels:
+            [ "keeper", updated_meta.name
+            ; "site", "completion_contract_attention_auto_pause"
+            ]
+          ();
+        pause_meta)
+    else updated_meta)
 ;;
 
 let emit_terminal_fsm

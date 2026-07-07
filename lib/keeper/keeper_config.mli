@@ -212,6 +212,11 @@ val keeper_bootstrap_retry_interval_sec : unit -> int
 
 val keeper_proactive_min_cooldown_sec : unit -> int
 val keeper_proactive_min_interval_sec : unit -> int
+
+val keeper_goal_stagnation_threshold_sec : unit -> int
+(** RFC-0310 §3.3: seconds a live goal may sit untouched before a one-shot
+    stagnation wake (default 3600). Edge-gated on the goal's updated_at, so
+    it is not a blind cadence. *)
 val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 val keeper_proactive_noop_backoff_max_shift : unit -> int

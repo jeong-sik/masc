@@ -415,15 +415,13 @@ let test_gh_pr_ready_allowed_under_autonomous () =
     ; "gh pr ready 123 --repo o/r", [ "pr"; "ready"; "123"; "--repo"; "o/r" ]
     ]
 
-(* Documents a KNOWN residual asymmetry, not an endorsement: the disposition
-   axis ([Gh_capability_policy.disposition_of_simple]) locates the gh subcommand
-   with the word-list [Gh_verb.classify], which reads a leading value-taking
-   global flag's value ("o/r") as the subcommand -> [Gh_verb.Other] ->
-   [Requires_approval] -> [Ask]. The risk floor is already flag-robust (typed
-   lowering), so this is strictly better than the prior [Deny] and non-blocking.
-   The floor-aligned fix (a flag-robust verb extractor shared with the floor)
-   is tracked as a follow-up; when it lands, this expectation flips to [Allow]. *)
-let test_gh_pr_ready_leading_flag_asks_under_autonomous () =
+(* RFC-0309 W3 (#23599 fix): the disposition axis now locates the gh subcommand
+   with the flag-robust typed lowering ([Shell_ir_risk.gh_verb_of_simple]), so a
+   leading value-taking global flag no longer shadows the subcommand as the
+   word-list [Gh_verb.classify] did. [gh --repo O/R pr ready] reads as [Pr/ready]
+   -> Allowed, matching the plain and trailing-flag forms. (Before #23599 this
+   asked; before #23597 it was denied.) *)
+let test_gh_pr_ready_leading_flag_allowed_under_autonomous () =
   let s =
     simple (bin_ok "gh")
       ~args:(List.map lit [ "--repo"; "o/r"; "pr"; "ready"; "123" ])
@@ -433,10 +431,55 @@ let test_gh_pr_ready_leading_flag_asks_under_autonomous () =
     Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
       ~simple:s
   with
+  | Verdict.Allow t ->
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+  | _ ->
+    Alcotest.fail
+      "leading-flag gh pr ready must be allowed after the #23599 flag-robust fix"
+
+(* #23599: leading-flag reads must not be over-gated. Before the fix
+   [gh --repo O/R pr view] -> [Gh_verb.Other] -> [Ask]; now it reads as a known
+   read and is Allowed like the plain form. *)
+let test_gh_leading_flag_read_allowed_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Allow t ->
+         assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+       | _ ->
+         Alcotest.failf "%s: leading-flag gh read must be allowed" label)
+    [ "gh --repo o/r pr view 123", [ "--repo"; "o/r"; "pr"; "view"; "123" ]
+    ; "gh --repo o/r pr list", [ "--repo"; "o/r"; "pr"; "list" ]
+    ]
+
+(* #23599 fail-closed preservation: making the disposition flag-robust must NOT
+   weaken the RFC-0208 graphql boundary. A leading-flag literal durable-remote
+   graphql mutation still reaches the capability Ask, because the typed lowering
+   preserves the [Api]/[graphql] identity (subcommand="api", action="graphql")
+   and the durable-remote body scan runs on the argv words. *)
+let test_gh_leading_flag_graphql_durable_remote_asks_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:
+        (List.map lit
+           [ "--repo"; "o/r"; "api"; "graphql"; "-f"
+           ; "query=mutation{createRepository}"
+           ])
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+      ~simple:s
+  with
   | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
   | _ ->
     Alcotest.fail
-      "leading-flag gh pr ready currently asks (known disposition asymmetry)"
+      "leading-flag durable-remote graphql must still ask (fail-closed preserved)"
 
 (* Issue #23390 regression: a leading value-taking global flag ([gh --repo o/r
    pr merge]) must not slip the destructive op past the floor. gh (Cobra)
@@ -459,7 +502,7 @@ let test_gh_leading_flag_destructive_floored_under_autonomous () =
     [ "gh --repo o/r pr merge", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
       (* [pr ready] moved off this floor (RFC-0309 W4/G-9: reversible via --undo);
          its leading-flag disposition is covered by
-         [test_gh_pr_ready_leading_flag_asks_under_autonomous]. *)
+         [test_gh_pr_ready_leading_flag_allowed_under_autonomous]. *)
     ; "gh --repo o/r repo delete"
       , [ "--repo"; "o/r"; "repo"; "delete"; "o/r"; "--yes" ]
     ]
@@ -940,7 +983,9 @@ let () =
   test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous ();
   test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
   test_gh_pr_ready_allowed_under_autonomous ();
-  test_gh_pr_ready_leading_flag_asks_under_autonomous ();
+  test_gh_pr_ready_leading_flag_allowed_under_autonomous ();
+  test_gh_leading_flag_read_allowed_under_autonomous ();
+  test_gh_leading_flag_graphql_durable_remote_asks_under_autonomous ();
   test_gh_leading_flag_destructive_floored_under_autonomous ();
   test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();

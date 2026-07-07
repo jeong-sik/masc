@@ -1,30 +1,31 @@
-// Keeper runtime editor — a prominent, one-expand-away card that lets an
-// operator change which runtime lane a keeper dispatches on.
+// Keeper runtime model card — a prominent, one-expand-away card that shows which
+// runtime lane a keeper dispatches on, at the top of the keeper detail's 진단/운영
+// section so it is discoverable without digging.
 //
 // RFC-0207: a keeper's runtime selection lives in a SINGLE surface —
-// runtime.toml [runtime.assignments]. The detailed view of that assignment is
-// buried under 설정 → Keeper 설정 → 소스. This card surfaces the same assignment
-// at the top of the keeper detail's 진단/운영 section so it is discoverable
-// without digging.
+// runtime.toml [runtime.assignments], edited through the 설정(.kcf) config modal's
+// 런타임 tab. This card is READ-ONLY: it surfaces the current assignment + catalog
+// facts and deep-links to the config modal for changes. It does NOT write.
 //
-// State is SHARED with keeper-config-panel via [configState]/[loadKeeperConfig]
-// (read) and [applyKeeperConfigUpdate] (write) so the two surfaces never show
-// divergent values for the same keeper. No second fetch, no drift.
+// History: runtime_id used to be editable here AND in the config modal — two
+// write paths for one field (both PATCH /config {runtime_id}) with two mirrored
+// edit gates kept in sync by hand. The write now lives only in the config modal,
+// so there is one SSOT, one edit gate (keeperRuntimeConfigCanWrite), and no drift.
+//
+// State is SHARED with keeper-config-panel via [loadKeeperConfig] /
+// [peekLoadedKeeperConfig] so the two surfaces never show divergent values for the
+// same keeper. No second fetch, no drift.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
-import { patchKeeperConfig, type DashboardRuntimeProviderSnapshot } from '../api/dashboard'
-import type { KeeperConfig } from '../types'
+import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import {
-  InlineSelectRow,
-  applyKeeperConfigUpdate,
+  focusKeeperConfigTab,
+  keeperRuntimeConfigCanWrite,
   loadKeeperConfig,
   peekKeeperConfigLoadStatus,
   peekLoadedKeeperConfig,
 } from './keeper-config-panel'
-import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
-import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { formatContextTokens } from '../lib/format-number'
 import {
@@ -39,38 +40,6 @@ import {
   runtimeCatalogRequestConfig,
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
-import { refreshKeeperRuntimeStatus } from '../store'
-
-// Pending dropdown selection before save. `null` = no pending change (show the
-// server's current value). Module-level singleton: at most one editor renders at
-// a time (one keeper detail page), mirroring keeper-config-panel's draft signals.
-const modelDraft = signal<string | null>(null)
-// Which keeper [modelDraft] belongs to. Guards against a stale pending selection
-// leaking across keeper navigation (A's dropdown choice showing up on B).
-const modelDraftKeeper = signal<string>('')
-const modelSaving = signal(false)
-
-/** Dedupe + drop empty, preserving first-seen order. */
-export function uniqueNonEmpty(values: readonly string[]): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const raw of values) {
-    const v = raw.trim()
-    if (v === '' || seen.has(v)) continue
-    seen.add(v)
-    out.push(v)
-  }
-  return out
-}
-
-/**
- * Editable only when the keeper has a writable TOML-backed config source.
- * persona-only / generated keepers have no manifest to patch. Mirrors the
- * `runtimeCanEdit` gate in keeper-config-panel so the two surfaces agree.
- */
-export function canEditRuntime(c: KeeperConfig): boolean {
-  return c.sources.default_source_kind === 'toml' && Boolean(c.sources.default_manifest_path)
-}
 
 function RuntimeCapabilityPill({ label, value }: { label: string; value: boolean | undefined }) {
   const enabled = value === true
@@ -179,13 +148,17 @@ function EditorHeader() {
   `
 }
 
-export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string }) {
-  // Reset the pending selection whenever the viewed keeper changes.
-  if (modelDraftKeeper.value !== keeperName) {
-    if (modelDraft.value !== null) modelDraft.value = null
-    modelDraftKeeper.value = keeperName
-  }
-
+export function KeeperRuntimeModelEditor({
+  keeperName,
+  onOpenRuntimeConfig,
+}: {
+  keeperName: string
+  // Opens the 설정(.kcf) config modal for this keeper (the card pre-focuses the
+  // 런타임 tab, which owns the single write path for runtime_id). Optional so the
+  // card degrades to read-only display when no host wires it (e.g. isolated
+  // renders/tests); the deep-link button then hides.
+  onOpenRuntimeConfig?: () => void
+}) {
   // Lazy-load the shared config. This card only mounts when the 진단/운영
   // section is expanded; loadKeeperConfig dedupes by name internally.
   const status = peekKeeperConfigLoadStatus(keeperName)
@@ -202,32 +175,31 @@ export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string })
 
   const current = config.execution.selected_runtime_id.trim()
   const canonical = config.execution.selected_runtime_canonical.trim()
-  const effective = (modelDraft.value ?? current).trim()
-  const hasChange = modelDraft.value !== null && effective !== current
-  const isSaving = modelSaving.value
   loadRuntimeCatalog()
   const catalogState = runtimeCatalogState.value
   const catalog = catalogState.status === 'loaded' ? catalogState.data : []
-  const runtimeEntry = findRuntimeCatalogEntry(catalog, effective || current)
+  const runtimeEntry = findRuntimeCatalogEntry(catalog, current)
 
-  if (!canEditRuntime(config)) {
-    // Actionable read-only: explain WHY it is locked and HOW to unlock it, so
-    // the operator is not left at the same dead-end the card exists to fix.
+  const canonicalRow =
+    canonical && canonical !== current
+      ? html`<div class="text-2xs text-[var(--color-fg-muted)]">정규화: ${canonical}</div>`
+      : null
+  const summary = html`
+    <${RuntimeCatalogSummary} runtimeId=${current} entry=${runtimeEntry} status=${catalogState.status} />
+  `
+
+  if (!keeperRuntimeConfigCanWrite(config)) {
+    // Non-TOML source: the config modal cannot write this either, so there is no
+    // deep-link — explain WHY it is locked and HOW to unlock it via runtime.toml.
     const kind = config.sources.default_source_kind ?? 'unknown'
     return html`
       <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--color-border-default)]/60 bg-[var(--color-bg-surface)]/35 px-4 py-3">
         <${EditorHeader} />
         <div class="text-sm font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</div>
-        ${canonical && canonical !== current
-          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">정규화: ${canonical}</div>`
-          : null}
-        <${RuntimeCatalogSummary}
-          runtimeId=${current}
-          entry=${findRuntimeCatalogEntry(catalog, current)}
-          status=${catalogState.status}
-        />
+        ${canonicalRow}
+        ${summary}
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-status-warn)]">
-          이 keeper는 편집 가능한 TOML 소스가 아니라(소스: ${kind}) 여기서 model을 바꿀 수 없습니다.
+          이 keeper는 편집 가능한 TOML 소스가 아니라(소스: ${kind}) model을 바꿀 수 없습니다.
           편집하려면 <code>.masc/config/runtime.toml</code> 의
           <code>[runtime.assignments]</code> 에 keeper 배정을 추가하고 서버를 재시작하세요.
         </div>
@@ -235,69 +207,31 @@ export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string })
     `
   }
 
-  const options = uniqueNonEmpty([
-    effective,
-    current,
-    canonical,
-    ...config.execution.runtime_options,
-  ])
-
-  async function save() {
-    const next = (modelDraft.value ?? '').trim()
-    if (next === '' || next === current) return
-    modelSaving.value = true
-    try {
-      const updated = await patchKeeperConfig(keeperName, { runtime_id: next })
-      applyKeeperConfigUpdate(keeperName, updated)
-      void refreshKeeperRuntimeStatus().catch(err => {
-        const message = err instanceof Error ? err.message : '런타임 상태 새로고침 실패'
-        showToast(message, 'warning')
-      })
-      modelDraft.value = null
-      showToast('런타임 저장 완료', 'success')
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '저장 실패', 'error')
-    } finally {
-      modelSaving.value = false
-    }
-  }
-
-  function reset() {
-    modelDraft.value = null
-  }
-
+  // TOML-backed: read-only display + deep-link to the 설정(.kcf) 런타임 tab, which
+  // owns the single write path for runtime_id.
   return html`
     <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-4 py-3">
       <${EditorHeader} />
       <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</span></div>
-      <${InlineSelectRow}
-        label="runtime"
-        value=${effective}
-        options=${options}
-        onChange=${(value: string) => { modelDraft.value = value }}
-      />
-      <${RuntimeCatalogSummary}
-        runtimeId=${effective}
-        entry=${runtimeEntry}
-        status=${catalogState.status}
-      />
-      <div class="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
-          onClick=${save}
-          disabled=${!hasChange || isSaving}
-        >${isSaving ? '저장 중...' : '저장'}</button>
-        <button
-          type="button"
-          class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
-          onClick=${reset}
-          disabled=${!hasChange || isSaving}
-        >되돌리기</button>
-        ${hasChange
-          ? html`<span class="text-2xs text-[var(--color-fg-muted)]">저장 시 runtime.toml assignment 갱신</span>`
-          : null}
-      </div>
+      ${canonicalRow}
+      ${summary}
+      ${onOpenRuntimeConfig
+        ? html`
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--color-bg-surface)] px-3 py-1 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--color-bg-hover)] cursor-pointer v2-monitoring-action"
+                onClick=${() => {
+                  // Pre-focus the 런타임 tab before the modal opens; kcfTab is not
+                  // reset on mount, so this value survives the open.
+                  focusKeeperConfigTab('runtime')
+                  onOpenRuntimeConfig()
+                }}
+              >설정에서 변경 ↗</button>
+              <span class="text-2xs text-[var(--color-fg-muted)]">런타임 배정은 설정 → 런타임에서 편집합니다</span>
+            </div>
+          `
+        : null}
     </div>
   `
 }

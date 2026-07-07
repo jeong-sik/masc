@@ -202,6 +202,11 @@ let transition_task_outcome_r
                 " Remediation: cancellation requires owning the task. Use \
                  masc_board_post to ask the current assignee to cancel or release, or \
                  claim a different task with keeper_task_claim."
+              | (Masc_domain.Claimed _ | Masc_domain.InProgress _), Masc_domain.Submit_for_verification
+                when not own_assignee ->
+                " Remediation: submit_for_verification requires owning the task. Use \
+                 masc_board_post to ask the current assignee to release, or claim a \
+                 different task with keeper_task_claim."
               | Masc_domain.InProgress _, Masc_domain.Claim ->
                 " Remediation: task is already in_progress under someone. Use \
                  keeper_task_claim for unclaimed work."
@@ -214,6 +219,11 @@ let transition_task_outcome_r
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
+              | _, Masc_domain.Submit_for_verification
+                when String.length (String.trim notes) = 0 ->
+                " Remediation: submit_for_verification requires non-empty notes \
+                 describing the deliverable. Provide a summary of what was done \
+                 and evidence references."
               | _ -> ""
             in
             Error

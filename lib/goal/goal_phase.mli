@@ -32,6 +32,12 @@ val all : t list
 (** Every phase in declaration order. SSOT for callers that need the full
     string set (MCP schema enum, validator) via [List.map to_string all]. *)
 
+val admits_self_directed_progress : t -> bool
+(** RFC-0310 §3.3: whether a keeper waking on this goal can make progress on
+    it. Only [Executing] qualifies; terminal, operator-gated, and
+    awaiting-verdict phases return [false]. Used to gate stagnation wakes so
+    a completed/dropped/paused/blocked goal never wakes its keeper. *)
+
 (** Operator / system actions that may drive a transition. *)
 type action =
   | Request_complete

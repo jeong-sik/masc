@@ -412,6 +412,48 @@ let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
 ;;
 
+let json_opt_string name = function
+  | Some value -> [ name, `String value ]
+  | None -> []
+;;
+
+let repo_create_visibility_label = function
+  | Masc_exec.Gh_capability_policy.Public -> "public"
+  | Masc_exec.Gh_capability_policy.Private -> "private"
+  | Masc_exec.Gh_capability_policy.Internal -> "internal"
+;;
+
+let repo_create_contract_json
+      (contract : Masc_exec.Gh_capability_policy.repo_create_contract)
+  =
+  let lifecycle = contract.lifecycle in
+  `Assoc
+    ([ "owner", `String contract.owner
+     ; "name", `String contract.name
+     ; "visibility", `String (repo_create_visibility_label contract.visibility)
+     ; ( "lifecycle"
+       , `Assoc
+           ([ "add_readme", `Bool lifecycle.add_readme
+            ; "clone", `Bool lifecycle.clone
+            ; "push", `Bool lifecycle.push
+            ]
+            @ json_opt_string "source" lifecycle.source
+            @ json_opt_string "remote" lifecycle.remote
+            @ json_opt_string "template" lifecycle.template) )
+     ])
+;;
+
+let repo_create_contract_json_of_ir ir =
+  let rec scan = function
+    | Masc_exec.Shell_ir.Simple simple ->
+      (match Masc_exec.Gh_capability_policy.repo_create_contract_of_simple simple with
+       | Some (Ok contract) -> Some (repo_create_contract_json contract)
+       | Some (Error _) | None -> None)
+    | Masc_exec.Shell_ir.Pipeline stages -> List.find_map scan stages
+  in
+  scan ir
+;;
+
 let shell_ir_approval_input
       ~cmd
       ~cwd
@@ -421,8 +463,10 @@ let shell_ir_approval_input
       ~sandbox_target
       ~risk_class
       ~typed_hit
-  =
-  `Assoc
+      ?repo_create_contract
+      ()
+      =
+  let fields =
     [ "schema", `String "masc.shell_ir_approval_request.v1"
     ; "op", `String "shell_ir_approval_required"
     ; "action", `String "execute"
@@ -437,6 +481,13 @@ let shell_ir_approval_input
       , `String (Masc_exec.Shell_ir_risk.string_of_risk_class risk_class) )
     ; "typed_hit", `Bool typed_hit
     ]
+  in
+  `Assoc
+    (fields
+     @
+     match repo_create_contract with
+     | Some contract -> [ "repo_create_contract", contract ]
+     | None -> [])
 ;;
 
 let submit_shell_ir_approval_pending
@@ -452,6 +503,7 @@ let submit_shell_ir_approval_pending
       ~sandbox_target
       ~risk_class
       ~typed_hit
+      ?repo_create_contract
       ()
   =
   let input =
@@ -464,6 +516,8 @@ let submit_shell_ir_approval_pending
       ~sandbox_target
       ~risk_class
       ~typed_hit
+      ?repo_create_contract
+      ()
   in
   let on_resolution decision =
     let event =
@@ -1086,6 +1140,7 @@ let handle_tool_execute_typed
                  Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile
                in
                let sandbox_target = sandbox_target_label dispatch_sandbox in
+               let repo_create_contract = repo_create_contract_json_of_ir ir in
                let approval_id =
                  submit_shell_ir_approval_pending
                    ~base_path:root
@@ -1100,6 +1155,7 @@ let handle_tool_execute_typed
                    ~sandbox_target
                    ~risk_class
                    ~typed_hit
+                   ?repo_create_contract
                    ()
                in
                typed_error_json

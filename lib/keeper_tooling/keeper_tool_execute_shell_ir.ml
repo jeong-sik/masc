@@ -136,9 +136,14 @@ let last_simple_of_ir ir =
      | _ -> None)
 ;;
 
-let gh_capability_approval_required ir ~caps =
+type gh_capability_policy_result =
+  | Gh_policy_noop
+  | Gh_policy_approval_required of Masc_exec.Exec_program.t
+  | Gh_policy_denied of string
+
+let gh_capability_policy_result ir ~caps =
   match last_simple_of_ir ir with
-  | None -> None
+  | None -> Gh_policy_noop
   | Some simple ->
     let raw_source = Format.asprintf "%a" Masc_exec.Shell_ir.pp ir in
     let summary = "shell IR capability approval check" in
@@ -152,10 +157,12 @@ let gh_capability_approval_required ir ~caps =
      with
      | Masc_exec.Verdict.Ask { bin; _ } ->
        (match Masc_exec.Exec_program.known bin with
-        | Some Masc_exec.Exec_program.Gh -> Some bin
-        | Some _ | None -> None)
-     | Masc_exec.Verdict.Allow _ | Masc_exec.Verdict.Suggest_confirm (_, _)
-     | Masc_exec.Verdict.Deny _ -> None)
+        | Some Masc_exec.Exec_program.Gh -> Gh_policy_approval_required bin
+        | Some _ | None -> Gh_policy_noop)
+     | Masc_exec.Verdict.Allow _ | Masc_exec.Verdict.Suggest_confirm (_, _) ->
+       Gh_policy_noop
+     | Masc_exec.Verdict.Deny { reason; _ } ->
+       Gh_policy_denied (Masc_exec.Verdict.deny_reason_to_string reason))
 ;;
 
 let dispatch_classified
@@ -184,8 +191,9 @@ let dispatch_classified
   | Some reason ->
     Error (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason })
   | None ->
-    (match gh_capability_approval_required ir ~caps with
-     | Some bin ->
+    (match gh_capability_policy_result ir ~caps with
+     | Gh_policy_denied reason -> Error (Policy_denied { reason })
+     | Gh_policy_approval_required bin ->
        let bin = Masc_exec.Exec_program.to_string bin in
        Error
          (Approval_required
@@ -196,7 +204,7 @@ let dispatch_classified
             ; bin
             ; kind = Gh_capability_requires_approval
             })
-     | None ->
+     | Gh_policy_noop ->
        (match first_privileged_program caps with
         | Some bin ->
           let bin = Masc_exec.Exec_program.to_string bin in

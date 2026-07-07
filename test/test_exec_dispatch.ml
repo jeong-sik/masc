@@ -1081,6 +1081,43 @@ let () =
     assert (kind = Keeper_tool_execute_shell_ir.Gh_capability_requires_approval)
   | Error _ -> assert false
 
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args =
+        [ Lit ("repo", default_meta)
+        ; Lit ("create", default_meta)
+        ; Lit ("masc-test/new-repo", default_meta)
+        ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify
+      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  (* G-10: a repo-create request missing required contract metadata is denied
+     before approval routing, including on the flag-off dispatch path. *)
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
+    assert (
+      String.equal
+        reason
+        "policy rule denied: gh_repo_create_contract:missing_visibility")
+  | Error _ -> assert false
+
 (* --- Keeper_tool_execute_shell_ir.dispatch_classified: catastrophic floor is
    flag-independent (RFC-0254 §5.3.1) --- *)
 

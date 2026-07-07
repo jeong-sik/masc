@@ -264,8 +264,8 @@ space *between* Allow and Deny; it does not soften Deny.
 | W3 | G-6 | `Requires_approval` disposition ≠ Deny | disposition round-trips through receipts |
 | W3 | G-7 | exec gate `Ask` → HITL queue wiring | keeper-turn block time on gated op = 0 ms |
 | W3 | G-8 | autonomous overlay: gated families → `Requires_approval` | overlay no longer all-`Observe` for gh mutations |
-| W4 | G-9 | re-enable repo-create/discussion surfaces to request approval (supersede #23362 behavior; design doc marked superseded) | `gh repo create` reaches `Pending_approval`, not `Deny` |
-| W4 | G-10 | repo-create capability contract (naming/ownership/lifecycle) | contract doc + typed args |
+| W4 | G-9 | re-enable repo-create/discussion surfaces to request approval (supersede #23362 behavior; design doc marked superseded) | contract-valid `gh repo create OWNER/NAME --public\|--private\|--internal` reaches `Pending_approval`, not `Deny` |
+| W4 | G-10 | repo-create capability contract (naming/ownership/lifecycle) | missing `OWNER/NAME`, missing/ambiguous visibility, or opaque repo target denies before HITL; valid requests carry structured contract metadata in the approval input |
 | W4 | G-11 | prompts + `KEEPER-CAPABILITY-MATRIX.md` update; block-time metric | docs match behavior; p99 block-time 0 ms |
 | W5 | G-12 | TLA+ `CatastrophicNeverAllowed` + `NonBlockingApproval` + `UnknownGhVerbNeverAutoRun` | clean cfg passes AND buggy cfg violates (both required) |
 | W5 | G-13 | gated-op observability | 100% gated ops emit enqueue/resolve/wake events |

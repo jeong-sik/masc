@@ -43,6 +43,8 @@ module For_testing : sig
     sandbox_target:string ->
     risk_class:Masc_exec.Shell_ir_risk.risk_class ->
     typed_hit:bool ->
+    ?repo_create_contract:Yojson.Safe.t ->
+    unit ->
     Yojson.Safe.t
   val submit_shell_ir_approval_pending :
     base_path:string ->
@@ -57,6 +59,7 @@ module For_testing : sig
     sandbox_target:string ->
     risk_class:Masc_exec.Shell_ir_risk.risk_class ->
     typed_hit:bool ->
+    ?repo_create_contract:Yojson.Safe.t ->
     unit ->
     string
   val redact_execute_output :

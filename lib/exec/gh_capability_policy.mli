@@ -31,9 +31,53 @@ type disposition =
       (** Never permitted for a keeper. These are also floored on the risk axis
           (R2/Destructive); the capability axis records the policy intent. *)
 
+type repo_create_visibility =
+  | Public
+  | Private
+  | Internal
+
+type repo_create_lifecycle =
+  { add_readme : bool
+  ; clone : bool
+  ; push : bool
+  ; source : string option
+  ; remote : string option
+  ; template : string option
+  }
+
+type repo_create_contract =
+  { owner : string
+  ; name : string
+  ; visibility : repo_create_visibility
+  ; lifecycle : repo_create_lifecycle
+  }
+(** G-10 repo-create capability contract extracted from literal
+    [gh repo create OWNER/NAME --public|--private|--internal ...] argv.
+    The owner segment must be explicit so ambient authenticated-user defaults
+    cannot decide ownership invisibly. [lifecycle] records the visible creation
+    mode flags that shape post-create state; these values are metadata for the
+    approval request and future lifecycle policy, not an execution grant. *)
+
 val string_of_disposition : disposition -> string
 (** Stable lowercase label for logs/metrics: "allowed" | "requires_approval" |
     "denied". *)
+
+val repo_create_contract_of_simple :
+  Shell_ir.simple -> (repo_create_contract, string list) result option
+(** [Some (Ok contract)] for a literal [gh repo create] command that satisfies
+    the G-10 contract, [Some (Error fields)] when the command is repo-create but
+    lacks required metadata or has unverifiable args, and [None] for non
+    repo-create commands. Required fields are:
+    - explicit [OWNER/NAME] repo target;
+    - exactly one visibility flag: [--public], [--private], or [--internal].
+
+    Missing or opaque contract fields are policy failures, not approval asks:
+    the keeper must provide the contract before a human can approve the remote
+    repository creation. *)
+
+val repo_create_contract_rule_of_simple : Shell_ir.simple -> string option
+(** Render a stable [Verdict.Policy_deny] rule for a repo-create command that
+    violates {!repo_create_contract_of_simple}. *)
 
 val creates_durable_remote_surface : Gh_verb.t -> bool
 (** G-4 externality axis (risk-independent): [true] when this gh verb creates or

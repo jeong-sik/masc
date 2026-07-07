@@ -217,7 +217,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   min-width: 0;
   align-items: center;
   gap: 6px;
-  flex-wrap: nowrap;
+  /* CJK chip labels have a wide min-content floor; at narrow roster widths the
+     sort <select> (margin-left:auto, min-width) overflowed the aside instead
+     of dropping to its own line. Wrap keeps every control inside the toolbar. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .kw-rfilter {
   font-size: var(--fs-11); letter-spacing: 0.06em; text-transform: uppercase;
@@ -229,6 +233,15 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-rfilter:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); }
 .kw-rfilter[aria-pressed="true"] { background: var(--color-accent-fg); border-color: var(--color-accent-fg); color: var(--bg-deep); font-weight: var(--fw-semi); }
 .kw-rfilter .n { opacity: 0.8; }
+/* 주의 chip: cross-cutting attention flag, not a lifecycle state — reuse the
+   row badge (.kw-kp-att) palette so both surfaces read as the same signal. */
+.kw-rfilter.att { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.35); }
+.kw-rfilter.att:hover { border-color: rgb(var(--color-status-err-glow) / 0.6); }
+.kw-rfilter.att[aria-pressed="true"] {
+  background: rgb(var(--color-status-err-glow) / 0.16);
+  border-color: rgb(var(--color-status-err-glow) / 0.6);
+  color: var(--color-status-err);
+}
 .kw-rfilter-icon {
   display: inline-flex;
   flex: none;

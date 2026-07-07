@@ -18,7 +18,7 @@ import { navigate } from '../../router'
 import { keepers } from '../../store'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { runKeeperAction } from '../keeper-action-panel'
-import { KeeperWorkspaceRoster, rosterFleetSummary } from './keeper-workspace-roster'
+import { KeeperWorkspaceRoster, rosterFilterPref, rosterFleetSummary, rosterSortPref } from './keeper-workspace-roster'
 import type { Keeper } from '../../types'
 
 function mk(partial: Partial<Keeper>): Keeper {
@@ -35,6 +35,10 @@ let host: HTMLElement
 
 beforeEach(() => {
   keepers.value = FIXTURE
+  // View prefs are module-level persistent signals — reset to defaults so
+  // sort/filter choices made by one test never leak into the next.
+  rosterFilterPref.value = 'all'
+  rosterSortPref.value = 'recent'
   vi.mocked(navigate).mockClear()
   vi.mocked(runKeeperAction).mockClear()
   host = document.createElement('div')

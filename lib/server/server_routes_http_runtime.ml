@@ -1374,9 +1374,10 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
       let contributor_quality =
         board_contributor_quality_lookup ?config () author
       in
+      let claim_evidence = board_claim_evidence_lookup () post_id in
       let post_json =
         board_post_dashboard_json ~include_moderation ~blind_votes ?current_vote
-          ?contributor_quality ~reactions ~author_karma post
+          ?contributor_quality ?claim_evidence ~reactions ~author_karma post
       in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->

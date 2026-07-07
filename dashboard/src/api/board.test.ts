@@ -556,6 +556,22 @@ describe('fetchBoard', () => {
               recent_user_ids: ['analyst', 'reviewer'],
             },
           ],
+          claim_evidence: {
+            source: 'board_claim_evidence.jsonl',
+            target_post_id: 'post-1',
+            state: 'artifact_missing',
+            label: 'Artifact missing',
+            total_count: 2,
+            allowed_count: 1,
+            rejected_count: 1,
+            artifact_missing_count: 1,
+            artifact_unknown_count: 0,
+            missing_source_snapshot_count: 0,
+            stale_source_snapshot_count: 0,
+            artifact_not_verified_count: 1,
+            latest_decision: 'allow',
+            latest_recorded_at: 1_713_000_010,
+          },
           author_identity: {
             kind: 'keeper',
             id: 'analyst',
@@ -592,6 +608,14 @@ describe('fetchBoard', () => {
         accountability_score: 0.9,
         autonomy_level: 'elevated',
         thompson_confidence: 0.7,
+      },
+      claim_evidence: {
+        state: 'artifact_missing',
+        label: 'Artifact missing',
+        total_count: 2,
+        rejected_count: 1,
+        artifact_missing_count: 1,
+        artifact_not_verified_count: 1,
       },
       reactions: [
         {

@@ -589,6 +589,7 @@ let add_routes ~sw ~clock router =
                   let contributor_quality_for =
                     board_contributor_quality_lookup ~config ()
                   in
+                  let claim_evidence_for = board_claim_evidence_lookup () in
                   let posts_json =
                     List.map
                       (fun (p : Board.post) ->
@@ -597,8 +598,9 @@ let add_routes ~sw ~clock router =
                          let current_vote = board_current_vote_for_post ~voter ~post_id in
                          let reactions = reactions_for (Board.Reaction_post, post_id) in
                          let contributor_quality = contributor_quality_for author in
+                         let claim_evidence = claim_evidence_for post_id in
                          board_post_dashboard_json ~include_moderation ~blind_votes
-                           ?contributor_quality ~reactions
+                           ?contributor_quality ?claim_evidence ~reactions
                            ?current_vote
                            ~author_karma:(get_karma author) p)
                       paged

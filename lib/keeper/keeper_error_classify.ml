@@ -25,21 +25,10 @@ type error_classification =
   | Non_transient
   | Unclassified
 
-let is_structural_oas_timeout_message message =
-  Keeper_oas_timeout_message.is_structural message
-
 let string_contains_substring = String_util.string_contains_substring
 
-(** {1 Retry & Side-Effect Safety}
-
-    @boundary-contract
-    - MASC owns: side-effect detection (blocking retry after mutating tools),
-      cross-provider retry (2 attempts after all OAS per-provider retries
-      exhaust), error reclassification for ambiguous outcomes.
-    - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
-      handling, provider failover within a single runtime call.
-    - Neither may: retry silently after a mutating tool succeeded (integrity
-      over availability); duplicate OAS per-provider retry counts. *)
+let is_structural_oas_timeout_message message =
+  Keeper_oas_timeout_message.is_structural message
 
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
@@ -67,6 +56,68 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _ )
   | None -> false
+
+(** Classify an [sdk_error] into a static [error_classification] variant.
+    Replaces the individual heuristic predicate functions with a single
+    exhaustive match. *)
+let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
+  if is_transient_internal_runner_error err
+  then Transient_internal_runner
+  else match err with
+  | Agent_sdk.Error.Api (NetworkError _) -> Transient_network
+  | Agent_sdk.Error.Api (Timeout { message }) ->
+      if is_structural_oas_timeout_message message then Transient_oas_timeout
+      else Transient_network
+  | Agent_sdk.Error.Api (Overloaded _) -> Transient_capacity
+  | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> Transient_network
+  | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> Transient_network
+  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> Transient_network
+  | Agent_sdk.Error.Api (RateLimited _) -> Transient_rate_limit
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { kind =
+             Llm_provider.Http_client.Tls_error
+           | Llm_provider.Http_client.Local_resource_exhaustion
+         ; _
+         }) ->
+      Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
+      if is_structural_oas_timeout_message detail then Transient_oas_timeout
+      else Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
+      Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
+      if transient then Transient_network else Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) -> Transient_rate_limit
+  | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) -> Transient_capacity
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderTerminal _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.MissingApiKey _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
+  | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
+    | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
+  | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _ | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _ | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> Unclassified
+
+(** {1 Retry & Side-Effect Safety}
+
+    @boundary-contract
+    - MASC owns: side-effect detection (blocking retry after mutating tools),
+      cross-provider retry (2 attempts after all OAS per-provider retries
+      exhaust), error reclassification for ambiguous outcomes.
+    - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
+      handling, provider failover within a single runtime call.
+    - Neither may: retry silently after a mutating tool succeeded (integrity
+      over availability); duplicate OAS per-provider retry counts. *)
 
 let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   if is_transient_internal_runner_error err
@@ -110,79 +161,6 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
-
-(** Classify an [sdk_error] into a static [error_classification] variant.
-    This is an ADT companion to the existing typed retry predicates; it must not
-    silently weaken their structured semantics while callers migrate. *)
-let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
-  if is_transient_internal_runner_error err
-  then Transient_internal_runner
-  else
-    match err with
-    | Agent_sdk.Error.Api (Timeout { message })
-      when is_structural_oas_timeout_message message ->
-      Transient_oas_timeout
-    | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ })
-      when is_structural_oas_timeout_message detail ->
-      Transient_oas_timeout
-    | Agent_sdk.Error.Api (RateLimited _) ->
-      Transient_rate_limit
-    | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) ->
-      Transient_rate_limit
-    | Agent_sdk.Error.Api (Overloaded _) ->
-      Transient_capacity
-    | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
-      Transient_capacity
-    | Agent_sdk.Error.Api (NetworkError _ | Timeout _) ->
-      Transient_network
-    | Agent_sdk.Error.Api (ServerError { status = (503 | 522 | 524); _ }) ->
-      Transient_network
-    | Agent_sdk.Error.Provider
-        (Llm_provider.Error.NetworkError
-          { kind =
-              Llm_provider.Http_client.Tls_error
-            | Llm_provider.Http_client.Local_resource_exhaustion
-          ; _
-          }) ->
-      Non_transient
-    | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) ->
-      Transient_network
-    | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
-      Transient_network
-    | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
-      Transient_network
-    | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient = true; _ }) ->
-      Transient_network
-    | Agent_sdk.Error.Api
-        ( ServerError _
-        | AuthError _
-        | PaymentRequired _
-        | InvalidRequest _
-        | NotFound _
-        | ContextOverflow _ ) ->
-      Non_transient
-    | Agent_sdk.Error.Provider
-        ( Llm_provider.Error.AuthError _
-        | Llm_provider.Error.ParseError _
-        | Llm_provider.Error.ServerError _
-        | Llm_provider.Error.InvalidRequest _
-        | Llm_provider.Error.HardQuota _
-        | Llm_provider.Error.ProviderUnavailable _
-        | Llm_provider.Error.ProviderTerminal _
-        | Llm_provider.Error.NotFound _
-        | Llm_provider.Error.MissingApiKey _
-        | Llm_provider.Error.InvalidConfig _ ) ->
-      Non_transient
-    | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) ->
-      Unclassified
-    | Agent_sdk.Error.Agent _
-    | Agent_sdk.Error.Mcp _
-    | Agent_sdk.Error.Config _
-    | Agent_sdk.Error.Serialization _
-    | Agent_sdk.Error.Io _
-    | Agent_sdk.Error.Orchestration _
-    | Agent_sdk.Error.Internal _ ->
-      Unclassified
 
 (** Detect typed server-side request body parse errors.  The LLM API never
     processed the request, so committed tool results are not at risk of

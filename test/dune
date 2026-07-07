@@ -117,6 +117,7 @@
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
+  test_server_keeper_background
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value
@@ -470,6 +471,7 @@
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
+  test_server_keeper_background
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value

@@ -20,6 +20,7 @@ import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { KeeperBackgroundPanel } from './keeper-background-panel'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
@@ -67,6 +68,10 @@ export function Tools() {
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">
         <${KeeperWaitingInventoryPanel} inventory=${data?.keeper_waiting_inventory ?? null} />
+      <//>
+
+      <${SectionCard} label="Keeper 자율 백그라운드" class="section v2-lab-panel mb-4">
+        <${KeeperBackgroundPanel} data=${data?.keeper_background ?? null} />
       <//>
 
       <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">

@@ -7,6 +7,8 @@
        fires, and the updated phase is reflected in-memory and in JSON. *)
 
 module AQ = Masc.Keeper_approval_queue
+module Continuation = Keeper_continuation_channel
+module Connector = Keeper_chat_connector
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
@@ -143,6 +145,9 @@ let test_resolve_fires_keeper_wake_hook () =
              ~input:(`Assoc [ "kind", `String "critical_gate" ])
              ~risk_level:AQ.Critical
              ~base_path
+             ~continuation_channel:
+               (Continuation.routed
+                  (Connector.Discord { channel_id = "chan-7"; user_id = "user-9" }))
              ()
          in
          result := Some decision);
@@ -165,8 +170,63 @@ let test_resolve_fires_keeper_wake_hook () =
             "wake carries the typed decision label"
             true
             (decision = Keeper_event_queue.Hitl_approved)
-        | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
+       | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
        yield_until (fun () -> Option.is_some !result))
+;;
+
+let test_approval_entry_carries_continuation_channel () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let keeper_name = "approval-continuation-channel-test" in
+       let channel =
+         Continuation.routed
+           (Connector.Slack { channel = "C123"; user_id = "U456" })
+       in
+       let id =
+         AQ.submit_pending
+           ~keeper_name
+           ~tool_name:"masc_transition"
+           ~input:
+             (`Assoc
+               [ ("action", `String "claim")
+               ; ("task_id", `String "task-continuation-channel")
+               ])
+           ~risk_level:AQ.High
+           ~base_path
+           ~continuation_channel:channel
+           ~on_resolution:(fun _ -> ())
+           ()
+       in
+       let entry =
+         match AQ.get_pending_entry ~id with
+         | Some entry -> entry
+         | None -> Alcotest.fail "pending entry missing"
+       in
+       Alcotest.(check string)
+         "entry carries captured continuation channel"
+         (Continuation.to_string channel)
+         (Continuation.to_string entry.continuation_channel);
+       let detail =
+         match AQ.get_pending_json ~id with
+         | Some json -> json
+         | None -> Alcotest.fail "pending detail JSON missing"
+       in
+       let open Yojson.Safe.Util in
+       let json_channel = detail |> member "continuation_channel" in
+       Alcotest.(check string)
+         "detail JSON carries channel kind"
+         "slack"
+         (json_channel |> member "kind" |> to_string);
+       Alcotest.(check string)
+         "detail JSON carries channel id"
+         "C123"
+         (json_channel |> member "channel" |> to_string);
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err)))
 ;;
 
 let test_critical_entry_phase_becomes_escalated_after_timer () =
@@ -466,6 +526,12 @@ let () =
             "resolve fires the keeper wake hook"
             `Quick
             test_resolve_fires_keeper_wake_hook
+        ] )
+    ; ( "continuation_channel"
+      , [ Alcotest.test_case
+            "approval entry carries captured channel"
+            `Quick
+            test_approval_entry_carries_continuation_channel
         ] )
     ; ( "summary"
       , [ Alcotest.test_case

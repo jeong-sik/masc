@@ -472,6 +472,7 @@ let create_entry
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ~continuation_channel
       ?sandbox_target
       ?sandbox_profile
       ?backend
@@ -510,6 +511,7 @@ let create_entry
   ; task_id
   ; goal_id
   ; goal_ids
+  ; continuation_channel
   ; runtime_contract
   ; selected_model
   ; disposition
@@ -565,6 +567,7 @@ let pending_entry_json_fields
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
   ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
+  ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
   ; "selected_model", `Null
   ; "disposition", Json_util.string_opt_to_json entry.disposition
   ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason
@@ -1015,6 +1018,7 @@ let submit_and_await
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?continuation_channel
       ?sandbox_target
       ?sandbox_profile
       ?backend
@@ -1029,6 +1033,13 @@ let submit_and_await
   : Agent_sdk.Hooks.approval_decision
   =
   let id = generate_id () in
+  let continuation_channel =
+    Option.value
+      continuation_channel
+      ~default:
+        (Keeper_continuation_channel.unrouted
+           "approval submit_and_await missing originating connector")
+  in
   let promise, resolver = Eio.Promise.create () in
   let entry =
     create_entry
@@ -1041,6 +1052,7 @@ let submit_and_await
       ?task_id
       ?goal_id
       ~goal_ids
+      ~continuation_channel
       ?sandbox_target
       ?sandbox_profile
       ?backend
@@ -1171,6 +1183,7 @@ let submit_pending
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?continuation_channel
       ?sandbox_target
       ?sandbox_profile
       ?backend
@@ -1184,6 +1197,13 @@ let submit_pending
   =
   let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
+  let continuation_channel =
+    Option.value
+      continuation_channel
+      ~default:
+        (Keeper_continuation_channel.unrouted
+           "approval submit_pending missing originating connector")
+  in
   let sandbox_target =
     match nonempty_string_opt sandbox_target with
     | Some target -> target
@@ -1216,6 +1236,7 @@ let submit_pending
           ?task_id
           ?goal_id
           ~goal_ids
+          ~continuation_channel
           ~sandbox_target
           ?sandbox_profile
           ?backend

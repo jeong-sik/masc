@@ -218,6 +218,7 @@ let run_turn
       ?shared_context
       ?event_bus
       ?trace_link
+      ?continuation_channel
       ?yield_to_chat_waiting
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
@@ -771,6 +772,7 @@ let run_turn
                          ~governance_level:(Env_config_core.governance_level ())
                          ~keeper_name:meta.name
                          ~meta
+                         ?continuation_channel
                          ?clock:(Eio_context.get_clock_opt ())
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())

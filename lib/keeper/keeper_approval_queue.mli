@@ -72,6 +72,7 @@ type pending_approval =
   ; task_id : string option
   ; goal_id : string option
   ; goal_ids : string list
+  ; continuation_channel : Keeper_continuation_channel.t
   ; runtime_contract : Yojson.Safe.t option
   (* Legacy/internal OAS model hint. Public approval JSON redacts this field. *)
   ; selected_model : string option
@@ -269,6 +270,7 @@ val submit_and_await :
   ?task_id:string ->
   ?goal_id:string ->
   ?goal_ids:string list ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?sandbox_target:string ->
   ?sandbox_profile:string ->
   ?backend:string ->
@@ -296,6 +298,7 @@ val submit_pending :
   ?task_id:string ->
   ?goal_id:string ->
   ?goal_ids:string list ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?sandbox_target:string ->
   ?sandbox_profile:string ->
   ?backend:string ->

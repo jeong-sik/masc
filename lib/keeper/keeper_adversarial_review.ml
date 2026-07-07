@@ -140,6 +140,9 @@ let wake_author ?grounded ~base_path ~(input : review_input) ~reason () :
       conversation = { conversation_id; surface = Surface_ref.Agent };
       external_message = None;
       source_label = "adversarial_review";
+      continuation_channel =
+        Keeper_continuation_channel.unrouted
+          "adversarial review attention is agent-surface only";
       actor =
         {
           actor_id = Some "adversarial_review";

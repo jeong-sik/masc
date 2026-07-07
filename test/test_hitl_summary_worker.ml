@@ -79,6 +79,9 @@ let dummy_pending_approval
   ; task_id = Some task_id
   ; goal_id = Some goal_id
   ; goal_ids = []
+  ; continuation_channel =
+      Keeper_continuation_channel.unrouted
+        "hitl summary worker fixture has no originating connector"
   ; runtime_contract = None
   ; selected_model = None
   ; disposition = None

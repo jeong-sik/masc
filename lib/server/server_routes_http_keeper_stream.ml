@@ -134,12 +134,40 @@ let turn_instructions_for_request payload =
       if ctx_text = "" then Some ti
       else Some (ti ^ "\n\n" ^ ctx_text)
 
+let continuation_channel_of_request payload =
+  if has_connector_context payload
+  then (
+    let channel = String.lowercase_ascii (String.trim payload.channel) in
+    let channel_workspace_id = String.trim payload.channel_workspace_id in
+    let channel_user_id = String.trim payload.channel_user_id in
+    match channel with
+    | "discord" when channel_workspace_id <> "" && channel_user_id <> "" ->
+      Keeper_continuation_channel.routed
+        (Keeper_chat_connector.Discord
+           { channel_id = channel_workspace_id; user_id = channel_user_id })
+    | "slack" when channel_workspace_id <> "" && channel_user_id <> "" ->
+      Keeper_continuation_channel.routed
+        (Keeper_chat_connector.Slack { channel = channel_workspace_id; user_id = channel_user_id })
+    | "discord" | "slack" ->
+      Keeper_continuation_channel.unrouted
+        "connector continuation missing channel_workspace_id or channel_user_id"
+    | "" ->
+      Keeper_continuation_channel.unrouted
+        "connector continuation missing channel label"
+    | other ->
+      Keeper_continuation_channel.unrouted
+        ("unsupported connector continuation channel: " ^ other))
+  else Keeper_continuation_channel.routed Keeper_chat_connector.Dashboard
+
 let args_of_request payload : Yojson.Safe.t =
   let message = message_for_request payload in
   let base_fields =
     [ ("name", `String payload.name);
       ("message", `String message);
-      ("direct_reply", `Bool true) ]
+      ("direct_reply", `Bool true);
+      ( "continuation_channel",
+        Keeper_continuation_channel.to_yojson
+          (continuation_channel_of_request payload) ) ]
     @
     (match payload.timeout_sec with
      | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]

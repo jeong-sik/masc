@@ -294,6 +294,18 @@ let direct_owner_conversation_context
       ~limit:8 ~config ~meta ()
     |> Keeper_world_observation_message_scope.render_recent_direct_conversation_context
 
+let continuation_channel_of_keeper_msg_args args =
+  match Json_util.assoc_member_opt "continuation_channel" args with
+  | Some json ->
+    (match Keeper_continuation_channel.of_yojson json with
+     | Ok channel -> channel
+     | Error err ->
+       Keeper_continuation_channel.unrouted
+         ("invalid masc_keeper_msg continuation_channel: " ^ err))
+  | None ->
+    Keeper_continuation_channel.unrouted
+      "masc_keeper_msg missing continuation_channel provenance"
+
 (* Flatten newlines/tabs to spaces and trim, so a co-view value never breaks
    the line-oriented instruction block. *)
 let normalized_surface_context_value value =
@@ -617,6 +629,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
     let channel = get_string args "channel" "" in
+    let continuation_channel = continuation_channel_of_keeper_msg_args args in
     (match keeper_msg_timeout_override args with
     | Error e -> tool_result_error e
     | Ok keeper_msg_oas_timeout_s ->
@@ -1172,6 +1185,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                ~runtime_rotation_attempts
 		                                ~is_retry
 		                                ?event_bus
+		                                ~continuation_channel
 		                                ())
 		                         ()))
 		            in

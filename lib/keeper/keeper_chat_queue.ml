@@ -10,7 +10,7 @@
 
     @since 2.145.0 *)
 
-type message_source =
+type message_source = Keeper_chat_connector.t =
   | Dashboard
   | Discord of { channel_id : string; user_id : string }
   | Slack of { channel : string; user_id : string }
@@ -58,40 +58,25 @@ let snapshot_path ~base_path ~keeper_name =
          persistence_file)
   else Error (Printf.sprintf "invalid keeper name for chat queue snapshot: %s" keeper_name)
 
-let source_to_yojson = function
-  | Dashboard -> `Assoc [ ("kind", `String "dashboard") ]
-  | Discord { channel_id; user_id } ->
-    `Assoc
-      [ ("kind", `String "discord")
-      ; ("channel_id", `String channel_id)
-      ; ("user_id", `String user_id)
-      ]
-  | Slack { channel; user_id } ->
-    `Assoc
-      [ ("kind", `String "slack")
-      ; ("channel", `String channel)
-      ; ("user_id", `String user_id)
-      ]
+let source_to_yojson = Keeper_chat_connector.to_yojson
 
 let source_of_yojson json =
-  match Json_util.get_string json "kind" with
-  | Some "dashboard" -> Ok Dashboard
-  | Some "discord" ->
-    let channel_id =
-      Json_util.get_string_with_default json ~key:"channel_id" ~default:""
-    in
-    let user_id = Json_util.get_string_with_default json ~key:"user_id" ~default:"" in
-    if String.trim channel_id = "" || String.trim user_id = ""
-    then Error "discord chat queue source requires channel_id and user_id"
-    else Ok (Discord { channel_id; user_id })
-  | Some "slack" ->
-    let channel = Json_util.get_string_with_default json ~key:"channel" ~default:"" in
-    let user_id = Json_util.get_string_with_default json ~key:"user_id" ~default:"" in
-    if String.trim channel = "" || String.trim user_id = ""
-    then Error "slack chat queue source requires channel and user_id"
-    else Ok (Slack { channel; user_id })
-  | Some kind -> Error (Printf.sprintf "unsupported chat queue source kind: %s" kind)
-  | None -> Error "chat queue source requires kind"
+  match Keeper_chat_connector.of_yojson json with
+  | Ok source -> Ok source
+  | Error "chat connector requires kind" -> Error "chat queue source requires kind"
+  | Error "discord chat connector requires channel_id and user_id" ->
+    Error "discord chat queue source requires channel_id and user_id"
+  | Error "slack chat connector requires channel and user_id" ->
+    Error "slack chat queue source requires channel and user_id"
+  | Error err ->
+    let prefix = "unsupported chat connector kind: " in
+    if String.starts_with ~prefix err
+    then
+      let kind =
+        String.sub err (String.length prefix) (String.length err - String.length prefix)
+      in
+      Error (Printf.sprintf "unsupported chat queue source kind: %s" kind)
+    else Error err
 
 let queued_message_to_yojson (msg : queued_message) =
   `Assoc

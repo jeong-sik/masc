@@ -8,6 +8,8 @@
   keeper_accountability_claim_types
   keeper_transition_audit_types
   keeper_world_observation_turn_types
+  keeper_chat_connector
+  keeper_continuation_channel
   keeper_approval_queue_rules_types
   keeper_invariant
   keeper_path_rejection)

@@ -133,6 +133,9 @@ let external_attention_item ~keeper_name index : Keeper_external_attention.item 
       }
   ; external_message = None
   ; source_label = "agent"
+  ; continuation_channel =
+      Keeper_continuation_channel.unrouted
+        "waiting inventory fixture has no chat connector"
   ; actor =
       { actor_id = Some (Printf.sprintf "actor-%d" index)
       ; display_name = None

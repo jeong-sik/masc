@@ -369,9 +369,23 @@ let reject_hard_forbidden ~config ~keeper_name ~tool_name ~input ~risk ~meta () 
   decision
 ;;
 
-let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock ()
+let to_oas_approval_callback
+      ~config
+      ~governance_level
+      ~keeper_name
+      ?meta
+      ?continuation_channel
+      ?clock
+      ()
   : Agent_sdk.Hooks.approval_callback
   =
+  let continuation_channel =
+    Option.value
+      continuation_channel
+      ~default:
+        (Keeper_continuation_channel.unrouted
+           "governance approval callback missing originating connector")
+  in
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -514,46 +528,47 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
           Agent_sdk.Hooks.Approve)
         else (
           match rule_match with
-             | Some matched ->
-               Keeper_approval_queue.audit_approval_event
-                 ~base_path
-                 ~event_type:"auto_approved_rule_match"
-                 ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
-                 ~keeper_name
-                 ~tool_name
-                 ~risk_level
-                 ?turn_id
-                 ?task_id
-                 ?goal_id
-                 ~goal_ids
-                 ?sandbox_target
-                 ?runtime_contract
-                 ?selected_model
-                 ~disposition:"Pass"
-                 ~disposition_reason:"healthy"
-                 ~rule_match:matched
-                 ~auto_approved:true
-                 ();
-               Agent_sdk.Hooks.Approve
-             | None ->
-               Keeper_approval_queue.submit_and_await
-                 ~keeper_name
-                 ~tool_name
-                 ~input
-                 ~base_path
-                 ?turn_id
-                 ?task_id
-                 ?goal_id
-                 ~goal_ids
-                 ?sandbox_target
-                 ?sandbox_profile
-                 ?backend
-                 ?runtime_contract
-                 ?selected_model
-                 ~disposition:"Blocked"
-                 ~disposition_reason:"waiting_approval"
-                 ~risk_level
-                 ?clock
-                 ()))
+          | Some matched ->
+            Keeper_approval_queue.audit_approval_event
+              ~base_path
+              ~event_type:"auto_approved_rule_match"
+              ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
+              ~keeper_name
+              ~tool_name
+              ~risk_level
+              ?turn_id
+              ?task_id
+              ?goal_id
+              ~goal_ids
+              ?sandbox_target
+              ?runtime_contract
+              ?selected_model
+              ~disposition:"Pass"
+              ~disposition_reason:"healthy"
+              ~rule_match:matched
+              ~auto_approved:true
+              ();
+            Agent_sdk.Hooks.Approve
+          | None ->
+            Keeper_approval_queue.submit_and_await
+              ~keeper_name
+              ~tool_name
+              ~input
+              ~base_path
+              ?turn_id
+              ?task_id
+              ?goal_id
+              ~goal_ids
+              ?sandbox_target
+              ?sandbox_profile
+              ?backend
+              ?runtime_contract
+              ?selected_model
+              ~continuation_channel
+              ~disposition:"Blocked"
+              ~disposition_reason:"waiting_approval"
+              ~risk_level
+              ?clock
+              ()))
       else Agent_sdk.Hooks.Approve)
 ;;

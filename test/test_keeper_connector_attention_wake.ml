@@ -10,6 +10,8 @@
 open Alcotest
 module WO = Masc.Keeper_world_observation
 module A = Masc.Keeper_external_attention
+module Continuation = Keeper_continuation_channel
+module Connector = Keeper_chat_connector
 
 let contains ~needle haystack =
   let nl = String.length needle in
@@ -96,6 +98,10 @@ let external_attention_item ?(urgency = A.Ambient) ?(preview = "ambient TOKEN-12
           reply_to_message_id = None;
         };
     source_label = "discord";
+    continuation_channel =
+      Keeper_continuation_channel.routed
+        (Keeper_chat_connector.Discord
+           { channel_id = "chan-1"; user_id = "user-1" });
     actor =
       {
         actor_id = Some "user-1";
@@ -177,6 +183,34 @@ let test_connector_attention_codec_roundtrips () =
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
 
+let check_continuation_roundtrip label channel =
+  match Continuation.of_yojson (Continuation.to_yojson channel) with
+  | Ok decoded ->
+    check string label (Continuation.to_string channel) (Continuation.to_string decoded)
+  | Error err -> fail (label ^ " decode failed: " ^ err)
+
+let test_continuation_channel_codec_roundtrips () =
+  check_continuation_roundtrip "Dashboard continuation round-trip"
+    (Continuation.routed Connector.Dashboard);
+  check_continuation_roundtrip "Discord continuation round-trip"
+    (Continuation.routed
+       (Connector.Discord { channel_id = "chan-1"; user_id = "user-1" }));
+  check_continuation_roundtrip "Slack continuation round-trip"
+    (Continuation.routed (Connector.Slack { channel = "C123"; user_id = "U123" }));
+  check_continuation_roundtrip "Unrouted continuation round-trip"
+    (Continuation.unrouted "fixture missing connector")
+
+let test_unknown_continuation_kind_fails_closed () =
+  match
+    Continuation.of_yojson
+      (`Assoc [ ("kind", `String "teams"); ("channel_id", `String "c") ])
+  with
+  | Ok (Continuation.Unrouted { reason }) ->
+    check bool "unknown kind is surfaced in reason" true
+      (contains ~needle:"unsupported continuation channel kind: teams" reason)
+  | Ok (Continuation.Routed _) -> fail "unknown kind decoded as a routed channel"
+  | Error err -> fail ("unknown kind should be Unrouted, got error: " ^ err)
+
 let test_external_attention_projects_to_prompt_event () =
   let meta = make_meta "conn-keeper" in
   let item = external_attention_item () in
@@ -206,6 +240,10 @@ let () =
     ; ( "codec",
         [ test_case "Connector_attention payload JSON round-trips" `Quick
             test_connector_attention_codec_roundtrips
+        ; test_case "continuation_channel JSON round-trips" `Quick
+            test_continuation_channel_codec_roundtrips
+        ; test_case "unknown continuation kind becomes Unrouted" `Quick
+            test_unknown_continuation_kind_fails_closed
         ] )
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick

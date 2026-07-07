@@ -258,6 +258,17 @@ let discord_chat_metadata ~guild_id ~channel_id ~message_id =
     ("external_message_id", message_id);
   ]
 
+let discord_continuation_channel ~channel_id ~author_id =
+  let channel_id = String.trim channel_id in
+  let author_id = String.trim author_id in
+  if channel_id = "" || author_id = ""
+  then
+    Keeper_continuation_channel.unrouted
+      "discord attention missing channel_id or author_id"
+  else
+    Keeper_continuation_channel.routed
+      (Keeper_chat_connector.Discord { channel_id; user_id = author_id })
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
   =
@@ -275,6 +286,7 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
     ; external_message =
         Some { surface; message_id; reply_to_message_id = None }
     ; source_label = State.channel
+    ; continuation_channel = discord_continuation_channel ~channel_id ~author_id
     ; actor =
         { actor_id = Some author_id
         ; display_name = author_name

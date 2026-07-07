@@ -142,6 +142,7 @@ val to_oas_approval_callback :
   governance_level:string ->
   keeper_name:string ->
   ?meta:Keeper_meta_contract.keeper_meta ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
   Agent_sdk.Hooks.approval_callback

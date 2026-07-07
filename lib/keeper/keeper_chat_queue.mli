@@ -19,7 +19,7 @@
 
 (** {1 Types} *)
 
-type message_source =
+type message_source = Keeper_chat_connector.t =
   | Dashboard
   | Discord of { channel_id : string; user_id : string }
   | Slack of { channel : string; user_id : string }

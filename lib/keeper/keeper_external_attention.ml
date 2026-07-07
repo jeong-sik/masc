@@ -81,6 +81,7 @@ type item = {
   conversation : conversation_ref;
   external_message : external_message_ref option;
   source_label : string;
+  continuation_channel : Keeper_continuation_channel.t;
   actor : actor;
   urgency : urgency;
   content_preview : string;
@@ -256,6 +257,8 @@ let item_to_json item =
        ("keeper_name", `String item.keeper_name);
        ("conversation", conversation_ref_to_json item.conversation);
        ("source_label", `String item.source_label);
+       ( "continuation_channel",
+         Keeper_continuation_channel.to_yojson item.continuation_channel );
        ("actor", actor_to_json item.actor);
        ("urgency", `String (urgency_to_string item.urgency));
        ("content_preview", `String item.content_preview);
@@ -282,6 +285,21 @@ let item_of_json json =
   in
   let* external_message = external_message in
   let* source_label = required_string "source_label" json in
+  let continuation_channel =
+    match optional_object "continuation_channel" json with
+    | None ->
+      Ok
+        (Keeper_continuation_channel.unrouted
+           "external attention record missing continuation_channel")
+    | Some obj ->
+      (match Keeper_continuation_channel.of_yojson obj with
+       | Ok channel -> Ok channel
+       | Error err ->
+         Ok
+           (Keeper_continuation_channel.unrouted
+              ("invalid external attention continuation_channel: " ^ err)))
+  in
+  let* continuation_channel = continuation_channel in
   let* actor_json = required_object "actor" json in
   let* actor = actor_of_json actor_json in
   let* urgency_label = required_string "urgency" json in
@@ -306,6 +324,7 @@ let item_of_json json =
       conversation;
       external_message;
       source_label;
+      continuation_channel;
       actor;
       urgency;
       content_preview;

@@ -62,6 +62,7 @@ type item = {
   conversation : conversation_ref;
   external_message : external_message_ref option;
   source_label : string;
+  continuation_channel : Keeper_continuation_channel.t;
   actor : actor;
   urgency : urgency;
   content_preview : string;

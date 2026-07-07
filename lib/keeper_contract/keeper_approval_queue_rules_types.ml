@@ -54,6 +54,7 @@ type pending_approval =
   ; task_id : string option
   ; goal_id : string option
   ; goal_ids : string list
+  ; continuation_channel : Keeper_continuation_channel.t
   ; runtime_contract : Yojson.Safe.t option
   ; selected_model : string option
   ; disposition : string option

@@ -330,9 +330,21 @@ let decode_event ~bot_user_id ~event_type ~payload =
   | other -> Ok (Ignored_event other)
 ;;
 
+let decode_events_api_payload ~bot_user_id payload =
+  match string_field "type" payload with
+  | "event_callback" -> (
+      match object_field "event" payload with
+      | Error e -> Error ("events_api payload " ^ e)
+      | Ok event ->
+        let event_type = string_field "type" event in
+        decode_event ~bot_user_id ~event_type ~payload:event)
+  | "" -> Error "events_api payload missing {type}"
+  | other -> Ok (Ignored_event other)
+;;
+
 (* A Slack Socket Mode envelope is { type; envelope_id?; payload? }. For
-   events_api, [payload] is itself { type; ...event fields... } and the real
-   event type is payload.type. *)
+   events_api, [payload] is the normal Events API wrapper and [payload.event]
+   is the real event object. *)
 let parse_envelope ~bot_user_id json =
   let type_str = string_field "type" json in
   let envelope_id = string_field_opt "envelope_id" json in
@@ -349,9 +361,8 @@ let parse_envelope ~bot_user_id json =
       match object_field "payload" json with
       | Error e -> Error ("events_api envelope " ^ e)
       | Ok payload ->
-        let event_type = string_field "type" payload in
-        (match decode_event ~bot_user_id ~event_type ~payload with
-      | Error e -> Error ("events_api decode failed: " ^ e)
+        (match decode_events_api_payload ~bot_user_id payload with
+         | Error e -> Error ("events_api decode failed: " ^ e)
          | Ok event -> Ok { kind = Events_api_env; envelope_id; event = Some event }))
   | "slash_commands" | "interactive" -> Ok { kind = Ignored_env type_str; envelope_id; event = None }
   | "" -> Error "envelope missing {type}"

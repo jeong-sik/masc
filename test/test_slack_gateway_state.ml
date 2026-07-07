@@ -249,11 +249,16 @@ let test_parse_envelope_events_api_message () =
       ; ("envelope_id", `String "EE1")
       ; ( "payload"
         , `Assoc
-            [ ("type", `String "message")
-            ; ("channel", `String "C9")
-            ; ("user", `String "U9")
-            ; ("text", `String "hello bot")
-            ; ("ts", `String "1700000000.000200")
+            [ ("type", `String "event_callback")
+            ; ("team_id", `String "T1")
+            ; ( "event"
+              , `Assoc
+                  [ ("type", `String "message")
+                  ; ("channel", `String "C9")
+                  ; ("user", `String "U9")
+                  ; ("text", `String "hello bot")
+                  ; ("ts", `String "1700000000.000200")
+                  ] )
             ] )
       ]
   in
@@ -267,6 +272,17 @@ let test_parse_envelope_events_api_missing_payload_rejected () =
   let json = `Assoc [ ("type", `String "events_api") ] in
   match S.parse_envelope ~bot_user_id:None json with
   | Ok _ -> fail "events_api missing payload must be Error"
+  | Error _ -> ()
+
+let test_parse_envelope_events_api_missing_event_rejected () =
+  let json =
+    `Assoc
+      [ ("type", `String "events_api")
+      ; ("payload", `Assoc [ ("type", `String "event_callback") ])
+      ]
+  in
+  match S.parse_envelope ~bot_user_id:None json with
+  | Ok _ -> fail "events_api event_callback missing event must be Error"
   | Error _ -> ()
 
 let test_parse_envelope_disconnect_missing_payload_rejected () =
@@ -363,6 +379,8 @@ let () =
             test_parse_envelope_events_api_message
         ; test_case "events_api missing payload rejected" `Quick
             test_parse_envelope_events_api_missing_payload_rejected
+        ; test_case "events_api missing event rejected" `Quick
+            test_parse_envelope_events_api_missing_event_rejected
         ; test_case "disconnect missing payload rejected" `Quick
             test_parse_envelope_disconnect_missing_payload_rejected
         ; test_case "unknown envelope type rejected" `Quick

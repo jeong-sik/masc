@@ -57,6 +57,27 @@ let write_file path contents =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec scan offset =
+    offset + needle_len <= haystack_len
+    && (String.equal (String.sub haystack offset needle_len) needle || scan (offset + 1))
+  in
+  String.equal needle "" || scan 0
+
+let restored_log_messages_since before_seq =
+  Log.Ring.recent ~limit:20 ~module_filter:"Keeper" ~since_seq:before_seq ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    if contains_substring ~needle:"event_queue_snapshot: restored " entry.message
+    then Some entry.message
+    else None)
+
 let () =
   let open Keeper_event_queue in
   let board_payload () =
@@ -619,6 +640,35 @@ let () =
       assert (String.equal second.post_id "bootstrap");
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- health snapshot reads stay quiet; live hydration still announces replay. --- *)
+  let base_path = temp_dir "keeper-event-queue-restore-log-gate" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      Log.set_level Log.Info;
+      let keeper_name = "keeper-event-queue-restore-log-gate-test" in
+      let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
+      let before_health_reads = latest_log_seq () in
+      ignore (Keeper_event_queue_persistence.load_snapshot_pair ~base_path ~keeper_name);
+      ignore
+        (Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+           ~base_path
+           ~keeper_name);
+      Alcotest.(check (list string))
+        "health snapshot reads do not emit restore log"
+        []
+        (restored_log_messages_since before_health_reads);
+      let before_live_load = latest_log_seq () in
+      ignore (Keeper_event_queue_persistence.load ~base_path ~keeper_name);
+      Alcotest.(check bool)
+        "live load emits restore log"
+        true
+        (List.exists
+           (contains_substring
+              ~needle:"keeper=keeper-event-queue-restore-log-gate-test")
+           (restored_log_messages_since before_live_load)));
 
   (* --- durable snapshot load collapses legacy duplicates that differ only by
          arrival time. --- *)

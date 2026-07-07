@@ -143,6 +143,32 @@ let gh_simple args : Shell_ir.simple =
 
 let gh_simple_words words = gh_simple (List.map lit words)
 
+let test_repo_create_action_words_closed () =
+  Alcotest.(check (list string))
+    "repo-create action words"
+    [ "create"; "new" ]
+    Pol.repo_create_action_words;
+  let contract action =
+    Pol.repo_create_contract_of_simple
+      (gh_simple_words [ "repo"; action; "org/new-repo"; "--private" ])
+  in
+  List.iter
+    (fun action ->
+       match contract action with
+       | Some (Ok _) -> ()
+       | Some (Error errors) ->
+         Alcotest.failf "%s should parse repo-create: %s" action
+           (String.concat "," errors)
+       | None -> Alcotest.failf "%s should enter repo-create contract" action)
+    Pol.repo_create_action_words;
+  match contract "init" with
+  | None -> ()
+  | Some (Ok _) -> Alcotest.fail "gh repo init must not parse as repo-create"
+  | Some (Error errors) ->
+    Alcotest.failf "gh repo init must not enter repo-create contract: %s"
+      (String.concat "," errors)
+;;
+
 let test_repo_create_contract () =
   let contract words =
     Pol.repo_create_contract_of_simple (gh_simple_words words)
@@ -279,6 +305,8 @@ let () =
             test_durable_remote_surface;
           Alcotest.test_case "current dispositions" `Quick
             test_current_dispositions;
+          Alcotest.test_case "repo-create action words are closed" `Quick
+            test_repo_create_action_words_closed;
           Alcotest.test_case "repo-create contract" `Quick
             test_repo_create_contract;
           Alcotest.test_case "graphql durable-remote (words)" `Quick

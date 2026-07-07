@@ -75,6 +75,11 @@ val repo_create_contract_of_simple :
     the keeper must provide the contract before a human can approve the remote
     repository creation. *)
 
+val repo_create_action_words : string list
+(** Closed lowercase action words that enter the G-10 repo-create contract:
+    canonical [create] plus official [gh repo create --help] aliases. Tests pin
+    this exact list so any future alias sync must update the executable spec. *)
+
 val repo_create_contract_rule_of_simple : Shell_ir.simple -> string option
 (** Render a stable [Verdict.Policy_deny] rule for a repo-create command that
     violates {!repo_create_contract_of_simple}. *)

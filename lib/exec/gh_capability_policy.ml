@@ -179,10 +179,11 @@ let rec next_gh_positional = function
    G-10 exists to prevent by routing through the alias. This is the closed
    acceptance set over `gh`'s documented create-aliases, not a risk
    classifier: keep it in sync with `gh`'s ALIASES list. *)
+let repo_create_action_words = [ "create"; "new" ]
+
 let is_repo_create_action action =
-  match String.lowercase_ascii action with
-  | "create" | "new" -> true
-  | _ -> false
+  let action = String.lowercase_ascii action in
+  List.exists (String.equal action) repo_create_action_words
 ;;
 
 let repo_create_tail words =

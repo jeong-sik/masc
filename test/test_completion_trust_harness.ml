@@ -23,6 +23,10 @@
        notes below the substance floor ([min_notes_length] = 10) are rejected
        before Gate 3 ever calls an LLM. Reachable only when the caller owns the
        task (otherwise gate 1 above intercepts first).
+    3. [Task_completion_gate] — done attempts with substantive notes but no
+       trusted, reviewer-inspectable [handoff_context.evidence_refs] are
+       rejected, and a later retry with a trusted ref can still complete the
+       same task.
 
     Each reject asserts a gate-SPECIFIC signal (distinct rule_id / substring /
     failure_class), not merely outcome=failure — a tool-not-allowed or unknown-tool
@@ -30,17 +34,11 @@
     so the gate-specific assertion is what proves the *intended* gate fired. Each
     reject also asserts the task FSM was NOT mutated (anti-vacuity).
 
-    Deliberately NOT covered here, with rationale:
-    - A legitimate *completion* success: once notes clear the length floor, the
-      anti-rationalization review reaches its Gate-3 LLM branch, whose
-      unavailable-LLM verdict is governed by operator fail-mode config and is not
-      deterministic in a no-LLM CI fixture. The deterministic success anchor is
-      therefore the *claim* (Test D), which has no review gate.
-    - An evidence-gate rejection on keeper_task_done: the deterministic evidence
-      evaluator is wired into the *claim* auto-complete path, not the done path
-      (a Phase-3 / RFC-0199 gap). Asserting a done-evidence reject here would
-      assert a gate that does not exist. The evaluator's Indeterminate-dominates
-      determinism is already covered by test_keeper_deterministic_evidence_probe.ml.
+    Completion success and evidence-gate recovery are covered with a trusted
+    evidence reference ([PR#123]), keeping the no-LLM fixture deterministic while
+    proving the gate is selective rather than reject-everything. The evaluator's
+    Indeterminate-dominates determinism remains covered by
+    test_keeper_deterministic_evidence_probe.ml.
 
     The fixture helpers below are intentionally a local copy of the minimal subset
     used by test_keeper_tool_dispatch_runtime.ml (Eio workspace + a registered
@@ -320,10 +318,10 @@ let test_completion_with_evidence_refs_succeeds () =
 
 (* Test E — the evidence gate BLOCKS an untrusted (fake) reference on the *done*
    path, and the block is RECOVERABLE. This closes the reject-path proof gap the
-   docstring above left open ("asserting a done-evidence reject here would assert
-   a gate that does not exist"): the deterministic evidence gate DOES run on
-   Done_action (tool_task.ml: needs_gate = Done_action -> true), so a done attempt
-   whose evidence_refs hold no trusted Evidence_ref shape is rejected here.
+   old harness docstring left open ("asserting a done-evidence reject here would
+   assert a gate that does not exist"): the deterministic evidence gate DOES run
+   on Done_action (tool_task.ml: needs_gate = Done_action -> true), so a done
+   attempt whose evidence_refs hold no trusted Evidence_ref shape is rejected here.
 
    Two properties in one flow, mirroring test_completion_with_evidence_refs so the
    ONLY changed variable is trusted-vs-untrusted evidence:

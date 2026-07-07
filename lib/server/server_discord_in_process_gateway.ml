@@ -589,6 +589,8 @@ let handle_ambient ~base_dir
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_too_long
     else begin
+      let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+      let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
           ~message_id ~author_id ~author_name ~content:trimmed
@@ -602,8 +604,8 @@ let handle_ambient ~base_dir
              {
                guild_id;
                channel_id;
-               parent_channel_id = None;
-               thread_id = None;
+               parent_channel_id;
+               thread_id;
              })
         ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
         ~external_message_id:message_id
@@ -643,7 +645,12 @@ let handle_ambient ~base_dir
                  { event_id
                  ; channel =
                      Keeper_continuation_channel.Discord
-                       { channel_id; user_id = author_id }
+                       { guild_id
+                       ; channel_id
+                       ; parent_channel_id
+                       ; thread_id
+                       ; user_id = author_id
+                       }
                  }
            }
          in

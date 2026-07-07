@@ -14,8 +14,21 @@ let roundtrip ch =
 
 let test_codec_roundtrip () =
   roundtrip (Dashboard { thread_id = "thread-42" });
-  roundtrip (Discord { channel_id = "C123"; user_id = "U9" });
-  roundtrip (Slack { channel = "general"; user_id = "U1" });
+  roundtrip
+    (Discord
+       { guild_id = Some "G1"
+       ; channel_id = "C123"
+       ; parent_channel_id = Some "P1"
+       ; thread_id = Some "T1"
+       ; user_id = "U9"
+       });
+  roundtrip
+    (Slack
+       { team_id = Some "TEAM1"
+       ; channel_id = "general"
+       ; thread_ts = Some "1710000000.000001"
+       ; user_id = "U1"
+       });
   roundtrip (unrouted "connector not captured at submission")
 
 let expect_error label json =
@@ -43,14 +56,38 @@ let test_non_object_is_error () =
 
 let test_is_routable () =
   assert (is_routable (Dashboard { thread_id = "t" }));
-  assert (is_routable (Discord { channel_id = "c"; user_id = "u" }));
-  assert (is_routable (Slack { channel = "c"; user_id = "u" }));
+  assert (
+    is_routable
+      (Discord
+         { guild_id = None
+         ; channel_id = "c"
+         ; parent_channel_id = None
+         ; thread_id = None
+         ; user_id = "u"
+         }));
+  assert (
+    is_routable
+      (Slack { team_id = None; channel_id = "c"; thread_ts = None; user_id = "u" }));
   assert (not (is_routable (unrouted "x")))
 
 let test_kind_label () =
   assert (String.equal (kind_label (Dashboard { thread_id = "t" })) "dashboard");
-  assert (String.equal (kind_label (Discord { channel_id = "c"; user_id = "u" })) "discord");
-  assert (String.equal (kind_label (Slack { channel = "c"; user_id = "u" })) "slack");
+  assert (
+    String.equal
+      (kind_label
+         (Discord
+            { guild_id = None
+            ; channel_id = "c"
+            ; parent_channel_id = None
+            ; thread_id = None
+            ; user_id = "u"
+            }))
+      "discord");
+  assert (
+    String.equal
+      (kind_label
+         (Slack { team_id = None; channel_id = "c"; thread_ts = None; user_id = "u" }))
+      "slack");
   assert (String.equal (kind_label (unrouted "x")) "unrouted")
 
 let test_same_route () =
@@ -58,18 +95,50 @@ let test_same_route () =
   assert (same_route (Dashboard { thread_id = "t1" }) (Dashboard { thread_id = "t1" }));
   assert (
     same_route
-      (Discord { channel_id = "c"; user_id = "u" })
-      (Discord { channel_id = "c"; user_id = "u" }));
+      (Discord
+         { guild_id = Some "g"
+         ; channel_id = "c"
+         ; parent_channel_id = Some "p"
+         ; thread_id = Some "t"
+         ; user_id = "u"
+         })
+      (Discord
+         { guild_id = Some "g"
+         ; channel_id = "c"
+         ; parent_channel_id = Some "p"
+         ; thread_id = Some "t"
+         ; user_id = "u"
+         }));
   (* differing coordinate -> different route *)
   assert (not (same_route (Dashboard { thread_id = "t1" }) (Dashboard { thread_id = "t2" })));
   assert (
     not
       (same_route
-         (Discord { channel_id = "c"; user_id = "u" })
-         (Discord { channel_id = "c"; user_id = "u2" })));
+         (Discord
+            { guild_id = Some "g"
+            ; channel_id = "c"
+            ; parent_channel_id = Some "p"
+            ; thread_id = Some "t"
+            ; user_id = "u"
+            })
+         (Discord
+            { guild_id = Some "g"
+            ; channel_id = "c"
+            ; parent_channel_id = Some "p"
+            ; thread_id = Some "t2"
+            ; user_id = "u"
+            })));
   (* different constructor -> different route *)
   assert (
-    not (same_route (Dashboard { thread_id = "t" }) (Slack { channel = "c"; user_id = "u" })));
+    not
+      (same_route
+         (Dashboard { thread_id = "t" })
+         (Slack
+            { team_id = None
+            ; channel_id = "c"
+            ; thread_ts = None
+            ; user_id = "u"
+            })));
   (* two Unrouted values never share a route (no destination to share) *)
   assert (not (same_route (unrouted "a") (unrouted "a")))
 

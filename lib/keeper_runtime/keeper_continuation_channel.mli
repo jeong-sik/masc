@@ -10,12 +10,25 @@
     convenience channel. The variant is closed and matches are exhaustive so a
     new connector forces a compile error at every routing site.
 
-    This module is a pure data type with no consumers yet (RFC-0320 W1). *)
+    This module is a pure data type. It lives below the main [masc] library, so
+    connector constructors carry the lossless coordinate fields used by
+    [Surface_ref] without depending on that higher-level module. *)
 
 type t =
   | Dashboard of { thread_id : string }
-  | Discord of { channel_id : string; user_id : string }
-  | Slack of { channel : string; user_id : string }
+  | Discord of {
+      guild_id : string option;
+      channel_id : string;
+      parent_channel_id : string option;
+      thread_id : string option;
+      user_id : string;
+    }
+  | Slack of {
+      team_id : string option;
+      channel_id : string;
+      thread_ts : string option;
+      user_id : string;
+    }
   | Unrouted of { reason : string }
 
 (** [unrouted reason] is the fail-closed channel carrying a diagnostic

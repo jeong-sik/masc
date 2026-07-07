@@ -633,17 +633,5 @@ let install () =
       Otel_metric_store.metric_cache_desync_cleared
       ~labels:[ "module", module_name; "status", status ]
       ());
-
-  let decide_hook
-        ~task_id:_
-        ~task_opt:_
-        ~notes:_
-        ~handoff:_
-        ()
-      : Workspace_hooks.evidence_gate_verdict
-    =
-    Workspace_hooks.Pass
-  in
-  Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide_hook;
   ()
 ;;

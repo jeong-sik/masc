@@ -167,12 +167,20 @@ let validate_non_empty_output ~message_count ~kept ~summarized =
 let plan_of_json ~message_count json =
   let* summary = string_field Schema.compaction_plan_field_summary json in
   let summary = String.trim summary in
-  let* () =
-    if summary = "" then Error "summary must be non-empty" else Ok ()
-  in
   let* kept = int_list_field Schema.compaction_plan_field_kept_indices json in
   let* summarized = int_list_field Schema.compaction_plan_field_summarized_indices json in
   let* dropped = int_list_field Schema.compaction_plan_field_dropped_indices json in
+  (* The summary stands in for the [summarized] messages; it is consumed by
+     [apply] only when [summarized] is non-empty. Requiring it non-empty
+     unconditionally would reject a legitimate "keep everything, nothing to
+     summarize" plan (summary="") and spuriously fall back to the
+     deterministic chain. So the summary must be non-empty iff it will be
+     used. *)
+  let* () =
+    if summarized <> [] && summary = ""
+    then Error "summary must be non-empty when summarized indices are present"
+    else Ok ()
+  in
   let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
   let* () = validate_non_empty_output ~message_count ~kept ~summarized in
   Ok { summary; kept; summarized; dropped }

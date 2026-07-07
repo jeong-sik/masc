@@ -59,8 +59,9 @@ let dispatch ~agent_name ~name ~args =
           in
           if owned
           then (
-            ignore (remove ~id : bool);
-            ok (`Assoc [ "removed", `String id ]))
+            if remove ~id
+            then ok (`Assoc [ "removed", `String id ])
+            else err ("Recurring task not found: " ^ id))
           else if
             list_all ()
             |> List.exists (fun (task : Keeper_recurring.recurring_task) ->

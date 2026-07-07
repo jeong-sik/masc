@@ -979,6 +979,11 @@ export interface KeeperConversationEntry {
   details?: KeeperConversationDetails | null
   error?: string | null
   surface?: SurfaceRef | null
+  conversationId?: string | null
+  externalMessageId?: string | null
+  speakerId?: string | null
+  speakerName?: string | null
+  speakerAuthority?: string | null
   audio?: KeeperConversationAudioClip | null
 }
 

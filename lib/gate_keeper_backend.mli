@@ -47,6 +47,7 @@ val dispatch :
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  idempotency_key:string ->
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
@@ -75,6 +76,7 @@ val dispatch_with_text_snapshot :
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  idempotency_key:string ->
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
@@ -107,6 +109,7 @@ val persist_connector_assistant_reply :
   base_dir:string ->
   keeper_name:string ->
   source:string ->
+  ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?turn_ref:Ids.Turn_ref.t ->
   reply:string ->

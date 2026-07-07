@@ -142,9 +142,9 @@ let ahead_behind ~repository ~target_ref : (int * int, string) result =
       ~timeout_sec:inspect_timeout_sec
       [ "rev-list"; "--left-right"; "--count"; target_ref ^ "...HEAD" ]
   with
-  | Error msg -> Error msg
-  | Ok [] -> Error "git rev-list --left-right --count returned no output"
-  | Ok (line :: _) -> (
+  | Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok [] -> Stdlib.Error "git rev-list --left-right --count returned no output"
+  | Stdlib.Ok (line :: _) -> (
       match String.split_on_char '\t' (String.trim line) with
       | [ behind; ahead ] -> (
           match

@@ -176,7 +176,7 @@ let evidence_summary_payload
            | Some hc -> List.length hc.evidence_refs) )
     ]
 
-let decide ~task_id ~task_opt ~notes ~handoff_context () =
+let classify_evidence ~task_id ~task_opt ~notes ~handoff_context () =
   match (task_opt : Masc_domain.task option) with
   | Some t ->
     let unsatisfied =
@@ -217,4 +217,22 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
   | _ ->
     (* Analysis-only task bypass: a task with no contract has nothing to
        verify, so the gate must not block keeper_task_done. *)
+    Pass
+
+(* CDAL gate disabled per operator directive. Evidence gathering and
+   classification are preserved; only the enforcement gate is bypassed. See
+   p-5db73a43. *)
+let decide ~task_id ~task_opt ~notes ~handoff_context () =
+  match classify_evidence ~task_id ~task_opt ~notes ~handoff_context () with
+  | Pass -> Pass
+  | Reject { rule_id; _ } ->
+    Log.Task.warn
+      "cdal_evidence_gate DISABLED task=%s would_reject rule=%s notes_len=%d \
+       handoff_refs=%d; enforcement bypassed"
+      task_id
+      rule_id
+      (String.length (String.trim notes))
+      (match handoff_context with
+       | None -> 0
+       | Some hc -> List.length hc.evidence_refs);
     Pass

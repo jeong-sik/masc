@@ -10,6 +10,8 @@ open Masc
 
 module Gate = Cdal_evidence_gate
 
+let decide = Gate.classify_evidence
+
 let make_task
       ?(id = "task-1")
       ?(contract : Masc_domain.task_contract option = None)
@@ -62,6 +64,22 @@ let handoff_with_refs refs : Masc_domain.task_handoff_context =
   ; updated_by = None
   }
 
+let test_public_decide_bypasses_enforcement_but_classifier_rejects () =
+  let contract = make_contract ~required_evidence:[ "artifact:run_deliverable" ] () in
+  let task = make_task ~contract:(Some contract) () in
+  let task_id = "task-disabled" in
+  let task_opt = Some task in
+  let notes = "" in
+  let handoff_context = None in
+  (match decide ~task_id ~task_opt ~notes ~handoff_context () with
+   | Gate.Reject { rule_id; _ } ->
+     check string "classifier rule_id" Gate.rule_id_evidence_incomplete rule_id
+   | Gate.Pass -> fail "classifier must still detect incomplete evidence");
+  match Gate.decide ~task_id ~task_opt ~notes ~handoff_context () with
+  | Gate.Pass -> ()
+  | Gate.Reject { rule_id; _ } ->
+    failf "disabled enforcement decide must Pass, got Reject rule_id=%s" rule_id
+
 (* ─────────────────────────────────────────────────────────────── *)
 (* No contract -> explicit handoff evidence_refs required            *)
 (* ─────────────────────────────────────────────────────────────── *)
@@ -75,7 +93,7 @@ let test_no_contract_without_handoff_refs_rejects () =
   List.iter
     (fun handoff_context ->
        match
-         Gate.decide
+         decide
            ~task_id:"task-analysis"
            ~task_opt:(Some (make_task ()))
            ~notes:"substantive notes alone do not satisfy no-contract evidence"
@@ -95,7 +113,7 @@ let test_no_contract_without_handoff_refs_rejects () =
 
 let test_no_contract_with_handoff_refs_passes () =
   match
-    Gate.decide
+    decide
       ~task_id:"task-analysis"
       ~task_opt:(Some (make_task ()))
       ~notes:""
@@ -110,7 +128,7 @@ let test_no_contract_with_untrusted_handoff_refs_rejects () =
   List.iter
     (fun ref_ ->
        match
-         Gate.decide
+         decide
            ~task_id:"task-analysis"
            ~task_opt:(Some (make_task ()))
            ~notes:"substantive notes alone do not satisfy no-contract evidence"
@@ -131,7 +149,7 @@ let test_no_contract_with_untrusted_handoff_refs_rejects () =
 
 let test_no_task_passes () =
   match
-    Gate.decide
+    decide
       ~task_id:"task-ghost"
       ~task_opt:None
       ~notes:""
@@ -147,7 +165,7 @@ let test_required_evidence_satisfied_passes () =
   let contract = make_contract ~required_evidence:[ "src/main.ml" ] () in
   let task = make_task ~contract:(Some contract) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-ev"
       ~task_opt:(Some task)
       ~notes:"completed work on src/main.ml"
@@ -162,7 +180,7 @@ let test_required_evidence_satisfied_passes () =
 let test_substantive_notes_pass () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-notes"
       ~task_opt:(Some task)
       ~notes:"see commit abc123 for the typed evidence-gate collapse"
@@ -177,7 +195,7 @@ let test_substantive_notes_pass () =
 let test_handoff_reference_passes () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-handoff"
       ~task_opt:(Some task)
       ~notes:""
@@ -194,7 +212,7 @@ let test_plain_handoff_reference_rejects () =
   List.iter
     (fun ref_ ->
        match
-         Gate.decide
+         decide
            ~task_id:"task-weak-handoff"
            ~task_opt:(Some task)
            ~notes:""
@@ -212,7 +230,7 @@ let test_placeholder_handoff_reference_rejects () =
   List.iter
     (fun ref_ ->
        match
-         Gate.decide
+         decide
            ~task_id:"task-placeholder-handoff"
            ~task_opt:(Some task)
            ~notes:""
@@ -230,7 +248,7 @@ let test_unvalidated_file_handoff_reference_rejects () =
   List.iter
     (fun ref_ ->
        match
-         Gate.decide
+         decide
            ~task_id:"task-file-handoff"
            ~task_opt:(Some task)
            ~notes:""
@@ -251,7 +269,7 @@ let test_unvalidated_file_required_evidence_rejects () =
        let contract = make_contract ~required_evidence:[ ref_ ] () in
        let task = make_task ~contract:(Some contract) () in
        match
-         Gate.decide
+         decide
            ~task_id:"task-file-required"
            ~task_opt:(Some task)
            ~notes:"substantive completion notes without the file-shaped reference"
@@ -276,7 +294,7 @@ let test_placeholder_required_evidence_reference_rejects () =
   let contract = make_contract ~required_evidence:[ "trace:" ] () in
   let task = make_task ~contract:(Some contract) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-placeholder-required-ref"
       ~task_opt:(Some task)
       ~notes:"substantive completion notes are present here"
@@ -344,7 +362,7 @@ let test_blank_required_evidence_rejects () =
   let contract = make_contract ~required_evidence:[ "  " ] () in
   let task = make_task ~contract:(Some contract) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-blank-required"
       ~task_opt:(Some task)
       ~notes:"substantive completion notes are present here"
@@ -368,7 +386,7 @@ let test_required_evidence_unsatisfied_rejects () =
   in
   let task = make_task ~contract:(Some contract) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-missing"
       ~task_opt:(Some task)
       ~notes:"finished the work, see PR"
@@ -392,7 +410,7 @@ let test_required_evidence_embedded_substring_rejects () =
   let contract = make_contract ~required_evidence:[ "error" ] () in
   let task = make_task ~contract:(Some contract) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-embedded-substring"
       ~task_opt:(Some task)
       ~notes:"completed an errorless run with enough context"
@@ -423,7 +441,7 @@ let test_required_evidence_extended_reference_rejects () =
        let contract = make_contract ~required_evidence:[ required ] () in
        let task = make_task ~contract:(Some contract) () in
        match
-         Gate.decide
+         decide
            ~task_id:"task-extended-reference"
            ~task_opt:(Some task)
            ~notes
@@ -448,7 +466,7 @@ let test_required_evidence_path_with_punctuation_passes () =
   let contract = make_contract ~required_evidence:[ "src/main.ml" ] () in
   let task = make_task ~contract:(Some contract) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-path-boundary"
       ~task_opt:(Some task)
       ~notes:"implemented the fix in src/main.ml. review notes attached"
@@ -463,7 +481,7 @@ let test_required_evidence_word_with_colon_passes () =
   let contract = make_contract ~required_evidence:[ "error" ] () in
   let task = make_task ~contract:(Some contract) () in
   match
-    Gate.decide
+    decide
       ~task_id:"task-word-colon-boundary"
       ~task_opt:(Some task)
       ~notes:"Error: reproduced and fixed with detailed validation notes"
@@ -480,7 +498,7 @@ let test_placeholder_notes_reject () =
   List.iter
     (fun placeholder ->
        match
-         Gate.decide
+         decide
            ~task_id:"task-placeholder"
            ~task_opt:(Some task)
            ~notes:placeholder
@@ -503,6 +521,8 @@ let () =
     [ ( "evidence-substantiveness"
       , [ test_case "no contract without handoff refs → Reject" `Quick
             test_no_contract_without_handoff_refs_rejects
+        ; test_case "disabled enforcement classify reject → decide Pass" `Quick
+            test_public_decide_bypasses_enforcement_but_classifier_rejects
         ; test_case "no contract with handoff refs → Pass" `Quick
             test_no_contract_with_handoff_refs_passes
         ; test_case "no contract with untrusted handoff refs → Reject" `Quick

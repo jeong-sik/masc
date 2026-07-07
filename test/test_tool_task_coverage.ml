@@ -213,7 +213,7 @@ let workspace_evidence_verdict_of_cdal = function
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
 
 let real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff () =
-  Cdal_evidence_gate.decide
+  Cdal_evidence_gate.classify_evidence
     ~task_id
     ~task_opt
     ~notes

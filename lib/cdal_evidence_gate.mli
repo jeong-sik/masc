@@ -13,7 +13,7 @@
     they exist inside the allowed workspace. Blank required evidence entries are
     treated as unsatisfied. There is no internal proof/verdict pipeline.
 
-    Decision matrix:
+    Classification matrix:
 
     | task.contract | evidence | Decision |
     |---------------|----------|----------|
@@ -37,7 +37,20 @@ val rule_id_evidence_incomplete : string
     without sufficient evidence (required_evidence unsatisfied and no
     substantive notes / handoff reference). *)
 
-(** [decide] applies the evidence-substantiveness matrix above. *)
+(** [classify_evidence] applies the evidence-substantiveness matrix above
+    without consulting the rollout enforcement switch.  This keeps the
+    evidence classifier auditable while enforcement is disabled. *)
+val classify_evidence
+  :  task_id:string
+  -> task_opt:Masc_domain.task option
+  -> notes:string
+  -> handoff_context:Masc_domain.task_handoff_context option
+  -> unit
+  -> decision
+
+(** [decide] preserves evidence classification for diagnostics but currently
+    returns [Pass] for every task because the CDAL evidence gate enforcement is
+    disabled by operator directive. *)
 val decide
   :  task_id:string
   -> task_opt:Masc_domain.task option

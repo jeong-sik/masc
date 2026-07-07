@@ -13,7 +13,8 @@ include Channel_gate_connector.S
 
 val keeper_for_channel : channel_id:string -> string option
 (** Look up the keeper bound to a Slack channel id. [None] when no binding
-    exists, the channel id is blank, or the binding store is unreadable. *)
+    exists, the channel id is blank, or the binding store is unreadable after
+    logging the read failure. *)
 
 type keeper_binding_resolution = {
   keeper_name : string;
@@ -26,6 +27,11 @@ val resolve_keeper_for_channel :
   channel_id:string -> keeper_binding_resolution option
 (** Resolve the keeper for [channel_id]. Slack threads share the parent
     channel id, so this is a single exact lookup — no thread→parent fallback. *)
+
+val resolve_keeper_for_channel_result :
+  channel_id:string -> (keeper_binding_resolution option, string) result
+(** Typed variant of {!resolve_keeper_for_channel}. Store read failures return
+    [Error] instead of being collapsed into an unbound channel. *)
 
 val record_ready : bot_user_id:string -> unit
 (** Called by the in-process gateway's hello handler. Stores the bot identity

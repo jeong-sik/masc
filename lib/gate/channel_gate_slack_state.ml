@@ -27,10 +27,8 @@ let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
 (* Slack has no Discord-style guilds; the bot token authorizes per-workspace.
    Path resolvers read an env override, else fall back to the default. *)
 let slack_path ~env_var ~default () =
-  match Sys.getenv_opt env_var with
-  | Some s ->
-    let trimmed = String.trim s in
-    if String.equal trimmed "" then default else trimmed
+  match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
+  | Some path -> path
   | None -> default
 
 let status_path () =
@@ -52,6 +50,7 @@ let binding_store =
     ~guild_id_field:Store.Omit
 
 let read_bindings () = Store.read_bindings binding_store
+let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
 let save_bindings bindings = Store.save_bindings binding_store bindings
 let append_audit_event event = Store.append_audit_event binding_store event
@@ -78,18 +77,12 @@ let connector_state_label ~available ~connected ~stale =
 (* Outbound REST uses the bot token (xoxb-...). The app token (xapp-...) is read
    only by {!Slack_socket_client} for apps.connections.open. *)
 let bot_token_opt () =
-  match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
-  | None -> None
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
+  Env_config_core.raw_value_opt "MASC_SLACK_BOT_TOKEN"
+  |> Env_config_core.trim_opt
 
 let app_token_opt () =
-  match Sys.getenv_opt "MASC_SLACK_APP_TOKEN" with
-  | None -> None
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
+  Env_config_core.raw_value_opt "MASC_SLACK_APP_TOKEN"
+  |> Env_config_core.trim_opt
 
 let gateway_state_label = function
   | Slack_gateway_state.Disconnected -> "disconnected"
@@ -126,6 +119,8 @@ let status_json ?(audit_limit = 10) () =
     | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
   in
   let stale = false in
+  (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
+     reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
   let error =
     match gateway_state with
@@ -136,6 +131,7 @@ let status_json ?(audit_limit = 10) () =
   in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
+  let configured_binding_json = List.map binding_json configured_bindings in
   `Assoc
     [ ("channel", `String channel)
     ; ("available", `Bool available)
@@ -149,7 +145,11 @@ let status_json ?(audit_limit = 10) () =
     ; ("status_path", `String (status_path ()))
     ; ("binding_store_path", `String (binding_store_path ()))
     ; ("audit_path", `String (binding_audit_path ()))
-    ; ("bindings", `List (List.map binding_json configured_bindings))
+    ; ("binding_source", `String "persisted")
+    ; ("runtime_bindings_count", `Int (List.length configured_bindings))
+    ; ("configured_bindings", `List configured_binding_json)
+    ; ("recent_audit", `List recent_audit)
+    ; ("bindings", `List configured_binding_json)
     ; ("audit", `List recent_audit)
     ; ("bot_token_present", `Bool bot_present)
     ; ("app_token_present", `Bool app_present)
@@ -184,70 +184,84 @@ let bind ~channel_id ~keeper_name ~actor_name =
   if String.equal channel_id "" then Error "channel_id is required"
   else if String.equal keeper_name "" then Error "keeper_name is required"
   else
-    let original_bindings = read_bindings () in
-    let previous_keeper =
-      original_bindings
-      |> List.find_map (fun (b : binding) ->
-             if String.equal b.channel_id channel_id then Some b.keeper_name
-             else None)
-      |> Option.value ~default:""
-    in
-    let updated_bindings =
-      (({ channel_id; keeper_name } : binding)
-       :: List.filter
+    match read_bindings_result () with
+    | Error msg -> Error msg
+    | Ok original_bindings ->
+      let previous_keeper =
+        match
+          List.find_map
             (fun (b : binding) ->
-              not (String.equal b.channel_id channel_id))
-            original_bindings)
-      |> List.sort (fun (a : binding) (b : binding) ->
-             String.compare a.channel_id b.channel_id)
-    in
-    try
-      save_bindings updated_bindings;
-      append_audit_event
-        Store.
-          { timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
-          ; action = "bind"
-          ; guild_id = None
-          ; channel_id
-          ; keeper_name
-          ; actor_id = actor_name
-          ; actor_name
-          ; previous_keeper };
-      Ok (status_json ())
-    with Sys_error msg -> rollback_bindings original_bindings; Error msg
-
-let unbind ~channel_id ~actor_name =
-  let channel_id = String.trim channel_id in
-  if String.equal channel_id "" then Error "channel_id is required"
-  else
-    let original_bindings = read_bindings () in
-    match
-      original_bindings
-      |> List.find_opt (fun (b : binding) ->
-             String.equal b.channel_id channel_id)
-    with
-    | None -> Error "binding not found"
-    | Some (removed : binding) ->
+              if String.equal b.channel_id channel_id then Some b.keeper_name
+              else None)
+            original_bindings
+        with
+        | Some keeper_name -> keeper_name
+        | None -> ""
+      in
       let updated_bindings =
-        List.filter
-          (fun (b : binding) ->
-            not (String.equal b.channel_id channel_id))
-          original_bindings
+        (({ channel_id; keeper_name } : binding)
+         :: List.filter
+              (fun (b : binding) ->
+                not (String.equal b.channel_id channel_id))
+              original_bindings)
+        |> List.sort (fun (a : binding) (b : binding) ->
+               String.compare a.channel_id b.channel_id)
       in
       try
         save_bindings updated_bindings;
         append_audit_event
           Store.
-            { timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
-            ; action = "unbind"
+            { timestamp =
+                (* NDT-OK: binding audit wall-clock is operator-facing
+                   telemetry only. *)
+                Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
+            ; action = "bind"
             ; guild_id = None
             ; channel_id
-            ; keeper_name = removed.keeper_name
+            ; keeper_name
             ; actor_id = actor_name
             ; actor_name
-            ; previous_keeper = removed.keeper_name };
+            ; previous_keeper };
         Ok (status_json ())
       with Sys_error msg -> rollback_bindings original_bindings; Error msg
+
+let unbind ~channel_id ~actor_name =
+  let channel_id = String.trim channel_id in
+  if String.equal channel_id "" then Error "channel_id is required"
+  else
+    match read_bindings_result () with
+    | Error msg -> Error msg
+    | Ok original_bindings -> (
+      match
+        original_bindings
+        |> List.find_opt (fun (b : binding) ->
+               String.equal b.channel_id channel_id)
+      with
+      | None -> Error "binding not found"
+      | Some (removed : binding) ->
+        let updated_bindings =
+          List.filter
+            (fun (b : binding) ->
+              not (String.equal b.channel_id channel_id))
+            original_bindings
+        in
+        try
+          save_bindings updated_bindings;
+          append_audit_event
+            Store.
+              { timestamp =
+                  (* NDT-OK: binding audit wall-clock is operator-facing
+                     telemetry only. *)
+                  Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
+              ; action = "unbind"
+              ; guild_id = None
+              ; channel_id
+              ; keeper_name = removed.keeper_name
+              ; actor_id = actor_name
+              ; actor_name
+              ; previous_keeper = removed.keeper_name };
+          Ok (status_json ())
+        with Sys_error msg -> rollback_bindings original_bindings; Error msg)
 
 (* ---- In-process gateway support (replaces sidecars/slack-bot/) ---- *)
 
@@ -267,23 +281,32 @@ let binding_for_channel bindings ~channel_id =
 (* Slack threads share the parent channel id (a thread_ts is a message
    timestamp, not a channel), so resolution is a single exact lookup — no
    thread→parent fallback like Discord. *)
+let resolve_keeper_for_channel_result ~channel_id =
+  let normalized = String.trim channel_id in
+  if String.equal normalized "" then Ok None
+  else
+    match read_bindings_result () with
+    | Error msg -> Error msg
+    | Ok candidates -> (
+      match binding_for_channel candidates ~channel_id:normalized with
+      | Some b ->
+        Ok
+          (Some
+             { keeper_name = b.keeper_name
+             ; incoming_channel_id = normalized
+             ; bound_channel_id = b.channel_id
+             ; via_parent = false })
+      | None -> Ok None)
+
 let resolve_keeper_for_channel ~channel_id =
   let normalized = String.trim channel_id in
-  if String.equal normalized "" then None
-  else
-    let candidates =
-      try read_bindings () with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> []
-    in
-    match binding_for_channel candidates ~channel_id:normalized with
-    | Some b ->
-      Some
-        { keeper_name = b.keeper_name
-        ; incoming_channel_id = normalized
-        ; bound_channel_id = b.channel_id
-        ; via_parent = false }
-    | None -> None
+  match resolve_keeper_for_channel_result ~channel_id:normalized with
+  | Ok resolution -> resolution
+  | Error msg ->
+    if not (String.equal normalized "") then
+      Log.Slack.warn "slack binding lookup failed for channel_id=%s: %s"
+        normalized msg;
+    None
 
 let keeper_for_channel ~channel_id =
   match resolve_keeper_for_channel ~channel_id with

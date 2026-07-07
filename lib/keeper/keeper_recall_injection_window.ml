@@ -17,7 +17,12 @@ let note ~keeper_id ~turn ~keys =
   | [] -> ()
   | _ ->
     Stdlib.Mutex.protect mu (fun () ->
+      (* Absence of a table entry IS the fact "no injections recorded for
+         this keeper yet" — the empty window — not an unknown input being
+         silently accepted. The .mli contract states unknown keepers and
+         lost (restarted) windows answer as empty. *)
       let prior =
+        (* DET-OK: empty window is the deterministic absence value. *)
         Option.value (Hashtbl.find_opt table keeper_id) ~default:[]
       in
       let kept =

@@ -81,6 +81,22 @@ val handle_provider_timeout_pause
   -> count:int
   -> (unit, string) result
 
+(** [handle_turn_failure_streak_pause ~publish_phase_lifecycle ctx entry
+      ~count] pauses [entry] because the keeper's turns failed [count]
+    consecutive cycles ([Keeper_registry.Turn_consecutive_failures], which
+    [failure_reason_policy_decision] maps to a [Pause_keeper] verdict).
+    Blocker class [No_progress_loop]; auto-resume with exponential back-off
+    (same policy as [handle_provider_timeout_pause]). Fail-closed like
+    [handle_crash_auto_pause]. Added for #23439 so the supervisor honors the
+    typed pause verdict instead of restarting the keeper. *)
+val handle_turn_failure_streak_pause
+  :  publish_phase_lifecycle:
+       (phase:Keeper_state_machine.phase -> string -> string -> unit -> unit)
+  -> _ context
+  -> Keeper_registry.registry_entry
+  -> count:int
+  -> (unit, string) result
+
 (** [handle_auto_pause_from_meta ~config ~meta ~reason_tag
       ?metric_name ~lifecycle_detail ~log_message ~blocker_class
       ~resume_policy] is the turn-context SSOT for pausing a keeper.
@@ -121,10 +137,11 @@ val reconcile_persisted_auto_pause_task_release
 
 (** [failure_reason_policy_decision reason] maps a persisted
     [Keeper_registry.failure_reason] back to a
-    [Keeper_failure_policy.decision]. Returns [None] for non-policy
-    reasons (heartbeat / turn consecutive failures, fleet batch,
-    provider runtime error, fiber unresolved, exception) and [None]
-    when [reason] itself is [None]. *)
+    [Keeper_failure_policy.decision]. Policy-backed reasons include
+    provider timeout, stale termination storms, and turn consecutive
+    failures. Returns [None] for non-policy reasons (heartbeat, fleet
+    batch, provider runtime error, fiber unresolved, exception) and
+    [None] when [reason] itself is [None]. *)
 val failure_reason_policy_decision
   :  Keeper_registry.failure_reason option
   -> Keeper_failure_policy.decision option

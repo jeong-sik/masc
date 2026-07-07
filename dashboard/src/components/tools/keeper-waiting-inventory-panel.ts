@@ -7,12 +7,15 @@ import type {
 import { formatDateTimeKo } from '../../lib/format-time'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
 
-function enumLabel(value: string | null | undefined): string {
+// Exported for the keeper workspace lane strip (#23507): the lane
+// state/source palettes stay single-sourced here instead of growing a
+// second copy per consuming surface.
+export function enumLabel(value: string | null | undefined): string {
   if (!value) return '-'
   return value.replace(/_/g, ' ')
 }
 
-function stateTone(state: string | null | undefined): StatusChipTone {
+export function stateTone(state: string | null | undefined): StatusChipTone {
   switch (state) {
     case 'waiting':
       return 'warn'
@@ -27,7 +30,7 @@ function stateTone(state: string | null | undefined): StatusChipTone {
   }
 }
 
-function sourceTone(source: string | null | undefined): StatusChipTone {
+export function sourceTone(source: string | null | undefined): StatusChipTone {
   switch (source) {
     case 'read_error':
       return 'bad'

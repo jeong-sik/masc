@@ -299,6 +299,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
     | Some
         { Keeper_failure_policy.lifecycle_effect = Keeper_failure_policy.Pause_keeper
         ; _
+        }
+      when Keeper_pacing_shadow.pacing_enforced () ->
+      (* RFC-0313 W3: failure policy verdicts no longer flip existence. A
+         crashed fiber is process reality; it relaunches on the standard
+         backoff path. The pause arms below stay reachable only in shadow
+         mode (kill-switch, removed in W4). *)
+      queue_standard_restart acc
+    | Some
+        { Keeper_failure_policy.lifecycle_effect = Keeper_failure_policy.Pause_keeper
+        ; _
         } ->
       (match entry.last_failure_reason with
        | Some (Keeper_registry.Stale_termination_storm { count }) ->
@@ -312,7 +322,12 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
             failure gate and let the reconcile loop relaunch a keeper whose
             disk meta still says [paused=false] while operators saw Paused. *)
          (match handle_stale_storm_pause ctx entry ~count with
-          | Ok () -> { acc with to_unregister = entry :: acc.to_unregister }
+          | Ok () ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string FailureDrivenPause)
+             ~labels:[ "keeper", entry.name; "site", "supervisor_stale_storm" ]
+             ();
+           { acc with to_unregister = entry :: acc.to_unregister }
           | Error err ->
             Log.Keeper.warn
               "%s: stale_storm pause not committed (%s); keeping registry entry \
@@ -326,7 +341,12 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
             keeper death. Same fail-closed unregister rule as the stale-storm
             branch above. *)
          (match handle_provider_timeout_pause ctx entry ~count with
-          | Ok () -> { acc with to_unregister = entry :: acc.to_unregister }
+          | Ok () ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string FailureDrivenPause)
+             ~labels:[ "keeper", entry.name; "site", "supervisor_provider_timeout" ]
+             ();
+           { acc with to_unregister = entry :: acc.to_unregister }
           | Error err ->
             Log.Keeper.warn
               "%s: provider_timeout_loop pause not committed (%s); keeping \
@@ -348,7 +368,12 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
             crash-auto-pause path, with the same fail-closed unregister rule as
             the stale-storm / provider-timeout arms above. *)
          (match handle_turn_failure_streak_pause ctx entry ~count with
-          | Ok () -> { acc with to_unregister = entry :: acc.to_unregister }
+          | Ok () ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string FailureDrivenPause)
+             ~labels:[ "keeper", entry.name; "site", "supervisor_turn_failure_streak" ]
+             ();
+           { acc with to_unregister = entry :: acc.to_unregister }
           | Error err ->
             Log.Keeper.warn
               "%s: turn_failure_streak pause not committed (%s); keeping \

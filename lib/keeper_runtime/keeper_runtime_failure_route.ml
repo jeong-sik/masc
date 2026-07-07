@@ -157,6 +157,12 @@ let route_of_error (err : Agent_sdk.Error.sdk_error) : route =
      | Agent_sdk.Error.Provider p -> route_of_provider_error ~err p
      | Agent_sdk.Error.Mcp _ -> judge ~err Protocol_error
      | Agent_sdk.Error.Config _ -> judge ~err Config_mismatch
+     | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
+       (* RFC-0313 W3: an idle loop (repeated no-usable-progress turns) was
+          a manual-resume pause class on the legacy ladder; under existence
+          invariance it escalates as a behavioral contract judgment, not as
+          an opaque internal error. *)
+       judge ~err Contract_violation
      | Agent_sdk.Error.Agent _
      | Agent_sdk.Error.Serialization _
      | Agent_sdk.Error.Io _

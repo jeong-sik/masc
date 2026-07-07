@@ -472,6 +472,28 @@ let test_edit_descriptor_requires_read_first () =
     descriptor.description
 ;;
 
+let test_board_descriptors_steer_concise_content () =
+  (* board_post/comment content-length rejects (53/day): keepers pasted full
+     logs/analyses (up to 8186 chars) past the max_content_length limit. The
+     descriptors now steer concise summaries + links. No hardcoded number —
+     the limit is env-configurable (Board_types.Limits.max_content_length),
+     and the rejection error already reports the actual count. *)
+  let post = required_internal_descriptor "keeper_board_post" in
+  let comment = required_internal_descriptor "keeper_board_comment" in
+  check_contains
+    "board_post description names the length limit"
+    ~sub:"maximum length"
+    post.description;
+  check_contains
+    "board_post description steers summary + link"
+    ~sub:"reference a file path, PR, or issue link"
+    post.description;
+  check_contains
+    "board_comment description names the length limit"
+    ~sub:"maximum length"
+    comment.description
+;;
+
 let test_board_descriptions_disambiguate_post_id_flow () =
   let get_descriptor = required_internal_descriptor "keeper_board_post_get" in
   let get_schema = required_board_schema "keeper_board_post_get" in
@@ -1183,6 +1205,10 @@ let () =
             "Edit requires Read-first and byte-exact old_string"
             `Quick
             test_edit_descriptor_requires_read_first
+        ; test_case
+            "Board post/comment steer concise content"
+            `Quick
+            test_board_descriptors_steer_concise_content
         ; test_case
             "Board get/list descriptions disambiguate post_id flow"
             `Quick

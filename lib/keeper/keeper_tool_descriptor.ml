@@ -1576,7 +1576,7 @@ let internal_descriptors : t list =
     (* ── board cluster (RFC-0179 PR-3, 15 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"
-      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get."
+      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get. Board content has a maximum length; keep comments concise — summarize and link rather than pasting long output."
       ~readonly:false
   ; board_descriptor
       "keeper_board_comment_vote"
@@ -1600,7 +1600,10 @@ let internal_descriptors : t list =
       ~readonly:true
   ; board_descriptor
       "keeper_board_post"
-      "Post a new board entry. Quantitative claims require code-anchor evidence."
+      "Post a new board entry. Quantitative claims require code-anchor \
+       evidence. Board content has a maximum length; keep entries concise — \
+       post a short summary of the key points and reference a file path, PR, \
+       or issue link instead of pasting full logs, diffs, or analyses."
       ~readonly:false
   ; board_descriptor
       "keeper_board_search"

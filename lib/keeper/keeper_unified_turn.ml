@@ -931,7 +931,8 @@ dominant source of the observed CAS race exhaustion after
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:
                       [ "keeper", meta.name
-                      ; "runtime", final_execution.runtime_id
+                      ; (* RFC-0132-EXEMPT: internal observability — real runtime identity on a metric label, not a redacted public surface *)
+                        "runtime", final_execution.runtime_id
                       ; "route", Keeper_failure_route.route_kind_label failure_route
                       ; "class", Keeper_failure_route.route_class_label failure_route
                       ]

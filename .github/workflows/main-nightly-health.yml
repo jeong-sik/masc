@@ -33,7 +33,7 @@ jobs:
 
       - name: Install ripgrep
         run: |
-          sudo apt-get update -qq
+          bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y -qq ripgrep
 
       - name: Check doc truth

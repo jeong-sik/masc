@@ -173,12 +173,24 @@ let rec next_gh_positional = function
   | tok :: rest -> Some (tok, rest)
 ;;
 
+(* `gh repo new` is an official alias of `gh repo create` (see `gh repo create
+   --help`, ALIASES section). The repo-create contract must fire on both, or
+   an agent reaches the exact ambient-ownership / missing-visibility failure
+   G-10 exists to prevent by routing through the alias. This is the closed
+   acceptance set over `gh`'s documented create-aliases, not a risk
+   classifier: keep it in sync with `gh`'s ALIASES list. *)
+let is_repo_create_action action =
+  match String.lowercase_ascii action with
+  | "create" | "new" -> true
+  | _ -> false
+;;
+
 let repo_create_tail words =
   match next_gh_positional words with
   | Some (family, after_family) when String.equal (String.lowercase_ascii family) "repo" ->
     (match next_gh_positional after_family with
      | Some (action, after_action)
-       when String.equal (String.lowercase_ascii action) "create" -> Some after_action
+       when is_repo_create_action action -> Some after_action
      | Some _ | None -> None)
   | Some _ | None -> None
 ;;

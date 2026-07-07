@@ -170,7 +170,7 @@ module For_testing_blame : sig
 
   (** [parse_blame_header line] returns [(sha, final_line)] when [line] is a
       porcelain group header ["<40-hex sha> <orig> <final>[ <count>]"]. *)
-  val parse_blame_header : string -> (string * int) option
+  val parse_blame_header : string -> (string * int * int) option
 
   (** [parse_blame_porcelain lines] joins per-line headers with each sha's
       metadata block (which git emits only on the sha's first group). Lines

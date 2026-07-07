@@ -123,6 +123,45 @@ let get_origin_url ~local_path =
   | Ok [] -> Error "git remote get-url origin returned no output"
   | Error msg -> Error msg
 
+let inspect_timeout_sec = status_summary_timeout_sec
+
+let current_branch ~repository =
+  match
+    run_git ~cwd:repository.local_path ~env:read_only_git_env
+      ~timeout_sec:inspect_timeout_sec
+      [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
+  with
+  | Ok (name :: _) -> Ok name
+  | Ok [] -> Error "git rev-parse --abbrev-ref HEAD returned no output"
+  | Error msg -> Error msg
+
+let ahead_behind ~repository ~target_ref =
+  match
+    run_git ~cwd:repository.local_path ~env:read_only_git_env
+      ~timeout_sec:inspect_timeout_sec
+      [ "rev-list"; "--left-right"; "--count"; target_ref ^ "...HEAD" ]
+  with
+  | Error msg -> Error msg
+  | Ok [] -> Error "git rev-list --left-right --count returned no output"
+  | Ok (line :: _) -> (
+      match String.split_on_char '\t' (String.trim line) with
+      | [ behind; ahead ] -> (
+          match
+            ( int_of_string_opt (String.trim behind),
+              int_of_string_opt (String.trim ahead) )
+          with
+          | Some behind, Some ahead -> Ok (behind, ahead)
+          | _ ->
+              Error
+                (Printf.sprintf
+                   "git rev-list --left-right --count returned non-numeric output: %S"
+                   line))
+      | _ ->
+          Error
+            (Printf.sprintf
+               "git rev-list --left-right --count returned malformed output: %S"
+               line))
+
 let get_recent_commits ~repository ~branch ~limit =
   match
     run_git ~cwd:repository.local_path

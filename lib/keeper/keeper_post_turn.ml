@@ -452,7 +452,7 @@ let no_state_interruption_note =
    backlog, and messages against live state, then act or defer with a \
    stated reason."
 
-(* RFC-0314 P2a: a no-[STATE] turn is exactly the turn whose replay suffix
+(* RFC-0315 P2a: a no-[STATE] turn is exactly the turn whose replay suffix
    the checkpoint layer prunes (synthetic-empty / requires-attention), and
    it also writes zero memory-bank notes — so without a note the next turn
    opens on "No continuity snapshot available." and re-derives the world

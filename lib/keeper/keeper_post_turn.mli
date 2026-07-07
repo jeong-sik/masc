@@ -140,7 +140,7 @@ val augment_progress_with_interruption_note :
   updated_at:string ->
   keeper_name:string ->
   unit
-(** RFC-0314 P2a. Called on a turn that produced no [STATE] snapshot (the
+(** RFC-0315 P2a. Called on a turn that produced no [STATE] snapshot (the
     same turns whose checkpoint replay suffix is pruned and whose memory
     writes are suppressed): preserves the existing forward-looking
     progress.md snapshot and adds {!no_state_interruption_note} to its

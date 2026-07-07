@@ -1,4 +1,4 @@
-(* RFC-0314 P2a — interruption note for no-[STATE] turns.
+(* RFC-0315 P2a — interruption note for no-[STATE] turns.
 
    A turn that produces no [STATE] snapshot is the same turn whose checkpoint
    replay suffix gets pruned and whose memory-bank writes are suppressed, so

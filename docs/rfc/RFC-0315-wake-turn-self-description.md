@@ -91,7 +91,8 @@ admission 의미론 불변. 프롬프트 입력만 바로잡는다.
 ### Phase 3 — Standing-objective lane (자기 주도 턴)
 
 - goal을 **edge-gated** 기회 신호로 승격: goal 배정/갱신/stagnation-wake(RFC-0310 §3.3) 이벤트가 신호를 만들고, 상수 레벨 신호로는 cadence를 admit하지 않는다(D5의 executor-spin 재발 방지 — level→edge 원칙은 current_task_id에도 적용 검토).
-- goal 배정 흐름: operator/supervisor가 `active_goal_ids`를 실제로 채우는 표면(대시보드/도구) — 현재 함대 전원 빈 배열인 근본 원인 해소.
+  - **W0 (구현 PR #23563)**: `Keeper_event_queue.Goal_assigned` — keeper_up의 `active_goal_ids` 변경 커밋 직후 old/new diff의 **추가분만** 1회 wake(typed lane, `Goal_verification_failed` 선례). identity는 display 필드 strip으로 goal 단위 dedupe. TOML reconcile 경로는 의도적 제외(overlay ids는 영속되지 않아 매 ensure마다 재발화하는 level 신호가 됨 — TOML 목표는 상시 구성이지 배정 이벤트가 아님).
+- goal 배정 흐름: operator/supervisor가 `active_goal_ids`를 실제로 채우는 표면(대시보드/도구) — 현재 함대 전원 빈 배열인 근본 원인 해소. 배정 표면 자체는 존재(keeper_up args + TOML); W0로 배정이 keeper에게 **들리게** 됨.
 - `keeper_deliberation.ml` dead code 정리: 삭제하고 SelfDirectedExplore 의미론은 본 lane으로 흡수.
 - **Cheap-defer 계약**: 무자극 자기주도 턴에서 모델이 typed defer로 응답하면 낮은 비용 terminal로 처리하고 noop backoff로 벌하지 않는다(openclaw HEARTBEAT_OK 등가). 이는 cap/cooldown 추가가 아니라 기존 backoff의 오발동 제거다.
 

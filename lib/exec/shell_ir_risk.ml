@@ -365,10 +365,17 @@ let classify_write_detail (words : string list) : risk_class option =
 let repo_hosting_cli_irreversible_ops =
   [
     ("pr", [ "merge"; "ready" ]);
-    ("repo", [ "create"; "delete"; "archive"; "transfer"; "rename"; "fork" ]);
-    ( "discussion",
-      [ "create"; "comment"; "edit"; "delete"; "close"; "reopen"; "lock";
-        "unlock"; "answer"; "unanswer" ] );
+    (* RFC-0309 W4/G-9: repo create/fork are factually REVERSIBLE (a created or
+       forked repo can be deleted), so they move to the reversible table below.
+       Only the genuinely irreversible repo ops stay here. This restores the
+       risk axis to state a fact; the "keeper may not create repos
+       unsupervised" decision now lives on the capability axis
+       ([Gh_capability_policy]) as [Requires_approval], superseding #23362's
+       policy-as-risk encoding. *)
+    ("repo", [ "delete"; "archive"; "transfer"; "rename" ]);
+    (* Only [delete] is irreversible; create/comment/edit/close/reopen/lock/
+       unlock/answer/unanswer are reversible discussion mutations (W4/G-9). *)
+    ("discussion", [ "delete" ]);
     ("release", [ "delete" ]);
     ("secret", [ "delete"; "remove" ]);
     ("ssh-key", [ "delete" ]);
@@ -392,8 +399,18 @@ let repo_hosting_cli_reversible_mutations =
     ("run", [ "cancel"; "rerun"; "watch" ]);
     ("cache", [ "delete" ]);
     ("gist", [ "create"; "edit"; "clone"; "rename" ]);
+    (* RFC-0309 W4/G-9: create/fork are reversible remote mutations. The
+       capability axis ([Gh_capability_policy]) routes create/fork/edit/sync to
+       [Requires_approval] because they touch a durable remote surface; the
+       risk axis only states they are reversible (R1). *)
     ("repo",
-     [ "clone"; "edit"; "sync"; "set-default" ]);
+     [ "clone"; "create"; "fork"; "edit"; "sync"; "set-default" ]);
+    (* RFC-0309 W4/G-9: reversible discussion mutations (delete stays R2 in the
+       irreversible table). The capability axis routes these to
+       [Requires_approval] via the Discussion durable-remote family. *)
+    ("discussion",
+     [ "create"; "comment"; "edit"; "close"; "reopen"; "lock"; "unlock";
+       "answer"; "unanswer" ]);
     ("project",
      [ "create"; "edit"; "close"; "copy"; "link"; "unlink"; "field-create";
        "field-delete"; "item-add"; "item-archive"; "item-delete"; "item-edit" ]);
@@ -452,12 +469,13 @@ let repo_hosting_graphql_r2_fragments =
   [ "deletepullrequest"; "deleteissue"; "deletebranch"; "deleteref";
     "deleteproject"; "deletebranchprotectionrule";
     "removeouterfromorganization"; "transferrepository";
-    "archiverepository"; "createrepository"; "clonetemplaterepository";
-    "creatediscussion"; "adddiscussioncomment"; "adddiscussionpollvote";
-    "closediscussion"; "deletediscussion"; "deletediscussioncomment";
-    "markdiscussioncommentasanswer"; "reopendiscussion";
-    "unmarkdiscussioncommentasanswer"; "updatediscussion";
-    "updatediscussioncomment";
+    "archiverepository";
+    (* RFC-0309 W4/G-9: only irreversible discussion graphql mutations stay R2.
+       createDiscussion/addDiscussionComment/closeDiscussion/updateDiscussion/
+       etc. are reversible and are gated by the capability axis, not the risk
+       floor (they were added to R2 by #23362's policy-as-risk encoding).
+       createRepository/cloneTemplateRepository are likewise reversible. *)
+    "deletediscussion"; "deletediscussioncomment";
     (* Forward-looking verb prefixes for mutations GitHub may introduce.
        Over-block here is acceptable — under-block (silent miss) is not. *)
     "purgerepository" ]
@@ -474,12 +492,15 @@ let strip_graphql_comments s =
     s;
   Buffer.contents buf
 
-let body_contains_r2_mutation words =
-  let body =
-    String.concat " " words
-    |> String.lowercase_ascii
-    |> strip_graphql_comments
-  in
+let graphql_body_lower words =
+  String.concat " " words |> String.lowercase_ascii |> strip_graphql_comments
+
+(* Substring-scan the (comment-stripped, lowercased) graphql body for any of
+   [fragments]. Shared by the R2 deny-list and the durable-remote capability
+   list so both use one parser-owned body reader. *)
+let body_contains_fragment (fragments : string list) (words : string list) : bool
+  =
+  let body = graphql_body_lower words in
   let m = String.length body in
   List.exists
     (fun frag ->
@@ -492,7 +513,34 @@ let body_contains_r2_mutation words =
            else scan (i + 1)
          in
          scan 0)
-    repo_hosting_graphql_r2_fragments
+    fragments
+
+let body_contains_r2_mutation words =
+  body_contains_fragment repo_hosting_graphql_r2_fragments words
+
+(* GraphQL mutation fragments that establish or modify a durable REMOTE
+   repository/discussion surface and are reversible (R1). W4/G-9 moved these out
+   of [repo_hosting_graphql_r2_fragments] (they are reversible, so the risk floor
+   no longer denies them). The capability axis escalates them to Ask, mirroring
+   the typed [gh repo create] / [gh discussion create] path — without this the
+   string-borne graphql form would auto-run under the autonomous overlay while
+   the typed form asks (an axis-asymmetry bypass). Irreversible graphql mutations
+   (delete*/transfer/archive/purge) stay in [repo_hosting_graphql_r2_fragments]
+   and are denied by the floor, so they are deliberately absent here.
+   Over-inclusion only adds an approval prompt (safe); under-inclusion silently
+   auto-runs a durable-remote write (unsafe). *)
+let repo_hosting_graphql_durable_remote_fragments =
+  [ "createrepository"; "clonetemplaterepository"; "updaterepository";
+    "creatediscussion"; "updatediscussion"; "adddiscussioncomment";
+    "updatediscussioncomment"; "adddiscussionpollvote"; "closediscussion";
+    "reopendiscussion"; "markdiscussioncommentasanswer";
+    "unmarkdiscussioncommentasanswer" ]
+
+let gh_api_graphql_creates_durable_remote (words : string list) : bool =
+  (* Guard on the [graphql] endpoint token: a REST [gh api /path] call whose
+     path merely contains a mutation name must not be over-flagged. *)
+  List.mem "graphql" (List.map String.lowercase_ascii words)
+  && body_contains_fragment repo_hosting_graphql_durable_remote_fragments words
 
 let classify_repo_hosting_cli (words : string list) : risk_class =
   match words with

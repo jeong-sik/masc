@@ -114,6 +114,19 @@ val risk_of_gh_verb : Gh_verb.t -> risk_class
     Never returns [Destructive_protected]. Capability-identity substrate for
     W2 (per-keeper policy) and W3 (non-blocking approval routing). *)
 
+val gh_api_graphql_creates_durable_remote : string list -> bool
+(** True when [words] is a [gh api graphql ...] invocation whose (comment-
+    stripped) body contains a durable-remote repository/discussion create/mutate
+    fragment that W4/G-9 demoted from the R2 deny floor to R1 (createRepository,
+    createDiscussion, addDiscussionComment, …). The capability axis
+    ([Gh_capability_policy.disposition_of_words]) consults this to escalate the
+    string-borne graphql form to [Requires_approval], matching the typed
+    [gh repo create] path — the typed verb for [gh api] is [Gh_verb.Api], which
+    is body-blind by design (RFC-0208), so the disposition would otherwise
+    [Allow] it. Guarded on the [graphql] endpoint token; a REST [gh api] path
+    that merely contains a mutation name returns [false]. Irreversible graphql
+    mutations stay R2-floored and are not reported here. *)
+
 val literal_words_of_simple : Shell_ir.simple -> string list option
 (** Extract literal words from a single [Shell_ir.simple] stage:
     [[bin; arg0; arg1; ...]]. Non-literal args ([Concat], [Var])

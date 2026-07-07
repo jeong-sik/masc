@@ -65,3 +65,28 @@ val disposition_of : Gh_verb.t -> disposition
     - risk R0 -> [Allowed];
     - risk R1 -> [Requires_approval] if [creates_durable_remote_surface],
       else [Allowed]. *)
+
+val disposition_of_words : string list -> Gh_verb.t -> disposition
+(** Body-aware disposition. Identical to [disposition_of] for every command
+    except [gh api graphql ...]: the typed verb for [gh api] is [Gh_verb.Api],
+    which is body-blind by design (RFC-0208), yet W4/G-9 demoted durable-remote
+    graphql creates (createRepository/createDiscussion/addDiscussionComment) from
+    the R2 deny floor to R1. Without body inspection the disposition would
+    [Allow] them while the typed [gh repo create] form [Requires_approval] — an
+    axis-asymmetry bypass. This variant consults
+    [Shell_ir_risk.gh_api_graphql_creates_durable_remote words] and returns
+    [Requires_approval] for such bodies. ADDITIVE: only ever upgrades [Allowed]
+    to [Requires_approval], never the reverse. Callers with the raw argv words
+    (e.g. [Approval_policy.decide]) should prefer this over [disposition_of]. *)
+
+val disposition_of_simple : Shell_ir.simple -> disposition option
+(** Capability disposition for a parsed Shell IR simple command. Returns [None]
+    for non-[gh] commands.
+
+    This is the approval-path entry point because it preserves argument opacity.
+    Literal [gh api graphql -f query=...] bodies are classified through
+    {!disposition_of_words}. If the GraphQL [query] field itself is non-literal
+    (for example [query=$MUTATION] or an opaque field token), the body cannot be
+    inspected for durable-remote mutations, so the capability axis fail-closes to
+    [Requires_approval]. Opaque non-query GraphQL variables such as
+    [owner=$OWNER] do not trigger this approval path. *)

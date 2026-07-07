@@ -5,7 +5,6 @@
     provider-error classification, not runtime-specific. *)
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
-val message_looks_like_capacity_backpressure : string -> bool
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_is_terminal_provider_runtime_failure :
   Agent_sdk.Error.sdk_error -> bool
@@ -71,6 +70,10 @@ val health_error_kind : string -> Keeper_binding_health.error_kind
 type provider_cooldown_block =
   { blocked_provider_keys : string list
   ; cooldown_remaining_sec : int
+  ; cooldown_cause : Keeper_internal_error.provider_cooldown_cause option
+    (** Aggregate arming cause across all blocking providers ([None] when
+        unknown); deterministic only when every blocker is deterministic.
+        #23438. *)
   }
 
 val provider_cooldown_block :

@@ -350,6 +350,19 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    ();
                  tool_result_error e
              | Ok () ->
+               (* RFC-0315 P3 W0: goals that newly entered active_goal_ids
+                  wake the keeper once at the assignment edge. Enqueue is
+                  durable, so the keepalive restart below delivers it on the
+                  new fiber's first cycle. Removals never wake. *)
+               let (_ : string list) =
+                 Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
+                   ~config:ctx.config
+                   ~keeper_name:updated.name
+                   ~assigned_by:"keeper_up"
+                   ~old_ids:old.active_goal_ids
+                   ~new_ids:updated.active_goal_ids
+                   ()
+               in
                stop_keepalive ~base_path:ctx.config.base_path updated.name;
                start_keepalive ctx updated;
                tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated)))))

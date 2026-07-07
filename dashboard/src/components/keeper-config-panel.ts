@@ -142,6 +142,15 @@ export type KeeperConfigControlInventoryItem = {
 
 const kcfTab = signal<KcfTabId>('identity')
 
+// Deep-link entry point: focus a specific config tab before the modal opens.
+// `kcfTab` is reset to 'identity' only on panel teardown (see
+// resetKeeperConfigPanelDrafts), never on mount, so a value set here survives the
+// next open. Used by the read-only runtime card (keeper-runtime-model-editor) to
+// land the operator on the 런타임 tab where runtime_id is actually edited.
+export function focusKeeperConfigTab(tab: KcfTabId): void {
+  kcfTab.value = tab
+}
+
 // ── State ────────────────────────────────────────────────
 
 const goalOptionsResource = createAsyncResource<GoalTreeNode[]>()

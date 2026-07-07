@@ -34,6 +34,7 @@ type wake_producer =
   | Goal_verification_store
   | Keeper_turn_failure_route
   | Keeper_goal_assignment
+  | Keeper_goal_stagnation
   | Read_model_reader
 
 type waiting_row =
@@ -104,6 +105,7 @@ let wake_producer_to_string = function
   | Goal_verification_store -> "goal_verification_store"
   | Keeper_turn_failure_route -> "keeper_turn_failure_route"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
+  | Keeper_goal_stagnation -> "keeper_goal_stagnation"
   | Read_model_reader -> "read_model_reader"
 ;;
 
@@ -120,6 +122,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Goal_verification_failed _ -> Goal_verification_store
   | Failure_judgment _ -> Keeper_turn_failure_route
   | Goal_assigned _ -> Keeper_goal_assignment
+  | Goal_stagnation _ -> Keeper_goal_stagnation
 ;;
 
 let unix_iso_json = function

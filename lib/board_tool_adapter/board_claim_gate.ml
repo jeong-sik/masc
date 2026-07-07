@@ -46,6 +46,14 @@ let has_prefix ~prefix s =
 
 let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
 
+let digest_of_file path =
+  (* Bind an artifact ref to the actual on-disk content: a sha256 of the file
+     body, so "evidence" is more than "any file under the base happened to
+     exist". [None] only if the file vanished between the [Sys.file_exists]
+     check and the read (TOCTOU) or is unreadable. *)
+  try Some ("sha256:" ^ sha256_hex (In_channel.with_open_text path In_channel.input_all))
+  with Sys_error _ -> None
+
 let normalize_sha256 raw =
   let trimmed = String.trim raw in
   if has_prefix ~prefix:"sha256:" trimmed
@@ -196,7 +204,7 @@ let resolve_file_path raw =
     | None -> Unknown { ref_; checked_at; reason = "artifact_ref_outside_base_path" }
     | Some path ->
       if Sys.file_exists path
-      then Exists { ref_; kind = "file_path"; checked_at; digest = None }
+      then Exists { ref_; kind = "file_path"; checked_at; digest = digest_of_file path }
       else Missing { ref_; checked_at; reason = "file_path_missing" })
 ;;
 
@@ -312,7 +320,13 @@ let append_record ~tool_name ~author ~target_post_id ~content ~claims ~snapshot 
        | Some s -> [ "source_post_snapshot", source_snapshot_to_yojson s ]
        | None -> [])
   in
-  Fs_compat.append_jsonl (Board_claim_evidence.sidecar_path ()) json
+  let path = Board_claim_evidence.sidecar_path () in
+  Fs_compat.append_jsonl path json;
+  (* Mirror sibling sidecars (board_posts/comments/reactions/sub_boards), which
+     rotate at [Board_paths.max_jsonl_bytes]. Without this the claim-evidence
+     ledger grew unbounded and the projection re-read the whole file on every
+     dashboard fetch. *)
+  Board_paths.rotate_if_needed path
 ;;
 
 let evaluate ~target_post_id ~claims ~snapshot ~artifact_refs ~resolutions =

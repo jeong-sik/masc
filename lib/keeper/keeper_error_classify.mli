@@ -5,6 +5,8 @@ type error_classification =
   | Transient_network
   | Transient_internal_runner
   | Transient_oas_timeout
+  | Transient_rate_limit
+  | Transient_capacity
   | Non_transient
   | Unclassified
 

@@ -939,7 +939,7 @@ function WorkAside({
           <span class=${`wka-hud-v ${counts.verify ? 'volt' : ''}`}>${counts.verify}</span>
         </div>
         <div class="wka-hud-c">
-          <span class="wka-hud-k">미배정</span>
+          <span class="wka-hud-k">백로그</span>
           <span class=${`wka-hud-v ${counts.backlog ? 'warn' : ''}`}>${counts.backlog}</span>
         </div>
         <div class="wka-hud-c">
@@ -1392,7 +1392,7 @@ function WorkSurfaceV2() {
               <div class=${`wk-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">미배정</div>
+              <div class="wk-kpi-k">백로그</div>
               <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
@@ -1401,7 +1401,7 @@ function WorkSurfaceV2() {
             <section class="wk-backlog" data-testid="work-backlog">
               <div class="wk-backlog-h">
                 <span class="wk-backlog-glyph" aria-hidden="true">⊕</span>
-                미배정 Task
+                클레임 가능 백로그
                 <span class="n">${backlogTasks.length}</span>
                 <span class="wk-backlog-sub mono">keeper_task_claim — 미배정 task</span>
               </div>
@@ -1448,7 +1448,7 @@ function WorkSurfaceV2() {
               />
             `}
 
-          <div class="wk-foot mono">목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 claim</div>
+          <div class="wk-foot mono">목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 백로그에서 claim</div>
       </div>
       ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
         <${WorkAside}

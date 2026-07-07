@@ -21,7 +21,7 @@ import { PanelCard } from './common/panel-card'
 import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 
-function SnapshotBadge({ tone, children }: { tone: 'accent' | 'neutral' | 'ok'; children: unknown }) {
+function SnapshotBadge({ tone, children }: { tone: 'accent' | 'neutral' | 'ok' | 'warn' | 'bad'; children: unknown }) {
   const chipTone: StatusChipTone = tone === 'accent' ? 'info' : tone
   return html`<${StatusChip} tone=${chipTone} uppercase=${false} class="font-semibold">${children}</${StatusChip}>`
 }

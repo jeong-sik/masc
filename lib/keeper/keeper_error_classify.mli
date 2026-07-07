@@ -24,7 +24,9 @@ val classify_error : Agent_sdk.Error.sdk_error -> error_classification
 val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when a typed internal runner exception preserves a transient
-    transport failure that was raised inside [runtime_runner.execute]. *)
+    transport failure raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
+    Legacy internal exception envelopes without [transport_error_kind] are
+    diagnostic-only and are not parsed heuristically. *)
 val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when an OAS timeout message describes an execution budget expiry,

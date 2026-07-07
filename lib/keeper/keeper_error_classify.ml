@@ -33,14 +33,24 @@ let is_structural_oas_timeout_message message =
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
+let is_transient_internal_transport_error = function
+  | Llm_provider.Http_client.Tls_error -> true
+  | Llm_provider.Http_client.Connection_refused
+  | Llm_provider.Http_client.Dns_failure
+  | Llm_provider.Http_client.Timeout
+  | Llm_provider.Http_client.Local_resource_exhaustion
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown ->
+    false
+;;
+
 let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Internal_unhandled_exception { site; exn_repr })
-    when String.equal site "runtime_runner.execute" ->
-    let lower = String.lowercase_ascii exn_repr in
-    string_contains_substring ~needle:"tls alert" lower
-    || string_contains_substring ~needle:"handshake failure" lower
-    || string_contains_substring ~needle:"tls_error" lower
+  | Some
+      (Keeper_turn_driver.Internal_unhandled_exception
+         { site; transport_error_kind = Some transport_error_kind; _ })
+    when String.equal site Keeper_turn_driver.runtime_runner_execute_site ->
+    is_transient_internal_transport_error transport_error_kind
   | Some
       ( Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Runtime_exhausted _

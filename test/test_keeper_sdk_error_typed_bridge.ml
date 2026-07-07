@@ -392,8 +392,18 @@ let check_classification label expected err =
 let runtime_runner_tls_error () =
   KTD.sdk_error_of_masc_internal_error
     (KTD.Internal_unhandled_exception
-       { site = "runtime_runner.execute"
+       { site = KTD.runtime_runner_execute_site
        ; exn_repr = "TLS alert from peer: handshake failure"
+       ; transport_error_kind = Some Http.Tls_error
+       })
+;;
+
+let runtime_runner_legacy_tls_text_error () =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Internal_unhandled_exception
+       { site = KTD.runtime_runner_execute_site
+       ; exn_repr = "TLS alert from peer: handshake failure"
+       ; transport_error_kind = None
        })
 ;;
 
@@ -419,6 +429,10 @@ let test_static_error_classification_preserves_retry_semantics () =
     "internal runner tls"
     EC.Transient_internal_runner
     (runtime_runner_tls_error ());
+  check_classification
+    "legacy internal runner tls text is not parsed"
+    EC.Unclassified
+    (runtime_runner_legacy_tls_text_error ());
   check_classification
     "api overloaded"
     EC.Transient_capacity

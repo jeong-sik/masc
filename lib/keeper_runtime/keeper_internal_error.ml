@@ -320,6 +320,7 @@ type masc_internal_error =
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
     }
   | Internal_bridge_exception of {
       caller : string;
@@ -330,6 +331,7 @@ type masc_internal_error =
     }
 
 let masc_internal_error_prefix = "[masc_oas_error] "
+let runtime_runner_execute_site = "runtime_runner.execute"
 
 (* #9933: a keeper [blocker_info] detail string may carry a structured
    [masc_oas_error] JSON payload — [masc_internal_error_prefix] above,
@@ -409,6 +411,33 @@ let provider_rejection_reasons rejections =
 
 let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
+;;
+
+let network_error_kind_to_string = function
+  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
+  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
+  | Llm_provider.Http_client.Tls_error -> "tls_error"
+  | Llm_provider.Http_client.Timeout -> "timeout"
+  | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Llm_provider.Http_client.End_of_file -> "end_of_file"
+  | Llm_provider.Http_client.Unknown -> "unknown"
+;;
+
+let network_error_kind_of_string = function
+  | "connection_refused" -> Some Llm_provider.Http_client.Connection_refused
+  | "dns_failure" -> Some Llm_provider.Http_client.Dns_failure
+  | "tls_error" -> Some Llm_provider.Http_client.Tls_error
+  | "timeout" -> Some Llm_provider.Http_client.Timeout
+  | "local_resource_exhaustion" ->
+    Some Llm_provider.Http_client.Local_resource_exhaustion
+  | "end_of_file" -> Some Llm_provider.Http_client.End_of_file
+  | "unknown" -> Some Llm_provider.Http_client.Unknown
+  | _ -> None
+;;
+
+let transport_error_kind_json_fields = function
+  | None -> []
+  | Some kind -> [ "transport_error_kind", `String (network_error_kind_to_string kind) ]
 ;;
 
 let bool_opt_of_assoc key = function
@@ -569,13 +598,13 @@ let masc_internal_error_to_json = function
         ("tools", Json_util.json_string_list tools);
         ("original_error", `String original_error);
       ]
-  | Internal_unhandled_exception { site; exn_repr } ->
+  | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
     `Assoc
-      [
-        ("kind", `String "internal_unhandled_exception");
-        ("site", `String site);
-        ("exn_repr", `String exn_repr);
-      ]
+      ([ ("kind", `String "internal_unhandled_exception")
+       ; ("site", `String site)
+       ; ("exn_repr", `String exn_repr)
+       ]
+       @ transport_error_kind_json_fields transport_error_kind)
   | Internal_bridge_exception { caller; exn_repr } ->
     `Assoc
       [
@@ -1144,11 +1173,20 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             Some (Ambiguous_post_commit { is_timeout; tools; original_error })
           | _ -> None)
       | Some (`String "internal_unhandled_exception") -> (
-          match string_opt_of_assoc "site" json,
-                string_opt_of_assoc "exn_repr" json
-          with
+          match string_opt_of_assoc "site" json, string_opt_of_assoc "exn_repr" json with
           | Some site, Some exn_repr ->
-            Some (Internal_unhandled_exception { site; exn_repr })
+            (match string_opt_of_assoc "transport_error_kind" json with
+             | None ->
+               Some
+                 (Internal_unhandled_exception
+                    { site; exn_repr; transport_error_kind = None })
+             | Some raw_kind ->
+               (match network_error_kind_of_string raw_kind with
+                | Some transport_error_kind ->
+                  Some
+                    (Internal_unhandled_exception
+                       { site; exn_repr; transport_error_kind = Some transport_error_kind })
+                | None -> None))
           | _ -> None)
       | Some (`String "internal_bridge_exception") -> (
           match string_opt_of_assoc "caller" json,

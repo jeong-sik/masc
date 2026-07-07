@@ -156,6 +156,7 @@ type masc_internal_error =
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
     }
   | Internal_bridge_exception of {
       caller : string;
@@ -164,6 +165,8 @@ type masc_internal_error =
   | Internal_contract_rejected of { reason : string }
 
 val masc_internal_error_prefix : string
+
+val runtime_runner_execute_site : string
 
 val blocker_detail_structured_max_chars : int
 (** Upper bound (~2000) preserved for a [masc_oas_error] structured payload

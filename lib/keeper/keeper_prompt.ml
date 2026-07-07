@@ -178,7 +178,7 @@ let behavior_prompt_block name =
 let build_keeper_system_prompt
     ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(home_ground = "") ?(active_goals = []) () =
+    ?(home_ground = "") ?(active_goals = []) ?(registered_repos = []) () =
   let goal = normalize_goal_text goal in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
@@ -235,6 +235,31 @@ let build_keeper_system_prompt
          </home_ground>\n"
         (String_util.escape_xml home_ground)
   in
+  let registered_repositories_block =
+    (* Enumerate the keeper's registered repository ids from
+       [repositories.toml] so the keeper has the closed set of valid
+       [repos/<name>] segments rather than guessing (org-prefixed, renamed,
+       or invented names are rejected as unregistered). Empty list renders
+       nothing — a failed/empty catalog read degrades to silence, never a
+       fabricated name. *)
+    match registered_repos with
+    | [] -> ""
+    | repos ->
+        let lines =
+          List.map
+            (fun id -> Printf.sprintf "- repos/%s" (String_util.escape_xml id))
+            repos
+        in
+        Printf.sprintf
+          "\n\
+           <registered_repositories>\n\
+           Only these repository names resolve under repos/<name>/. Any other \
+           name (org-prefixed, renamed, or invented) is rejected as \
+           unregistered.\n\
+           %s\n\
+           </registered_repositories>\n"
+          (String.concat "\n" lines)
+  in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
      and most of <world>/<capabilities> text.  Keeper-specific blocks
@@ -285,6 +310,8 @@ let build_keeper_system_prompt
       identity_anchor;
       (* ── Home ground (CWD anchor) ───────────────────────────── *)
       home_ground_block;
+      (* ── Registered repositories (valid repos/<name> segments) ─ *)
+      registered_repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\

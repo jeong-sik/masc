@@ -318,6 +318,7 @@ val build_keeper_system_prompt
   -> ?keeper_name:string
   -> ?home_ground:string
   -> ?active_goals:(string * string) list
+  -> ?registered_repos:string list
   -> unit
   -> string
 

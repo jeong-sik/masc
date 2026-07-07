@@ -58,6 +58,14 @@ let build_base_system_prompt
          | None -> None)
       meta.active_goal_ids
   in
+  let registered_repos =
+    (* Enumerate registered repository ids so the system prompt can list the
+       valid [repos/<name>] segments. A failed catalog read yields [] (no
+       block), matching the empty-goals/empty-home degrade-to-silence policy. *)
+    match Repo_store.load_all ~base_path:config.base_path with
+    | Ok repos -> List.map (fun (r : Repo_manager_types.repository) -> r.id) repos
+    | Error _ -> []
+  in
   Keeper_prompt.build_keeper_system_prompt
     ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
     ~instructions:
@@ -66,6 +74,7 @@ let build_base_system_prompt
     ~keeper_name:meta.name
     ~active_goals
     ~home_ground:config.base_path
+    ~registered_repos
     ()
 
 let max_tokens_fallback ~keeper_name profile_defaults () =

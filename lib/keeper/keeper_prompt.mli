@@ -36,8 +36,13 @@ val build_keeper_system_prompt :
   ?keeper_name:string ->
   ?home_ground:string ->
   ?active_goals:(string * string) list ->
+  ?registered_repos:string list ->
   unit ->
   string
+(** [registered_repos] lists the keeper's registered repository ids (from
+    [repositories.toml]). When non-empty it renders a [<registered_repositories>]
+    block enumerating the valid [repos/<name>] segments, so the keeper does not
+    guess org-prefixed / renamed / invented names that fail as unregistered. *)
 
 val append_direct_reply_mode_prompt :
   base_prompt:string ->

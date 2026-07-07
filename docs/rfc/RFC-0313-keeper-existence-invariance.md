@@ -124,8 +124,8 @@ One record (pacing + operator intent) replaces `paused`/`latched_reason`/`last_b
 
 - **W0** — this RFC + TLA+ spec `KeeperPacing.tla`: invariant `NoFailureDrivenExistenceChange` + bug-model action (`FailureSetsPaused`) with clean/buggy cfg pair (house pattern); replay fixture built from the 07-06 storm log window.
 - **W1** — `keeper_pacing` module + shadow writes (observe-only: pacing computed and logged next to existing behavior; dashboard shows it). No behavior change.
-- **W2** — total routing: kill `None` rotation classes, add `Escalate_judgment` typed stimulus channel; per-runtime revisit honors `retry_after`. Cycle-cap matrix deleted in the same PR (pacing replaces it).
-- **W3** — flip: the six in-turn pause paths and both supervisor auto arms write pacing instead of `paused=true`. Manual-resume classes (idle, contract-attention) become `Escalate_judgment` stimuli. Storm replay fixture must show bounded retry rate.
+- **W2** — total routing, **additively**: a typed total route function covers every `sdk_error` class (the `None` family gets an explicit route), the `Escalate_judgment` stimulus channel is added, and the provider `retry_after` hint is threaded into shadow pacing. Existing streak/pause/rotation behavior is unchanged — the new routes are recorded and escalations enqueued alongside it. Nothing is deleted at this wave: the cycle-cap matrix must outlive shadow pacing, because deleting the cap while pacing is still observe-only would reopen the 07-06 backpressure storm.
+- **W3** — flip: the six in-turn pause paths and both supervisor auto arms write pacing instead of `paused=true`; the cycle-cap matrix is deleted in this same PR (enforcing pacing is what replaces it). Manual-resume classes (idle, contract-attention) become `Escalate_judgment` stimuli. Storm replay fixture must show bounded retry rate.
 - **W4** — purge: streak/crash/restart-budget thresholds, DEAD-by-budget, dead_ttl/prune of auto-paused, `[pause]` knobs; supervisor relaunch always-on with paced relaunch.
 - **W5** — state SSOT consolidation + boundary cleanups (§6), CAS merge simplification, vestige deletion.
 

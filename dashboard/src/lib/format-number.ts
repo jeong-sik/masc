@@ -22,6 +22,18 @@ export function formatTokens(n: number | null | undefined): string {
   return String(n)
 }
 
+/** Format a max-context window as a ctx label: 1_000_000 → "1M ctx",
+ *  131072 → "131K ctx", 512 → "512 ctx". Returns null for missing or
+ *  non-positive values so callers pick their own fallback ('—', omit, …).
+ *  Single owner of the ctx label — the keeper rail and the runtime model
+ *  editor previously shipped divergent copies ("1000k ctx" vs "1M ctx"). */
+export function formatContextTokens(value: number | null | undefined): string | null {
+  if (!isFiniteMetricValue(value) || value <= 0) return null
+  if (value >= 1_000_000) return `${Number.parseFloat((value / 1_000_000).toFixed(1))}M ctx`
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K ctx`
+  return `${value} ctx`
+}
+
 /** Format a number with locale-aware grouping and configurable decimals.
  *  Returns fallback for null/NaN/undefined. */
 export function formatNumber(value: number | null | undefined, digits = 0, fallback = '--'): string {

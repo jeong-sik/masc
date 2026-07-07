@@ -6,6 +6,27 @@ type disposition =
   | Requires_approval
   | Denied
 
+type repo_create_visibility =
+  | Public
+  | Private
+  | Internal
+
+type repo_create_lifecycle =
+  { add_readme : bool
+  ; clone : bool
+  ; push : bool
+  ; source : string option
+  ; remote : string option
+  ; template : string option
+  }
+
+type repo_create_contract =
+  { owner : string
+  ; name : string
+  ; visibility : repo_create_visibility
+  ; lifecycle : repo_create_lifecycle
+  }
+
 let string_of_disposition = function
   | Allowed -> "allowed"
   | Requires_approval -> "requires_approval"
@@ -111,6 +132,382 @@ let arg_word (arg : Shell_ir.arg) : string =
   match arg_literal arg with
   | Some s -> s
   | None -> ""
+;;
+
+let literal_arg_words (args : Shell_ir.arg list) : (string list, string list) result =
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc)
+    | arg :: rest ->
+      (match arg_literal arg with
+       | Some s -> collect (s :: acc) rest
+       | None -> Error [ "nonliteral_args" ])
+  in
+  collect [] args
+;;
+
+let is_flag tok = String.length tok > 0 && tok.[0] = '-'
+
+let split_eq tok =
+  match String.index_opt tok '=' with
+  | None -> None
+  | Some idx ->
+    let key = String.sub tok 0 idx in
+    let value = String.sub tok (idx + 1) (String.length tok - idx - 1) in
+    Some (key, value)
+;;
+
+let gh_global_value_flags = [ "--repo"; "-R"; "--hostname"; "-H" ]
+let gh_global_bool_flags = [ "--help" ]
+
+let rec next_gh_positional = function
+  | [] -> None
+  | tok :: rest when List.mem tok gh_global_value_flags ->
+    (match rest with _ :: tail -> next_gh_positional tail | [] -> None)
+  | tok :: rest
+    when (match split_eq tok with
+          | Some (key, _) -> List.mem key gh_global_value_flags
+          | None -> false) ->
+    next_gh_positional rest
+  | tok :: rest when List.mem tok gh_global_bool_flags -> next_gh_positional rest
+  | tok :: rest when is_flag tok -> next_gh_positional rest
+  | tok :: rest -> Some (tok, rest)
+;;
+
+let repo_create_tail words =
+  match next_gh_positional words with
+  | Some (family, after_family) when String.equal (String.lowercase_ascii family) "repo" ->
+    (match next_gh_positional after_family with
+     | Some (action, after_action)
+       when String.equal (String.lowercase_ascii action) "create" -> Some after_action
+     | Some _ | None -> None)
+  | Some _ | None -> None
+;;
+
+let repo_create_value_flags =
+  [ "--description", "description"
+  ; "-d", "description"
+  ; "--gitignore", "gitignore"
+  ; "-g", "gitignore"
+  ; "--homepage", "homepage"
+  ; "-h", "homepage"
+  ; "--license", "license"
+  ; "-l", "license"
+  ; "--remote", "remote"
+  ; "-r", "remote"
+  ; "--source", "source"
+  ; "-s", "source"
+  ; "--team", "team"
+  ; "-t", "team"
+  ; "--template", "template"
+  ; "-p", "template"
+  ]
+;;
+
+let repo_create_bool_flags =
+  [ "--add-readme"
+  ; "--clone"
+  ; "-c"
+  ; "--disable-issues"
+  ; "--disable-wiki"
+  ; "--include-all-branches"
+  ; "--push"
+  ]
+;;
+
+let visibility_of_flag = function
+  | "--public" -> Some Public
+  | "--private" -> Some Private
+  | "--internal" -> Some Internal
+  | _ -> None
+;;
+
+type repo_create_parse_acc =
+  { repo_name_arg : string option
+  ; visibility_flags : repo_create_visibility list
+  ; add_readme : bool
+  ; clone : bool
+  ; push : bool
+  ; source : string option
+  ; remote : string option
+  ; template : string option
+  ; errors : string list
+  }
+
+let empty_repo_create_acc =
+  { repo_name_arg = None
+  ; visibility_flags = []
+  ; add_readme = false
+  ; clone = false
+  ; push = false
+  ; source = None
+  ; remote = None
+  ; template = None
+  ; errors = []
+  }
+;;
+
+let record_repo_value acc field value =
+  match field with
+  | "source" -> { acc with source = Some value }
+  | "remote" -> { acc with remote = Some value }
+  | "template" -> { acc with template = Some value }
+  | "description" | "gitignore" | "homepage" | "license" | "team" -> acc
+  | _ -> acc
+;;
+
+let add_error acc err = { acc with errors = err :: acc.errors }
+
+let rec parse_repo_create_tail acc = function
+  | [] -> acc
+  | "--" :: rest ->
+    List.fold_left
+      (fun acc tok ->
+         match acc.repo_name_arg with
+         | None -> { acc with repo_name_arg = Some tok }
+         | Some _ -> add_error acc ("extra_positional:" ^ tok))
+      acc
+      rest
+  | tok :: rest ->
+    (match visibility_of_flag tok with
+     | Some visibility ->
+       parse_repo_create_tail
+         { acc with visibility_flags = visibility :: acc.visibility_flags }
+         rest
+     | None ->
+       if List.mem tok repo_create_bool_flags then
+         let acc =
+           match tok with
+           | "--add-readme" -> { acc with add_readme = true }
+           | "--clone" | "-c" -> { acc with clone = true }
+           | "--push" -> { acc with push = true }
+           | "--disable-issues" | "--disable-wiki" | "--include-all-branches" ->
+             acc
+           | _ -> acc
+         in
+         parse_repo_create_tail acc rest
+       else (
+         match List.assoc_opt tok repo_create_value_flags with
+         | Some field ->
+           (match rest with
+            | value :: tail ->
+              parse_repo_create_tail (record_repo_value acc field value) tail
+            | [] ->
+              parse_repo_create_tail
+                (add_error acc ("missing_flag_value:" ^ tok))
+                [])
+         | None ->
+           (match split_eq tok with
+            | Some (key, value) ->
+              (match List.assoc_opt key repo_create_value_flags with
+               | Some field ->
+                 parse_repo_create_tail (record_repo_value acc field value) rest
+               | None ->
+                 if is_flag tok
+                 then
+                   parse_repo_create_tail
+                     (add_error acc ("unknown_flag:" ^ key))
+                     rest
+                 else parse_repo_create_tail (add_error acc ("invalid_name:" ^ tok)) rest)
+            | None ->
+              if is_flag tok
+              then
+                parse_repo_create_tail (add_error acc ("unknown_flag:" ^ tok)) rest
+              else (
+                match acc.repo_name_arg with
+                | None ->
+                  parse_repo_create_tail { acc with repo_name_arg = Some tok } rest
+                | Some _ ->
+                  parse_repo_create_tail
+                    (add_error acc ("extra_positional:" ^ tok))
+                    rest))))
+;;
+
+let valid_repo_component s =
+  let valid_char = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' -> true
+    | _ -> false
+  in
+  String.length s > 0
+  && not (String.equal s "." || String.equal s "..")
+  && String.for_all valid_char s
+;;
+
+let unique_visibility flags =
+  let add acc v = if List.mem v acc then acc else v :: acc in
+  List.rev (List.fold_left add [] flags)
+;;
+
+let contract_from_acc acc : (repo_create_contract, string list) result =
+  let errors = List.rev acc.errors in
+  let errors, owner, name =
+    match acc.repo_name_arg with
+    | None -> "missing_name" :: "missing_owner" :: errors, None, None
+    | Some repo_name ->
+      (match String.split_on_char '/' repo_name with
+       | [ owner; name ] ->
+         let errors =
+           (if valid_repo_component owner then errors else "invalid_owner" :: errors)
+         in
+         let errors =
+           if valid_repo_component name then errors else "invalid_name" :: errors
+         in
+         errors, Some owner, Some name
+       | [ _name_without_owner ] -> "missing_owner" :: errors, None, None
+       | _ -> "invalid_name" :: errors, None, None)
+  in
+  let visibility_flags = unique_visibility acc.visibility_flags in
+  let errors, visibility =
+    match visibility_flags with
+    | [] -> "missing_visibility" :: errors, None
+    | [ visibility ] -> errors, Some visibility
+    | _ -> "ambiguous_visibility" :: errors, None
+  in
+  match errors, owner, name, visibility with
+  | [], Some owner, Some name, Some visibility ->
+    Ok
+      { owner
+      ; name
+      ; visibility
+      ; lifecycle =
+          { add_readme = acc.add_readme
+          ; clone = acc.clone
+          ; push = acc.push
+          ; source = acc.source
+          ; remote = acc.remote
+          ; template = acc.template
+          }
+      }
+  | errors, _, _, _ -> Error errors
+;;
+
+let repo_create_contract_of_gh_simple simple =
+  match literal_arg_words simple.Shell_ir.args with
+  | Error errors ->
+    if repo_create_tail (List.map arg_word simple.Shell_ir.args) = None
+    then None
+    else Some (Error errors)
+  | Ok words ->
+    (match repo_create_tail words with
+     | None -> None
+     | Some tail ->
+       Some (contract_from_acc (parse_repo_create_tail empty_repo_create_acc tail)))
+;;
+
+let repo_create_contract_of_known simple = function
+  | Exec_program.Gh -> repo_create_contract_of_gh_simple simple
+  | Exec_program.Ls
+  | Exec_program.Cat
+  | Exec_program.Pwd
+  | Exec_program.Echo
+  | Exec_program.Head
+  | Exec_program.Tail
+  | Exec_program.Rg
+  | Exec_program.Grep
+  | Exec_program.Find
+  | Exec_program.Which
+  | Exec_program.Test
+  | Exec_program.Basename
+  | Exec_program.Dirname
+  | Exec_program.Stat
+  | Exec_program.Du
+  | Exec_program.Df
+  | Exec_program.Sort
+  | Exec_program.Uniq
+  | Exec_program.Wc
+  | Exec_program.Cut
+  | Exec_program.Tr
+  | Exec_program.File
+  | Exec_program.Printf
+  | Exec_program.Date
+  | Exec_program.Env
+  | Exec_program.Printenv
+  | Exec_program.Hostname
+  | Exec_program.Whoami
+  | Exec_program.Uname
+  | Exec_program.Ps
+  | Exec_program.Tty
+  | Exec_program.Cp
+  | Exec_program.Mv
+  | Exec_program.Ln
+  | Exec_program.Touch
+  | Exec_program.Tee
+  | Exec_program.Awk
+  | Exec_program.Xargs
+  | Exec_program.Git
+  | Exec_program.Docker
+  | Exec_program.Curl
+  | Exec_program.Wget
+  | Exec_program.Ssh
+  | Exec_program.Scp
+  | Exec_program.Tar
+  | Exec_program.Rsync
+  | Exec_program.Make
+  | Exec_program.Cmake
+  | Exec_program.Dune_local_sh
+  | Exec_program.Diff
+  | Exec_program.Patch
+  | Exec_program.Mkdir
+  | Exec_program.Npm
+  | Exec_program.Node
+  | Exec_program.Npx
+  | Exec_program.Yarn
+  | Exec_program.Pnpm
+  | Exec_program.Pip
+  | Exec_program.Python
+  | Exec_program.Python3
+  | Exec_program.Pytest
+  | Exec_program.Pyright
+  | Exec_program.Ruff
+  | Exec_program.Opam
+  | Exec_program.Ocamlfind
+  | Exec_program.Tsc
+  | Exec_program.Cargo
+  | Exec_program.Rustc
+  | Exec_program.Go
+  | Exec_program.Gofmt
+  | Exec_program.Gradle
+  | Exec_program.Java
+  | Exec_program.Javac
+  | Exec_program.Mvn
+  | Exec_program.Ninja
+  | Exec_program.Sed
+  | Exec_program.Uv
+  | Exec_program.Glab
+  | Exec_program.Terminal_notifier
+  | Exec_program.Osascript
+  | Exec_program.Play
+  | Exec_program.Rec
+  | Exec_program.Ffplay
+  | Exec_program.Mpg123
+  | Exec_program.Open
+  | Exec_program.Psql
+  | Exec_program.Mysql
+  | Exec_program.Mariadb
+  | Exec_program.Cockroach
+  | Exec_program.Sudo
+  | Exec_program.Su
+  | Exec_program.Chmod
+  | Exec_program.Chown
+  | Exec_program.Rm
+  | Exec_program.Dd
+  | Exec_program.Mkfs
+  | Exec_program.Shutdown
+  | Exec_program.Reboot
+  | Exec_program.Halt
+  | Exec_program.Poweroff -> None
+;;
+
+let repo_create_contract_of_simple simple =
+  match Exec_program.known simple.Shell_ir.bin with
+  | None -> None
+  | Some known -> repo_create_contract_of_known simple known
+;;
+
+let repo_create_contract_rule_of_simple simple =
+  match repo_create_contract_of_simple simple with
+  | Some (Error errors) ->
+    Some ("gh_repo_create_contract:" ^ String.concat "," errors)
+  | Some (Ok _) | None -> None
 ;;
 
 let is_graphql_api (v : Gh_verb.t) : bool =
@@ -256,6 +653,9 @@ let graphql_query_body_is_opaque (args : Shell_ir.arg list) : bool =
 let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
   match Exec_program.known simple.Shell_ir.bin with
   | Some Exec_program.Gh ->
+    (match repo_create_contract_rule_of_simple simple with
+     | Some _ -> Some Denied
+     | None ->
     let words =
       Exec_program.to_string simple.Shell_ir.bin
       :: List.map arg_word simple.Shell_ir.args
@@ -263,6 +663,6 @@ let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
     let verb = Gh_verb.classify words in
     if is_graphql_api verb && graphql_query_body_is_opaque simple.Shell_ir.args
     then Some Requires_approval
-    else Some (disposition_of_words words verb)
+    else Some (disposition_of_words words verb))
   | Some _ | None -> None
 [@@warning "-4"]

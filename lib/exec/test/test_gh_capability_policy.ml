@@ -141,6 +141,58 @@ let gh_simple args : Shell_ir.simple =
   ; sandbox = Sandbox_target.host ()
   }
 
+let gh_simple_words words = gh_simple (List.map lit words)
+
+let test_repo_create_contract () =
+  let contract words =
+    Pol.repo_create_contract_of_simple (gh_simple_words words)
+  in
+  (match contract [ "repo"; "create"; "org/new-repo"; "--private" ] with
+   | Some (Ok c) ->
+     Alcotest.(check string) "owner" "org" c.owner;
+     Alcotest.(check string) "name" "new-repo" c.name;
+     Alcotest.(check string)
+       "visibility"
+       "private"
+       (match c.visibility with
+        | Pol.Public -> "public"
+        | Pol.Private -> "private"
+        | Pol.Internal -> "internal")
+   | Some (Error errors) ->
+     Alcotest.failf "expected valid contract, got %s" (String.concat "," errors)
+   | None -> Alcotest.fail "expected repo-create contract");
+  let expect_errors label words expected =
+    match contract words with
+    | Some (Error errors) ->
+      Alcotest.(check (list string)) label expected errors
+    | Some (Ok _) -> Alcotest.failf "%s: expected contract error" label
+    | None -> Alcotest.failf "%s: expected repo-create contract" label
+  in
+  expect_errors "missing owner"
+    [ "repo"; "create"; "new-repo"; "--private" ]
+    [ "missing_owner" ];
+  expect_errors "missing visibility"
+    [ "repo"; "create"; "org/new-repo" ]
+    [ "missing_visibility" ];
+  expect_errors "ambiguous visibility"
+    [ "repo"; "create"; "org/new-repo"; "--private"; "--public" ]
+    [ "ambiguous_visibility" ];
+  (match
+     Pol.repo_create_contract_of_simple
+       (gh_simple [ lit "repo"; lit "create"; var "REPO"; lit "--private" ])
+   with
+   | Some (Error [ "nonliteral_args" ]) -> ()
+   | Some (Error errors) ->
+     Alcotest.failf "opaque repo target errors: %s" (String.concat "," errors)
+   | Some (Ok _) -> Alcotest.fail "opaque repo target must not validate"
+   | None -> Alcotest.fail "expected opaque repo-create contract result");
+  (match
+     Pol.repo_create_contract_rule_of_simple (gh_simple_words [ "repo"; "view"; "org/repo" ])
+   with
+   | None -> ()
+   | Some rule -> Alcotest.failf "non-create should not emit rule: %s" rule)
+;;
+
 let test_graphql_durable_remote_words () =
   let ask =
     [ ("createRepository", "mutation { createRepository(input:{name:\"x\"}){ repository { id } } }")
@@ -227,6 +279,8 @@ let () =
             test_durable_remote_surface;
           Alcotest.test_case "current dispositions" `Quick
             test_current_dispositions;
+          Alcotest.test_case "repo-create contract" `Quick
+            test_repo_create_contract;
           Alcotest.test_case "graphql durable-remote (words)" `Quick
             test_graphql_durable_remote_words;
           Alcotest.test_case "graphql opaque query (simple)" `Quick

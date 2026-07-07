@@ -337,9 +337,27 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
        | Some Keeper_registry.Turn_overflow_pause
        | Some Keeper_registry.Turn_livelock_pause ->
          { acc with to_unregister = entry :: acc.to_unregister }
+       | Some (Keeper_registry.Turn_consecutive_failures count) ->
+         (* #23439: policy returns [Pause_keeper] for a turn-failure streak
+            (keeper_failure_policy.ml [Turn_failure_streak]).  This reason
+            previously fell through to [queue_standard_restart], discarding the
+            verdict; the restart then zeroed the streak evidence
+            (keeper_registry_setup.ml [turn_consecutive_failures = 0]) so the
+            identical "Keeper turn failed N consecutive cycle(s)" blocker
+            regenerated every sweep.  Honor the verdict via the shared
+            crash-auto-pause path, with the same fail-closed unregister rule as
+            the stale-storm / provider-timeout arms above. *)
+         (match handle_turn_failure_streak_pause ctx entry ~count with
+          | Ok () -> { acc with to_unregister = entry :: acc.to_unregister }
+          | Error err ->
+            Log.Keeper.warn
+              "%s: turn_failure_streak pause not committed (%s); keeping \
+               registry entry so the pause retries next sweep"
+              entry.name
+              err;
+            acc)
        | Some
            ( Keeper_registry.Heartbeat_consecutive_failures _
-           | Keeper_registry.Turn_consecutive_failures _
            | Keeper_registry.Stale_turn_timeout _
            | Keeper_registry.Stale_fleet_batch _
            | Keeper_registry.Provider_runtime_error _

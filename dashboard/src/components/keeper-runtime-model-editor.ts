@@ -26,6 +26,7 @@ import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { MISSING_DATA_DASH } from '../lib/format-string'
+import { formatContextTokens } from '../lib/format-number'
 import {
   findRuntimeCatalogEntry,
   loadRuntimeCatalog,
@@ -69,13 +70,6 @@ export function uniqueNonEmpty(values: readonly string[]): string[] {
  */
 export function canEditRuntime(c: KeeperConfig): boolean {
   return c.sources.default_source_kind === 'toml' && Boolean(c.sources.default_manifest_path)
-}
-
-function formatContextTokens(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return MISSING_DATA_DASH
-  if (value >= 1_000_000) return `${Number.parseFloat((value / 1_000_000).toFixed(1))}M ctx`
-  if (value >= 1_000) return `${Math.round(value / 1_000)}K ctx`
-  return `${value} ctx`
 }
 
 function RuntimeCapabilityPill({ label, value }: { label: string; value: boolean | undefined }) {
@@ -148,7 +142,7 @@ function RuntimeCatalogSummary({
         <div class="min-w-0">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">model</div>
           <div class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${model}</div>
-          <div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${formatContextTokens(entry.max_context)}</div>
+          <div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${formatContextTokens(entry.max_context) ?? MISSING_DATA_DASH}</div>
         </div>
       </div>
       <div class="mt-2 flex flex-wrap gap-1.5">

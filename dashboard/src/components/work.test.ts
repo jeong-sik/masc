@@ -289,11 +289,11 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
       // Five KPI summary cells
       expect(screen.getByTestId('work-kpis').children.length).toBe(5)
-      expect(screen.getByText(/미배정 task는 claim/).textContent).toContain('claim')
+      expect(screen.getByText(/미배정 task는 백로그에서 claim/).textContent).toContain('claim')
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
 
-    it('separates Goal KPI language from Task pipeline labels', () => {
+    it('avoids repeating Task scope labels across the KPI row and kanban columns', () => {
       goals.value = [
         { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
@@ -305,20 +305,29 @@ describe('Work', () => {
       render(html`<${Work} />`)
 
       const kpis = screen.getByTestId('work-kpis')
-      expect(kpis.textContent).toContain('GOAL')
-      expect(kpis.textContent).toContain('TASK')
-      expect(kpis.textContent).toContain('활성')
-      expect(kpis.textContent).toContain('전체')
+      expect(kpis.textContent).toContain('활성 목표')
+      expect(kpis.textContent).toContain('전체 작업')
+      expect(kpis.textContent).toContain('백로그')
       expect(kpis.textContent).not.toContain('목표 TASK')
+      expect(kpis.textContent).not.toContain('Task')
+      expect(kpis.textContent).not.toContain('TASK')
 
       fireEvent.click(screen.getByTestId('work-view-kanban'))
 
+      const section = screen.getByTestId('work-board-section')
+      expect(section.textContent).toContain('칸반 · 상태별')
+      expect(section.textContent).toContain('todo → claimed → in_progress → verify → done')
+
       const todoCol = screen.getByTestId('kanban-col-todo')
       const claimedCol = screen.getByTestId('kanban-col-claimed')
-      expect(todoCol.querySelector('.wk-kcol-scope')?.textContent).toBe('TASK')
-      expect(todoCol.querySelector('.wk-kcol-label')?.textContent).toBe('미배정')
-      expect(claimedCol.querySelector('.wk-kcol-scope')?.textContent).toBe('TASK')
-      expect(claimedCol.querySelector('.wk-kcol-label')?.textContent).toBe('클레임됨')
+      expect(todoCol.querySelector('.wk-kcol-dot.todo')).toBeTruthy()
+      expect(todoCol.querySelector('.wk-kcol-title')?.textContent).toBe('백로그')
+      expect(todoCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
+      expect(todoCol.textContent).not.toContain('TASK')
+      expect(claimedCol.querySelector('.wk-kcol-dot.claimed')).toBeTruthy()
+      expect(claimedCol.querySelector('.wk-kcol-title')?.textContent).toBe('클레임')
+      expect(claimedCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
+      expect(claimedCol.textContent).not.toContain('TASK')
 
       fireEvent.click(screen.getByTestId('work-view-list'))
       expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
@@ -440,7 +449,7 @@ describe('Work', () => {
 
       const backlog = screen.getByTestId('work-backlog')
       expect(backlog).toBeTruthy()
-      expect(backlog.textContent).toContain('미배정 Task')
+      expect(backlog.textContent).toContain('클레임 가능 백로그')
       expect(backlog.textContent).toContain('2')
       expect(backlog.querySelectorAll('.wk-task-claim').length).toBe(2)
       expect(screen.getByText('Orphan job')).toBeTruthy()
@@ -716,6 +725,7 @@ describe('Work', () => {
         render(html`<${Work} />`)
 
         const aside = screen.getByTestId('work-aside')
+        expect(aside.querySelector('.wka-hud')?.textContent).toContain('백로그')
         // "지금 상황" calm state
         expect(aside.querySelector('[data-testid="wka-flagged-calm"]')?.textContent).toContain('주의 목표 없음')
         // "해야 할 일" calm state
@@ -783,6 +793,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const approvalItems = aside.querySelectorAll('[data-testid="wka-approval-item"]')
         expect(approvalItems.length).toBe(1)
+        expect(approvalItems[0]?.classList.contains('approve')).toBe(true)
         expect(approvalItems[0]?.textContent).toContain('Approval Goal')
         expect(approvalItems[0]?.textContent).toContain('lead-keeper')
       })
@@ -809,6 +820,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const verifyItems = aside.querySelectorAll('[data-testid="wka-verify-item"]')
         expect(verifyItems.length).toBe(1)
+        expect(verifyItems[0]?.classList.contains('verify')).toBe(true)
         expect(verifyItems[0]?.textContent).toContain('Verify Me')
         // 1 unsatisfied gate (done=blocked, inspect=ready → 1 open)
         expect(verifyItems[0]?.textContent).toContain('1 미충족')
@@ -833,6 +845,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const blockerItems = aside.querySelectorAll('[data-testid="wka-blocker-item"]')
         expect(blockerItems.length).toBe(1)
+        expect(blockerItems[0]?.classList.contains('block')).toBe(true)
         expect(blockerItems[0]?.textContent).toContain('Blocked Task')
         expect(blockerItems[0]?.textContent).toContain('dependency unavailable')
       })
@@ -852,6 +865,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const backlogItem = aside.querySelector('[data-testid="wka-backlog-item"]')
         expect(backlogItem).toBeTruthy()
+        expect(backlogItem?.classList.contains('claim')).toBe(true)
         expect(backlogItem?.textContent).toContain('미배정 task 2건')
       })
 
@@ -972,6 +986,7 @@ describe('Work', () => {
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
         // Kanban board present; list view gone
+        expect(screen.getByTestId('work-board-section').textContent).toContain('칸반 · 상태별')
         const board = screen.getByTestId('work-kanban')
         expect(board).toBeTruthy()
         expect(screen.queryByTestId('work-goal-list')).toBeNull()
@@ -991,6 +1006,10 @@ describe('Work', () => {
         const todoCol = screen.getByTestId('kanban-col-todo')
         const wipCol  = screen.getByTestId('kanban-col-in_progress')
         const doneCol = screen.getByTestId('kanban-col-done')
+        expect(todoCol.querySelector('.wk-kcol-dot.todo')).toBeTruthy()
+        expect(wipCol.querySelector('.wk-kcol-dot.wip')).toBeTruthy()
+        expect(doneCol.querySelector('.wk-kcol-dot.done')).toBeTruthy()
+        expect(todoCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
         expect(todoCol.textContent).toContain('Todo task')
         expect(wipCol.textContent).toContain('In progress')
         expect(doneCol.textContent).toContain('Done task')

@@ -27,6 +27,7 @@
 
 (tests
  (names
+  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_os_io_fd
@@ -233,6 +234,7 @@
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
+  test_keeper_pacing
   test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
@@ -374,6 +376,7 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (modules
+  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_os_io_fd
@@ -582,6 +585,7 @@
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
+  test_keeper_pacing
   test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
@@ -727,11 +731,7 @@
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution)
- (libraries
-  masc_test_deps
-  masc_schedule
-  multimodal
-  bigstringaf))
+ (libraries masc_test_deps masc_schedule multimodal bigstringaf))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 

@@ -12,6 +12,7 @@ import { getIdeDataWorkspaceStore } from './ide-workspace-singleton'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
+import { IdeAnnotationComposer } from './ide-annotation-composer'
 import { IdeConversationRail } from './ide-conversation-rail'
 import { IdeActivityPanel } from './ide-activity-panel'
 import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
@@ -1250,6 +1251,12 @@ export function IdeShell() {
         <div
           class="ide-plane-editor ide-v2-editor v2-ide-panel"
         >
+          <${IdeAnnotationComposer}
+            documentStore=${workspaceStore.documentStore}
+            activeRepositoryId=${workspaceStore.activeRepositoryId}
+            subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+            refresh=${workspaceStore.refresh}
+          />
           <${IdeEditor}
             activeView=${activeView}
             activeLayers=${activeLayers}

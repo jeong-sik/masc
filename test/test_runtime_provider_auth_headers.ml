@@ -743,6 +743,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in
@@ -779,6 +780,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in
@@ -816,6 +818,7 @@ let provider_cfg () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in
@@ -898,6 +901,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in

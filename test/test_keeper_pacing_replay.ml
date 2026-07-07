@@ -18,6 +18,11 @@
 open Masc
 module KP = Keeper_pacing
 
+(* Fixture pin: mirrors Runtime_schema.pacing_default (base 30s, x2, cap
+   3600s). The asserted [0; 30; 90; 210] schedule is derived from these
+   numbers, so the policy is part of the fixture, not read from config. *)
+let fixture_policy = { KP.base_sec = 30.0; multiplier = 2.0; cap_sec = 3600.0 }
+
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when root <> "" -> root
@@ -122,7 +127,7 @@ let test_pacing_bounds_storm_window () =
   let events = load_events () in
   let catalog = distinct_runtimes events in
   let admitted =
-    simulate ~catalog ~policy:KP.default_policy ~window_sec:300.0
+    simulate ~catalog ~policy:fixture_policy ~window_sec:300.0
   in
   (* Deterministic schedule under base 30s x2: each runtime fails at
      t=0, 30, 90, 210; the next revisit (450) falls outside the window. *)
@@ -148,7 +153,7 @@ let test_provider_hint_spaces_revisit () =
      one attempt per hint interval and cannot go negative. *)
   let state =
     KP.on_failure
-      ~policy:KP.default_policy
+      ~policy:fixture_policy
       ~runtime_id:"glm-coding.glm-5-turbo"
       ~retry_after:(Some 120.0)
       ~now:0.0

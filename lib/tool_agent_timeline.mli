@@ -3,18 +3,18 @@
 
     Implements the [masc_agent_timeline] MCP tool plus the
     [/api/dashboard/agent/<name>/timeline] HTTP route.  Aggregates
-    5 event sources for a single agent ([agent_events],
+    6 event sources for a single agent ([agent_events],
     [task_events], [message_events], [tool_call_events],
-    [turn_completed_events]), filters by
+    [keeper_cdal_events], [turn_completed_events]), filters by
     [since_hours] cutoff, sorts chronologically, truncates to
     [limit] (most recent), and emits a JSON summary with
     cardinality counts + token/cost rollups.
 
     Internal: 11 helpers + 1 type stay private —
     \[parse_iso_timestamp] (Scanf-based ISO8601 parser),
-    [timeline_event] type + [event_to_json], the 5 source
+    [timeline_event] type + [event_to_json], the 6 source
     extractors ([agent_events], [task_events], [message_events],
-    [tool_call_events],
+    [tool_call_events], [keeper_cdal_events],
     [turn_completed_events]), and [handle_agent_timeline] (the
     dispatch handler that reaches {!build_timeline}).  All
     consumed only inside {!build_timeline} or {!dispatch}.
@@ -91,7 +91,7 @@ val build_timeline :
       board-event integration).
 
     Per-source internal limits are pinned at 200 events
-    ([message_events], [tool_call_events],
+    ([message_events], [tool_call_events], [keeper_cdal_events],
     [turn_completed_events]); the [~limit] argument applies to
     the merged sorted list. *)
 

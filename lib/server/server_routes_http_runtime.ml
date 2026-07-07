@@ -815,6 +815,7 @@ let full_health_cached_field_names =
     "keeper_board_event_collection";
     "keeper_event_queue";
     "paused_keepers";
+    "cdal";
     "keeper_config_parse_error_count";
     "keeper_config_parse_errors";
     "keeper_config_unknown_key_count";
@@ -905,6 +906,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("names", `List []);
           ("component_timed_out", `Bool component_timed_out);
         ] );
+    ( "cdal",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "cdal" );
     ("keeper_config_parse_error_count", `Int 0);
     ("keeper_config_parse_errors", `List []);
     ("keeper_config_unknown_key_count", `Int 0);

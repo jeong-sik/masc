@@ -854,6 +854,27 @@
  (modules test_runtime_per_keeper_routing)
  (libraries masc_test_deps unix))
 
+; RFC-0236 §10: GitHub App installation token — JWT RS256 signing (keeper credential source).
+
+(test
+ (name test_keeper_github_app_jwt)
+ (modules test_keeper_github_app_jwt)
+ (libraries masc_test_deps mirage-crypto-pk x509 base64))
+
+; RFC-0236 §10: GitHub App projection fail-closed contract.
+
+(test
+ (name test_keeper_secret_projection_github_app)
+ (modules test_keeper_secret_projection_github_app)
+ (libraries masc_test_deps))
+
+; RFC-0236 §10: GitHub token prefix redaction (installation ghs_ + classic/oauth/user).
+
+(test
+ (name test_observability_redact_github_tokens)
+ (modules test_observability_redact_github_tokens)
+ (libraries masc_test_deps))
+
 ; RFC-0265: capability-driven proactive runtime reroute (modality-gated decision).
 
 (test

@@ -583,10 +583,17 @@ let () =
                Alcotest.(check bool) "young unverified" true (Consolidator.not_stale ~now young))
         ; Alcotest.test_case "eligible ~now filters stale Durable_knowledge" `Quick
             (fun () ->
-               let stale_dk = fact ~last_verified_at:(now -. 90000.)
+               (* [eligible] also gates on category
+                  ([is_outcome_positive_for_shared_promotion]): the fixture
+                  default [Fact] is rejected there, which would mask the
+                  staleness axis this case isolates. Pin an outcome-positive
+                  category so only [not_stale] varies between the two facts. *)
+               let stale_dk = fact ~category:Types.Validated_approach
+                 ~last_verified_at:(now -. 90000.)
                  ~claim_kind:(Some Types.Durable_knowledge) "stale_dk" in
                Alcotest.(check bool) "stale dk" false (Consolidator.eligible ~now stale_dk);
-               let fresh_dk = fact ~last_verified_at:(now -. 10.0)
+               let fresh_dk = fact ~category:Types.Validated_approach
+                 ~last_verified_at:(now -. 10.0)
                  ~claim_kind:(Some Types.Durable_knowledge) "fresh_dk" in
                Alcotest.(check bool) "fresh dk" true (Consolidator.eligible ~now fresh_dk))
         ; Alcotest.test_case "not_stale delegates to fact_effective_valid_until first" `Quick

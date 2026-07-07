@@ -108,7 +108,7 @@ let test_reobserve_external_state_does_not_bump () =
       ~last_verified_at:stale_lv ()
   in
   let incoming = fact ~claim_kind:(Some Types.External_state) ~category:Types.Blocker () in
-  let merged = Policy.reobserve_fact ~now ~existing ~incoming in
+  let merged = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   check (option (float 0.001))
     "External_state last_verified_at unchanged by re-observation" stale_lv
     merged.Types.last_verified_at;
@@ -120,7 +120,7 @@ let test_reobserve_external_state_does_not_bump () =
     fact ~claim_kind:(Some Types.Durable_knowledge) ~category:Types.Lesson
       ~last_verified_at:stale_lv ()
   in
-  let dk_merged = Policy.reobserve_fact ~now ~existing:dk ~incoming:dk in
+  let dk_merged = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing:dk ~incoming:dk in
   check (option (float 0.001))
     "Durable_knowledge last_verified_at advances to now" (Some now)
     dk_merged.Types.last_verified_at

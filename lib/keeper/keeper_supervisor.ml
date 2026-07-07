@@ -225,7 +225,8 @@ let pending_hitl_approval_keeper_names config =
        Keeper_approval_queue.has_pending_for_keeper ~keeper_name:name)
 ;;
 
-let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
+let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _ context)
+  =
   let now = Time_compat.now () in
   let max_restarts =
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
@@ -300,11 +301,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
         { Keeper_failure_policy.lifecycle_effect = Keeper_failure_policy.Pause_keeper
         ; _
         }
-      when Keeper_pacing_shadow.pacing_enforced () ->
+      when pacing_enforced ->
       (* RFC-0313 W3: failure policy verdicts no longer flip existence. A
          crashed fiber is process reality; it relaunches on the standard
          backoff path. The pause arms below stay reachable only in shadow
-         mode (kill-switch, removed in W4). *)
+         mode (kill-switch, removed in W4). [pacing_enforced] is injected by
+         the sweep caller so the mode is read once per sweep at the boundary,
+         not per entry inside policy code. *)
       queue_standard_restart acc
     | Some
         { Keeper_failure_policy.lifecycle_effect = Keeper_failure_policy.Pause_keeper

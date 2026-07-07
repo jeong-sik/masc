@@ -374,6 +374,71 @@ let () =
       ~new_ids:[]
     = []);
 
+  (* --- RFC-0310 §3.3: Goal_stagnation --- *)
+  let stagnation =
+    { gs_goal_id = "goal-9"
+    ; gs_stale_since = "2026-07-08T00:00:00Z"
+    ; gs_goal_title = "Harden wake continuity"
+    }
+  in
+  assert (
+    String.equal
+      (goal_stagnation_post_id stagnation)
+      "goal-stagnation:goal-9:2026-07-08T00:00:00Z");
+  assert (
+    String.equal
+      (payload_kind_label (Goal_stagnation stagnation))
+      "goal_stagnation");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = goal_stagnation_post_id stagnation
+          ; urgency = Normal
+          ; arrived_at = 11.0
+          ; payload = Goal_stagnation stagnation
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Goal_stagnation gs ->
+        assert (String.equal gs.gs_goal_id "goal-9");
+        assert (String.equal gs.gs_stale_since "2026-07-08T00:00:00Z");
+        assert (String.equal gs.gs_goal_title "Harden wake continuity")
+      | _ -> Alcotest.fail "Goal_stagnation codec round-trip changed payload shape")
+   | Error msg ->
+     Alcotest.fail ("Goal_stagnation stimulus round-trip failed: " ^ msg));
+  (* Identity strips the display-only title but keeps (goal_id, stale_since):
+     a title edit within the same stale episode dedups... *)
+  let stagnation_stim =
+    { post_id = goal_stagnation_post_id stagnation
+    ; urgency = Normal
+    ; arrived_at = 11.0
+    ; payload = Goal_stagnation stagnation
+    }
+  in
+  let stagnation_retitled =
+    { stagnation_stim with
+      arrived_at = 12.0
+    ; payload =
+        Goal_stagnation { stagnation with gs_goal_title = "Harden wake (v2)" }
+    }
+  in
+  assert (stimulus_identity_equal stagnation_stim stagnation_retitled);
+  (* ...but a goal that was advanced (new updated_at) and went stale again
+     carries a new [gs_stale_since], so it is a DISTINCT episode that fires
+     independently — the edge, not a blind clock. *)
+  let stagnation_next_episode =
+    { stagnation_stim with
+      post_id =
+        goal_stagnation_post_id
+          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
+    ; payload =
+        Goal_stagnation
+          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
+    }
+  in
+  assert (not (stimulus_identity_equal stagnation_stim stagnation_next_episode));
+
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }

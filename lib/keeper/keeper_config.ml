@@ -182,6 +182,20 @@ let keeper_proactive_min_interval_sec_rp =
 let keeper_proactive_min_interval_sec () : int =
   Runtime_params.get keeper_proactive_min_interval_sec_rp
 
+let keeper_goal_stagnation_threshold_sec_rp =
+  _rp_int ~key:"keeper.goal.stagnation_threshold_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_GOAL_STAGNATION_THRESHOLD_SEC"
+                          ~default:3600 ~min_v:600 ~max_v:one_day_seconds_int)
+    ~min_v:600 ~max_v:one_day_seconds_int
+    ~description:"RFC-0310 §3.3: a live (Executing) goal untouched for at \
+                  least this long wakes its keeper once per stale episode so \
+                  it can resume the goal or hand off a progress note. The \
+                  wake is edge-gated on the goal's updated_at, not a blind \
+                  clock: advancing the goal opens a fresh episode and an \
+                  unadvanced goal never re-wakes within one episode." ()
+let keeper_goal_stagnation_threshold_sec () : int =
+  Runtime_params.get keeper_goal_stagnation_threshold_sec_rp
+
 let keeper_proactive_task_cooldown_divisor_rp =
   _rp_int ~key:"keeper.proactive.task_cooldown_divisor"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_TASK_COOLDOWN_DIVISOR"

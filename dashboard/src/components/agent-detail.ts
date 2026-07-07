@@ -252,6 +252,10 @@ export function AgentDetailOverlay() {
     >
       <div class="p-6 flex flex-col gap-5">
         <div class="flex justify-between items-start gap-4">
+          <div class="flex items-center gap-2">
+            <button class="btn btn-sm btn-ghost" onclick="${refreshAgentDetail}" title="Refresh">⟳</button>
+            <button class="btn btn-sm btn-ghost" onclick="${closeAgentDetail}" title="Close">✕</button>
+          </div>
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
               ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xl shadow-inset">${agentEmoji}</div>` : ''}

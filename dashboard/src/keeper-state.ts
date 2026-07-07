@@ -860,6 +860,11 @@ function normalizeHistoryEntry(
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  const conversationId = asString(raw.conversation_id) ?? null
+  const externalMessageId = asString(raw.external_message_id) ?? null
+  const speakerId = asString(raw.speaker_id) ?? null
+  const speakerName = asString(raw.speaker_name) ?? null
+  const speakerAuthority = asString(raw.speaker_authority) ?? null
   // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
   // keeper_chat_store mints kind=transport_failure (row content is the
@@ -895,6 +900,11 @@ function normalizeHistoryEntry(
     streamContract,
     details: null,
     surface,
+    conversationId,
+    externalMessageId,
+    speakerId,
+    speakerName,
+    speakerAuthority,
     audio,
     attachments,
     blocks,
@@ -1402,6 +1412,11 @@ interface RestChatHistoryMessage {
   tool_call_name?: string
   source?: string
   surface?: SurfaceRef
+  conversation_id?: string
+  external_message_id?: string
+  speaker_id?: string
+  speaker_name?: string
+  speaker_authority?: string
   // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
   turn_ref?: string | null
   audio?: unknown
@@ -1447,6 +1462,11 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     }),
     details: null,
     surface: message.surface ?? null,
+    conversationId: asString(message.conversation_id) ?? null,
+    externalMessageId: asString(message.external_message_id) ?? null,
+    speakerId: asString(message.speaker_id) ?? null,
+    speakerName: asString(message.speaker_name) ?? null,
+    speakerAuthority: asString(message.speaker_authority) ?? null,
     // Tool rows share the same untrusted REST boundary; reject malformed
     // turn_ref values here too so this path matches normalizeHistoryEntry.
     turnRef: asString(message.turn_ref) ?? null,
@@ -1477,6 +1497,11 @@ export function chatHistoryEntriesFromRest(
         ts_unix: message.ts,
         source: message.source,
         surface: message.surface,
+        conversation_id: message.conversation_id,
+        external_message_id: message.external_message_id,
+        speaker_id: message.speaker_id,
+        speaker_name: message.speaker_name,
+        speaker_authority: message.speaker_authority,
         audio: message.audio,
         attachments: message.attachments,
         kind: message.kind,

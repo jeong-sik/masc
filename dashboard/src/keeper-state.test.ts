@@ -331,6 +331,9 @@ describe('thread history merge & persistence', () => {
         content: 'state snapshot',
         ts: 1_780_000_000,
         surface: { kind: 'dashboard', session_id: 'sess-1' },
+        speaker_id: 'operator-1',
+        speaker_name: 'Operator',
+        speaker_authority: 'owner',
       },
       {
         role: 'assistant',
@@ -338,6 +341,8 @@ describe('thread history merge & persistence', () => {
         content: 'reply from channel context',
         ts: 1_780_000_001,
         turn_ref: 'trace-rest#7',
+        conversation_id: 'discord:guild-1:channel:channel-1',
+        external_message_id: 'message-1',
         surface: {
           kind: 'discord',
           guild_id: 'guild-1',
@@ -357,6 +362,11 @@ describe('thread history merge & persistence', () => {
       thread_id: 'thread-1',
     })
     expect(entries[1]?.turnRef).toBe('trace-rest#7')
+    expect(entries[0]?.speakerId).toBe('operator-1')
+    expect(entries[0]?.speakerName).toBe('Operator')
+    expect(entries[0]?.speakerAuthority).toBe('owner')
+    expect(entries[1]?.conversationId).toBe('discord:guild-1:channel:channel-1')
+    expect(entries[1]?.externalMessageId).toBe('message-1')
   })
 
   it('prefers backend stream contracts from REST chat history', () => {

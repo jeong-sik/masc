@@ -243,7 +243,7 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          ; observed_by = []
          ; first_seen = now
          ; valid_until = fact_valid_until ~now ~external_ref ~claim_kind category
-         ; last_verified_at = Some now
+         ; last_verified_at = None (* RFC-0285 §3.3 / RFC-0259 P7: re-extraction must not advance last_verified_at *)
          ; schema_version
          ; claim_id
          }

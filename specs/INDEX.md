@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-07-07T05:10:27Z (HEAD: db58d82025)
+Generated: 2026-07-07T06:15:13Z (HEAD: bce11c4304)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 94 |
-| Manual specs | 94 |
+| Total .tla files | 95 |
+| Manual specs | 95 |
 | TTrace (auto-generated) | 0 |
 | Directories | 18 |
-| Total .cfg files | 194 |
-| Buggy .cfg (bug-model pair) | 99 |
+| Total .cfg files | 197 |
+| Buggy .cfg (bug-model pair) | 101 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -105,7 +105,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | TierRouting.tla | TierRouting | manual | 2 | 1 | clean={inv:Safety} buggy={inv:MissingNeverPass} | ec2a467bf853 |
 | Validation.tla | Validation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:PassRequiresComplete, inv:PassRequiresAllPassed} | c1310b236bcc |
 
-### specs/keeper-state-machine (32 specs)
+### specs/keeper-state-machine (33 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -129,6 +129,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperMemoryLifecycle.tla | KeeperMemoryLifecycle | manual | 2 | 1 | clean={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} buggy={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} | 1ee66a63435a |
 | KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicRuntimeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicRuntimeFallback, prop:StrictStopPreemption, prop:EventualTermination} | 6a288b34a171 |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 7ac6ec2c5bf3 |
+| KeeperPacing.tla | KeeperPacing | manual | 3 | 2 | clean={inv:Safety} buggy-unbounded={inv:PacingBounded} buggy={inv:NoFailureDrivenExistenceChange} | 616514d1dcbf |
 | KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 2b313c94357a |
 | KeeperProactiveWakeGuard.tla | KeeperProactiveWakeGuard | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety} buggy={inv:NeverWakeWithoutMutatingAffordance, inv:NoUnboundedZeroProgressStreak} | f12350ddda14 |
 | KeeperReactionLiveness.tla | KeeperReactionLiveness | manual | 2 | 1 | clean={inv:Safety, prop:BoardEnqueueLeadsToReceipt, prop:VerificationLeadsToReaction, prop:GoalVerificationLeadsToResolution, prop:TaskTransitionLeadsToReceipt, prop:CursorAdvancementRequiresAck} buggy={inv:TypeOK, prop:BoardEnqueueLeadsToReceipt} | 04f8e04c4fe0 |

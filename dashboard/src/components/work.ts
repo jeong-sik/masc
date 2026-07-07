@@ -54,11 +54,11 @@ type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification'
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
 const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  ['todo',                  '미배정',   'todo'],
-  ['claimed',               '클레임됨', 'claimed'],
-  ['in_progress',           '진행 중',  'wip'],
-  ['awaiting_verification', '검증 대기', 'verify'],
-  ['done',                  '완료',     'done'],
+  ['todo',                  '백로그', 'todo'],
+  ['claimed',               '클레임', 'claimed'],
+  ['in_progress',           '진행',   'wip'],
+  ['awaiting_verification', '검증',   'verify'],
+  ['done',                  '완료',   'done'],
 ] as const
 
 interface JobState {
@@ -776,15 +776,11 @@ function KanbanView({
   const total = kanbanTasks.length
   return html`
     <section class="wk-board-section" data-testid="work-board-section">
-      <div class="wk-board-head">
-        <div>
-          <div class="wk-board-title">
-            <span class="wk-board-glyph" aria-hidden="true">▦</span>
-            칸반 · 상태별
-            <span class="wk-board-count mono">${total}</span>
-          </div>
-        </div>
-        <div class="wk-board-flow mono">todo → claimed → in_progress → verify → done</div>
+      <div class="wk-sec-h">
+        <span class="wk-sec-glyph" aria-hidden="true">▦</span>
+        <span class="wk-sec-t">칸반 · 상태별</span>
+        <span class="wk-sec-n mono">${total}</span>
+        <span class="wk-sec-sub mono">todo → claimed → in_progress → verify → done</span>
       </div>
       <div class="wk-kanban" data-testid="work-kanban">
         ${KANBAN_COLUMNS.map(([status, label, cls]) => {
@@ -792,8 +788,9 @@ function KanbanView({
           return html`
             <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
               <div class="wk-kcol-h">
+                <span class=${`wk-kcol-dot ${cls}`} aria-hidden="true"></span>
                 <span class="wk-kcol-title">${label}</span>
-                <span class="wk-kcol-count">${col.length}</span>
+                <span class="wk-kcol-n mono">${col.length}</span>
               </div>
               <div class="wk-kcol-body">
                 ${col.length === 0

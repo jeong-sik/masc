@@ -2340,7 +2340,7 @@ let test_gc_waits_for_fact_writer_lock () =
           Memory_io.merge_and_cap_facts
             ~now
             ~keeper_id
-            ~merge:(Policy.reobserve_fact ~now)
+            ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
             ~incoming:[ fresh ]
             ~keep:Policy.fact_recall_window
             ~trigger:fact_store_trigger
@@ -2658,7 +2658,7 @@ let test_recall_scans_whole_bounded_store () =
           Memory_io.merge_and_cap_facts
             ~now
             ~keeper_id
-            ~merge:(Policy.reobserve_fact ~now)
+            ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
             ~incoming:(head :: cap_fillers)
             ~keep:Policy.fact_recall_window
             ~trigger:Policy.fact_store_max
@@ -3165,7 +3165,7 @@ let test_merge_and_cap_drops_expired_no_incoming () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -3489,7 +3489,7 @@ let test_reobserve_fact_refreshes_truth_anchor () =
     }
   in
   let incoming = { existing with Types.last_verified_at = Some now } in
-  let merged = Policy.reobserve_fact ~now ~existing ~incoming in
+  let merged = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (option (float 1e-9)))
     "last_verified_at refreshed to now"
     (Some now)
@@ -3525,7 +3525,7 @@ let test_merge_and_cap_upserts_reobserved_claim () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ reobserved ]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -3562,7 +3562,7 @@ let test_merge_and_cap_appends_distinct_and_caps () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ mk 1; mk 2; mk 3 ]
         ~keep:2
         ~trigger:2
@@ -4481,7 +4481,7 @@ let test_self_observation_horizon_and_remint () =
      row entirely, so the horizon is not pushed past the original anchor. *)
   let later = now +. 1_800.0 in
   let incoming = mk_self ~first_seen:later () in
-  let merged = Policy.reobserve_fact ~now:later ~existing ~incoming in
+  let merged = Policy.reobserve_fact ~now:later ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (option (float 0.001)))
     "re-mint does not extend the self-observation horizon past the first anchor"
     existing.Types.valid_until
@@ -4888,7 +4888,7 @@ let test_merge_and_cap_upserts_same_claim_id () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ reworded ]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -4938,7 +4938,7 @@ let test_merge_and_cap_no_over_merge_distinct_conclusions () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ merged ]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -4963,7 +4963,7 @@ let test_reobserve_advances_durable_anchor () =
     }
   in
   let incoming = { existing with Types.last_verified_at = Some now } in
-  let reobserved = Policy.reobserve_fact ~now ~existing ~incoming in
+  let reobserved = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (option (float 1e-9)))
     "durable claim's last_verified_at advances to now"
     (Some now)
@@ -5004,7 +5004,7 @@ let test_reobserve_external_ref_refreshes_like_context () =
   in
   (* incoming is a reworded re-extraction of the same referent claim *)
   let incoming = { existing with Types.claim = "pull request #42 remains open" } in
-  let reobserved = Policy.reobserve_fact ~now ~existing ~incoming in
+  let reobserved = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (float 0.001))
     "first_seen inherited (not advanced to now)"
     older

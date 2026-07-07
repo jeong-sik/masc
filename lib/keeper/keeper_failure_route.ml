@@ -30,15 +30,30 @@ let of_degraded_retry_reason (reason : Keeper_error_classify.degraded_retry_reas
   | Keeper_error_classify.Admission_queue_timeout
   | Keeper_error_classify.Runtime_exhausted
   | Keeper_error_classify.Resumable_cli_session -> Retry_after_pacing
-  (* Provider-bound with candidates left to try: rotate on this turn. *)
-  | Keeper_error_classify.Runtime_candidates_filtered -> Rotate_now
-  (* Deterministic: retrying cannot help. Auth is a config/credential
-     fact; the three no-progress accept-rejections are model-behavior
-     facts. Both become stimuli for an LLM-boundary verdict, not retries. *)
+  (* Runtime-dependent failures: a DIFFERENT runtime (other credentials or
+     model) may succeed, so rotate — never escalate. This matches the
+     current production behavior: [recoverable_runtime_failure_reason]
+     returns a [Some] reason for exactly these (they are the rotation-
+     recoverable set), and the credential-pool candidate filter already
+     rotates auth/no-progress. Auth = this runtime's credential is invalid
+     (a different runtime's is not); no-progress = this model made no
+     progress on this input (a different model may). Correction: these were
+     mis-routed to [Escalate_judgment] in the first W2a landing — a
+     [degraded_retry_reason] is by construction rotation-recoverable, so
+     none of them is a judgment stimulus. *)
+  | Keeper_error_classify.Runtime_candidates_filtered
   | Keeper_error_classify.Auth_error
   | Keeper_error_classify.Read_only_no_progress
   | Keeper_error_classify.Empty_no_progress
-  | Keeper_error_classify.Thinking_only_no_progress -> Escalate_judgment
+  | Keeper_error_classify.Thinking_only_no_progress -> Rotate_now
+(* [Escalate_judgment] is intentionally unreachable from this projection:
+   every [degraded_retry_reason] is rotation-recoverable. Deterministic
+   errors that warrant a judgment stimulus (config / schema / contract /
+   Mcp / catalog illegal-state) are the ones [recoverable_runtime_failure_
+   reason] maps to [None] — i.e. they never become a [degraded_retry_reason]
+   at all, and are routed by the sdk-error-level total router, not here. The
+   [Escalate_judgment] constructor stays in the [route] type for that
+   caller. *)
 
 let is_deterministic = function
   | Escalate_judgment -> true

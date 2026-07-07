@@ -42,10 +42,13 @@ let expected : (EC.degraded_retry_reason * R.route) list =
   ; EC.Capacity_backpressure, R.Retry_after_pacing
   ; EC.Rate_limit, R.Retry_after_pacing
   ; EC.Server_error, R.Retry_after_pacing
-  ; EC.Auth_error, R.Escalate_judgment
-  ; EC.Read_only_no_progress, R.Escalate_judgment
-  ; EC.Empty_no_progress, R.Escalate_judgment
-  ; EC.Thinking_only_no_progress, R.Escalate_judgment
+  (* Runtime-dependent → rotate (a different credential/model may succeed).
+     Matches current production behavior and codex #23495; the earlier W2a
+     landing mis-routed these to Escalate_judgment. *)
+  ; EC.Auth_error, R.Rotate_now
+  ; EC.Read_only_no_progress, R.Rotate_now
+  ; EC.Empty_no_progress, R.Rotate_now
+  ; EC.Thinking_only_no_progress, R.Rotate_now
   ]
 
 (* Every reason maps to the RFC-0313 §2 route the table assigns it. *)

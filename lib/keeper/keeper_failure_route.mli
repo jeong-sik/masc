@@ -35,10 +35,15 @@ type route =
 val route_to_string : route -> string
 
 val of_degraded_retry_reason : Keeper_error_classify.degraded_retry_reason -> route
-(** Total, exhaustive map. Deterministic reasons (auth, the three
-    no-progress accept-rejections) route to [Escalate_judgment]; every
-    transient/capacity/timeout reason routes to [Retry_after_pacing];
-    runtime-candidate filtering routes to [Rotate_now]. *)
+(** Total, exhaustive map. Every [degraded_retry_reason] is by construction
+    rotation-recoverable ([recoverable_runtime_failure_reason] returns
+    [Some] only for the recoverable set), so this projection produces only
+    [Retry_after_pacing] (transient / capacity / timeout / quota) and
+    [Rotate_now] (candidate filtering, auth, the three no-progress
+    accept-rejections — all runtime-dependent: a different credential or
+    model may succeed). [Escalate_judgment] is unreachable here; deterministic
+    errors that warrant a judgment stimulus are the [None] family, routed at
+    the sdk-error level, not projected from a [degraded_retry_reason]. *)
 
 val is_deterministic : route -> bool
 (** [true] for [Escalate_judgment]. Convenience for callers deciding

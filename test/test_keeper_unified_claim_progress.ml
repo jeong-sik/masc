@@ -8,7 +8,7 @@ module Outcome = Keeper_tool_outcome
 
 (* RFC-0232: a budget-exhausted (Continuation_checkpoint) turn substitutes a
    synthetic continuation notice for the reply text. That text is display-only;
-   the work preview must gate visible model text on [is_visible_reply] so the
+   callers must pass [has_text=false] for non-visible reply surfaces so the
    canned "Continuation checkpoint saved; ..." sentence never surfaces as
    output. These pin the preview precedence. *)
 let test_preview_shows_visible_model_text () =
@@ -18,11 +18,11 @@ let test_preview_shows_visible_model_text () =
        ~response_text:"real answer" ~validated_evidence_preview:None)
 
 let test_preview_drops_continuation_notice () =
-  (* has_text is true (the synthetic notice is non-empty) but the outcome is
-     not a visible reply -> the notice must NOT become the preview. With no
-     tools and no evidence, the prior preview is kept. *)
+  (* The synthetic notice is non-empty, but the typed surface is not a visible
+     reply, so the caller passes [has_text=false]. With no tools and no evidence,
+     the prior preview is kept. *)
   check string "checkpoint notice does not overwrite preview" "old"
-    (KUS.select_proactive_preview ~previous:"old" ~has_text:true
+    (KUS.select_proactive_preview ~previous:"old" ~has_text:false
        ~is_visible_reply:false ~has_substantive_tools:false ~tool_names:[]
        ~response_text:"Continuation checkpoint saved; keeper remains scheduled."
        ~validated_evidence_preview:None)
@@ -30,7 +30,7 @@ let test_preview_drops_continuation_notice () =
 let test_preview_falls_back_to_tools_then_evidence () =
   check string "checkpoint with tools -> tool summary"
     "(tools: keeper_task_claim)"
-    (KUS.select_proactive_preview ~previous:"old" ~has_text:true
+    (KUS.select_proactive_preview ~previous:"old" ~has_text:false
        ~is_visible_reply:false ~has_substantive_tools:true
        ~tool_names:[ "keeper_task_claim" ]
        ~response_text:"Continuation checkpoint saved; keeper remains scheduled."

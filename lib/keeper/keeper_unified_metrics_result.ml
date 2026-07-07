@@ -67,6 +67,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          ~response_text:result.response_text result.stop_reason)
       Keeper_turn_outcome.Visible_reply
   in
+  let has_preview_text = has_text && is_visible_reply in
   let validated_evidence = visible_run_validation result in
   let has_validated_evidence = Option.is_some validated_evidence in
   let visible_tool_signal_present =
@@ -169,7 +170,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else
              select_proactive_preview
                ~previous:rt.proactive_rt.last_preview
-               ~has_text
+               ~has_text:has_preview_text
                ~is_visible_reply
                ~has_substantive_tools
                ~tool_names

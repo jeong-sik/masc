@@ -116,10 +116,13 @@ val select_proactive_preview :
   is_visible_reply:bool ->
   has_substantive_tools:bool ->
   tool_names:string list ->
-  response_text:string ->
-  validated_evidence_preview:string option ->
-  string
-(** RFC-0232 scheduled-autonomous work preview, by precedence: visible model
-    text (only when [is_visible_reply], so the synthetic continuation notice on
-    a budget-exhausted turn is not shown as output) -> substantive tool calls ->
-    validated evidence -> [previous]. Pure for unit testing. *)
+    response_text:string ->
+    validated_evidence_preview:string option ->
+    string
+  (** RFC-0232 scheduled-autonomous work preview, by precedence:
+      caller-eligible model text -> substantive tool calls -> validated evidence
+      -> [previous]. Callers must pass [has_text = false] when the typed turn
+      surface is not [Visible_reply], so a synthetic continuation notice on a
+      budget-exhausted turn is not shown as work output. [is_visible_reply] is
+      retained for source compatibility; this helper trusts the caller-supplied
+      text eligibility. Pure for unit testing. *)

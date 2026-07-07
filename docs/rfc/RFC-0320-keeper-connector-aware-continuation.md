@@ -1,0 +1,167 @@
+---
+rfc: "0320"
+title: "Keeper connector-aware continuation: carry the originating channel through wake so a resumed keeper replies where the conversation started"
+status: Draft
+created: 2026-07-08
+updated: 2026-07-08
+author: vincent (+ Claude Opus 4.8)
+supersedes: []
+superseded_by: null
+related: ["0315", "0304", "0303", "connector-deferred-reply-via-chat-queue", "connector-ambient-attention-wake"]
+implementation_prs: []
+---
+
+# RFC-0320: Keeper connector-aware continuation
+
+wake는 발화되지만 keeper가 **어느 대화를 이어가야 하는지**를 모른다. 승인이 풀리고 mention이 와도 keeper가 자기 상태로만 진행하고 발화했던 채널로 돌아오지 않는 근원을, 직교하는 wake 계열 전체 관점에서 닫는다.
+
+## 1. Problem — connector-blind wake
+
+keeper 이벤트 큐의 wake payload는 id + 결과만 싣는다. 어느 커넥터(대시보드 채팅 / Discord / Slack 스레드)에서 대화가 시작됐는지가 제출 시점에 캡처되지 않아 resolve→wake까지 전달할 수가 없다. 그래서 keeper는 깨어나도 "proceed on its own state" — 발화했던 대화로 돌아오지 못한다.
+
+### 1.1 실측 체인 (30초 내 승인했는데도 keeper가 채팅에서 멈춘 사례, `appr_7bf611289364`)
+
+1. keeper가 대시보드 채팅 턴에서 gated tool(`gh repo create`, audited/privileged)을 호출.
+2. 승인 큐에 제출 — entry는 `turn_id` / `task_id` / `goal_id`만 캡처. chat connector / thread는 캡처 안 함.
+3. keeper 턴이 "승인 대기 중" narration을 하고 종료.
+4. operator가 30초 뒤 승인 → `resolve_entry` → composition-root hook이 `Hitl_resolved{approval_id, decision}`를 keeper 큐에 enqueue. wake는 분명히 발화됨.
+5. keeper가 `Hitl_resolved`로 깨어남 — 그러나 payload에 커넥터가 없고, intake가 "unblock → proceed on its own state"로 처리. "채팅 스레드로 대화 이어가라"가 아님.
+6. → keeper는 대시보드 채팅에 답하지 않고 자율 사이클로 진행. **채팅 관점에선 멈춘 것.**
+
+### 1.2 증거 (adversarial 검증 완료, file:line)
+
+| 사실 | 위치 | 확인 |
+|---|---|---|
+| wake payload에 커넥터 없음 | `lib/keeper_runtime/keeper_event_queue.ml:39-92` | 11개 wake variant 전수. `hitl_resolution={approval_id;decision}` (:119-126), `connector_attention={event_id}` (:132). 어느 payload도 outbound reply channel을 first-class 필드로 갖지 않음. |
+| Hitl_resolved intake = 자기상태 | `keeper_heartbeat_stimulus_intake.ml:104-115` | `event_queue_trigger_of_stimulus`가 `None` 반환. 주석: "proceeds on its own state". |
+| Hitl_resolved consume = 빈 관찰 | `keeper_heartbeat_stimulus_intake.ml:259-271` | `[]` 반환, reply-channel 라우팅 없음 ("no observation to inject"). |
+| approval entry에 커넥터 없음 | `keeper_approval_queue` (`create_entry`) | `turn_id`/`task_id`/`goal_id`(+sandbox/runtime/model)만. chat connector/thread 필드 부재. |
+| resolve→wake hook에 채널 없음 | `server_bootstrap_loops.ml:509-526` | `Hitl_resolved{approval_id,decision}` enqueue. entry 타입에도 hook에도 전달할 channel 필드 자체가 없음. |
+| 커넥터 좌표는 존재하나 wake에 안 실림 | `keeper_external_attention.mli:15-29` | `surface_ref`가 Discord{channel_id;thread_id}/Slack{channel_id;thread_ts}/Webhook을 이미 모델링. `Connector_attention`은 `{event_id}` 포인터로 간접 참조만, 좌표는 store에서 재조회. |
+
+### 1.3 유일한 예외 = 살아있는 turn의 in-place 재개
+
+채널에 답이 도달하는 **단 하나의 경로**는 fast-approval resolver가 **원래 suspended turn을 in-place로 재개**할 때다 (원래 turn이 아직 살아있어야 함). 이는 wake path가 아니며, 턴이 종료된 뒤에는 성립하지 않는다. 턴이 끝나면 woken keeper는 자기 상태로 진행하고 발화 채널로 답하지 않는다.
+
+### 1.4 인접 사실 — Dashboard continuation은 이미 push된다 (별개 개선)
+
+adversarial 검증에서 교정된 사실: 대시보드-소스 queued 턴의 결과는 `process_single_turn`이 `Keeper_chat_broadcast.chat_appended`를 호출해 실시간 전달된다 (`server_routes_http_keeper_stream.ml:1288-1289` → `keeper_chat_broadcast.ml:82` → `sse.ml:1011`; 대시보드 `sse-store.ts:637` → `hydrateKeeperChatHistory(force)` `keeper-actions.ts:741-762`). 즉 **이 RFC의 주 대상이 아니다.** 남는 caveat 둘: (a) live token streaming은 유실되고 final message만 재-fetch로 나타남, (b) 해당 keeper 패널이 hydrate/active 상태일 때만 도착, 아니면 client-side drop되어 다음 open 시 보임. 이 둘은 §9 follow-up으로 분리한다. **이 RFC의 코어는 event-queue wake의 outbound continuation이다** (Dashboard chat inbound가 아니라).
+
+### 1.5 기존 RFC와의 경계
+
+- `RFC-connector-deferred-reply-via-chat-queue` — busy-path connector 메시지를 chat queue로 drain (구현: #22798/#23446, stale Draft/[] 메타에도 실질 구현됨). **Discord inbound 한정.**
+- `RFC-connector-ambient-attention-wake` — idle keeper가 ambient connector 메시지 인지 (구현: #22818/#22825). **Discord ambient 한정.**
+- 두 RFC 모두 **inbound** dispatch/ambient를 다루며, `Hitl_resolved` 및 나머지 event-queue wake의 **outbound continuation connector-blindness는 어느 쪽도 닫지 않는다.** 이 RFC가 그 gap을 닫는다.
+
+## 2. 원칙 — continuation channel을 일급으로
+
+깨우는 것(stimulus)과 어디로 답할지(continuation channel)를 분리된 두 개념으로 두지 말고, wake가 originating channel을 실어나른다. 판단(무엇을 말할지)은 LLM 경계에 남기고, 라우팅(어디로 답할지)은 결정론적으로 stimulus에 태워 보낸다. 커넥터를 지어내지 않는다 — 없으면 `Unrouted`로 표면화(fail-closed).
+
+## 3. 직교 wake 계열 매트릭스
+
+이 gap은 HITL만이 아니다. keeper 이벤트 큐의 wake 계열 전체가 같은 결함을 공유한다 — "누가 특정 채널에서 응답/이어짐을 기다림"인데 채널이 안 실린다.
+
+| Wake stimulus | 계기 | continuation 대상 | 현재 payload | 커넥터 필요 | 현재 동작 |
+|---|---|---|---|---|---|
+| `Hitl_resolved` | operator 승인/거부 | 발화했던 채팅 스레드 | `{approval_id, decision}` | 필수 | 자기상태 진행 |
+| `Connector_attention` | keeper/유저 @mention·메시지 | 부른 채널·상대 | `{event_id}` | 필수 | 응답 루프 안 닫힘 |
+| `Bg_completed` | 백그라운드 잡 완료 (RFC-0290) | 요청한 대화/보고처 | `{bg_run_id;…}` | 권장 | 보고처 유실 가능 |
+| `Fusion_completed` | fusion 완료 | 요청 맥락 | `{run_id;…}` | 권장 | 동상 |
+| `Schedule_due` | 예약 wake | 예약이 지정한 대상 | `{schedule_id;…}` | 선택 | 대상별 상이 |
+| `Goal_assigned` | 목표 배정 (RFC-0315) | 배정자 | `{ga_goal_id;…}` | 선택 | self-desc 있음 |
+| `Board_signal` | 보드 포스트 | 보드 스레드 | `{…author;hearth}` | 선택 | 보드 한정 |
+| `Bootstrap` / `No_progress_recovery` | 내부 복구/부팅 | (대화 아님) | — | 불필요 | 해당 없음 |
+
+→ continuation channel이 필요한 5계열(`Hitl_resolved`, `Connector_attention`, `Bg_completed`/`Fusion_completed`, `Schedule_due`)이 동일한 구조 수정으로 함께 닫힌다. 이것이 이 설계를 단발 패치가 아니라 직교 매트릭스로 다루는 이유다.
+
+## 4. Goal Matrix
+
+각 Goal은 독립 검증 가능한 슬라이스.
+
+| Goal | 현재 | Gap | 목표 (측정 가능) | 접점 (파일) | 검증 | 경계·리스크 |
+|---|---|---|---|---|---|---|
+| **G1** provenance capture | entry/stimulus가 turn/task/goal만 | originating connector 미캡처 | typed `continuation_channel`(Dashboard{thread}\|Discord{ch,user}\|Slack{ch,user}\|Unrouted{reason})를 승인 제출·mention 접수 시점에 캡처 | `keeper_approval_queue`(create_entry), `keeper_chat_queue`, `connector_attention` | 제출 시 커넥터 왕복 테스트; 없으면 Unrouted | 커넥터 지어내기 금지 → Unrouted (fail-closed) |
+| **G2** carry-through | resolve→`Hitl_resolved{id,decision}` | wake payload에 채널 없음 | resolve/완료 hook이 `continuation_channel`을 wake payload에 실어 enqueue | `server_bootstrap_loops`(hitl hook), `keeper_event_queue`(payload 확장) | resolve→enqueue payload에 채널 보존; 직렬화 왕복 | payload 확장은 exhaustive; 미매핑 variant 컴파일 에러 |
+| **G3** re-engagement | 깨면 "proceed on its own state" | 발화 대화로 복귀 안 함 | wake 턴이 `continuation_channel`의 대화를 재개 — 채팅 스레드/부른 상대에게 응답. RFC-0315 self-description에 "continuation channel" 차원 추가 | `keeper_heartbeat_stimulus_intake`, `keeper_unified_prompt`(self-desc) | 승인→해당 스레드에 응답 도착; Unrouted면 자율진행 | 재개는 대화만; 새 privileged 행동은 재-게이팅(RFC-0319) |
+| **G4** keeper↔keeper | `Connector_attention` wake만 존재 | 부른 채널로 응답 루프 안 닫힘 → "서로 안 도와줌" | A가 B를 mention→B가 A가 부른 채널에서 응답. G1–G3를 mention 경로에 적용 | `connector_attention`, reactive wake 경로 | A@B→B가 같은 채널 응답 관측; 무응답률 지표 하락 | 과잉 wake 방지(RFC-0303 throttle 유지) |
+| **G5** observability | resolve만 audit | wake→continuation 전달/누락 불가시 | 모든 wake→continuation을 attributed; Unrouted·dropped-continuation을 대시보드에 표면화(silent 금지) | `audit_approval_event`, `agent_timeline`, dashboard | continuation 전달률·Unrouted 카운트 노출 | telemetry-as-fix 금지 — 카운트는 알람이지 fix 아님 |
+| **G6** safety invariant | — | 재개 시 gated 행동 자동실행 위험 | 재개는 대화 계속일 뿐: 새 privileged tool은 다시 승인 큐로. continuation이 중복 실행/자동승인으로 새지 않음 | `governance_pipeline` / `runtime_agent_context.ml:491-493`(재-게이팅 경로) | TLA+ must-fail: `ContinuationNeverAutoExecutesGated` | RFC-0319 직무분리와 정합; 이중 실행 방지 |
+
+## 5. 데이터 모델 델타
+
+커넥터 provenance를 closed variant로. bool/string 금지 — 미분류는 `Unrouted`로 표현 가능해야 하고(fail-closed), 새 커넥터 추가 시 라우팅 지점이 컴파일 에러가 나야 한다.
+
+```ocaml
+(* NOW — id만: wake payload에 대화 채널이 없다 *)
+and hitl_resolution = { approval_id : string; decision : hitl_resolution_decision }
+and connector_attention = { event_id : string }
+(* 승인 entry: turn/task/goal만, chat connector 필드 없음 *)
+
+(* TO-BE — continuation_channel 관통 *)
+type continuation_channel =
+  | Dashboard of { thread_id : string }
+  | Discord   of { channel_id : string; user_id : string }
+  | Slack     of { channel : string; user_id : string }
+  | Unrouted  of { reason : string }   (* fail-closed: 커넥터 미상 *)
+
+and hitl_resolution =
+  { approval_id : string; decision : hitl_resolution_decision; channel : continuation_channel }
+and connector_attention =
+  { event_id : string; channel : continuation_channel }
+(* create_entry … ~turn_id ~task_id ~goal_id ~channel  (제출 시점 캡처, resolve까지 관통) *)
+```
+
+## 6. Wake 턴 재개 — before / after
+
+```ocaml
+(* NOW — heartbeat intake *)
+| Hitl_resolved _ ->
+  (* approval left the queue; keeper no longer skips on
+     Approval_pending and proceeds ON ITS OWN STATE *)
+  []   (* → 발화 대화로 안 돌아옴 *)
+
+(* TO-BE — connector-aware *)
+| Hitl_resolved r ->
+  (match r.channel with
+   | Dashboard { thread_id } -> resume_conversation ~thread_id ~note:(approval_outcome r)
+   | Discord _ | Slack _     -> resume_conversation ~channel:r.channel ~note:(approval_outcome r)
+   | Unrouted { reason }      -> log_unrouted reason; proceed_on_own_state ())
+  (* exhaustive: 새 채널 = 컴파일 에러 *)
+```
+
+판단(무엇을 말할지)=LLM. 라우팅(어디로)=결정론적 channel 매치. 둘의 경계가 이 설계의 핵심.
+
+## 7. 불변식 & 검증
+
+- **Fail-closed 라우팅**: 커넥터를 결정 못 하면 `Unrouted` — 임의 채널로 보내지 않고 자율진행 + 표면화.
+- **Exhaustive 매치**: `continuation_channel`·wake variant는 catch-all(`_ ->`) 금지. 새 커넥터/새 wake는 라우팅 지점에서 컴파일 에러.
+- **No double-execute (G6)**: 재개는 대화 계속일 뿐. 재개 턴의 새 privileged tool은 다시 승인 큐. TLA+ `ContinuationNeverAutoExecutesGated` must-fail 모델(clean 만족 / buggy 위반). 현재 wiring(`runtime_agent_context.ml:491-493`)은 resumed 턴을 fresh 턴과 같은 governance callback으로 보내나 재-invocation 실행 의미론은 외부 Agent SDK에 있어 in-repo 미검증 — TLA+로 invariant를 못박는다.
+- **At-most-once continuation**: 한 resolution이 두 번 재개하지 않음(중복 wake 멱등).
+- **Observable**: continuation 전달률 + Unrouted 카운트가 대시보드에 노출 — dropped continuation이 silent가 아님.
+- **Regression**: `appr_7bf611289364` 시나리오 재현 — 대시보드 채팅 발화→gated→30초 승인→같은 스레드에 응답 도착.
+
+## 8. 경계
+
+- **MASC 전용** — OAS 무관.
+- **LLM 경계** = 재개 턴에서 무엇을 말할지. 라우팅(어디로)은 typed channel로 결정론적. 커넥터를 LLM/문자열로 추론하지 않음.
+- **No fabrication** — 커넥터 미상은 `Unrouted`. 편의 기본값(예: 항상 Dashboard) 금지.
+- **RFC-0319와 직교** — 이건 continuation 라우팅, 저건 auto-approval 모드. G6에서 직무분리·재게이팅으로 만난다.
+- **과잉 wake 금지** — RFC-0303 reactive-wake throttle / No_signal 게이트 유지. continuation은 이미 있던 대화의 재개이지 새 wake 소스가 아니다.
+
+## 9. 롤아웃 웨이브
+
+- **W1** — G1 provenance capture. `continuation_channel` 타입 + 승인 제출/mention 접수 시 캡처. 순수 추가, 소비자 없음(무행동). payload 필드는 `option`으로 추가해 기존 직렬화 하위호환.
+- **W2** — G2 carry-through. resolve/완료 hook이 채널을 wake payload에 실음. 직렬화 왕복 + audit.
+- **W3** — G3 re-engagement. intake가 채널로 대화 재개. HITL 먼저(가장 명확한 계기), 그다음 `Connector_attention`(G4).
+- **W4** — G5 observability + G6 safety invariant + TLA+ + regression 픽스처. `Bg`/`Fusion`/`Schedule`로 채널 확장 및 Dashboard streaming/패널-drop caveat(§1.4)은 opt-in follow-up.
+
+## 10. Open questions
+
+- 재개 타이밍: resolve 즉시 wake vs 다음 heartbeat 틱? (throttle와의 상호작용)
+- 턴 종료 후 재개: `submit_and_await`가 여전히 블로킹이면 fiber 재개 vs 새 continuation 턴 — 어느 것이 SSOT?
+- 커넥터 만료: 대화 스레드가 닫힌 뒤 승인되면? (`Unrouted` + 보드 fallback?)
+- 다중 대기: 한 keeper가 여러 채널에서 대기 시 continuation 우선순위.
+
+---
+
+근거: `keeper_approval_queue.ml` · `keeper_event_queue.ml` · `keeper_heartbeat_stimulus_intake.ml` · `server_bootstrap_loops.ml` · `keeper_external_attention.mli` · `server_routes_http_keeper_stream.ml` · `runtime_agent_context.ml`. 인접 RFC-0315 / RFC-0304 / RFC-0290 / RFC-0303. 설계 원본: `reports/masc-keeper-connector-aware-continuation-goal-matrix.html`. 근본원인 매핑 및 adversarial 검증(H1 교정 / H2 확정)은 7-agent understand workflow(2026-07-08)로 수행.

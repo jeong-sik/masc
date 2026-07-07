@@ -92,14 +92,16 @@ let dashboard_json (config : Workspace.config) =
   (* Only keepers with recurring tasks appear: loop liveness on its own already
      lives on the fleet surface, so re-listing every keeper here would duplicate
      it. The novel observable is the recurring autonomous work. *)
-  let keeper_rows =
+  let keeper_rows, recurring_total =
     entries
-    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-      match Keeper_recurring.list ~keeper_name:entry.name with
-      | [] -> None
-      | tasks -> Some (keeper_json entry tasks))
+    |> List.fold_left
+         (fun (rows, total) (entry : Keeper_registry.registry_entry) ->
+            match Keeper_recurring.list ~keeper_name:entry.name with
+            | [] -> rows, total
+            | tasks -> keeper_json entry tasks :: rows, total + List.length tasks)
+         ([], 0)
   in
-  let recurring_total = List.length (Keeper_recurring.list_all ()) in
+  let keeper_rows = List.rev keeper_rows in
   `Assoc
     [ "schema", `String schema
     ; "source", `String source

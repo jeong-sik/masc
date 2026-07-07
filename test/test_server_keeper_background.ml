@@ -84,7 +84,40 @@ let test_recurring_task_surfaced () =
        check int "run count" 0 J.(task |> member "run_count" |> to_int);
        check bool "last_run null (never run)" true (J.member "last_run_at" task = `Null);
        check bool "next_run null (never run)" true (J.member "next_run_at" task = `Null)
-     | other -> failf "expected exactly one recurring task, got %d" (List.length other))
+	     | other -> failf "expected exactly one recurring task, got %d" (List.length other))
+;;
+
+(* ── top-level recurring_count is scoped to returned keeper rows, not every
+      global Keeper_recurring entry keyed by an absent keeper name ── *)
+let test_recurring_count_ignores_unregistered_keepers () =
+  Keeper_recurring.clear ();
+  let base = temp_base () in
+  let config = Workspace_core.default_config base in
+  let name = "registered-keeper" in
+  register_keeper ~base name;
+  ignore
+    (Keeper_recurring.add
+       ~keeper_name:name
+       ~label:"visible"
+       ~interval_sec:30
+       (Keeper_recurring.Broadcast "visible"));
+  ignore
+    (Keeper_recurring.add
+       ~keeper_name:"orphan-keeper"
+       ~label:"orphan"
+       ~interval_sec:30
+       (Keeper_recurring.Broadcast "orphan"));
+  let json = Server_keeper_background.dashboard_json config in
+  check int "registered keepers" 1 J.(json |> member "keeper_count" |> to_int);
+  check int "one visible recurring keeper" 1 J.(json |> member "recurring_keeper_count" |> to_int);
+  check int "orphan recurring task excluded" 1 J.(json |> member "recurring_count" |> to_int);
+  check int "only registered keeper row returned" 1 (json |> J.member "keepers" |> J.to_list |> List.length);
+  match keeper_row json name with
+  | None -> fail "registered keeper missing from projection"
+  | Some row ->
+    (match recurring_of row with
+     | [ task ] -> check string "visible task only" "visible" J.(task |> member "label" |> to_string)
+     | other -> failf "expected one visible task, got %d" (List.length other))
 ;;
 
 (* ── next_run is derived only for a task that has run and is still enabled;
@@ -130,6 +163,10 @@ let () =
     [ ( "projection",
         [ test_case "empty when no recurring task" `Quick test_empty_when_no_recurring
         ; test_case "recurring task surfaced with loop context" `Quick test_recurring_task_surfaced
+        ; ( test_case
+              "recurring_count ignores unregistered keepers"
+              `Quick
+              test_recurring_count_ignores_unregistered_keepers )
         ; test_case "next_run derivation and pause" `Quick test_next_run_derivation
         ] )
     ]

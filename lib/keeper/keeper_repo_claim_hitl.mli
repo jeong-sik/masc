@@ -1,35 +1,30 @@
-(** Keeper-side HITL bridge for repository-scope claim requests.
+(** Keeper-side repository access projection for filesystem tools.
 
     [Keeper_repo_mapping] remains a pure policy/enforcement module and does
-    not depend on the keeper approval queue. This module is the composition
-    layer that turns a claimable selected-scope denial into a non-blocking HITL
-    request and applies the mapping mutation only after operator approval. *)
+    not depend on keeper tool surfaces. This module is the composition layer
+    that turns fail-closed repository denials into tool-facing responses.
+    Keeper repository mappings are advisory/default-scope metadata and are not
+    claimable access caps. The module name is retained for compatibility with
+    the former repo-claim path; selected-scope misses no longer submit HITL
+    approvals. *)
 
 type access_result =
   | Access_allowed
-  | Access_pending_approval of
-      { approval_id : string
-      ; repository_id : Repo_manager_types.repository_id
-      }
   | Access_denied of string
-
-val repository_claim_tool_name : string
-val repository_claim_request_type : string
 
 val request_repository_access :
   keeper_id:string ->
   base_path:string ->
   repository_id:Repo_manager_types.repository_id ->
   access_result
-(** Request access to a registered repository. Returns
-    [Access_pending_approval] only for the selected-scope miss that an operator
-    can resolve by adding [repository_id] to the keeper mapping. Hard
+(** Request access to a registered repository. Registered repositories are
+    allowed even when outside the keeper's advisory/default mapping scope. Hard
     fail-closed cases return [Access_denied]. *)
 
 val request_path_access :
   keeper_id:string -> base_path:string -> path:string -> access_result
-(** Resolve [path] through the repository catalog and request HITL access for
-    claimable repository-scope misses. *)
+(** Resolve [path] through the repository catalog and validate fail-closed
+    repository identity/store cases. *)
 
 val tool_response_json : path:string -> access_result -> Yojson.Safe.t
 (** Render a tool-facing policy response for non-[Access_allowed] results. *)

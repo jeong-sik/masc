@@ -26,6 +26,7 @@ val build_prompt :
   ?turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?current_task:Masc_domain.task ->
   ?active_goal_summaries:(string * string) list ->
+  ?active_open_loops:Keeper_working_state.loop list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   string * string
@@ -42,4 +43,8 @@ val build_prompt :
       holds ([meta.current_task_id] admits scheduled-autonomous turns, so the
       turn must see the work that admitted it). Omitted: layer absent.
     - [?active_goal_summaries]: renders goal titles next to ids in the Active
-      Goals layer. Omitted or empty: bare ids (legacy). *)
+      Goals layer. Omitted or empty: bare ids (legacy).
+    - [?active_open_loops]: renders an "Open Loops" layer for unresolved
+      working-state ledger entries (the keeper's own prior [STATE]
+      obligations restored from the sidecar). Omitted or empty: layer
+      absent. *)

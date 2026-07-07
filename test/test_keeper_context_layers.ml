@@ -13,6 +13,7 @@ let all_layers =
   [
     L.Active_goals;
     L.Current_task;
+    L.Working_state;
     L.Connected_surfaces;
     L.Namespace_state;
     L.Context_health;
@@ -66,9 +67,9 @@ let test_assemble_empty_when_all_absent () =
   check string "no layers -> empty body" "" (L.assemble ~content_of:(fun _ -> None))
 
 let test_assemble_all_present_follows_ordered () =
-  (* Each layer renders its own order index; the result must read 0..11. *)
+  (* Each layer renders its own order index; the result must read 0..12. *)
   let content_of id = Some (string_of_int (L.order_index id)) in
-  check string "every layer present -> indices in order" "01234567891011"
+  check string "every layer present -> indices in order" "0123456789101112"
     (L.assemble ~content_of)
 
 let () =

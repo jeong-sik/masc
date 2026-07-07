@@ -3,6 +3,7 @@
 type layer_id =
   | Active_goals
   | Current_task
+  | Working_state
   | Connected_surfaces
   | Namespace_state
   | Context_health
@@ -18,10 +19,12 @@ type layer_id =
    can reuse a longer shared prefix across cycles; highly volatile reactive
    signals stay later in the same user message. [Current_task] sits directly
    after [Active_goals]: the claimed task is standing context that changes on
-   claim/release, not per cycle. *)
+   claim/release, not per cycle. [Working_state] (unresolved open loops from
+   the keeper's own prior [STATE] blocks) follows for the same reason. *)
 let ordered =
   [ Active_goals
   ; Current_task
+  ; Working_state
   ; Connected_surfaces
   ; Namespace_state
   ; Context_health
@@ -41,16 +44,17 @@ let ordered =
 let order_index = function
   | Active_goals -> 0
   | Current_task -> 1
-  | Connected_surfaces -> 2
-  | Namespace_state -> 3
-  | Context_health -> 4
-  | Autonomous_trigger -> 5
-  | Scheduled_automation -> 6
-  | Continuity -> 7
-  | Pending_mentions -> 8
-  | Scope_messages -> 9
-  | Claimable_work -> 10
-  | Board_activity -> 11
+  | Working_state -> 2
+  | Connected_surfaces -> 3
+  | Namespace_state -> 4
+  | Context_health -> 5
+  | Autonomous_trigger -> 6
+  | Scheduled_automation -> 7
+  | Continuity -> 8
+  | Pending_mentions -> 9
+  | Scope_messages -> 10
+  | Claimable_work -> 11
+  | Board_activity -> 12
 ;;
 
 let assemble ~content_of =

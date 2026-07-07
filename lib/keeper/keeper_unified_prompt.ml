@@ -90,6 +90,48 @@ let format_current_task (task : Masc_domain.task) : string =
      so another keeper can take over.\n\n";
   Buffer.contents buf
 
+(* Open Loops render cap: the ledger's own [compact] already bounds the
+   digest, this is a prompt-size guard only. *)
+let max_open_loops_rendered = 5
+
+(** Render unresolved open loops from the keeper's working-state ledger
+    (RFC-0314). These are the keeper's OWN prior [STATE] obligations that
+    survived compaction/handoff via the sidecar; before this section the
+    ledger was persisted but never shown back to the model. *)
+let format_open_loops (loops : Keeper_working_state.loop list) : string =
+  let buf = Buffer.create 256 in
+  let total = List.length loops in
+  Buffer.add_string buf
+    (Printf.sprintf "### Open Loops (%d unresolved, from your own prior [STATE])\n"
+       total);
+  List.iteri
+    (fun i (loop : Keeper_working_state.loop) ->
+      if i < max_open_loops_rendered then (
+        Buffer.add_string buf
+          (Printf.sprintf "- %s — %s" loop.Keeper_working_state.title
+             loop.Keeper_working_state.six_w.Keeper_working_state.what);
+        (match loop.Keeper_working_state.evidence_refs with
+         | [] -> ()
+         | refs ->
+             Buffer.add_string buf
+               (Printf.sprintf " [%s]"
+                  (String.concat ", "
+                     (List.map
+                        (fun (r : Keeper_working_state.evidence_ref) ->
+                          r.Keeper_working_state.kind ^ ":"
+                          ^ r.Keeper_working_state.target)
+                        refs))));
+        Buffer.add_char buf '\n'))
+    loops;
+  if total > max_open_loops_rendered then
+    Buffer.add_string buf
+      (Printf.sprintf "- [%d more not shown]\n"
+         (total - max_open_loops_rendered));
+  Buffer.add_string buf
+    "- Continue, resolve, or explicitly archive these loops; do not silently \
+     drop them.\n\n";
+  Buffer.contents buf
+
 (** Format one connected-surface presence line (RFC-0223 P2).
     Presence only: lane label + liveness, no content, no counts. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =
@@ -694,6 +736,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(current_task : Masc_domain.task option)
     ?(active_goal_summaries : (string * string) list option)
+    ?(active_open_loops : Keeper_working_state.loop list option)
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string
     =
@@ -916,6 +959,13 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
       Option.map format_current_task current_task
+    (* 1c. Working state — unresolved open loops from the keeper's own prior
+       [STATE] blocks, restored from the working-state sidecar (RFC-0314:
+       the ledger was persisted-but-never-shown before this layer). *)
+    | Keeper_context_layers.Working_state ->
+      (match active_open_loops with
+       | Some (_ :: _ as loops) -> Some (format_open_loops loops)
+       | Some [] | None -> None)
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
        or transport flaps (RFC-0223 P2). Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only

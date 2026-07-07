@@ -81,12 +81,12 @@ admission 의미론 불변. 프롬프트 입력만 바로잡는다.
 - **P1b Current Task layer**: `Keeper_context_layers.Current_task` 신설(Active_goals 직후). `meta.current_task_id` → backlog 레코드 해석(`read_current_task`, 실패 시 None + 계측). 렌더: id/title/status/handoff summary/next step + "이어서 하거나, 막혔으면 blocker를 명시하고 handoff와 함께 release하라" 지시.
 - **P1c Goal titles**: turn runner가 `Goal_store.get_goal`로 (id,title) 해석, user message Active Goals 레이어가 title 렌더(legacy bare-id는 fallback 유지).
 - **P1d Self-direction parity**: goal 보유 keeper에게도 무자극 턴 지시 추가(goal 분해→task 생성/claim, 진행 업데이트 게시, blocker 명시). defer 유효성 명문화("이유를 [STATE]에").
+- **P1e Open Loops layer**: working-state ledger(`keeper_working_state`, TLA `KeeperWorkingStateLifecycle`)의 active loop을 `Working_state` 레이어로 렌더. ledger는 sidecar로 영속·resume-merge까지 되면서 프롬프트로는 한 번도 읽히지 않았다(.mli 선언대로 "checkpoint injection은 후속 배선"이었으나 미착지 — write-only theater의 배선 완성). latest 경로는 `Keeper_agent_run_sidecar.latest_working_state_path` SSOT.
 
 ### Phase 2 — Continuity that survives failure
 
-- Replay-suffix prune 재설계: `requires_attention` 턴의 히스토리를 소거하는 대신 **압축 실패 노트**(what tried / what blocked)로 체크포인트에 잔존시킨다. 소거는 protocol-boundary 오염(깨진 tool pair 등)에 한정.
-- working_state sidecar: 프롬프트에 도달시키거나(Continuity fallback 체인에 편입) 삭제한다. write-only theater 금지.
-- generation bump 시 short-term snapshot 드랍 정책 재검토, corrupt checkpoint의 silent fresh-context를 관측 가능한 이벤트로.
+- **P2a (구현: no-[STATE] interruption note)**: prune 자체는 유지하되(오염 replay 방역은 정당) 손실을 continuity 파이프로 복구 — no-snapshot 턴에서 progress.md를 제자리 증강(기존 forward 필드 보존 + "이전 턴이 상태를 남기지 못함, 재검증 후 행동/사유 defer" open question 1개, 상수 텍스트로 dedupe). 다음 턴 Continuity 읽기 체인 1순위가 이를 렌더.
+- 잔여: replay prune reason의 typed 관통(현재 manifest 텔레메트리에서 소멸)과 reason별 노트 구체화, generation bump 시 short-term snapshot 드랍 정책 재검토, corrupt checkpoint의 silent fresh-context를 관측 가능한 이벤트로. (working_state sidecar 배선은 P1e로 이동 완료.)
 
 ### Phase 3 — Standing-objective lane (자기 주도 턴)
 

@@ -1,5 +1,5 @@
 (** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
-    See compaction_llm_summarizer.mli. Structure mirrors
+    See keeper_compaction_llm_summarizer.mli. Structure mirrors
     Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
     schema-capable provider filter + timeout + fail-closed [None]. *)
 
@@ -54,7 +54,12 @@ let provider_for_plan (provider_cfg : Llm_provider.Provider_config.t) =
   ; tool_choice = None
   ; disable_parallel_tool_use = true
   }
-  |> Schema.apply_to_provider_config Schema.compaction_plan_output_schema
+  (* Full module path (not the [Schema] alias): the structured-output
+     coverage test resolves callees literally via Ast_grep.count_calls, so
+     this call must read [Keeper_structured_output_schema.apply_to_provider_config]
+     in source — same pattern as the other registry entries. *)
+  |> Keeper_structured_output_schema.apply_to_provider_config
+       Schema.compaction_plan_output_schema
 
 let plan_schema_supported provider_cfg =
   Schema.provider_config_accepts_schema Schema.compaction_plan_output_schema provider_cfg

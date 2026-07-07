@@ -438,6 +438,7 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     // where hover is unavailable.
     expect(baseRuleDecls('.kw-kp-more').opacity).toBe('0')
     expect(baseRuleDecls('.kw-kp-row:hover .kw-kp-more').opacity).toBe('1')
+    expect(baseRuleDecls('.kw-kp-row:focus-within .kw-kp-more').opacity).toBe('1')
     expect(mobileRuleDecls('.kw-kp-more').opacity).toBe('1')
   })
 

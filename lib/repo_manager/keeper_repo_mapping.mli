@@ -145,7 +145,10 @@ val repository_resolution_of_path :
   base_path:string -> path:string -> repository_resolution
 (** [repository_resolution_of_path ~base_path ~path] returns the repository
     resolution for [path]. Use this for access decisions so identity mismatches
-    and repository-store load failures stay explicit and fail closed. *)
+    and repository-store load failures stay explicit and fail closed.
+    Playground clone paths that do not resolve to a registered repository are
+    classified as [No_repository], so containment remains the access boundary
+    for sandbox-local files. *)
 
 val repository_resolution_of_path_from_catalog :
   base_path:string -> path:string -> repository list -> repository_resolution
@@ -168,5 +171,4 @@ val validate_path_access :
 (** [validate_path_access ~keeper_id ~base_path ~path] returns [Ok ()] if
     [path] resolves outside registered repositories or to a registered
     repository. Per-keeper mappings do not cap access. Returns [Error msg] for
-    unregistered playground repositories, identity mismatches, and
-    repository-store load failures. *)
+    identity mismatches and repository-store load failures. *)

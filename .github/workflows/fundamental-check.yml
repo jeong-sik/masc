@@ -352,7 +352,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y -qq ripgrep
+        run: |
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y -qq ripgrep
       - name: Run path SSOT audit
         run: bash scripts/audit-path-ssot.sh
 

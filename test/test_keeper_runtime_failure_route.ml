@@ -1,11 +1,11 @@
-(** Mapping tests for [Keeper_failure_route] (RFC-0313 W2).
+(** Mapping tests for [Keeper_runtime_failure_route] (RFC-0313 W2).
 
     Totality over [Agent_sdk.Error.sdk_error] is compiler-enforced (the
     route function has no catch-all); these tests pin the mapping opinion
     per class and the typed retry_after extraction so a refactor cannot
     silently move a class between routes. *)
 
-module KFR = Keeper_failure_route
+module KFR = Keeper_runtime_failure_route
 
 let route = Alcotest.testable (fun fmt r -> Format.pp_print_string fmt (KFR.route_kind_label r ^ ":" ^ KFR.route_class_label r)) ( = )
 
@@ -288,7 +288,7 @@ let test_queue_bounded_across_detail_variants () =
 
 let () =
   Alcotest.run
-    "keeper_failure_route"
+    "keeper_runtime_failure_route"
     [ ( "api"
       , [ Alcotest.test_case "rate limited hint" `Quick test_api_rate_limited_threads_hint
         ; Alcotest.test_case "hard quota message" `Quick test_api_hard_quota_message_wins

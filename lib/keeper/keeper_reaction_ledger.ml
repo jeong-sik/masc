@@ -212,7 +212,7 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
     Printf.sprintf
       "failure_judgment runtime=%s class=%s"
       fj.fj_runtime_id
-      (Keeper_failure_route.judgment_class_label fj.fj_judgment)
+      (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =

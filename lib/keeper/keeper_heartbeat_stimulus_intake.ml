@@ -182,7 +182,7 @@ let consume_single_heartbeat_stimulus
     Log.Keeper.info
       "turn entry: failure judgment delivered runtime=%s class=%s (keeper=%s)"
       fj.fj_runtime_id
-      (Keeper_failure_route.judgment_class_label fj.fj_judgment)
+      (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->

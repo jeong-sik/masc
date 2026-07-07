@@ -1,4 +1,4 @@
-(* RFC-0313 W2 — total failure routing. See keeper_failure_route.mli. *)
+(* RFC-0313 W2 — total failure routing. See keeper_runtime_failure_route.mli. *)
 
 type pacing_class =
   | Rate_limited

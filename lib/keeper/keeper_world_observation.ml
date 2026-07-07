@@ -754,7 +754,7 @@ let pending_board_event_of_failure_judgment
   ; title =
       Printf.sprintf
         "Turn failure escalated for judgment: %s on %s"
-        (Keeper_failure_route.judgment_class_label fj.fj_judgment)
+        (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
         fj.fj_runtime_id
   ; preview = short_preview ~max_len:fusion_result_preview_max_len fj.fj_detail
   ; hearth = None

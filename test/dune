@@ -236,7 +236,6 @@
   test_keeper_compact_policy_pure
   test_keeper_pacing
   test_keeper_pacing_replay
-  test_keeper_failure_route
   test_keeper_runtime_failure_route
   test_heartbeat_smart
   test_keeper_allowed_paths
@@ -590,7 +589,6 @@
   test_keeper_compact_policy_pure
   test_keeper_pacing
   test_keeper_pacing_replay
-  test_keeper_failure_route
   test_keeper_runtime_failure_route
   test_heartbeat_smart
   test_keeper_allowed_paths

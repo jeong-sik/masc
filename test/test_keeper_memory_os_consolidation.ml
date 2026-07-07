@@ -564,21 +564,21 @@ let () =
     ; ( "staleness_gate"
       , [ Alcotest.test_case "fresh verified fact passes not_stale" `Quick
             (fun () ->
-               let fresh = fact ~last_verified_at:(Some (now -. 10. *. 86400.)) "fresh" in
+               let fresh = fact ~last_verified_at:(Some (now -. 3600.)) "fresh" in
                Alcotest.(check bool) "fresh" true (Consolidation.not_stale ~now fresh))
         ; Alcotest.test_case "stale verified fact fails not_stale" `Quick
             (fun () ->
-               let stale = fact ~last_verified_at:(Some (now -. 31. *. 86400.)) "stale" in
+               let stale = fact ~last_verified_at:(Some (now -. 90000.)) "stale" in
                Alcotest.(check bool) "stale" false (Consolidation.not_stale ~now stale))
         ; Alcotest.test_case "unverified fact falls back to first_seen" `Quick
             (fun () ->
-               let old = fact ~first_seen:(now -. 31. *. 86400.) ~last_verified_at:None "old" in
+               let old = fact ~first_seen:(now -. 90000.) ~last_verified_at:None "old" in
                Alcotest.(check bool) "old unverified" false (Consolidation.not_stale ~now old);
                let young = fact ~first_seen:(now -. 100.0) ~last_verified_at:None "young" in
                Alcotest.(check bool) "young unverified" true (Consolidation.not_stale ~now young))
         ; Alcotest.test_case "eligible ~now filters stale Durable_knowledge" `Quick
             (fun () ->
-               let stale_dk = fact ~last_verified_at:(Some (now -. 31. *. 86400.))
+               let stale_dk = fact ~last_verified_at:(Some (now -. 90000.))
                  ~claim_kind:(Some Types.Durable_knowledge) "stale_dk" in
                Alcotest.(check bool) "stale dk" false (Consolidation.eligible ~now stale_dk);
                let fresh_dk = fact ~last_verified_at:(Some (now -. 10.0))

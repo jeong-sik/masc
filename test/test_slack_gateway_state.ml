@@ -263,6 +263,18 @@ let test_parse_envelope_events_api_message () =
   | Ok _ -> fail "events_api message: kind/event/envelope_id mismatch"
   | Error e -> failf "events_api parse error: %s" e
 
+let test_parse_envelope_events_api_missing_payload_rejected () =
+  let json = `Assoc [ ("type", `String "events_api") ] in
+  match S.parse_envelope ~bot_user_id:None json with
+  | Ok _ -> fail "events_api missing payload must be Error"
+  | Error _ -> ()
+
+let test_parse_envelope_disconnect_missing_payload_rejected () =
+  let json = `Assoc [ ("type", `String "disconnect") ] in
+  match S.parse_envelope ~bot_user_id:None json with
+  | Ok _ -> fail "disconnect missing payload must be Error"
+  | Error _ -> ()
+
 let test_parse_envelope_unknown_type_rejected () =
   let json = `Assoc [ ("type", `String "totally_unknown") ] in
   match S.parse_envelope ~bot_user_id:None json with
@@ -291,6 +303,18 @@ let test_decode_event_reaction_ignored_as_turn () =
   | Ok (S.Reaction_added _) -> ()
   | Ok _ -> fail "expected Reaction_added"
   | Error e -> failf "reaction decode error: %s" e
+
+let test_decode_event_reaction_missing_item_rejected () =
+  let payload =
+    `Assoc
+      [ ("type", `String "reaction_added")
+      ; ("user", `String "U1")
+      ; ("reaction", `String "thumbsup")
+      ]
+  in
+  match S.decode_event ~bot_user_id:None ~event_type:"reaction_added" ~payload with
+  | Error _ -> ()
+  | Ok _ -> fail "reaction_added missing item must be Error"
 
 let test_decode_event_unknown_is_ignored_event () =
   let payload = `Assoc [ ("type", `String "channel_archive") ] in
@@ -337,12 +361,18 @@ let () =
       , [ test_case "parse hello" `Quick test_parse_envelope_hello
         ; test_case "parse events_api message" `Quick
             test_parse_envelope_events_api_message
+        ; test_case "events_api missing payload rejected" `Quick
+            test_parse_envelope_events_api_missing_payload_rejected
+        ; test_case "disconnect missing payload rejected" `Quick
+            test_parse_envelope_disconnect_missing_payload_rejected
         ; test_case "unknown envelope type rejected" `Quick
             test_parse_envelope_unknown_type_rejected
         ; test_case "decode message missing fields errors" `Quick
             test_decode_event_message_missing_fields
         ; test_case "decode reaction_added" `Quick
             test_decode_event_reaction_ignored_as_turn
+        ; test_case "decode reaction_added missing item rejected" `Quick
+            test_decode_event_reaction_missing_item_rejected
         ; test_case "decode unknown -> Ignored_event" `Quick
             test_decode_event_unknown_is_ignored_event
         ]

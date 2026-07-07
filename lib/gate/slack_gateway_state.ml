@@ -260,6 +260,13 @@ let string_field key json =
 
 let string_field_opt key json = Option.bind (assoc key json) as_string
 
+let object_field key json =
+  match assoc key json with
+  | Some (`Assoc _ as obj) -> Ok obj
+  | Some _ -> Error (key ^ " must be an object")
+  | None -> Error (key ^ " missing")
+;;
+
 let text_mentions_bot ~bot_user_id text =
   match bot_user_id with
   | None -> false
@@ -312,12 +319,14 @@ let decode_event ~bot_user_id ~event_type ~payload =
   | "reaction_added" ->
     let user_id = string_field "user" payload in
     let reaction = string_field "reaction" payload in
-    let item = Option.value (assoc "item" payload) ~default:`Null in
-    let channel_id = string_field "channel" item in
-    let message_ts = string_field "ts" item in
-    if String.equal channel_id "" || String.equal message_ts "" then
-      Error "reaction_added event missing item.channel/ts"
-    else Ok (Reaction_added { channel_id; message_ts; user_id; reaction })
+    (match object_field "item" payload with
+     | Error _ -> Error "reaction_added event missing item.channel/ts"
+     | Ok item ->
+       let channel_id = string_field "channel" item in
+       let message_ts = string_field "ts" item in
+       if String.equal channel_id "" || String.equal message_ts "" then
+         Error "reaction_added event missing item.channel/ts"
+       else Ok (Reaction_added { channel_id; message_ts; user_id; reaction }))
   | other -> Ok (Ignored_event other)
 ;;
 
@@ -329,17 +338,21 @@ let parse_envelope ~bot_user_id json =
   let envelope_id = string_field_opt "envelope_id" json in
   match type_str with
   | "hello" -> Ok { kind = Hello_env; envelope_id; event = None }
-  | "disconnect" ->
-    let payload = Option.value (assoc "payload" json) ~default:`Null in
-    let reason = string_field "reason" payload in
-    Ok { kind = Disconnect_env { reason }; envelope_id; event = None }
+  | "disconnect" -> (
+      match object_field "payload" json with
+      | Error e -> Error ("disconnect envelope " ^ e)
+      | Ok payload ->
+        let reason = string_field "reason" payload in
+        Ok { kind = Disconnect_env { reason }; envelope_id; event = None })
   | "reconnect" -> Ok { kind = Reconnect_env; envelope_id; event = None }
   | "events_api" -> (
-      let payload = Option.value (assoc "payload" json) ~default:`Null in
-      let event_type = string_field "type" payload in
-      match decode_event ~bot_user_id ~event_type ~payload with
+      match object_field "payload" json with
+      | Error e -> Error ("events_api envelope " ^ e)
+      | Ok payload ->
+        let event_type = string_field "type" payload in
+        (match decode_event ~bot_user_id ~event_type ~payload with
       | Error e -> Error ("events_api decode failed: " ^ e)
-      | Ok event -> Ok { kind = Events_api_env; envelope_id; event = Some event })
+         | Ok event -> Ok { kind = Events_api_env; envelope_id; event = Some event }))
   | "slash_commands" | "interactive" -> Ok { kind = Ignored_env type_str; envelope_id; event = None }
   | "" -> Error "envelope missing {type}"
   | other -> Error (Printf.sprintf "unknown envelope type: %S" other)

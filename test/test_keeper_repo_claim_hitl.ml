@@ -98,6 +98,13 @@ let init_git_repo dir url =
        |])
 ;;
 
+let set_git_origin_url dir url =
+  Alcotest.(check int)
+    "git remote set-url"
+    0
+    (run_git_quiet [| "git"; "-C"; dir; "remote"; "set-url"; "origin"; url |])
+;;
+
 let with_temp_base_path f =
   let dir = Filename.temp_file "repo_claim_hitl" "" in
   Sys.remove dir;
@@ -274,6 +281,37 @@ let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
         repo.local_path)
 ;;
 
+let test_registration_approval_rechecks_clone_origin () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "keeper-repo-register-stale-origin" in
+    write_repositories base_path [];
+    let repo_root =
+      Filename.concat
+        base_path
+        (Filename.concat ".masc/playground" (keeper_id ^ "/repos/not-registered"))
+    in
+    let target = Filename.concat repo_root "README.md" in
+    init_git_repo repo_root "https://github.com/test/not-registered.git";
+    write_file target "hello\n";
+    (match Claim.request_path_access ~keeper_id ~base_path ~path:target with
+     | Claim.Access_denied_hitl_pending _ -> ()
+     | Claim.Access_allowed -> Alcotest.fail "expected registration HITL denial"
+     | Claim.Access_denied detail ->
+       Alcotest.fail ("expected registration HITL pending denial, got: " ^ detail));
+    let pending = require_one_pending ~keeper_id in
+    set_git_origin_url repo_root "https://github.com/test/renamed.git";
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    match Repo_store.find ~base_path "not-registered" with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "stale approved registration must not persist")
+;;
+
 let test_unregistered_clone_matching_existing_remote_requests_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
@@ -322,6 +360,45 @@ let test_unregistered_clone_matching_existing_remote_requests_alias () =
         (List.exists (String.equal "masc-mcp") repo.aliases))
 ;;
 
+let test_alias_approval_rechecks_clone_origin () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "keeper-repo-alias-stale-origin" in
+    let registered = sample_repo ~base_path "masc" in
+    let registered =
+      { registered with url = "https://github.com/jeong-sik/masc.git"; aliases = [] }
+    in
+    write_repositories base_path [ registered ];
+    let repo_root =
+      Filename.concat
+        base_path
+        (Filename.concat ".masc/playground" (keeper_id ^ "/repos/masc-mcp"))
+    in
+    let target = Filename.concat repo_root "README.md" in
+    init_git_repo repo_root registered.url;
+    write_file target "hello\n";
+    (match Claim.request_path_access ~keeper_id ~base_path ~path:target with
+     | Claim.Access_denied_hitl_pending _ -> ()
+     | Claim.Access_allowed -> Alcotest.fail "expected alias HITL denial"
+     | Claim.Access_denied detail ->
+       Alcotest.fail ("expected alias HITL pending denial, got: " ^ detail));
+    let pending = require_one_pending ~keeper_id in
+    set_git_origin_url repo_root "https://github.com/jeong-sik/not-masc.git";
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    match Repo_store.find ~base_path "masc" with
+    | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
+    | Ok repo ->
+      Alcotest.(check bool)
+        "stale alias not persisted"
+        false
+        (List.exists (String.equal "masc-mcp") repo.aliases))
+;;
+
 let () =
   Alcotest.run
     "Keeper_repo_claim_hitl"
@@ -339,8 +416,16 @@ let () =
             `Quick
             test_unregistered_clone_requests_hitl_and_approval_registers_repo
         ; Alcotest.test_case
+            "registration approval rechecks clone origin"
+            `Quick
+            test_registration_approval_rechecks_clone_origin
+        ; Alcotest.test_case
             "clone name mismatch queues alias HITL"
             `Quick
             test_unregistered_clone_matching_existing_remote_requests_alias
+        ; Alcotest.test_case
+            "alias approval rechecks clone origin"
+            `Quick
+            test_alias_approval_rechecks_clone_origin
         ] )
     ]

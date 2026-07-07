@@ -61,6 +61,44 @@ let canonical_url_equal left right =
   | _ -> false
 ;;
 
+let origin_url_matches left right = String.equal left right || canonical_url_equal left right
+
+let revalidate_registration_candidate candidate =
+  match Repo_git.worktree_root ~local_path:candidate.repo_root with
+  | Error reason -> Error ("worktree root recheck failed: " ^ reason)
+  | Ok repo_root ->
+    if not (String.equal repo_root candidate.repo_root)
+    then
+      Error
+        (Printf.sprintf
+           "worktree root changed from %s to %s"
+           candidate.repo_root
+           repo_root)
+    else (
+      match Repo_git.get_origin_url ~local_path:repo_root with
+      | Error reason -> Error ("origin recheck failed: " ^ reason)
+      | Ok origin_url ->
+        if not (origin_url_matches candidate.origin_url origin_url)
+        then
+          Error
+            (Printf.sprintf
+               "origin changed from %s to %s"
+               candidate.origin_url
+               origin_url)
+        else (
+          match Repo_git.origin_head_branch ~local_path:repo_root with
+          | Error reason -> Error ("origin HEAD recheck failed: " ^ reason)
+          | Ok default_branch ->
+            if not (String.equal default_branch candidate.default_branch)
+            then
+              Error
+                (Printf.sprintf
+                   "default branch changed from %s to %s"
+                   candidate.default_branch
+                   default_branch)
+            else Ok { candidate with repo_root; origin_url; default_branch }))
+;;
+
 let find_existing_repository_by_origin ~base_path origin_url =
   match Repo_store.load_all ~base_path with
   | Error detail -> Error detail
@@ -70,6 +108,18 @@ let find_existing_repository_by_origin ~base_path origin_url =
          (fun (repo : Repo_manager_types.repository) ->
             canonical_url_equal repo.url origin_url)
          repos)
+;;
+
+let log_stale_approved_candidate ~keeper_id candidate detail =
+  Log.Keeper.warn
+    "keeper repo registration approved but git metadata recheck failed; \
+     skipping catalog mutation keeper=%s repository=%s repo_root=%s \
+     source=%s error=%s"
+    keeper_id
+    candidate.repository_id
+    candidate.repo_root
+    Config_dir_resolver.repositories_toml_basename
+    detail
 ;;
 
 let registration_operation ~keeper_id ~base_path candidate =
@@ -99,8 +149,37 @@ let operation_name = function
   | Manual_catalog_review _ -> "review_repository_catalog"
 ;;
 
-let approve_alias ~keeper_id ~base_path ~existing_repository_id ~alias =
-  match Repo_store.find ~base_path existing_repository_id with
+let persist_alias ~keeper_id ~base_path ~(existing : Repo_manager_types.repository) ~alias =
+  let updated =
+    { existing with
+      aliases = add_string_once alias existing.aliases
+    ; keepers = add_string_once keeper_id existing.keepers
+    }
+  in
+  match Repo_store.update ~base_path existing.id updated with
+  | Ok _ ->
+    Log.Keeper.info
+      "keeper repo alias approved keeper=%s repository=%s alias=%s source=%s"
+      keeper_id
+      existing.id
+      alias
+      Config_dir_resolver.repositories_toml_basename
+  | Error detail ->
+    Log.Keeper.warn
+      "keeper repo alias approved but catalog update failed keeper=%s \
+       repository=%s alias=%s source=%s error=%s"
+      keeper_id
+      existing.id
+      alias
+      Config_dir_resolver.repositories_toml_basename
+      detail
+;;
+
+let approve_alias ~keeper_id ~base_path ~existing_repository_id ~alias ~candidate =
+  match revalidate_registration_candidate candidate with
+  | Error detail -> log_stale_approved_candidate ~keeper_id candidate detail
+  | Ok current_candidate -> (
+    match Repo_store.find ~base_path existing_repository_id with
   | Error detail ->
     Log.Keeper.warn
       "keeper repo alias approved but catalog read failed keeper=%s \
@@ -111,32 +190,25 @@ let approve_alias ~keeper_id ~base_path ~existing_repository_id ~alias =
       Config_dir_resolver.repositories_toml_basename
       detail
   | Ok existing ->
-    let updated =
-      { existing with
-        aliases = add_string_once alias existing.aliases
-      ; keepers = add_string_once keeper_id existing.keepers
-      }
-    in
-    (match Repo_store.update ~base_path existing.id updated with
-     | Ok _ ->
-       Log.Keeper.info
-         "keeper repo alias approved keeper=%s repository=%s alias=%s source=%s"
-         keeper_id
-         existing.id
-         alias
-         Config_dir_resolver.repositories_toml_basename
-     | Error detail ->
-       Log.Keeper.warn
-         "keeper repo alias approved but catalog update failed keeper=%s \
-          repository=%s alias=%s source=%s error=%s"
-         keeper_id
-         existing.id
-         alias
-         Config_dir_resolver.repositories_toml_basename
-         detail)
+    if not (origin_url_matches existing.url current_candidate.origin_url)
+    then
+      Log.Keeper.warn
+        "keeper repo alias approved but current clone origin does not match \
+         target repository; skipping catalog mutation keeper=%s repository=%s \
+         alias=%s source=%s target_origin=%s current_origin=%s"
+        keeper_id
+        existing.id
+        alias
+        Config_dir_resolver.repositories_toml_basename
+        existing.url
+        current_candidate.origin_url
+    else persist_alias ~keeper_id ~base_path ~existing ~alias)
 ;;
 
 let approve_new_registration ~keeper_id ~base_path candidate =
+  match revalidate_registration_candidate candidate with
+  | Error detail -> log_stale_approved_candidate ~keeper_id candidate detail
+  | Ok candidate -> (
   match find_existing_repository_by_origin ~base_path candidate.origin_url with
   | Error detail ->
     Log.Keeper.warn
@@ -147,11 +219,7 @@ let approve_new_registration ~keeper_id ~base_path candidate =
       Config_dir_resolver.repositories_toml_basename
       detail
   | Ok (Some existing) ->
-    approve_alias
-      ~keeper_id
-      ~base_path
-      ~existing_repository_id:existing.id
-      ~alias:candidate.repository_id
+    persist_alias ~keeper_id ~base_path ~existing ~alias:candidate.repository_id
   | Ok None ->
     if candidate_identity_is_valid ~keeper_id candidate then (
       let repo = repository_record_of_candidate ~keeper_id candidate in
@@ -176,13 +244,13 @@ let approve_new_registration ~keeper_id ~base_path candidate =
          repository=%s url=%s"
         keeper_id
         candidate.repository_id
-        candidate.origin_url
+        candidate.origin_url)
 ;;
 
 let apply_approved_operation ~keeper_id ~base_path = function
   | Register_new candidate -> approve_new_registration ~keeper_id ~base_path candidate
-  | Add_alias_to_existing { existing_repository_id; alias; _ } ->
-    approve_alias ~keeper_id ~base_path ~existing_repository_id ~alias
+  | Add_alias_to_existing { existing_repository_id; alias; candidate } ->
+    approve_alias ~keeper_id ~base_path ~existing_repository_id ~alias ~candidate
   | Manual_catalog_review { reason; candidate } ->
     Log.Keeper.warn
       "keeper repo catalog review approved but no automatic mutation is safe \

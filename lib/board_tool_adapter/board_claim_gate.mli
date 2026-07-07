@@ -1,15 +1,13 @@
-(** Board_claim_gate — claim/evidence gate for board writes (#23486).
+(** Evidence-backed board claim gate (#23486).
 
-    Board posts and comments that carry claims (artifact existence, task
-    completion, PR state, …) are checked against the referenced artifacts and
-    a source-post snapshot before the write is accepted; accepted or rejected,
-    the decision is appended to the claim-evidence sidecar.
+    Resolves the artifacts a board post claims about (exists / missing /
+    unknown, with content digests), classifies the claim kinds, and decides
+    whether a post/comment write may proceed. This interface exposes only the
+    surface consumed by {!Board_tool_post} (write gating) and the coverage
+    tests; the parsing/normalization helpers stay module-private.
 
-    This interface exposes the surface consumed by [Board_tool_post] and
-    [test_tool_board_coverage] (#23525); parsing and sidecar internals stay
-    private. *)
-
-open Masc_board_handlers
+    Made a public module (mli required) in the fix that let
+    [test_tool_board_coverage] exercise [resolve_file_path] directly. *)
 
 type claim_kind =
   | Artifact_exists
@@ -31,8 +29,15 @@ type source_post_snapshot =
   ; read_tool_call_id : string option
   }
 
+(** Resolution of one claimed artifact reference. [Exists] carries the
+    content [digest] when the file is readable. *)
 type artifact_resolution =
-  | Exists of { ref_ : string; kind : string; checked_at : float; digest : string option }
+  | Exists of
+      { ref_ : string
+      ; kind : string
+      ; checked_at : float
+      ; digest : string option
+      }
   | Missing of { ref_ : string; checked_at : float; reason : string }
   | Unknown of { ref_ : string; checked_at : float; reason : string }
 
@@ -40,6 +45,8 @@ type gate_decision =
   | Allow
   | Reject of string
 
+(** Outcome of a pre-write check: either nothing to record, or a resolved
+    claim bundle to persist alongside the write. *)
 type prechecked_write =
   | No_record
   | Record of
@@ -50,14 +57,16 @@ type prechecked_write =
       ; decision : gate_decision
       }
 
-val source_snapshot_of_post : Board.post -> Yojson.Safe.t
-(** Render the snapshot fields a subsequent claim-carrying write must echo
-    back as its [source_post_snapshot] argument. *)
+val claim_kind_to_string : claim_kind -> string
 
+(** [resolve_file_path raw] resolves a claimed artifact reference to its
+    existence/digest, rejecting parent-directory escapes. *)
 val resolve_file_path : string -> artifact_resolution
-(** Resolve an artifact ref against the board base path. Rejects empty refs
-    and parent-path segments as [Unknown]. *)
 
+(** Snapshot a source post's identity+body digest for claim provenance. *)
+val source_snapshot_of_post : Masc_board_handlers.Board.post -> Yojson.Safe.t
+
+(** Gate a comment write; [Error] rejects with a human-readable reason. *)
 val check_comment
   :  tool_name:string
   -> author:string
@@ -65,20 +74,16 @@ val check_comment
   -> content:string
   -> args:Yojson.Safe.t
   -> (unit, string) result
-(** Gate a comment write on [post_id]. Claim-free writes pass without a
-    sidecar record; claim-carrying writes are resolved, recorded, and rejected
-    with a reason on gate failure. *)
 
+(** Gate a post-create write, returning the resolved claim bundle to record. *)
 val check_post_create
   :  tool_name:string
   -> author:string
   -> content:string
   -> args:Yojson.Safe.t
   -> (prechecked_write, string) result
-(** Pre-check a post-create write. The returned [prechecked_write] must be
-    passed to {!record_post_create} once the post id is known; a rejected
-    precheck is recorded immediately and surfaces as [Error]. *)
 
+(** Persist a [prechecked_write] produced by {!check_post_create}. *)
 val record_post_create
   :  tool_name:string
   -> author:string
@@ -86,5 +91,3 @@ val record_post_create
   -> content:string
   -> prechecked_write
   -> (unit, string) result
-(** Append the precheck outcome for the created post to the claim-evidence
-    sidecar. [Error] on gate rejection or sidecar write failure. *)

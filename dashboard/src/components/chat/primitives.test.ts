@@ -242,6 +242,53 @@ describe('ChatTranscript', () => {
     )
     const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
     expect(surfaceLink?.textContent).toContain('Discord Thread')
+    expect(surfaceLink?.getAttribute('title')).toContain('guild_id=guild-1')
+    expect(surfaceLink?.getAttribute('title')).toContain('thread_id=thread-1')
+  })
+
+  it('renders connector speaker and route context for gate history rows', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'gate-user',
+            text: 'hello from discord',
+            speakerId: '98791450001',
+            speakerName: 'Minsu',
+            speakerAuthority: 'external',
+            conversationId: 'discord:guild-1:channel:1514586257706061834',
+            externalMessageId: '1498985300729172039',
+            surface: {
+              kind: 'gate',
+              label: 'discord',
+              address: {
+                connector: 'discord',
+                workspace_id: '1514586257706061834',
+                external_message_id: '1498985300729172039',
+              },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="gate-user"]') as HTMLElement
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('gate')
+    expect(bubble.getAttribute('data-chat-speaker-id')).toBe('98791450001')
+    expect(bubble.getAttribute('data-chat-speaker-name')).toBe('Minsu')
+    expect(bubble.getAttribute('data-chat-conversation-id')).toBe(
+      'discord:guild-1:channel:1514586257706061834',
+    )
+    expect(bubble.getAttribute('data-chat-external-message-id')).toBe('1498985300729172039')
+    expect(bubble.textContent).toContain('Gate: discord')
+    expect(bubble.textContent).toContain('Minsu')
+    const chips = [...bubble.querySelectorAll('[data-chat-meta-chip]')]
+    expect(chips.some(chip => chip.getAttribute('title')?.includes('workspace_id=1514586257706061834'))).toBe(true)
+    expect(chips.some(chip => chip.getAttribute('title')?.includes('speaker_id=98791450001'))).toBe(true)
+    expect(chips.some(chip => chip.getAttribute('title')?.includes('external_message_id=1498985300729172039'))).toBe(true)
   })
 
   it('exposes interrupted stream reconciliation as a no-receipt contract gap', () => {
@@ -289,6 +336,13 @@ describe('ChatTranscript', () => {
         role: 'user',
         content: 'legacy row without turn ref',
         ts: 1_780_000_000,
+        source: 'discord',
+        surface: { kind: 'gate', label: 'discord', address: { workspace_id: 'chan-1' } },
+        conversation_id: 'discord:guild-1:channel:chan-1',
+        external_message_id: 'msg-1',
+        speaker_id: 'user-1',
+        speaker_name: 'Minsu',
+        speaker_authority: 'external',
         stream_contract: {
           source: 'keeper_chat_store',
           status: 'history_without_turn_ref',
@@ -333,7 +387,10 @@ describe('ChatTranscript', () => {
     expect(legacy.getAttribute('data-chat-stream-contract-status')).toBe('history_without_turn_ref')
     expect(legacy.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     expect(legacy.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
-    expect(legacy.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('턴 연결 없음')
+    const noTurnBadge = legacy.querySelector('[data-chat-stream-contract-badge]')
+    expect(noTurnBadge?.textContent).toContain('턴 연결 없음')
+    expect(noTurnBadge?.getAttribute('title')).toContain('conversation_id=discord:guild-1:channel:chan-1')
+    expect(noTurnBadge?.getAttribute('title')).toContain('speaker_name=Minsu')
 
     const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
     expect(failure).not.toBeNull()

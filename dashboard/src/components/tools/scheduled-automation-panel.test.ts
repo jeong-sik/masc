@@ -682,6 +682,17 @@ describe('ScheduledAutomationPanel', () => {
     doneFilter.click()
     await Promise.resolve()
 
+    const cardWakeSummary = container.querySelector('[data-schedule-wake-evidence-summary="sched-keeper-wake"]')
+    expect(cardWakeSummary).not.toBeNull()
+    expect(cardWakeSummary?.getAttribute('data-schedule-wake-evidence-receipt')).toBe('recognized')
+    expect(cardWakeSummary?.getAttribute('data-schedule-wake-evidence-queue')).toBe('matched_pending')
+    expect(cardWakeSummary?.getAttribute('data-schedule-wake-evidence-reaction')).toBe('matched_stimulus')
+    expect(cardWakeSummary?.textContent).toContain('wake evidence')
+    expect(cardWakeSummary?.textContent).toContain('receipt recognized')
+    expect(cardWakeSummary?.textContent).toContain('queue matched pending')
+    expect(cardWakeSummary?.textContent).toContain('reaction matched stimulus')
+    expect(cardWakeSummary?.textContent).toContain('post schedule-due:sched-keeper-wake')
+
     const openDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
     openDetail.click()
     await Promise.resolve()
@@ -804,6 +815,142 @@ describe('ScheduledAutomationPanel', () => {
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_seen')
     expect(ackReactionEvidence?.textContent).toContain('true')
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_recorded_at')
+  })
+
+  it('shows missing wake evidence explicitly for keeper wake cards', async () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-keeper-wake-missing',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'scheduled',
+        approval_required: false,
+        payload_kind: 'masc.keeper_wake',
+        payload_support: 'supported',
+        payload_target: 'keeper:schedule-keeper',
+        payload_summary: 'Scheduled wake without projection evidence yet',
+      }),
+    ])
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const scheduledFilter = container.querySelector('[data-schedule-filter="scheduled"]') as HTMLButtonElement
+    scheduledFilter.click()
+    await Promise.resolve()
+
+    const summary = container.querySelector('[data-schedule-wake-evidence-summary="sched-keeper-wake-missing"]')
+    expect(summary).not.toBeNull()
+    expect(summary?.getAttribute('data-schedule-wake-evidence-receipt')).toBe('missing')
+    expect(summary?.getAttribute('data-schedule-wake-evidence-queue')).toBe('missing')
+    expect(summary?.getAttribute('data-schedule-wake-evidence-reaction')).toBe('missing')
+    expect(summary?.textContent).toContain('receipt missing')
+    expect(summary?.textContent).toContain('queue missing')
+    expect(summary?.textContent).toContain('reaction missing')
+  })
+
+  it('surfaces cadence counts and filters exact recurrence kinds in v2', async () => {
+    const auto = automation([
+      request({
+        schedule_id: 'sched-poll-live',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'scheduled',
+        recurrence: { kind: 'interval', interval_sec: 60 },
+        recurrence_kind: 'interval',
+        payload_kind: 'keeper.poll',
+        payload_summary: 'Poll live queue',
+        due_at_iso: '2026-06-21T00:01:00Z',
+      }),
+      request({
+        schedule_id: 'sched-poll-terminal',
+        status: 'succeeded',
+        effective_status: 'succeeded',
+        execution_readiness: 'terminal',
+        recurrence: { kind: 'interval', interval_sec: 300 },
+        recurrence_kind: 'interval',
+        payload_kind: 'keeper.poll',
+        payload_summary: 'Terminal poll history',
+      }),
+      request({
+        schedule_id: 'sched-daily',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'scheduled',
+        recurrence: { kind: 'daily', hour: 9, minute: 0, timezone: 'Asia/Seoul' },
+        recurrence_kind: 'daily',
+        payload_kind: 'keeper.daily',
+        payload_summary: 'Daily keeper check',
+      }),
+      request({
+        schedule_id: 'sched-one-shot',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'scheduled',
+        recurrence: { kind: 'one_shot' },
+        recurrence_kind: 'one_shot',
+        payload_kind: 'keeper.once',
+        payload_summary: 'One shot keeper check',
+      }),
+      request({
+        schedule_id: 'sched-cron',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'scheduled',
+        recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
+        recurrence_kind: 'cron',
+        payload_kind: 'keeper.cron',
+        payload_summary: 'Cron keeper check',
+      }),
+      request({
+        schedule_id: 'sched-unknown-cadence',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'scheduled',
+        payload_kind: 'keeper.unknown',
+        payload_summary: 'Missing recurrence projection',
+      }),
+    ])
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const summary = container.querySelector('[data-schedule-cadence-summary]')
+    expect(summary).not.toBeNull()
+    expect(container.querySelector('[data-schedule-cadence-filter="interval"]')?.getAttribute('data-schedule-cadence-count')).toBe('2')
+    expect(container.querySelector('[data-schedule-cadence-filter="daily"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
+    expect(container.querySelector('[data-schedule-cadence-filter="oneshot"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
+    expect(container.querySelector('[data-schedule-cadence-filter="cron"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
+    expect(container.querySelector('[data-schedule-cadence-filter="unknown"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
+    expect(container.querySelector('[data-schedule-polling-strip]')?.getAttribute('data-schedule-polling-count')).toBe('1')
+    expect(container.querySelector('[data-schedule-polling-card="sched-poll-live"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-polling-card="sched-poll-terminal"]')).toBeNull()
+
+    const scheduledFilter = container.querySelector('[data-schedule-filter="scheduled"]') as HTMLButtonElement
+    scheduledFilter.click()
+    await flush()
+
+    const intervalFilter = container.querySelector('[data-schedule-cadence-filter="interval"]') as HTMLButtonElement
+    intervalFilter.click()
+    await flush()
+
+    expect(container.querySelector('[data-schedule-id="sched-poll-live"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-daily"]')).toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-one-shot"]')).toBeNull()
+    expect(container.querySelector('[data-schedule-cadence-card="sched-poll-live"]')?.getAttribute('data-schedule-cadence')).toBe('interval')
+
+    const dailyFilter = container.querySelector('[data-schedule-cadence-filter="daily"]') as HTMLButtonElement
+    dailyFilter.click()
+    await flush()
+
+    expect(container.querySelector('[data-schedule-polling-strip]')).toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-daily"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-poll-live"]')).toBeNull()
+
+    const unknownFilter = container.querySelector('[data-schedule-cadence-filter="unknown"]') as HTMLButtonElement
+    unknownFilter.click()
+    await flush()
+
+    expect(container.querySelector('[data-schedule-id="sched-unknown-cadence"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-cadence-card="sched-unknown-cadence"]')?.getAttribute('data-schedule-cadence')).toBe('unknown')
   })
 
   it('filters schedule cards without filtering the wake signal feed', async () => {

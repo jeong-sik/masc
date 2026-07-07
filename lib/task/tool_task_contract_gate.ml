@@ -63,7 +63,7 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
               "task %s is awaiting verification by %s; approve or reject before marking done"
               task_id assignee)))
 
-(* Verification is owned solely by [Cdal_evidence_gate], applied upstream in
+(* Verification is owned solely by [Task_completion_gate], applied upstream in
    [Tool_task.handle_transition]. This per-action layer formerly ran a second
    gate against the contract-verdict ledger; that ledger no longer exists, so this
    layer never rejects. Kept as a typed seam so the transition control flow is

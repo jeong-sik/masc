@@ -17,6 +17,7 @@ let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = [])
 
 let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 let var s = Shell_ir.Var (s, Shell_ir.default_meta)
+let concat parts = Shell_ir.Concat parts
 
 let default_policy : Approval_policy.t =
   { raw_source = "(test)"; summary = "(test summary)" }
@@ -363,16 +364,16 @@ let test_gh_irreversible_repo_hosting_ops_denied_under_autonomous () =
        | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
          assert (Exec_program.to_string bin = "gh")
        | _ -> Alcotest.failf "%s: expected gh irreversible op to be denied" label)
+    (* W4/G-9: repo create/fork, discussion create, and graphql create* moved
+       to R1 (reversible) — they are no longer Deny; they Ask via the capability
+       axis (asserted in [test_gh_durable_remote_asks_under_autonomous]). Only
+       the genuinely irreversible ops remain Deny here. *)
     [ "gh pr merge", [ "pr"; "merge"; "123"; "--squash" ]
-    ; "gh repo create", [ "repo"; "create"; "owner/new-repo" ]
-    ; "gh repo fork", [ "repo"; "fork"; "owner/repo" ]
     ; "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
-    ; "gh discussion create", [ "discussion"; "create"; "--title"; "T" ]
+    ; "gh discussion delete", [ "discussion"; "delete"; "42" ]
     ; "gh api delete", [ "api"; "-X"; "DELETE"; "/repos/owner/repo" ]
-    ; "gh graphql createRepository"
-      , [ "api"; "graphql"; "-f"; "query=mutation{createRepository}" ]
-    ; "gh graphql createDiscussion"
-      , [ "api"; "graphql"; "-f"; "query=mutation{createDiscussion}" ]
+    ; "gh graphql deleteDiscussion"
+      , [ "api"; "graphql"; "-f"; "query=mutation{deleteDiscussion}" ]
     ]
 
 let test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous () =
@@ -479,21 +480,139 @@ let test_gh_durable_remote_asks_under_autonomous () =
        | _ ->
          Alcotest.failf "%s: durable-remote gh op must Ask under autonomous"
            label)
-    (* R1 durable-remote mutations that exist TODAY (repo reversible table).
-       discussion mutations and repo create/fork are R2 under #23362, so they
-       Deny (not Ask) until W4/G-9 moves them to R1 — asserted separately in
-       [test_gh_r2_durable_remote_denies_pending_w4]. *)
-    [ "gh repo edit", [ "repo"; "edit"; "--description"; "d" ]
+    (* W4/G-9 ENABLED: repo create/fork and discussion mutations moved R2->R1,
+       so they now take the capability Ask path (durable-remote R1) instead of
+       the floor Deny path — the active-keeper enablement. Plus the R1
+       durable-remote ops that already existed (repo edit/sync/set-default) and
+       unknown gh. *)
+    [ "gh repo create", [ "repo"; "create"; "o/new"; "--private" ]
+    ; "gh repo fork", [ "repo"; "fork"; "o/r" ]
+    ; "gh discussion create", [ "discussion"; "create"; "--title"; "T" ]
+    ; "gh discussion comment", [ "discussion"; "comment"; "42"; "--body"; "B" ]
+    ; "gh repo edit", [ "repo"; "edit"; "--description"; "d" ]
     ; "gh repo sync", [ "repo"; "sync" ]
     ; "gh repo set-default", [ "repo"; "set-default"; "o/r" ]
-    ; "gh frobnicate (unknown -> Requires_approval)", [ "frobnicate"; "now" ]
+    ; "gh frobnicate (unknown family -> Requires_approval)", [ "frobnicate"; "now" ]
+    (* Gap fix: an unrecognized ACTION on a known mutating family no longer
+       auto-runs as a read — it Asks under autonomous. *)
+    ; "gh repo upsert-magic (unknown action)", [ "repo"; "upsert-magic"; "o/r" ]
+    ; "gh pr teleport (unknown action)", [ "pr"; "teleport"; "123" ]
     ]
 
-(* #23362 keeps discussion mutations and repo create/fork at R2, so the
-   capability disposition is [Denied] and they take the floor Deny path, NOT
-   the W3 Ask path. Pinned here so W4/G-9 (R2 -> R1) produces a visible delta:
-   these flip from Deny to Ask. *)
-let test_gh_r2_durable_remote_denies_pending_w4 () =
+let test_gh_repo_create_contract_denies_under_autonomous () =
+  List.iter
+    (fun (label, args, expected_rule) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Policy_deny { rule }; _ } ->
+         Alcotest.(check string) label expected_rule rule
+       | Verdict.Ask _ ->
+         Alcotest.failf "%s: invalid repo-create contract must Deny, not Ask" label
+       | Verdict.Allow _ | Verdict.Suggest_confirm _ | Verdict.Deny _ ->
+         Alcotest.failf "%s: expected Policy_deny for repo-create contract" label)
+    [ ( "missing visibility"
+      , [ "repo"; "create"; "o/new" ]
+      , "gh_repo_create_contract:missing_visibility" )
+    ; ( "missing owner"
+      , [ "repo"; "create"; "new"; "--private" ]
+      , "gh_repo_create_contract:missing_owner" )
+    ; ( "ambiguous visibility"
+      , [ "repo"; "create"; "o/new"; "--private"; "--public" ]
+      , "gh_repo_create_contract:ambiguous_visibility" )
+    ]
+
+(* RFC-0309 W4 axis-symmetry regression: the string-borne GraphQL form of a
+   durable-remote create must Ask under autonomous exactly like the typed
+   [gh repo create] form. W4 demoted createRepository/createDiscussion/
+   addDiscussionComment from the R2 deny floor to R1 (they are reversible), so
+   the floor no longer catches them; the typed verb is [Gh_verb.Api] which is
+   body-blind by design (RFC-0208), so the body-blind capability disposition
+   would wrongly [Allow] them. The capability axis must inspect the graphql body
+   for durable-remote create fragments and escalate to Ask — otherwise the typed
+   path asks while the equivalent string path auto-runs (an axis-asymmetry
+   bypass). *)
+let test_gh_graphql_durable_remote_asks_under_autonomous () =
+  List.iter
+    (fun (label, body) ->
+       let s =
+         simple (bin_ok "gh")
+           ~args:[ lit "api"; lit "graphql"; lit "-f"; lit ("query=" ^ body) ]
+       in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf
+           "%s: string-borne graphql durable-remote create must Ask under \
+            autonomous"
+           label)
+    [ ( "createRepository"
+      , "mutation { createRepository(input: {name: \"x\"}) { repository { id } } }"
+      )
+    ; ( "createDiscussion"
+      , "mutation { createDiscussion(input: {repositoryId: \"r\", title: \"t\", \
+         body: \"b\", categoryId: \"c\"}) { discussion { id } } }" )
+    ; ( "addDiscussionComment"
+      , "mutation { addDiscussionComment(input: {discussionId: \"d\", body: \
+         \"b\"}) { comment { id } } }" )
+    ]
+
+(* Opaque GraphQL [query] bodies are not inspectable by the durable-remote
+   fragment classifier. They must fail closed to the same non-blocking approval
+   route, while opaque non-query variables stay non-blocking. *)
+let test_gh_graphql_opaque_query_asks_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf
+           "%s: opaque graphql query body must Ask under autonomous" label)
+    [ ( "query=$MUTATION concat"
+      , [ lit "api"; lit "graphql"; lit "-f"; concat [ lit "query="; var "MUTATION" ] ]
+      )
+    ; "query field variable", [ lit "api"; lit "graphql"; lit "-f"; var "FIELD" ]
+    ; ( "attached --field=query=$MUTATION"
+      , [ lit "api"; lit "graphql"; concat [ lit "--field=query="; var "MUTATION" ] ]
+      )
+    ]
+
+let test_gh_graphql_non_query_opaque_field_allowed_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:
+        [ lit "api"
+        ; lit "graphql"
+        ; lit "-F"
+        ; concat [ lit "owner="; var "OWNER" ]
+        ; lit "-f"
+        ; lit "query=query { viewer { login } }"
+        ]
+  in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Allow t ->
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+  | _ -> Alcotest.fail "opaque non-query graphql variables must not Ask"
+
+(* External-body graphql: gh reads a [-F/--field] value starting with '@'
+   from a file ('@-' = stdin), and [--input FILE] reads the whole body
+   externally. The mutation text is therefore not in argv, so the LITERAL body
+   scanners cannot see it. These forms are literal (no Shell_ir Var/Concat), so
+   the earlier $VAR opacity check does not fire; they must still Ask. *)
+let test_gh_graphql_external_body_asks_under_autonomous () =
   List.iter
     (fun (label, args) ->
        let s = simple (bin_ok "gh") ~args:(List.map lit args) in
@@ -502,12 +621,93 @@ let test_gh_r2_durable_remote_denies_pending_w4 () =
          Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
            ~caps ~simple:s
        with
-       | Verdict.Deny { reason = Destructive_repo_hosting_cli _; _ } -> ()
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
        | _ ->
-         Alcotest.failf "%s: R2 durable-remote must Deny under autonomous (W4 -> Ask)"
+         Alcotest.failf "%s: external graphql body must Ask under autonomous"
            label)
-    [ "gh discussion comment", [ "discussion"; "comment"; "42"; "--body"; "B" ]
-    ; "gh repo create", [ "repo"; "create"; "o/new" ]
+    [ ("-F query=@file", [ "api"; "graphql"; "-F"; "query=@mutation.graphql" ])
+    ; ("-F query=@- (stdin)", [ "api"; "graphql"; "-F"; "query=@-" ])
+    ; ( "--field=query=@file"
+      , [ "api"; "graphql"; "--field=query=@mutation.graphql" ] )
+    ; ("--input file", [ "api"; "graphql"; "--input"; "body.json" ])
+    ; ("attached -Fquery=@file", [ "api"; "graphql"; "-Fquery=@mutation.graphql" ])
+    ; ("--input=file attached", [ "api"; "graphql"; "--input=body.json" ])
+    ]
+
+(* [-f/--raw-field] is a static string parameter in gh; [query=@...] is not a
+   file/stdin-backed external body. It can still Ask when the value is Shell IR
+   opaque (Var/Concat), but a literal raw-field [@...] must not be documented or
+   tested as an external body. *)
+let test_gh_graphql_raw_field_at_literal_allowed () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Allow _ -> ()
+       | _ ->
+         Alcotest.failf
+           "%s: raw-field literal @ value is not an external graphql body" label)
+    [ ("-f query=@-", [ "api"; "graphql"; "-f"; "query=@-" ])
+    ; ( "--raw-field query=@file"
+      , [ "api"; "graphql"; "--raw-field"; "query=@mutation.graphql" ] )
+    ; ("attached -fquery=@file", [ "api"; "graphql"; "-fquery=@mutation.graphql" ])
+    ; ( "--raw-field=query=@file"
+      , [ "api"; "graphql"; "--raw-field=query=@mutation.graphql" ] )
+    ]
+
+(* Regression guard for the external-body fix: an '@'-file on a NON-query field
+   (a graphql variable) combined with an inline READ query must NOT be
+   over-blocked. Only the query body being external is a capability concern. *)
+let test_gh_graphql_external_non_query_field_allowed () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:
+        (List.map lit
+           [ "api"; "graphql"; "-F"; "owner=@owner.txt"; "-f"
+           ; "query=query { viewer { login } }" ])
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Allow _ -> ()
+  | _ ->
+    Alcotest.fail
+      "external @-file on a non-query field with an inline read query must not \
+       Ask"
+
+(* RFC-0309 W3 pipeline coverage: a gh durable-remote op in a NON-final pipeline
+   stage must still Ask. [gh repo create ... | cat] shifts the representative
+   (last) simple to [cat]; the capability axis folds over ALL caps so the create
+   is still seen. Without the fold this auto-runs (R1, no longer floored after
+   W4 moved repo/discussion create R2->R1). The caller hands [decide] the last
+   stage as [~simple], mirroring [last_simple_of_ir]. *)
+let test_gh_durable_remote_in_pipeline_asks_under_autonomous () =
+  let cat_stage = simple (bin_ok "cat") in
+  List.iter
+    (fun (label, gh_args) ->
+       let gh_stage = simple (bin_ok "gh") ~args:(List.map lit gh_args) in
+       let ir =
+         Shell_ir.Pipeline
+           [ Shell_ir.Simple gh_stage; Shell_ir.Simple cat_stage ]
+       in
+       let caps = Capability_check.of_ir ir in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:cat_stage
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf "%s | cat must still Ask under autonomous" label)
+    [ ("gh repo create", [ "repo"; "create"; "o/new"; "--private" ])
+    ; ("gh discussion create", [ "discussion"; "create"; "--title"; "T" ])
+    ; ( "gh api graphql -F query=@file (composed with pipeline)"
+      , [ "api"; "graphql"; "-F"; "query=@mutation.graphql" ] )
     ]
 
 (* Regression guard: the W3 capability layer is ADDITIVE. Reads and local /
@@ -609,6 +809,51 @@ let test_push_mirror_floored_under_autonomous () =
   | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_mirror); _ } -> ()
   | _ -> assert false
 
+let test_push_prune_floored_under_autonomous () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "push"; lit "--prune"; lit "origin"; lit "main" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_delete); _ }
+    -> ()
+  | _ -> assert false
+
+(* Refspec-borne destructive push must hit the trust-independent floor under the
+   autonomous overlay, exactly like the flag forms. [:dst] deletes the remote
+   ref; [+ref] force-overwrites it. Without refspec parsing these auto-ran. *)
+let test_push_delete_refspec_floored_under_autonomous () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "push"; lit "origin"; lit ":refs/heads/main" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_delete); _ }
+    -> ()
+  | _ -> assert false
+
+let test_push_force_refspec_floored_under_autonomous () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "push"; lit "origin"; lit "+refs/heads/main" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_force); _ }
+    -> ()
+  | _ -> assert false
+
 (* RFC-0255 §4.5: [worktree remove] is NOT recoverable (discards uncommitted
    worktree state and races concurrent keepers/the conveyor) — it STAYS in the
    floor and is [Deny] under every overlay including autonomous. *)
@@ -652,7 +897,14 @@ let () =
   test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_gh_durable_remote_asks_under_autonomous ();
-  test_gh_r2_durable_remote_denies_pending_w4 ();
+  test_gh_repo_create_contract_denies_under_autonomous ();
+  test_gh_graphql_durable_remote_asks_under_autonomous ();
+  test_gh_graphql_opaque_query_asks_under_autonomous ();
+  test_gh_graphql_non_query_opaque_field_allowed_under_autonomous ();
+  test_gh_graphql_external_body_asks_under_autonomous ();
+  test_gh_graphql_raw_field_at_literal_allowed ();
+  test_gh_graphql_external_non_query_field_allowed ();
+  test_gh_durable_remote_in_pipeline_asks_under_autonomous ();
   test_gh_reads_and_local_still_allowed_under_autonomous ();
   test_non_gh_unaffected_by_capability_layer ();
   test_git_clean_bundled_force_denied ();
@@ -663,6 +915,9 @@ let () =
   test_push_delete_short_flag_floored_under_autonomous ();
   test_push_force_with_lease_floored_under_autonomous ();
   test_push_mirror_floored_under_autonomous ();
+  test_push_prune_floored_under_autonomous ();
+  test_push_delete_refspec_floored_under_autonomous ();
+  test_push_force_refspec_floored_under_autonomous ();
   test_worktree_remove_floored_under_autonomous ();
   test_rm_root_allowed_at_policy_layer_jailed_downstream ();
   test_autonomous_allows_toolchain ();

@@ -84,6 +84,14 @@ let has_connector_context (payload : keeper_chat_stream_request) =
 let has_external_speaker (payload : keeper_chat_stream_request) =
   has_connector_context payload && payload.channel_user_id <> ""
 
+let gate_address_of_request payload =
+  let field key value =
+    let value = String.trim value in
+    if value = "" then [] else [ (key, value) ]
+  in
+  field "connector" payload.channel
+  @ field "workspace_id" payload.channel_workspace_id
+
 let message_for_request payload =
   if has_external_speaker payload then
     Gate_keeper_backend.contextualize_message
@@ -98,7 +106,8 @@ let message_for_request payload =
 
 let chat_surface_of_request payload =
   if has_connector_context payload then
-    Surface_ref.Gate { label = payload.channel; address = [] }
+    Surface_ref.Gate
+      { label = payload.channel; address = gate_address_of_request payload }
   else Surface_ref.Dashboard { session_id = None }
 
 let chat_speaker_of_request payload =

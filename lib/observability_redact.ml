@@ -51,6 +51,12 @@ let bearer_re =
 
 let ghp_re = Re.compile (Re.seq [Re.bow; Re.str "ghp_"; Re.rep1 Re.alnum])
 
+let ghs_re = Re.compile (Re.seq [Re.bow; Re.str "ghs_"; Re.rep1 Re.alnum])
+
+let gho_re = Re.compile (Re.seq [Re.bow; Re.str "gho_"; Re.rep1 Re.alnum])
+
+let ghu_re = Re.compile (Re.seq [Re.bow; Re.str "ghu_"; Re.rep1 Re.alnum])
+
 let github_pat_re =
   Re.compile (Re.seq [Re.bow; Re.str "github_pat_"; Re.rep1 (Re.alt [Re.alnum; Re.char '_'])])
 
@@ -59,6 +65,54 @@ let sk_re =
 
 let awsakia_re =
   Re.compile (Re.seq [Re.bow; Re.str "AKIA"; Re.repn Re.alnum 16 (Some 16); Re.eow])
+
+let pem_marker_pairs =
+  [ "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----"
+  ; "-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----"
+  ]
+
+let find_substring_from haystack needle start =
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then Some start
+  else (
+    let haystack_len = String.length haystack in
+    let max_start = haystack_len - needle_len in
+    let rec loop idx =
+      if idx > max_start
+      then None
+      else if String.sub haystack idx needle_len = needle
+      then Some idx
+      else loop (idx + 1)
+    in
+    if start > max_start then None else loop start)
+
+let redact_between_markers ~begin_marker ~end_marker s =
+  let begin_len = String.length begin_marker in
+  let end_len = String.length end_marker in
+  let s_len = String.length s in
+  let buf = Buffer.create s_len in
+  let rec loop pos =
+    match find_substring_from s begin_marker pos with
+    | None ->
+        Buffer.add_substring buf s pos (s_len - pos);
+        Buffer.contents buf
+    | Some start ->
+        Buffer.add_substring buf s pos (start - pos);
+        Buffer.add_string buf "[REDACTED]";
+        let after_begin = start + begin_len in
+        (match find_substring_from s end_marker after_begin with
+         | None -> Buffer.contents buf
+         | Some stop -> loop (stop + end_len))
+  in
+  loop 0
+
+let redact_pem_blocks s =
+  List.fold_left
+    (fun acc (begin_marker, end_marker) ->
+       redact_between_markers ~begin_marker ~end_marker acc)
+    s
+    pem_marker_pairs
 
 (** Common secret-bearing value patterns. Specific prefixes are listed before
     any generic matcher so short, well-known tokens are not missed when they
@@ -79,6 +133,9 @@ let secret_res () =
   [ url_credential_re
   ; bearer_re
   ; ghp_re
+  ; ghs_re
+  ; gho_re
+  ; ghu_re
   ; github_pat_re
   ; sk_re
   ; awsakia_re
@@ -87,7 +144,7 @@ let secret_res () =
 let redact_patterns (s : string) : string =
   List.fold_left
     (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc)
-    s
+    (redact_pem_blocks s)
     (secret_res ())
 
 let redact_text (s : string) : string =

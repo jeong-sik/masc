@@ -554,7 +554,14 @@ let public_descriptors =
          the executable, or pipeline. Do not repeat executable as argv[0]. \
          Examples: executable='git' argv=['status', '--short']; executable='gh' \
          argv=['pr', 'list', '--repo', 'owner/name']. Use cwd for repo-scoped \
-         operations."
+         operations. Each Execute call is typed, not shell-parsed: use \
+         pipeline=[...] for pipelines, typed stdin/stdout/stderr fields for \
+         redirection-like I/O, typed env for environment variables, and \
+         explicit argv/path literals instead of shell glob expansion. To EDIT a \
+         file, use the Edit tool, not 'sed -i' or 'cat >' — in-place shell \
+         edits fail here. If a command fails, do not repeat the same argv: fix \
+         the invocation or use a different tool (Edit for edits, Read/Grep for \
+         inspection)."
       ~input_schema:execute_schema
       ~policy:
         (policy

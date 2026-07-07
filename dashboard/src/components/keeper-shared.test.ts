@@ -248,8 +248,10 @@ describe('KeeperConversationPanel', () => {
 
     expect(container.textContent).toContain('직접 대화')
     expect(container.textContent).toContain('@sangsu')
-    expect(container.textContent).toContain('메타데이터 표시')
-    expect(container.textContent).toContain('내부 메시지 숨김')
+    // Metadata/internal visibility switches moved to the Tweaks panel
+    // (global persisted prefs) — the transcript toolbar no longer hosts them.
+    expect(container.textContent).not.toContain('메타데이터 표시')
+    expect(container.textContent).not.toContain('내부 메시지 숨김')
     expect(container.textContent).toContain('Current World State')
     expect(container.textContent).not.toContain('Conversation Lane')
     expect(container.textContent).not.toContain('Visible thread')

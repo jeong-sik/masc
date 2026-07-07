@@ -238,7 +238,7 @@ let transition_task_outcome_r
             , _
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
             , prepare_opt ) ->
-            (* RFC-0109 Phase E: gating is owned by Cdal_evidence_gate (called
+            (* RFC-0109 Phase E: gating is owned by Task_completion_gate (called
                from tool_task.ml before transition_task_r). Here we only
                collect typed evidence refs as observability metadata for
                the verifier request output. Empty list is valid for

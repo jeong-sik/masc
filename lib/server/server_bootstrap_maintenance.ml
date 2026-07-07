@@ -663,9 +663,33 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       try
         let now = Int64.of_float (Eio.Time.now clock) in
         match Repo_sync.sync_all ~base_path:(Mcp_server.workspace_config state).base_path ~now with
-        | Ok repos ->
-          if repos <> []
-          then Log.Server.info "repo_sync: synced %d repositories" (List.length repos)
+        | Ok synced ->
+          List.iter
+            (fun ((repo : Repo_manager_types.repository), outcome) ->
+              match outcome with
+              | Repo_sync.Already_current -> ()
+              | Repo_sync.Advanced { behind } ->
+                Log.Server.info
+                  "repo_sync: %s advanced %d commit(s) to origin/%s"
+                  repo.id behind repo.default_branch
+              | Repo_sync.Skipped_dirty { staged; unstaged; conflicted } ->
+                Log.Server.warn
+                  "repo_sync: %s not advanced (dirty tree: staged=%d unstaged=%d conflicted=%d)"
+                  repo.id staged unstaged conflicted
+              | Repo_sync.Skipped_not_on_default_branch { current } ->
+                Log.Server.warn
+                  "repo_sync: %s not advanced (checked out %s, default %s)"
+                  repo.id current repo.default_branch
+              | Repo_sync.Fast_forward_refused { behind; reason } ->
+                Log.Server.warn
+                  "repo_sync: %s is %d commit(s) behind but fast-forward was refused: %s"
+                  repo.id behind reason
+              | Repo_sync.Advance_inspect_failed { reason } ->
+                Log.Server.warn
+                  "repo_sync: %s advance inspection failed: %s" repo.id reason)
+            synced;
+          if synced <> []
+          then Log.Server.info "repo_sync: synced %d repositories" (List.length synced)
         | Error msg -> Log.Server.warn "repo_sync: sync_all failed: %s" msg
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

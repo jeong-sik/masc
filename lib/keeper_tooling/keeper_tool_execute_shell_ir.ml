@@ -65,12 +65,25 @@ let gate_verdict_map verdict ~f_allow ~f_reject ~f_cannot_parse ~f_too_complex =
   | Shell_gate.Too_complex _ -> f_too_complex
 ;;
 
+type approval_required_kind =
+  | Gh_capability_requires_approval
+  | Privileged_program_floor
+
+let approval_required_kind_to_string = function
+  | Gh_capability_requires_approval -> "gh_capability_requires_approval"
+  | Privileged_program_floor -> "privileged_program_floor"
+;;
+
 type dispatch_error =
   | Gate_reject of string
   | Cannot_parse
   | Too_complex
   | Path_reject of string
-  | Approval_required of { summary : string; bin : string }
+  | Approval_required of {
+      summary : string;
+      bin : string;
+      kind : approval_required_kind;
+    }
   | Policy_denied of { reason : string }
 
 let rec first_privileged_program = function
@@ -114,6 +127,68 @@ let tool_execute_command_context ?(allow_pipes = true) command =
 
 (* TEL-OK: facade is pure gate/path/dispatch routing; the Execute handler emits
    Shell IR dispatch telemetry with keeper, sandbox, status, elapsed_ms. *)
+let last_simple_of_ir ir =
+  match ir with
+  | Masc_exec.Shell_ir.Simple s -> Some s
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    (match List.rev stages with
+     | Masc_exec.Shell_ir.Simple s :: _ -> Some s
+     | _ -> None)
+;;
+
+type gh_capability_policy_result =
+  | Gh_policy_noop
+  | Gh_policy_approval_required of Masc_exec.Exec_program.t
+  | Gh_policy_denied of string
+
+(* Surface WHY a gh command is gated on the operator approval prompt: the gh
+   family/action and its verb classification (read / reversible / irreversible
+   mutation / …). Returns [None] when the command's words are not literally
+   recoverable (env/redirect/$VAR present) so no rationale is fabricated. *)
+let gh_gating_detail ir =
+  match last_simple_of_ir ir with
+  | None -> None
+  | Some simple ->
+    (match Masc_exec.Shell_ir_risk.literal_words_of_simple simple with
+     | None -> None
+     | Some words ->
+       let verb = Masc_exec.Gh_verb.classify words in
+       let verb_class = Masc_exec.Shell_ir_risk.classify_gh_verb verb in
+       let family = Masc_exec.Gh_verb.string_of_family verb.Masc_exec.Gh_verb.family in
+       let action = Option.value ~default:"" verb.Masc_exec.Gh_verb.action in
+       let subject = String.trim (family ^ " " ^ action) in
+       let subject = if subject = "" then "gh" else "gh " ^ subject in
+       Some
+         (Printf.sprintf
+            "%s: %s"
+            subject
+            (Masc_exec.Shell_ir_risk.gh_verb_class_to_string verb_class)))
+;;
+
+let gh_capability_policy_result ir ~caps =
+  match last_simple_of_ir ir with
+  | None -> Gh_policy_noop
+  | Some simple ->
+    let raw_source = Format.asprintf "%a" Masc_exec.Shell_ir.pp ir in
+    let summary = "shell IR capability approval check" in
+    let policy_input = { Masc_exec.Approval_policy.raw_source; summary } in
+    (match
+       Masc_exec.Approval_policy.decide
+         policy_input
+         ~overlay:Masc_exec.Approval_config.autonomous
+         ~caps
+         ~simple
+     with
+     | Masc_exec.Verdict.Ask { bin; _ } ->
+       (match Masc_exec.Exec_program.known bin with
+        | Some Masc_exec.Exec_program.Gh -> Gh_policy_approval_required bin
+        | Some _ | None -> Gh_policy_noop)
+     | Masc_exec.Verdict.Allow _ | Masc_exec.Verdict.Suggest_confirm (_, _) ->
+       Gh_policy_noop
+     | Masc_exec.Verdict.Deny { reason; _ } ->
+       Gh_policy_denied (Masc_exec.Verdict.deny_reason_to_string reason))
+;;
+
 let dispatch_classified
       ?(allow_pipes = true)
       ?(redirect_allowed = true)
@@ -140,41 +215,62 @@ let dispatch_classified
   | Some reason ->
     Error (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason })
   | None ->
-    (match first_privileged_program caps with
-     | Some bin ->
+    (match gh_capability_policy_result ir ~caps with
+     | Gh_policy_denied reason -> Error (Policy_denied { reason })
+     | Gh_policy_approval_required bin ->
        let bin = Masc_exec.Exec_program.to_string bin in
+       let summary =
+         match gh_gating_detail ir with
+         | Some detail ->
+           Printf.sprintf
+             "command '%s' requires approval — %s (audited/privileged risk class)"
+             bin
+             detail
+         | None ->
+           Printf.sprintf
+             "command '%s' requires approval (audited/privileged risk class)"
+             bin
+       in
        Error
          (Approval_required
-            { summary =
-                Printf.sprintf
-                  "privileged command '%s' requires explicit approval; no \
-                   Shell IR approval resolver is configured, so it is blocked"
-                  bin
-            ; bin
-            })
-     | None ->
-       let gate_verdict =
-         Shell_gate.gate_typed
-           ~ir
-           ~syntax_policy:{ allow_pipes; redirect_allowed }
-           ~path_policy:Shell_gate.forbid_masc_internal_state_paths
-           ~sandbox:{ target = sandbox }
-           ()
-       in
-       gate_verdict_map
-         gate_verdict
-         ~f_reject:(fun diagnostic -> Error (Gate_reject diagnostic))
-         ~f_cannot_parse:(Error Cannot_parse)
-         ~f_too_complex:(Error Too_complex)
-         ~f_allow:(fun _context ->
-           match validate_paths ?keeper_id ?base_path ~workdir ir with
-           | Error e -> Error (Path_reject e)
-           | Ok () ->
-             Ok
-               (Masc_exec.Exec_dispatch.dispatch_decided
-                  ?base_host_env
-                  ?on_output_chunk
-                  envelope)))
+            { summary; bin; kind = Gh_capability_requires_approval })
+     | Gh_policy_noop ->
+       (match first_privileged_program caps with
+        | Some bin ->
+          let bin = Masc_exec.Exec_program.to_string bin in
+          Error
+            (Approval_required
+               { summary =
+                   Printf.sprintf
+                     "privileged command '%s' requires explicit approval; no \
+                      Shell IR approval resolver is configured, so it is blocked"
+                     bin
+               ; bin
+               ; kind = Privileged_program_floor
+               })
+        | None ->
+          let gate_verdict =
+            Shell_gate.gate_typed
+              ~ir
+              ~syntax_policy:{ allow_pipes; redirect_allowed }
+              ~path_policy:Shell_gate.forbid_masc_internal_state_paths
+              ~sandbox:{ target = sandbox }
+              ()
+          in
+          gate_verdict_map
+            gate_verdict
+            ~f_reject:(fun diagnostic -> Error (Gate_reject diagnostic))
+            ~f_cannot_parse:(Error Cannot_parse)
+            ~f_too_complex:(Error Too_complex)
+            ~f_allow:(fun _context ->
+              match validate_paths ?keeper_id ?base_path ~workdir ir with
+              | Error e -> Error (Path_reject e)
+              | Ok () ->
+                Ok
+                  (Masc_exec.Exec_dispatch.dispatch_decided
+                     ?base_host_env
+                     ?on_output_chunk
+                     envelope))))
 ;;
 
 (* TEL-OK: wrapper only classifies before delegating to dispatch_classified. *)
@@ -201,27 +297,15 @@ let dispatch
     (classify ir)
 ;;
 
-(** Extract the last simple stage from an IR for per-command approval policy.
-    For a [Simple] IR it is the command itself; for a pipeline it is the
-    final stage, whose risk class and binary usually drive the approval
-    decision. *)
-let last_simple_of_ir ir =
-  match ir with
-  | Masc_exec.Shell_ir.Simple s -> Some s
-  | Masc_exec.Shell_ir.Pipeline stages ->
-    (match List.rev stages with
-     | Masc_exec.Shell_ir.Simple s :: _ -> Some s
-     | _ -> None)
-;;
-
 (** Same pipeline as [dispatch_classified], but runs the capability-based
     approval policy gate {i before} the typed gate and path validation
     (the approval decision is made first, then [dispatch_classified] applies
     [Shell_gate.gate_typed] followed by [validate_paths]).
     [Ask] and [Deny] are surfaced as typed errors so the keeper runtime
-    can log them and return a structured failure to the model.  Even when the
-    policy overlay allows, [dispatch_classified] still applies the privileged
-    fail-closed floor before dispatch. *)
+    can log them and either enqueue non-blocking HITL for gh capabilities or
+    return a structured failure to the model.  Even when the policy overlay
+    allows, [dispatch_classified] still applies the privileged fail-closed
+    floor before dispatch. *)
 let dispatch_classified_with_approval
       ?allow_pipes
       ?redirect_allowed
@@ -261,20 +345,22 @@ let dispatch_classified_with_approval
          ?base_host_env
          ?on_output_chunk
          envelope
-     | Ask _request ->
-       (* The policy wants explicit approval, but the keeper runtime has no
-          approval channel yet (RFC v5 HITL path is not wired), so this is a
-          block.  Report the binary and risk class so the failure is
-          actionable instead of an opaque "approval check" string. *)
-       let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
+     | Ask { bin = request_bin; _ } ->
+       let kind =
+         match Masc_exec.Exec_program.known request_bin with
+         | Some Masc_exec.Exec_program.Gh -> Gh_capability_requires_approval
+         | Some _ | None -> Privileged_program_floor
+       in
+       let bin = Masc_exec.Exec_program.to_string request_bin in
        Error
          (Approval_required
             { summary =
                 Printf.sprintf
                   "command '%s' requires approval (audited/privileged risk \
-                   class); no approval channel is configured, so it is blocked"
+                   class)"
                   bin
             ; bin
+            ; kind
             })
      | Deny { reason; caps = _ } ->
        Error

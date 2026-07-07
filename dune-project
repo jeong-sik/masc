@@ -59,7 +59,7 @@
   ;; the reasoning replay token-waste fix (oas#2470, released via oas#2473).
   ;; Exact pin sha lives
   ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.208.19))
+  (agent_sdk (>= 0.208.20))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))
@@ -72,6 +72,8 @@
   (sqlite3 (>= 5.1))
   (mirage-crypto (>= 1.0))
   (mirage-crypto-rng (>= 1.0))
+  (mirage-crypto-pk (>= 1.0))
+  (x509 (>= 1.0))
   (integers (>= 0.7))
   (zstd (>= 0.4))
   (httpun (>= 0.2))

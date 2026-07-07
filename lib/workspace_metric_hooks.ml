@@ -633,5 +633,21 @@ let install () =
       Otel_metric_store.metric_cache_desync_cleared
       ~labels:[ "module", module_name; "status", status ]
       ());
+
+  let decide_hook
+        ~(base_path : string)
+        ~(task_id : string)
+        ~(task_opt : Masc_domain.task option)
+        ~(notes : string)
+        ~(handoff : Masc_domain.task_handoff_context option)
+        ()
+      : Workspace_hooks.evidence_gate_verdict
+    =
+    match Task_completion_gate.decide ~base_path ~task_id ~task_opt ~notes ~handoff_context:handoff () with
+    | Task_completion_gate.Pass -> Workspace_hooks.Pass
+    | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
+      Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
+  in
+  Atomic.set Workspace_hooks.task_completion_gate_decide_fn decide_hook;
   ()
 ;;

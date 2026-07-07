@@ -70,19 +70,34 @@ let persist_turn_livelock_pause
       ~(detail : string)
   : unit
   =
-  match
-    Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
-      ~config
-      ~meta
-      ~reason_tag:"turn_livelock"
-      ~lifecycle_detail:detail
-      ~log_message:(Printf.sprintf "paused keeper after turn livelock block: %s" detail)
-      ~blocker_class:(Some Keeper_meta_contract.Turn_livelock_blocked)
-      ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
-      ()
-  with
-  | Ok _paused_meta -> ()
-  | Error _err -> ()
+  if Keeper_pacing_shadow.pacing_enforced ()
+  then
+    (* RFC-0313 W3: the livelock gate keeps blocking the repeated mutating
+       call in-turn (unchanged), but no longer flips keeper existence. The
+       blocked turn ends through the failure path, which records pacing and
+       routes the error. *)
+    Log.Keeper.warn
+      "%s: turn livelock block recorded without pause (RFC-0313 W3): %s"
+      meta.name
+      detail
+  else (
+    match
+      Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
+        ~config
+        ~meta
+        ~reason_tag:"turn_livelock"
+        ~lifecycle_detail:detail
+        ~log_message:(Printf.sprintf "paused keeper after turn livelock block: %s" detail)
+        ~blocker_class:(Some Keeper_meta_contract.Turn_livelock_blocked)
+        ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+        ()
+    with
+    | Ok _paused_meta ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string FailureDrivenPause)
+        ~labels:[ "keeper", meta.name; "site", "turn_livelock" ]
+        ()
+    | Error _err -> ())
 ;;
 
 let handle

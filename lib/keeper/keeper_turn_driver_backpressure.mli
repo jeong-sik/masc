@@ -29,13 +29,7 @@ val capacity_backpressure_of_pending :
    * Keeper_internal_error.capacity_retry_after) option ->
   Keeper_internal_error.masc_internal_error option
 
-(** Classify an SDK error into a capacity-backpressure error,
-    when the error indicates provider capacity exhaustion or a
-    backpressure-like internal message. *)
-val capacity_backpressure_of_sdk_error :
-  runtime_id:string ->
-  message_looks_like_capacity_backpressure:(string -> bool) ->
-  sdk_error_of_masc_internal_error:(Keeper_internal_error.masc_internal_error ->
-                                    Agent_sdk.Error.sdk_error) ->
-  Agent_sdk.Error.sdk_error ->
-  Agent_sdk.Error.sdk_error option
+(* [capacity_backpressure_of_sdk_error] was removed (#23438): a dead substring
+   classifier that laundered opaque [Internal] errors into the auto-recoverable
+   capacity-backpressure class.  The typed [cooldown_cause] on the pre-dispatch
+   cooldown gate replaces it. *)

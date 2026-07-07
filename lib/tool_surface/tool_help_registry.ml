@@ -187,21 +187,21 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Mark your owned task done with completion notes and evidence.";
+            "Mark your owned task done with a result summary and evidence_refs.";
           when_to_use =
-            "Use when the current keeper has finished an owned task and can cite concrete evidence in result/notes.";
+            "Use when the current keeper has finished an owned task and can cite concrete evidence_refs.";
           key_constraints =
             [
               "Caller must own the task unless using a force tool.";
-              "Result should include PR, commit, file, or command evidence when applicable.";
+              "evidence_refs must include at least one locally validated base-path artifact, local git commit, or .masc trace/turn/receipt artifact when marking work done.";
             ];
           details_markdown =
-            "Completes the task directly. For PR-bearing work, include the PR URL or artifact reference in the result text instead of using a separate verification-evidence wrapper.";
+            "Completes the task directly. For PR-bearing work, include the PR URL or artifact reference in evidence_refs instead of using a separate verification-evidence wrapper.";
           doc_refs = [];
           prompt_hints = [ "Prefer this over retired task verification wrapper tools." ];
           examples =
             [
-              "task_id='task-123' result='Opened PR https://github.com/org/repo/pull/42; checks: dune build target passed.'";
+              "task_id='task-123' result='Implemented the task; checks passed.' evidence_refs=['https://github.com/org/repo/pull/42']";
             ];
           alternatives = [];
         }
@@ -223,7 +223,7 @@ let manual_help_entry name =
           prompt_hints = [];
           examples =
             [
-              "kind='decision' title='verification wrapper retired' content='Use keeper_task_done result evidence; do not call separate submit evidence wrappers.'";
+              "kind='decision' title='verification wrapper retired' content='Use keeper_task_done evidence_refs; do not call separate submit evidence wrappers.'";
             ];
           alternatives = [];
         }

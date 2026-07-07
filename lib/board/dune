@@ -15,6 +15,7 @@
   board_core_payload
   board_core_persist
   board_core_status_rollup
+  board_claim_evidence
   board_curation
   board_dispatch
   board_effect_hooks

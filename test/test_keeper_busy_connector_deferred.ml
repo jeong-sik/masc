@@ -79,7 +79,8 @@ let test_busy_discord_enqueues () =
               ~sw ~clock ~proc_mgr:None ~net:None ~config
               ~channel:"discord" ~channel_user_id:"user-42"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
-              ~keeper_name ~metadata:[] ~content:"are you there?")
+              ~keeper_name ~idempotency_key:"discord-msg-777"
+              ~metadata:[] ~content:"are you there?")
         in
         (* The connector receives a busy ACK now; the deferred reply arrives
            later via the consumer, so there is no async-poll request_id. *)

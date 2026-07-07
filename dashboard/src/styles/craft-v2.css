@@ -83,7 +83,9 @@
 .v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 34px 40px 14px; }
 .v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-turn-bundle { gap: 16px; }
 .v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-bubble      { padding: 16px 20px; line-height: 1.7; }
-.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 16px 30px 24px; }
+/* .kw-composer-inner keeps keeper-workspace.css `padding: 0 4px` — outer
+   composer spacing is owned solely by .kw-composer-wrap (the spacious inner
+   padding here was the second layer of the 62px bottom-gap stack). */
 .v2-app[data-density="spacious"] .kw-kp-row        { padding: 12px 12px; }
 /* Context rail + roster (design `.ctx-scroll`/`.ctx-card`/`.tps-card`/`.roster-*`
    -> live `.kw-rail-scroll`/`.kw-sec`/`.kw-roster-*`). `.kw-sec` is scoped under
@@ -113,7 +115,6 @@
    the running dashboard. */
 .v2-app[data-density="compact"] .kw-chat-head     { padding: 10px 16px 10px; }
 .v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 14px 24px 6px; }
-.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 10px 20px 12px; }
 .v2-app[data-density="compact"] .kw-rail-scroll { padding: 12px; gap: 12px; }
 .v2-app[data-density="compact"] .bd-list       { padding: 12px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }

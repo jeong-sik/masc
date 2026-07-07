@@ -41,11 +41,24 @@ import {
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
 type FusionTone = 'ok' | 'warn' | 'bad' | 'volt' | 'muted'
+type FusionDecisionKey = 'Answer' | 'Recommend' | 'Insufficient'
 
 const FAILED_PANEL_STATUSES: readonly string[] = ['failed', 'error']
+const FAILED_JUDGE_STATUSES: readonly string[] = ['failed', 'error']
+const COMPLETE_JUDGE_STATUSES: readonly string[] = ['synthesized', 'complete', 'completed']
+const DECISION_KEY_BY_TOKEN: Readonly<Record<string, FusionDecisionKey>> = {
+  answer: 'Answer',
+  recommend: 'Recommend',
+  insufficient: 'Insufficient',
+}
 
 function isPanelFailure(status: string): status is 'failed' | 'error' {
   return FAILED_PANEL_STATUSES.includes(status)
+}
+
+function normalizedWireToken(value: string | null): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed.toLowerCase() : null
 }
 
 const FUSION_BOARD_SOURCE = 'fusion'
@@ -271,37 +284,47 @@ function normalizeParams(meta: Record<string, unknown>): FusionRunParams {
 }
 
 function statusFor(judge: FusionJudge, panel: FusionPanelEntry[]): FusionRunStatus {
-  const status = judge.status?.toLowerCase() ?? ''
-  if (status.includes('fail')) return 'failed'
+  const status = normalizedWireToken(judge.status)
+  if (status && FAILED_JUDGE_STATUSES.includes(status)) return 'failed'
   if (judge.error) return 'failed'
-  if (judge.resolvedAnswer || judge.synthesis || judge.decision || status.includes('synth')) return 'complete'
+  if (judge.resolvedAnswer || judge.synthesis || judge.decision) return 'complete'
+  if (status && COMPLETE_JUDGE_STATUSES.includes(status)) return 'complete'
   if (panel.length > 0 && panel.every(entry => isPanelFailure(entry.status))) return 'failed'
   return 'running'
 }
 
+interface ParsedFusionDecision {
+  raw: string
+  key: FusionDecisionKey | null
+}
+
+function parseFusionDecision(decision: string | null): ParsedFusionDecision | null {
+  const raw = decision?.trim()
+  if (!raw) return null
+  const token = normalizedWireToken(raw)
+  return {
+    raw,
+    key: token ? DECISION_KEY_BY_TOKEN[token] ?? null : null,
+  }
+}
+
 function toneFor(status: FusionRunStatus, decision: string | null): FusionTone {
   if (status === 'failed') return 'bad'
-  const lower = decision?.toLowerCase() ?? ''
-  if (lower.includes('answer')) return 'ok'
-  if (lower.includes('recommend')) return 'volt'
-  if (lower.includes('insufficient') || lower.includes('uncertain')) return 'warn'
+  const parsed = parseFusionDecision(decision)
+  if (parsed?.key === 'Answer') return 'ok'
+  if (parsed?.key === 'Recommend') return 'volt'
+  if (parsed?.key === 'Insufficient') return 'warn'
+  if (parsed && status === 'complete') return 'warn'
   return status === 'running' ? 'muted' : 'ok'
 }
 
-// Wire `decision` is a free-form string (`fusion_sink.render_decision` emits
-// `"answer — …"` / `"recommend — …"` / `"insufficient — missing: …"`), not the
-// clean OCaml variant. Map it to the canonical key the SSOT `fusionDecisionSpec`
-// understands, then defer label/glyph/tone to that shared spec (no inline
-// label/colour drift). Unknown / running / failed decisions fall through to the
-// spec's neutral fallback. This mirrors the existing `toneFor` substring logic —
-// the typed variant lives backend-side and is flattened to a string on the wire.
+// Only exact wire decision tokens are elevated to semantic badges. Description
+// strings remain raw/neutral so protocol drift is visible instead of silently
+// inheriting the wrong label, glyph, or tone.
 function decisionSpecFor(decision: string | null): FusionDecisionSpec | null {
-  if (!decision) return null
-  const lower = decision.toLowerCase()
-  if (lower.includes('answer')) return fusionDecisionSpec('Answer')
-  if (lower.includes('recommend')) return fusionDecisionSpec('Recommend')
-  if (lower.includes('insufficient') || lower.includes('uncertain')) return fusionDecisionSpec('Insufficient')
-  return fusionDecisionSpec(decision)
+  const parsed = parseFusionDecision(decision)
+  if (!parsed) return null
+  return fusionDecisionSpec(parsed.key ?? parsed.raw)
 }
 
 function keeperNameFor(post: BoardPost): string {

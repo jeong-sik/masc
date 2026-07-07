@@ -1441,7 +1441,7 @@ let thinking_control_format_wire : Runtime_schema.thinking_control_format -> str
   | Runtime_schema.Thinking_object_adaptive -> "thinking-object-adaptive"
   | Runtime_schema.Thinking_object_only -> "thinking-object-only"
   | Runtime_schema.Chat_template_kwargs -> "chat-template-kwargs"
-  | Runtime_schema.Chat_template_token -> "chat-template-token"
+  | Runtime_schema.Chat_template_token _ -> "chat-template-token"
   | Runtime_schema.Ollama_think -> "ollama-think"
   | Runtime_schema.Reasoning_effort -> "reasoning-effort"
   | Runtime_schema.Enable_thinking -> "enable-thinking"
@@ -3427,12 +3427,16 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
     let keeper_waiting_inventory =
       run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
     in
+    let keeper_background =
+      run Tools_compute (fun () -> Server_keeper_background.dashboard_json config)
+    in
     match json with
     | `Assoc fields ->
       `Assoc
         (fields
          @ [ "scheduled_automation", scheduled_automation
            ; "keeper_waiting_inventory", keeper_waiting_inventory
+           ; "keeper_background", keeper_background
            ])
     | other -> other
   in

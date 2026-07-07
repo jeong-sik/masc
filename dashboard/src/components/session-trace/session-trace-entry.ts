@@ -1,5 +1,5 @@
 // Session trace entry — expandable row for a single event in the trace timeline.
-// Reuses tool category patterns from keeper-trajectory-timeline.ts.
+// Tool category patterns shared via tool-call-shared.ts.
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'

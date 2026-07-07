@@ -349,7 +349,12 @@
 .v2-app[data-surface="code"] .v2-body > .h-full,
 .v2-app[data-surface="code"] .v2-surface,
 .v2-app[data-surface="code"] .v2-shell-surface,
-.v2-app[data-surface="code"] .ide-v2-surface {
+.v2-app[data-surface="code"] .ide-v2-surface,
+.v2-app[data-surface="schedule"] .v2-body,
+.v2-app[data-surface="schedule"] .v2-surface-host,
+.v2-app[data-surface="schedule"] .v2-surface-host > .h-full,
+.v2-app[data-surface="schedule"] .v2-surface,
+.v2-app[data-surface="schedule"] .sch-surf {
   height: 100%;
   min-height: 0;
 }

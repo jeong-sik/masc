@@ -455,7 +455,16 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Reject_verification ->
         false
     in
-    in
+    if not needs_gate then Workspace_hooks.Pass
+    else
+      (Atomic.get Workspace_hooks.task_completion_gate_decide_fn)
+        ~base_path:ctx.config.base_path
+        ~task_id
+        ~task_opt
+        ~notes
+        ~handoff:handoff_context
+        ()
+  in
   match evidence_decision with
   | Workspace_hooks.Reject { reason; rule_id; hint; payload_json } ->
     let extra_fields =

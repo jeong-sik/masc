@@ -24,6 +24,7 @@ import {
   Overview,
 } from './overview'
 import type { FusionRunRecord, TelemetryEntry, TelemetrySourceSummary } from '../../api/dashboard'
+import { keepers } from '../../store'
 import type { Goal } from '../../types/core'
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
@@ -991,5 +992,25 @@ describe('Overview prototype surface', () => {
     const btn = tel?.querySelector('button.ov-link')
     expect(btn).not.toBeNull()
     expect(btn?.textContent).toBe('로그 보기 →')
+  })
+
+  // The attention row's mono sublabel exists to show the wire name next to a
+  // localized display name; when they are identical it printed "base base".
+  it('attention row hides the ns sublabel when display name equals keeper name', () => {
+    const previousKeepers = keepers.value
+    keepers.value = [
+      makeKeeper({ name: 'base', needs_attention: true }),
+      makeKeeper({ name: 'nick0cave', koreanName: '닉케이브', needs_attention: true }),
+    ]
+    try {
+      const { container } = render(h(Overview, null))
+      const plain = container.querySelector('[data-testid="attention-row-base"] .ov-attn-name')
+      expect(plain?.textContent?.trim()).toBe('base')
+      expect(plain?.querySelector('.ov-attn-ns')).toBeNull()
+      const localized = container.querySelector('[data-testid="attention-row-nick0cave"] .ov-attn-name')
+      expect(localized?.querySelector('.ov-attn-ns')?.textContent).toBe('nick0cave')
+    } finally {
+      keepers.value = previousKeepers
+    }
   })
 })

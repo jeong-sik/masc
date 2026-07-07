@@ -347,15 +347,86 @@ let ask_of policy ~caps ~bin : Verdict.t =
    floored or Ask-graded; [Allowed] verbs fall through to the overlay), so this
    layer only ADDS an approval requirement, never removes one. Non-gh commands
    are unaffected. *)
-let gh_verb_of_simple (simple : Shell_ir.simple) : Gh_verb.t option =
-  match Exec_program.known simple.Shell_ir.bin with
-  | Some Exec_program.Gh ->
-    let words =
-      Exec_program.to_string simple.Shell_ir.bin
-      :: List.map repo_hosting_arg_word simple.Shell_ir.args
-    in
-    Some (Gh_verb.classify words)
-  | Some _ | None -> None
+let gh_capability_of_simple (simple : Shell_ir.simple)
+  : Gh_capability_policy.disposition option
+  =
+  (* [disposition_of_simple], not [disposition_of]: [gh api graphql ...] lowers
+     to the body-blind [Gh_verb.Api], so the capability axis must see both the
+     literal argv words and any Shell IR opacity in the graphql [query] body. *)
+  Gh_capability_policy.disposition_of_simple simple
+
+let gh_capability_policy_deny_rule_of_simple (simple : Shell_ir.simple)
+  : string option
+  =
+  Gh_capability_policy.repo_create_contract_rule_of_simple simple
+
+let gh_capability_policy_deny_rule (caps : Capability.t list) : string option =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      (match Exec_program.known bin with
+       | Some Exec_program.Gh ->
+         let simple : Shell_ir.simple =
+           { Shell_ir.bin
+           ; args
+           ; env = []
+           ; cwd = None
+           ; redirects = []
+           ; sandbox = Sandbox_target.host ()
+           }
+         in
+         (match gh_capability_policy_deny_rule_of_simple simple with
+          | Some _ as found -> found
+          | None -> scan rest)
+       | Some _ | None -> scan rest)
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
+(* RFC-0309 W3 (pipeline coverage): the capability Ask must fire for a gh
+   durable-remote op in ANY pipeline stage, not only the representative (last)
+   [simple] the caller extracts via [last_simple_of_ir]. [caps] folds over every
+   stage — the same source the catastrophic floor scans — so [gh repo create ...
+   | cat] still reaches the capability axis. Without this the trailing read stage
+   ([cat]) becomes the representative simple, and the R1 durable-remote create —
+   no longer floored after W4 moved it R2->R1 — would auto-run under the
+   autonomous overlay. Returns the first gh binary whose stage requires approval
+   so the [Ask] reports the real command, not the trailing read.
+
+   [@@warning "-4"]: the [_ :: rest] arm is a find-first scan that intentionally
+   skips non-gh capabilities, same rationale as [find_destructive_repo_hosting_cli]. *)
+let gh_cap_requiring_approval (caps : Capability.t list) : Exec_program.t option =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      (match Exec_program.known bin with
+       | Some Exec_program.Gh ->
+         let simple : Shell_ir.simple =
+           { Shell_ir.bin
+           ; args
+           ; env = []
+           ; cwd = None
+           ; redirects = []
+           ; sandbox = Sandbox_target.host ()
+           }
+         in
+         (match gh_capability_of_simple simple with
+          | Some Gh_capability_policy.Requires_approval -> Some bin
+          | Some (Gh_capability_policy.Allowed | Gh_capability_policy.Denied)
+          | None -> scan rest)
+       | Some _ | None -> scan rest)
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
 [@@warning "-4"]
 
 let trust_dispatch ~trust_level ~caps ~policy ~bin ~simple : Verdict.t =
@@ -377,21 +448,23 @@ let decide (policy : t)
   | Some reason ->
     (* Trust-independent: denied regardless of [overlay] (RFC-0254 §5.3). *)
     Verdict.Deny { caps; reason }
-  | None when
-      (match gh_verb_of_simple simple with
-       | Some v ->
-         Gh_capability_policy.disposition_of v
-         = Gh_capability_policy.Requires_approval
-       | None -> false) ->
-    (* RFC-0309 W3: a gh verb the capability axis marks [Requires_approval] is
-       escalated to [Ask] regardless of overlay. Additive only — reached solely
-       for gh, and only to REQUIRE approval the risk grading would not. *)
-    ask_of policy ~caps ~bin:simple.bin
   | None ->
-    (* Non-catastrophic: graded by the per-actor trust overlay.  Under the
-       autonomous overlay every level is [Observe] => [Allow] + telemetry;
-       under [enforced_all] every level is [Enforced] => [Ask]. *)
-    (match max_risk caps with
+    (match gh_capability_policy_deny_rule caps with
+     | Some rule -> Verdict.Deny { caps; reason = Verdict.Policy_deny { rule } }
+     | None ->
+    (match gh_cap_requiring_approval caps with
+     | Some gh_bin ->
+       (* RFC-0309 W3: a gh verb the capability axis marks [Requires_approval]
+          is escalated to [Ask] regardless of overlay. Additive only — reached
+          solely for gh, and only to REQUIRE approval the risk grading would
+          not. Scanned over ALL caps so a gh op in any pipeline stage asks, not
+          only the representative [simple]. *)
+       ask_of policy ~caps ~bin:gh_bin
+     | None ->
+       (* Non-catastrophic: graded by the per-actor trust overlay.  Under the
+          autonomous overlay every level is [Observe] => [Allow] + telemetry;
+          under [enforced_all] every level is [Enforced] => [Ask]. *)
+       (match max_risk caps with
      | `Privileged ->
        trust_dispatch ~trust_level:overlay.privileged_trust
          ~caps ~policy ~bin:simple.bin ~simple
@@ -400,4 +473,4 @@ let decide (policy : t)
          ~caps ~policy ~bin:simple.bin ~simple
      | `Safe ->
        trust_dispatch ~trust_level:overlay.safe_trust
-         ~caps ~policy ~bin:simple.bin ~simple)
+         ~caps ~policy ~bin:simple.bin ~simple)))

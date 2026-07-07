@@ -81,6 +81,7 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
   runtime_backpressure : runtime_backpressure_decision;
+  pacing_block : float option;
   should_run_turn : bool;
   verdict_reasons : string list;
   channel : string;
@@ -156,7 +157,9 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.No_progress_recovery
       | Keeper_event_queue.Hitl_resolved _
-      | Keeper_event_queue.Goal_verification_failed _ ->
+      | Keeper_event_queue.Goal_verification_failed _
+      | Keeper_event_queue.Failure_judgment _
+      | Keeper_event_queue.Goal_assigned _ ->
         None)
     stimuli
 ;;
@@ -174,7 +177,9 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.No_progress_recovery
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _ -> ())
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _
+       | Keeper_event_queue.Goal_assigned _ -> ())
     stimuli
 ;;
 
@@ -191,7 +196,9 @@ let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.No_progress_recovery
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _ -> ())
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _
+       | Keeper_event_queue.Goal_assigned _ -> ())
     stimuli
 ;;
 
@@ -287,6 +294,20 @@ let run_keepalive_unified_turn
           ~keeper_resilience_of_name:(fun keeper_name ->
             if Health.is_healthy ~agent_name:keeper_name then None
             else Some "unhealthy")
+            (* RFC-0313 W3: with [pacing.mode = enforce] the scheduler
+               consumes failure revisit pacing — the next turn waits until
+               the earliest runtime revisit is eligible. Shadow mode keeps
+               the pre-W3 behavior (pacing observed, never consulted).
+               [next_due_remaining] (in-memory) is consulted first so the
+               per-tick hot path only pays the [Runtime.pacing] toml read
+               while a revisit is actually pending. *)
+          ~pacing_block_of_name:(fun keeper_name ->
+            match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
+            | None -> None
+            | Some _ as remaining
+              when Keeper_pacing_shadow.pacing_enforced () ->
+              remaining
+            | Some _ -> None)
           ~stop
           ~meta:meta_after_triage
           obs

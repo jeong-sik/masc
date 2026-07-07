@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { formatContextTokens } from '../lib/format-number'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import {
@@ -77,7 +78,7 @@ interface RuntimeEnvironmentEditorProps {
   draftDirty?: boolean
   saving?: boolean
   onRoutingChange: (
-    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'librarian' | 'structured_judge' | 'hitl_summary' | 'cross_verifier',
     runtimeId: string | null,
   ) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
@@ -175,10 +176,10 @@ function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransport
   return provider.transportKind === 'command' ? 'command' : 'endpoint'
 }
 
-// Prototype rt-model-ctx label — runtime-editor.jsx:176 `(max/1000).toFixed(0)}k ctx`.
+// Prototype rt-model-ctx label (runtime-editor.jsx:176) — now via the shared
+// formatContextTokens SSOT so 1M-class contexts read '1M ctx', not '1000k ctx'.
 function protoContext(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '— ctx'
-  return `${(value / 1000).toFixed(0)}k ctx`
+  return formatContextTokens(value) ?? '— ctx'
 }
 
 function parseOptionalPositiveInteger(raw: string): number | null | undefined {
@@ -270,6 +271,14 @@ function keeperDotTone(status: string): string {
   return 'bg-[var(--color-status-err)]'
 }
 
+type RuntimeLaneCapabilityState = 'supported' | 'unsupported' | 'unknown' | 'unconfigured'
+
+interface RuntimeLaneCapabilityBadge {
+  readonly state: RuntimeLaneCapabilityState
+  readonly className: 'rt-ok' | 'rt-warn' | 'rt-unknown'
+  readonly label: string
+}
+
 export function RuntimeEnvironmentEditor({
   sourceText,
   section,
@@ -306,6 +315,7 @@ export function RuntimeEnvironmentEditor({
   const isDisabled = disabled === true || saving === true
 
   const librarianLane = environment.librarianRuntimeId
+  const hitlSummaryLane = environment.hitlSummaryRuntimeId
   const crossVerifierLane = environment.crossVerifierRuntimeId
   const assignments = environment.assignments
   const keeperList = keepers.value
@@ -327,7 +337,7 @@ export function RuntimeEnvironmentEditor({
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
   }
 
-  function updateRoutingLane(lane: 'librarian' | 'structured_judge' | 'cross_verifier', runtimeId: string) {
+  function updateRoutingLane(lane: 'librarian' | 'structured_judge' | 'hitl_summary' | 'cross_verifier', runtimeId: string) {
     onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
@@ -488,13 +498,11 @@ export function RuntimeEnvironmentEditor({
     setBindingFormError(null)
   }
 
-  // rt-select — runtime.css:43. Inline width cap so the 248px min-width never
-  // Layout is now handled by keeper-v2/runtime.css (.rt-lane/.rt-lane-c/.rt-select)
-  // so the narrow Settings embed stacks label above control instead of squeezing
-  // the label to one-word-per-line.
+  // Layout is handled by keeper-v2/runtime.css (.rt-lane/.rt-lane-c/.rt-select)
+  // so the narrow Settings embed can wrap labels, controls, and capability badges.
 
   function laneRow(
-    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'librarian' | 'structured_judge' | 'hitl_summary' | 'cross_verifier',
     label: string,
     hint: string,
     value: string,
@@ -517,14 +525,44 @@ export function RuntimeEnvironmentEditor({
           ? (typeof model.structuredOutput === 'boolean' ? model.structuredOutput : null)
           : (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null)
     const capLabel = requirement === 'structured' ? 'structured output 필요' : 'JSON 모드 필요'
-    const capWarning =
+    const capBadge: RuntimeLaneCapabilityBadge | null =
       requirement === 'none'
         ? null
-        : capValue === false && model
-          ? html`<span class="rt-warn">${capLabel} · ${model.apiName} 미지원</span>`
-          : (capValue === null && model) || !model
-            ? html`<span class="rt-ok">${capLabel} · 모델 capability 미확인</span>`
-            : null
+        : value === ''
+          ? {
+              state: 'unconfigured',
+              className: 'rt-unknown',
+              label: `${capLabel} · lane 미설정`,
+            }
+          : !binding
+            ? {
+                state: 'unknown',
+                className: 'rt-unknown',
+                label: `${capLabel} · runtime binding 없음: ${value}`,
+              }
+            : !model
+              ? {
+                  state: 'unknown',
+                  className: 'rt-unknown',
+                  label: `${capLabel} · model 정의 없음: ${binding.modelId}`,
+                }
+              : capValue === true
+                ? {
+                    state: 'supported',
+                    className: 'rt-ok',
+                    label: `${capLabel} · ${model.apiName} 지원`,
+                  }
+                : capValue === false
+                  ? {
+                      state: 'unsupported',
+                      className: 'rt-warn',
+                      label: `${capLabel} · ${model.apiName} 미지원`,
+                    }
+                  : {
+                      state: 'unknown',
+                      className: 'rt-unknown',
+                      label: `${capLabel} · ${model.apiName} capability 미확인`,
+                    }
 
     return html`
       <div class="rt-lane">
@@ -543,7 +581,14 @@ export function RuntimeEnvironmentEditor({
             ${canUnset ? html`<option value="">미설정</option>` : null}
             ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
           </select>
-          ${capWarning}
+          ${capBadge ? html`
+            <span
+              class=${capBadge.className}
+              data-testid=${`runtime-lane-${lane}-capability`}
+              data-runtime-lane=${lane}
+              data-runtime-lane-capability=${capBadge.state}
+            >${capBadge.label}</span>
+          ` : null}
         </div>
       </div>
     `
@@ -632,7 +677,8 @@ export function RuntimeEnvironmentEditor({
       ` : null}
 
       <!-- routing — runtime-editor.jsx:135-141. default lane is live; librarian /
-           structured_judge / cross_verifier are read from [runtime] and written back. -->
+           structured_judge / hitl_summary / cross_verifier are read from
+           [runtime] and written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
         <div class="rt-note">
           런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
@@ -660,6 +706,14 @@ export function RuntimeEnvironmentEditor({
           environment.structuredJudgeRuntimeId,
           runtimeId => updateRoutingLane('structured_judge', runtimeId),
           'structured',
+        )}
+        ${laneRow(
+          'hitl_summary',
+          'HITL summary',
+          '[runtime].hitl_summary — approval context summary',
+          hitlSummaryLane,
+          runtimeId => updateRoutingLane('hitl_summary', runtimeId),
+          'none',
         )}
         ${laneRow(
           'cross_verifier',

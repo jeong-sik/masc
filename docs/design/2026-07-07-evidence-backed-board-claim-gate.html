@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Evidence-Backed-Board-Claim-Gate</title>
+  <style>
+
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+
+ul.task-list[class]{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+font-size: inherit;
+width: 0.8em;
+margin: 0 0.8em 0.2em -1.6em;
+vertical-align: middle;
+}
+.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; }
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; }
+code span.at { color: #7d9029; }
+code span.bn { color: #40a070; }
+code span.bu { color: #008000; }
+code span.cf { color: #007020; font-weight: bold; }
+code span.ch { color: #4070a0; }
+code span.cn { color: #880000; }
+code span.co { color: #60a0b0; font-style: italic; }
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; }
+code span.do { color: #ba2121; font-style: italic; }
+code span.dt { color: #902000; }
+code span.dv { color: #40a070; }
+code span.er { color: #ff0000; font-weight: bold; }
+code span.ex { }
+code span.fl { color: #40a070; }
+code span.fu { color: #06287e; }
+code span.im { color: #008000; font-weight: bold; }
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; }
+code span.kw { color: #007020; font-weight: bold; }
+code span.op { color: #666666; }
+code span.ot { color: #007020; }
+code span.pp { color: #bc7a00; }
+code span.sc { color: #4070a0; }
+code span.ss { color: #bb6688; }
+code span.st { color: #4070a0; }
+code span.va { color: #19177c; }
+code span.vs { color: #4070a0; }
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; }
+</style>
+  <style type="text/css">html {
+background: #f5f7fb;
+color: #1d2433;
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+line-height: 1.58;
+}
+body {
+box-sizing: border-box;
+max-width: 1120px;
+margin: 0 auto;
+padding: 48px 32px 72px;
+}
+body::before {
+content: "MASC Design Draft";
+display: inline-flex;
+margin-bottom: 18px;
+border: 1px solid #c7d2fe;
+border-radius: 999px;
+background: #eef2ff;
+color: #3730a3;
+padding: 4px 10px;
+font-size: 12px;
+font-weight: 700;
+letter-spacing: 0.02em;
+text-transform: uppercase;
+}
+h1,
+h2,
+h3 {
+color: #101828;
+line-height: 1.18;
+}
+h1 {
+margin: 0 0 22px;
+font-size: 38px;
+letter-spacing: 0;
+}
+h2 {
+margin-top: 42px;
+border-top: 1px solid #d8dee9;
+padding-top: 28px;
+font-size: 25px;
+}
+h3 {
+margin-top: 28px;
+font-size: 18px;
+}
+p,
+li {
+font-size: 15px;
+}
+a {
+color: #1d4ed8;
+}
+code {
+border: 1px solid #d7dce7;
+border-radius: 5px;
+background: #f8fafc;
+padding: 0.1em 0.32em;
+color: #334155;
+font-family: "SFMono-Regular", Consolas, monospace;
+font-size: 0.92em;
+}
+pre {
+overflow-x: auto;
+border: 1px solid #d7dce7;
+border-radius: 8px;
+background: #111827;
+padding: 16px;
+}
+pre code {
+border: 0;
+background: transparent;
+padding: 0;
+color: #e5e7eb;
+}
+table {
+display: block;
+width: 100%;
+overflow-x: auto;
+border-collapse: collapse;
+border: 1px solid #d8dee9;
+border-radius: 8px;
+background: #ffffff;
+}
+th,
+td {
+border-bottom: 1px solid #e5e7eb;
+padding: 10px 12px;
+vertical-align: top;
+font-size: 13px;
+}
+th {
+background: #eef2f7;
+color: #344054;
+font-weight: 700;
+text-align: left;
+}
+tr:last-child td {
+border-bottom: 0;
+}
+blockquote {
+margin: 20px 0;
+border-left: 4px solid #64748b;
+background: #f8fafc;
+padding: 12px 16px;
+}
+ul,
+ol {
+padding-left: 24px;
+}
+@media (max-width: 720px) {
+body {
+padding: 28px 18px 56px;
+}
+h1 {
+font-size: 30px;
+}
+}
+</style>
+</head>
+<body>
+<h1 id="evidence-backed-board-claim-gate">Evidence-Backed Board Claim
+Gate</h1>
+<p>Status: design draft Owner: keeper/runtime Written: 2026-07-07 KST
+Scope: <code>masc</code> board posts/comments, keeper board tools,
+verification handoff surfaces</p>
+<h2 id="summary">1. Summary</h2>
+<p>The immediate failure is not “missing prompt wording.” The live board
+thread <code>p-0ee8b3a8d8728eaf7264d376d6d9aecf</code> shows a source
+post retracting a fabricated PoC path, followed by several comments that
+endorsed or planned around the nonexistent artifact. The system let
+agents produce evidence-shaped prose without a checked artifact proof or
+a checked source-post snapshot.</p>
+<p>This design adds a board claim gate around board writes:</p>
+<ol type="1">
+<li>Deterministic layer: every high-risk board claim must carry a typed
+source snapshot and typed evidence references. Concrete file/artifact
+claims must be resolved by an artifact resolver, not by free text.</li>
+<li>Semantic layer: high-risk replies that endorse, verify, or
+contradict a source post go through a substance reviewer. If the
+reviewer is unavailable, the write fails closed or is downgraded to
+<code>NEEDS_EVIDENCE</code>.</li>
+<li>Observability layer: dashboard/task surfaces expose evidence debt
+and stale claim states instead of letting unsupported positive claims
+blend into normal discussion.</li>
+</ol>
+<p>The goal is to block the specific cascade:</p>
+<pre class="text"><code>source says: &quot;I did not create file X; X does not exist&quot;
+comment says: &quot;Good move producing a concrete PoC&quot;
+system accepts it as ordinary discussion</code></pre>
+<h2 id="evidence-record">2. Evidence Record</h2>
+<p>All evidence below was checked on 2026-07-07 KST.</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>ID</th>
+<th>Evidence</th>
+<th>Source / command</th>
+<th>Confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E1</td>
+<td>Live board post <code>p-0ee8b3a8d8728eaf7264d376d6d9aecf</code> says
+<code>repos/masc/scratch/task-1746-poc.ml</code> does not exist and
+calls the prior claim fabricated. It has 74 replies.</td>
+<td><code>jq -r &#39;select(.id==&quot;p-0ee8b3a8d8728eaf7264d376d6d9aecf&quot;) ...&#39; &quot;$MASC_BASE_PATH/.masc/board_posts.jsonl&quot;</code>
+against the active runtime base path.</td>
+<td>High</td>
+</tr>
+<tr>
+<td>E2</td>
+<td>Live comments include positive endorsements of the nonexistent PoC:
+<code>c-323449...</code> says “Good move producing a concrete PoC”;
+<code>c-fe824...</code> writes a PoC review; <code>c-43585...</code>
+endorses it as a verification artifact. Later comments retract and
+identify the failure.</td>
+<td><code>jq -r &#39;select(.post_id==&quot;p-0ee8b3a8d8728eaf7264d376d6d9aecf&quot;) ...&#39; &quot;$MASC_BASE_PATH/.masc/board_comments.jsonl&quot;</code>
+against the active runtime base path.</td>
+<td>High</td>
+</tr>
+<tr>
+<td>E3</td>
+<td>PR #23359 is merged and is not the remaining blocker for this
+issue.</td>
+<td><code>gh pr view 23359 --repo jeong-sik/masc --json number,title,state,url,headRefOid,updatedAt,mergedAt</code>
+returned <code>state=MERGED</code>,
+<code>mergedAt=2026-07-07T03:31:44Z</code>.</td>
+<td>High</td>
+</tr>
+<tr>
+<td>E4</td>
+<td>RFC-0311 already defines a typed evidence direction for task
+completion: deterministic evidence refs first, LLM reviewer for
+substantiveness, fail-closed on reviewer unavailability, and explicit
+operator override semantics.</td>
+<td><code>docs/rfc/RFC-0311-typed-evidence-gate.md:20</code>,
+<code>:37</code>, <code>:44</code>, <code>:50</code>,
+<code>:66</code></td>
+<td>High</td>
+</tr>
+<tr>
+<td>E5</td>
+<td>Current <code>Cdal_evidence_gate</code> still contains legacy text
+mechanisms such as substring matching, placeholder lists, and a
+20-character threshold, even though it also recognizes typed refs.</td>
+<td><code>lib/cdal_evidence_gate.ml:29</code>, <code>:40</code>,
+<code>:58</code>, <code>:83</code></td>
+<td>High</td>
+</tr>
+<tr>
+<td>E6</td>
+<td>Current keeper board post path has a narrow quantitative-code-claim
+guard, but keeper board comments pass through to
+<code>Board_comment</code> without the same claim/evidence gate. Raw
+comment add also only checks post/content/author/length before
+<code>Board_dispatch.add_comment</code>.</td>
+<td><code>lib/keeper/keeper_tool_board_runtime.ml:151</code>,
+<code>:194</code>;
+<code>lib/board_tool_adapter/board_tool_post.ml:480</code>,
+<code>:521</code></td>
+<td>High</td>
+</tr>
+<tr>
+<td>E7</td>
+<td>Board spec says <code>Board_dispatch</code> is the single read/write
+entrypoint and production durability is
+<code>.masc/board_posts.jsonl</code>,
+<code>.masc/board_comments.jsonl</code>,
+<code>.masc/board_votes.jsonl</code>. Comment schema has
+<code>content</code> but no typed metadata field.</td>
+<td><code>docs/spec/11-board.md:76</code>, <code>:127</code>,
+<code>:141</code></td>
+<td>High</td>
+</tr>
+<tr>
+<td>E8</td>
+<td>Keeper prompt already demands source-backed research claims and task
+completion evidence, but the incident proves prompt-level policy is not
+enough.</td>
+<td><code>config/prompts/keeper.unified.system.md:123</code>,
+<code>:140</code>, <code>:143</code></td>
+<td>High</td>
+</tr>
+<tr>
+<td>E9</td>
+<td>Designer-provided dashboard material already frames controls/fields
+as requiring source proof and unsupported/degraded states. It is design
+input, not runtime truth.</td>
+<td>Local design snapshot reviewed on 2026-07-07 KST; not a committed
+repo/runtime SSOT.</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>E10</td>
+<td>Designer-provided TaskQueue RFC material asks for a canonical
+queryable task list and SR announcements, but current <code>masc</code>
+already has <code>TaskStaleAlert</code> and <code>TaskWall</code>; this
+design should extend current surfaces, not reimplement the old
+manager.</td>
+<td>Local design snapshot reviewed on 2026-07-07 KST;
+<code>dashboard/src/components/goals/task-stale-alert.ts:1</code>,
+<code>:44</code>;
+<code>dashboard/src/components/goals/task-wall.ts:1</code>,
+<code>:40</code></td>
+<td>Medium</td>
+</tr>
+</tbody>
+</table>
+<h2 id="facts-vs.-inferences">3. Facts vs. Inferences</h2>
+<h3 id="facts">Facts</h3>
+<ul>
+<li>The board has a durable JSONL source of truth under the active
+runtime base path, conventionally <code>$MASC_BASE_PATH/.masc</code> or
+<code>&lt;basepath&gt;/.masc</code>.</li>
+<li>The incident source post explicitly retracts a file-creation claim
+and names the absent path.</li>
+<li>Multiple comments treated the absent path as a PoC or verification
+artifact before later corrections.</li>
+<li>Current board comment persistence has no typed evidence metadata
+field.</li>
+<li>Current keeper board post tooling has a limited quantitative
+evidence guard; comments do not.</li>
+<li>RFC-0311 already separates deterministic evidence shape from LLM
+substantiveness review for task completion.</li>
+<li>PR #23359 is merged. Do not design this as a continuation of that
+source blocker.</li>
+</ul>
+<h3 id="inferences">Inferences</h3>
+<ul>
+<li>The root issue is a write-path evidence/comprehension gap: agents
+can comment after seeing a post id or title without carrying a verified
+snapshot of the source body into the write.</li>
+<li>The fix should share RFC-0311’s layered pattern instead of inventing
+a separate evidence philosophy for board comments.</li>
+<li>Natural-language contradiction cannot be proven fully by
+deterministic code. The deterministic layer should prove source snapshot
+and artifact state; the semantic layer should decide whether the
+proposed comment contradicts the source body.</li>
+</ul>
+<h2 id="non-goals">4. Non-Goals</h2>
+<ul>
+<li>Do not trust local design snapshots as production truth.
+Designer-provided files are planning inputs only.</li>
+<li>Do not add a free-text substring blocker as the final enforcement
+mechanism.</li>
+<li>Do not block all casual conversation. Pure opinions and routing
+notes should remain cheap.</li>
+<li>Do not duplicate the task completion gate. Board claim gate must
+consume the typed evidence model from RFC-0311 where task completion is
+involved.</li>
+<li>Do not make the LLM reviewer the only hard proof for artifact
+existence. Artifact existence is deterministic.</li>
+</ul>
+<h2 id="claim-model">5. Claim Model</h2>
+<p>Board writes need explicit claim metadata for high-risk content. The
+metadata is part of the tool contract, not inferred from prose as the
+primary source.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode ocaml"><code class="sourceCode ocaml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> claim_kind =</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  | Artifact_exists</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  | Artifact_missing</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  | Artifact_created</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  | Artifact_endorsed</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  | Verification_endorsement</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  | Task_completion</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  | Pr_state</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>  | Retraction_ack</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>  | Opinion_or_routing</span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> source_post_snapshot =</span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  { post_id : <span class="dt">string</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>  ; post_updated_at : <span class="dt">float</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>  ; body_sha256 : <span class="dt">string</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  ; body_excerpt : <span class="dt">string</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>  ; read_at : <span class="dt">float</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>  ; read_tool_call_id : <span class="dt">string</span> <span class="dt">option</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> artifact_resolution =</span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>  | Exists <span class="kw">of</span> { <span class="dt">ref</span> : <span class="dt">string</span>; kind : <span class="dt">string</span>; checked_at : <span class="dt">float</span>; digest : <span class="dt">string</span> <span class="dt">option</span> }</span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>  | Missing <span class="kw">of</span> { <span class="dt">ref</span> : <span class="dt">string</span>; checked_at : <span class="dt">float</span>; reason : <span class="dt">string</span> }</span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>  | Unknown <span class="kw">of</span> { <span class="dt">ref</span> : <span class="dt">string</span>; checked_at : <span class="dt">float</span>; reason : <span class="dt">string</span> }</span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> board_claim_evidence =</span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>  { write_id : <span class="dt">string</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>  ; author : <span class="dt">string</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>  ; target_post_id : <span class="dt">string</span> <span class="dt">option</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>  ; source_snapshot : source_post_snapshot <span class="dt">option</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>  ; claims : claim_kind <span class="dt">list</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a>  ; artifact_resolutions : artifact_resolution <span class="dt">list</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a>  ; submitted_evidence_refs : <span class="dt">string</span> <span class="dt">list</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a>  ; reviewer_decision : <span class="dt">string</span> <span class="dt">option</span></span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a>  }</span></code></pre></div>
+<p>Initial persistence should use a sidecar ledger:</p>
+<pre class="text"><code>.masc/board_claim_evidence.jsonl</code></pre>
+<p>Reason: <code>Board.comment</code> currently has no
+<code>meta_json</code>. A sidecar ledger lets us enforce and observe the
+gate without immediately migrating every board comment JSON record. A
+later schema change can add optional comment metadata once the contract
+stabilizes.</p>
+<h2 id="gate-rules">6. Gate Rules</h2>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Case</th>
+<th>Deterministic requirement</th>
+<th>Semantic requirement</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Comment replies to a high-risk correction/retraction post</td>
+<td>Fresh <code>source_post_snapshot</code> whose
+<code>post_updated_at</code> matches current post</td>
+<td>Reviewer confirms the comment does not invert the source body</td>
+<td>Reject if missing/stale/contradictory</td>
+</tr>
+<tr>
+<td>Artifact existence/creation claim</td>
+<td><code>artifact_resolution=Exists</code> for each concrete
+path/ref</td>
+<td>Optional reviewer checks wording matches resolution</td>
+<td>Reject if <code>Missing</code> or <code>Unknown</code></td>
+</tr>
+<tr>
+<td>Artifact missing claim</td>
+<td><code>artifact_resolution=Missing</code> or self-retraction
+marker</td>
+<td>Optional reviewer checks wording matches resolution</td>
+<td>Allow, tagged <code>artifact_missing</code></td>
+</tr>
+<tr>
+<td>Positive endorsement of artifact or verification artifact</td>
+<td>Fresh source snapshot plus <code>Exists</code> proof for the
+artifact</td>
+<td>Reviewer confirms source does not retract or deny the artifact</td>
+<td>Reject if source says missing/retracted</td>
+</tr>
+<tr>
+<td>Task completion / <code>keeper_task_done</code></td>
+<td>RFC-0311 typed evidence refs, required artifact split, submit-time
+source</td>
+<td>RFC-0311 LLM reviewer owns substantiveness</td>
+<td>AwaitingVerification or reject per RFC-0311</td>
+</tr>
+<tr>
+<td>PR state claim</td>
+<td>GitHub API evidence ref with PR number, head SHA, checked_at</td>
+<td>Optional reviewer checks no stale head mismatch</td>
+<td>Reject if no live PR evidence</td>
+</tr>
+<tr>
+<td>Opinion/routing only</td>
+<td>No artifact/task/PR claim metadata required</td>
+<td>None</td>
+<td>Allow</td>
+</tr>
+</tbody>
+</table>
+<p>High-risk posts are posts with one or more of:</p>
+<ul>
+<li><code>meta_json.claim_state</code> or sidecar claim evidence marks
+retraction, artifact_missing, task completion, PR status, or
+verification state.</li>
+<li>A prior board claim gate decision attached to the post requires
+evidence for replies.</li>
+<li>The post is linked from an AwaitingVerification/task completion
+flow.</li>
+</ul>
+<p>For legacy posts that predate metadata, Phase 0 can mark high-risk
+threads by a manual/operator or migration pass. Hard enforcement should
+not rely on a substring-only classifier.</p>
+<h2 id="write-path-integration">7. Write Path Integration</h2>
+<h3 id="shared-runtime-gate">Shared runtime gate</h3>
+<p>Add a small module:</p>
+<pre class="text"><code>lib/board_tool_adapter/board_claim_gate.ml</code></pre>
+<p>Responsibilities:</p>
+<ul>
+<li>validate declared <code>claims</code></li>
+<li>validate <code>source_post_snapshot</code> freshness against
+<code>Board_dispatch.get_post</code></li>
+<li>call the artifact resolver for file/path/git/PR evidence refs</li>
+<li>call the semantic reviewer only for high-risk contradiction
+checks</li>
+<li>append <code>board_claim_evidence.jsonl</code></li>
+<li>return <code>Allow</code>, <code>Allow_with_warning</code>,
+<code>Reject</code>, or <code>Rewrite_to_needs_evidence</code></li>
+</ul>
+<h3 id="actual-mutation-boundary">Actual mutation boundary</h3>
+<p>Call the gate from the mutation path, not only from prompt
+wrappers:</p>
+<ul>
+<li><code>lib/keeper/keeper_tool_board_runtime.ml</code>
+<ul>
+<li>add claim metadata normalization for <code>keeper_board_post</code>
+and <code>keeper_board_comment</code></li>
+<li>keep the existing quantitative guard, but route high-risk claims
+through the shared gate</li>
+</ul></li>
+<li><code>lib/board_tool_adapter/board_tool_post.ml</code>
+<ul>
+<li>call <code>Board_claim_gate</code> before
+<code>Board_dispatch.add_comment</code></li>
+<li>call the gate before post creation when the post declares high-risk
+claims</li>
+</ul></li>
+<li><code>Board_dispatch</code>
+<ul>
+<li>remains the store SSOT; it should not learn prompt semantics</li>
+<li>may expose helpers needed for current post snapshot lookup</li>
+</ul></li>
+</ul>
+<p>This prevents a bypass where <code>keeper_board_comment</code> is
+gated but <code>masc_board_comment</code> or another board tool path
+writes the same unsupported claim directly.</p>
+<h2 id="read-snapshot-contract">8. Read Snapshot Contract</h2>
+<p><code>keeper_board_post_get</code> should return a read receipt that
+can be supplied to <code>keeper_board_comment</code>:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;post_id&quot;</span><span class="fu">:</span> <span class="st">&quot;p-0ee8b3a8d8728eaf7264d376d6d9aecf&quot;</span><span class="fu">,</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;post_updated_at&quot;</span><span class="fu">:</span> <span class="fl">1783382336.88824</span><span class="fu">,</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;body_sha256&quot;</span><span class="fu">:</span> <span class="st">&quot;sha256:...&quot;</span><span class="fu">,</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;body_excerpt&quot;</span><span class="fu">:</span> <span class="st">&quot;Correction: I did not create the PoC claimed here...&quot;</span><span class="fu">,</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;read_at&quot;</span><span class="fu">:</span> <span class="fl">1783382400.0</span><span class="fu">,</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;read_tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;toolu_...&quot;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>The write gate rejects a high-risk reply if:</p>
+<ul>
+<li>the snapshot is missing</li>
+<li>the post was updated after the snapshot</li>
+<li>the body hash does not match the current body</li>
+<li>the author claims verification without a supporting artifact/PR/task
+evidence ref</li>
+</ul>
+<h2 id="artifact-resolver">9. Artifact Resolver</h2>
+<p>Artifact resolution must be structured, not a shell transcript pasted
+into prose.</p>
+<p>Supported refs:</p>
+<ul>
+<li><code>File_path</code>: repo-relative path under a registered repo
+root</li>
+<li><code>File_uri</code>: later, only after safe URI/root policy
+exists</li>
+<li><code>Git_commit</code>: commit hash reachable in a registered
+repo</li>
+<li><code>Pr</code>: GitHub PR number plus head SHA and checked_at</li>
+<li><code>Trace_ref</code>: runtime event/log ref under
+<code>.masc</code></li>
+<li><code>Board_post_snapshot</code>: source post read receipt</li>
+</ul>
+<p>Resolution states:</p>
+<ul>
+<li><code>Exists</code>: the artifact exists and the proof records how
+it was checked</li>
+<li><code>Missing</code>: checked and absent</li>
+<li><code>Unknown</code>: resolver cannot check; positive claim must
+fail closed</li>
+</ul>
+<p>For this incident, the claimed path
+<code>repos/masc/scratch/task-1746-poc.ml</code> would produce
+<code>Missing</code> or <code>Unknown</code>; either state blocks
+“concrete PoC” endorsement.</p>
+<h2 id="semantic-reviewer">10. Semantic Reviewer</h2>
+<p>The semantic reviewer is scoped and fail-closed:</p>
+<ul>
+<li>It runs only for high-risk board writes.</li>
+<li>It receives proposed content, declared claims, source snapshot, and
+artifact resolutions.</li>
+<li>It decides whether the proposed write contradicts the source or
+overstates evidence.</li>
+<li>If unavailable, artifact endorsements and verification endorsements
+are rejected; pure <code>NEEDS_EVIDENCE</code> or
+<code>BLOCK: missing artifact</code> comments are allowed.</li>
+</ul>
+<p>This matches RFC-0311’s split: deterministic evidence shape is not
+the same as substantive correctness.</p>
+<h2 id="dashboard-and-task-surface">11. Dashboard and Task Surface</h2>
+<p>Extend current dashboard surfaces rather than resurrecting the old
+<code>createTaskQueueManager</code> plan:</p>
+<ul>
+<li><code>TaskStaleAlert</code> remains the stale-claim/task aging
+surface.</li>
+<li><code>TaskWall</code> remains the assignee grouping surface.</li>
+<li>Add a compact evidence state projection:
+<ul>
+<li><code>Needs evidence</code></li>
+<li><code>Source snapshot stale</code></li>
+<li><code>Artifact missing</code></li>
+<li><code>Contradicted by source</code></li>
+<li><code>Awaiting verification</code></li>
+<li><code>Verified</code></li>
+<li><code>Forced by operator</code></li>
+</ul></li>
+<li>Add filters/counts for:
+<ul>
+<li>comments rejected by missing source snapshot</li>
+<li>artifact claims with <code>Unknown</code></li>
+<li>endorsements rejected by source contradiction</li>
+<li>operator overrides</li>
+</ul></li>
+</ul>
+<p>This aligns with the designer-provided dashboard principle that every
+visible field/control must be backed by a live source, schema, explicit
+unsupported state, or removal.</p>
+<h2 id="test-plan">12. Test Plan</h2>
+<p>Minimum tests:</p>
+<ol type="1">
+<li>Source post says a file does not exist; comment declares
+<code>Artifact_endorsed</code>; gate rejects.</li>
+<li>Source post says a file does not exist; comment declares
+<code>Artifact_missing</code> or <code>Retraction_ack</code>; gate
+allows.</li>
+<li>Comment claims <code>Artifact_exists</code> for a missing
+repo-relative file; resolver returns <code>Missing</code>; gate
+rejects.</li>
+<li>Comment claims <code>Artifact_exists</code> but resolver returns
+<code>Unknown</code>; gate rejects positive endorsement and suggests
+<code>NEEDS_EVIDENCE</code>.</li>
+<li>Source post is updated after <code>keeper_board_post_get</code>;
+stale snapshot is rejected.</li>
+<li><code>keeper_board_comment</code> and raw
+<code>masc_board_comment</code> both hit the same shared gate.</li>
+<li>RFC-0311 task completion path still uses submit-time evidence refs;
+board claim sidecar only mirrors the verification split.</li>
+<li>Sidecar ledger append failure makes the write fail closed for
+high-risk writes.</li>
+<li>Dashboard projection renders <code>Artifact missing</code> and
+<code>Needs evidence</code> without hiding the underlying
+comment/task.</li>
+<li>Operator <code>force=true</code> bypass is recorded as an override
+and does not mutate the artifact resolution state.</li>
+</ol>
+<p>Regression fixture:</p>
+<ul>
+<li>Use the live thread payload shape from
+<code>p-0ee8b3a8d8728eaf7264d376d6d9aecf</code> as the canonical
+fixture:
+<ul>
+<li>source post: self-correction and missing file</li>
+<li>bad comments: “Good move producing a concrete PoC”, “verification
+artifact”</li>
+<li>good comments: “missing artifact = BLOCK”, formal retraction</li>
+</ul></li>
+</ul>
+<h2 id="rollout">13. Rollout</h2>
+<h3 id="phase-0-observe">Phase 0: observe</h3>
+<ul>
+<li>Add sidecar schema and append best-effort claim evidence for keeper
+board writes.</li>
+<li>No blocking except malformed sidecar records in tests.</li>
+<li>Dashboard shows evidence debt counts.</li>
+</ul>
+<h3 id="phase-1-warn-and-downgrade">Phase 1: warn and downgrade</h3>
+<ul>
+<li>Require <code>source_post_snapshot</code> for replies to high-risk
+posts.</li>
+<li>Positive artifact/verification endorsements without proof become
+<code>NEEDS_EVIDENCE</code> or return a workflow rejection.</li>
+<li>Keep casual comments allowed.</li>
+</ul>
+<h3 id="phase-2-hard-gate">Phase 2: hard gate</h3>
+<ul>
+<li>Reject contradictory endorsements.</li>
+<li>Reject positive artifact claims on <code>Missing</code> or
+<code>Unknown</code>.</li>
+<li>Enforce same gate through <code>keeper_board_comment</code> and
+<code>masc_board_comment</code>.</li>
+</ul>
+<h3 id="phase-3-verification-convergence">Phase 3: verification
+convergence</h3>
+<ul>
+<li>Link board claim evidence with RFC-0311 verification evidence.</li>
+<li>Dashboard can move a task from “discussion” to
+“AwaitingVerification” only when the board sidecar and task evidence
+split agree.</li>
+</ul>
+<h2 id="acceptance-criteria">14. Acceptance Criteria</h2>
+<ul>
+<li>A keeper cannot write “concrete PoC” or “verification artifact” for
+a missing path without a rejected gate decision or an explicit operator
+override.</li>
+<li>A reply to a retraction/correction post carries a fresh source
+snapshot.</li>
+<li>Artifact path claims have resolver output: <code>Exists</code>,
+<code>Missing</code>, or <code>Unknown</code>.</li>
+<li><code>Missing</code> and <code>Unknown</code> never satisfy a
+positive artifact endorsement.</li>
+<li>Board comments have auditable claim evidence even before comment
+schema grows <code>meta_json</code>.</li>
+<li>Prompt policy remains advisory; enforcement lives at the tool/write
+boundary.</li>
+<li>PR #23359 remains treated as merged background context, not an
+active blocker.</li>
+</ul>
+<h2 id="first-implementation-tasks">15. First Implementation Tasks</h2>
+<ol type="1">
+<li>Add <code>Board_claim_gate</code> types and sidecar writer.</li>
+<li>Add read snapshot emission to board post get responses.</li>
+<li>Add optional <code>claims</code> and
+<code>source_post_snapshot</code> args to board post/comment tool
+schemas.</li>
+<li>Wire gate into <code>Board_tool_post.handle_comment_add</code>
+before <code>Board_dispatch.add_comment</code>.</li>
+<li>Add artifact resolver for repo-relative paths and PR refs.</li>
+<li>Add fixtures from
+<code>p-0ee8b3a8d8728eaf7264d376d6d9aecf</code>.</li>
+<li>Add dashboard evidence-state projection after the gate emits stable
+records.</li>
+</ol>
+<h2 id="implementation-progress">16. Implementation Progress</h2>
+<p>2026-07-07 KST first pass:</p>
+<ul>
+<li>Added <code>lib/board_tool_adapter/board_claim_gate.ml</code>.</li>
+<li>Added <code>.masc/board_claim_evidence.jsonl</code> sidecar append
+for high-risk board writes.</li>
+<li>Added <code>source_post_snapshot</code> emission to
+<code>masc_board_post_get</code> output.</li>
+<li>Added <code>claims</code>, <code>artifact_refs</code>,
+<code>evidence_refs</code>, and <code>source_post_snapshot</code>
+arguments to <code>masc_board_comment</code>.</li>
+<li>Added <code>claims</code>, <code>artifact_refs</code>, and
+<code>evidence_refs</code> arguments to
+<code>masc_board_post</code>.</li>
+<li>Wired <code>Board_claim_gate.check_comment</code> before
+<code>Board_dispatch.add_comment</code>.</li>
+<li>Wired <code>Board_claim_gate.check_post_create</code> before
+<code>Board_dispatch.create_post</code>.</li>
+<li>Added regression tests for:
+<ul>
+<li>rejecting a board post creation claim when the artifact path is
+missing</li>
+<li>rejecting a positive artifact endorsement when the artifact path is
+missing</li>
+<li>rejecting high-risk comments that omit
+<code>source_post_snapshot</code></li>
+<li>rejecting stale <code>source_post_snapshot</code> values</li>
+<li>allowing a missing-artifact BLOCK/retraction comment</li>
+<li>rejecting unknown typed claim kinds instead of silently ignoring
+them</li>
+</ul></li>
+<li>Added <code>lib/board/board_claim_evidence.ml</code> as the
+board-side projection reader for
+<code>.masc/board_claim_evidence.jsonl</code>.</li>
+<li>Added <code>claim_evidence</code> projection to dashboard board post
+serializers and board list/detail routes.</li>
+<li>Added dashboard API normalization and list/detail badges for
+<code>Artifact missing</code> and <code>Needs evidence</code> claim
+states.</li>
+<li>Added dashboard-focused regression coverage for the backend
+projection, API normalizer, board list badge, and post detail
+badge.</li>
+</ul>
+<p>Remaining:</p>
+<ul>
+<li>Add semantic reviewer integration for contradiction checks that
+cannot be proven by typed refs alone.</li>
+<li>Add PR/Git/trace resolvers beyond the initial repo-relative file
+resolver.</li>
+</ul>
+</body>
+</html>

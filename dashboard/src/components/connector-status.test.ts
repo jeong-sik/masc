@@ -121,6 +121,13 @@ function sampleConnectorsResponse(overrides?: Partial<Record<string, unknown>>) 
         binding_source: 'persisted',
         runtime_bindings_count: 1,
         pid: 4242,
+        source_health: {
+          storage_paths: 'fallback',
+          runtime_summary: 'fallback',
+          binding_summary: 'fallback',
+          names: 'fallback',
+          observed_channel: 'missing',
+        },
         configured_bindings: [
           {
             channel_id: '123456',
@@ -307,6 +314,10 @@ describe('ConnectorStatusPanel', () => {
     const detailPanels = container.querySelectorAll('[data-testid="connector-detail-panel"]')
     expect(detailPanels.length).toBe(1)
     expect(detailPanels[0]?.textContent).toContain('Discord')
+    const sourceHealth = detailPanels[0]?.querySelector('[data-testid="connector-source-health"]')
+    expect(sourceHealth?.textContent).toContain('source health')
+    expect(sourceHealth?.querySelector('[data-connector-source-health="storage_paths"]')?.getAttribute('data-connector-source-health-state')).toBe('fallback')
+    expect(sourceHealth?.querySelector('[data-connector-source-health="observed_channel"]')?.getAttribute('data-connector-source-health-state')).toBe('missing')
     expect(container.querySelectorAll('button[aria-label="toggle header details"]').length).toBe(1)
   })
 

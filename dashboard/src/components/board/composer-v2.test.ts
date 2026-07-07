@@ -15,6 +15,13 @@ const currentDashboardActorMock = vi.hoisted(() => vi.fn(() => 'dashboard-test')
 const sendBroadcastMock = vi.hoisted(() => vi.fn())
 const dispatchOperatorActionMock = vi.hoisted(() => vi.fn())
 const showToastMock = vi.hoisted(() => vi.fn())
+const voiceStartMock = vi.hoisted(() => vi.fn())
+const voiceStopMock = vi.hoisted(() => vi.fn())
+const voiceInputState = vi.hoisted(() => ({
+  state: 'idle' as 'idle' | 'recording' | 'transcribing',
+  supported: true,
+  transcript: '스케줄러 결과 확인 바람',
+}))
 
 vi.mock('../../api', () => ({
   currentDashboardActor: currentDashboardActorMock,
@@ -31,6 +38,18 @@ vi.mock('../../operator-store', async (importOriginal) => {
 
 vi.mock('../common/toast', () => ({
   showToast: showToastMock,
+}))
+
+vi.mock('../chat/voice-input', () => ({
+  useVoiceInput: (options: { onTranscribed: (text: string) => void }) => ({
+    state: voiceInputState.state,
+    supported: voiceInputState.supported,
+    start: voiceStartMock.mockImplementation(() => {
+      options.onTranscribed(voiceInputState.transcript)
+      return Promise.resolve()
+    }),
+    stop: voiceStopMock,
+  }),
 }))
 
 function snapshotWithKeepers(keepers: Array<{
@@ -118,6 +137,11 @@ describe('ComposerV2', () => {
       result: 'sent',
     })
     showToastMock.mockReset()
+    voiceStartMock.mockReset()
+    voiceStopMock.mockReset()
+    voiceInputState.state = 'idle'
+    voiceInputState.supported = true
+    voiceInputState.transcript = '스케줄러 결과 확인 바람'
     operatorActionBusy.value = false
     operatorSnapshot.value = snapshotWithKeepers([
       { name: 'keeper-a', status: 'online' },
@@ -157,7 +181,7 @@ describe('ComposerV2', () => {
     expect((screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('sends attachment-only drafts through the current text transport', async () => {
+  it('blocks attachment-only drafts until block transport is available', () => {
     render(h(ComposerV2, { workspaceId: 'ops' }))
 
     fireEvent.change(screen.getByTestId('composer-v2-file-input'), {
@@ -166,39 +190,28 @@ describe('ComposerV2', () => {
 
     expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('trace.log')
     expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('text/plain')
+    expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('transport unavailable')
     expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('1 file')
+    expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('blocked · attachment transport unavailable')
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-    await waitFor(() => {
-      expect(sendBroadcastMock).toHaveBeenCalledWith(
-        'dashboard-test',
-        'Attachments:\n- trace.log (4 B · file)',
-      )
-    })
-    expect(screen.queryByTestId('composer-v2-tray')).not.toBeInTheDocument()
+    expect(sendBroadcastMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-v2-tray')).toBeInTheDocument()
   })
 
-  it('captures a voice draft and serializes it into the current text transport', async () => {
+  it('transcribes voice input into the current text transport', async () => {
     render(h(ComposerV2, { workspaceId: 'ops' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start voice draft' }))
-    expect(screen.getByTestId('composer-v2-recorder')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: /완료/ }))
-    expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('받아쓰기')
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }))
+    expect(voiceStartMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('Composer v2 message')).toHaveValue('스케줄러 결과 확인 바람')
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
-      expect(sendBroadcastMock).toHaveBeenCalledWith(
-        'dashboard-test',
-        expect.stringContaining('Voice memo 0:12 (40 KB)'),
-      )
+      expect(sendBroadcastMock).toHaveBeenCalledWith('dashboard-test', '스케줄러 결과 확인 바람')
     })
-    expect(sendBroadcastMock).toHaveBeenCalledWith(
-      'dashboard-test',
-      expect.stringContaining('스케줄러 p99 스파이크와 compact 타이밍을 비교해서 결과만 알려줘.'),
-    )
   })
 
   it('sends keeper DMs through the operator keeper-message action', async () => {

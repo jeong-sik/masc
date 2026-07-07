@@ -38,6 +38,8 @@ let cleanup () =
   Board_dispatch.reset_for_test ();
   Board_curation.reset_for_test ();
   Board_moderation.reset_for_test ();
+  Fs_compat.reset_fd_cache_for_testing ();
+  Fs_compat.reset_mkdir_memo_for_testing ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
   Board_dispatch.init_jsonl ()
 
@@ -1417,8 +1419,11 @@ let test_dispatch_delete_success () =
     |> Yojson.Safe.Util.member "id"
     |> Yojson.Safe.Util.to_string
   in
-  let ok_del, msg_del = dispatch "masc_board_delete"
-    (make_args [("post_id", `String post_id)]) in
+  let ok_del, msg_del =
+    dispatch
+      "masc_board_delete"
+      (make_args [ ("post_id", `String post_id); ("author", `String "tester") ])
+  in
   Alcotest.(check bool) "delete ok" true ok_del;
   Alcotest.(check bool) "delete msg contains id" true
     (contains_substring msg_del post_id)
@@ -1427,11 +1432,14 @@ let test_dispatch_delete_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let ok, body = dispatch "masc_board_delete"
-    (make_args [("post_id", `String "nonexistent-id")]) in
+  let ok, body =
+    dispatch
+      "masc_board_delete"
+      (make_args [ ("post_id", `String "nonexistent-id"); ("author", `String "tester") ])
+  in
   Alcotest.(check bool) "delete not found" false ok;
   Alcotest.(check bool) "error message present" true
-    (contains_substring body "Delete failed")
+    (contains_substring body "Post not found" || contains_substring body "nonexistent-id")
 
 let test_dispatch_delete_empty_id () =
   with_eio @@ fun env ->
@@ -2993,7 +3001,7 @@ let () =
             let json = parse_create_response_json create_msg in
             let post_id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
             let (_ok, _msg) = dispatch "masc_board_delete" (make_args [
-              ("post_id", `String post_id)
+              ("post_id", `String post_id); ("author", `String "tester")
             ]) in
             let (_ok2, body2) = dispatch "masc_board_list" args in
             Alcotest.(check bool) "cache invalidated after delete" true

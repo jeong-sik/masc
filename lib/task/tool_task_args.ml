@@ -21,6 +21,9 @@ let parse_task_contract args =
            "contract must be an object when provided (received %s)"
            (Json_util.kind_name other))
 
+let handoff_example_evidence_ref =
+  Filename.concat Common.masc_dirname "harness-evidence/proof.json"
+
 let is_internal_marker key =
   String.length key > 0 && Char.equal key.[0] '_'
 
@@ -123,11 +126,12 @@ let parse_handoff_context ~(agent_name : string)
                    "handoff_context.summary is required for action=%s \
                     (non-empty string). Example: {\"summary\": \"tests \
                     green, local proof saved\", \"next_step\": \"wait \
-                    for CI\", \"evidence_refs\": [\".masc/harness-evidence/proof.json\"]}. \
+                    for CI\", \"evidence_refs\": [\"%s\"]}. \
                     Alternatively pass a non-empty top-level 'notes' or \
                     'reason' and it will be synthesized into summary \
                     automatically."
-                   (Masc_domain.task_action_to_string action))
+                   (Masc_domain.task_action_to_string action)
+                   handoff_example_evidence_ref)
             else
               (* Entry-class action (claim/start) with an empty
                  handoff_context object. The summary is meaningless at

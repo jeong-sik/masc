@@ -1246,4 +1246,3 @@ let cmd =
 let () =
   setup_gc ();
   exit (Cmd.eval' cmd)
-

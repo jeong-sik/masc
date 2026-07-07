@@ -153,6 +153,7 @@ and connector_attention =
 - **W1** — G1 provenance capture. `continuation_channel` 타입 + 승인 제출/mention 접수 시 캡처. 순수 추가, 소비자 없음(무행동). payload 필드는 `option`으로 추가해 기존 직렬화 하위호환.
 - **W2** — G2 carry-through. resolve/완료 hook이 채널을 wake payload에 실음. 직렬화 왕복 + audit.
 - **W3** — G3 re-engagement. intake가 채널로 대화 재개. HITL 먼저(가장 명확한 계기), 그다음 `Connector_attention`(G4).
+  - **구현 노트 (2026-07-08 조사)**: `Connector_attention`은 `keeper_heartbeat_stimulus_intake.ml:226-269`에서 `external_attention` item(surface_ref 포함)을 turn observation으로 이미 주입한다. 따라서 Connector 계열의 실제 gap은 wake payload가 아니라 **turn 결과를 channel로 delivery하는 라우팅**이다(현재 heartbeat turn 결과가 원 채널로 가지 않음). `Hitl_resolved`는 `external_attention`이 없어 wake payload의 `channel`이 유일한 provenance이며, 그 provenance 캡처가 W2b다. 즉 W3의 핵심 난도는 delivery 라우팅(keeper turn 아키텍처)이고 W2b는 approval entry provenance 배선이다 — 두 축이 독립적으로 진행 가능.
 - **W4** — G5 observability + G6 safety invariant + TLA+ + regression 픽스처. `Bg`/`Fusion`/`Schedule`로 채널 확장 및 Dashboard streaming/패널-drop caveat(§1.4)은 opt-in follow-up.
 
 ## 10. Open questions

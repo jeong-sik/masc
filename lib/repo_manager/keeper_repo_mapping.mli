@@ -124,6 +124,12 @@ type repository_identity_mismatch
 
 val repository_identity_mismatch_message : repository_identity_mismatch -> string
 
+val repository_url_basename_matches_identity : repository -> bool
+(** [repository_url_basename_matches_identity repo] is the catalog identity
+    SSOT used before authorizing a playground repository path. Registration
+    flows reuse it so operator-approved catalog additions do not grow a second
+    URL/name matching rule. *)
+
 type repository_resolution =
   | No_repository
   | Repository of repository_id

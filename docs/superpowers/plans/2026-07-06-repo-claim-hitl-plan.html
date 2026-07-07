@@ -134,10 +134,11 @@
     <section>
       <h2>Decision</h2>
       <p>
-        Keep the strict repo access gate as the default authority. Add an
-        explicit HITL claim path for the narrow case where a repository is
-        registered and identity-validated, but the keeper's selected mapping
-        does not include it.
+        Keep the strict repo access gate as the default authority. Add explicit
+        HITL recovery paths for sandbox clones that are physically present but
+        not authorized by the repository catalog. Registered repositories remain
+        allowed because keeper mappings are advisory/default-scope metadata, not
+        access caps.
       </p>
       <div class="grid">
         <div class="tile">
@@ -150,15 +151,17 @@
         <div class="tile">
           <h3 class="warn">HITL Pending</h3>
           <p>
-            Repository identity is valid, but the keeper mapping excludes it.
-            Queue an approval request and do not block the keeper fiber.
+            A sandbox clone has auditable Git metadata but is missing from
+            <code>repositories.toml</code>, or its sandbox name should become an
+            explicit alias of an existing catalog repository.
           </p>
         </div>
         <div class="tile">
           <h3 class="danger">Denied</h3>
           <p>
-            Repository is unregistered, mapping file is malformed, repository
-            store load failed, or identity mismatched. No claim request is made.
+            Repository store load failed, Git metadata is incomplete, or identity
+            evidence is insufficient for an automatic approved mutation. The
+            keeper remains fail-closed.
           </p>
         </div>
       </div>
@@ -167,11 +170,11 @@
     <section>
       <h2>Implementation Slice</h2>
       <ul>
-        <li>Add a typed access decision in <code>Keeper_repo_mapping</code> so callers can distinguish not-in-mapping from load/store/identity errors.</li>
-        <li>Add a keeper-side HITL bridge that calls <code>Keeper_approval_queue.submit_pending</code> for repository-claim requests.</li>
-        <li>On operator approve, update <code>keeper_repo_mappings.toml</code> through the existing <code>save_mapping</code> SSOT.</li>
-        <li>On reject or edit, persist no mapping change and emit an explicit log path.</li>
-        <li>Wire read/write filesystem paths to return a structured <code>approval_pending</code> response instead of a plain policy reject for the claimable case.</li>
+        <li>Keep <code>Keeper_repo_mapping</code> as the pure policy/enforcement boundary.</li>
+        <li>Add a keeper-side HITL bridge that calls <code>Keeper_approval_queue.submit_pending</code> for sandbox clone registration requests.</li>
+        <li>On operator approve, update <code>repositories.toml</code> through <code>Repo_store.add</code> for new repositories, or <code>Repo_store.update</code> for approved aliases.</li>
+        <li>On reject, edit, or incomplete evidence, persist no catalog mutation and emit an explicit log path.</li>
+        <li>Wire read/write filesystem paths to return a structured <code>approval_pending</code> response instead of a plain policy reject for claimable sandbox clones.</li>
       </ul>
     </section>
 
@@ -179,7 +182,8 @@
       <h2>Non Goals</h2>
       <ul>
         <li>No OAS API or provider behavior change.</li>
-        <li>No automatic repo registration for unregistered or identity-mismatched paths.</li>
+        <li>No automatic repo registration without an operator approval decision.</li>
+        <li>No duplicate catalog entry when the clone remote matches an existing registered repository; use an approved alias instead.</li>
         <li>No heuristic matching from free text, branch names, or command strings.</li>
         <li>No background mutation without an approval decision.</li>
       </ul>
@@ -197,19 +201,19 @@
         </thead>
         <tbody>
           <tr>
-            <td>Keeper mapping excludes registered repo</td>
-            <td>HITL pending approval is created</td>
-            <td>Focused Alcotest for repo claim bridge</td>
+              <td>Unregistered sandbox clone with valid origin metadata</td>
+              <td>HITL pending approval is created; approve registers the repo in <code>repositories.toml</code></td>
+              <td>Focused Alcotest for repo registration bridge</td>
           </tr>
           <tr>
-            <td>Operator approves claim</td>
-            <td>Mapping file gains the repository id through <code>save_mapping</code></td>
-            <td>Resolve pending approval and reload mapping</td>
+              <td>Clone name differs but origin remote matches an existing repo</td>
+              <td>HITL pending approval is created; approve adds the clone segment as an alias</td>
+              <td>Resolve pending approval and reload repository catalog</td>
           </tr>
           <tr>
-            <td>Unregistered repo id</td>
-            <td>Fail closed; no HITL request</td>
-            <td>Repo mapping decision test</td>
+              <td>Unregistered repo id without sandbox clone evidence</td>
+              <td>Fail closed; no HITL request</td>
+              <td>Repo access decision test</td>
           </tr>
           <tr>
             <td>Malformed mapping or repository store</td>

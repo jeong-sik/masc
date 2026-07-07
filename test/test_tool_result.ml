@@ -336,7 +336,7 @@ let string_list_member name json =
   | _ -> []
 ;;
 
-let test_keeper_done_schema_uses_result_only () =
+let test_keeper_done_schema_uses_result_and_evidence_refs () =
   let schema = keeper_taskboard_schema "keeper_task_done" in
   let properties =
     match object_member "properties" schema with
@@ -346,13 +346,13 @@ let test_keeper_done_schema_uses_result_only () =
   let has_property name = List.exists (fun (key, _) -> String.equal key name) properties in
   let required = string_list_member "required" schema in
   Alcotest.(check bool) "result property present" true (has_property "result");
-  Alcotest.(check bool) "evidence_refs is not a keeper done field" false
+  Alcotest.(check bool) "evidence_refs is a keeper done field" true
     (has_property "evidence_refs");
   Alcotest.(check bool) "pr_url is not a keeper done field" false
     (has_property "pr_url");
   Alcotest.(check (list string))
-    "only task_id and result are required"
-    [ "task_id"; "result" ]
+    "task_id, result, and evidence_refs are required"
+    [ "task_id"; "result"; "evidence_refs" ]
     required
 ;;
 
@@ -537,9 +537,9 @@ let () =
         ] )
     ; ( "keeper verification evidence schema"
       , [ Alcotest.test_case
-            "done schema uses result only"
+            "done schema uses result and evidence refs"
             `Quick
-            test_keeper_done_schema_uses_result_only
+            test_keeper_done_schema_uses_result_and_evidence_refs
         ; Alcotest.test_case
             "workflow marker accepts notes"
             `Quick

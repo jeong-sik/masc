@@ -1,3 +1,4 @@
+import { mentionText, sendingMention, submitMention } from './agent-detail-state'
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { signal } from '@preact/signals'

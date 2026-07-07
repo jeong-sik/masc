@@ -165,6 +165,26 @@ let gh_gating_detail ir =
             (Masc_exec.Shell_ir_risk.gh_verb_class_to_string verb_class)))
 ;;
 
+let approval_required_summary ir bin =
+  let bin_text = Masc_exec.Exec_program.to_string bin in
+  match Masc_exec.Exec_program.known bin with
+  | Some Masc_exec.Exec_program.Gh ->
+    (match gh_gating_detail ir with
+     | Some detail ->
+       Printf.sprintf
+         "command '%s' requires approval — %s (audited/privileged risk class)"
+         bin_text
+         detail
+     | None ->
+       Printf.sprintf
+         "command '%s' requires approval (audited/privileged risk class)"
+         bin_text)
+  | Some _ | None ->
+    Printf.sprintf
+      "command '%s' requires approval (audited/privileged risk class)"
+      bin_text
+;;
+
 let gh_capability_policy_result ir ~caps =
   match last_simple_of_ir ir with
   | None -> Gh_policy_noop
@@ -218,19 +238,8 @@ let dispatch_classified
     (match gh_capability_policy_result ir ~caps with
      | Gh_policy_denied reason -> Error (Policy_denied { reason })
      | Gh_policy_approval_required bin ->
+       let summary = approval_required_summary ir bin in
        let bin = Masc_exec.Exec_program.to_string bin in
-       let summary =
-         match gh_gating_detail ir with
-         | Some detail ->
-           Printf.sprintf
-             "command '%s' requires approval — %s (audited/privileged risk class)"
-             bin
-             detail
-         | None ->
-           Printf.sprintf
-             "command '%s' requires approval (audited/privileged risk class)"
-             bin
-       in
        Error
          (Approval_required
             { summary; bin; kind = Gh_capability_requires_approval })
@@ -352,16 +361,10 @@ let dispatch_classified_with_approval
          | Some _ | None -> Privileged_program_floor
        in
        let bin = Masc_exec.Exec_program.to_string request_bin in
+       let summary = approval_required_summary ir request_bin in
        Error
          (Approval_required
-            { summary =
-                Printf.sprintf
-                  "command '%s' requires approval (audited/privileged risk \
-                   class)"
-                  bin
-            ; bin
-            ; kind
-            })
+            { summary; bin; kind })
      | Deny { reason; caps = _ } ->
        Error
          (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason }))

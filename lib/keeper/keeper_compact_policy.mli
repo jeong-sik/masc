@@ -51,7 +51,13 @@ val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * in
 
 (** OAS strategy chain used by checkpoint compaction before the
     keeper-private tool-result fold reducer. *)
-val checkpoint_compaction_strategies : unit -> Context_compact_oas.strategy list
+val checkpoint_compaction_strategies
+  :  mode:Keeper_config.compaction_mode
+  -> Context_compact_oas.strategy list
+(** OAS strategy chain for checkpoint compaction, selected by the
+    per-keeper [compaction_mode]. [Deterministic] returns the extractive
+    chain; [Llm] delegates to the same chain in W1 (no summarizer wired
+    yet) and is replaced by the librarian-lane call in W2. *)
 
 (** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the compaction
     gates and either returns [ctx] unchanged or applies the OAS

@@ -159,6 +159,20 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       |> canonical_compaction_profile
       |> Option.value ~default:default_compaction_profile
     in
+    (* [compaction_mode] parses fail-closed: absent → env default
+       ([Keeper_config.keeper_compaction_mode_default], itself
+       [Deterministic] unless MASC_KEEPER_COMPACTION_MODE overrides);
+       present-but-non-canonical → default too, since [json_string] has no
+       error channel here. The env layer is the strict (raise-on-invalid)
+       gate; JSON overrides are advisory, matching [compaction_profile]. *)
+    let compaction_mode =
+      match Safe_ops.json_string_opt "compaction_mode" json with
+      | None -> Keeper_config.keeper_compaction_mode_default ()
+      | Some raw ->
+        (match Keeper_config.compaction_mode_of_string raw with
+         | Ok mode -> mode
+         | Error _ -> Keeper_config.keeper_compaction_mode_default ())
+    in
     let compaction_ratio_gate =
       Safe_ops.json_float ~default:env_ratio_gate "compaction_ratio_gate" json
       |> normalize_compaction_ratio_gate
@@ -201,6 +215,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           }
       ; pp_compaction =
           { profile = compaction_profile
+          ; mode = compaction_mode
           ; ratio_gate = compaction_ratio_gate
           ; message_gate = compaction_message_gate
           ; token_gate = compaction_token_gate

@@ -254,9 +254,27 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
 
-let checkpoint_compaction_strategies () =
+let deterministic_checkpoint_strategies =
   Context_compact_oas.
     [ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]
+;;
+
+(* RFC-0313-adjacent W1: strategy selection now reads the per-keeper
+   [compaction_mode]. [Deterministic] returns the extractive OAS chain
+   (unchanged behavior, the fail-closed default).
+
+   [Llm] is the opt-in provider-backed summarizer on the librarian lane.
+   In W1 it has no summarizer wired yet, so it DELEGATES to the same
+   deterministic chain — behavior is identical to today for every keeper.
+   The exhaustive match (no catch-all) forces W2 to replace this arm with
+   the real librarian-lane call site; until then the delegation keeps the
+   [Llm] mode safe rather than silently doing nothing. *)
+let checkpoint_compaction_strategies ~(mode : Keeper_config.compaction_mode) =
+  match mode with
+  | Keeper_config.Deterministic -> deterministic_checkpoint_strategies
+  | Keeper_config.Llm ->
+    (* W2 wires the librarian-lane summarizer here. W1: delegate. *)
+    deterministic_checkpoint_strategies
 ;;
 
 let compact_if_needed_typed
@@ -290,7 +308,7 @@ let compact_if_needed_typed
     ctx, None, decision
   | Applied trigger ->
     (* PreCompact observability: log strategy and context state (#3165) *)
-    let strategies = checkpoint_compaction_strategies () in
+    let strategies = checkpoint_compaction_strategies ~mode:meta.compaction.mode in
     (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
          OAS owns context reduction, MASC is a consumer. *)
     (* V12: per-keeper config replaces the prior hardcoded

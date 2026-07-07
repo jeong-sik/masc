@@ -52,11 +52,13 @@ function Topbar({ goal, goals, mode, setMode, density, setDensity, branch, setBr
         </div>
       )}
       <span className="tb-sep"></span>
-      <div className="tb-goal" title={goal.id}>
-        <span className="chip active"><span className="d"></span>{goal.id.replace("goal-","")}</span>
-        <span>{goal.title}</span>
-        <span className="chev">▾</span>
-      </div>
+      {goal && (
+        <div className="tb-goal" title={goal.id || ""}>
+          <span className="chip active"><span className="d"></span>{(goal.id || "").replace("goal-","")}</span>
+          <span>{goal.title || ""}</span>
+          <span className="chev">▾</span>
+        </div>
+      )}
       <span className="tb-sep"></span>
       <div className="tb-modes">
         {PLANES.map(m => (

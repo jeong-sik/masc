@@ -59,7 +59,7 @@ function App() {
       </div>
     );
   }
-  const activeGoal = D.goals.find(g => g.id === selGoal) || D.goals[0];
+  const activeGoal = D.goals.find(g => g.id === selGoal) || D.goals[0] || null;
 
   const toggleKeeper = useCallback((id) => {
     setSelectedKeepers(prev => {

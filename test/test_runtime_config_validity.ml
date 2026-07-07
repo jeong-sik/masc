@@ -451,7 +451,10 @@ let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
        (option string)
        (provider_model_id ^ " thinking token")
        (Some "<|think|>")
-       entry.thinking_control_token);
+       (match entry.thinking_control_format with
+        | Some (Llm_provider.Capabilities.Chat_template_token token) ->
+          Some token
+        | Some _ | None -> None));
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~allow_bare_fallback:false

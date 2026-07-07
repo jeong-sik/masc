@@ -276,10 +276,13 @@ let test_ledger () =
   Alcotest.(check int) "corpus size" 32 (List.length corpus);
   (* W4/G-9 delta vs W1: the 9 policy-as-risk cases moved R2->R1 (repo
      create/fork, discussion create/comment/edit/close, graphql create x3), so
-     R1 6->15, R2 19->10, and policy_as_risk 9->0 — the #23362 defect is closed. *)
+     R1 5->14, R2 20->11, and policy_as_risk 9->0 — the #23362 defect is closed.
+     Post-W4 follow-ups moved two more R2->R1: [pr ready] (#23597, reversible via
+     --undo) and [pr merge] (#23618, reversible via git revert; the capability
+     axis carries its Requires_approval decision). So R1 14->16 and R2 11->9. *)
   Alcotest.(check int) "R0 count" 7 r0;
-  Alcotest.(check int) "R1 count" 15 r1;
-  Alcotest.(check int) "R2 count" 10 r2;
+  Alcotest.(check int) "R1 count" 16 r1;
+  Alcotest.(check int) "R2 count" 9 r2;
   Alcotest.(check int) "Destructive count" 0 dp;
   Alcotest.(check int) "defect: policy-as-risk (CLOSED by W4)" 0 policy_as_risk;
   (* Was 1 (unknown-repo-action). CLOSED: the auto-run gap moved to the

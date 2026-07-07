@@ -728,6 +728,28 @@ let gh_verb_class_to_string = function
   | Gh_string_borne -> "string-borne (word-list floor)"
   | Gh_unrecognized_family -> "unrecognized family (fail-closed)"
 
+(* Flag-robust gh verb identity for the capability axis (RFC-0309 W3, #23599).
+   The word-list [Gh_verb.classify] reads a leading value-taking global flag's
+   value as the subcommand ([gh --repo O/R pr view] -> [Gh_verb.Other "O/R"]),
+   which routes reversible reads/mutations to [Requires_approval]. The typed
+   lowering ([Shell_ir_typed.of_simple], whose gh parser consumes gh global
+   value-flags exactly like gh) locates the real subcommand/action, so this is
+   the same source the enforcement floor ([repo_hosting_cli_floor_risk]) already
+   trusts — the risk and capability axes cannot disagree on the subcommand.
+
+   [None] when the command does not lower to a typed [Gh] (the [Generic] escape
+   hatch for non-literal argv, e.g. [gh $CMD]); the caller then keeps its
+   word-list fallback, preserving today's behavior for that case. The [Api]
+   family is preserved by the typed parser ([gh api graphql] lowers to
+   [subcommand="api"; action="graphql"], including the leading-flag form), so the
+   caller's [gh api graphql] opacity fail-closed (RFC-0208) is not weakened. *)
+let gh_verb_of_simple (simple : Shell_ir.simple) : Gh_verb.t option =
+  match Shell_ir_typed.of_simple simple with
+  | Shell_ir_typed.W (Shell_ir_typed_types.Gh { subcommand; action; _ }) ->
+    Some (Gh_verb.of_fields ~subcommand ~action)
+  | Shell_ir_typed.W _ -> None
+[@@warning "-4"]
+
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)
 

@@ -9,6 +9,11 @@ let b64url s = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabe
    10 min, so we stay one minute under the ceiling. *)
 let exp_window_seconds = 540
 
+(* GitHub recommends setting [iat] in the past to tolerate small clock drift.
+   With [exp = now + exp_window_seconds], this keeps [exp - iat] at the
+   documented 10-minute ceiling. *)
+let iat_clock_skew_seconds = 60
+
 let signing_input ~app_id ~iat ~exp =
   let header = `Assoc [ ("alg", `String "RS256"); ("typ", `String "JWT") ] in
   let payload =
@@ -21,7 +26,7 @@ let sign ~app_id ~pem ~now () =
   match X509.Private_key.decode_pem pem with
   | Error (`Msg m) -> Error ("keeper_github_app_jwt: PEM decode failed: " ^ m)
   | Ok (`RSA priv) ->
-    let iat = now in
+    let iat = now - iat_clock_skew_seconds in
     let exp = now + exp_window_seconds in
     let input = signing_input ~app_id ~iat ~exp in
     (* RS256 = RSASSA-PKCS1-v1_5 with SHA-256. [Rsa.PKCS1.sign] computes the

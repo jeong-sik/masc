@@ -57,6 +57,16 @@ let write_keeper_env ~base_path ~keeper_name name value =
   write_file (Filename.concat env_dir name) value
 ;;
 
+let write_keeper_file ~base_path ~keeper_name rel value =
+  let path =
+    Filename.concat
+      (Filename.concat (Projection.secret_root ~base_path ~keeper_name) "files")
+      rel
+  in
+  ensure_dir_chain (Filename.dirname path);
+  write_file path value
+;;
+
 let starts_with ~prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len
@@ -113,6 +123,27 @@ let test_github_app_partial_config_fails_closed () =
        "github_app_config_incomplete"
 ;;
 
+let test_github_app_config_without_clock_fails_closed () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "keeper-clockless" in
+  write_keeper_env ~base_path ~keeper_name "MASC_GITHUB_APP_ID" "1\n";
+  write_keeper_env ~base_path ~keeper_name "MASC_GITHUB_APP_INSTALLATION_ID" "2\n";
+  write_keeper_env ~base_path ~keeper_name "GH_TOKEN" "ghp_static\n";
+  write_keeper_file
+    ~base_path
+    ~keeper_name
+    "github-app/private-key.pem"
+    "not-a-real-pem";
+  Projection.local_env_for_keeper
+    ~host_env:[||]
+    ~base_path
+    ~keeper_name
+    ()
+  |> assert_error_contains
+       "clock unavailable fails closed"
+       "github_app_eio_clock_unavailable"
+;;
+
 let test_no_github_app_config_keeps_static_token () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "keeper-c" in
@@ -145,6 +176,10 @@ let () =
             "partial app config fails closed"
             `Quick
             test_github_app_partial_config_fails_closed
+        ; Alcotest.test_case
+            "configured app without Eio clock fails closed"
+            `Quick
+            test_github_app_config_without_clock_fails_closed
         ] )
     ; ( "static_token_compat"
       , [ Alcotest.test_case

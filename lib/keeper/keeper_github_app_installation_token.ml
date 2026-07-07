@@ -13,6 +13,11 @@ let token_lifetime_seconds = 3600
    that lands near the boundary never hands git an already-expired token. *)
 let refresh_skew_seconds = 300
 
+(* Use the existing outbound HTTP pool liveness boundary for this small
+   control-plane POST. Keeping this tied to the HTTP transport SSOT avoids a
+   second GitHub-specific timeout knob. *)
+let mint_timeout_sec = Masc_http_client.Pool.default_config.connect_timeout_seconds
+
 type cached = { token : string; expires_at : int }
 
 let cache : (string, cached) Hashtbl.t = Hashtbl.create 8
@@ -37,7 +42,7 @@ let parse_token body =
     Error (sprintf "keeper_github_app_installation_token: response is not JSON: %s" msg)
 ;;
 
-let mint ~app_id ~installation_id ~pem ~now () =
+let mint ~clock ~timeout_sec ~app_id ~installation_id ~pem ~now () =
   match Keeper_github_app_jwt.sign ~app_id ~pem ~now () with
   | Error _ as e -> e
   | Ok jwt ->
@@ -53,7 +58,9 @@ let mint ~app_id ~installation_id ~pem ~now () =
     (* An empty JSON body requests the installation's configured repository
        selection (no per-request restriction). A Content-Type is not required
        for an empty body but GitHub tolerates the default. *)
-    (match Masc_http_client.post_sync ~url ~headers ~body:"{}" () with
+    (match
+       Masc_http_client.post_sync ~clock ~timeout_sec ~url ~headers ~body:"{}" ()
+     with
      | Error e -> Error ("keeper_github_app_installation_token: HTTP error: " ^ e)
      | Ok (201, body) ->
        (match parse_token body with
@@ -68,21 +75,33 @@ let mint ~app_id ~installation_id ~pem ~now () =
             snippet))
 ;;
 
-let get ~app_id ~installation_id ~pem ~now () =
-  let k = key ~app_id ~installation_id in
-  (* The whole lookup-or-mint is inside the mutex. Different installations have
-     different keys, so two keepers minting concurrently for different
-     installations do not contend on [cache_mutex] except for the brief hash
-     lookup — the expensive HTTP call happens here only for the installation
-     whose cache entry is stale. *)
+let cached_token_if_valid ~now k =
   Mutex.protect cache_mutex (fun () ->
     match Hashtbl.find_opt cache k with
-    | Some c when now < c.expires_at -> Ok c.token
+    | Some c when now < c.expires_at -> Some c.token
+    | _ -> None)
+;;
+
+let store_freshest_token ~now k token =
+  let expires_at = now + token_lifetime_seconds - refresh_skew_seconds in
+  Mutex.protect cache_mutex (fun () ->
+    match Hashtbl.find_opt cache k with
+    | Some c when now < c.expires_at && c.expires_at >= expires_at -> c.token
     | _ ->
-      (match mint ~app_id ~installation_id ~pem ~now () with
-       | Error _ as e -> e
-       | Ok token ->
-         let expires_at = now + token_lifetime_seconds - refresh_skew_seconds in
-         Hashtbl.replace cache k { token; expires_at };
-         Ok token))
+      Hashtbl.replace cache k { token; expires_at };
+      token)
+;;
+
+let get ~clock ~timeout_sec ~app_id ~installation_id ~pem ~now () =
+  let k = key ~app_id ~installation_id in
+  match cached_token_if_valid ~now k with
+  | Some token -> Ok token
+  | None ->
+    (* The HTTP mint is deliberately outside [cache_mutex]. The mutex protects
+       only the cache map, so one stalled installation token request cannot
+       block unrelated keeper projections. Concurrent stale misses for the same
+       key may co-mint; the freshest cache entry wins on store. *)
+    (match mint ~clock ~timeout_sec ~app_id ~installation_id ~pem ~now () with
+     | Error _ as e -> e
+     | Ok token -> Ok (store_freshest_token ~now k token))
 ;;

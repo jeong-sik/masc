@@ -110,17 +110,17 @@ GitHub App installation tokens (per [GitHub docs](https://docs.github.com/enterp
 
 New modules under `lib/keeper/`:
 
-- `keeper_github_app_jwt.ml`: signs a GitHub App JWT (RS256) from the App ID + PEM-encoded RSA private key. Header `{"alg":"RS256","typ":"JWT"}`, payload `iss=<app_id>; iat=now; exp=now+9min` (GitHub rejects exp beyond 10min). RSA signing via `mirage-crypto-pk` (already in opam at 1.2.0; add to `dune-project` + `lib/keeper/dune`), base64url via the existing `base64` dependency.
-- `keeper_github_app_installation_token.ml`: requests the installation token via `Masc_http_client.post_sync`, parses `expires_at`, caches per-keeper in a `Mutex`-protected `Hashtbl`. A cached entry is reused until `expires_at - 5min`; a later call re-mints. Mint errors surface as `Result.Error` (fail-closed — projection falls back to the existing static `GH_TOKEN` so a transient GitHub API outage does not brick the keeper).
+- `keeper_github_app_jwt.ml`: signs a GitHub App JWT (RS256) from the App ID + PEM-encoded RSA private key. Header `{"alg":"RS256","typ":"JWT"}`, payload `iss=<app_id>; iat=now-60s; exp=now+9min` (GitHub recommends backdating `iat` by 60 seconds and rejects JWTs whose `exp` is more than 10 minutes in the future; this keeps `exp - iat = 10min`). RSA signing via `mirage-crypto-pk` (already in opam at 1.2.0; add to `dune-project` + `lib/keeper/dune`), base64url via the existing `base64` dependency.
+- `keeper_github_app_installation_token.ml`: requests the installation token via `Masc_http_client.post_sync` using the Eio clock and the shared HTTP pool connect-timeout boundary. It parses the returned token, relies on GitHub's documented 1-hour token lifetime, and caches per keeper in a `Mutex`-protected `Hashtbl` until `now + 1h - 5min`. The mutex guards only cache lookup/store and is not held across the HTTP request. Mint errors surface as `Result.Error` (fail-closed — a configured App token must mint successfully; static `GH_TOKEN` compatibility applies only when no App config is configured).
 
 Projection insertion (`keeper_secret_projection.ml`):
-- In `local_env_for_keeper` / `docker_args_for_keeper`, immediately after `merge_env_entries roots`, if the keeper has GitHub App config loaded, mint (or reuse cached) the installation token and overlay `("GH_TOKEN", token)` ahead of the existing entries. This overlay flips `has_github_token` true, so the §3 git-config helper activates on the installation token exactly as it does on a PAT — no change to the credential-helper path.
+- In `local_env_for_keeper` / `docker_args_for_keeper`, immediately after `merge_env_entries roots`, if the keeper has GitHub App config loaded, mint (or reuse cached) the installation token, remove any existing `GH_TOKEN`/`GITHUB_TOKEN` entries, and insert a single `("GH_TOKEN", token)` entry. This overlay flips `has_github_token` true, so the §3 git-config helper activates on the installation token exactly as it does on a PAT — no change to the credential-helper path.
 
 Per-keeper config storage:
 - PEM private key: `secrets/<keeper>/files/github-app/private-key.pem` (PEM is multiline, rejected by `validate_env_value`'s single-line env rule; the `files/` path is the existing file-projection channel, mounted read-only into the sandbox).
 - `MASC_GITHUB_APP_ID` and `MASC_GITHUB_APP_INSTALLATION_ID`: numeric, single-line, valid as env at `secrets/<keeper>/env/`.
 
-Redaction (`keeper_secret_redaction.ml`): add PEM begin/end markers (`-----BEGIN PRIVATE KEY-----`, `-----BEGIN RSA PRIVATE KEY-----`) to the deny-list so a leaked key never reaches logs/argv.
+Redaction (`observability_redact.ml`): redact complete or truncated PEM private-key blocks delimited by `-----BEGIN PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----` markers so leaked keys do not reach logs/argv.
 
 ### 10.4 Security analysis
 
@@ -128,7 +128,7 @@ Redaction (`keeper_secret_redaction.ml`): add PEM begin/end markers (`-----BEGIN
 - Per-keeper App config means one keeper's PEM is not another's — isolation the shared PAT cannot provide.
 - The PEM lives on disk under `files/` (read-only mount); it is never inlined into env or argv. Redaction denies it from logs.
 - The token still flows through the §3 credential helper — git resolves it from env at call time, nothing secret is written to git config (RFC-0236 §5 preserved).
-- Fail-closed on mint failure: projection keeps the static PAT fallback rather than silently dropping git auth. Operators see the failure in the projection result and can rotate.
+- Fail-closed on mint failure: projection rejects the env materialisation rather than silently keeping a static PAT fallback. Operators see the failure in the projection result and can rotate or repair the App config.
 
 ### 10.5 Alternatives considered
 
@@ -142,8 +142,8 @@ Redaction (`keeper_secret_redaction.ml`): add PEM begin/end markers (`-----BEGIN
 ### 10.6 Verification plan (additions to §7)
 
 - JWT RS256 unit test cross-checked with `openssl dgst -sha256 -sign` against the same PEM.
-- Installation-token mint + cache: mock GitHub API returns a token with `expires_at`; assert reuse within the window and re-mint after expiry.
-- Redaction regression: a PEM literal in a scrubbed env is masked (`test_env_keeper_scrub` extended).
+- Installation-token mint + cache: mock GitHub API returns a token; assert reuse within the documented 1-hour lifetime window and re-mint after expiry.
+- Redaction regression: PEM private-key literals are masked by `test_observability_redact_github_tokens`.
 - Integration: a keeper whose `files/github-app/private-key.pem` is populated pushes over HTTPS using the minted installation token (the §3 helper consumes it).
 - Census: `git_gh_auth_error` continues to drop; a new metric `keeper_github_app_mint_error` is watched over 168h.
 

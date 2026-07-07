@@ -956,10 +956,19 @@ let github_app_token_overlay ~base_path ~keeper_name ~env_entries () =
             reason)
      | Ok pem ->
        let now = Time_compat.now () |> int_of_float in
-       (match
+       (match Eio_context.get_clock_opt () with
+        | None ->
+          Error "github_app_eio_clock_unavailable: token mint timeout cannot be enforced"
+        | Some clock ->
           Keeper_github_app_installation_token.get
-            ~app_id ~installation_id ~pem ~now ()
-        with
+            ~clock
+            ~timeout_sec:Keeper_github_app_installation_token.mint_timeout_sec
+            ~app_id
+            ~installation_id
+            ~pem
+            ~now
+            ())
+       |> (function
         | Ok token -> Ok (Some token)
         | Error reason ->
           Log.Keeper.warn

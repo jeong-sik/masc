@@ -41,8 +41,9 @@ let test_sign_shape_and_claims () =
       "payload iss=app_id" app_id (as_string (member "iss" payload));
     let iat = as_int (member "iat" payload) in
     let exp = as_int (member "exp" payload) in
-    Alcotest.(check int) "iat=now" now iat;
-    Alcotest.(check int) "exp=iat+540" (iat + 540) exp;
+    Alcotest.(check int) "iat=now-60s" (now - 60) iat;
+    Alcotest.(check int) "exp=now+540s" (now + 540) exp;
+    Alcotest.(check int) "exp-iat=600s" 600 (exp - iat);
     (* Self-verify: the third segment is a valid RS256 signature of the
        signing input under the public half of the key. This proves the PEM
        round-trip (X509.Private_key.decode_pem) and the RS256 wiring

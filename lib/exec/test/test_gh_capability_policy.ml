@@ -279,6 +279,31 @@ let test_graphql_opaque_query_simple () =
   | None -> Alcotest.fail "expected gh disposition"
 ;;
 
+let test_pr_merge_admin_denies_simple () =
+  let cases =
+    [ "trailing admin", [ lit "pr"; lit "merge"; lit "123"; lit "--admin" ]
+    ; ( "leading repo admin"
+      , [ lit "--repo"; lit "o/r"; lit "pr"; lit "merge"; lit "123"; lit "--admin" ] )
+    ; "attached admin", [ lit "pr"; lit "merge"; lit "123"; lit "--admin=true" ]
+    ]
+  in
+  List.iter
+    (fun (label, args) ->
+       match Pol.disposition_of_simple (gh_simple args) with
+       | Some Pol.Denied -> ()
+       | Some d -> Alcotest.failf "%s: expected denied, got %s" label (dstr d)
+       | None -> Alcotest.failf "%s: expected gh disposition" label)
+    cases;
+  match
+    Pol.disposition_of_simple
+      (gh_simple [ lit "pr"; lit "merge"; lit "123"; lit "--subject"; lit "--admin" ])
+  with
+  | Some Pol.Requires_approval -> ()
+  | Some d ->
+    Alcotest.failf "--admin used as subject value should ask, got %s" (dstr d)
+  | None -> Alcotest.fail "expected gh disposition"
+;;
+
 let () =
   Alcotest.run "gh_capability_policy"
     [
@@ -294,6 +319,8 @@ let () =
             test_graphql_durable_remote_words;
           Alcotest.test_case "graphql opaque query (simple)" `Quick
             test_graphql_opaque_query_simple;
+          Alcotest.test_case "pr merge admin deny (simple)" `Quick
+            test_pr_merge_admin_denies_simple;
         ] );
     ]
 ;;

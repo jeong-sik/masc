@@ -390,7 +390,8 @@ let test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous () =
    -> Requires_approval. The safety-critical assertions are that it is NOT Allow
    (a keeper must never auto-merge to the base branch) and NOT Deny (the operator
    chose non-blocking approval over a hard block, 2026-07-08). Covers plain,
-   squash, admin-flag, and trailing-repo-flag forms. *)
+   squash, leading/trailing repo flags, and a value that looks like [--admin] but
+   belongs to another flag. Admin-bypass itself is denied below. *)
 let test_gh_pr_merge_asks_under_autonomous () =
   List.iter
     (fun (label, args) ->
@@ -406,9 +407,45 @@ let test_gh_pr_merge_asks_under_autonomous () =
        | _ -> Alcotest.failf "%s: gh pr merge must ask, not deny/other" label)
     [ "gh pr merge 123", [ "pr"; "merge"; "123" ]
     ; "gh pr merge 123 --squash", [ "pr"; "merge"; "123"; "--squash" ]
-    ; "gh pr merge 123 --admin", [ "pr"; "merge"; "123"; "--admin" ]
     ; "gh pr merge --repo o/r 123", [ "pr"; "merge"; "--repo"; "o/r"; "123" ]
+    ; "gh --repo o/r pr merge 123", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
+    ; ( "gh pr merge 123 --subject --admin"
+      , [ "pr"; "merge"; "123"; "--subject"; "--admin" ] )
     ]
+
+let test_gh_pr_merge_admin_denied_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Policy_deny { rule }; _ } ->
+         if rule <> "gh_pr_merge_admin_bypass" then
+           Alcotest.failf "%s: unexpected deny rule %s" label rule
+       | Verdict.Allow _ ->
+         Alcotest.failf "%s: gh pr merge --admin must NOT auto-run" label
+       | Verdict.Ask _ ->
+         Alcotest.failf "%s: gh pr merge --admin must deny, not enter HITL" label
+       | Verdict.Suggest_confirm _ ->
+         Alcotest.failf "%s: gh pr merge --admin must deny, not suggest" label)
+    [ "gh pr merge 123 --admin", [ "pr"; "merge"; "123"; "--admin" ]
+    ; "gh pr merge 123 --admin=true", [ "pr"; "merge"; "123"; "--admin=true" ]
+    ; ( "gh --repo o/r pr merge 123 --admin"
+      , [ "--repo"; "o/r"; "pr"; "merge"; "123"; "--admin" ] )
+    ]
+
+let test_gh_pr_merge_with_dynamic_leading_repo_asks_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:[ lit "--repo"; var "REPO"; lit "pr"; lit "merge"; lit "123" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+  | _ -> Alcotest.fail "gh --repo $REPO pr merge 123 should ask"
 
 let test_gh_reversible_repo_hosting_ops_allowed_under_autonomous () =
   let s =
@@ -1008,7 +1045,9 @@ let () =
   test_read_sql_allowed_under_autonomous ();
   test_gh_irreversible_repo_hosting_ops_denied_under_autonomous ();
   test_gh_pr_merge_asks_under_autonomous ();
+  test_gh_pr_merge_admin_denied_under_autonomous ();
   test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous ();
+  test_gh_pr_merge_with_dynamic_leading_repo_asks_under_autonomous ();
   test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
   test_gh_pr_ready_allowed_under_autonomous ();
   test_gh_pr_ready_leading_flag_allowed_under_autonomous ();

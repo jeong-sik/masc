@@ -342,11 +342,10 @@ let ask_of policy ~caps ~bin : Verdict.t =
    risk and to the overlay: a gh verb whose [Gh_capability_policy.disposition]
    is [Requires_approval] produces [Ask] even under the autonomous (all-Observe)
    overlay, because the non-blocking HITL queue is the resolver the overlay
-   comment (approval_config.ml) said did not exist. [Allowed]/[Denied] verbs are
-   left to the existing risk grading ([Denied] verbs are R2/Destructive, already
-   floored or Ask-graded; [Allowed] verbs fall through to the overlay), so this
-   layer only ADDS an approval requirement, never removes one. Non-gh commands
-   are unaffected. *)
+   comment (approval_config.ml) said did not exist. [Allowed] verbs fall through
+   to the existing risk grading. [Denied] gh capability rules are handled by
+   [gh_capability_policy_deny_rule] before this approval path, so they cannot
+   fall through to the autonomous overlay. Non-gh commands are unaffected. *)
 let gh_capability_of_simple (simple : Shell_ir.simple)
   : Gh_capability_policy.disposition option
   =
@@ -358,7 +357,7 @@ let gh_capability_of_simple (simple : Shell_ir.simple)
 let gh_capability_policy_deny_rule_of_simple (simple : Shell_ir.simple)
   : string option
   =
-  Gh_capability_policy.repo_create_contract_rule_of_simple simple
+  Gh_capability_policy.policy_deny_rule_of_simple simple
 
 let gh_capability_policy_deny_rule (caps : Capability.t list) : string option =
   let rec scan = function

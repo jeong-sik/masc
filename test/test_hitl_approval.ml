@@ -1614,13 +1614,19 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
   in
   wait_for_immediate_approve_or_fail ~keeper_name ~pending_before result
 
-let test_callback_auto_mode_high_queues_by_sod_floor () =
+let test_callback_auto_mode_high_queues_for_operator () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let keeper_name = "auto-high-floor-keeper" in
+  let tool_name = "masc_create_task" in
+  let input = `Assoc [ "title", `String "high-risk task" ] in
+  Alcotest.(check string)
+    "fixture is high risk"
+    "high"
+    (GP.assess_risk ~tool_name ~input |> GP.risk_level_to_string);
   let base_path = temp_dir () in
   AQ.For_testing.reset_audit_store ();
   Fun.protect
@@ -1638,12 +1644,8 @@ let test_callback_auto_mode_high_queues_by_sod_floor () =
           ~config
           ~governance_level:"enterprise"
           ~keeper_name
-          ~tool_name:"tool_write_file"
-          ~input:
-            (`Assoc
-              [ ("path", `String "lib/example.ml")
-              ; ("content", `String "let x = 1\n")
-              ])
+          ~tool_name
+          ~input
           ()
       in
       let id = wait_for_pending_or_result ~keeper_name result in
@@ -2314,8 +2316,8 @@ let () =
           test_callback_auto_mode_critical_rejects_hard_forbidden;
         Alcotest.test_case "production claimed worktree write auto-approved" `Quick
           test_callback_production_claimed_worktree_write_auto_approved;
-        Alcotest.test_case "Auto_low_risk high band queues by SoD floor" `Quick
-          test_callback_auto_mode_high_queues_by_sod_floor;
+        Alcotest.test_case "Auto_low_risk high band queues for operator" `Quick
+          test_callback_auto_mode_high_queues_for_operator;
         Alcotest.test_case "Manual preserves remembered medium policy" `Quick
           test_callback_manual_mode_preserves_remembered_medium_policy;
         Alcotest.test_case "Manual preserves remembered soft rule" `Quick

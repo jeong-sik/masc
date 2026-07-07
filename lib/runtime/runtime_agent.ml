@@ -32,7 +32,7 @@ let network_error_kind_of_unix_error = function
   | _ -> Llm_provider.Http_client.Unknown
 ;;
 
-let rec network_error_kind_of_eio_error = function
+let network_error_kind_of_eio_error = function
   | Eio.Net.E (Eio.Net.Connection_reset _) -> Some Llm_provider.Http_client.End_of_file
   | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) ->
     Some Llm_provider.Http_client.Connection_refused
@@ -40,7 +40,7 @@ let rec network_error_kind_of_eio_error = function
     Some Llm_provider.Http_client.Timeout
   | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.No_matching_addresses) ->
     Some Llm_provider.Http_client.Dns_failure
-  | Eio.Exn.X backend -> network_error_kind_of_eio_error backend
+  | Eio.Exn.X _ -> None
   | _ -> None
 ;;
 

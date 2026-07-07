@@ -347,14 +347,20 @@ let ask_of policy ~caps ~bin : Verdict.t =
    floored or Ask-graded; [Allowed] verbs fall through to the overlay), so this
    layer only ADDS an approval requirement, never removes one. Non-gh commands
    are unaffected. *)
-let gh_verb_of_simple (simple : Shell_ir.simple) : Gh_verb.t option =
+let gh_capability_of_simple (simple : Shell_ir.simple)
+  : Gh_capability_policy.disposition option
+  =
   match Exec_program.known simple.Shell_ir.bin with
   | Some Exec_program.Gh ->
     let words =
       Exec_program.to_string simple.Shell_ir.bin
       :: List.map repo_hosting_arg_word simple.Shell_ir.args
     in
-    Some (Gh_verb.classify words)
+    (* [disposition_of_words], not [disposition_of]: [gh api graphql ...] lowers
+       to the body-blind [Gh_verb.Api], so the words must be passed through for
+       the graphql-body durable-remote check (RFC-0309 W4 axis-symmetry fix). *)
+    Some
+      (Gh_capability_policy.disposition_of_words words (Gh_verb.classify words))
   | Some _ | None -> None
 [@@warning "-4"]
 
@@ -378,11 +384,10 @@ let decide (policy : t)
     (* Trust-independent: denied regardless of [overlay] (RFC-0254 §5.3). *)
     Verdict.Deny { caps; reason }
   | None when
-      (match gh_verb_of_simple simple with
-       | Some v ->
-         Gh_capability_policy.disposition_of v
-         = Gh_capability_policy.Requires_approval
-       | None -> false) ->
+      (match gh_capability_of_simple simple with
+       | Some Gh_capability_policy.Requires_approval -> true
+       | Some (Gh_capability_policy.Allowed | Gh_capability_policy.Denied) | None
+         -> false) ->
     (* RFC-0309 W3: a gh verb the capability axis marks [Requires_approval] is
        escalated to [Ask] regardless of overlay. Additive only — reached solely
        for gh, and only to REQUIRE approval the risk grading would not. *)

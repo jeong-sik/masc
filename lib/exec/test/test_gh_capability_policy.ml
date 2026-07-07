@@ -103,6 +103,55 @@ let test_current_dispositions () =
        unknown-action gap is deferred to W3, same as the risk axis. *)
 ;;
 
+(* --- W4 axis symmetry: string-borne graphql vs typed (disposition_of_words) --
+   [gh api graphql ...] lowers to the body-blind [Gh_verb.Api]; [disposition_of]
+   alone would [Allow] a durable-remote create because it cannot see the body.
+   [disposition_of_words] inspects the parsed graphql body so the string form
+   matches the typed [gh repo create] -> Requires_approval decision. *)
+let graphql_words body =
+  [ "gh"; "api"; "graphql"; "-f"; "query=" ^ body ]
+
+let test_graphql_durable_remote_words () =
+  let ask =
+    [ ("createRepository", "mutation { createRepository(input:{name:\"x\"}){ repository { id } } }")
+    ; ("createDiscussion", "mutation { createDiscussion(input:{title:\"t\"}){ discussion { id } } }")
+    ; ("addDiscussionComment", "mutation { addDiscussionComment(input:{body:\"b\"}){ comment { id } } }")
+    ]
+  in
+  (* graphql reads and non-durable mutations must NOT be over-approved *)
+  let allow =
+    [ ("query repo", "query { repository(owner:\"o\", name:\"r\"){ id } }")
+    ; ("addComment (issue, not durable-remote)", "mutation { addComment(input:{body:\"b\"}){ clientMutationId } }")
+    ]
+  in
+  List.iter
+    (fun (label, body) ->
+       let words = graphql_words body in
+       let v = Gh_verb.classify words in
+       let d = Pol.disposition_of_words words v in
+       if d <> Pol.Requires_approval then
+         Alcotest.failf "graphql %s: %s, expected requires_approval" label
+           (dstr d))
+    ask;
+  List.iter
+    (fun (label, body) ->
+       let words = graphql_words body in
+       let v = Gh_verb.classify words in
+       let d = Pol.disposition_of_words words v in
+       if d = Pol.Requires_approval then
+         Alcotest.failf "graphql %s must not be over-approved (%s)" label (dstr d))
+    allow;
+  (* disposition_of_words agrees with disposition_of for every non-Api verb *)
+  List.iter
+    (fun (sub, act) ->
+       let v = verb ~sub ~act () in
+       let words = [ "gh"; sub; act ] in
+       if Pol.disposition_of_words words v <> Pol.disposition_of v then
+         Alcotest.failf "gh %s %s: disposition_of_words diverged from disposition_of"
+           sub act)
+    [ ("repo", "create"); ("repo", "view"); ("pr", "merge"); ("issue", "create") ]
+;;
+
 let () =
   Alcotest.run "gh_capability_policy"
     [
@@ -112,6 +161,8 @@ let () =
             test_durable_remote_surface;
           Alcotest.test_case "current dispositions" `Quick
             test_current_dispositions;
+          Alcotest.test_case "graphql durable-remote (words)" `Quick
+            test_graphql_durable_remote_words;
         ] );
     ]
 ;;

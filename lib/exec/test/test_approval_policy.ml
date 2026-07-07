@@ -494,6 +494,45 @@ let test_gh_durable_remote_asks_under_autonomous () =
     ; "gh frobnicate (unknown -> Requires_approval)", [ "frobnicate"; "now" ]
     ]
 
+(* RFC-0309 W4 axis-symmetry regression: the string-borne GraphQL form of a
+   durable-remote create must Ask under autonomous exactly like the typed
+   [gh repo create] form. W4 demoted createRepository/createDiscussion/
+   addDiscussionComment from the R2 deny floor to R1 (they are reversible), so
+   the floor no longer catches them; the typed verb is [Gh_verb.Api] which is
+   body-blind by design (RFC-0208), so the body-blind capability disposition
+   would wrongly [Allow] them. The capability axis must inspect the graphql body
+   for durable-remote create fragments and escalate to Ask — otherwise the typed
+   path asks while the equivalent string path auto-runs (an axis-asymmetry
+   bypass). *)
+let test_gh_graphql_durable_remote_asks_under_autonomous () =
+  List.iter
+    (fun (label, body) ->
+       let s =
+         simple (bin_ok "gh")
+           ~args:[ lit "api"; lit "graphql"; lit "-f"; lit ("query=" ^ body) ]
+       in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf
+           "%s: string-borne graphql durable-remote create must Ask under \
+            autonomous"
+           label)
+    [ ( "createRepository"
+      , "mutation { createRepository(input: {name: \"x\"}) { repository { id } } }"
+      )
+    ; ( "createDiscussion"
+      , "mutation { createDiscussion(input: {repositoryId: \"r\", title: \"t\", \
+         body: \"b\", categoryId: \"c\"}) { discussion { id } } }" )
+    ; ( "addDiscussionComment"
+      , "mutation { addDiscussionComment(input: {discussionId: \"d\", body: \
+         \"b\"}) { comment { id } } }" )
+    ]
+
 (* Regression guard: the W3 capability layer is ADDITIVE. Reads and local /
    in-repo reversible mutations stay [Allow] under autonomous — no over-block of
    routine keeper work. *)
@@ -522,48 +561,6 @@ let test_non_gh_unaffected_by_capability_layer () =
   match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
   | Verdict.Allow _ -> ()
   | _ -> Alcotest.fail "ls should stay Allow under autonomous"
-
-(* Issue #23390 regression: a leading value-taking global flag ([gh --repo o/r
-   pr merge]) must not slip the destructive op past the floor. gh (Cobra)
-   accepts flags before the subcommand and consumes their values, so the
-   word-list classifier's position-based subcommand slot is wrong; the typed
-   lowering locates the real subcommand. *)
-let test_gh_leading_flag_destructive_floored_under_autonomous () =
-  List.iter
-    (fun (label, args) ->
-       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
-       let caps = Capability_check.of_simple s in
-       match
-         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
-           ~caps ~simple:s
-       with
-       | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
-         assert (Exec_program.to_string bin = "gh")
-       | _ ->
-         Alcotest.failf "%s: leading-flag destructive op must be floored" label)
-    [ "gh --repo o/r pr merge", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
-    ; "gh --repo o/r pr ready", [ "--repo"; "o/r"; "pr"; "ready"; "123" ]
-    ; "gh --repo o/r repo delete"
-      , [ "--repo"; "o/r"; "repo"; "delete"; "o/r"; "--yes" ]
-    ]
-
-(* Control: a leading global flag on a READ must NOT be over-blocked — the fix
-   restores correct subcommand location without flooring reads. *)
-let test_gh_leading_flag_read_not_floored_under_autonomous () =
-  List.iter
-    (fun (label, args) ->
-       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
-       let caps = Capability_check.of_simple s in
-       match
-         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
-           ~caps ~simple:s
-       with
-       | Verdict.Deny { reason = Destructive_repo_hosting_cli _; _ } ->
-         Alcotest.failf "%s: leading-flag read must not be floored" label
-       | _ -> ())
-    [ "gh --repo o/r pr view", [ "--repo"; "o/r"; "pr"; "view"; "123" ]
-    ; "gh --repo o/r pr list", [ "--repo"; "o/r"; "pr"; "list" ]
-    ]
 
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
    common force-delete-untracked form) is destructive and hits the floor.
@@ -678,10 +675,9 @@ let () =
   test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_gh_durable_remote_asks_under_autonomous ();
+  test_gh_graphql_durable_remote_asks_under_autonomous ();
   test_gh_reads_and_local_still_allowed_under_autonomous ();
   test_non_gh_unaffected_by_capability_layer ();
-  test_gh_leading_flag_destructive_floored_under_autonomous ();
-  test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
   test_reset_hard_floored_under_autonomous ();

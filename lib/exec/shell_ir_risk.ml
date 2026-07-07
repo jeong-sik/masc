@@ -492,12 +492,15 @@ let strip_graphql_comments s =
     s;
   Buffer.contents buf
 
-let body_contains_r2_mutation words =
-  let body =
-    String.concat " " words
-    |> String.lowercase_ascii
-    |> strip_graphql_comments
-  in
+let graphql_body_lower words =
+  String.concat " " words |> String.lowercase_ascii |> strip_graphql_comments
+
+(* Substring-scan the (comment-stripped, lowercased) graphql body for any of
+   [fragments]. Shared by the R2 deny-list and the durable-remote capability
+   list so both use one parser-owned body reader. *)
+let body_contains_fragment (fragments : string list) (words : string list) : bool
+  =
+  let body = graphql_body_lower words in
   let m = String.length body in
   List.exists
     (fun frag ->
@@ -510,7 +513,34 @@ let body_contains_r2_mutation words =
            else scan (i + 1)
          in
          scan 0)
-    repo_hosting_graphql_r2_fragments
+    fragments
+
+let body_contains_r2_mutation words =
+  body_contains_fragment repo_hosting_graphql_r2_fragments words
+
+(* GraphQL mutation fragments that establish or modify a durable REMOTE
+   repository/discussion surface and are reversible (R1). W4/G-9 moved these out
+   of [repo_hosting_graphql_r2_fragments] (they are reversible, so the risk floor
+   no longer denies them). The capability axis escalates them to Ask, mirroring
+   the typed [gh repo create] / [gh discussion create] path — without this the
+   string-borne graphql form would auto-run under the autonomous overlay while
+   the typed form asks (an axis-asymmetry bypass). Irreversible graphql mutations
+   (delete*/transfer/archive/purge) stay in [repo_hosting_graphql_r2_fragments]
+   and are denied by the floor, so they are deliberately absent here.
+   Over-inclusion only adds an approval prompt (safe); under-inclusion silently
+   auto-runs a durable-remote write (unsafe). *)
+let repo_hosting_graphql_durable_remote_fragments =
+  [ "createrepository"; "clonetemplaterepository"; "updaterepository";
+    "creatediscussion"; "updatediscussion"; "adddiscussioncomment";
+    "updatediscussioncomment"; "adddiscussionpollvote"; "closediscussion";
+    "reopendiscussion"; "markdiscussioncommentasanswer";
+    "unmarkdiscussioncommentasanswer" ]
+
+let gh_api_graphql_creates_durable_remote (words : string list) : bool =
+  (* Guard on the [graphql] endpoint token: a REST [gh api /path] call whose
+     path merely contains a mutation name must not be over-flagged. *)
+  List.mem "graphql" (List.map String.lowercase_ascii words)
+  && body_contains_fragment repo_hosting_graphql_durable_remote_fragments words
 
 let classify_repo_hosting_cli (words : string list) : risk_class =
   match words with

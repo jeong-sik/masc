@@ -65,3 +65,16 @@ val disposition_of : Gh_verb.t -> disposition
     - risk R0 -> [Allowed];
     - risk R1 -> [Requires_approval] if [creates_durable_remote_surface],
       else [Allowed]. *)
+
+val disposition_of_words : string list -> Gh_verb.t -> disposition
+(** Body-aware disposition. Identical to [disposition_of] for every command
+    except [gh api graphql ...]: the typed verb for [gh api] is [Gh_verb.Api],
+    which is body-blind by design (RFC-0208), yet W4/G-9 demoted durable-remote
+    graphql creates (createRepository/createDiscussion/addDiscussionComment) from
+    the R2 deny floor to R1. Without body inspection the disposition would
+    [Allow] them while the typed [gh repo create] form [Requires_approval] — an
+    axis-asymmetry bypass. This variant consults
+    [Shell_ir_risk.gh_api_graphql_creates_durable_remote words] and returns
+    [Requires_approval] for such bodies. ADDITIVE: only ever upgrades [Allowed]
+    to [Requires_approval], never the reverse. Callers with the raw argv words
+    (e.g. [Approval_policy.decide]) should prefer this over [disposition_of]. *)

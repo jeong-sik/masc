@@ -343,6 +343,7 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_library ->
+                 | Mod_recurring ->
                    Tool_library.dispatch
                      { Tool_library.agent_name }
                      ~name

@@ -106,7 +106,8 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Goal_verification_failed _
-  | Keeper_event_queue.Failure_judgment _ ->
+  | Keeper_event_queue.Failure_judgment _
+  | Keeper_event_queue.Goal_assigned _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle. Once the resolved
        approval has left the queue the keeper no longer skips on
@@ -173,6 +174,16 @@ let consume_single_heartbeat_stimulus
       failure.goal_id
       failure.request_id
       failure.rejected_by
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Goal_assigned ga ->
+    (* RFC-0315 P3 W0: a newly assigned standing objective is actionable
+       work. Promote it to a pending observation so the assignment turn does
+       not wake empty — returning [] would silently drop the edge. *)
+    Log.Keeper.info
+      "turn entry: goal assignment delivered goal_id=%s assigned_by=%s (keeper=%s)"
+      ga.ga_goal_id
+      ga.ga_assigned_by
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Failure_judgment fj ->

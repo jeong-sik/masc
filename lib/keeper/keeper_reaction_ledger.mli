@@ -24,6 +24,8 @@ type stimulus_kind =
       (** Goal verification rejection wake — resumes assigned goal work. *)
   | Failure_judgment
       (** RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
+  | Goal_assigned
+      (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
 
 type reaction_kind =
   | Turn_started

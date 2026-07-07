@@ -81,6 +81,14 @@ type stimulus_payload =
          dedicated turn_reason, so scheduling cooldowns are unchanged and
          the stable per-(runtime, class) post_id lets queue identity dedup
          collapse repeats. *)
+  | Goal_assigned of goal_assignment
+      (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
+         (keeper_up tool args or TOML reconcile). Wakes the keeper ONCE at
+         the assignment edge so the new standing objective arrives as
+         actionable turn input — before this, an assigned goal was
+         discovered only if some unrelated stimulus happened to fire.
+         Follows the [Goal_verification_failed] precedent: no dedicated
+         turn_reason; the injected pending observation drives the turn. *)
 
 and fusion_completion = {
   run_id : string;
@@ -155,6 +163,16 @@ and failure_judgment = {
      matched. *)
 }
 
+and goal_assignment = {
+  ga_goal_id : string;
+  ga_goal_title : string;
+  (* display-only title resolved from Goal_store at enqueue time. *)
+  ga_assigned_by : string;
+  (* actor label for the prompt line: tool caller name or
+     "toml_reconcile". Display-only; stripped from queue identity so
+     repeat assignments of the same goal dedup regardless of actor. *)
+}
+
 let fusion_completion_post_id (fc : fusion_completion) =
   if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
   else fc.board_post_id
@@ -175,6 +193,11 @@ let failure_judgment_post_id (fj : failure_judgment) =
      collapse under queue identity dedup instead of accumulating a backlog. *)
   "failure-judgment:" ^ fj.fj_runtime_id ^ ":"
   ^ Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment
+
+let goal_assignment_post_id (ga : goal_assignment) =
+  (* Stable per goal: re-assigning the same goal before the keeper consumes
+     the first wake collapses under queue identity dedup. *)
+  "goal-assigned:" ^ ga.ga_goal_id
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -224,6 +247,8 @@ let enqueue (queue : t) (s : stimulus) : t =
    payload kind must decide its identity fields here at compile time. *)
 let identity_payload = function
   | Failure_judgment fj -> Failure_judgment { fj with fj_detail = "" }
+  | Goal_assigned ga ->
+    Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | ( Board_signal _ | Bootstrap | No_progress_recovery | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Goal_verification_failed _ ) as payload ->
@@ -318,12 +343,13 @@ let payload_kind_label = function
   | Hitl_resolved _ -> "hitl_resolved"
   | Goal_verification_failed _ -> "goal_verification_failed"
   | Failure_judgment _ -> "failure_judgment"
+  | Goal_assigned _ -> "goal_assigned"
 
 let is_board_signal = function
   | Board_signal _ -> true
   | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Goal_verification_failed _ | Failure_judgment _ ->
+  | Goal_verification_failed _ | Failure_judgment _ | Goal_assigned _ ->
     false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
@@ -529,6 +555,13 @@ let payload_to_yojson = function
         `String (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       ; "detail", `String fj.fj_detail
       ]
+  | Goal_assigned ga ->
+    `Assoc
+      [ "kind", `String "goal_assigned"
+      ; "goal_id", `String ga.ga_goal_id
+      ; "goal_title", `String ga.ga_goal_title
+      ; "assigned_by", `String ga.ga_assigned_by
+      ]
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -624,6 +657,16 @@ let payload_of_yojson json =
     Ok
       (Failure_judgment
          { fj_runtime_id = runtime_id; fj_judgment = judgment; fj_detail = detail })
+  | "goal_assigned" ->
+    let* goal_id = string_field ~context "goal_id" fields in
+    let* goal_title = string_field ~context "goal_title" fields in
+    let* assigned_by = string_field ~context "assigned_by" fields in
+    Ok
+      (Goal_assigned
+         { ga_goal_id = goal_id
+         ; ga_goal_title = goal_title
+         ; ga_assigned_by = assigned_by
+         })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

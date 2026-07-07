@@ -7,6 +7,7 @@
 
 type t =
   | Read_backlog_counts
+  | Read_current_task (** [meta.current_task_id] → backlog record resolve failure (RFC-0315). *)
   | Count_running_keeper_fibers
   | Cursor_stale
   | Board_events

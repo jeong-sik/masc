@@ -189,13 +189,13 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
     in
     if evidence_sufficient
     then begin
-      Log.Task.info "cdal_evidence_gate PASS task=%s notes_len=%d handoff_refs=%d"
+      Log.Task.info "task_completion_gate PASS task=%s notes_len=%d handoff_refs=%d"
         task_id (String.length (String.trim notes))
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs);
       Pass
     end
     else begin
-      Log.Task.warn "cdal_evidence_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
+      Log.Task.warn "task_completion_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
         task_id (List.length unsatisfied) (String.length (String.trim notes))
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
         rule_id_evidence_incomplete;

@@ -2,7 +2,7 @@
     extracted from task_state.ml.
 
     Phase D (RFC-0109 #18715) routed contracted submissions through the
-    typed [Cdal_evidence_gate] decision. Phase E (this module rewrite)
+    typed [Task_completion_gate] decision. Phase E (this module rewrite)
     retires the legacy substring-classifier predicates that used to
     reject empty/analysis-only submissions at the transition layer.
 
@@ -10,7 +10,7 @@
     metadata, handoff context, and a non-empty/non-placeholder notes
     string. They are forwarded to [Verification_protocol.create_submit_request]
     as observability metadata only — the gating decision lives in
-    [Cdal_evidence_gate]. *)
+    [Task_completion_gate]. *)
 
 open Masc_domain
 include Workspace_state

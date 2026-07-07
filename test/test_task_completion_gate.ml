@@ -1,4 +1,4 @@
-(** Cdal_evidence_gate — evidence-substantiveness decision tests.
+(** Task_completion_gate — evidence-substantiveness decision tests.
 
     The gate verifies explicit verification submissions by the presence of
     evidence a reviewer can inspect downstream: substantive notes plus the
@@ -8,7 +8,7 @@
 open Alcotest
 open Masc
 
-module Gate = Cdal_evidence_gate
+module Gate = Task_completion_gate
 
 let make_task
       ?(id = "task-1")
@@ -499,7 +499,7 @@ let test_rule_id_constant_stable () =
 
 let () =
   Alcotest.run
-    "cdal_evidence_gate"
+    "task_completion_gate"
     [ ( "evidence-substantiveness"
       , [ test_case "no contract without handoff refs → Reject" `Quick
             test_no_contract_without_handoff_refs_rejects

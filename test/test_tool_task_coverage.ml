@@ -1012,8 +1012,8 @@ let () = test "handle_transition_submit_uses_canonical_task_actor_identity"
         (`Assoc [ ("title", `String "Canonical submit identity") ])
     in
     (match
-       Workspace.claim_task ctx.config ~agent_name:"keeper-executor-agent"
-         ~task_id:"task-001"
+       Workspace.claim_task_r ctx.config ~agent_name:"keeper-executor-agent"
+         ~task_id:"task-001" ()
      with
      | Ok _ -> ()
      | Error err -> failwith (Masc_domain.masc_error_to_string err));

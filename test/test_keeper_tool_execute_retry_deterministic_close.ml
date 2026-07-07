@@ -76,6 +76,23 @@ let cleanup_dir dir =
   try rm_rf dir with _ -> ()
 ;;
 
+let submit_test_gh_approval_pending ~base_path () =
+  Execute_runtime.submit_shell_ir_approval_pending
+    ~base_path
+    ~keeper_name:"typed-gh-keeper"
+    ~task_id:"task-typed-gh"
+    ~goal_ids:[ "goal-typed-gh" ]
+    ~cmd:"gh repo create owner/new-repo --public"
+    ~cwd:"/tmp/masc"
+    ~bin:"gh"
+    ~summary:"command 'gh' requires approval (audited/privileged risk class)"
+    ~sandbox_profile:"host"
+    ~sandbox_target:"host"
+    ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
+    ~typed_hit:true
+    ()
+;;
+
 let test_command_shape_blocked () =
   let raw =
     Yojson.Safe.to_string
@@ -294,22 +311,7 @@ let test_gh_approval_pending_helper_enqueues_nonblocking () =
            ~labels:block_time_labels
            ()
        in
-       let id =
-         Execute_runtime.submit_shell_ir_approval_pending
-           ~base_path
-           ~keeper_name:"typed-gh-keeper"
-           ~task_id:"task-typed-gh"
-           ~goal_ids:[ "goal-typed-gh" ]
-           ~cmd:"gh repo create owner/new-repo --public"
-           ~cwd:"/tmp/masc"
-           ~bin:"gh"
-           ~summary:"command 'gh' requires approval (audited/privileged risk class)"
-           ~sandbox_profile:"host"
-           ~sandbox_target:"host"
-           ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
-           ~typed_hit:true
-           ()
-       in
+       let id = submit_test_gh_approval_pending ~base_path () in
        approval_id := Some id;
        Alcotest.(check bool) "approval id nonempty" true (String.length id > 0);
        Alcotest.(check int) "pending count increments" (before + 1) (AQ.pending_count ());
@@ -350,6 +352,57 @@ let test_gh_approval_pending_helper_enqueues_nonblocking () =
               (block_time_metric ^ "_count")
               ~labels:block_time_labels
               ()))
+;;
+
+let resolve_or_fail ~id decision =
+  match AQ.resolve ~id ~decision with
+  | Ok () -> ()
+  | Error err ->
+    Alcotest.failf "approval resolve failed: %s" (AQ.resolve_error_to_string err)
+;;
+
+let test_gh_approval_resolution_does_not_install_retry_grant () =
+  let base_path = temp_dir () in
+  let approval_ids = ref [] in
+  let remember id =
+    approval_ids := id :: !approval_ids;
+    id
+  in
+  let forget id =
+    approval_ids := List.filter (fun pending_id -> not (String.equal pending_id id)) !approval_ids
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun id ->
+           ignore (AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+        !approval_ids;
+      cleanup_dir base_path)
+    (fun () ->
+       let before = AQ.pending_count () in
+       let first_id = remember (submit_test_gh_approval_pending ~base_path ()) in
+       Alcotest.(check int)
+         "first request pending"
+         (before + 1)
+         (AQ.pending_count ());
+       resolve_or_fail ~id:first_id Agent_sdk.Hooks.Approve;
+       forget first_id;
+       Alcotest.(check int)
+         "approval removed from pending queue"
+         before
+         (AQ.pending_count ());
+       let second_id = remember (submit_test_gh_approval_pending ~base_path ()) in
+       Alcotest.(check bool)
+         "retry creates a fresh pending approval"
+         true
+         (String.length second_id > 0 && not (String.equal first_id second_id));
+       Alcotest.(check int)
+         "retry re-enqueues instead of consuming grant"
+         (before + 1)
+         (AQ.pending_count ());
+       resolve_or_fail ~id:second_id (Agent_sdk.Hooks.Reject "test cleanup");
+       forget second_id;
+       Alcotest.(check int) "cleanup restores pending count" before (AQ.pending_count ()))
 ;;
 
 let test_plain_error_codes_are_observed_only () =
@@ -740,6 +793,10 @@ let () =
             "gh_capability_requires_approval_enqueues_pending_without_wait"
             `Quick
             test_gh_approval_pending_helper_enqueues_nonblocking
+        ; Alcotest.test_case
+            "gh_capability_resolution_does_not_install_retry_grant"
+            `Quick
+            test_gh_approval_resolution_does_not_install_retry_grant
         ] )
     ; ( "telemetry_key_invariants"
       , [ Alcotest.test_case "key_format" `Quick test_telemetry_key_format

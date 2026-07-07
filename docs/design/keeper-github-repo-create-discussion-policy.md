@@ -78,7 +78,9 @@ The current Shell IR path separates risk from capability policy:
 
 `Requires_approval` creates a pending HITL approval entry and returns immediately
 to the keeper turn. The keeper must not block waiting for the operator decision;
-resolution is delivered later through the HITL wake path.
+resolution is delivered later through the HITL wake path. Resolution only wakes
+the keeper to observe the resolved state; it does not execute the stored command,
+create a one-shot approval grant, or authorize an automatic retry.
 
 ## 5. Non-goals
 
@@ -96,7 +98,8 @@ resolution is delivered later through the HITL wake path.
   irreversible operations.
 - `test/test_keeper_tool_execute_retry_deterministic_close.ml` proves the
   runtime helper enqueues a non-blocking pending approval entry for gh
-  capability approval.
+  capability approval, and that resolving the entry does not install an implicit
+  grant for a later retry.
 - Keeper capability docs and prompts state the decision directly: PR/issue work
   is supported, remote repo/discussion reversible mutations require HITL, and
   irreversible repo/discussion operations remain denied.

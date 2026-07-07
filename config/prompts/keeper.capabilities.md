@@ -153,6 +153,8 @@ Choosing a capability family:
   auto-run surfaces. When the exact visible task requires one of these GitHub
   artifacts, use typed `Execute` with `gh` only to create a non-blocking HITL
   approval request; do not retry the same command while approval is pending.
+  Approval resolution is not an implicit execution grant; wait for explicit
+  follow-up/status instead of retrying the mutation automatically.
   Repo delete, PR merge, and irreversible discussion deletion remain denied.
   Prefer MASC board tools for workspace-local durable discussion.
 - Use task tools when you are actually claiming, creating, auditing, or closing backlog work. Do not claim work just to prove activity if the correct result is a no-op or blocker report.

@@ -1485,12 +1485,12 @@ let () = test "handle_transition_force_done_still_rejects_cdal_evidence_incomple
             let result =
               Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
                 (`Assoc
-                  [
-                    ("task_id", `String "task-001");
-                    ("action", `String "done");
-                    ("force", `Bool true);
-                    ("notes", `String "");
-                  ])
+                   [
+                     ("task_id", `String "task-001");
+                     ("action", `String "done");
+                     ("force", `Bool true);
+                     ("notes", `String "");
+                   ])
             in
             assert (!gate_calls = 1);
             assert (not (Tool_result.is_success result));

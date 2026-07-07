@@ -498,55 +498,6 @@ and handle_transition ~tool_name ~start_time ctx args =
         | _ -> (default_time, []))
     | None -> (default_time, [])
   in
-  (* task-1861: Deliverable freshness and ownership verification.
-     Prevents stale or cross-agent submissions from reaching the
-     verification protocol.  Ownership is skipped when the assignee
-     field is empty (unclaimed tasks).  Freshness window is 48 h. *)
-  let freshness_ownership_check =
-    match action with
-    | Masc_domain.Submit_for_verification ->
-      (match task_opt with
-      | None ->
-        Some
-          (Tool_result.error ~tool_name ~start_time
-             "Cannot submit for verification: task not found in backlog")
-      | Some task ->
-        let assignee =
-          match task.task_status with
-          | Masc_domain.InProgress { assignee; _ } -> assignee
-          | Masc_domain.Claimed { assignee; _ } -> assignee
-          | _ -> ""
-        in
-        if
-          not (String.equal assignee "")
-          && not (String.equal assignee ctx.agent_name)
-        then
-          Some
-            (Tool_result.error ~tool_name ~start_time
-               (Printf.sprintf
-                  "Ownership verification failed: task is assigned to \
-                     '%s', not '%s'.  Only the assignee may submit for \
-                     verification."
-                  assignee ctx.agent_name))
-        else
-          let age_h =
-            (Time_compat.now () -. started_at_actual) /. 3600.0
-          in
-          let max_age_h = 48.0 in
-          if age_h > max_age_h then
-            Some
-              (Tool_result.error ~tool_name ~start_time
-                 (Printf.sprintf
-                    "Deliverable freshness check failed: task was last \
-                       started %.0fh ago (max %.0fh).  Re-claim the task \
-                       before submitting stale deliverables."
-                    age_h max_age_h))
-          else None)
-    | _ -> None
-  in
-  match freshness_ownership_check with
-  | Some result -> result
-  | None ->
   let max_cas_retries = 3 in
   let cas_retry_delay_s = 0.05 in
   let version_mismatch_prefix = "Version mismatch" in

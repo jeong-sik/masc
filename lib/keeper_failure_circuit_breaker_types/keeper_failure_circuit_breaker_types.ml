@@ -13,25 +13,33 @@ type error_class =
 module Path_check_error = Keeper_path_check_error
 module Path_rejection = Keeper_path_rejection
 
+let classify_typed_path_check (error : Path_check_error.t) : error_class =
+  match error with
+  | Path_check_error.Cwd_not_directory _ -> Cwd_not_directory
+  | Path_check_error.Path_outside_whitelist _ -> Path_not_allowed
+;;
+
+let classify_typed_path_rejection (error : Path_rejection.t) : error_class =
+  match error with
+  | Path_rejection.Not_found_relative _ -> Path_not_found
+  | Path_rejection.Absolute_path_rejected _
+  | Path_rejection.Outside_project_root _
+  | Path_rejection.Outside_sandbox _
+  | Path_rejection.Task_state_file_path_blocked _ -> Path_not_allowed
+  | Path_rejection.Path_required
+  | Path_rejection.Allowed_paths_normalized_empty _
+  | Path_rejection.Ambiguous_relative_read_path _ -> Other
+;;
+
 let classify_path_check_prefix (error_msg : string) : error_class option =
   match Path_check_error.parse_prefix error_msg with
-  | Some (Path_check_error.Cwd_not_directory _) -> Some Cwd_not_directory
-  | Some (Path_check_error.Path_outside_whitelist _) -> Some Path_not_allowed
+  | Some error -> Some (classify_typed_path_check error)
   | None -> None
 ;;
 
 let classify_path_rejection_prefix (error_msg : string) : error_class option =
   match Path_rejection.parse_rejection_prefix error_msg with
-  | Some (Path_rejection.Not_found_relative _) -> Some Path_not_found
-  | Some
-      (Path_rejection.Absolute_path_rejected _
-      | Path_rejection.Outside_project_root _
-      | Path_rejection.Outside_sandbox _
-      | Path_rejection.Task_state_file_path_blocked _) -> Some Path_not_allowed
-  | Some
-      (Path_rejection.Path_required
-      | Path_rejection.Allowed_paths_normalized_empty _
-      | Path_rejection.Ambiguous_relative_read_path _) -> Some Other
+  | Some error -> Some (classify_typed_path_rejection error)
   | None -> None
 ;;
 

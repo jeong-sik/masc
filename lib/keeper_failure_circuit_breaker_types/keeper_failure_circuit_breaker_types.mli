@@ -11,7 +11,20 @@ module Path_check_error = Keeper_path_check_error
 
 val classify_path_check_prefix : string -> error_class option
 val classify_path_rejection_prefix : string -> error_class option
+
+val classify_typed_path_check : Keeper_path_check_error.t -> error_class
+(** Static ADT matching — no string round-trip. Callers that already hold
+    a [Path_check_error.t] value use this directly. *)
+
+val classify_typed_path_rejection : Keeper_path_rejection.t -> error_class
+(** Static ADT matching — no string round-trip. Callers that already hold
+    a [Path_rejection.t] value use this directly. *)
+
 val classify_error : string -> error_class
+(** Legacy string-input entry point. Internally delegates to the typed
+    matchers above via [parse_prefix]; falls back to substring heuristics
+    for unstructured error messages. *)
+
 val error_class_to_string : error_class -> string
 
 type failure_signature =

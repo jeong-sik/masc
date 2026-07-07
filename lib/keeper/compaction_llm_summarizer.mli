@@ -16,7 +16,9 @@
 
 (** A validated compaction plan over a working set of [n] messages. Every
     index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
-    pairwise disjoint, and together they cover every index exactly once. *)
+    pairwise disjoint, and together they cover every index exactly once. For
+    non-empty inputs, at least one [kept] or [summarized] index is required so
+    applying the plan cannot erase the entire working set. *)
 type compaction_plan = private
   { summary : string
   ; kept : int list
@@ -57,7 +59,8 @@ val make
 (** Parse+validate a raw structured response into a plan over [message_count]
     messages. Exposed for tests. Returns [Error] with a reason on any
     structural violation (out-of-range / negative / duplicate / non-covering
-    indices, or a missing/empty summary). *)
+    indices, empty output for a non-empty working set, or a missing/empty
+    summary). *)
 val plan_of_json
   :  message_count:int
   -> Yojson.Safe.t

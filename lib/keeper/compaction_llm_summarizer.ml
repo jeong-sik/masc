@@ -159,6 +159,11 @@ let validate_partition ~message_count ~kept ~summarized ~dropped =
          "indices not covered: %s"
          (String.concat "," (List.rev_map string_of_int xs)))
 
+let validate_non_empty_output ~message_count ~kept ~summarized =
+  if message_count > 0 && kept = [] && summarized = [] then
+    Error "plan would produce empty compaction output"
+  else Ok ()
+
 let plan_of_json ~message_count json =
   let* summary = string_field Schema.compaction_plan_field_summary json in
   let summary = String.trim summary in
@@ -169,6 +174,7 @@ let plan_of_json ~message_count json =
   let* summarized = int_list_field Schema.compaction_plan_field_summarized_indices json in
   let* dropped = int_list_field Schema.compaction_plan_field_dropped_indices json in
   let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
+  let* () = validate_non_empty_output ~message_count ~kept ~summarized in
   Ok { summary; kept; summarized; dropped }
 
 (* Marker prefix so the folded summary is recognizable in the transcript and

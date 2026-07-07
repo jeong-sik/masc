@@ -36,6 +36,13 @@ let test_all_kept_accepted () =
     true
     (is_ok (C.plan_of_json ~message_count:3 json))
 
+let test_drop_only_with_kept_accepted () =
+  let json = plan_json ~summary:"unused" ~kept:[ 1 ] ~summarized:[] ~dropped:[ 0 ] in
+  Alcotest.(check bool)
+    "drop-only plans are valid when at least one message remains"
+    true
+    (is_ok (C.plan_of_json ~message_count:2 json))
+
 (* -- plan_of_json: structural violations rejected (no silent repair) -- *)
 
 let test_out_of_range_rejected () =
@@ -63,6 +70,13 @@ let test_missing_index_rejected () =
   let json = plan_json ~summary:"x" ~kept:[ 0 ] ~summarized:[] ~dropped:[] in
   Alcotest.(check bool)
     "a partition that omits an in-range index is rejected"
+    true
+    (is_error (C.plan_of_json ~message_count:2 json))
+
+let test_all_dropped_rejected () =
+  let json = plan_json ~summary:"S" ~kept:[] ~summarized:[] ~dropped:[ 0; 1 ] in
+  Alcotest.(check bool)
+    "a non-empty working set must not compact to empty output"
     true
     (is_error (C.plan_of_json ~message_count:2 json))
 
@@ -132,10 +146,13 @@ let () =
     [ ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted
         ; Alcotest.test_case "all kept accepted" `Quick test_all_kept_accepted
+        ; Alcotest.test_case "drop-only with kept accepted" `Quick
+            test_drop_only_with_kept_accepted
         ; Alcotest.test_case "out of range rejected" `Quick test_out_of_range_rejected
         ; Alcotest.test_case "negative rejected" `Quick test_negative_rejected
         ; Alcotest.test_case "duplicate rejected" `Quick test_duplicate_rejected
         ; Alcotest.test_case "missing index rejected" `Quick test_missing_index_rejected
+        ; Alcotest.test_case "all dropped rejected" `Quick test_all_dropped_rejected
         ; Alcotest.test_case "empty summary rejected" `Quick test_empty_summary_rejected
         ; Alcotest.test_case "missing field rejected" `Quick test_missing_field_rejected
         ] )

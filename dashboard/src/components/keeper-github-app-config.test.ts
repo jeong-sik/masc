@@ -63,6 +63,8 @@ describe('KeeperGithubAppConfigPanel', () => {
       keeperName: 'sangsu',
     }))
 
+    expect(screen.getByText('configured / unvalidated')).toBeInTheDocument()
+    expect(screen.queryByText('active')).not.toBeInTheDocument()
     expect(screen.getAllByText('Configured').length).toBe(2)
     expect(screen.getByText('Uploaded')).toBeInTheDocument()
   })
@@ -120,6 +122,81 @@ describe('KeeperGithubAppConfigPanel', () => {
       path: '/github-app/private-key.pem',
       value: '-----BEGIN RSA PRIVATE KEY-----\npem-content\n-----END RSA PRIVATE KEY-----',
     })
+  })
+
+  it('rejects partial bundle saves before mutating keeper secrets', async () => {
+    const setSecretEnv = vi.fn().mockResolvedValue(mockProjectionConfigured)
+    const setSecretFile = vi.fn().mockResolvedValue(mockProjectionConfigured)
+
+    const { container } = render(h(KeeperGithubAppConfigPanel, {
+      projection: mockProjectionEmpty,
+      keeperName: 'sangsu',
+      setSecretEnv,
+      setSecretFile,
+    }))
+
+    fireEvent.input(screen.getByLabelText('GitHub App ID'), { target: { value: '123456' } })
+
+    const form = container.querySelector('form')
+    expect(form).not.toBeNull()
+    fireEvent.submit(form!)
+
+    await waitFor(() => {
+      expect(screen.getByText('GitHub App credentials must be saved as a complete bundle.')).toBeInTheDocument()
+    })
+    expect(setSecretEnv).not.toHaveBeenCalled()
+    expect(setSecretFile).not.toHaveBeenCalled()
+  })
+
+  it('rolls back applied bundle fields when a later save step fails', async () => {
+    const partialProjection: KeeperSecretProjection = {
+      ...mockProjectionEmpty,
+      env_count: 1,
+      env_names: ['MASC_GITHUB_APP_ID'],
+    }
+    const setSecretEnv = vi
+      .fn()
+      .mockResolvedValueOnce(partialProjection)
+      .mockRejectedValueOnce(new Error('installation write failed'))
+    const setSecretFile = vi.fn().mockResolvedValue(mockProjectionConfigured)
+    const deleteSecretEnv = vi.fn().mockResolvedValue(mockProjectionEmpty)
+    const deleteSecretFile = vi.fn().mockResolvedValue(mockProjectionEmpty)
+    const onProjectionChange = vi.fn()
+
+    const { container } = render(h(KeeperGithubAppConfigPanel, {
+      projection: mockProjectionEmpty,
+      keeperName: 'sangsu',
+      setSecretEnv,
+      setSecretFile,
+      deleteSecretEnv,
+      deleteSecretFile,
+      onProjectionChange,
+    }))
+
+    fireEvent.input(screen.getByLabelText('GitHub App ID'), { target: { value: '123456' } })
+    fireEvent.input(screen.getByLabelText('GitHub App Installation ID'), { target: { value: '7891011' } })
+    fireEvent.input(screen.getByLabelText('GitHub App Private Key PEM'), {
+      target: { value: '-----BEGIN RSA PRIVATE KEY-----\npem-content\n-----END RSA PRIVATE KEY-----' },
+    })
+
+    const form = container.querySelector('form')
+    expect(form).not.toBeNull()
+    fireEvent.submit(form!)
+
+    await waitFor(() => {
+      expect(screen.getByText(/installation write failed/)).toBeInTheDocument()
+      expect(screen.getByText(/Partially written GitHub App credentials were purged/)).toBeInTheDocument()
+    })
+
+    expect(setSecretEnv).toHaveBeenCalledTimes(2)
+    expect(setSecretFile).not.toHaveBeenCalled()
+    expect(deleteSecretEnv).toHaveBeenCalledTimes(1)
+    expect(deleteSecretEnv).toHaveBeenCalledWith('sangsu', {
+      scope: 'keeper',
+      name: 'MASC_GITHUB_APP_ID',
+    })
+    expect(deleteSecretFile).not.toHaveBeenCalled()
+    expect(onProjectionChange).toHaveBeenCalledWith(mockProjectionEmpty)
   })
 
   it('calls deleteSecretEnv and deleteSecretFile when purge is clicked', async () => {

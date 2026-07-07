@@ -16,6 +16,14 @@ import { ActionButton } from './common/button'
 import { TextArea, TextInput } from './common/input'
 import { StatusChip } from './common/status-chip'
 
+const GITHUB_APP_ID_ENV = 'MASC_GITHUB_APP_ID'
+const GITHUB_APP_INSTALLATION_ID_ENV = 'MASC_GITHUB_APP_INSTALLATION_ID'
+const GITHUB_APP_PRIVATE_KEY_PATH = '/github-app/private-key.pem'
+
+type AppliedGithubAppSecret =
+  | { kind: 'env'; name: typeof GITHUB_APP_ID_ENV | typeof GITHUB_APP_INSTALLATION_ID_ENV }
+  | { kind: 'file'; path: typeof GITHUB_APP_PRIVATE_KEY_PATH }
+
 interface KeeperGithubAppConfigPanelProps {
   projection: KeeperSecretProjection | null | undefined
   keeperName?: string
@@ -24,6 +32,51 @@ interface KeeperGithubAppConfigPanelProps {
   deleteSecretEnv?: typeof deleteKeeperSecretEnv
   setSecretFile?: typeof setKeeperSecretFile
   deleteSecretFile?: typeof deleteKeeperSecretFile
+}
+
+function messageFromError(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function hasGithubAppPrivateKey(projection: KeeperSecretProjection | null | undefined): boolean {
+  return (projection?.file_mounts ?? []).some(
+    (mount: { container_path: string }) => mount.container_path === GITHUB_APP_PRIVATE_KEY_PATH,
+  )
+}
+
+async function rollbackAppliedGithubAppSecrets({
+  keeperName,
+  applied,
+  deleteSecretEnv,
+  deleteSecretFile,
+}: {
+  keeperName: string
+  applied: AppliedGithubAppSecret[]
+  deleteSecretEnv: typeof deleteKeeperSecretEnv
+  deleteSecretFile: typeof deleteKeeperSecretFile
+}): Promise<{ projection: KeeperSecretProjection | null; failures: string[] }> {
+  let projection: KeeperSecretProjection | null = null
+  const failures: string[] = []
+
+  for (const secret of [...applied].reverse()) {
+    try {
+      if (secret.kind === 'env') {
+        projection = await deleteSecretEnv(keeperName, {
+          scope: 'keeper',
+          name: secret.name,
+        })
+      } else {
+        projection = await deleteSecretFile(keeperName, {
+          scope: 'keeper',
+          path: secret.path,
+        })
+      }
+    } catch (error) {
+      failures.push(messageFromError(error, `failed to roll back ${secret.kind}`))
+    }
+  }
+
+  return { projection, failures }
 }
 
 export function KeeperGithubAppConfigPanel({
@@ -44,18 +97,25 @@ export function KeeperGithubAppConfigPanel({
 
   // Detect presence in the projection
   const envNames = projection?.env_names ?? []
-  const fileMounts = projection?.file_mounts ?? []
-  
-  const hasAppId = envNames.includes('MASC_GITHUB_APP_ID')
-  const hasInstallationId = envNames.includes('MASC_GITHUB_APP_INSTALLATION_ID')
-  const hasPrivateKey = fileMounts.some((m: { container_path: string }) => m.container_path === '/github-app/private-key.pem')
+  const hasAppId = envNames.includes(GITHUB_APP_ID_ENV)
+  const hasInstallationId = envNames.includes(GITHUB_APP_INSTALLATION_ID_ENV)
+  const hasPrivateKey = hasGithubAppPrivateKey(projection)
+  const hasCompleteConfig = hasAppId && hasInstallationId && hasPrivateKey
+  const appIdValue = appId.trim()
+  const installationIdValue = installationId.trim()
+  const privateKeyPemValue = privateKeyPem.trim()
+  const hasCompleteDraft = Boolean(appIdValue && installationIdValue && privateKeyPemValue)
 
-  const canSave = Boolean(keeperName) && pending === null && (appId.trim() || installationId.trim() || privateKeyPem.trim())
+  const canSave = Boolean(keeperName) && pending === null && hasCompleteDraft
   const canDelete = Boolean(keeperName) && pending === null && (hasAppId || hasInstallationId || hasPrivateKey)
 
   async function handleSave(event: Event) {
     event.preventDefault()
     if (!keeperName || pending !== null) return
+    if (!hasCompleteDraft) {
+      setError('GitHub App credentials must be saved as a complete bundle.')
+      return
+    }
 
     setPending('saving')
     setMessage(null)
@@ -64,38 +124,54 @@ export function KeeperGithubAppConfigPanel({
     try {
       let currentProjection = projection
       const steps: string[] = []
+      const applied: AppliedGithubAppSecret[] = []
 
-      // 1. App ID
-      if (appId.trim()) {
+      try {
         const mutation: KeeperSecretEnvSetMutation = {
           scope: 'keeper',
-          name: 'MASC_GITHUB_APP_ID',
-          value: appId.trim(),
+          name: GITHUB_APP_ID_ENV,
+          value: appIdValue,
         }
         currentProjection = await setSecretEnv(keeperName, mutation)
+        applied.push({ kind: 'env', name: GITHUB_APP_ID_ENV })
         steps.push('App ID')
-      }
 
-      // 2. Installation ID
-      if (installationId.trim()) {
-        const mutation: KeeperSecretEnvSetMutation = {
+        const installationMutation: KeeperSecretEnvSetMutation = {
           scope: 'keeper',
-          name: 'MASC_GITHUB_APP_INSTALLATION_ID',
-          value: installationId.trim(),
+          name: GITHUB_APP_INSTALLATION_ID_ENV,
+          value: installationIdValue,
         }
-        currentProjection = await setSecretEnv(keeperName, mutation)
+        currentProjection = await setSecretEnv(keeperName, installationMutation)
+        applied.push({ kind: 'env', name: GITHUB_APP_INSTALLATION_ID_ENV })
         steps.push('Installation ID')
-      }
 
-      // 3. Private Key PEM
-      if (privateKeyPem.trim()) {
-        const mutation: KeeperSecretFileSetMutation = {
+        const fileMutation: KeeperSecretFileSetMutation = {
           scope: 'keeper',
-          path: '/github-app/private-key.pem',
-          value: privateKeyPem.trim(),
+          path: GITHUB_APP_PRIVATE_KEY_PATH,
+          value: privateKeyPemValue,
         }
-        currentProjection = await setSecretFile(keeperName, mutation)
+        currentProjection = await setSecretFile(keeperName, fileMutation)
+        applied.push({ kind: 'file', path: GITHUB_APP_PRIVATE_KEY_PATH })
         steps.push('Private Key')
+      } catch (saveError) {
+        const rollback = await rollbackAppliedGithubAppSecrets({
+          keeperName,
+          applied,
+          deleteSecretEnv,
+          deleteSecretFile,
+        })
+        if (rollback.projection) {
+          currentProjection = rollback.projection
+          onProjectionChange?.(rollback.projection)
+        }
+        const saveMessage = messageFromError(saveError, 'Failed to save GitHub App configuration')
+        const rollbackMessage =
+          applied.length === 0
+            ? ''
+            : rollback.failures.length > 0
+            ? ` Rollback failed: ${rollback.failures.join('; ')}`
+            : ' Partially written GitHub App credentials were purged.'
+        throw new Error(`${saveMessage}.${rollbackMessage}`)
       }
 
       if (currentProjection) {
@@ -107,7 +183,7 @@ export function KeeperGithubAppConfigPanel({
       setPrivateKeyPem('')
       setMessage(`Successfully saved: ${steps.join(', ')}`)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save GitHub App configuration')
+      setError(messageFromError(e, 'Failed to save GitHub App configuration'))
     } finally {
       setPending(null)
     }
@@ -132,7 +208,7 @@ export function KeeperGithubAppConfigPanel({
       if (hasAppId) {
         const mutation: KeeperSecretEnvMutation = {
           scope: 'keeper',
-          name: 'MASC_GITHUB_APP_ID',
+          name: GITHUB_APP_ID_ENV,
         }
         currentProjection = await deleteSecretEnv(keeperName, mutation)
         steps.push('App ID')
@@ -142,7 +218,7 @@ export function KeeperGithubAppConfigPanel({
       if (hasInstallationId) {
         const mutation: KeeperSecretEnvMutation = {
           scope: 'keeper',
-          name: 'MASC_GITHUB_APP_INSTALLATION_ID',
+          name: GITHUB_APP_INSTALLATION_ID_ENV,
         }
         currentProjection = await deleteSecretEnv(keeperName, mutation)
         steps.push('Installation ID')
@@ -152,7 +228,7 @@ export function KeeperGithubAppConfigPanel({
       if (hasPrivateKey) {
         const mutation: KeeperSecretFileMutation = {
           scope: 'keeper',
-          path: '/github-app/private-key.pem',
+          path: GITHUB_APP_PRIVATE_KEY_PATH,
         }
         currentProjection = await deleteSecretFile(keeperName, mutation)
         steps.push('Private Key')
@@ -164,7 +240,7 @@ export function KeeperGithubAppConfigPanel({
 
       setMessage(`Successfully removed: ${steps.join(', ')}`)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete GitHub App configuration')
+      setError(messageFromError(e, 'Failed to delete GitHub App configuration'))
     } finally {
       setPending(null)
     }
@@ -185,8 +261,8 @@ export function KeeperGithubAppConfigPanel({
             <h4 class="text-sm font-bold text-[var(--color-fg-primary)]">GitHub App Installation (RFC-0236 §10)</h4>
           </div>
         </div>
-        <${StatusChip} tone=${(hasAppId && hasInstallationId && hasPrivateKey) ? 'success' : 'neutral'} uppercase=${false}>
-          ${(hasAppId && hasInstallationId && hasPrivateKey) ? 'active' : 'partial / inactive'}
+        <${StatusChip} tone=${hasCompleteConfig ? 'warn' : 'neutral'} uppercase=${false}>
+          ${hasCompleteConfig ? 'configured / unvalidated' : 'partial / inactive'}
         <//>
       </div>
 

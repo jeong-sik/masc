@@ -1999,6 +1999,67 @@ let test_post_create_claim_gate_rolls_back_on_sidecar_failure () =
   Alcotest.(check int) "created post rolled back" 0
     (List.length (Board_dispatch.list_posts ()))
 
+let test_post_create_claim_gate_rolls_back_rollup_sidecar_failure () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let task_id = "task-claim-rollup" in
+  let make_rollup_args ~content ~marker =
+    make_args
+      [ "content", `String content
+      ; "author", `String "ramarama"
+      ; "post_kind", `String "automation"
+      ; "meta", `Assoc [ "task_id", `String task_id; "rollup_marker", `String marker ]
+      ; "claims", `List [ `String "artifact_missing" ]
+      ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+      ]
+  in
+  let ok, body =
+    dispatch
+      "masc_board_post"
+      (make_rollup_args
+         ~content:"task-claim-rollup checking artifact status"
+         ~marker:"first")
+  in
+  Alcotest.(check bool) "initial claim-gated status post accepted" true ok;
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let sidecar = claim_gate_sidecar_path () in
+  Alcotest.(check bool) "initial sidecar written" true (Sys.file_exists sidecar);
+  Sys.remove sidecar;
+  Unix.mkdir sidecar 0o755;
+  let result =
+    dispatch_result
+      "masc_board_post"
+      (make_rollup_args
+         ~content:"task-claim-rollup continuing artifact status"
+         ~marker:"second")
+  in
+  Alcotest.(check bool) "rollup fails when evidence sidecar fails" false
+    (Tool_result.is_success result);
+  Alcotest.(check bool) "rollup hook failure is explicit" true
+    (contains_substring
+       (Tool_result.message result)
+       "status-rollup post-persist hook failed");
+  Alcotest.(check int) "failed rollup did not create a second post" 1
+    (List.length (Board_dispatch.list_posts ()));
+  let post =
+    match Board_dispatch.get_post ~post_id with
+    | Ok post -> Board.post_to_yojson post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check string)
+    "rolled-up body restored"
+    "task-claim-rollup checking artifact status"
+    Yojson.Safe.Util.(post |> member "body" |> to_string);
+  Alcotest.(check string)
+    "rolled-up meta restored"
+    "first"
+    Yojson.Safe.Util.(post |> member "meta" |> member "rollup_marker" |> to_string)
+
 let test_board_dashboard_json_embeds_claim_evidence_projection () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2542,6 +2603,8 @@ let () =
             test_post_create_claim_gate_projects_to_created_post;
           Alcotest.test_case "claim gate rolls back post-create sidecar failure" `Quick
             test_post_create_claim_gate_rolls_back_on_sidecar_failure;
+          Alcotest.test_case "claim gate rolls back rollup sidecar failure" `Quick
+            test_post_create_claim_gate_rolls_back_rollup_sidecar_failure;
           Alcotest.test_case "claim gate projects dashboard evidence state" `Quick
             test_board_dashboard_json_embeds_claim_evidence_projection;
           Alcotest.test_case "claim gate rejects unknown claim kind" `Quick

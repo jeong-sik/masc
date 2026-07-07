@@ -182,6 +182,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
            (match
               Board_dispatch.create_post_with_outcome
                 ~after_fresh_persist:record_for_post
+                ~after_rollup_persist:record_for_post
                 ~author
                 ~content
                 ?title
@@ -198,8 +199,8 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
               let post = Board.post_of_create_post_outcome outcome in
               let evidence_result =
                 match outcome with
-                | Board.Fresh_post _ -> Ok ()
-                | Board.Dedup_hit _ | Board.Rolled_up_post _ -> record_for_post post
+                | Board.Fresh_post _ | Board.Rolled_up_post _ -> Ok ()
+                | Board.Dedup_hit _ -> record_for_post post
               in
               (match evidence_result with
                | Error msg ->

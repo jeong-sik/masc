@@ -365,15 +365,15 @@ let emit_post_created (post : Board.post) =
          content = post.content; post_kind = post.post_kind;
          hearth = post.hearth })
 
-let create_post_with_outcome ?after_fresh_persist ~author ~content ?title ?body
-    ~post_kind ?meta_json ?(visibility = Board.Internal)
+let create_post_with_outcome ?after_fresh_persist ?after_rollup_persist ~author
+    ~content ?title ?body ~post_kind ?meta_json ?(visibility = Board.Internal)
     ?(ttl_hours = Board.Limits.default_ttl_hours) ?hearth ?thread_id ?origin () =
   match backend () with
   | Jsonl store ->
       (match
-         Board.create_post_with_outcome store ~author ~content ?title ?body
-           ~post_kind ?meta_json ~visibility ~ttl_hours ?hearth ?thread_id
-           ?origin ()
+         Board.create_post_with_outcome ?after_rollup_persist store ~author
+           ~content ?title ?body ~post_kind ?meta_json ~visibility ~ttl_hours
+           ?hearth ?thread_id ?origin ()
        with
       | Ok (Board.Fresh_post post) ->
           (match after_fresh_persist with

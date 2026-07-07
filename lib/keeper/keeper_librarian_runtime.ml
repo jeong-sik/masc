@@ -638,17 +638,38 @@ let extract_and_append_with_provider_classified
        call applies the RFC-0239 Q4 retention cap (ranked by the structural
        [retention_rank]) in one atomic rewrite. Only after the facts are durable
        do we publish the episode file and append the event row; the event row is
-       the reader-visible commit marker for [read_episodes_tail]. *)
+       the reader-visible commit marker for [read_episodes_tail].
+
+       RFC-0285 §8: before folding, decide each claim's provenance. A claim
+       whose identity was recall-injected into this keeper's recent prompts is
+       an echo — the model restating what it just read — and must not advance
+       the truth anchor recall's recency ranking reads. The judgment (window
+       join + metric) lives here at the write boundary; the fold itself stays
+       a pure function of the decision. *)
     Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
       match
         try
           let window = Keeper_memory_os_io.fact_recall_window in
+          let merge ~existing ~incoming =
+            let provenance =
+              let key = Keeper_memory_os_types.claim_identity incoming in
+              if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
+              then (
+                Otel_metric_store.inc_counter
+                  Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
+                  ~labels:[ "keeper", keeper_id ]
+                  ();
+                Keeper_memory_os_policy.Recalled_echo)
+              else Keeper_memory_os_policy.Independent_observation
+            in
+            Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
+          in
           let (_ : Keeper_memory_os_io.fact_merge_stats) =
             File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
               Keeper_memory_os_io.merge_and_cap_facts
                 ~now
                 ~keeper_id
-                ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
+                ~merge
                 ~incoming:episode.Keeper_memory_os_types.claims
                 ~keep:window
                 ~trigger:Keeper_memory_os_io.fact_store_max

@@ -173,7 +173,9 @@ module For_testing_blame : sig
   val parse_blame_header : string -> (string * int) option
 
   (** [parse_blame_porcelain lines] joins per-line headers with each sha's
-      metadata block (which git emits only on the sha's first group). *)
+      metadata block (which git emits only on the sha's first group). Lines
+      whose sha has incomplete metadata are omitted instead of being assigned
+      fabricated authors or timestamps. *)
   val parse_blame_porcelain : string list -> entry list
 
   val group_blame_entries : string -> entry list -> Yojson.Safe.t list

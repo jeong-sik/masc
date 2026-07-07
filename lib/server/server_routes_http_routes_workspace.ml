@@ -649,7 +649,9 @@ let parse_blame_porcelain lines =
   in
   let update_metadata sha f =
     let current =
-      Option.value (Hashtbl.find_opt metadata sha) ~default:(None, None)
+      match Hashtbl.find_opt metadata sha with
+      | Some value -> value
+      | None -> (None, None)
     in
     Hashtbl.replace metadata sha (f current)
   in
@@ -673,15 +675,11 @@ let parse_blame_porcelain lines =
         collect cur_sha acc tl)
   in
   collect None [] lines
-  |> List.map (fun (line, sha) ->
-       let author, time =
-         match Hashtbl.find_opt metadata sha with
-         | Some (author, time) ->
-           ( Option.value author ~default:"unknown",
-             Option.value time ~default:0L )
-         | None -> ("unknown", 0L)
-       in
-       { bl_line = line; bl_author = author; bl_time = time })
+  |> List.filter_map (fun (line, sha) ->
+       match Hashtbl.find_opt metadata sha with
+       | Some (Some author, Some time) ->
+         Some { bl_line = line; bl_author = author; bl_time = time }
+       | Some (None, _) | Some (_, None) | None -> None)
 
 let blame_entry_to_json file_path ~line_start ~line_end ~author ~time =
   `Assoc [ ("file_path", `String file_path)

@@ -642,6 +642,21 @@ let test_blame_porcelain_repeated_sha () =
     "Alice" line4.B.bl_author;
   Alcotest.(check int64) "line 4 keeps sha_a's time" 1700000100L line4.B.bl_time
 
+let test_blame_porcelain_omits_incomplete_metadata () =
+  let lines =
+    [ sha_a ^ " 1 1 1"
+    ; "author Alice"
+    ; "\tline one"
+    ; sha_b ^ " 2 2 1"
+    ; "author-time 1700000200"
+    ; "\tline two"
+    ]
+  in
+  Alcotest.(check int)
+    "no fabricated author or timestamp for incomplete metadata"
+    0
+    (List.length (B.parse_blame_porcelain lines))
+
 let test_blame_group_adjacent () =
   let entries = B.parse_blame_porcelain porcelain_fixture in
   let grouped = B.group_blame_entries "file.txt" entries in
@@ -730,6 +745,8 @@ let () =
             test_blame_porcelain_sha_join
         ; Alcotest.test_case "repeated sha inherits its own metadata" `Quick
             test_blame_porcelain_repeated_sha
+        ; Alcotest.test_case "omits incomplete metadata" `Quick
+            test_blame_porcelain_omits_incomplete_metadata
         ; Alcotest.test_case "groups adjacent same-author lines" `Quick
             test_blame_group_adjacent
         ] )

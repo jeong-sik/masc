@@ -22,6 +22,7 @@
   discord_wss_connection
   slack_gateway_state
   slack_socket_client
+  slack_rest_client
   gate_protocol
   gate_surface
   gate_time_util)

@@ -1,10 +1,11 @@
-(** RFC-0313 W3 gate — storm replay over the 2026-07-06 fixture.
+(** RFC-0313 W3 gate — storm pacing contrast over the 2026-07-06 fixture.
 
-    Replays the highest-density 5-minute window of the 07-06 rotation storm
-    (test/fixtures/pacing_storm_20260706/) against [Keeper_pacing] with the
-    default policy and pins the contrast: the recorded ping-pong produced
-    2,004 rotation attempts across two runtimes in ~300s; per-runtime
-    revisit pacing admits a fixed, small schedule instead. W3 flips
+    Uses the highest-density 5-minute window of the 07-06 rotation storm
+    (test/fixtures/pacing_storm_20260706/) as the recorded baseline and runtime
+    catalog, then runs an all-failing keeper against [Keeper_pacing] with the
+    default policy over the same 300s window. This pins the contrast: the
+    recorded ping-pong produced 2,004 rotation attempts across two runtimes;
+    per-runtime revisit pacing admits a fixed, small schedule instead. W3 flips
     enforcement only with this gate green.
 
     The simulation passes [retry_after:None] (pure exponential widening).
@@ -16,6 +17,11 @@
 
 open Masc
 module KP = Keeper_pacing
+
+(* Fixture pin: mirrors Runtime_schema.pacing_default (base 30s, x2, cap
+   3600s). The asserted [0; 30; 90; 210] schedule is derived from these
+   numbers, so the policy is part of the fixture, not read from config. *)
+let fixture_policy = { KP.base_sec = 30.0; multiplier = 2.0; cap_sec = 3600.0 }
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -70,8 +76,9 @@ let distinct_runtimes events =
 (* Enforced-pacing semantics (RFC-0313 §1-2): a failure widens only the
    failed runtime's revisit; the next attempt runs on the earliest-eligible
    runtime; when every runtime is paced the keeper waits until the minimum
-   deadline. Every attempt in the storm window failed, so the replay marks
-   every admitted attempt as a failure. *)
+   deadline. The fixture supplies the runtime catalog, 300s window, and recorded
+   attempt count; this simulator intentionally models the all-failing pacing
+   schedule instead of consuming the fixture event timestamps. *)
 let simulate ~catalog ~policy ~window_sec =
   let eligible_at state runtime_id now =
     match KP.revisit_of ~runtime_id state with
@@ -120,7 +127,7 @@ let test_pacing_bounds_storm_window () =
   let events = load_events () in
   let catalog = distinct_runtimes events in
   let admitted =
-    simulate ~catalog ~policy:KP.default_policy ~window_sec:300.0
+    simulate ~catalog ~policy:fixture_policy ~window_sec:300.0
   in
   (* Deterministic schedule under base 30s x2: each runtime fails at
      t=0, 30, 90, 210; the next revisit (450) falls outside the window. *)
@@ -146,7 +153,7 @@ let test_provider_hint_spaces_revisit () =
      one attempt per hint interval and cannot go negative. *)
   let state =
     KP.on_failure
-      ~policy:KP.default_policy
+      ~policy:fixture_policy
       ~runtime_id:"glm-coding.glm-5-turbo"
       ~retry_after:(Some 120.0)
       ~now:0.0

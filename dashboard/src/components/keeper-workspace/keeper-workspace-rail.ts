@@ -44,6 +44,7 @@ import { persistentSignal } from '../../lib/persistent-signal'
 import { recordManualCompaction } from './compaction-snapshots'
 import type { MemoryKeeper } from '../memory-inspector'
 import { keepers } from '../../store'
+import { KeeperLaneSection } from './keeper-lane-strip'
 
 const LazyCompactionInspectorOverlay = lazy(async () => ({
   default: (await import('./compaction-inspector-overlay')).CompactionInspectorOverlay,
@@ -492,6 +493,7 @@ export function KeeperWorkspaceRail({
     <aside class="ctx" aria-label="키퍼 컨텍스트">
       <div class="ctx-scroll">
         <${AttentionSection} keeper=${keeper} />
+        <${KeeperLaneSection} keeper=${keeper} />
         <${RuntimeSection} keeper=${keeper} drift=${runtimeDrift} />
         <${ContextSection}
           keeper=${keeper}

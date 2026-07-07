@@ -60,6 +60,11 @@ export interface IdeDataWorkspaceStore {
   readonly subscribeRepositories: (listener: () => void) => () => void
   readonly annotations: () => ReadonlyArray<IdeAnnotation>
   readonly subscribeAnnotations: (listener: () => void) => () => void
+  /** Re-run the workspace fetches on demand — the annotation composer
+   *  (#23471 FE-4) calls this after a successful create so the line
+   *  chips / popover / Context Lens pick the new record up through the
+   *  same read path keeper edits use. */
+  readonly refresh: () => void
   readonly dispose: () => void
 }
 
@@ -584,6 +589,9 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     annotations: () => annotationsSignal.value,
     subscribeAnnotations: (listener: () => void) =>
       annotationsSignal.subscribe(listener),
+    refresh: () => {
+      runWorkspaceFetches()
+    },
     dispose: () => {
       abortController.abort()
       unregisterLiveRefresh()

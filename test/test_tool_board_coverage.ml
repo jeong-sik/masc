@@ -1201,7 +1201,11 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   in
   Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
   let submitted = Yojson.Safe.from_string submit_body in
-  Alcotest.(check string) "MCP runtime submitted_by persisted" "mcp-runtime-curator"
+  (* #23489 routes curation_submit through [enforce_caller_identity]:
+     a same-keeper surface form ("mcp-runtime-curator") is stored as the
+     canonical keeper name via [Server_utils.board_actor_author_for_write],
+     with the raw surface preserved in meta. *)
+  Alcotest.(check string) "MCP runtime submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
     require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
@@ -1774,6 +1778,8 @@ let claim_gate_sidecar_path () =
     (Filename.concat _test_base_path Common.masc_dirname)
     "board_claim_evidence.jsonl"
 
+let claim_gate_posts_path () = Board.persist_path ()
+
 let create_claim_gate_source_post () =
   let correction =
     "Correction: I did not create the PoC claimed here. \
@@ -2060,6 +2066,69 @@ let test_post_create_claim_gate_rolls_back_rollup_sidecar_failure () =
     "first"
     Yojson.Safe.Util.(post |> member "meta" |> member "rollup_marker" |> to_string)
 
+let test_post_create_claim_gate_skips_sidecar_when_rollup_persist_fails () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let task_id = "task-claim-persist" in
+  let make_rollup_args ~content ~marker =
+    make_args
+      [ "content", `String content
+      ; "author", `String "ramarama"
+      ; "post_kind", `String "automation"
+      ; "meta", `Assoc [ "task_id", `String task_id; "rollup_marker", `String marker ]
+      ; "claims", `List [ `String "artifact_missing" ]
+      ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+      ]
+  in
+  let ok, body =
+    dispatch
+      "masc_board_post"
+      (make_rollup_args
+         ~content:"task-claim-persist checking artifact status"
+         ~marker:"first")
+  in
+  Alcotest.(check bool) "initial claim-gated status post accepted" true ok;
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let sidecar = claim_gate_sidecar_path () in
+  let sidecar_before = In_channel.with_open_text sidecar In_channel.input_all in
+  let posts_path = claim_gate_posts_path () in
+  Sys.remove posts_path;
+  Unix.mkdir posts_path 0o755;
+  let result =
+    dispatch_result
+      "masc_board_post"
+      (make_rollup_args
+         ~content:"task-claim-persist continuing artifact status"
+         ~marker:"second")
+  in
+  Alcotest.(check bool) "rollup fails when board persist fails" false
+    (Tool_result.is_success result);
+  Alcotest.(check bool) "board persist failure is explicit" true
+    (contains_substring (Tool_result.message result) "rewrite_posts");
+  let sidecar_after = In_channel.with_open_text sidecar In_channel.input_all in
+  Alcotest.(check string)
+    "failed rollup did not append claim evidence"
+    sidecar_before
+    sidecar_after;
+  let post =
+    match Board_dispatch.get_post ~post_id with
+    | Ok post -> Board.post_to_yojson post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check string)
+    "failed persist restored body"
+    "task-claim-persist checking artifact status"
+    Yojson.Safe.Util.(post |> member "body" |> to_string);
+  Alcotest.(check string)
+    "failed persist restored meta"
+    "first"
+    Yojson.Safe.Util.(post |> member "meta" |> member "rollup_marker" |> to_string)
+
 let test_board_dashboard_json_embeds_claim_evidence_projection () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2143,6 +2212,48 @@ let test_comment_claim_gate_rejects_unknown_claim_kind () =
   Alcotest.(check bool) "unknown claim rejected" false (Tool_result.is_success result);
   Alcotest.(check bool) "unknown claim named" true
     (contains_substring (Tool_result.message result) "invalid_claim_kind")
+
+let test_resolve_file_path_records_content_digest () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  (* Create a real artifact at the exact path [resolve_file_path] computes.
+     [Board_core.board_base_path] is the public alias of the gate's internal
+     [Board_paths.board_base_path] (a wrapped-library module the test cannot
+     name), so the test is robust to whatever the harness sets as base_path.
+     Before [digest_of_file], the Exists arm returned [digest=None] —
+     "evidence" meant only "any file under the base existed". *)
+  let artifact_rel = Filename.concat Common.masc_dirname "claim_gate_digest_fixture.ml" in
+  let artifact_content = "let proof = \"digest-fixture-v1\"\n" in
+  let artifact_path = Filename.concat (Board_core.board_base_path ()) artifact_rel in
+  (try Unix.mkdir (Filename.dirname artifact_path) 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  Out_channel.with_open_bin artifact_path (fun oc -> output_string oc artifact_content);
+  let expected = Some ("sha256:" ^ sha256_hex artifact_content) in
+  let got_digest =
+    match Board_claim_gate.resolve_file_path artifact_rel with
+    | Board_claim_gate.Exists { digest; _ } -> digest
+    | _ -> None
+  in
+  Alcotest.(check (option string)) "exists arm records content digest" expected got_digest
+
+let test_resolve_file_path_rejects_digest_unavailable () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let artifact_rel = Filename.concat Common.masc_dirname "claim_gate_digest_dir" in
+  let artifact_path = Filename.concat (Board_core.board_base_path ()) artifact_rel in
+  (try Unix.mkdir (Filename.dirname artifact_path) 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  (try Unix.mkdir artifact_path 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  match Board_claim_gate.resolve_file_path artifact_rel with
+  | Board_claim_gate.Unknown { reason; _ } ->
+    Alcotest.(check string)
+      "digest unavailable is explicit"
+      "file_path_digest_unavailable"
+      reason
+  | Board_claim_gate.Exists _ ->
+    Alcotest.fail "digest-unavailable artifact must not resolve as existing evidence"
+  | Board_claim_gate.Missing _ ->
+    Alcotest.fail "digest-unavailable fixture should exist as a path"
 
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
@@ -2605,10 +2716,16 @@ let () =
             test_post_create_claim_gate_rolls_back_on_sidecar_failure;
           Alcotest.test_case "claim gate rolls back rollup sidecar failure" `Quick
             test_post_create_claim_gate_rolls_back_rollup_sidecar_failure;
+          Alcotest.test_case "claim gate skips sidecar on rollup persist failure" `Quick
+            test_post_create_claim_gate_skips_sidecar_when_rollup_persist_fails;
           Alcotest.test_case "claim gate projects dashboard evidence state" `Quick
             test_board_dashboard_json_embeds_claim_evidence_projection;
           Alcotest.test_case "claim gate rejects unknown claim kind" `Quick
             test_comment_claim_gate_rejects_unknown_claim_kind;
+          Alcotest.test_case "claim gate resolves artifact content digest" `Quick
+            test_resolve_file_path_records_content_digest;
+          Alcotest.test_case "claim gate rejects digest-unavailable artifact" `Quick
+            test_resolve_file_path_rejects_digest_unavailable;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;

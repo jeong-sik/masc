@@ -159,7 +159,8 @@ let gh_capability_policy_result ir ~caps =
        (match Masc_exec.Exec_program.known bin with
         | Some Masc_exec.Exec_program.Gh -> Gh_policy_approval_required bin
         | Some _ | None -> Gh_policy_noop)
-     | Masc_exec.Verdict.Allow _ | Masc_exec.Verdict.Suggest_confirm (_, _)
+     | Masc_exec.Verdict.Allow _ | Masc_exec.Verdict.Suggest_confirm (_, _) ->
+       Gh_policy_noop
      | Masc_exec.Verdict.Deny { reason; _ } ->
        Gh_policy_denied (Masc_exec.Verdict.deny_reason_to_string reason))
 ;;

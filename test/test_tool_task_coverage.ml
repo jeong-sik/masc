@@ -995,6 +995,49 @@ let () = test "handle_transition_rejects_submit_when_verification_disabled"
   assert (not (str_contains message "Valid actions: start, done, submit_for_verification"))
 )
 
+let () = test "handle_transition_submit_uses_canonical_task_actor_identity"
+    (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "keeper-executor-agent" in
+    ignore
+      (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+         ~capabilities:[] ());
+    register_test_keeper ctx ~keeper_name:"executor"
+      ~agent_name:"keeper-executor-agent";
+    let _ =
+      Task.Tool.handle_add_task
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        ctx
+        (`Assoc [ ("title", `String "Canonical submit identity") ])
+    in
+    (match
+       Workspace.claim_task_r ctx.config ~agent_name:"keeper-executor-agent"
+         ~task_id:"task-001" ()
+     with
+     | Ok _ -> ()
+     | Error err -> failwith (Masc_domain.masc_error_to_string err));
+    let alias_ctx =
+      { ctx with Task.Tool.agent_name = "keeper-executor" }
+    in
+    let result =
+      Task.Tool.handle_transition
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        alias_ctx
+        (`Assoc
+           [
+             ("task_id", `String "task-001");
+             ("action", `String "submit_for_verification");
+             ( "notes",
+               `String
+                 "completion_notes: canonical identity submit test. \
+                  reviewable_evidence_ref: artifact:canonical-submit.json" );
+           ])
+    in
+    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
+    assert_task_awaiting_verification_by ctx "keeper-executor-agent"))
+
 let () = test "handle_transition_expected_version_mismatch_does_not_retry_without_cas"
     (fun () ->
   let ctx = make_test_ctx () in

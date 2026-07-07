@@ -709,6 +709,17 @@ let risk_of_gh_verb (v : Gh_verb.t) : risk_class =
   (* Risk genuinely unknown; capability axis gates it. Not fabricated to R1/R2. *)
   | Gh_unrecognized_action -> R0_Read
 
+(* Human-readable label for the gh verb classification, for surfacing the
+   gating rationale on operator approval prompts (why this gh command needs
+   approval). *)
+let gh_verb_class_to_string = function
+  | Gh_read -> "read"
+  | Gh_reversible_mutation -> "reversible mutation"
+  | Gh_irreversible_mutation -> "irreversible mutation"
+  | Gh_unrecognized_action -> "unrecognized action (capability-gated)"
+  | Gh_string_borne -> "string-borne (word-list floor)"
+  | Gh_unrecognized_family -> "unrecognized family (fail-closed)"
+
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)
 

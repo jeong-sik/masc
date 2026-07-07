@@ -137,10 +137,11 @@ val reconcile_persisted_auto_pause_task_release
 
 (** [failure_reason_policy_decision reason] maps a persisted
     [Keeper_registry.failure_reason] back to a
-    [Keeper_failure_policy.decision]. Returns [None] for non-policy
-    reasons (heartbeat / turn consecutive failures, fleet batch,
-    provider runtime error, fiber unresolved, exception) and [None]
-    when [reason] itself is [None]. *)
+    [Keeper_failure_policy.decision]. Policy-backed reasons include
+    provider timeout, stale termination storms, and turn consecutive
+    failures. Returns [None] for non-policy reasons (heartbeat, fleet
+    batch, provider runtime error, fiber unresolved, exception) and
+    [None] when [reason] itself is [None]. *)
 val failure_reason_policy_decision
   :  Keeper_registry.failure_reason option
   -> Keeper_failure_policy.decision option

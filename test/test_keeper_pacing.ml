@@ -74,6 +74,12 @@ let test_next_turn_due_always_finite () =
   feq "empty state is due now" 7.0 (KP.next_turn_due ~catalog:[ "a" ] ~now:7.0 KP.empty)
 
 let test_shadow_snapshot_isolated_by_keeper () =
+  (* Keeper_pacing_shadow guards its table with Eio.Mutex.use_rw
+     ~protect:true, which needs a fiber context even when uncontended —
+     without Eio_main.run this raised
+     Effect.Unhandled(Cancel.Get_context) on main (2026-07-07). *)
+  Eio_main.run
+  @@ fun _env ->
   let keeper_name = "test-keeper-pacing-shadow-isolated" in
   Alcotest.(check int)
     "unknown keeper snapshot is empty"

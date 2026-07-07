@@ -554,7 +554,7 @@ let test_read_annotations_rejects_missing_scope () =
     check
       string
       "missing scope error"
-      "IDE scope is required; pass repo_id or canonical_url"
+      "IDE scope is required; pass repo_id, canonical_url, or keeper_lane"
       (error_message_of_response response);
     check
       string

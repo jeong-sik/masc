@@ -36,9 +36,12 @@ val local_env_for_keeper :
     the effective env provides [GH_TOKEN] or [GITHUB_TOKEN] and does not
     provide [GIT_CONFIG_GLOBAL], local execution writes a per-keeper gitconfig
     under the keeper playground that points git-over-HTTPS at
-    [gh auth git-credential]. If the keeper does not supply [GH_CONFIG_DIR],
-    local execution points [gh] at an empty system config directory when
-    available to avoid ambient host config fallback. *)
+    [gh auth git-credential]. If the effective env configures GitHub App
+    issuance via [MASC_GITHUB_APP_ID]/[MASC_GITHUB_APP_INSTALLATION_ID],
+    missing config, unreadable PEM material, or mint failure is returned as an
+    error instead of falling back to a broader static token. If the keeper does
+    not supply [GH_CONFIG_DIR], local execution points [gh] at an empty system
+    config directory when available to avoid ambient host config fallback. *)
 
 val docker_args_for_keeper :
   base_path:string -> keeper_name:string -> container_name:string -> (t, string) result

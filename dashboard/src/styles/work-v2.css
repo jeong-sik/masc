@@ -67,10 +67,19 @@
 }
 
 .wk-kpi-k {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
   font-size: 9.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
+}
+
+.wk-kpi-scope {
+  color: var(--color-accent-fg);
+  font-weight: 700;
 }
 
 .wk-kpi-v {
@@ -1469,8 +1478,24 @@
 }
 
 .wk-kcol-title {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.125rem;
   font-size: var(--text-xs);
   font-weight: 600;
+  color: var(--color-fg-primary);
+  line-height: 1.1;
+}
+
+.wk-kcol-scope {
+  font-size: var(--text-3xs);
+  font-weight: 700;
+  color: var(--color-fg-muted);
+}
+
+.wk-kcol-label {
+  font-size: var(--text-xs);
+  font-weight: 700;
   color: var(--color-fg-primary);
 }
 

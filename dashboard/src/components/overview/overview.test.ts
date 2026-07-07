@@ -997,6 +997,7 @@ describe('Overview prototype surface', () => {
   // The attention row's mono sublabel exists to show the wire name next to a
   // localized display name; when they are identical it printed "base base".
   it('attention row hides the ns sublabel when display name equals keeper name', () => {
+    const previousKeepers = keepers.value
     keepers.value = [
       makeKeeper({ name: 'base', needs_attention: true }),
       makeKeeper({ name: 'nick0cave', koreanName: '닉케이브', needs_attention: true }),
@@ -1009,7 +1010,7 @@ describe('Overview prototype surface', () => {
       const localized = container.querySelector('[data-testid="attention-row-nick0cave"] .ov-attn-name')
       expect(localized?.querySelector('.ov-attn-ns')?.textContent).toBe('nick0cave')
     } finally {
-      keepers.value = []
+      keepers.value = previousKeepers
     }
   })
 })

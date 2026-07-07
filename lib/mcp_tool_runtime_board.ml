@@ -202,16 +202,7 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
               record_identity_raw_surface field ctx_raw ctx_canonical fields
             in
             `Assoc fields))
-  | "masc_board_delete" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
-          arguments
-    | "masc_board_sub_board_update" | "masc_board_sub_board_delete" ->
-        enforce_caller_identity ~tool:name ~field:"owner" ~agent_name
-          arguments
-    | "masc_board_curation_submit" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
-          arguments
-    | _ -> arguments
+  | _ -> arguments
 
 let ensure_board_post_author ~agent_name arguments =
   enforce_caller_identity ~tool:"masc_board_post" ~field:"author"

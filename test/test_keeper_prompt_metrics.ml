@@ -232,12 +232,12 @@ let test_keeper_prompt_preserves_snapshot_delta_anchors () =
 
 let test_registered_repositories_block_lists_valid_repos () =
   (* ~780 wrong-repo-name failures: keepers guess org-prefixed / stale /
-     invented names. The block hands them the closed set of valid segments. *)
+     invented names. The block hands them the global registered id set. *)
   let prompt =
     KP.build_keeper_system_prompt
       ~goal:"Work on the registered repositories"
       ~instructions:""
-      ~registered_repos:[ "masc"; "oas" ]
+      ~registered_repositories:(KP.Registered_repository_ids [ "masc"; "oas" ])
       ()
   in
   check bool "block header present" true
@@ -248,8 +248,8 @@ let test_registered_repositories_block_lists_valid_repos () =
     (has_in prompt "rejected as")
 
 let test_registered_repositories_block_empty_renders_nothing () =
-  (* Empty / failed catalog read degrades to silence, never a fabricated
-     name — same policy as empty active_goals / empty home_ground. *)
+  (* Empty catalog still degrades to silence, never a fabricated name — same
+     policy as empty active_goals / empty home_ground. *)
   let prompt =
     KP.build_keeper_system_prompt
       ~goal:"No registered repositories"
@@ -258,6 +258,23 @@ let test_registered_repositories_block_empty_renders_nothing () =
   in
   check bool "no block when list empty" false
     (has_in prompt "<registered_repositories>")
+
+let test_registered_repositories_block_failure_renders_fail_closed () =
+  let prompt =
+    KP.build_keeper_system_prompt
+      ~goal:"Repository catalog unavailable"
+      ~instructions:""
+      ~registered_repositories:
+        (KP.Registered_repositories_unavailable "repositories.toml parse error")
+      ()
+  in
+  check bool "block header present" true
+    (has_in prompt "<registered_repositories>");
+  check bool "catalog unavailable visible" true
+    (has_in prompt "Repository catalog unavailable");
+  check bool "tells keeper not to guess" true (has_in prompt "Do not guess");
+  check bool "carries parse error" true
+    (has_in prompt "repositories.toml parse error")
 
 let test_prompt_recovery_guard_restores_missing_anchors () =
   let prompt =
@@ -552,6 +569,8 @@ let () =
             test_registered_repositories_block_lists_valid_repos;
           test_case "registered_repositories block empty renders nothing" `Quick
             test_registered_repositories_block_empty_renders_nothing;
+          test_case "registered_repositories failure block is fail closed" `Quick
+            test_registered_repositories_block_failure_renders_fail_closed;
           test_case "prompt recovery guard restores missing anchors" `Quick
             test_prompt_recovery_guard_restores_missing_anchors;
           test_case "prompt recovery guard survives empty registry value"

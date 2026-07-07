@@ -175,10 +175,15 @@ let behavior_prompt_block name =
         name
 
 
+type registered_repositories =
+  | Registered_repository_ids of string list
+  | Registered_repositories_unavailable of string
+
 let build_keeper_system_prompt
     ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(home_ground = "") ?(active_goals = []) ?(registered_repos = []) () =
+    ?(home_ground = "") ?(active_goals = [])
+    ?(registered_repositories = Registered_repository_ids []) () =
   let goal = normalize_goal_text goal in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
@@ -236,15 +241,25 @@ let build_keeper_system_prompt
         (String_util.escape_xml home_ground)
   in
   let registered_repositories_block =
-    (* Enumerate the keeper's registered repository ids from
-       [repositories.toml] so the keeper has the closed set of valid
+    (* Enumerate the globally registered repository ids from [repositories.toml]
+       so the keeper has the closed set of valid
        [repos/<name>] segments rather than guessing (org-prefixed, renamed,
-       or invented names are rejected as unregistered). Empty list renders
-       nothing — a failed/empty catalog read degrades to silence, never a
-       fabricated name. *)
-    match registered_repos with
-    | [] -> ""
-    | repos ->
+       or invented names are rejected as unregistered). Empty catalog renders
+       nothing. Catalog read failure renders a fail-closed block so the keeper
+       does not silently fall back to guessing. *)
+    match registered_repositories with
+    | Registered_repository_ids [] -> ""
+    | Registered_repositories_unavailable reason ->
+        Printf.sprintf
+          "\n\
+           <registered_repositories>\n\
+           Repository catalog unavailable: %s\n\
+           Do not guess repos/<name> segments while the catalog is unavailable. \
+           Refresh repositories.toml or ask the operator for the correct \
+           registered repository id before using repository-scoped tools.\n\
+           </registered_repositories>\n"
+          (String_util.escape_xml reason)
+    | Registered_repository_ids repos ->
         let lines =
           List.map
             (fun id -> Printf.sprintf "- repos/%s" (String_util.escape_xml id))
@@ -253,7 +268,8 @@ let build_keeper_system_prompt
         Printf.sprintf
           "\n\
            <registered_repositories>\n\
-           Only these repository names resolve under repos/<name>/. Any other \
+           Only these globally registered repository names resolve under \
+           repos/<name>/. Any other \
            name (org-prefixed, renamed, or invented) is rejected as \
            unregistered.\n\
            %s\n\

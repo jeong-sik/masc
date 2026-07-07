@@ -190,11 +190,11 @@ describe('ScheduleSurface', () => {
     expect(summary?.textContent).not.toContain('승인 차단')
     // The wake-signal feed header is renamed in v2.
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
-    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
-      .toContain('Keeper Waiting Inventory')
-    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
+      .toContain('Keeper Lanes · wake evidence')
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
       .toContain('sangsu')
-    expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
       .toContain('masc.board_post')
     // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
     // the v2 surface (it is diagnostics-only); no equivalent element exists to

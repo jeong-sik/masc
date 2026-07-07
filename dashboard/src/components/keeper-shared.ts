@@ -62,6 +62,7 @@ import {
   removeQueuedMessage,
   type QueuedMessage,
 } from '../keeper-chat-store'
+import { stableAttachmentId } from './chat/attachments'
 import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
@@ -287,17 +288,32 @@ export function filterConversationEntries(
 }
 
 function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[] {
+  const generatedCounts = new Map<string, number>()
   return blocks
     .filter((b): b is ChatAttachBlock => b.t === 'attach')
-    .map((b) => ({
-      id: b.id ?? `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
-      name: b.name,
-      size: b.sizeBytes ?? 0,
-      mimeType: b.mimeType ?? 'application/octet-stream',
-      data: b.data ?? b.src ?? '',
-      dims: b.dims,
-    }))
+    .map((b) => {
+      const baseId = stableAttachmentId({
+        name: b.name,
+        type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
+        kind: b.kind,
+        mimeType: b.mimeType,
+        size: b.sizeBytes,
+        dims: b.dims,
+        data: b.data ?? b.svg ?? b.ph,
+        src: b.src,
+      })
+      const count = generatedCounts.get(baseId) ?? 0
+      generatedCounts.set(baseId, count + 1)
+      return {
+        id: b.id ?? (count === 0 ? baseId : `${baseId}-${count + 1}`),
+        type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
+        name: b.name,
+        size: b.sizeBytes ?? 0,
+        mimeType: b.mimeType ?? 'application/octet-stream',
+        data: b.data ?? b.src ?? '',
+        dims: b.dims,
+      }
+    })
 }
 
 function blocksToDisplayBlocks(blocks: ChatBlock[]): ChatBlock[] | undefined {

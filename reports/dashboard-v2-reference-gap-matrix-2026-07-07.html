@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC Dashboard v2 Reference Gap Matrix - 2026-07-07</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101113;
+      --panel: #17191d;
+      --panel-2: #1f2228;
+      --line: #343944;
+      --line-2: #46505f;
+      --text: #eef1f5;
+      --muted: #a7afba;
+      --soft: #d1d6de;
+      --green: #7ddc9a;
+      --amber: #f0c36a;
+      --red: #ff8d8d;
+      --blue: #88b8ff;
+      --violet: #bba1ff;
+      --cyan: #7ed6dc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1480px; margin: 0 auto; padding: 28px 22px 48px; }
+    header {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #1a1d23, #14161a);
+      border-radius: 8px;
+      padding: 22px;
+    }
+    h1 { margin: 0; font-size: 25px; letter-spacing: 0; }
+    h2 { margin: 28px 0 12px; font-size: 18px; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: 0; }
+    p { margin: 8px 0; }
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+    }
+    code {
+      color: #e8eefb;
+      background: #20242c;
+      border: 1px solid #343b47;
+      border-radius: 4px;
+      padding: 1px 5px;
+      white-space: nowrap;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: #20242b;
+      border-radius: 999px;
+      padding: 4px 9px;
+    }
+    .grid { display: grid; gap: 12px; }
+    .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .card strong { color: var(--soft); }
+    .note {
+      border: 1px solid #5a4d2a;
+      background: #211c13;
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: #f4dfaa;
+    }
+    .danger {
+      border-color: #6f3737;
+      background: #251819;
+      color: #ffd1d1;
+    }
+    .ok { color: var(--green); }
+    .warn { color: var(--amber); }
+    .bad { color: var(--red); }
+    .info { color: var(--blue); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      padding: 10px;
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #20242b;
+      color: #f5f7fb;
+      text-align: left;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    td { color: #dfe3ea; }
+    tr:last-child td { border-bottom: 0; }
+    th:last-child, td:last-child { border-right: 0; }
+    .id { width: 52px; color: var(--cyan); font-weight: 700; }
+    .surface { min-width: 155px; font-weight: 700; color: #f0f4fa; }
+    .risk { min-width: 265px; }
+    .slice { min-width: 260px; }
+    .score { width: 88px; text-align: center; }
+    .pct {
+      display: inline-flex;
+      min-width: 54px;
+      justify-content: center;
+      border: 1px solid var(--line-2);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-weight: 700;
+      background: #222831;
+    }
+    .sev {
+      display: inline-flex;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      padding: 1px 6px;
+      margin-bottom: 5px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .sev.p0 { color: #ffd5d5; border-color: #844545; background: #2a1717; }
+    .sev.p1 { color: #ffe9b8; border-color: #725b2b; background: #261f12; }
+    .sev.p2 { color: #cfe5ff; border-color: #3d587a; background: #172033; }
+    .sev.p3 { color: #d8d1ff; border-color: #5a4c85; background: #211c31; }
+    ul, ol { margin: 8px 0 0; padding-left: 18px; }
+    li { margin: 5px 0; }
+    .ledger {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .ledger .card { min-height: 100%; }
+    .evidence-list li { margin: 6px 0; }
+    .small { font-size: 12px; color: var(--muted); }
+    @media (max-width: 1000px) {
+      .grid.cols-4, .grid.cols-3, .ledger { grid-template-columns: 1fr; }
+      main { padding: 18px 12px 36px; }
+      table { font-size: 12px; }
+      th, td { padding: 8px; }
+      code { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>MASC Dashboard v2 Reference Gap Matrix</h1>
+      <p>
+        최신 기준은 <code>/Users/dancer/Downloads/v2 (29)</code>의 <code>keeper-v2/*.jsx</code> 소스 번들이다.
+        이 문서는 레퍼런스 의도를 현재 <code>~/me/workspace/yousleepwhen/masc/dashboard</code> 구현과 대조해
+        PR로 쪼갤 수 있는 미비점만 증거 기반으로 정리한다.
+      </p>
+      <div class="meta">
+        <span class="pill">작성일 2026-07-07</span>
+        <span class="pill">대상 MASC dashboard</span>
+        <span class="pill">OAS 경계: MASC -> OAS 단방향만 허용</span>
+        <span class="pill">dune build: CI 권한</span>
+      </div>
+    </header>
+
+    <h2>판독 규칙</h2>
+    <div class="grid cols-4">
+      <div class="card"><strong>레퍼런스 샘플은 truth가 아니다.</strong><br />모델명, 토큰, 비용, fixture transcript는 화면 형태와 데이터 계약의 힌트로만 본다.</div>
+      <div class="card"><strong>Activation %는 완료율이 아니다.</strong><br />현재 증거만으로 해당 PR slice를 바로 시작할 수 있는 준비도다.</div>
+      <div class="card"><strong>판단은 LLM 경계로 둔다.</strong><br />멘션/관련글/wake 판단을 regex, substring, 임의 점수로 확정하지 않는다.</div>
+      <div class="card"><strong>없으면 없음으로 보여준다.</strong><br />빈 문자열, 0, unknown default가 운영 정상처럼 보이면 silent failure로 본다.</div>
+    </div>
+
+    <h2>우선순위 결론</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>P0 - protocol hardening 먼저</h3>
+        <p>상태를 다른 상태로 접거나, free-form string을 의미판정하거나, 임시 id를 만드는 지점부터 제거한다.</p>
+        <p class="small">대표: task status fallback, fusion decision substring, connector fallback default, attachment Math.random fallback.</p>
+      </div>
+      <div class="card">
+        <h3>P1 - wake evidence</h3>
+        <p>Scheduler/HITL/Board/Connector가 keeper lane을 깨웠다는 durable event와 UI join key가 필요하다.</p>
+        <p class="small">UI가 관측 전용이라고 말하는 지점은 정직하지만, 스펙상 wake plane의 끝은 아니다.</p>
+      </div>
+      <div class="card">
+        <h3>P1 - multimodal transport</h3>
+        <p>Keeper chat은 block 구조가 강하지만 board composer는 attachment/voice를 텍스트로 접는다.</p>
+        <p class="small">Board와 Chat이 같은 multimodal block transport를 공유해야 한다.</p>
+      </div>
+    </div>
+
+    <h2>Goal Matrix</h2>
+    <table>
+      <thead>
+        <tr>
+          <th class="id">ID</th>
+          <th class="surface">Surface</th>
+          <th>Reference evidence</th>
+          <th>Current evidence</th>
+          <th class="risk">Gap / risk</th>
+          <th class="slice">First PR slice</th>
+          <th class="score">Activation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="id">G01</td>
+          <td class="surface">Keeper chat, turn transcript</td>
+          <td><code>messages.jsx:80-127</code>, <code>messages.jsx:175-203</code>, <code>turn-inspector.jsx:152-194</code></td>
+          <td><code>chat/primitives.ts:1534-1678</code>, <code>chat/primitives.ts:3031-3158</code>, <code>tool-call-output-store.ts:176-205</code>, <code>keeper-turn-inspector.ts:1087-1228</code></td>
+          <td><span class="sev p1">P1</span><br />Interleaving은 강하다. 남은 리스크는 tool output join coverage와 attachment id 안정성이다. <code>tool_use_id</code> 없는 출력은 skip되고, 일부 attachment id는 fallback 생성된다.</td>
+          <td>Turn bundle join coverage badge, unlinked tool output warning, stable block id contract. No timestamp/order heuristic beyond provider sequence.</td>
+          <td class="score"><span class="pct ok">80%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G02</td>
+          <td class="surface">Multimodal composer</td>
+          <td><code>composer.jsx:1-3</code>, <code>composer.jsx:164-171</code>, <code>messages.jsx:96-98</code></td>
+          <td><code>board/composer-v2.ts:151-175</code>, <code>board/composer-v2.ts:326-364</code>, <code>chat/primitives.ts:3976-4008</code>, <code>chat/primitives.ts:4176-4246</code></td>
+          <td><span class="sev p1">P1</span><br />Keeper chat has block transport. Board composer serializes attachment/voice into text and has a fixed voice draft. This violates multimodal parity and can hide missing blob transport.</td>
+          <td>Extract shared <code>ComposerBlocks</code> transport for chat/board, persist attachment ids/content refs, remove fixed voice draft path.</td>
+          <td class="score"><span class="pct warn">52%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G03</td>
+          <td class="surface">Board social workflow</td>
+          <td><code>board.jsx:33-67</code>, <code>board.jsx:69-112</code>, <code>board.jsx:115-186</code></td>
+          <td><code>api/board.ts:887-1083</code>, <code>board/post-detail.ts:78-185</code>, <code>board/reaction-bar.ts:31-83</code>, <code>board/mention-inbox.ts:27-121</code></td>
+          <td><span class="sev p2">P2</span><br />Write/edit/comment/vote/reaction surface is mostly wired. Mention inbox is content-derived UI, not reactive/proactive keeper wake. Emoji set is static UI vocabulary, acceptable only if backend reaction contract is explicit.</td>
+          <td>Board mention/context inference -> LLM wake decision queue with explicit outcome event: ignored, queued, woke, or failed.</td>
+          <td class="score"><span class="pct ok">78%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G04</td>
+          <td class="surface">HITL approvals</td>
+          <td><code>approvals.jsx:24-58</code>, <code>approvals.jsx:60-65</code>, <code>approvals.jsx:134-214</code></td>
+          <td><code>approvals/approvals-surface.ts:1-12</code>, <code>approvals/approvals-surface.ts:165-225</code>, <code>approvals/approvals-surface.ts:228-327</code></td>
+          <td><span class="sev p1">P1</span><br />Current UI honestly omits defer/undo because live endpoint only supports approve/reject/always. Missing piece is the non-blocking path from decision to keeper wake/job queue evidence.</td>
+          <td>Add approval decision receipt and wake/job correlation row. Do not add fake defer UI until endpoint exists.</td>
+          <td class="score"><span class="pct ok">82%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G05</td>
+          <td class="surface">Scheduler wake plane</td>
+          <td><code>schedule.jsx:1-5</code>, <code>schedule.jsx:33-83</code>, <code>schedule.jsx:205-259</code></td>
+          <td><code>schedule/schedule-surface.ts:64-77</code>, <code>tools/scheduled-automation-panel.ts:194-241</code>, <code>tools/scheduled-automation-panel.ts:299-320</code></td>
+          <td><span class="sev p1">P1</span><br />The surface is explicitly observation-only. That is honest, but the spec needs a durable runner signal to keeper lane, plus terminal outcome. UI currently proves visibility, not execution.</td>
+          <td>Backend wake receipt -> dashboard lane event -> schedule detail join. Show supported/blocked/unknown payload state without data-stub wording.</td>
+          <td class="score"><span class="pct warn">60%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G06</td>
+          <td class="surface">Fusion quorum, judges, sink</td>
+          <td><code>fusion.jsx:1-5</code>, <code>fusion.jsx:63-144</code>, <code>fusion.jsx:146-179</code>, <code>fusion.jsx:189-260</code></td>
+          <td><code>api/dashboard-fusion.ts:8-70</code>, <code>fusion/fusion-surface.ts:130-252</code>, <code>fusion/fusion-surface.ts:273-305</code></td>
+          <td><span class="sev p1">P1</span><br />Judge fields and async registry exist. The weak point is mapping free-form decision text by substring, which is exactly the kind of semantic heuristic the project rules reject.</td>
+          <td>Wire typed <code>fusion_decision</code> variant from backend and render only typed arms. Preserve unknown as protocol drift, not failed decision.</td>
+          <td class="score"><span class="pct warn">68%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G07</td>
+          <td class="surface">Goal / Task work graph</td>
+          <td><code>work.jsx:1-9</code>, <code>work.jsx:25-61</code>, <code>work.jsx:63-87</code>, <code>work.jsx:136-227</code></td>
+          <td><code>api/dashboard-goals.ts:151-249</code>, <code>api/dashboard-goals.ts:263-305</code>, <code>work.ts:202-260</code>, <code>work.ts:290-319</code></td>
+          <td><span class="sev p0">P0</span><br /><code>blocked</code>/<code>paused</code> collapse into <code>in_progress</code>, and unknown task status falls back to <code>todo</code>. This can alter operator truth.</td>
+          <td>Introduce typed dashboard task status union with <code>blocked</code>, <code>paused</code>, <code>unknown(raw)</code>. Render protocol warnings instead of remapping.</td>
+          <td class="score"><span class="pct warn">58%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G08</td>
+          <td class="surface">Lane per Keeper, busy/deferred</td>
+          <td><code>data.jsx:12-16</code>, <code>data.jsx:51-85</code>, <code>data.jsx:103-110</code></td>
+          <td><code>keeper-workspace-chat.ts:72-141</code>, <code>keeper-workspace-chat.ts:187-203</code>, <code>keeper-shared.ts:210-254</code></td>
+          <td><span class="sev p1">P1</span><br />Lifecycle actions and queued input rows exist, but the dashboard still needs a first-class per-keeper lane panel: busy now, queued inputs, deferred external messages, wake cause, and next action.</td>
+          <td>Add lane timeline projection per keeper. Every external event must land as seen, queued, replied-busy, woke, or failed.</td>
+          <td class="score"><span class="pct warn">55%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G09</td>
+          <td class="surface">Memory OS / librarian</td>
+          <td><code>memory.jsx:1-6</code>, <code>memory.jsx:28-74</code>, <code>memory.jsx:76-144</code>, <code>memory.jsx:147-232</code></td>
+          <td><code>memory-inspector.ts:1-17</code>, <code>memory-inspector.ts:116-128</code>, <code>memory-inspector.ts:170-206</code>, <code>memory-inspector.ts:475-479</code>, <code>memory-inspector.ts:660-679</code></td>
+          <td><span class="sev p2">P2</span><br />This is one of the better-aligned surfaces: real bytes, typed categories, no salience/uses fabrication. Gap is explicit: compaction keep/summarize/drop diff is Phase 3, and wake/recall causality needs stronger linking.</td>
+          <td>Memory compaction diff view from backend projection, plus wake cause -> recall block -> fact provenance link.</td>
+          <td class="score"><span class="pct ok">72%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G10</td>
+          <td class="surface">Runtime provider/model catalog</td>
+          <td><code>runtime-data.jsx:1-6</code>, <code>runtime-data.jsx:17-38</code>, <code>runtime-data.jsx:40-60</code>, <code>runtime-data.jsx:69-94</code></td>
+          <td><code>api/dashboard-runtime.ts:19-210</code>, <code>api/dashboard-runtime.ts:1044-1141</code>, <code>runtime-panel.ts:136-183</code>, <code>runtime-toml-editor.ts:244-289</code></td>
+          <td><span class="sev p1">P1</span><br />The dashboard has rich runtime contracts and config editing. Do not copy prototype model lists as current truth. Model capability changes require official docs/OAS source verification before implementation.</td>
+          <td>Runtime capability provenance view: declared spec, effective capability, OAS provider source, latest official-doc verification timestamp where applicable.</td>
+          <td class="score"><span class="pct ok">76%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G11</td>
+          <td class="surface">Connectors and context separation</td>
+          <td><code>connectors.jsx:1-3</code>, <code>connectors.jsx:4-75</code>, <code>connectors.jsx:78-194</code>, <code>messages.jsx:149-171</code></td>
+          <td><code>api/schemas/gate-connectors.ts:1-21</code>, <code>api/schemas/gate-connectors.ts:195-238</code>, <code>api/schemas/gate-connectors.ts:298-383</code>, <code>connector-flow.ts:1-8</code>, <code>connector-flow.ts:78-190</code></td>
+          <td><span class="sev p1">P1</span><br />Connector flow and audit are useful. However the schema intentionally returns shaped defaults for missing nested data. That can be okay for partial availability, but the UI must expose partial/missing provenance instead of making empty records look normal.</td>
+          <td>Connector source-health strip per nested object: storage paths, names, runtime summary, binding summary, observed channel. No invisible fallback.</td>
+          <td class="score"><span class="pct warn">62%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G12</td>
+          <td class="surface">Observability / inspector</td>
+          <td><code>turn-inspector.jsx:1-4</code>, <code>turn-inspector.jsx:62-115</code>, <code>turn-inspector.jsx:118-249</code></td>
+          <td><code>dashboard-turn-records.ts:37-69</code>, <code>dashboard-turn-records.ts:101-161</code>, <code>keeper-turn-inspector.ts:41-87</code>, <code>keeper-turn-inspector.ts:1361-1370</code>, <code>observatory.ts:164-202</code></td>
+          <td><span class="sev p2">P2</span><br />Current implementation explicitly avoids fabricated model/cost/duration. Remaining debt: 30-minute timestamp fallback for legacy rows and approximate context token labels. Both are labeled, but should be retired once exact refs are backfilled.</td>
+          <td>Backfill <code>turn_ref</code> on persisted rows, then remove timestamp attribution fallback. Replace approximate context token labels with backend bytes/tokens only.</td>
+          <td class="score"><span class="pct ok">74%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G13</td>
+          <td class="surface">Layout / pixel parity</td>
+          <td><code>fleet.jsx</code>, <code>keeper-v2/*.jsx</code>, <code>keeper-v2/Keeper Agent v2 (standalone).html</code></td>
+          <td><code>dashboard/src/components/**</code>, existing v2 CSS/classes, multiple migrated surfaces</td>
+          <td><span class="sev p3">P3</span><br />Many surfaces are functionally migrated, but the reference bundle is a denser, integrated workspace. Visual parity should be checked after protocol slices, not before data truth.</td>
+          <td>Playwright screenshot loop after functional slices: desktop/mobile, non-overlap, drawer widths, side rails, table density.</td>
+          <td class="score"><span class="pct warn">48%</span></td>
+        </tr>
+        <tr>
+          <td class="id">G14</td>
+          <td class="surface">False-field elimination</td>
+          <td>Prototype explicitly contains fixture-only values in <code>composer.jsx</code>, <code>runtime-data.jsx</code>, <code>turn-inspector.jsx</code>.</td>
+          <td><code>keeper-shared.ts:289-300</code>, <code>board/composer-v2.ts:142-149</code>, <code>fusion/fusion-surface.ts:291-305</code>, <code>work.ts:202-260</code>, <code>gate-connectors.ts:66-70</code></td>
+          <td><span class="sev p0">P0</span><br />Cross-cutting source of future regressions. These are small enough to fix first and unblock stricter review of every later feature.</td>
+          <td>Single hardening PR: stable ids, no fixed draft voice, typed decisions, no status remap, explicit partial-source UI.</td>
+          <td class="score"><span class="pct ok">90%</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>PR Slice Order</h2>
+    <ol>
+      <li><strong>P0 protocol hardening:</strong> task status typed union, fusion decision typed wire, stable attachment ids, connector partial-source disclosures.</li>
+      <li><strong>Multimodal block transport:</strong> share chat/board composer block contract and stop serializing rich media into plain body text.</li>
+      <li><strong>Scheduler wake evidence:</strong> durable runner receipt, lane event, terminal outcome, and dashboard join.</li>
+      <li><strong>Fusion async surface:</strong> typed Judge/Judge-of-Judges graph, sink receipt, and failed-panel isolation without free-form parsing.</li>
+      <li><strong>Lane per Keeper:</strong> one lane timeline per keeper showing busy, queued, deferred, wake cause, current run, and next action.</li>
+      <li><strong>Board reactive/proactive path:</strong> board mention/context inference -> LLM judgment -> wake or queue with explicit ignored reason.</li>
+      <li><strong>Connector context memory:</strong> Discord/Slack/iMessage server/channel/user context as scoped facts and turn source badges.</li>
+      <li><strong>Memory compaction diff:</strong> backend projection for keep/summarize/drop and librarian diagnostic rows.</li>
+      <li><strong>Visual parity loop:</strong> only after truth contracts are stable, run Playwright screenshots against the latest reference bundle.</li>
+    </ol>
+
+    <h2>Do Not Copy As Truth</h2>
+    <div class="note">
+      <p><strong>Runtime/model names in <code>runtime-data.jsx</code> are not current capability truth.</strong> Provider/model support changes quickly. Any implementation around Thinking, Reasoning, Tools, Multiturn, Multimodal, or pricing must first read the latest official docs and then bind the result to OAS/runtime schema evidence.</p>
+      <p><strong>Prototype fixture values must stay out of production:</strong> synthetic turn cost/tokens, hardcoded voice transcript/duration, sample Discord messages, and demo model catalogs are design scaffolding only.</p>
+    </div>
+
+    <h2>Acceptance Rules For Every Slice</h2>
+    <div class="grid cols-3">
+      <div class="card"><strong>Boundary</strong><br />MASC can consume OAS runtime/provider truth; OAS must not import or assume MASC dashboard concepts.</div>
+      <div class="card"><strong>No silent failure</strong><br />Malformed, missing, stale, unsupported, and partial data must render as explicit source health or protocol drift.</div>
+      <div class="card"><strong>No fake judgment</strong><br />Human-like judgment paths go through an LLM boundary or an explicit typed rule. Regex/substrings may extract candidates only, not decide meaning.</div>
+      <div class="card"><strong>Lane isolation</strong><br />One keeper blocked/busy must not freeze global dashboard behavior or other keepers' lanes.</div>
+      <div class="card"><strong>Immutable UI transforms</strong><br />Prefer pure transforms over in-place mutation; preserve raw tokens for unknown variants.</div>
+      <div class="card"><strong>Verification</strong><br />Frontend changes run targeted typecheck/tests. OCaml/dune full build remains CI authority unless explicitly requested.</div>
+    </div>
+
+    <h2>Evidence Ledger</h2>
+    <div class="ledger">
+      <div class="card">
+        <h3>Latest reference bundle</h3>
+        <ul class="evidence-list">
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/messages.jsx:37-52</code> trace groups and tool duration.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/messages.jsx:80-127</code> rich chat block taxonomy including fusion/media.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/board.jsx:33-186</code> board posts, replies, reactions, mention inbox, composer modes.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/schedule.jsx:1-259</code> scheduler approval/detail/run payload surface.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/approvals.jsx:1-214</code> HITL queue and auto policy shape.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/fusion.jsx:1-260</code> panel fanout, judge fields, Judge-of-Judges, sink.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/memory.jsx:1-232</code> real-memory inspector shape, no salience/uses/pins.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/connectors.jsx:1-194</code> gate/connectors/bindings/audit surface.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/runtime-data.jsx:1-94</code> runtime config/catalog shape, treated as design shape only.</li>
+          <li><code>/Users/dancer/Downloads/v2 (29)/keeper-v2/turn-inspector.jsx:1-249</code> turn detail intent; synthetic fixture values excluded from truth.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Current MASC dashboard</h3>
+        <ul class="evidence-list">
+          <li><code>dashboard/src/api/board.ts:887-1157</code> board API, context inference, reactions, sub-board operations.</li>
+          <li><code>dashboard/src/components/board/composer-v2.ts:142-175</code> fixed voice draft and body serialization gap.</li>
+          <li><code>dashboard/src/components/approvals/approvals-surface.ts:1-483</code> live approval queue, approve/reject/always, no fake defer.</li>
+          <li><code>dashboard/src/components/schedule/schedule-surface.ts:64-77</code> current scheduler page states observation-only.</li>
+          <li><code>dashboard/src/components/fusion/fusion-surface.ts:291-305</code> current decision normalization from free-form text.</li>
+          <li><code>dashboard/src/components/work.ts:202-260</code> task status remapping and unknown fallback risk.</li>
+          <li><code>dashboard/src/components/memory-inspector.ts:1-17</code> real-data-only memory inspector contract.</li>
+          <li><code>dashboard/src/api/dashboard-runtime.ts:19-210</code> runtime capability and config surface types.</li>
+          <li><code>dashboard/src/api/schemas/gate-connectors.ts:66-70</code> shaped fallback contract for nested connector objects.</li>
+          <li><code>dashboard/src/components/keeper-turn-inspector.ts:1361-1370</code> exact turn_ref match with legacy timestamp fallback.</li>
+        </ul>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -201,25 +201,28 @@ html[data-skin="v2"] .rt-input:focus { outline: none; border-color: var(--volt-d
 html[data-skin="v2"] .rt-lane {
   display: flex;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 10px 16px;
   padding: 14px 0;
   border-top: 1px solid var(--border-soft);
 }
 html[data-skin="v2"] .rt-lane:first-of-type { border-top: 0; } /* runtime.css:38 */
-html[data-skin="v2"] .rt-lane-l { flex: 1; min-width: 0; } /* runtime.css:39 */
+html[data-skin="v2"] .rt-lane-l { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; } /* runtime.css:39 */
 html[data-skin="v2"] .rt-lane-lbl { font-size: var(--fs-13); color: var(--text-primary); } /* runtime.css:40 */
 html[data-skin="v2"] .rt-lane-hint {
   /* runtime.css:41 */
   font-size: var(--fs-11);
   color: var(--text-dim);
   margin-top: 3px;
+  overflow-wrap: anywhere;
 }
 html[data-skin="v2"] .rt-lane-c {
   /* runtime.css:42 */
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: none;
+  flex: 1 1 200px;
+  min-width: 0;
 }
 html[data-skin="v2"] .rt-select {
   /* runtime.css:43 */
@@ -230,11 +233,17 @@ html[data-skin="v2"] .rt-select {
   color: var(--text-bright);
   font-size: var(--fs-12);
   cursor: pointer;
-  min-width: 248px;
+  min-width: 0;
+  width: 100%;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 html[data-skin="v2"] .rt-select:focus { outline: none; border-color: var(--volt-dim); } /* runtime.css:44 */
-html[data-skin="v2"] .rt-warn { font-size: var(--fs-11); color: var(--status-bad); white-space: nowrap; } /* runtime.css:45 */
-html[data-skin="v2"] .rt-ok { font-size: var(--fs-11); color: var(--status-ok); white-space: nowrap; } /* runtime.css:46 */
+html[data-skin="v2"] .rt-warn { font-size: var(--fs-11); color: var(--status-bad); overflow-wrap: anywhere; } /* runtime.css:45 */
+html[data-skin="v2"] .rt-ok { font-size: var(--fs-11); color: var(--status-ok); overflow-wrap: anywhere; } /* runtime.css:46 */
+html[data-skin="v2"] .rt-unknown { font-size: var(--fs-11); color: var(--status-warn); overflow-wrap: anywhere; }
 
 /* provider cards — runtime.css:49 */
 html[data-skin="v2"] .rt-cards { display: flex; flex-direction: column; gap: 12px; }
@@ -536,5 +545,5 @@ html[data-skin="v2"] .set-card-b-wide .rt-shell {
   html[data-skin="v2"] .rt-nav { flex-direction: row; overflow-x: auto; }
   html[data-skin="v2"] .rt-nav-h,
   html[data-skin="v2"] .rt-nav-foot { display: none; }
-  html[data-skin="v2"] .rt-select { min-width: 160px; }
+  html[data-skin="v2"] .rt-select { min-width: 0; }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_FILE_SIZE,
   MAX_IMAGE_SIZE,
+  stableAttachmentId,
   validateFile,
 } from './attachments'
 
@@ -49,5 +50,32 @@ describe('validateFile', () => {
 
   it('rejects oversized files', () => {
     expect(validateFile(fileOfSize('a.txt', 'text/plain', MAX_FILE_SIZE + 1))).toContain('파일 크기 초과')
+  })
+})
+
+describe('stableAttachmentId', () => {
+  it('derives a deterministic id from attachment identity and content', () => {
+    const input = {
+      name: 'trace.log',
+      type: 'file',
+      mimeType: 'text/plain',
+      size: 12,
+      data: 'data:text/plain;base64,QUJD',
+    }
+
+    expect(stableAttachmentId(input)).toBe(stableAttachmentId({ ...input }))
+    expect(stableAttachmentId(input)).toMatch(/^att-[0-9a-z]+$/)
+  })
+
+  it('changes when the attachment content reference changes', () => {
+    const base = {
+      name: 'trace.log',
+      type: 'file',
+      mimeType: 'text/plain',
+      size: 12,
+    }
+
+    expect(stableAttachmentId({ ...base, data: 'data:text/plain;base64,QUJD' }))
+      .not.toBe(stableAttachmentId({ ...base, data: 'data:text/plain;base64,REVG' }))
   })
 })

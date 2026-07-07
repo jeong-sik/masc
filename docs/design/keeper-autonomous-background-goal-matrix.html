@@ -288,9 +288,9 @@
           </tr>
           <tr>
             <td>주기 반복 작업 (cadence + 상태 + 마지막 실행)</td>
-            <td><code>keeper_recurring.ml</code><span class="tnote"><span class="mono">interval_sec · last_run_ts · run_count · failure_count · enabled(paused)</span> — action은 Broadcast 한정</span></td>
-            <td><span class="chip observable">observable</span></td>
-            <td>1</td>
+            <td><code>keeper_recurring.ml</code><span class="tnote"><span class="mono">interval_sec · last_run_ts · run_count · enabled(paused)</span> — 소비자(heartbeat dispatch)는 라이브지만 <b>생산자(add) 호출이 프로덕션에 0</b> → <span class="mono">list_all()</span> 항상 empty. 등록 경로 = RFC-0314.</span></td>
+            <td><span class="chip absent">producer 0</span></td>
+            <td>2·RFC</td>
           </tr>
           <tr>
             <td>비동기 · deferred (bg shell · fusion · hitl)</td>
@@ -329,10 +329,13 @@
     <div class="sec-h"><span class="sec-n">§3</span><h2>Goal Matrix</h2><span class="sub">phased · 검증 가능한 완료 기준</span></div>
     <div class="goals">
 
-      <article class="goal" data-phase="1">
-        <div class="goal-rail"><span class="goal-id">G1</span><span class="goal-phase">Phase 1 · 지금</span></div>
+      <article class="goal" data-phase="2">
+        <div class="goal-rail"><span class="goal-id">G1</span><span class="goal-phase">projection 머지 · 패널 보류</span></div>
         <div class="goal-body">
-          <h3>백엔드 projection <code>server_keeper_background</code> — <em>신규 관측만</em></h3>
+          <div class="callout" style="margin:0 0 14px">
+            <b>적대 검증 정정 (2026-07-07):</b> recurring은 대시보드 소비자도 0이지만 <b>생산자(add)도 0</b>인 죽은 소스로 확인됨 → 패널은 프로덕션에서 항상 empty. <b>패널은 보류</b>하고 백엔드 projection + 설계만 머지. 생산자(등록 MCP 도구)는 <b>RFC-0314</b>로 선행. 빈 패널을 프로덕션에 내보내지 않음.
+          </div>
+          <h3>백엔드 projection <code>server_keeper_background</code> — <em>display-ready infra</em></h3>
           <p><b>SSOT 경계:</b> bg/fusion/hitl(비동기·deferred)은 이미 <span class="mono">keeper_waiting_inventory</span>로 출하됐으므로 <b>재projection하지 않는다</b>.
             이 모듈은 대시보드에 <em>전혀 노출되지 않던</em> keeper-native 자율 활동만 투영한다: <b>루프 liveness</b>(registry phase·started_at·restart) + <b>주기 반복 작업</b>(recurring: cadence·last_run·enabled).</p>
           <dl class="kv">

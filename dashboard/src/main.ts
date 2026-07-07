@@ -88,7 +88,6 @@ import './styles/keeper-v2/keeper-config.css'
 import './styles/keeper-v2/fusion.css'
 import './styles/keeper-v2/memory.css'
 import './styles/keeper-v2/schedule.css'
-import './styles/keeper-v2/keeper-background.css'
 import './styles/keeper-v2/runtime.css'
 // Non-prototype: harmonizes the re-mounted operational cluster (.v2-top-ops) to
 // the statchip pill shape. Loaded last so it wins on shape (see file header).

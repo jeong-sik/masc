@@ -83,7 +83,7 @@ done 판정의 결정론 층이 substring 주문(incantation)으로 구현되어
 - [근거] `keepers/*.decisions.jsonl` error_preview 142건 중 **142/142가 contracted 경로**(`required_evidence` n_unsat 2/3/4), #23330 no-contract 규칙(`contract_required:false`)은 **0/142**. 원래 지목된 no-contract typed-ref 규칙은 실측 거부가 0건 — 지배적 과잉차단 원인이 아니다.
 - [근거] 모든 task는 생성 시 무조건 계약을 받는다: `workspace_task_create.ml:161` → `ensure_task_contract_for_verification`. 계약 없이 생성해도 `required_evidence` 기본값이 `["completion_notes"; "reviewable_evidence_ref"]`(`workspace_task_classify.ml:200`) 두 메타 토큰으로 채워진다.
 - [근거] 이 기본 토큰을 만족하는 유일한 방법은 리터럴 문자열을 notes에 붙여넣는 substring 매칭(`task_completion_gate.ml:40-56`)이다. trusted-ref 대안은 `evidence_ref_is_gate_trusted ref_ && r = entry_lower`(`:74-78`)로 ref 문자열이 메타 필드명과 **정확히 일치**해야 하는데 어떤 실제 `Evidence_ref`도 그 이름이 될 수 없다. 따라서 한 줄이 동시에 **누수**(라벨 붙여넣기 = fake-done)이자 **과잉차단**(토큰을 모르는 키퍼는 결정론적 거부: nick0cave task-1831 4회 거부 후 포기, sangsu 트레이스 "required_evidence 항목을 verbatim으로 다 써야 하는데 그게 뭔지 모른다").
-- [근거] non-code task의 구조적 블로커: trusted 형태(Url/Trace_ref)를 원리상 생산할 수 있어도 제출 채널 `handoff_context.evidence_refs`가 `action='release'` 전용(`tool_task_schemas.ml:256`, `tool_task_args.ml:143-145`)이라 keeper가 "keeper_task_done 스키마에 노출 안 됨"으로 제출 불가.
+- [근거] non-code task의 구조적 블로커(해소 대상): trusted 형태(Url/Trace_ref)를 원리상 생산할 수 있어도 기존 제출 채널은 `masc_transition.handoff_context.evidence_refs`에만 있었고 keeper-facing `keeper_task_done`은 이를 노출하지 않았다. Phase 1 구현은 `keeper_task_done.evidence_refs`를 required field로 추가하고 runtime에서 `handoff_context.evidence_refs`로 운반해 이 제출 경로를 연다.
 
 ### 8.2 운영자 결정 (2026-07-07 ratified)
 

@@ -143,14 +143,27 @@ let assignee_of config task_id =
     Some assignee
   | _ -> None
 
-let attempt_done ~config ~meta ~ctx_work ~task_id ~result =
+let attempt_done
+      ?(evidence_refs = [ "trace:completion-trust-harness" ])
+      ~config
+      ~meta
+      ~ctx_work
+      ~task_id
+      ~result
+  =
   KET.execute_keeper_tool_call_with_outcome
     ~config
     ~meta
     ~ctx_work
     ~exec_cache:None
     ~name:"keeper_task_done"
-    ~input:(`Assoc [ ("task_id", `String task_id); ("result", `String result) ])
+    ~input:
+      (`Assoc
+        [ "task_id", `String task_id
+        ; "result", `String result
+        ; ( "evidence_refs"
+          , `List (List.map (fun ref_ -> `String ref_) evidence_refs) )
+        ])
     ()
 
 let claim_via_dispatch ~config ~meta ~ctx_work ~task_id =
@@ -261,6 +274,44 @@ let test_completion_denied_for_thin_notes () =
     | Some assignee -> check string "task still owned by caller, not Done" meta.agent_name assignee
     | None -> fail "task-001 must remain Claimed/InProgress after the rejected completion")
 
+let test_completion_with_evidence_refs_succeeds () =
+  with_ws "completion_trust_evidence_refs" (fun ~config ~meta ~ctx_work ->
+    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore
+      (Workspace.add_task config ~title:"complete with evidence refs" ~priority:1
+         ~description:"claimed by the caller and completed with trusted proof");
+    let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
+    check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
+    let result =
+      attempt_done
+        ~config
+        ~meta
+        ~ctx_work
+        ~task_id:"task-001"
+        ~result:"Implemented the deliverable and opened PR#123 for review."
+        ~evidence_refs:[ "PR#123" ]
+    in
+    check string "completion outcome" "success" (outcome_label result.KET.outcome);
+    check string "completion payload shape" "structured_success"
+      (payload_kind result.KET.payload_shape);
+    match
+      List.find_opt
+        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
+        (Workspace.get_tasks_raw config)
+    with
+    | Some
+        { task_status = Masc_domain.Done { assignee; _ }
+        ; handoff_context = Some handoff
+        ; _
+        } ->
+      check string "done assignee" meta.agent_name assignee;
+      check (list string) "handoff evidence_refs" [ "PR#123" ] handoff.evidence_refs
+    | Some task ->
+      fail
+        ("expected task-001 Done with handoff evidence refs, got "
+         ^ Masc_domain.task_status_to_string task.task_status)
+    | None -> fail "task-001 missing after completion")
+
 (* Test D — positive control: the gates are SELECTIVE, not reject-everything.
    A keeper claiming its own backlog task is accepted on the same dispatch path. *)
 let test_legitimate_claim_succeeds () =
@@ -295,6 +346,8 @@ let () =
             test_completion_denied_when_unclaimed
         ; test_case "completion with sub-floor notes is denied (anti-rationalization length gate)"
             `Quick test_completion_denied_for_thin_notes
+        ; test_case "completion with evidence_refs succeeds"
+            `Quick test_completion_with_evidence_refs_succeeds
         ; test_case "legitimate self-claim is accepted (selectivity control)" `Quick
             test_legitimate_claim_succeeds
         ] )

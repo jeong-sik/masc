@@ -7,12 +7,14 @@ import {
   fetchIdeEvents,
   fetchIdeRegions,
 } from './ide'
+import { clearStoredToken, setStoredToken } from './core'
 
 const mockFetch = vi.fn()
 
 afterEach(() => {
   mockFetch.mockReset()
   vi.unstubAllGlobals()
+  clearStoredToken()
 })
 
 function stubFetch(response: unknown, ok = true, status?: number): void {
@@ -190,7 +192,8 @@ describe('ide API', () => {
     )
   })
 
-  it('deleteIdeAnnotation relies on token identity and appends repo_id param', async () => {
+  it('deleteIdeAnnotation sends the bearer token and appends repo_id param without keeper_id', async () => {
+    setStoredToken('delete-test-token', { source: 'manual', actor: 'dashboard-user' })
     stubFetch({}, true)
 
     await deleteIdeAnnotation('ann-1', { repoId: 'masc' })
@@ -199,6 +202,10 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/annotations/ann-1?')
     expect(url).toContain('repo_id=masc')
     expect(url).not.toContain('keeper_id=')
+    // The DELETE route is token-bound (CanBroadcast) — a header-less
+    // request is rejected 401 in every server configuration.
+    const init = mockFetch.mock.calls[0]![1] as RequestInit
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer delete-test-token' })
   })
 
   it('deleteIdeAnnotation maps success to deleted', async () => {
@@ -207,13 +214,29 @@ describe('ide API', () => {
     await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('deleted')
   })
 
-  it('deleteIdeAnnotation maps 403 ownership/scope rejection to forbidden', async () => {
-    stubFetch({}, false, 403)
+  it('deleteIdeAnnotation maps the coded 403 (ownership/not-found) to rejected', async () => {
+    stubFetch(
+      { ok: false, error: 'annotation delete rejected', code: 'annotation_delete_rejected' },
+      false,
+      403,
+    )
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('rejected')
+  })
+
+  it('deleteIdeAnnotation maps an uncoded 403 (auth tier) to forbidden', async () => {
+    stubFetch({ ok: false, error: 'permission denied' }, false, 403)
 
     await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('forbidden')
   })
 
-  it('deleteIdeAnnotation maps non-403 failures to error', async () => {
+  it('deleteIdeAnnotation maps 401 to unauthorized', async () => {
+    stubFetch({ ok: false, error: 'missing token' }, false, 401)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('unauthorized')
+  })
+
+  it('deleteIdeAnnotation maps non-auth failures to error', async () => {
     stubFetch({}, false)
 
     await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')

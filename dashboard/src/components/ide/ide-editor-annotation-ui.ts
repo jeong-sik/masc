@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { EditorView } from '@codemirror/view'
 import type { IdeAnnotationDeleteOutcome } from '../../api/ide'
 import type { SelectedAnnotation } from './ide-lsp-client'
@@ -71,35 +71,50 @@ export function AnnotationDeleteControl({
   readonly onDelete: (annotation: SelectedAnnotation) => Promise<IdeAnnotationDeleteOutcome>
   readonly onDeleted: () => void
 }) {
-  // Armed state is keyed to the annotation id: switching the popover to a
-  // different annotation reuses this component instance (same vDOM slot),
-  // and a plain boolean would carry the armed click over to the new
-  // target — one click would then delete an annotation the user never
-  // armed.
+  // Armed/pending state is keyed to the annotation id: switching the
+  // popover to a different annotation reuses this component instance
+  // (same vDOM slot), and a plain boolean would carry the armed click
+  // over to the new target — one click would then delete an annotation
+  // the user never armed.
   const [armedFor, setArmedFor] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  const [pendingFor, setPendingFor] = useState<string | null>(null)
+  const latestIdRef = useRef(annotation.id)
+  latestIdRef.current = annotation.id
+
+  // Disarm on target switch, not just mask: without this, arming ann-1,
+  // browsing to ann-2 and coming back would leave ann-1 pre-armed.
+  useEffect(() => {
+    setArmedFor(current =>
+      current !== null && current !== annotation.id ? null : current)
+  }, [annotation.id])
+
   const armed = armedFor === annotation.id
+  const pending = pendingFor === annotation.id
 
   const run = async () => {
-    if (pending) return
+    if (pendingFor !== null) return
     if (!armed) {
       setArmedFor(annotation.id)
       return
     }
-    setPending(true)
+    const target = annotation
+    setPendingFor(target.id)
     let outcome: IdeAnnotationDeleteOutcome
     try {
-      outcome = await onDelete(annotation)
+      outcome = await onDelete(target)
     } catch {
       outcome = 'error'
     }
-    if (outcome === 'deleted') {
+    if (outcome === 'deleted' && latestIdRef.current === target.id) {
       // The popover unmounts with the deleted annotation — skip state
       // updates that would land on an unmounted component.
       onDeleted()
       return
     }
-    setPending(false)
+    // Non-deleted outcome, or the popover moved to a different annotation
+    // while the delete was in flight — closing now would dismiss a target
+    // the user is looking at, so just settle the control.
+    setPendingFor(null)
     setArmedFor(null)
   }
 
@@ -108,7 +123,7 @@ export function AnnotationDeleteControl({
       type="button"
       class="v2-ide-action"
       data-testid="ide-annotation-delete"
-      disabled=${pending}
+      disabled=${pendingFor !== null}
       title=${armed
         ? '한 번 더 누르면 삭제됩니다'
         : '주석 삭제 (본인이 작성한 주석만 서버가 허용)'}

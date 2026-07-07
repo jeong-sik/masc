@@ -1107,13 +1107,23 @@ export function IdeShell() {
       return 'error'
     }
     const outcome = await deleteIdeAnnotation(annotation.id, { repoId })
-    if (outcome === 'deleted') {
-      showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
-      workspaceStore.refresh()
-    } else if (outcome === 'forbidden') {
-      showToast('주석 삭제 거부 — 본인이 작성한 주석만 삭제할 수 있습니다', 'error')
-    } else {
-      showToast('주석 삭제 실패 — 서버/네트워크 오류', 'error')
+    switch (outcome) {
+      case 'deleted':
+        showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
+        workspaceStore.refresh()
+        break
+      case 'rejected':
+        showToast('주석 삭제 거부 — 본인이 작성한 주석이 아니거나 이미 삭제된 주석입니다', 'error')
+        break
+      case 'forbidden':
+        showToast('주석 삭제 권한 없음 — 토큰에 쓰기 권한(CanBroadcast tier)이 필요합니다', 'error')
+        break
+      case 'unauthorized':
+        showToast('인증 실패 — 대시보드 토큰이 없거나 만료되었습니다', 'error')
+        break
+      case 'error':
+        showToast('주석 삭제 실패 — 서버/네트워크 오류', 'error')
+        break
     }
     return outcome
   }

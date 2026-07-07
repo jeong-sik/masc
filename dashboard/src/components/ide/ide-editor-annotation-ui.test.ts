@@ -136,6 +136,46 @@ describe('AnnotationDeleteControl', () => {
     expect(onDelete).not.toHaveBeenCalled()
   })
 
+  it('does not stay armed after browsing away and back to the same annotation', async () => {
+    const el = mount()
+    button(el).click()
+    await tick()
+    expect(button(el).textContent?.trim()).toBe('삭제 확인')
+
+    mount({ ...annotation, id: 'ann-2' })
+    await tick()
+    mount(annotation)
+    await tick()
+
+    expect(button(el).textContent?.trim()).toBe('삭제')
+    button(el).click()
+    await tick()
+    expect(onDelete).not.toHaveBeenCalled()
+  })
+
+  it('does not close the popover when the target switched while the delete was in flight', async () => {
+    let resolveDelete: (outcome: IdeAnnotationDeleteOutcome) => void = () => {}
+    onDelete.mockReturnValue(new Promise(resolve => { resolveDelete = resolve }))
+    const el = mount()
+
+    button(el).click()
+    await tick()
+    button(el).click()
+    await tick()
+    expect(onDelete).toHaveBeenCalledWith(annotation)
+
+    mount({ ...annotation, id: 'ann-2' })
+    await tick()
+    expect(button(el).disabled).toBe(true)
+
+    resolveDelete('deleted')
+    await tick()
+
+    expect(onDeleted).not.toHaveBeenCalled()
+    expect(button(el).textContent?.trim()).toBe('삭제')
+    expect(button(el).disabled).toBe(false)
+  })
+
   it('treats a rejected onDelete as an error and stays usable', async () => {
     onDelete.mockRejectedValue(new Error('boom'))
     const el = mount()

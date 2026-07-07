@@ -771,7 +771,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
           </h5>
           ${judge.consensus.map((claim, index) => html`
             <div class="fus-claim" key=${`consensus-${index}`}>
-              <p><${RichContent} text=${claim.text} previewLimit=${0} /></p>
+              <div class="fus-claim-text"><${RichContent} text=${claim.text} previewLimit=${0} /></div>
               <${FusionModelChips} models=${claim.models} />
             </div>
           `)}
@@ -787,7 +787,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
                     ${contradiction.positions.map(position => html`
                       <div class="fus-pos" key=${`${contradiction.topic}:${position.model}`}>
                         <span class="fus-pos-m mono">${position.model}</span>
-                        <span class="fus-pos-s"><${RichContent} text=${position.stance} previewLimit=${0} /></span>
+                        <div class="fus-pos-s"><${RichContent} text=${position.stance} previewLimit=${0} /></div>
                       </div>
                     `)}
                   </div>
@@ -809,7 +809,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
                     </div>
                     <div class="fus-gap-row">
                       <span class="k">누락</span>
-                      <span class="fus-gap-miss"><${RichContent} text=${gap.missing} previewLimit=${0} /></span>
+                      <div class="fus-gap-miss"><${RichContent} text=${gap.missing} previewLimit=${0} /></div>
                     </div>
                   </div>
                 `)}
@@ -823,7 +823,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
                 <h5><span class="fus-jglyph">✦</span>고유 통찰 <span class="n">${judge.uniqueInsights.length}</span></h5>
                 ${judge.uniqueInsights.map((insight, index) => html`
                   <div class="fus-insight" key=${`insight-${index}`}>
-                    <p><${RichContent} text=${insight.text} previewLimit=${0} /></p>
+                    <div class="fus-insight-text"><${RichContent} text=${insight.text} previewLimit=${0} /></div>
                     ${insight.model ? html`<span class="fus-mchip mono">${insight.model}</span>` : null}
                   </div>
                 `)}
@@ -1108,7 +1108,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
         <div class="fus-resolved-lbl">resolved_answer</div>
         <${FusionResolvedBody} text=${resolved} />
         ${run.judge.recommendation?.rationale
-          ? html`<p class="fus-rec-rationale"><span class="k">근거</span><${RichContent} text=${run.judge.recommendation.rationale} previewLimit=${0} /></p>`
+          ? html`<div class="fus-rec-rationale"><span class="k">근거</span><${RichContent} text=${run.judge.recommendation.rationale} previewLimit=${0} /></div>`
           : null}
         ${run.judge.missingInputs.length > 0
           ? html`

@@ -773,32 +773,45 @@ function KanbanView({
   onClaim: (id: string) => void
   onJumpGoal: (goalId: string) => void
 }) {
+  const total = kanbanTasks.length
   return html`
-    <div class="wk-kanban" data-testid="work-kanban">
-      ${KANBAN_COLUMNS.map(([status, label, cls]) => {
-        const col = kanbanTasks.filter(t => t.status === status)
-        return html`
-          <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
-            <div class="wk-kcol-h">
-              <span class="wk-kcol-title">${label}</span>
-              <span class="wk-kcol-count">${col.length}</span>
-            </div>
-            <div class="wk-kcol-body">
-              ${col.length === 0
-                ? html`<div class="wk-kcol-empty mono">—</div>`
-                : col.map(t => html`
-                  <${KanbanCard}
-                    key=${t.id}
-                    task=${t}
-                    onClaim=${onClaim}
-                    onJumpGoal=${onJumpGoal}
-                  />
-                `)}
-            </div>
+    <section class="wk-board-section" data-testid="work-board-section">
+      <div class="wk-board-head">
+        <div>
+          <div class="wk-board-title">
+            <span class="wk-board-glyph" aria-hidden="true">▦</span>
+            칸반 · 상태별
+            <span class="wk-board-count mono">${total}</span>
           </div>
-        `
-      })}
-    </div>
+        </div>
+        <div class="wk-board-flow mono">todo → claimed → in_progress → verify → done</div>
+      </div>
+      <div class="wk-kanban" data-testid="work-kanban">
+        ${KANBAN_COLUMNS.map(([status, label, cls]) => {
+          const col = kanbanTasks.filter(t => t.status === status)
+          return html`
+            <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
+              <div class="wk-kcol-h">
+                <span class="wk-kcol-title">${label}</span>
+                <span class="wk-kcol-count">${col.length}</span>
+              </div>
+              <div class="wk-kcol-body">
+                ${col.length === 0
+                  ? html`<div class="wk-kcol-empty mono">—</div>`
+                  : col.map(t => html`
+                    <${KanbanCard}
+                      key=${t.id}
+                      task=${t}
+                      onClaim=${onClaim}
+                      onJumpGoal=${onJumpGoal}
+                    />
+                  `)}
+              </div>
+            </div>
+          `
+        })}
+      </div>
+    </section>
   `
 }
 

@@ -313,6 +313,10 @@ describe('Work', () => {
 
       fireEvent.click(screen.getByTestId('work-view-kanban'))
 
+      const section = screen.getByTestId('work-board-section')
+      expect(section.textContent).toContain('칸반 · 상태별')
+      expect(section.textContent).toContain('todo → claimed → in_progress → verify → done')
+
       const todoCol = screen.getByTestId('kanban-col-todo')
       const claimedCol = screen.getByTestId('kanban-col-claimed')
       expect(todoCol.querySelector('.wk-kcol-title')?.textContent).toBe('미배정')
@@ -972,6 +976,7 @@ describe('Work', () => {
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
         // Kanban board present; list view gone
+        expect(screen.getByTestId('work-board-section').textContent).toContain('칸반 · 상태별')
         const board = screen.getByTestId('work-kanban')
         expect(board).toBeTruthy()
         expect(screen.queryByTestId('work-goal-list')).toBeNull()

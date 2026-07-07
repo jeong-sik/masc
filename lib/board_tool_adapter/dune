@@ -14,7 +14,6 @@
  (wrapped false)
  (private_modules
   board_tool_cache
-  board_claim_gate
   board_tool_curation
   board_tool_handlers
   board_tool_post

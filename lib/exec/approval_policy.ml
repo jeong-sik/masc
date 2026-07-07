@@ -350,19 +350,10 @@ let ask_of policy ~caps ~bin : Verdict.t =
 let gh_capability_of_simple (simple : Shell_ir.simple)
   : Gh_capability_policy.disposition option
   =
-  match Exec_program.known simple.Shell_ir.bin with
-  | Some Exec_program.Gh ->
-    let words =
-      Exec_program.to_string simple.Shell_ir.bin
-      :: List.map repo_hosting_arg_word simple.Shell_ir.args
-    in
-    (* [disposition_of_words], not [disposition_of]: [gh api graphql ...] lowers
-       to the body-blind [Gh_verb.Api], so the words must be passed through for
-       the graphql-body durable-remote check (RFC-0309 W4 axis-symmetry fix). *)
-    Some
-      (Gh_capability_policy.disposition_of_words words (Gh_verb.classify words))
-  | Some _ | None -> None
-[@@warning "-4"]
+  (* [disposition_of_simple], not [disposition_of]: [gh api graphql ...] lowers
+     to the body-blind [Gh_verb.Api], so the capability axis must see both the
+     literal argv words and any Shell IR opacity in the graphql [query] body. *)
+  Gh_capability_policy.disposition_of_simple simple
 
 let trust_dispatch ~trust_level ~caps ~policy ~bin ~simple : Verdict.t =
   match trust_level with

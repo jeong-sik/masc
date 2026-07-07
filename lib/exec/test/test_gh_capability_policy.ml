@@ -14,6 +14,9 @@
 
 module Gh_verb = Masc_exec.Gh_verb
 module Pol = Masc_exec.Gh_capability_policy
+module Exec_program = Masc_exec.Exec_program
+module Sandbox_target = Masc_exec.Sandbox_target
+module Shell_ir = Masc_exec.Shell_ir
 
 let verb ~sub ?act () = Gh_verb.of_fields ~subcommand:sub ~action:act
 
@@ -111,6 +114,24 @@ let test_current_dispositions () =
 let graphql_words body =
   [ "gh"; "api"; "graphql"; "-f"; "query=" ^ body ]
 
+let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
+let var s = Shell_ir.Var (s, Shell_ir.default_meta)
+let concat parts = Shell_ir.Concat parts
+
+let gh_bin =
+  match Exec_program.of_string "gh" with
+  | Ok bin -> bin
+  | Error _ -> assert false
+
+let gh_simple args : Shell_ir.simple =
+  { bin = gh_bin
+  ; args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Sandbox_target.host ()
+  }
+
 let test_graphql_durable_remote_words () =
   let ask =
     [ ("createRepository", "mutation { createRepository(input:{name:\"x\"}){ repository { id } } }")
@@ -152,6 +173,42 @@ let test_graphql_durable_remote_words () =
     [ ("repo", "create"); ("repo", "view"); ("pr", "merge"); ("issue", "create") ]
 ;;
 
+let test_graphql_opaque_query_simple () =
+  let ask =
+    [ ( "query=$MUTATION concat"
+      , [ lit "api"; lit "graphql"; lit "-f"; concat [ lit "query="; var "MUTATION" ] ]
+      )
+    ; "opaque field", [ lit "api"; lit "graphql"; lit "-f"; var "FIELD" ]
+    ; ( "attached query"
+      , [ lit "api"; lit "graphql"; concat [ lit "--raw-field=query="; var "MUTATION" ] ]
+      )
+    ]
+  in
+  List.iter
+    (fun (label, args) ->
+       match Pol.disposition_of_simple (gh_simple args) with
+       | Some Pol.Requires_approval -> ()
+       | Some d ->
+         Alcotest.failf "%s: expected requires_approval, got %s" label (dstr d)
+       | None -> Alcotest.failf "%s: expected gh disposition" label)
+    ask;
+  match
+    Pol.disposition_of_simple
+      (gh_simple
+         [ lit "api"
+         ; lit "graphql"
+         ; lit "-F"
+         ; concat [ lit "owner="; var "OWNER" ]
+         ; lit "-f"
+         ; lit "query=query { viewer { login } }"
+         ])
+  with
+  | Some Pol.Requires_approval ->
+    Alcotest.fail "opaque non-query graphql variables must not require approval"
+  | Some (Pol.Allowed | Pol.Denied) -> ()
+  | None -> Alcotest.fail "expected gh disposition"
+;;
+
 let () =
   Alcotest.run "gh_capability_policy"
     [
@@ -163,6 +220,8 @@ let () =
             test_current_dispositions;
           Alcotest.test_case "graphql durable-remote (words)" `Quick
             test_graphql_durable_remote_words;
+          Alcotest.test_case "graphql opaque query (simple)" `Quick
+            test_graphql_opaque_query_simple;
         ] );
     ]
 ;;

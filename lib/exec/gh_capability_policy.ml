@@ -74,3 +74,118 @@ let disposition_of_words (words : string list) (v : Gh_verb.t) : disposition =
   | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Other _ ->
     disposition_of v
 ;;
+
+let rec arg_literal : Shell_ir.arg -> string option = function
+  | Shell_ir.Lit (s, _) -> Some s
+  | Shell_ir.Var _ -> None
+  | Shell_ir.Concat parts ->
+    let rec collect acc = function
+      | [] -> Some (String.concat "" (List.rev acc))
+      | Shell_ir.Lit (s, _) :: rest -> collect (s :: acc) rest
+      | Shell_ir.Var _ :: _ -> None
+      | Shell_ir.Concat nested :: rest ->
+        (match collect [] nested with
+         | Some s -> collect (s :: acc) rest
+         | None -> None)
+    in
+    collect [] parts
+;;
+
+let rec arg_leading_literal : Shell_ir.arg -> string option = function
+  | Shell_ir.Lit (s, _) -> Some s
+  | Shell_ir.Var _ -> None
+  | Shell_ir.Concat [] -> Some ""
+  | Shell_ir.Concat (first :: _) -> arg_leading_literal first
+;;
+
+let arg_word (arg : Shell_ir.arg) : string =
+  match arg_literal arg with
+  | Some s -> s
+  | None -> ""
+;;
+
+let is_graphql_api (v : Gh_verb.t) : bool =
+  match v.Gh_verb.family, v.Gh_verb.action with
+  | Gh_verb.Api, Some action -> String.equal (String.lowercase_ascii action) "graphql"
+  | Gh_verb.Api, None -> false
+  | ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+    | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
+    | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
+    | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Other _ )
+    , _ -> false
+;;
+
+let is_field_flag = function
+  | "-f" | "-F" | "--field" | "--raw-field" -> true
+  | _ -> false
+;;
+
+let strip_attached_field_flag tok =
+  let lower = String.lowercase_ascii tok in
+  let strip prefix =
+    let n = String.length prefix in
+    String.sub tok n (String.length tok - n)
+  in
+  if String.starts_with ~prefix:"--field=" lower then Some (strip "--field=")
+  else if String.starts_with ~prefix:"--raw-field=" lower then
+    Some (strip "--raw-field=")
+  else if String.starts_with ~prefix:"-f" tok && not (String.equal tok "-f") then
+    Some (strip "-f")
+  else if String.starts_with ~prefix:"-F" tok && not (String.equal tok "-F") then
+    Some (strip "-F")
+  else None
+;;
+
+let field_prefix_may_be_query field_prefix =
+  let lower = String.lowercase_ascii field_prefix in
+  String.starts_with ~prefix:"query=" lower || not (String.contains lower '=')
+;;
+
+let opaque_field_arg_may_be_query (arg : Shell_ir.arg) : bool =
+  match arg_literal arg with
+  | Some _ -> false
+  | None ->
+    (match arg_leading_literal arg with
+     | Some prefix -> field_prefix_may_be_query prefix
+     | None -> true)
+;;
+
+let attached_opaque_field_may_be_query (arg : Shell_ir.arg) : bool =
+  match arg_literal arg with
+  | Some _ -> false
+  | None ->
+    (match arg_leading_literal arg with
+     | Some prefix ->
+       (match strip_attached_field_flag prefix with
+        | Some field_prefix -> field_prefix_may_be_query field_prefix
+        | None -> false)
+     | None -> false)
+;;
+
+let graphql_query_body_is_opaque (args : Shell_ir.arg list) : bool =
+  let rec scan = function
+    | [] -> false
+    | arg :: rest ->
+      (match arg_literal arg with
+       | Some tok when is_field_flag tok ->
+         (match rest with
+          | value :: tail -> opaque_field_arg_may_be_query value || scan tail
+          | [] -> false)
+       | Some _ | None -> attached_opaque_field_may_be_query arg || scan rest)
+  in
+  scan args
+;;
+
+let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
+  match Exec_program.known simple.Shell_ir.bin with
+  | Some Exec_program.Gh ->
+    let words =
+      Exec_program.to_string simple.Shell_ir.bin
+      :: List.map arg_word simple.Shell_ir.args
+    in
+    let verb = Gh_verb.classify words in
+    if is_graphql_api verb && graphql_query_body_is_opaque simple.Shell_ir.args
+    then Some Requires_approval
+    else Some (disposition_of_words words verb)
+  | Some _ | None -> None
+[@@warning "-4"]

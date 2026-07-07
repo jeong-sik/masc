@@ -78,3 +78,15 @@ val disposition_of_words : string list -> Gh_verb.t -> disposition
     [Requires_approval] for such bodies. ADDITIVE: only ever upgrades [Allowed]
     to [Requires_approval], never the reverse. Callers with the raw argv words
     (e.g. [Approval_policy.decide]) should prefer this over [disposition_of]. *)
+
+val disposition_of_simple : Shell_ir.simple -> disposition option
+(** Capability disposition for a parsed Shell IR simple command. Returns [None]
+    for non-[gh] commands.
+
+    This is the approval-path entry point because it preserves argument opacity.
+    Literal [gh api graphql -f query=...] bodies are classified through
+    {!disposition_of_words}. If the GraphQL [query] field itself is non-literal
+    (for example [query=$MUTATION] or an opaque field token), the body cannot be
+    inspected for durable-remote mutations, so the capability axis fail-closes to
+    [Requires_approval]. Opaque non-query GraphQL variables such as
+    [owner=$OWNER] do not trigger this approval path. *)

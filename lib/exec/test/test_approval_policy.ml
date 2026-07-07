@@ -17,6 +17,7 @@ let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = [])
 
 let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 let var s = Shell_ir.Var (s, Shell_ir.default_meta)
+let concat parts = Shell_ir.Concat parts
 
 let default_policy : Approval_policy.t =
   { raw_source = "(test)"; summary = "(test summary)" }
@@ -533,6 +534,49 @@ let test_gh_graphql_durable_remote_asks_under_autonomous () =
          \"b\"}) { comment { id } } }" )
     ]
 
+(* Opaque GraphQL [query] bodies are not inspectable by the durable-remote
+   fragment classifier. They must fail closed to the same non-blocking approval
+   route, while opaque non-query variables stay non-blocking. *)
+let test_gh_graphql_opaque_query_asks_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf
+           "%s: opaque graphql query body must Ask under autonomous" label)
+    [ ( "query=$MUTATION concat"
+      , [ lit "api"; lit "graphql"; lit "-f"; concat [ lit "query="; var "MUTATION" ] ]
+      )
+    ; "query field variable", [ lit "api"; lit "graphql"; lit "-f"; var "FIELD" ]
+    ; ( "attached --field=query=$MUTATION"
+      , [ lit "api"; lit "graphql"; concat [ lit "--field=query="; var "MUTATION" ] ]
+      )
+    ]
+
+let test_gh_graphql_non_query_opaque_field_allowed_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:
+        [ lit "api"
+        ; lit "graphql"
+        ; lit "-F"
+        ; concat [ lit "owner="; var "OWNER" ]
+        ; lit "-f"
+        ; lit "query=query { viewer { login } }"
+        ]
+  in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Allow t ->
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+  | _ -> Alcotest.fail "opaque non-query graphql variables must not Ask"
+
 (* Regression guard: the W3 capability layer is ADDITIVE. Reads and local /
    in-repo reversible mutations stay [Allow] under autonomous — no over-block of
    routine keeper work. *)
@@ -676,6 +720,8 @@ let () =
   test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_gh_durable_remote_asks_under_autonomous ();
   test_gh_graphql_durable_remote_asks_under_autonomous ();
+  test_gh_graphql_opaque_query_asks_under_autonomous ();
+  test_gh_graphql_non_query_opaque_field_allowed_under_autonomous ();
   test_gh_reads_and_local_still_allowed_under_autonomous ();
   test_non_gh_unaffected_by_capability_layer ();
   test_git_clean_bundled_force_denied ();

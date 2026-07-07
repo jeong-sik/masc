@@ -28,21 +28,21 @@ main의 required check는 `CI Gate` 하나로 선언되어 있으나, `enforce_a
 
 머지 시점 CI 취소(cancelled-at-merge)의 직전 실측만으로도 #23524, #23534, #23537, #23539, #23552가 확인된다. 취소된 런은 pass로도 fail로도 기록되지 않으므로, red는 다음 main 런에서야 발현되고 그 사이에 머지된 모든 PR이 오염된 기준선을 상속한다. 오염된 기준선 위에서는 "이 PR이 새 실패를 추가했는가"를 FAIL 집합 비교로만 판별할 수 있게 되어, 리뷰·검증 비용이 매 PR마다 발생한다.
 
-감시 장치는 이미 존재한다. `.github/workflows/branch-protection-watchdog.yml`은 `scripts/ci/check-main-branch-protection.sh`로 정확히 `enforce_admins=true` + required contexts `CI Gate`를 기대한다. 그러나:
+감시 장치는 이미 존재한다. `.github/workflows/branch-protection-watchdog.yml`은 `scripts/ci/check-main-branch-protection.sh`로 정확히 `enforce_admins=true` + required contexts `CI Gate`를 기대한다. 현재 live 확인 결과:
 
 1. 현실이 기대와 달라(`enforce_admins=false`) 드리프트 상태이고,
-2. `BRANCH_PROTECTION_AUDIT_TOKEN` secret이 미설정이라 push/schedule 런이 **토큰 부재 사유로** fail-closed 실패한다.
+2. `BRANCH_PROTECTION_AUDIT_TOKEN` secret은 이미 설정되어 있으며 Watchdog은 branch protection을 읽고 있다.
 
-결과적으로 Watchdog은 "늘 우는 알람"이 되어 무시되고 있으며(2026-07-07 관측: 모든 PR/main 런에서 상습 fail), 드리프트 fail과 토큰 부재 fail이 구분되지 않는다.
+따라서 현재 Watchdog red는 토큰 부재가 아니라 실제 설정 드리프트(`enforce_admins.enabled=false; expected true`)다. known drift가 계속 red로 관측되는 상태이므로, 알람을 복원하려면 토큰 추가가 아니라 `enforce_admins=true` 전환이 필요하다.
 
 ## 2. Goal
 
 이미 코드로 선언된 목표 상태로 현실을 수렴시킨다:
 
 1. `enforce_admins=true` — admin 포함 모든 머지가 `CI Gate` 성공 완료를 전제.
-2. `BRANCH_PROTECTION_AUDIT_TOKEN` 설정 — Watchdog을 살아있는 드리프트 알람으로 복원.
+2. `BRANCH_PROTECTION_AUDIT_TOKEN` 유지 — Watchdog이 계속 branch protection을 읽고 실제 드리프트만 red로 보고하게 한다.
 
-Non-goal: merge queue 도입(User 소유 repo에서는 GitHub merge queue를 사용할 수 없다 — organization 소유가 전제. 공식 문서 재확인 필요), `strict`(require branches up-to-date) 활성화(§5), required contexts 확장.
+Non-goal: merge queue 도입(소유권/플랜 제약은 적용 검토 시 GitHub 공식 문서로 재검증), `strict`(require branches up-to-date) 활성화(§5), required contexts 확장.
 
 ## 3. Design
 
@@ -58,7 +58,9 @@ gh api -X POST repos/jeong-sik/masc/branches/main/protection/enforce_admins
 
 ### 3.2 Watchdog 토큰
 
-`BRANCH_PROTECTION_AUDIT_TOKEN`은 branch protection 읽기 권한(repo admin read)이 있는 fine-grained PAT로 설정한다 (운영자 실행: repo Settings → Secrets). 이후 Watchdog의 의미가 복원된다:
+`BRANCH_PROTECTION_AUDIT_TOKEN`은 이미 repo secret으로 존재한다(2026-07-07 live 확인). 현재 Watchdog job도 이 토큰으로 branch protection을 읽은 뒤 `enforce_admins=false` 드리프트를 보고한다. 운영자는 이 secret을 유지하고, future log가 `Resource not accessible by integration` 또는 token missing으로 바뀔 때만 토큰 범위/존재를 재점검한다.
+
+`enforce_admins=true` 전환 이후 Watchdog의 의미는 다음과 같다:
 
 - green = 설정이 선언 상태와 일치
 - red = 실제 드리프트 (누군가 enforce를 내렸거나 required context가 사라짐)
@@ -78,10 +80,11 @@ enforce 활성 후 main이 red가 되면(이론상 flaky/인프라 실패로 여
 
 main이 red인 상태에서 enforce를 켜면 즉시 3.3의 정지 상태로 들어간다. 따라서:
 
-1. 잔여 main red 해소를 확인한다 — 현재 B(#23567)와 D(#23527)가 잔여. A/C는 착지 완료.
+1. 잔여 main red 해소를 확인한다. 2026-07-07 23:10 KST live 확인 기준 #23567은 merged, #23527은 존재하지 않는 PR 번호이며, 최신 main head의 CI는 아직 진행 중이다.
 2. main 최신 커밋의 `CI Gate` green을 확인한다.
-3. 3.1 + 3.2를 적용한다.
-4. 직후 첫 PR 머지에서 게이트가 실제로 작동하는지(green 전 머지 거부) 확인한다.
+3. 3.1을 적용한다. 3.2 token은 이미 설정되어 있으므로 유지 검증만 수행한다.
+4. Watchdog workflow_dispatch 또는 다음 push/schedule run이 green인지 확인한다.
+5. 직후 첫 PR 머지에서 게이트가 실제로 작동하는지(green 전 머지 거부) 확인한다.
 
 ### 3.5 Fleet 행동 영향
 
@@ -92,7 +95,7 @@ keeper가 required green을 기다리지 않고 merge를 시도하는 기존 행
 
 ## 4. Verification
 
-- 적용 직후: `bash scripts/ci/check-main-branch-protection.sh` 로컬 실행(토큰 필요) 또는 Watchdog workflow_dispatch 런이 green.
+- 적용 직후: `bash scripts/ci/check-main-branch-protection.sh` 로컬 실행(`GH_TOKEN`에 branch protection read 권한 필요) 또는 Watchdog workflow_dispatch 런이 green.
 - 게이트 실증: CI 진행 중인 아무 Draft PR에서 `gh pr merge`가 거부되는지 확인.
 - 1주 관측: cancelled-at-merge 발생 건수 0 유지 (`gh run list`에서 merge 커밋 시각과 CANCELLED 런 교차 확인).
 

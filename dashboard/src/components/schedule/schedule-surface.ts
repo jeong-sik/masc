@@ -28,6 +28,7 @@ import {
   SCHED_TERMINAL,
 } from '../v2/schedule-constants'
 import { selectedAgentName } from '../agent-detail-selection'
+import { MOCK_SCHEDULES, MOCK_KEEPER_BG, MOCK_SIGNALS } from './schedule-mock-data'
 import type { DashboardScheduledAutomationRequest, DashboardScheduledAutomationSignal } from '../../api'
 
 // Helper to check if status is terminal
@@ -646,13 +647,71 @@ function SchAside({
 }
 
 // Keeper background tasks (simulated from waiting inventory & active signals)
+const SCHED_BG_STATUS = {
+  running: { lbl: '도는 중', cls: 'ok', glyph: '▶' },
+  paused: { lbl: '멈춤', cls: 'dim', glyph: '‖' },
+  in_flight: { lbl: '실행 중', cls: 'ok', glyph: '▶' },
+  awaiting: { lbl: '결과 대기', cls: 'warn', glyph: '◷' },
+}
+
 function SchKeeperBg({
   signals,
+  demoMode,
   onOpenKeeper,
 }: {
   signals: DashboardScheduledAutomationSignal[]
+  demoMode: boolean
   onOpenKeeper: (id: string) => void
 }) {
+  if (demoMode) {
+    const polls = MOCK_KEEPER_BG.filter((b: any) => b.kind === 'poll')
+    const asyncs = MOCK_KEEPER_BG.filter((b: any) => b.kind === 'async_tool')
+    
+    const row = (b: any) => {
+      const kId = b.keeper
+      const slot = kSlot(kId)
+      const sigil = kSigil(kId)
+      const st = SCHED_BG_STATUS[b.status as keyof typeof SCHED_BG_STATUS] || { lbl: b.status, cls: 'dim', glyph: '·' }
+      const whenStr = b.kind === 'poll' ? `↻ ${b.cadence_sec < 60 ? b.cadence_sec + 's' : (b.cadence_sec / 60) + 'm'}` : `◷ ${b.issued}`
+      const metaStr = b.kind === 'poll' ? `since ${b.since}` : b.eta
+
+      return html`
+        <button key=${b.id} class=${`sch-bg-row st-${st.cls}`} onClick=${() => onOpenKeeper(kId)} title=${`${kId} 대화 열기`}>
+          <span class="sch-bg-when mono">${whenStr}</span>
+          <span class="sch-bg-body">
+            <span class="sch-bg-title">${b.label}</span>
+            <span class="sch-bg-meta">
+              <${SigilBadge} slot=${slot} sigil=${sigil} size=${16} />
+              <span class="mono sch-bg-by">${kId}</span>
+              <${SchRisk} risk=${b.risk_class} />
+              <span class="sch-bg-since mono">${metaStr}</span>
+            </span>
+          </span>
+          <span class=${`sch-pill ${st.cls}`}>${st.glyph} ${st.lbl}</span>
+        </button>
+      `
+    }
+
+    return html`
+      <section class="sch-bg">
+        <div class="sch-bg-h">
+          <h3>Keeper 자율 백그라운드</h3>
+          <span class="sch-bg-sub">operator 승인 없이 keeper가 자기 turn에서 도는 폴링 · 비동기 도구 호출 — 예약 큐와 별개 origin</span>
+        </div>
+        <div class="sch-bg-grps">
+          <div class="sch-bg-grp">
+            <div class="sch-bg-grp-h"><span class="sch-cad volt">↻ 폴링 루프</span><span class="sch-bg-grp-n mono">${polls.length}</span></div>
+            <div class="sch-bg-list">${polls.map(row)}</div>
+          </div>
+          <div class="sch-bg-grp">
+            <div class="sch-bg-grp-h"><span class="sch-cad info">⇢ 비동기 도구 호출</span><span class="sch-bg-grp-n mono">${asyncs.length}</span></div>
+            <div class="sch-bg-list">${asyncs.map(row)}</div>
+          </div>
+        </div>
+      </section>
+    `
+  }
+
   const polls = signals.filter(s => (s.kind ?? '').includes('poll'))
   const asyncs = signals.filter(s => !(s.kind ?? '').includes('poll'))
   
@@ -723,19 +782,60 @@ export function ScheduleSurface() {
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
   const [banner, setBanner] = useState<{ id: string; action: string; lbl: string; toTab: string; tabLbl: string } | null>(null)
   const [pruning, setPruning] = useState(false)
+  const [demoMode, setDemoMode] = useState<boolean>(true)
+  const [schedulesState, setSchedulesState] = useState<DashboardScheduledAutomationRequest[]>(MOCK_SCHEDULES)
 
-  const list = useMemo(() => automation?.requests ?? [], [automation])
+  const list = useMemo(() => {
+    return demoMode ? schedulesState : (automation?.requests ?? [])
+  }, [demoMode, schedulesState, automation])
   
-  const act = async (id: string, action: DashboardScheduleDecision, reason?: string) => {
+  const act = async (id: string, action: DashboardScheduleDecision | 'cancel', reason?: string) => {
+    if (demoMode) {
+      setSchedulesState(prev => prev.map(s => {
+        if (s.schedule_id === id) {
+          const updatedStatus = action === 'approve' ? 'scheduled' : action === 'reject' ? 'rejected' : 'cancelled'
+          const updatedGrant = action === 'approve' ? { by: 'operator', at: '14:01' } : undefined
+          const updatedRejected = action === 'reject' ? { by: 'operator', at: '14:01', reason: reason || '이유 없음' } : undefined
+          const updatedCancelled = action === 'cancel' ? { by: 'operator', at: '14:01' } : undefined
+          return {
+            ...s,
+            status: updatedStatus,
+            grant: updatedGrant,
+            rejected: updatedRejected,
+            cancelled: updatedCancelled,
+          } as DashboardScheduledAutomationRequest
+        }
+        return s
+      }))
+      showToast(`${id}이(가) ${action === 'approve' ? '승인' : action === 'reject' ? '거부' : '취소'}되었습니다. (데모 모드)`, 'success')
+      
+      const map: Record<string, { lbl: string; toTab: string; tabLbl: string }> = { 
+        approve: { lbl: '예약됨', toTab: 'scheduled', tabLbl: '예약됨' }, 
+        reject: { lbl: '거부됨', toTab: 'done', tabLbl: '완료·종료' },
+        cancel: { lbl: '취소됨', toTab: 'done', tabLbl: '완료·종료' }
+      }
+      const m = map[action]
+      if (m) {
+        setBanner({ id, action, ...m })
+        clearTimeout((window as any).__schBannerT)
+        ;(window as any).__schBannerT = setTimeout(() => setBanner(null), 7000)
+      }
+      return
+    }
+
     try {
+      if (action === 'cancel') {
+        showToast('실제 데이터 모드에서는 취소 조작을 지원하지 않습니다.', 'error')
+        return
+      }
       await resolveScheduleApproval(id, action, reason)
       showToast(`${id}이(가) ${action === 'approve' ? '승인' : '거부'}되었습니다.`, 'success')
       
-      const map = { 
+      const map: Record<string, { lbl: string; toTab: string; tabLbl: string }> = { 
         approve: { lbl: '예약됨', toTab: 'scheduled', tabLbl: '예약됨' }, 
         reject: { lbl: '거부됨', toTab: 'done', tabLbl: '완료·종료' }
       }
-      const m = map[action]
+      const m = map[action as 'approve' | 'reject']
       if (m) {
         setBanner({ id, action, ...m })
         clearTimeout((window as any).__schBannerT)
@@ -752,6 +852,16 @@ export function ScheduleSurface() {
     if (!window.confirm('완료되었거나 취소/만료/반려된 예약을 정말로 정리하시겠습니까?\n연관된 실행 기록 및 권한 승인도 함께 삭제됩니다.')) {
       return
     }
+    if (demoMode) {
+      setPruning(true)
+      setTimeout(() => {
+        setSchedulesState(prev => prev.filter(s => !isTerminalStatus(s.status)))
+        showToast('성공적으로 완료된 예약을 정리했습니다. (데모 모드)', 'success')
+        setPruning(false)
+      }, 500)
+      return
+    }
+
     setPruning(true)
     try {
       const res = await pruneSchedules()
@@ -855,9 +965,21 @@ export function ScheduleSurface() {
         </section>
 
         <div class="sch-viewbar">
-          <div class="sch-viewseg">
-            <button class=${`sch-viewbtn ${view === 'calendar' ? 'on' : ''}`} onClick=${() => setView('calendar')}>▧ 캘린더</button>
-            <button class=${`sch-viewbtn ${view === 'list' ? 'on' : ''}`} onClick=${() => setView('list')}>≡ 목록</button>
+          <div style=${{ display: 'flex', gap: '8px' }}>
+            <div class="sch-viewseg">
+              <button class=${`sch-viewbtn ${view === 'calendar' ? 'on' : ''}`} onClick=${() => setView('calendar')}>▧ 캘린더</button>
+              <button class=${`sch-viewbtn ${view === 'list' ? 'on' : ''}`} onClick=${() => setView('list')}>≡ 목록</button>
+            </div>
+            <div class="sch-viewseg">
+              <button class=${`sch-viewbtn ${demoMode ? 'on' : ''}`} onClick=${() => {
+                setDemoMode(!demoMode)
+                if (!demoMode) {
+                  setSchedulesState(MOCK_SCHEDULES)
+                }
+              }} style=${{ color: demoMode ? 'var(--status-ok)' : 'inherit' }}>
+                ${demoMode ? '◈ 데모 모드 (온)' : '⛁ 실제 데이터'}
+              </button>
+            </div>
           </div>
           <${SchCadenceSummary} list=${list} filter=${cadFilter} onFilter=${setCadFilter} />
         </div>
@@ -877,7 +999,7 @@ export function ScheduleSurface() {
           ? html`
               ${cadFilter !== 'daily' && cadFilter !== 'oneshot' ? html`<${SchPollingStrip} list=${list} onOpen=${setSelectedScheduleId} />` : null}
               ${cadFilter !== 'interval' ? html`<${SchAgenda} list=${list} filter=${cadFilter} onOpen=${setSelectedScheduleId} />` : null}
-              <${SchKeeperBg} signals=${automation?.signals ?? []} onOpenKeeper=${handleOpenKeeper} />
+              <${SchKeeperBg} signals=${automation?.signals ?? []} demoMode=${demoMode} onOpenKeeper=${handleOpenKeeper} />
             `
           : html`
               <div class="sch-tabs">
@@ -912,7 +1034,7 @@ export function ScheduleSurface() {
         <section class="sch-signals">
           <div class="ov-card-h"><h3>wake signal 피드 · schedule_runner.tick</h3></div>
           <div class="sch-sig-list">
-            ${(automation?.signals ?? []).map(sig => html`
+            ${(demoMode ? MOCK_SIGNALS : (automation?.signals ?? [])).map((sig: any) => html`
               <div key=${sig.signal_id} class="sch-sig">
                 <span class="sch-sig-at mono">${formatDateTimeKo(sig.emitted_at_iso)}</span>
                 <span class="sch-sig-kind ok">${sig.kind}</span>

@@ -111,6 +111,9 @@ let observation_partition_for_tool_input ~config ~meta ~kind input =
   in
   let file_path =
     observation_file_path_from_tool_input ~base_path:base_dir ~sandbox_root input
+    |> Keeper_tool_shared_runtime.keeper_observation_host_path_of_visible_path
+         ~config
+         ~meta
   in
   Keeper_tool_filesystem_runtime.resolve_partition_for_write
     ~base_dir

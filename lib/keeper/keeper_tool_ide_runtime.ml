@@ -55,12 +55,13 @@ let handle_ide_annotate
        (or worse, under whichever repository the base path happened to
        overlap), where repo-scoped IDE reads can never see it. *)
     let anchored_file_path =
-      if Filename.is_relative file_path
-      then
-        Filename.concat
-          (keeper_observation_sandbox_root ~config ~meta)
-          file_path
-      else file_path
+      (if Filename.is_relative file_path
+       then
+         Filename.concat
+           (keeper_observation_sandbox_root ~config ~meta)
+           file_path
+       else file_path)
+      |> keeper_observation_host_path_of_visible_path ~config ~meta
     in
     let partition, stored_file_path =
       Keeper_tool_filesystem_runtime.resolve_partition_for_write

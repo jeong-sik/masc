@@ -328,6 +328,34 @@ let keeper_observation_sandbox_root
        (Keeper_sandbox.host_root_rel_of_meta ~meta))
 ;;
 
+let keeper_observation_host_path_of_visible_path
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      raw_path
+  =
+  if Filename.is_relative raw_path
+     || meta.sandbox_profile <> Keeper_types_profile_sandbox.Docker
+  then raw_path
+  else (
+    let strip = Keeper_alerting_path.strip_trailing_slashes in
+    let normalize path = Keeper_alerting_path.normalize_path_for_check_stripped path in
+    let container_root = Keeper_sandbox.container_root meta.name |> normalize in
+    let raw_norm = normalize raw_path in
+    let host_root = keeper_observation_sandbox_root ~config ~meta |> strip in
+    if String.equal raw_norm container_root
+    then host_root
+    else if String.starts_with ~prefix:(container_root ^ "/") raw_norm
+    then (
+      let suffix =
+        String.sub
+          raw_norm
+          (String.length container_root + 1)
+          (String.length raw_norm - String.length container_root - 1)
+      in
+      Filename.concat host_root suffix)
+    else raw_path)
+;;
+
 let safe_file_exists path =
   try Fs_compat.file_exists path with
   | Sys_error _ -> false

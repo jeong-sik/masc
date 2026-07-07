@@ -37,7 +37,7 @@ let sample_repo =
   }
 ;;
 
-let make_meta name =
+let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Local) name =
   let json =
     `Assoc
       [ "name", `String name
@@ -47,8 +47,8 @@ let make_meta name =
       ; "allowed_paths", `List [ `String "*" ]
       ; ( "sandbox_profile"
         , `String
-            (Keeper_types_profile_sandbox.sandbox_profile_to_string
-               Keeper_types_profile_sandbox.Local) )
+            (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
+        )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -195,13 +195,17 @@ let test_missing_path_falls_back_to_base_path () =
   check string "base fallback" "/tmp/masc-base" (observed_path [])
 ;;
 
-let with_partition_fixture f =
+let with_partition_fixture ?sandbox_profile f =
   with_temp_base_path (fun base_path ->
     (match Repo_store.save_all ~base_path [ sample_repo ] with
      | Ok () -> ()
      | Error msg -> fail ("repo save failed: " ^ msg));
     let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
-    let meta = make_meta "tester" in
+    let meta =
+      match sandbox_profile with
+      | Some sandbox_profile -> make_meta ~sandbox_profile "tester"
+      | None -> make_meta "tester"
+    in
     f ~config ~meta)
 ;;
 
@@ -252,6 +256,29 @@ let test_partition_unregistered_playground_repo_is_unmatched () =
     | Agent_observation.Base_unresolved
     | Agent_observation.Legacy_default ->
       fail "expected Unmatched partition for unregistered playground repo")
+;;
+
+let test_partition_docker_visible_path_maps_to_playground_repo () =
+  with_partition_fixture
+    ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+    (fun ~config ~meta ->
+       let container_repo_path =
+         Filename.concat
+           (Keeper_sandbox.container_root meta.name)
+           "repos/masc/lib/docker.ml"
+       in
+       let partition, rel_path =
+         resolve_partition ~config ~meta [ "path", `String container_repo_path ]
+       in
+       check string "repo-relative path" "lib/docker.ml" rel_path;
+       match partition with
+       | Agent_observation.By_url slug ->
+         check string "slug" "github.com_jeong-sik_masc" slug
+       | Agent_observation.No_canonical_url
+       | Agent_observation.Unmatched
+       | Agent_observation.Base_unresolved
+       | Agent_observation.Legacy_default ->
+         fail "expected Docker visible absolute path to resolve to By_url")
 ;;
 
 (* A bare relative path outside the [repos/<id>/] lane is a real
@@ -317,6 +344,10 @@ let () =
             "unregistered playground repo is Unmatched"
             `Quick
             test_partition_unregistered_playground_repo_is_unmatched
+        ; test_case
+            "Docker visible absolute path maps to playground repo"
+            `Quick
+            test_partition_docker_visible_path_maps_to_playground_repo
         ; test_case
             "bare relative outside repos lane is Base_unresolved"
             `Quick

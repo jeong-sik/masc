@@ -126,6 +126,7 @@ type t =
   | ProviderTimeoutLoopPaused
   | TurnFailureStreakPaused
   | CycleExceptions
+  | SnapshotReadFailures
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
   | StateSnapshotInvalidGoal
@@ -394,6 +395,7 @@ let to_string = function
   | ProviderTimeoutLoopPaused -> "masc_keeper_provider_timeout_loop_paused_total"
   | TurnFailureStreakPaused -> "masc_keeper_turn_failure_streak_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
+  | SnapshotReadFailures -> "masc_keeper_snapshot_read_failures_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
   | StateSnapshotSkippedNoState ->
     "masc_keeper_state_snapshot_skipped_no_state_total"
@@ -587,7 +589,7 @@ let all : t list =
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
     TurnFailureStreakPaused;
-    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; StateSnapshotInvalidGoal; PromptUnknownToolTokens;
+    CycleExceptions; SnapshotReadFailures; SnapshotWriteFailures; StateSnapshotSkippedNoState; StateSnapshotInvalidGoal; PromptUnknownToolTokens;
     PromptTokenStripped;
     ProgressUpdatedLineFailures;
     SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;

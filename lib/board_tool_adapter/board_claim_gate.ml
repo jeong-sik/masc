@@ -323,6 +323,7 @@ let append_record ~tool_name ~author ~target_post_id ~content ~claims ~snapshot 
        | None -> [])
   in
   let path = Board_claim_evidence.sidecar_path () in
+  Fs_compat.invalidate_cached_writer path;
   Fs_compat.append_jsonl path json;
   (* Mirror sibling sidecars (board_posts/comments/reactions/sub_boards), which
      rotate at [Board_paths.max_jsonl_bytes]. Without this the claim-evidence
@@ -332,16 +333,18 @@ let append_record ~tool_name ~author ~target_post_id ~content ~claims ~snapshot 
 ;;
 
 let evaluate ~target_post_id ~claims ~snapshot ~artifact_refs ~resolutions =
-  match snapshot with
-  | Some source ->
-    (match target_post_id with
-     | None -> Reject "source_post_snapshot_without_target_post"
-     | Some target_post_id ->
-       (match validate_source_snapshot ~target_post_id source with
-     | Error reason -> Reject reason
-        | Ok () -> Allow))
-  | None -> Allow
-  |> function
+  let snapshot_decision =
+    match snapshot with
+    | Some source ->
+      (match target_post_id with
+       | None -> Reject "source_post_snapshot_without_target_post"
+       | Some target_post_id ->
+         (match validate_source_snapshot ~target_post_id source with
+          | Error reason -> Reject reason
+          | Ok () -> Allow))
+    | None -> Allow
+  in
+  match snapshot_decision with
   | Reject _ as reject -> reject
   | Allow ->
     let requires_artifact = List.exists claim_requires_existing_artifact claims in

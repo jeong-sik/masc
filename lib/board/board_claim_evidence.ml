@@ -143,13 +143,13 @@ let apply_record path c json =
 let state_of_counters c =
   if c.stale_source_snapshot_count > 0
   then Source_snapshot_stale
-  else if c.artifact_missing_count > 0
-  then Artifact_missing
   else if c.missing_source_snapshot_count > 0
           || c.artifact_unknown_count > 0
           || c.artifact_not_verified_count > 0
           || c.rejected_count > 0
   then Needs_evidence
+  else if c.artifact_missing_count > 0
+  then Artifact_missing
   else Verified
 ;;
 

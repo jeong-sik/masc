@@ -61,10 +61,13 @@ let has_assoc_key key = function
   | `Assoc fields -> List.mem_assoc key fields
   | _ -> false
 
-let rec yield_until ?(attempts = 50) predicate =
+let rec yield_until ?(attempts = 500) predicate =
   if predicate () || attempts <= 0 then ()
   else (
     Eio.Fiber.yield ();
+    (match Mcp_eio.get_clock_opt () with
+     | Some clock -> Eio.Time.sleep clock 0.001
+     | None -> ());
     yield_until ~attempts:(attempts - 1) predicate)
 
 let approval_decision_is_reject = function
@@ -139,7 +142,13 @@ let fork_approval_callback
         ?meta
         ()
     in
-    result := Some (cb ~tool_name ~input));
+    result :=
+      Some
+        (try cb ~tool_name ~input with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Agent_sdk.Hooks.Reject
+             ("approval callback raised: " ^ Printexc.to_string exn)));
   result
 
 let wait_for_pending_or_result ~keeper_name result =

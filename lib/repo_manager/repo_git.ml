@@ -150,14 +150,14 @@ let ahead_behind ~repository ~target_ref =
             ( int_of_string_opt (String.trim behind),
               int_of_string_opt (String.trim ahead) )
           with
-          | Some behind, Some ahead -> Ok (behind, ahead)
+          | Some behind, Some ahead -> Stdlib.Ok (behind, ahead)
           | _ ->
-              Error
+              Stdlib.Error
                 (Printf.sprintf
                    "git rev-list --left-right --count returned non-numeric output: %S"
                    line))
       | _ ->
-          Error
+          Stdlib.Error
             (Printf.sprintf
                "git rev-list --left-right --count returned malformed output: %S"
                line))

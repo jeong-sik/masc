@@ -7,6 +7,7 @@ let repository_registration_tool_name = "keeper_repository_registration"
 let repository_registration_kind = "repository_registration"
 let repository_registration_disposition = "operator_action_required"
 let repository_registration_reason = "repository_unregistered"
+let repository_registration_next_action = "wait_for_operator_approval"
 
 type registration_candidate =
   { repository_id : Repo_manager_types.repository_id
@@ -326,14 +327,42 @@ let registration_candidate_of_path ~repository_id ~path =
   let probe_path = path_for_git_probe path in
   match Repo_git.worktree_root ~local_path:probe_path with
   | Error reason -> Error reason
-  | Ok repo_root ->
-    (match Repo_git.get_origin_url ~local_path:repo_root with
-     | Error reason -> Error reason
-     | Ok origin_url ->
-       (match Repo_git.origin_head_branch ~local_path:repo_root with
-        | Error reason -> Error reason
-        | Ok default_branch ->
-          Ok { repository_id; repo_root; origin_url; default_branch }))
+  | Ok repo_root -> (
+    match Repo_git.get_origin_url ~local_path:repo_root with
+    | Error reason -> Error reason
+    | Ok origin_url -> (
+      match Repo_git.origin_head_branch ~local_path:repo_root with
+      | Error reason -> Error reason
+      | Ok default_branch -> Ok { repository_id; repo_root; origin_url; default_branch }))
+;;
+
+let pending_operator_action_message detail =
+  Printf.sprintf
+    "%s; operator approval pending for %s"
+    detail
+    repository_registration_kind
+;;
+
+let deterministic_policy_blocked_fields =
+  Keeper_tool_deterministic_error.(deterministic_retry_fields Policy_blocked)
+;;
+
+let repository_registration_action_fields =
+  [ "operator_action_required", `Bool true
+  ; "operator_action_kind", `String repository_registration_kind
+  ; "operator_action_reason", `String repository_registration_reason
+  ; "recoverability", `String repository_registration_disposition
+  ; "next_action", `String repository_registration_next_action
+  ]
+;;
+
+let approval_pending_json approval_id =
+  `Assoc
+    [ "id", `String approval_id
+    ; "kind", `String repository_registration_kind
+    ; "reason", `String repository_registration_reason
+    ; "non_blocking", `Bool true
+    ]
 ;;
 
 let request_repository_access ~keeper_id ~base_path ~repository_id =
@@ -380,30 +409,19 @@ let tool_response_json ~path = function
     `Assoc [ "ok", `Bool true; "path", `String path ]
   | Access_denied detail ->
     `Assoc
-      [ "ok", `Bool false
-      ; "error", `String detail
-      ; "path", `String path
-      ; ( "deterministic_retry"
-        , `Assoc
-            [ "reason", `String "policy_blocked"
-            ; "retry_same_args", `Bool false
-            ] )
-      ]
+      ([ "ok", `Bool false
+       ; "error", `String detail
+       ; "path", `String path
+       ]
+       @ deterministic_policy_blocked_fields)
   | Access_denied_hitl_pending { detail; approval_id } ->
     `Assoc
-      [ "ok", `Bool false
-      ; "error", `String detail
-      ; "path", `String path
-      ; ( "approval_pending"
-        , `Assoc
-            [ "id", `String approval_id
-            ; "kind", `String repository_registration_kind
-            ; "non_blocking", `Bool true
-            ] )
-      ; ( "deterministic_retry"
-        , `Assoc
-            [ "reason", `String "policy_blocked"
-            ; "retry_same_args", `Bool false
-            ] )
-      ]
+      ([ "ok", `Bool false
+       ; "error", `String (pending_operator_action_message detail)
+       ; "policy_error", `String detail
+       ; "path", `String path
+       ; "approval_pending", approval_pending_json approval_id
+       ]
+       @ repository_registration_action_fields
+       @ deterministic_policy_blocked_fields)
 ;;

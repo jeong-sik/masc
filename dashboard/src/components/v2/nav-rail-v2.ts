@@ -18,20 +18,25 @@ type NavEntry = SurfaceEntry | 'sep'
 
 // Prototype SURFACES order/labels/icons, mapped to live TabIds.
 //   prototype work→workspace, monitor→monitoring, ide→code; rest 1:1.
+// Groups mirror the 2026-07 standalone export's rail DOM: 개요 |
+// Keepers · Monitor | 작업 · 승인 · 예약 | 보드 · Fusion · 로그 |
+// IDE · 커넥터 (설정 stays in the footer slot below the spacer).
 const SURFACES: readonly NavEntry[] = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
-  { tab: 'workspace', label: '작업', icon: 'target' },
   { tab: 'keepers', label: 'Keepers', icon: 'users' },
+  { tab: 'monitoring', label: 'Monitor', icon: 'monitor' },
+  'sep',
+  { tab: 'workspace', label: '작업', icon: 'target' },
+  { tab: 'approvals', label: '승인', icon: 'shield' },
+  { tab: 'schedule', label: '예약', icon: 'clock' },
   'sep',
   { tab: 'board', label: '보드', icon: 'board' },
-  { tab: 'schedule', label: '예약', icon: 'clock' },
-  { tab: 'approvals', label: '승인', icon: 'shield' },
   { tab: 'fusion', label: 'Fusion', icon: 'fusion' },
+  { tab: 'logs', label: '로그', icon: 'logs' },
   'sep',
   { tab: 'code', label: 'IDE', icon: 'code' },
   { tab: 'connectors', label: '커넥터', icon: 'plug' },
-  { tab: 'logs', label: '로그', icon: 'logs' },
 ]
 
 export interface NavBadges {

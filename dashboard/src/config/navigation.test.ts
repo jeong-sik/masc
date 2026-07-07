@@ -60,32 +60,34 @@ describe('dashboard surface navigation', () => {
     expect(workspace?.defaultTab).toBe('workspace')
   })
 
-  it('keeps the v2 primary shell aligned to the prototype surface set plus the operator-restored Logs surface', () => {
+  it('keeps the v2 primary shell aligned to the 2026-07 keeper-v2 export rail order', () => {
     expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
       'overview',
-      'workspace',
       'keepers',
-      'board',
-      'schedule',
+      'monitoring',
+      'workspace',
       'approvals',
+      'schedule',
+      'board',
       'fusion',
+      'logs',
       'code',
       'connectors',
       'settings',
-      'logs',
     ])
     expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
       'Overview',
-      'Work',
       'Keepers',
-      'Board',
-      'Schedule',
+      'Monitor',
+      'Work',
       'Approvals',
+      'Schedule',
+      'Board',
       'Fusion',
+      'Logs',
       'IDE',
       'Connectors',
       'Settings',
-      'Logs',
     ])
   })
 

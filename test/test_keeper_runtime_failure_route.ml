@@ -177,6 +177,18 @@ let test_non_provider_families_judge () =
    | KFR.Escalate_judgment { judgment = KFR.Internal_opaque; _ } -> ()
    | other ->
      Alcotest.failf "raw Internal should judge, got %s" (KFR.route_kind_label other));
+  (* RFC-0313 W3: an idle loop is a behavioral contract judgment, not an
+     opaque internal error (it was the legacy ladder's manual-resume pause
+     class). *)
+  (match
+     KFR.route_of_error
+       (Agent_sdk.Error.Agent
+          (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 3 }))
+   with
+   | KFR.Escalate_judgment { judgment = KFR.Contract_violation; _ } -> ()
+   | other ->
+     Alcotest.failf "idle loop should judge contract, got %s"
+       (KFR.route_kind_label other));
   match
     KFR.route_of_error
       (Agent_sdk.Error.Mcp (Agent_sdk.Error.InitializeFailed { detail = "handshake" }))

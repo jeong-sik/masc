@@ -1518,6 +1518,7 @@ let validate_runtime_config_text ~config_path content =
            * string option
            * string option
            * string option
+           * string option
            * string list
            * Runtime_lane.t list) =
     materialize_config ~config_path cfg

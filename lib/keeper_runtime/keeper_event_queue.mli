@@ -94,7 +94,7 @@ type stimulus_payload =
           unrelated board/task activity. *)
   | Failure_judgment of failure_judgment
       (** RFC-0313 W2: a turn failure routed
-          [Keeper_failure_route.Escalate_judgment] — a deterministic failure
+          [Keeper_runtime_failure_route.Escalate_judgment] — a deterministic failure
           class where mechanical retry/rotation cannot change the outcome.
           Surfaces on the keeper's next turn as prompt input for an
           LLM-boundary verdict. Follows the [Fusion_completed]/
@@ -189,7 +189,7 @@ and goal_verification_failure = {
 
 and failure_judgment = {
   fj_runtime_id : string;
-  fj_judgment : Keeper_failure_route.judgment_class;
+  fj_judgment : Keeper_runtime_failure_route.judgment_class;
   fj_detail : string;
 }
 (** Payload for [Failure_judgment]. [fj_detail] is a display-only failure

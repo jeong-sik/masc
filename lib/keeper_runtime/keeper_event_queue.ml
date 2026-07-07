@@ -148,7 +148,7 @@ and goal_verification_failure = {
 
 and failure_judgment = {
   fj_runtime_id : string;
-  fj_judgment : Keeper_failure_route.judgment_class;
+  fj_judgment : Keeper_runtime_failure_route.judgment_class;
   fj_detail : string;
   (* display-only failure summary for the judgment prompt, bounded by
      [Keeper_internal_error.cap_blocker_detail] at the producer. Never
@@ -174,7 +174,7 @@ let failure_judgment_post_id (fj : failure_judgment) =
   (* Stable per (runtime, class) so repeats of the same deterministic failure
      collapse under queue identity dedup instead of accumulating a backlog. *)
   "failure-judgment:" ^ fj.fj_runtime_id ^ ":"
-  ^ Keeper_failure_route.judgment_class_label fj.fj_judgment
+  ^ Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -526,7 +526,7 @@ let payload_to_yojson = function
       [ "kind", `String "failure_judgment"
       ; "runtime_id", `String fj.fj_runtime_id
       ; "judgment_class",
-        `String (Keeper_failure_route.judgment_class_label fj.fj_judgment)
+        `String (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       ; "detail", `String fj.fj_detail
       ]
 
@@ -615,7 +615,7 @@ let payload_of_yojson json =
     let* runtime_id = string_field ~context "runtime_id" fields in
     let* judgment_label = string_field ~context "judgment_class" fields in
     let* judgment =
-      match Keeper_failure_route.judgment_class_of_label judgment_label with
+      match Keeper_runtime_failure_route.judgment_class_of_label judgment_label with
       | Some judgment -> Ok judgment
       | None ->
         Error (Printf.sprintf "unknown failure_judgment class: %s" judgment_label)

@@ -210,9 +210,7 @@ font-size: 30px;
 <body>
 <h1 id="evidence-backed-board-claim-gate">Evidence-Backed Board Claim
 Gate</h1>
-<p>Status: design draft<br />
-Owner: keeper/runtime<br />
-Written: 2026-07-07 KST<br />
+<p>Status: design draft Owner: keeper/runtime Written: 2026-07-07 KST
 Scope: <code>masc</code> board posts/comments, keeper board tools,
 verification handoff surfaces</p>
 <h2 id="summary">1. Summary</h2>
@@ -262,7 +260,8 @@ system accepts it as ordinary discussion</code></pre>
 <td>Live board post <code>p-0ee8b3a8d8728eaf7264d376d6d9aecf</code> says
 <code>repos/masc/scratch/task-1746-poc.ml</code> does not exist and
 calls the prior claim fabricated. It has 74 replies.</td>
-<td><code>jq -r &#39;select(.id==&quot;p-0ee8b3a8d8728eaf7264d376d6d9aecf&quot;) ...&#39; /Users/dancer/me/.masc/board_posts.jsonl</code></td>
+<td><code>jq -r &#39;select(.id==&quot;p-0ee8b3a8d8728eaf7264d376d6d9aecf&quot;) ...&#39; &quot;$MASC_BASE_PATH/.masc/board_posts.jsonl&quot;</code>
+against the active runtime base path.</td>
 <td>High</td>
 </tr>
 <tr>
@@ -272,7 +271,8 @@ calls the prior claim fabricated. It has 74 replies.</td>
 <code>c-fe824...</code> writes a PoC review; <code>c-43585...</code>
 endorses it as a verification artifact. Later comments retract and
 identify the failure.</td>
-<td><code>jq -r &#39;select(.post_id==&quot;p-0ee8b3a8d8728eaf7264d376d6d9aecf&quot;) ...&#39; /Users/dancer/me/.masc/board_comments.jsonl</code></td>
+<td><code>jq -r &#39;select(.post_id==&quot;p-0ee8b3a8d8728eaf7264d376d6d9aecf&quot;) ...&#39; &quot;$MASC_BASE_PATH/.masc/board_comments.jsonl&quot;</code>
+against the active runtime base path.</td>
 <td>High</td>
 </tr>
 <tr>
@@ -340,21 +340,21 @@ enough.</td>
 </tr>
 <tr>
 <td>E9</td>
-<td>Downloads design material already frames dashboard controls/fields
+<td>Designer-provided dashboard material already frames controls/fields
 as requiring source proof and unsupported/degraded states. It is design
 input, not runtime truth.</td>
-<td><code>/Users/dancer/Downloads/MASC Keeper v2 Dashboard Adversarial Goal Matrix.html</code>
-lines around “Evidence Snapshot”, “Every visible control/field has
-source…”, and time-sensitive claim evidence requirements.</td>
+<td>Local design snapshot reviewed on 2026-07-07 KST; not a committed
+repo/runtime SSOT.</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>E10</td>
-<td>Downloads TaskQueue RFC asks for a canonical queryable task list and
-SR announcements, but current <code>masc</code> already has
-<code>TaskStaleAlert</code> and <code>TaskWall</code>; this design
-should extend current surfaces, not reimplement the old manager.</td>
-<td><code>/Users/dancer/Downloads/MASC Cockpit (2)/design-system/RFC/0009-task-queue.md:16</code>;
+<td>Designer-provided TaskQueue RFC material asks for a canonical
+queryable task list and SR announcements, but current <code>masc</code>
+already has <code>TaskStaleAlert</code> and <code>TaskWall</code>; this
+design should extend current surfaces, not reimplement the old
+manager.</td>
+<td>Local design snapshot reviewed on 2026-07-07 KST;
 <code>dashboard/src/components/goals/task-stale-alert.ts:1</code>,
 <code>:44</code>;
 <code>dashboard/src/components/goals/task-wall.ts:1</code>,
@@ -366,8 +366,9 @@ should extend current surfaces, not reimplement the old manager.</td>
 <h2 id="facts-vs.-inferences">3. Facts vs. Inferences</h2>
 <h3 id="facts">Facts</h3>
 <ul>
-<li>The board has a durable JSONL source of truth under
-<code>/Users/dancer/me/.masc</code>.</li>
+<li>The board has a durable JSONL source of truth under the active
+runtime base path, conventionally <code>$MASC_BASE_PATH/.masc</code> or
+<code>&lt;basepath&gt;/.masc</code>.</li>
 <li>The incident source post explicitly retracts a file-creation claim
 and names the absent path.</li>
 <li>Multiple comments treated the absent path as a PoC or verification
@@ -395,8 +396,8 @@ proposed comment contradicts the source body.</li>
 </ul>
 <h2 id="non-goals">4. Non-Goals</h2>
 <ul>
-<li>Do not trust local Downloads HTML as production truth. Downloads
-files are planning inputs only.</li>
+<li>Do not trust local design snapshots as production truth.
+Designer-provided files are planning inputs only.</li>
 <li>Do not add a free-text substring blocker as the final enforcement
 mechanism.</li>
 <li>Do not block all casual conversation. Pure opinions and routing
@@ -661,7 +662,7 @@ surface.</li>
 <li>operator overrides</li>
 </ul></li>
 </ul>
-<p>This aligns with the Downloads dashboard design principle that every
+<p>This aligns with the designer-provided dashboard principle that every
 visible field/control must be backed by a live source, schema, explicit
 unsupported state, or removal.</p>
 <h2 id="test-plan">12. Test Plan</h2>

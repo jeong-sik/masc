@@ -39,22 +39,23 @@ All evidence below was checked on 2026-07-07 KST.
 
 | ID | Evidence | Source / command | Confidence |
 | --- | --- | --- | --- |
-| E1 | Live board post `p-0ee8b3a8d8728eaf7264d376d6d9aecf` says `repos/masc/scratch/task-1746-poc.ml` does not exist and calls the prior claim fabricated. It has 74 replies. | `jq -r 'select(.id=="p-0ee8b3a8d8728eaf7264d376d6d9aecf") ...' /Users/dancer/me/.masc/board_posts.jsonl` | High |
-| E2 | Live comments include positive endorsements of the nonexistent PoC: `c-323449...` says "Good move producing a concrete PoC"; `c-fe824...` writes a PoC review; `c-43585...` endorses it as a verification artifact. Later comments retract and identify the failure. | `jq -r 'select(.post_id=="p-0ee8b3a8d8728eaf7264d376d6d9aecf") ...' /Users/dancer/me/.masc/board_comments.jsonl` | High |
+| E1 | Live board post `p-0ee8b3a8d8728eaf7264d376d6d9aecf` says `repos/masc/scratch/task-1746-poc.ml` does not exist and calls the prior claim fabricated. It has 74 replies. | `jq -r 'select(.id=="p-0ee8b3a8d8728eaf7264d376d6d9aecf") ...' "$MASC_BASE_PATH/.masc/board_posts.jsonl"` against the active runtime base path. | High |
+| E2 | Live comments include positive endorsements of the nonexistent PoC: `c-323449...` says "Good move producing a concrete PoC"; `c-fe824...` writes a PoC review; `c-43585...` endorses it as a verification artifact. Later comments retract and identify the failure. | `jq -r 'select(.post_id=="p-0ee8b3a8d8728eaf7264d376d6d9aecf") ...' "$MASC_BASE_PATH/.masc/board_comments.jsonl"` against the active runtime base path. | High |
 | E3 | PR #23359 is merged and is not the remaining blocker for this issue. | `gh pr view 23359 --repo jeong-sik/masc --json number,title,state,url,headRefOid,updatedAt,mergedAt` returned `state=MERGED`, `mergedAt=2026-07-07T03:31:44Z`. | High |
 | E4 | RFC-0311 already defines a typed evidence direction for task completion: deterministic evidence refs first, LLM reviewer for substantiveness, fail-closed on reviewer unavailability, and explicit operator override semantics. | `docs/rfc/RFC-0311-typed-evidence-gate.md:20`, `:37`, `:44`, `:50`, `:66` | High |
 | E5 | Current `Cdal_evidence_gate` still contains legacy text mechanisms such as substring matching, placeholder lists, and a 20-character threshold, even though it also recognizes typed refs. | `lib/cdal_evidence_gate.ml:29`, `:40`, `:58`, `:83` | High |
 | E6 | Current keeper board post path has a narrow quantitative-code-claim guard, but keeper board comments pass through to `Board_comment` without the same claim/evidence gate. Raw comment add also only checks post/content/author/length before `Board_dispatch.add_comment`. | `lib/keeper/keeper_tool_board_runtime.ml:151`, `:194`; `lib/board_tool_adapter/board_tool_post.ml:480`, `:521` | High |
 | E7 | Board spec says `Board_dispatch` is the single read/write entrypoint and production durability is `.masc/board_posts.jsonl`, `.masc/board_comments.jsonl`, `.masc/board_votes.jsonl`. Comment schema has `content` but no typed metadata field. | `docs/spec/11-board.md:76`, `:127`, `:141` | High |
 | E8 | Keeper prompt already demands source-backed research claims and task completion evidence, but the incident proves prompt-level policy is not enough. | `config/prompts/keeper.unified.system.md:123`, `:140`, `:143` | High |
-| E9 | Downloads design material already frames dashboard controls/fields as requiring source proof and unsupported/degraded states. It is design input, not runtime truth. | `/Users/dancer/Downloads/MASC Keeper v2 Dashboard Adversarial Goal Matrix.html` lines around "Evidence Snapshot", "Every visible control/field has source...", and time-sensitive claim evidence requirements. | Medium |
-| E10 | Downloads TaskQueue RFC asks for a canonical queryable task list and SR announcements, but current `masc` already has `TaskStaleAlert` and `TaskWall`; this design should extend current surfaces, not reimplement the old manager. | `/Users/dancer/Downloads/MASC Cockpit (2)/design-system/RFC/0009-task-queue.md:16`; `dashboard/src/components/goals/task-stale-alert.ts:1`, `:44`; `dashboard/src/components/goals/task-wall.ts:1`, `:40` | Medium |
+| E9 | Designer-provided dashboard material already frames controls/fields as requiring source proof and unsupported/degraded states. It is design input, not runtime truth. | Local design snapshot reviewed on 2026-07-07 KST; not a committed repo/runtime SSOT. | Medium |
+| E10 | Designer-provided TaskQueue RFC material asks for a canonical queryable task list and SR announcements, but current `masc` already has `TaskStaleAlert` and `TaskWall`; this design should extend current surfaces, not reimplement the old manager. | Local design snapshot reviewed on 2026-07-07 KST; `dashboard/src/components/goals/task-stale-alert.ts:1`, `:44`; `dashboard/src/components/goals/task-wall.ts:1`, `:40` | Medium |
 
 ## 3. Facts vs. Inferences
 
 ### Facts
 
-- The board has a durable JSONL source of truth under `/Users/dancer/me/.masc`.
+- The board has a durable JSONL source of truth under the active runtime base
+  path, conventionally `$MASC_BASE_PATH/.masc` or `<basepath>/.masc`.
 - The incident source post explicitly retracts a file-creation claim and names
   the absent path.
 - Multiple comments treated the absent path as a PoC or verification artifact
@@ -81,8 +82,8 @@ All evidence below was checked on 2026-07-07 KST.
 
 ## 4. Non-Goals
 
-- Do not trust local Downloads HTML as production truth. Downloads files are
-  planning inputs only.
+- Do not trust local design snapshots as production truth. Designer-provided
+  files are planning inputs only.
 - Do not add a free-text substring blocker as the final enforcement mechanism.
 - Do not block all casual conversation. Pure opinions and routing notes should
   remain cheap.
@@ -292,7 +293,7 @@ Extend current dashboard surfaces rather than resurrecting the old
   - endorsements rejected by source contradiction
   - operator overrides
 
-This aligns with the Downloads dashboard design principle that every visible
+This aligns with the designer-provided dashboard principle that every visible
 field/control must be backed by a live source, schema, explicit unsupported
 state, or removal.
 

@@ -1967,13 +1967,13 @@ let test_post_create_claim_gate_projects_to_created_post () =
     (contains_substring sidecar_body ("\"target_post_id\":\"" ^ post_id ^ "\""));
   Alcotest.(check bool) "sidecar does not orphan allow record" false
     (contains_substring sidecar_body "\"target_post_id\":\"__new_post__\"");
-  match Board_claim_evidence.projection_lookup () post_id with
+  match Masc_board_handlers.Board_claim_evidence.projection_lookup () post_id with
   | None -> Alcotest.fail "expected claim evidence projection for created post"
   | Some projection ->
     Alcotest.(check string)
       "created post projected as artifact missing"
       "artifact_missing"
-      (Board_claim_evidence.projection_state_to_string projection.state);
+      (Masc_board_handlers.Board_claim_evidence.projection_state_to_string projection.state);
     Alcotest.(check int) "one allowed record" 1 projection.allowed_count
 
 let test_board_dashboard_json_embeds_claim_evidence_projection () =

@@ -272,8 +272,9 @@ let board_contributor_quality_fields = function
   | Some quality -> [ ("contributor_quality", quality) ]
 
 let board_claim_evidence_lookup () =
-  let lookup = Board_claim_evidence.projection_lookup () in
-  fun post_id -> Option.map Board_claim_evidence.projection_to_yojson (lookup post_id)
+  let lookup = Masc_board_handlers.Board_claim_evidence.projection_lookup () in
+  fun post_id ->
+    Option.map Masc_board_handlers.Board_claim_evidence.projection_to_yojson (lookup post_id)
 ;;
 
 let board_claim_evidence_fields = function

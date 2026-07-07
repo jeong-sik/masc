@@ -5,6 +5,7 @@ import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import type { CodeDocumentStore } from './code-document-store'
 import type { KeeperLineOwnershipStore } from './keeper-line-ownership-store'
+import { ideEditorSelection } from './ide-editor-selection'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import {
@@ -355,6 +356,16 @@ function CodeMirrorEditor({
             if (sel !== prevAnnRef.current) {
               prevAnnRef.current = sel
               setSelectedAnn(sel)
+            }
+            // #23471 FE-4: publish the human selection as 1-based line
+            // numbers for the annotation composer's default range.
+            if (update.selectionSet || update.docChanged) {
+              const main = update.state.selection.main
+              ideEditorSelection.value = {
+                filePath: mountFilePath,
+                lineStart: update.state.doc.lineAt(main.from).number,
+                lineEnd: update.state.doc.lineAt(main.to).number,
+              }
             }
           }),
           ...(onKeeperLineSelect

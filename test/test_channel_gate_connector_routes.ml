@@ -15,6 +15,11 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let rec with_envs names value f =
+  match names with
+  | [] -> f ()
+  | name :: rest -> with_env name value (fun () -> with_envs rest value f)
+
 let temp_dir_counter = ref 0
 
 let with_temp_dir f =
@@ -41,14 +46,13 @@ let with_sidecar_paths prefix dir f =
   let status_path = Filename.concat dir (prefix ^ "-status.json") in
   let binding_path = Filename.concat dir (prefix ^ "-bindings.json") in
   let audit_path = Filename.concat dir (prefix ^ "-audit.jsonl") in
-  with_env (String.uppercase_ascii prefix ^ "_STATUS_PATH") (Some status_path)
-    (fun () ->
-      with_env
-        (String.uppercase_ascii prefix ^ "_BINDING_STORE_PATH")
-        (Some binding_path) (fun () ->
-          with_env
-            (String.uppercase_ascii prefix ^ "_BINDING_AUDIT_PATH")
-            (Some audit_path) f))
+  let env_names suffix =
+    let legacy = String.uppercase_ascii prefix ^ suffix in
+    [ legacy; "MASC_" ^ legacy ]
+  in
+  with_envs (env_names "_STATUS_PATH") (Some status_path) (fun () ->
+    with_envs (env_names "_BINDING_STORE_PATH") (Some binding_path) (fun () ->
+      with_envs (env_names "_BINDING_AUDIT_PATH") (Some audit_path) f))
 
 let test_resolve_connector_status_name_prefers_explicit_name () =
   check (option string) "name wins and normalizes" (Some "discord")

@@ -78,7 +78,7 @@ interface RuntimeEnvironmentEditorProps {
   draftDirty?: boolean
   saving?: boolean
   onRoutingChange: (
-    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'librarian' | 'structured_judge' | 'hitl_summary' | 'cross_verifier',
     runtimeId: string | null,
   ) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
@@ -307,6 +307,7 @@ export function RuntimeEnvironmentEditor({
   const isDisabled = disabled === true || saving === true
 
   const librarianLane = environment.librarianRuntimeId
+  const hitlSummaryLane = environment.hitlSummaryRuntimeId
   const crossVerifierLane = environment.crossVerifierRuntimeId
   const assignments = environment.assignments
   const keeperList = keepers.value
@@ -328,7 +329,7 @@ export function RuntimeEnvironmentEditor({
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
   }
 
-  function updateRoutingLane(lane: 'librarian' | 'structured_judge' | 'cross_verifier', runtimeId: string) {
+  function updateRoutingLane(lane: 'librarian' | 'structured_judge' | 'hitl_summary' | 'cross_verifier', runtimeId: string) {
     onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
@@ -495,7 +496,7 @@ export function RuntimeEnvironmentEditor({
   // the label to one-word-per-line.
 
   function laneRow(
-    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'librarian' | 'structured_judge' | 'hitl_summary' | 'cross_verifier',
     label: string,
     hint: string,
     value: string,
@@ -633,7 +634,8 @@ export function RuntimeEnvironmentEditor({
       ` : null}
 
       <!-- routing — runtime-editor.jsx:135-141. default lane is live; librarian /
-           structured_judge / cross_verifier are read from [runtime] and written back. -->
+           structured_judge / hitl_summary / cross_verifier are read from
+           [runtime] and written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
         <div class="rt-note">
           런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
@@ -661,6 +663,14 @@ export function RuntimeEnvironmentEditor({
           environment.structuredJudgeRuntimeId,
           runtimeId => updateRoutingLane('structured_judge', runtimeId),
           'structured',
+        )}
+        ${laneRow(
+          'hitl_summary',
+          'HITL summary',
+          '[runtime].hitl_summary — approval context summary',
+          hitlSummaryLane,
+          runtimeId => updateRoutingLane('hitl_summary', runtimeId),
+          'none',
         )}
         ${laneRow(
           'cross_verifier',

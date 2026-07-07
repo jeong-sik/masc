@@ -442,6 +442,78 @@ let apply_multimodal_wirein
             ();
           lifecycle)
 
+(* Must stay under [Keeper_memory_policy.default_max_item_chars] (200) and
+   contain no ';' — open questions round-trip through progress.md as a
+   single "; "-joined line, so a longer or semicolon-bearing note would be
+   truncated or split and the dedupe-by-membership check below would stop
+   holding. Pinned by test_keeper_post_turn_interruption_note. *)
+let no_state_interruption_note =
+  "Previous turn left no persisted [STATE] snapshot. Re-verify held task, \
+   backlog, and messages against live state, then act or defer with a \
+   stated reason."
+
+(* RFC-0314 P2a: a no-[STATE] turn is exactly the turn whose replay suffix
+   the checkpoint layer prunes (synthetic-empty / requires-attention), and
+   it also writes zero memory-bank notes — so without a note the next turn
+   opens on "No continuity snapshot available." and re-derives the world
+   from scratch. Augment progress.md in place: keep whatever forward-looking
+   snapshot already exists and add one open question stating that the
+   previous turn left no persisted state. Constant text + membership check
+   keep consecutive no-[STATE] turns from stacking duplicates. *)
+let augment_progress_with_interruption_note
+    ~(progress_path : string)
+    ~(generation : int)
+    ~(updated_at : string)
+    ~(keeper_name : string) : unit =
+  let existing_snapshot =
+    if Fs_compat.file_exists progress_path then (
+      try
+        Option.map
+          (fun (cache : Keeper_memory_policy.progress_snapshot_cache) ->
+            cache.snapshot)
+          (Keeper_memory_policy.progress_snapshot_cache_of_text
+             (Fs_compat.load_file progress_path))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> None)
+    else None
+  in
+  let base_snapshot =
+    match existing_snapshot with
+    | Some snapshot -> snapshot
+    | None -> Keeper_memory_policy.empty_keeper_state_snapshot
+  in
+  if
+    not
+      (List.mem no_state_interruption_note
+         base_snapshot.Keeper_memory_policy.open_questions)
+  then (
+    let augmented =
+      Keeper_memory_policy.cap_snapshot
+        {
+          base_snapshot with
+          Keeper_memory_policy.open_questions =
+            no_state_interruption_note
+            :: base_snapshot.Keeper_memory_policy.open_questions;
+        }
+    in
+    match
+      Keeper_memory_policy.write_progress_snapshot_path
+        ~path:progress_path
+        ~generation
+        ~updated_at
+        (Keeper_memory_policy.forward_looking_snapshot augmented)
+    with
+    | Ok () -> ()
+    | Error err ->
+        Log.Keeper.warn
+          "keeper:%s interruption-note snapshot write failed: %s"
+          keeper_name err;
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string SnapshotWriteFailures)
+          ~labels:[("keeper", keeper_name)]
+          ())
+
 let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
@@ -507,6 +579,11 @@ let apply_post_turn_lifecycle_with_resilience_handles
           Keeper_metrics.(to_string StateSnapshotSkippedNoState)
           ~labels:[("keeper", meta.name)]
           ();
+        augment_progress_with_interruption_note
+          ~progress_path
+          ~generation:meta.runtime.generation
+          ~updated_at:(now_iso ())
+          ~keeper_name:meta.name;
         {
           meta with
           runtime =

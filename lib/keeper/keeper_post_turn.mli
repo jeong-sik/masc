@@ -129,6 +129,25 @@ val recover_latest_checkpoint_for_overflow_retry :
   primary_model_max_tokens:int ->
   overflow_retry_recovery option
 
+val no_state_interruption_note : string
+(** Open-question text recorded by
+    {!augment_progress_with_interruption_note}. Constant so repeated
+    no-[STATE] turns dedupe by membership instead of stacking. *)
+
+val augment_progress_with_interruption_note :
+  progress_path:string ->
+  generation:int ->
+  updated_at:string ->
+  keeper_name:string ->
+  unit
+(** RFC-0314 P2a. Called on a turn that produced no [STATE] snapshot (the
+    same turns whose checkpoint replay suffix is pruned and whose memory
+    writes are suppressed): preserves the existing forward-looking
+    progress.md snapshot and adds {!no_state_interruption_note} to its
+    open questions, so the next turn's Continuity layer states that the
+    previous turn left no persisted state instead of rendering nothing.
+    Write failures are logged and counted, never raised. *)
+
 module For_testing : sig
   val invalid_snapshot_goal_fingerprint : string -> string
 

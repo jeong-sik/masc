@@ -154,6 +154,12 @@ and connector_attention =
 - **W2** — G2 carry-through. resolve/완료 hook이 채널을 wake payload에 실음. 직렬화 왕복 + audit.
 - **W3** — G3 re-engagement. intake가 채널로 대화 재개. HITL 먼저(가장 명확한 계기), 그다음 `Connector_attention`(G4).
   - **구현 노트 (2026-07-08 조사)**: `Connector_attention`은 `keeper_heartbeat_stimulus_intake.ml:226-269`에서 `external_attention` item(surface_ref 포함)을 turn observation으로 이미 주입한다. 따라서 Connector 계열의 실제 gap은 wake payload가 아니라 **turn 결과를 channel로 delivery하는 라우팅**이다(현재 heartbeat turn 결과가 원 채널로 가지 않음). `Hitl_resolved`는 `external_attention`이 없어 wake payload의 `channel`이 유일한 provenance이며, 그 provenance 캡처가 W2b다. 즉 W3의 핵심 난도는 delivery 라우팅(keeper turn 아키텍처)이고 W2b는 approval entry provenance 배선이다 — 두 축이 독립적으로 진행 가능.
+  - **W3 delivery 청사진 (Explore 조사, SMALL-to-MEDIUM — from-scratch 아님)**:
+    - **송신 인프라는 이미 존재·재사용**: `keeper_surface_post` 도구(`keeper_tool_in_process_runtime.ml:205-265`, `keeper_tool_runtime.ml:184`)가 Discord(`Channel_gate_discord_state.send_message`)/Slack(`Keeper_chat_slack.send_message_with_blocks`)로 send + `Keeper_chat_store` persist + `Keeper_chat_broadcast`한다. 표준 keeper 도구라 autonomous/wake turn에서 호출 가능.
+    - **현재 자동 미전달 이유**: chat 경로(`Keeper_chat_consumer` → `handle_turn`)는 `Keeper_chat_events` stream + adapter로 커넥터에 전달하지만, wake 경로 `Keeper_unified_turn.run_keeper_cycle`(`keeper_unified_turn.mli:199-209`)은 **events/channel/connector 파라미터가 없다**. wake-turn `response_text`는 `keeper_agent_run_finalize_response.ml:418,447,528`에서 checkpoint/session + post-turn memory로만 가고, autonomous prose는 `keeper_unified_turn_success.ml:129-131`에서 `Internal_prose`로 분류된다.
+    - **구현 seam**: `keeper_agent_run_finalize_response.finalize`(response_text 생산) 또는 `Keeper_unified_turn_success` 성공 핸들러에 post-turn routing seam을 추가. wake의 `continuation_channel`(routable일 때)과 `response_text`를 기존 send 인프라로 전달. Unrouted면 기존대로 internal 유지(fail-closed).
+    - **관통 필요**: `continuation_channel`을 wake stimulus → `run_keeper_cycle`(현재 param 없음) → `finalize`까지 전파. `run_keeper_cycle` 시그니처 변경이 호출자 관통을 유발(컴파일러가 강제). 정책: routable channel일 때만 delivery, autonomous internal prose는 그대로.
+    - **두 해석**: (a) "keeper가 채널로 답할 수 있다" = `keeper_surface_post`로 이미 가능(SMALL, self-description에 channel + 지시만); (b) "결정론적 auto-deliver(모델이 도구 안 골라도)" = MEDIUM(위 seam). RFC-0320 §2 "라우팅=결정론적" 원칙상 (b)가 정합.
 - **W4** — G5 observability + G6 safety invariant + TLA+ + regression 픽스처. `Bg`/`Fusion`/`Schedule`로 채널 확장 및 Dashboard streaming/패널-drop caveat(§1.4)은 opt-in follow-up.
 
 ## 10. Open questions

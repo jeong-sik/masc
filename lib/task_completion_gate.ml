@@ -7,162 +7,46 @@ type decision =
       ; payload_json : Yojson.Safe.t
       }
 
+(* Retained rule id. The gate historically lived in [Cdal_evidence_gate]; the
+   string is asserted by downstream tests and consumed offline by the
+   completion-trust audit, so it is kept stable across the RFC-0311 rewrite.
+   RFC-0311 §5 typed rejection reasons are a later phase. *)
 let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
-let no_contract_evidence_ref_required = "handoff_context.evidence_refs"
+
+(* Payload token naming the one thing every rejected completion is missing: a
+   trusted, reviewer-inspectable reference on handoff_context.evidence_refs.
+   Tests assert this literal in the reject payload. *)
+let missing_evidence_ref_token = "handoff_context.evidence_refs"
+
+let reason_evidence_incomplete =
+  "Task-completion evidence is insufficient: no trusted, reviewer-inspectable \
+   evidence reference was supplied. Completion notes alone do not satisfy the \
+   gate."
 
 let hint_evidence_incomplete =
-  "Supply task-completion evidence: no-contract tasks require at least one \
-   trusted handoff_context.evidence_refs reference (PR number, commit hash, \
-   trace id, or reviewer-inspectable URL). Contracted tasks require notes >= \
-   20 chars summarising what changed AND every contract.required_evidence \
-   entry mentioned verbatim, OR a trusted handoff_context.evidence_refs \
-   reference that satisfies the required evidence. Pure-placeholder notes \
-   ('done', 'ok', etc.) keep this gate closed."
+  "Attach at least one trusted handoff_context.evidence_refs reference: a PR \
+   number (PR#123), a commit hash, a trace id (trace:/turn:/receipt:), or a \
+   reviewer-inspectable URL. Completion notes and file paths are not accepted \
+   as proof — a file-shaped reference is not inspectable without base-path \
+   resolution."
 
-let reason_evidence_incomplete ~required_evidence =
-  Printf.sprintf
-    "Task-completion evidence is insufficient: %d required evidence \
-     entry/entries unsatisfied and no substantive notes or handoff \
-     reference supplied"
-    (List.length required_evidence)
-
+(* L1 core: an evidence reference is gate-trusted only when it parses to a
+   reviewer-inspectable Evidence_ref shape (URL / PR / commit / trace id).
+   File-shaped refs (File_uri / File_path) are shape-recognized but not proof a
+   reviewer can inspect without base-path/artifact-store resolution, so they
+   fail closed. *)
 let evidence_ref_is_gate_trusted ref_ =
   match Evidence_ref.of_string ref_ with
-  | Some (Evidence_ref.Url _ | Evidence_ref.Pr _ | Evidence_ref.Commit _ | Evidence_ref.Trace_ref _) -> true
-  | Some (Evidence_ref.File_uri _ | Evidence_ref.File_path _) ->
-    (* File-shaped refs are only shape-recognized by [Evidence_ref]. Without a
-       base-path/artifact-store resolution step they are candidates, not proof a
-       reviewer can inspect. Fail closed until a validated file evidence type is
-       available. *)
-    false
+  | Some (Evidence_ref.Url _ | Evidence_ref.Pr _ | Evidence_ref.Commit _ | Evidence_ref.Trace_ref _) ->
+    true
+  | Some (Evidence_ref.File_uri _ | Evidence_ref.File_path _) -> false
   | None -> false
 
-let notes_mention_required_entry ~notes entry =
-  let needle = String.lowercase_ascii entry in
-  let haystack = String.lowercase_ascii notes in
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 || needle_len > haystack_len then false
-  else
-    let limit = haystack_len - needle_len in
-    let rec loop i =
-      if i > limit then false
-      else if
-        String.sub haystack i needle_len = needle
-        && Evidence_ref.boundary_match ~haystack ~needle ~start:i
-      then true
-      else loop (i + 1)
-    in
-    loop 0
-
-(* Heuristic: an "evidence entry" is satisfied when the notes or
-   concrete handoff_context.evidence_refs mention a non-placeholder string that
-   names it. Blank required entries are never evidence. *)
-let evidence_entry_satisfied
-    ~notes
-    ~(handoff_context : Masc_domain.task_handoff_context option)
-    (entry : string)
-  =
-  let entry_trimmed = String.trim entry in
-  if String.equal entry_trimmed "" then false
-  else
-    let entry_lower = String.lowercase_ascii entry_trimmed in
-    let in_notes = notes_mention_required_entry ~notes entry_lower in
-    let in_handoff =
-      match handoff_context with
-      | None -> false
-      | Some hc ->
-        List.exists
-          (fun ref_ ->
-            let r = String.lowercase_ascii (String.trim ref_) in
-            evidence_ref_is_gate_trusted ref_ && r = entry_lower)
-          hc.evidence_refs
-    in
-    in_notes || in_handoff
-
-let unsatisfied_required_evidence
-    ~notes
-    ~(handoff_context : Masc_domain.task_handoff_context option)
-    (contract : Masc_domain.task_contract option)
-  =
-  match contract with
-  | None ->
-    (* task-1815: Layer 2: reject no-contract completions without
-       reviewer-inspectable evidence_refs. Reuse the same typed evidence-ref
-       parser as the contracted path so placeholder prose cannot bypass the
-       no-contract gate by being merely non-empty. *)
-    let has_trusted_refs =
-      match handoff_context with
-      | Some hc -> List.exists evidence_ref_is_gate_trusted hc.evidence_refs
-      | None -> false
-    in
-    if has_trusted_refs then [] else [no_contract_evidence_ref_required]
-  | Some c ->
-    List.filter
-      (fun e -> not (evidence_entry_satisfied ~notes ~handoff_context e))
-      c.required_evidence
-
-let task_has_contract (task_opt : Masc_domain.task option) =
-  match task_opt with
-  | None -> false
-  | Some t -> Option.is_some t.contract
-
-(* Placeholder note bodies that {!evidence_is_substantive} treats as
-   "keeper supplied nothing".  Compared on the trimmed lowercase form.
-   This is deliberately conservative: the goal is to recognise clearly
-   empty / null-equivalent done messages, not to second-guess substantive
-   prose. *)
-let placeholder_note_bodies =
-  [ ""
-  ; "done"
-  ; "ok"
-  ; "complete"
-  ; "completed"
-  ; "draft"
-  ; "pending"
-  ; "n/a"
-  ; "na"
-  ; "tbd"
-  ; "todo"
-  ]
-
-let notes_are_substantive (notes : string) : bool =
-  let trimmed = String.trim notes |> String.lowercase_ascii in
-  if List.exists (String.equal trimmed) placeholder_note_bodies then false
-  else String.length trimmed >= 20
-
-let handoff_supplies_evidence
+let handoff_supplies_trusted_ref
     (handoff_context : Masc_domain.task_handoff_context option) : bool =
   match handoff_context with
   | None -> false
-  | Some hc ->
-    List.exists
-      evidence_ref_is_gate_trusted
-      hc.evidence_refs
-
-(* Evidence-substantiveness gate for explicit verification submissions. Normal
-   task completion is LLM-reviewed before it reaches [Done]; this gate only
-   checks that a caller putting a task into AwaitingVerification supplied
-   evidence a reviewer can inspect downstream. A contracted task passes when
-   *every* required_evidence entry is mentioned in notes/handoff AND the caller
-   supplied at least one of: substantive notes, or a handoff evidence reference
-   (PR number, commit hash, trace id, or reviewer-inspectable URL). Empty
-   notes with empty required_evidence still rejects, since that carries no
-   evidence at all. *)
-let evidence_is_substantive
-    ~notes
-    ~(handoff_context : Masc_domain.task_handoff_context option)
-    (contract : Masc_domain.task_contract option) : bool =
-  match contract with
-  | None -> false
-  | Some c ->
-    let required_evidence_satisfied =
-      unsatisfied_required_evidence ~notes ~handoff_context (Some c) = []
-    in
-    let any_evidence_supplied =
-      notes_are_substantive notes || handoff_supplies_evidence handoff_context
-    in
-    required_evidence_satisfied && any_evidence_supplied
+  | Some hc -> List.exists evidence_ref_is_gate_trusted hc.evidence_refs
 
 let evidence_summary_payload
     ~(notes : string)
@@ -176,45 +60,62 @@ let evidence_summary_payload
            | Some hc -> List.length hc.evidence_refs) )
     ]
 
+let reject_payload ~task_id ~contract_required ~notes ~handoff_context : Yojson.Safe.t =
+  `Assoc
+    [ "task_id", `String task_id
+    ; "contract_required", `Bool contract_required
+    ; ( "required_evidence_unsatisfied"
+      , `List [ `String missing_evidence_ref_token ] )
+    ; "evidence_summary", evidence_summary_payload ~notes ~handoff_context
+    ]
+
+(* RFC-0311 Phase 1 (L1, universal default): a task completion is accepted iff
+   the caller supplies at least one trusted, reviewer-inspectable evidence
+   reference on handoff_context.evidence_refs. Completion [notes] are IGNORED
+   for the pass/fail decision — they cannot be inspected and were the substring
+   surface that previously let BOTH over-blocking (unknown keepers rejected) and
+   fake-done (labels pasted to pass) through the same line. The contract's
+   [required_evidence] descriptive entries are likewise not consulted here (they
+   still feed the anti-rationalization reviewer prompt and verifier records);
+   binding completion to specific evidence KINDS is RFC-0311 Phase 2. A missing
+   live task fails closed. *)
 let decide ~task_id ~task_opt ~notes ~handoff_context () =
+  let handoff_refs_count =
+    match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs
+  in
   match (task_opt : Masc_domain.task option) with
+  | None ->
+    (* Fail closed: there is no live task to verify. The sole production caller
+       already rejects a missing task before reaching the gate, so this branch
+       is defense-in-depth, not a keeper-visible path. *)
+    Log.Task.warn "task_completion_gate REJECT task=%s reason=no_live_task rule=%s"
+      task_id rule_id_evidence_incomplete;
+    Reject
+      { reason = "Task-completion evidence gate reached with no live task."
+      ; rule_id = rule_id_evidence_incomplete
+      ; hint = hint_evidence_incomplete
+      ; payload_json =
+          reject_payload ~task_id ~contract_required:false ~notes ~handoff_context
+      }
   | Some t ->
-    let unsatisfied =
-      unsatisfied_required_evidence ~notes ~handoff_context t.contract
-    in
-    let evidence_sufficient =
-      match t.contract with
-      | None -> unsatisfied = []
-      | Some _ -> evidence_is_substantive ~notes ~handoff_context t.contract
-    in
-    if evidence_sufficient
+    if handoff_supplies_trusted_ref handoff_context
     then begin
       Log.Task.info "task_completion_gate PASS task=%s notes_len=%d handoff_refs=%d"
-        task_id (String.length (String.trim notes))
-        (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs);
+        task_id (String.length (String.trim notes)) handoff_refs_count;
       Pass
     end
     else begin
-      Log.Task.warn "task_completion_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
-        task_id (List.length unsatisfied) (String.length (String.trim notes))
-        (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
+      Log.Task.warn
+        "task_completion_gate REJECT task=%s notes_len=%d handoff_refs=%d rule=%s"
+        task_id (String.length (String.trim notes)) handoff_refs_count
         rule_id_evidence_incomplete;
       Reject
-        { reason = reason_evidence_incomplete ~required_evidence:unsatisfied
+        { reason = reason_evidence_incomplete
         ; rule_id = rule_id_evidence_incomplete
         ; hint = hint_evidence_incomplete
         ; payload_json =
-            `Assoc
-              [ "task_id", `String task_id
-              ; "contract_required", `Bool (Option.is_some t.contract)
-              ; ( "required_evidence_unsatisfied"
-                , Json_util.json_string_list unsatisfied )
-              ; ( "evidence_summary"
-                , evidence_summary_payload ~notes ~handoff_context )
-              ]
+            reject_payload ~task_id
+              ~contract_required:(Option.is_some t.contract)
+              ~notes ~handoff_context
         }
     end
-  | _ ->
-    (* Analysis-only task bypass: a task with no contract has nothing to
-       verify, so the gate must not block keeper_task_done. *)
-    Pass

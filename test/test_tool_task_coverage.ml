@@ -731,6 +731,14 @@ let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fu
                 ( "notes",
                   `String
                     "Implemented deliverable-ready output and captured artifact:run_deliverable evidence." );
+                (* RFC-0311 Phase 1: completion needs a trusted evidence ref;
+                   notes are no longer inspected by the gate. *)
+                ( "handoff_context",
+                  `Assoc
+                    [
+                      ("summary", `String "Implemented deliverable-ready output");
+                      ("evidence_refs", `List [ `String "trace:run_deliverable" ]);
+                    ] );
               ])
         in
         if not (Tool_result.is_success result_done) then
@@ -1333,7 +1341,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
               (Masc_domain.task_status_to_string other)))
 )
 
-let () = test "handle_transition_done_default_contract_accepts_substantive_notes" (fun () ->
+let () = test "handle_transition_done_default_contract_accepts_trusted_evidence_ref" (fun () ->
   let ctx = make_test_ctx () in
   let add_result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1346,6 +1354,8 @@ let () = test "handle_transition_done_default_contract_accepts_substantive_notes
   if not (Tool_result.is_success add_result) then
     failwith (Tool_result.message add_result);
   start_task_001 ctx;
+  (* RFC-0311 Phase 1: a default-contract task completes on a trusted
+     handoff evidence ref (here a trace id), not on substantive notes alone. *)
   let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -1357,6 +1367,12 @@ let () = test "handle_transition_done_default_contract_accepts_substantive_notes
               "Contract harness completed the live workflow with reviewer-visible notes. \
                Task scope satisfied: Default contract Done task - Mirrors \
                contract harness task completion." );
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "Default contract Done task completed");
+                ("evidence_refs", `List [ `String "trace:default-contract-done" ]);
+              ] );
         ])
   in
   if not (Tool_result.is_success result) then
@@ -1366,7 +1382,7 @@ let () = test "handle_transition_done_default_contract_accepts_substantive_notes
   | other ->
     failwith
       (Printf.sprintf
-         "expected Done after default-contract CDAL pass, got: %s"
+         "expected Done after default-contract evidence-gate pass, got: %s"
          (Masc_domain.task_status_to_string other))
 )
 
@@ -2670,6 +2686,13 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
     ("task_id", `String "task-001");
     ("action", `String "done");
     ("notes", `String "Completed");
+    (* RFC-0311 Phase 1: a trusted evidence ref is required for the done to
+       actually land the task in a terminal state (the precondition this test
+       depends on); notes alone no longer complete a task. *)
+    ("handoff_context", `Assoc [
+      ("summary", `String "Done task completed");
+      ("evidence_refs", `List [ `String "trace:done-task" ]);
+    ]);
   ]) in
   (* Now try to claim next from a different agent in same workspace *)
   let agent2_ctx = make_test_ctx_with_agent "agent-2" in

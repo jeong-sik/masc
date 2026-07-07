@@ -99,3 +99,26 @@ done 판정의 결정론 층이 substring 주문(incantation)으로 구현되어
 - **PR-B (behavioral Phase 1+3)**: §3.1 Layer 1 typed 충족 + §8.2 결정 1·2·3. `default_verification_evidence_refs` 매직 토큰 → universal typed-ref, `ref==entry` 동등성 → typed-kind 매칭, enabler, substring 매처 제거(§7 Phase 3), 하네스 매직 토큰 마이그레이션(§4). tripwire 테스트(§6).
 - **PR-C (Phase 2)**: §3.2 LLM fail-closed 판단 + §3.3 force 감사.
 - 영속 계약 마이그레이션: `required_evidence : string list`(문자열 SSOT) → typed kind. 레거시 문자열 계약은 compat read 필요(`types_core.ml:519-540` 주석이 이미 "legacy 문자열 파싱 migration" 경로를 지시).
+
+### 8.4 검증된 구현 계획 (2026-07-07 4-track 코드검증 workflow)
+
+PR-A(#23499 decap) MERGED, 그리고 permissive stopgap #23513(default `required_evidence=[]`) MERGED. 아래 계획이 #23513을 supersede한다. 4-track read-only 검증이 §8.3의 스케치를 코드 사실로 정정했다:
+
+**정정 (assumption → 코드 사실):**
+
+- **§8.2 결정3 enabler = 스키마 텍스트 1줄** (코드 변경 아님). `parse_handoff_context`가 이미 `Done_action`에서 `evidence_refs`를 받아 gate까지 전달한다(`tool_task_args.ml:143-145` → `tool_task.ml:462`). "release 전용" 제약은 오직 스키마 **설명 문자열**(`tool_task_schemas.ml:256`)에만 존재.
+- **`Evidence_ref.kind` enum 부재** → "required KINDS" 표현에 필요하나, **경계 제약**: `Evidence_ref`는 lib `masc`, `task_contract`는 lib `masc_types`(dune `libraries`에 `masc` 없음 = 하위 레이어)라 계약이 상위 타입을 참조하면 순환 의존이다. kind vocabulary는 masc_types에 신설해야 하며 per-kind 바인딩과 함께 **PR2로 이동**(초기 스케치가 `masc`에 넣은 kind enum은 계약이 소비 불가한 위치라 revert). §8.2 결정1(universal)은 kind 필드 없이 gate만으로 달성되므로 PR1에서 완결.
+- **`required_evidence : string list`는 description 역할** — LLM 리뷰어 프롬프트(`anti_rationalization.ml:366-397`)와 verifier 기록(`tool_task_completion_review.ml:74-76`)에 렌더된다. 재타입하면 이 텍스트 소비자가 깨진다. 따라서 kind는 **새 필드** `required_evidence_kinds : kind list`(그 필드만 custom yojson, **같은 PR에서 gate가 읽기** → fan-in-0 scar 회피).
+- **`evidence_claims` ≠ ref kinds**. 별개 probe 합타입이며 keeper auto-DONE(`keeper_tool_task_runtime.ml:578-607`)에 이미 배선. 재사용 금지. 단 non-code `Artifact_exists`(file_bytes probe)의 올바른 집. `decide`는 순수 함수라 probe verdict를 caller가 pre-eval해 주입.
+- **L2 LLM 리뷰어(anti_rationalization, RFC-0189) 존재 + Done 배선**. 단 `Done_action`·non-force만, `Submit_for_verification` 없음. **현 실행 순서 L2(`:404`) → L1(`:445`)** = §1이 원하는 순서의 역. **LLM 불가 시 fail-OPEN 자동승인**(mode=Open 기본, `env_config_governance.ml:176`) — §3.2/RFC-0305 정반대. HITL primitive `Keeper_approval_queue.submit_pending`(non-blocking) 존재하나 완료 경로 미배선. `Done_action → AwaitingVerification` 경로 없음(`Submit`만).
+- **`Done_forced` 코드 부재**(문서만). 현 force 감사 = transition-log `forced:bool`+`authority`(`workspace_task_transitions.ml:512-540`). **actorless/reasonless force 미거부**(비admin force 조용히 강등 `tool_task.ml:200`, reason optional `:181`). force는 L2(`:405`)를 skip하나 L1(`:445`, unguarded)은 못 skip = OK.
+- `ref==entry` trusted 경로는 **증명상 dead**(어떤 ref도 entry 이름과 같을 수 없음). `task_opt=None → Pass`도 dead(caller가 `:206-208`에서 먼저 reject).
+
+**4-PR 순서 (build green 유지, 경계 정정 반영):**
+
+- **PR1 — L1 universal-default gate (본 PR)**: `decide` 재작성 — task 있으면 `handoff_context.evidence_refs`에 trusted ref(Url/Pr/Commit/Trace_ref) ≥1이면 PASS, **notes 완전 무시**, `contract.required_evidence` 미참조, `task_opt=None` fail-closed. 삭제: `notes_mention_required_entry`/`notes_are_substantive`/`placeholder_note_bodies`/`evidence_entry_satisfied`(ref==entry 포함)/`evidence_is_substantive`/`unsatisfied_required_evidence`. 유지: `evidence_ref_is_gate_trusted`, rule_id `"cdal_evidence_incomplete"`. + 스키마 설명 2곳(evidence_refs는 release 전용 아님, done/submit에서 gate 통과에 필요) + 하네스 2스크립트 done에 `trace:` ref + gate 유닛테스트 21→14 마이그레이션(notes-only reject tripwire 포함) + 통합테스트 3건(`test_tool_task_coverage`) 수정. **`types_core` 미변경 = yojson 마이그레이션 0, 계약 fixture 무손상.** `Evidence_ref.kind`(초기 스케치)는 경계 문제로 revert.
+- **PR2 — per-kind typed 바인딩**: masc_types에 evidence-kind vocabulary 신설 + `Evidence_ref` → kind projection + `required_evidence_kinds : kind list` 필드(그 필드만 custom yojson) + gate가 K 소비(K∈{}면 universal) + masc_add_task 스키마 노출 + legacy 문자열 계약 → universal compat read(문자열 kind substring 파싱 **금지**). §8.2 결정2 non-code `Artifact_exists`(file_bytes probe, `decide`에 verdict pre-eval 주입).
+- **PR3 — L2 fail-closed + 순서 역전**: L1을 L2 위로 이동 → `review_completion_notes` 3-way(Approved|Rejected|**Unavailable**) → Unavailable → `AwaitingVerification` + `submit_pending`(HITL, keeper 안 막음), fail-open 제거.
+- **PR4 — L3 force 감사**: `Task_done_forced` 이벤트(taxonomy `workspace_task_classify.ml:438-445`, emit `workspace_task_transitions.ml:512-540` `forced=true` 시 actor/reason/at) + actorless/reasonless force 거부(`tool_task.ml:194-203` 하드닝).
+
+per-test 마이그레이션 표(21항)와 track별 근거는 workflow `wf_cdf1141b` 산출물에 있다.

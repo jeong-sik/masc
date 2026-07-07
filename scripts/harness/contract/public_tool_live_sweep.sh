@@ -332,8 +332,12 @@ r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_n
 expect_ok "masc_agent_timeline" "$r_agent_timeline"
 
 next_step "masc_transition done"
-done_notes="completion_notes: Public MCP tool live sweep completed all requested tool calls and verified each response before task completion. Task scope satisfied: Public Tool Sweep Task - live public surface verification. reviewable_evidence_ref: contract-harness public_tool_live_sweep live MCP transcript."
-r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes}')")"
+# RFC-0311 Phase 1: the completion gate requires a trusted, reviewer-inspectable
+# evidence_refs entry on done (notes alone no longer satisfy it). A trace ref
+# naming this harness run is the appropriate evidence for a live MCP sweep.
+done_notes="Public MCP tool live sweep completed all requested tool calls and verified each response before task completion."
+done_summary="public tool live sweep verified across the public MCP surface"
+r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:["trace:public_tool_live_sweep"]}}')")"
 expect_ok "masc_transition done" "$r_done"
 CLEANUP_TASK_FINALIZED=1
 

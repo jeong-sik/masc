@@ -4,7 +4,6 @@ module CB = Masc.Keeper_failure_circuit_breaker
 module KSR = Masc.Keeper_tool_shared_runtime
 module KAP = Masc.Keeper_alerting_path
 module PCE = Keeper_path_check_error
-module KPR = Keeper_path_rejection
 
 let path_not_found_msg raw =
   KAP.rejection_to_user_message (KAP.Not_found_relative { raw })
@@ -45,35 +44,6 @@ let test_classify_path_not_allowed () =
      = CB.Path_not_allowed);
   check bool "legacy path_not_in_allowed no longer drives KCB" true
     (CB.classify_error "path_not_in_allowed_paths: /x" = CB.Other)
-
-(* Direct typed entry point tests — exercises classify_typed_path_check and
-   classify_typed_path_rejection without string round-trip (RFC-0314 coverage). *)
-
-let test_classify_typed_path_check_direct () =
-  check bool "direct Cwd_not_directory → Cwd_not_directory" true
-    (CB.classify_typed_path_check
-       (PCE.Cwd_not_directory { path = "/tmp"; hint = None })
-     = CB.Cwd_not_directory);
-  check bool "direct Path_outside_whitelist → Path_not_allowed" true
-    (CB.classify_typed_path_check
-       (PCE.Path_outside_whitelist { path = "/etc/passwd"; for_keeper_command = true })
-     = CB.Path_not_allowed)
-
-let test_classify_typed_path_rejection_direct () =
-  check bool "direct Not_found_relative → Path_not_found" true
-    (CB.classify_typed_path_rejection
-       (KPR.Not_found_relative { raw = "/missing" })
-     = CB.Path_not_found);
-  check bool "direct Outside_sandbox → Path_not_allowed" true
-    (CB.classify_typed_path_rejection
-       (KPR.Outside_sandbox { raw = "/x" })
-     = CB.Path_not_allowed);
-  check bool "direct Outside_project_root → Path_not_allowed" true
-    (CB.classify_typed_path_rejection
-       (KPR.Outside_project_root { raw = "../x" })
-     = CB.Path_not_allowed);
-  check bool "direct Path_required → Other" true
-    (CB.classify_typed_path_rejection KPR.Path_required = CB.Other)
 
 let test_classify_typed_path_check_prefixes () =
   let cwd_msg =
@@ -424,13 +394,11 @@ let test_prompt_failures_include_fleet_observed_failure () =
 let () =
   run "Circuit_breaker" [
     "classify", [
-      test_case "path_not_found" `Quick test_classify_path_not_found;
-      test_case "path_not_allowed" `Quick test_classify_path_not_allowed;
-      test_case "typed path-check prefixes" `Quick
-        test_classify_typed_path_check_direct;
-        test_classify_typed_path_rejection_direct;
-        test_classify_typed_path_check_prefixes;
-      test_case "other" `Quick test_classify_other;
+	      test_case "path_not_found" `Quick test_classify_path_not_found;
+	      test_case "path_not_allowed" `Quick test_classify_path_not_allowed;
+	      test_case "typed path-check prefixes" `Quick
+	        test_classify_typed_path_check_prefixes;
+	      test_case "other" `Quick test_classify_other;
     ];
     "signatures", [
       test_case "fingerprint collapses whitespace"

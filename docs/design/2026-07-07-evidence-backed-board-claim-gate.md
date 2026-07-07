@@ -1,8 +1,8 @@
 # Evidence-Backed Board Claim Gate
 
-Status: design draft  
-Owner: keeper/runtime  
-Written: 2026-07-07 KST  
+Status: design draft
+Owner: keeper/runtime
+Written: 2026-07-07 KST
 Scope: `masc` board posts/comments, keeper board tools, verification handoff surfaces
 
 ## 1. Summary

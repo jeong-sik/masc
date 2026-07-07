@@ -170,7 +170,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
              ~class_:Tool_result.Workflow_rejection
              ~start_time
              msg
-         | Ok () ->
+         | Ok claim_gate ->
            (match
               Board_dispatch.create_post
                 ~author
@@ -186,6 +186,22 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
                 ()
             with
             | Ok post ->
+              let post_id = Board.Post_id.to_string post.id in
+              (match
+                 Board_claim_gate.record_post_create
+                   ~tool_name
+                   ~author
+                   ~target_post_id:post_id
+                   ~content
+                   claim_gate
+               with
+               | Error msg ->
+                 Tool_result.make_err
+                   ~tool_name
+                   ~class_:Tool_result.Workflow_rejection
+                   ~start_time
+                   msg
+               | Ok () ->
               let json = Board.post_to_yojson post in
               (* Use [Tool_result.ok] (not [make_ok ~data:(`String ...)]) so the
               embedded JSON after the "<label>:\n" prefix is parsed into
@@ -199,7 +215,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
                 ~start_time
                 (Printf.sprintf
                    "Post created:\n%s"
-                   (Yojson.Safe.pretty_to_string json))
+                   (Yojson.Safe.pretty_to_string json)))
             | Error e ->
               Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;

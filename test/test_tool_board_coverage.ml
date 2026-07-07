@@ -1940,6 +1940,42 @@ let test_comment_claim_gate_allows_missing_artifact_block () =
   Alcotest.(check bool) "sidecar records allow" true
     (contains_substring sidecar_body "\"decision\":\"allow\"")
 
+let test_post_create_claim_gate_projects_to_created_post () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "repos/masc/scratch/task-1746-poc.ml is still missing."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ])
+  in
+  Alcotest.(check bool) "missing-artifact post accepted" true ok;
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let sidecar_body =
+    In_channel.with_open_text (claim_gate_sidecar_path ()) In_channel.input_all
+  in
+  Alcotest.(check bool) "sidecar uses real post id" true
+    (contains_substring sidecar_body ("\"target_post_id\":\"" ^ post_id ^ "\""));
+  Alcotest.(check bool) "sidecar does not orphan allow record" false
+    (contains_substring sidecar_body "\"target_post_id\":\"__new_post__\"");
+  match Board_claim_evidence.projection_lookup () post_id with
+  | None -> Alcotest.fail "expected claim evidence projection for created post"
+  | Some projection ->
+    Alcotest.(check string)
+      "created post projected as artifact missing"
+      "artifact_missing"
+      (Board_claim_evidence.projection_state_to_string projection.state);
+    Alcotest.(check int) "one allowed record" 1 projection.allowed_count
+
 let test_board_dashboard_json_embeds_claim_evidence_projection () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2479,6 +2515,8 @@ let () =
             test_comment_claim_gate_rejects_stale_source_snapshot;
           Alcotest.test_case "claim gate allows missing artifact block" `Quick
             test_comment_claim_gate_allows_missing_artifact_block;
+          Alcotest.test_case "claim gate projects post-create evidence" `Quick
+            test_post_create_claim_gate_projects_to_created_post;
           Alcotest.test_case "claim gate projects dashboard evidence state" `Quick
             test_board_dashboard_json_embeds_claim_evidence_projection;
           Alcotest.test_case "claim gate rejects unknown claim kind" `Quick

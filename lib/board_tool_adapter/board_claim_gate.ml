@@ -29,6 +29,16 @@ type gate_decision =
   | Allow
   | Reject of string
 
+type prechecked_write =
+  | No_record
+  | Record of
+      { claims : claim_kind list
+      ; snapshot : source_post_snapshot option
+      ; artifact_refs : string list
+      ; resolutions : artifact_resolution list
+      ; decision : gate_decision
+      }
+
 let has_prefix ~prefix s =
   let plen = String.length prefix in
   String.length s >= plen && String.equal (String.sub s 0 plen) prefix
@@ -308,9 +318,12 @@ let append_record ~tool_name ~author ~target_post_id ~content ~claims ~snapshot 
 let evaluate ~target_post_id ~claims ~snapshot ~artifact_refs ~resolutions =
   match snapshot with
   | Some source ->
-    (match validate_source_snapshot ~target_post_id source with
+    (match target_post_id with
+     | None -> Reject "source_post_snapshot_without_target_post"
+     | Some target_post_id ->
+       (match validate_source_snapshot ~target_post_id source with
      | Error reason -> Reject reason
-     | Ok () -> Allow)
+        | Ok () -> Allow))
   | None -> Allow
   |> function
   | Reject _ as reject -> reject
@@ -354,9 +367,19 @@ let check_write ~requires_source_snapshot ~tool_name ~author ~target_post_id ~co
            (match validate_source_snapshot ~target_post_id source with
             | Error reason -> Reject reason
             | Ok () ->
-              evaluate ~target_post_id ~claims ~snapshot ~artifact_refs ~resolutions)
+             evaluate
+               ~target_post_id:(Some target_post_id)
+               ~claims
+               ~snapshot
+               ~artifact_refs
+               ~resolutions)
          | false, None ->
-           evaluate ~target_post_id ~claims ~snapshot ~artifact_refs ~resolutions)
+           evaluate
+             ~target_post_id:(Some target_post_id)
+             ~claims
+             ~snapshot
+             ~artifact_refs
+             ~resolutions)
     in
     try
       append_record
@@ -374,8 +397,67 @@ let check_write ~requires_source_snapshot ~tool_name ~author ~target_post_id ~co
       | Reject reason -> Error ("board_claim_gate rejected write: " ^ reason)
     with
     | exn ->
-      Error
+          Error
         ("board_claim_gate sidecar write failed: " ^ Printexc.to_string exn))
+;;
+
+let prepare_post_create ~args =
+  let claims = claims_arg args in
+  let unknown_claims = unknown_claims_arg args in
+  let has_snapshot_arg = Option.is_some (assoc_opt "source_post_snapshot" args) in
+  let snapshot = source_snapshot_arg args in
+  let artifact_refs = artifact_refs_arg args in
+  let high_risk =
+    claims <> [] || unknown_claims <> [] || has_snapshot_arg || artifact_refs <> []
+  in
+  if not high_risk
+  then Ok No_record
+  else (
+    let resolutions = List.map resolve_file_path artifact_refs in
+    let decision =
+      match unknown_claims with
+      | claim :: _ -> Reject ("invalid_claim_kind:" ^ claim)
+      | [] ->
+        (match has_snapshot_arg, snapshot with
+         | true, None -> Reject "invalid_source_post_snapshot"
+         | _, Some _ -> Reject "source_post_snapshot_without_target_post"
+         | false, None ->
+           evaluate
+             ~target_post_id:None
+             ~claims
+             ~snapshot
+             ~artifact_refs
+             ~resolutions)
+    in
+    Ok (Record { claims; snapshot; artifact_refs; resolutions; decision }))
+;;
+
+let record_prechecked ~tool_name ~author ~target_post_id ~content = function
+  | No_record -> Ok ()
+  | Record { claims; snapshot; artifact_refs; resolutions; decision } ->
+    (try
+       append_record
+         ~tool_name
+         ~author
+         ~target_post_id
+         ~content
+         ~claims
+         ~snapshot
+         ~artifact_refs
+         ~resolutions
+         ~decision;
+       match decision with
+       | Allow -> Ok ()
+       | Reject reason -> Error ("board_claim_gate rejected write: " ^ reason)
+     with
+     | exn ->
+       Error ("board_claim_gate sidecar write failed: " ^ Printexc.to_string exn))
+;;
+
+let prechecked_reject_reason = function
+  | No_record -> None
+  | Record { decision = Allow; _ } -> None
+  | Record { decision = Reject reason; _ } -> Some reason
 ;;
 
 let check_comment ~tool_name ~author ~post_id ~content ~args =
@@ -389,11 +471,24 @@ let check_comment ~tool_name ~author ~post_id ~content ~args =
 ;;
 
 let check_post_create ~tool_name ~author ~content ~args =
-  check_write
-    ~requires_source_snapshot:false
-    ~tool_name
-    ~author
-    ~target_post_id:"__new_post__"
-    ~content
-    ~args
+  match prepare_post_create ~args with
+  | Error msg -> Error msg
+  | Ok prechecked ->
+    (match prechecked_reject_reason prechecked with
+     | None -> Ok prechecked
+     | Some _ ->
+       (match
+          record_prechecked
+            ~tool_name
+            ~author
+            ~target_post_id:"__new_post__"
+            ~content
+            prechecked
+        with
+        | Ok () -> Ok prechecked
+        | Error msg -> Error msg))
+;;
+
+let record_post_create =
+  record_prechecked
 ;;

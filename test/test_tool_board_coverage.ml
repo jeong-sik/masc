@@ -1976,6 +1976,29 @@ let test_post_create_claim_gate_projects_to_created_post () =
       (Masc_board_handlers.Board_claim_evidence.projection_state_to_string projection.state);
     Alcotest.(check int) "one allowed record" 1 projection.allowed_count
 
+let test_post_create_claim_gate_rolls_back_on_sidecar_failure () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let sidecar = claim_gate_sidecar_path () in
+  Unix.mkdir sidecar 0o755;
+  let result =
+    dispatch_result
+      "masc_board_post"
+      (make_args
+         [ "content", `String "repos/masc/scratch/task-1746-poc.ml is still missing."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ])
+  in
+  Alcotest.(check bool) "post create fails when evidence sidecar fails" false
+    (Tool_result.is_success result);
+  Alcotest.(check bool) "sidecar failure is explicit" true
+    (contains_substring (Tool_result.message result) "sidecar write failed");
+  Alcotest.(check int) "created post rolled back" 0
+    (List.length (Board_dispatch.list_posts ()))
+
 let test_board_dashboard_json_embeds_claim_evidence_projection () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2517,6 +2540,8 @@ let () =
             test_comment_claim_gate_allows_missing_artifact_block;
           Alcotest.test_case "claim gate projects post-create evidence" `Quick
             test_post_create_claim_gate_projects_to_created_post;
+          Alcotest.test_case "claim gate rolls back post-create sidecar failure" `Quick
+            test_post_create_claim_gate_rolls_back_on_sidecar_failure;
           Alcotest.test_case "claim gate projects dashboard evidence state" `Quick
             test_board_dashboard_json_embeds_claim_evidence_projection;
           Alcotest.test_case "claim gate rejects unknown claim kind" `Quick

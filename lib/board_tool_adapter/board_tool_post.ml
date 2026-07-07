@@ -171,8 +171,17 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
              ~start_time
              msg
          | Ok claim_gate ->
+           let record_for_post (post : Board.post) =
+             Board_claim_gate.record_post_create
+               ~tool_name
+               ~author
+               ~target_post_id:(Board.Post_id.to_string post.id)
+               ~content
+               claim_gate
+           in
            (match
-              Board_dispatch.create_post
+              Board_dispatch.create_post_with_outcome
+                ~after_fresh_persist:record_for_post
                 ~author
                 ~content
                 ?title
@@ -185,16 +194,14 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
                 ?thread_id
                 ()
             with
-            | Ok post ->
-              let post_id = Board.Post_id.to_string post.id in
-              (match
-                 Board_claim_gate.record_post_create
-                   ~tool_name
-                   ~author
-                   ~target_post_id:post_id
-                   ~content
-                   claim_gate
-               with
+            | Ok outcome ->
+              let post = Board.post_of_create_post_outcome outcome in
+              let evidence_result =
+                match outcome with
+                | Board.Fresh_post _ -> Ok ()
+                | Board.Dedup_hit _ | Board.Rolled_up_post _ -> record_for_post post
+              in
+              (match evidence_result with
                | Error msg ->
                  Tool_result.make_err
                    ~tool_name

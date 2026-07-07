@@ -76,4 +76,26 @@ let () =
    | Error msg ->
      Printf.printf "FAIL test3: parse: %s\n" msg; exit 1);
 
-  Printf.printf "\nAll 3 tests PASSED\n"
+  (* Test 4: a persisted typo in compaction_mode must fail closed. *)
+  let invalid_compaction_mode = Yojson.Safe.from_string {|
+{"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
+ "tool_access": ["masc_status"],
+ "compaction_mode": "aggressive",
+ "total_turns": 100}
+|} in
+  (match Keeper_meta_json_parse.meta_of_json invalid_compaction_mode with
+   | Ok _ ->
+     Printf.printf "FAIL test4: invalid compaction_mode parsed successfully\n";
+     exit 1
+   | Error msg ->
+     if
+       String_util.string_contains_substring
+         ~needle:"invalid persisted compaction_mode"
+         msg
+     then Printf.printf "test4: PASS — invalid compaction_mode fails closed\n"
+     else begin
+       Printf.printf "FAIL test4: unexpected parse error: %s\n" msg;
+       exit 1
+     end);
+
+  Printf.printf "\nAll 4 tests PASSED\n"

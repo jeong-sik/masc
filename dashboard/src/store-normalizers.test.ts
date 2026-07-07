@@ -166,6 +166,62 @@ describe('normalizeTaskStatus', () => {
       status: 'done',
     })
   })
+
+  it('preserves task gate snapshots from execution task payloads', () => {
+    expect(normalizeTask({
+      id: 'task-gate',
+      title: 'Execution task with gate',
+      status: 'awaiting_verification',
+      gate: {
+        strict: true,
+        completion_contract: ['unit tests pass'],
+        unmet_completion_contract: ['manual approval'],
+        done: {
+          status: 'blocked',
+          checks: [
+            { evidence: 'unit tests pass', outcome: 'satisfied', detail: 'vitest green' },
+            { evidence: 'manual approval', outcome: 'missing', detail: 'operator pending' },
+          ],
+          reasons: ['operator approval pending'],
+        },
+        inspect_to_implement: {
+          status: 'inconclusive',
+          checks: [
+            { evidence: 'diff review', outcome: 'unsupported', detail: 'not collected' },
+          ],
+        },
+        verify_to_review: {
+          status: 'not-a-known-status',
+          reasons: ['backend drift fixture'],
+        },
+      },
+    })).toMatchObject({
+      gate: {
+        strict: true,
+        completion_contract: ['unit tests pass'],
+        unmet_completion_contract: ['manual approval'],
+        done: {
+          status: 'blocked',
+          checks: [
+            { evidence: 'unit tests pass', outcome: 'satisfied', detail: 'vitest green' },
+            { evidence: 'manual approval', outcome: 'missing', detail: 'operator pending' },
+          ],
+          reasons: ['operator approval pending'],
+        },
+        inspect_to_implement: {
+          status: 'inconclusive',
+          checks: [
+            { evidence: 'diff review', outcome: 'unsupported', detail: 'not collected' },
+          ],
+        },
+        verify_to_review: {
+          status: 'unknown',
+          status_raw: 'not-a-known-status',
+          reasons: ['unknown gate status: not-a-known-status', 'backend drift fixture'],
+        },
+      },
+    })
+  })
 })
 
 describe('normalizeMessage', () => {

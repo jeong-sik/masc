@@ -14,6 +14,18 @@ val consolidation_plan_output_schema : Yojson.Safe.t
 val memory_bank_summary_output_schema : Yojson.Safe.t
 (** JSON object the memory-bank summary provider must return. *)
 
+(** Wire field names for {!compaction_plan_output_schema}; shared with the
+    W2 compaction-plan parser as the single source of truth. *)
+val compaction_plan_field_summary : string
+
+val compaction_plan_field_kept_indices : string
+val compaction_plan_field_summarized_indices : string
+val compaction_plan_field_dropped_indices : string
+
+val compaction_plan_output_schema : Yojson.Safe.t
+(** JSON object the LLM compaction summarizer must return: a [summary] prose
+    block plus kept / summarized / dropped 0-based message indices. *)
+
 val vision_analyze_output_schema : Yojson.Safe.t
 (** JSON object the one-shot vision analyzer provider must return. *)
 

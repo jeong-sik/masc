@@ -125,7 +125,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     label: 'Model routing lanes',
     kind: 'live-write',
     source: 'GET /api/v1/dashboard/runtime-defaults',
-    action: 'PATCH /api/v1/runtime/routing for default/librarian/structured_judge/cross_verifier',
+    action: 'PATCH /api/v1/runtime/routing for default/librarian/structured_judge/hitl_summary/cross_verifier',
   },
   {
     id: 'runtime-media-failover',
@@ -1195,6 +1195,7 @@ export function SettingsSurface() {
     : runtimeProviders?.assignment_governance?.assignment_count ?? 0
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
+  const hitlSummaryRuntime = runtimeDefaults?.model_routing.hitl_summary_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   const runtimeSelectOptions = runtimeEntries.length > 0
@@ -1463,6 +1464,16 @@ export function SettingsSurface() {
                       disabled=${runtimeRoutingSaving}
                       testId="runtime-routing-structured-judge"
                       onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('structured_judge', runtimeId)}
+                    />
+                    <${RuntimeRoutingSelect}
+                      label="HITL summary"
+                      hint="[runtime].hitl_summary · 승인 컨텍스트 요약"
+                      value=${hitlSummaryRuntime}
+                      fallbackLabel="structured_judge/librarian/default fallback"
+                      options=${runtimeSelectOptions}
+                      disabled=${runtimeRoutingSaving}
+                      testId="runtime-routing-hitl-summary"
+                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('hitl_summary', runtimeId)}
                     />
                     <${RuntimeRoutingSelect}
                       label="Cross verifier"

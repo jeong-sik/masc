@@ -55,3 +55,89 @@ export function schedRiskSpec(risk: string | null | undefined): { lbl: string; c
 export function schedPayloadSpec(kind: string | null | undefined): { glyph: string; lbl: string } {
   return (kind && SCHED_PAYLOAD[kind]) || { glyph: '▢', lbl: kind || '작업' }
 }
+
+// ── cadence (예약 종류) ──────────────────────────────────────────────
+// The single axis operators reason about: is a schedule a one-off, a polling
+// loop, or a fixed time-scheduled job? Derived from the backend recurrence kind
+// (Schedule_domain.recurrence → one_shot | interval | daily | cron). The backend
+// set is closed, so an unrecognized wire value means projection/version skew and
+// is surfaced as `null` rather than silently bucketed into a permissive default.
+
+export type RecurrenceKind = 'one_shot' | 'interval' | 'daily' | 'cron'
+
+const RECURRENCE_KINDS: readonly RecurrenceKind[] = ['one_shot', 'interval', 'daily', 'cron']
+
+/** Parse a wire recurrence kind into the closed backend set, or `null` if it is
+ * not one of them (Unknown → explicit, never Unknown → permissive default). */
+export function parseRecurrenceKind(raw: string | null | undefined): RecurrenceKind | null {
+  const value = raw?.trim().toLowerCase() ?? ''
+  return (RECURRENCE_KINDS as readonly string[]).includes(value) ? (value as RecurrenceKind) : null
+}
+
+export type Cadence = 'scheduled' | 'interval' | 'oneshot'
+
+function assertNeverRecurrenceKind(value: never): never {
+  throw new Error(`unhandled recurrence kind: ${String(value)}`)
+}
+
+/** Total, exhaustive map from the closed recurrence set to the operator cadence
+ * axis. `daily` and `cron` are both fixed time-scheduled jobs → `scheduled`. A
+ * new RecurrenceKind fails to compile here rather than falling through. */
+export function cadenceOfRecurrenceKind(kind: RecurrenceKind): Cadence {
+  switch (kind) {
+    case 'one_shot':
+      return 'oneshot'
+    case 'interval':
+      return 'interval'
+    case 'daily':
+    case 'cron':
+      return 'scheduled'
+    default:
+      return assertNeverRecurrenceKind(kind)
+  }
+}
+
+export interface SchedCadenceSpec {
+  readonly key: Cadence
+  readonly lbl: string
+  readonly short: string
+  readonly glyph: string
+  readonly cls: string
+  readonly hint: string
+}
+
+export const SCHED_CADENCE: Readonly<Record<Cadence, SchedCadenceSpec>> = {
+  scheduled: {
+    key: 'scheduled',
+    lbl: '정기 · 시각',
+    short: '정기',
+    glyph: '◈',
+    cls: 'ok',
+    hint: '지정 시각에 반복되는 정기 잡 (daily · cron)',
+  },
+  interval: {
+    key: 'interval',
+    lbl: '폴링 · 주기',
+    short: '폴링',
+    glyph: '↻',
+    cls: 'volt',
+    hint: '고정 간격마다 반복 — 특정 시각이 아니라 계속 도는 상시 폴링 루프',
+  },
+  oneshot: {
+    key: 'oneshot',
+    lbl: '1회 · ad-hoc',
+    short: '1회',
+    glyph: '•',
+    cls: 'info',
+    hint: '한 번 실행하고 종료 — keeper가 상황에 맞춰 건 단발성 예약',
+  },
+}
+
+/** Display order for the cadence filter strip (정기 → 폴링 → 1회). */
+export const SCHED_CADENCE_ORDER: readonly Cadence[] = ['scheduled', 'interval', 'oneshot']
+
+/** Terminal statuses normalized to the lowercase form the live API emits, so
+ * non-terminal filters share one source with {@link SCHED_TERMINAL}. */
+export const SCHED_TERMINAL_NORMALIZED: ReadonlySet<string> = new Set(
+  SCHED_TERMINAL.map(status => status.toLowerCase()),
+)

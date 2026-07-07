@@ -31,19 +31,26 @@ import { ReactionBar } from './reaction-bar'
 import { PostShareActions } from './post-share-actions'
 import { StateBlockMessages } from './state-block-messages'
 import {
+  appendVoiceTranscriptDraft,
+  composerAttachmentDeliveryReason,
+  composerAttachmentTrayMeta,
   ComposerV2,
-  createComposerVoiceDraft,
-  formatClock,
   formatFileSize,
   serializeComposerBody,
+  uniqueComposerAttachmentId,
 } from './composer-v2'
-import type { ComposerAttachmentDraft, ComposerV2Mode, ComposerVoiceDraft } from './composer-v2'
+import type { ComposerAttachmentDraft, ComposerV2Mode } from './composer-v2'
+import { stableAttachmentId } from '../chat/attachments'
+import { useVoiceInput } from '../chat/voice-input'
 import { ensureStateBlockDraft, stateBlockKeys } from '../ops/ops-state'
 import { navigateBoard } from './board-route'
 import {
   boardActorDisplayName,
   boardActorSigilLabel,
   boardActorTitle,
+  boardClaimEvidenceBadgeClass,
+  boardClaimEvidenceLabel,
+  boardClaimEvidenceTitle,
   contributorQualityBadgeClass,
   contributorQualityPercent,
   navigateToAuthor,
@@ -385,6 +392,8 @@ function PostCard({ post }: { post: BoardPost }) {
   const qualityTitle = qualityPercent === null
     ? undefined
     : `기여자 품질 ${qualityPercent}점`
+  const claimEvidenceLabel = boardClaimEvidenceLabel(post.claim_evidence)
+  const claimEvidenceTitle = boardClaimEvidenceTitle(post.claim_evidence)
   const selected = selectedBoardPostId.value === post.id
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
@@ -468,6 +477,13 @@ function PostCard({ post }: { post: BoardPost }) {
         ${isMod ? html`<span class="bd-badge mod">모더레이션 대기</span>` : null}
         ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
         ${qualityPercent !== null ? html`<span class="bd-badge ${contributorQualityBadgeClass(post.contributor_quality)}" aria-label=${qualityTitle} title=${qualityTitle}>품질 ${qualityPercent}</span>` : null}
+        ${claimEvidenceLabel !== null ? html`
+          <span
+            class=${`bd-badge ${boardClaimEvidenceBadgeClass(post.claim_evidence)}`}
+            aria-label=${claimEvidenceTitle}
+            title=${claimEvidenceTitle}
+          >${claimEvidenceLabel}</span>
+        ` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
         <span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span>
         <${Checkbox}
@@ -813,10 +829,17 @@ function BdComposer() {
   const [mobileKeeperTarget, setMobileKeeperTarget] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mobileAttachments, setMobileAttachments] = useState<ComposerAttachmentDraft[]>([])
-  const [mobileVoiceDraft, setMobileVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
-  const [mobileRecording, setMobileRecording] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const mobileFileInputRef = useRef<HTMLInputElement>(null)
+  const mobileVoice = useVoiceInput({
+    onTranscribed: (text) => {
+      setLocalBody(current => appendVoiceTranscriptDraft(current, text))
+      showToast('Voice transcribed.', 'success')
+    },
+    onError: (message) => {
+      showToast(message, 'error')
+    },
+  })
 
   useEffect(() => {
     if (boardHearthFilter.value !== localHearth) {
@@ -867,11 +890,16 @@ function BdComposer() {
     && mobileMentionOptions.length > 0
   const mobileStateKeys = mode === 'state' ? stateBlockKeys(localBody) : []
   const mobileQuickBusy = submitting || operatorActionBusy.value
+  const mobileAttachmentDeliveryReason = mode === 'mention'
+    ? composerAttachmentDeliveryReason(mobileAttachments)
+    : null
   const mobileMentionHasDraft = mode === 'mention'
-    && (localBody.trim() !== '' || mobileAttachments.length > 0 || mobileVoiceDraft !== null)
+    && (localBody.trim() !== '' || mobileAttachments.length > 0)
   const mobileQuickHasDraft = mode === 'mention' ? mobileMentionHasDraft : localBody.trim() !== ''
   const mobileQuickDisabled = mobileQuickBusy
+    || mobileVoice.state !== 'idle'
     || !mobileQuickHasDraft
+    || mobileAttachmentDeliveryReason !== null
     || (mode === 'mention' && (!mobileMentionTarget || mobileMentionUnresolved))
     || (mode === 'state' && mobileStateKeys.length === 0)
 
@@ -912,26 +940,31 @@ function BdComposer() {
   function attachMobileMentionFiles(files: FileList | File[]): void {
     const nextFiles = Array.from(files).slice(0, 6)
     if (nextFiles.length === 0) return
-    setMobileAttachments(current => [
-      ...current,
-      ...nextFiles.map((file, index): ComposerAttachmentDraft => ({
-        id: `mobile-${Date.now()}-${index}-${file.name}`,
-        kind: file.type.startsWith('image/') ? 'image' : 'file',
-        name: file.name,
-        size: formatFileSize(file.size),
-      })),
-    ].slice(0, 6))
-  }
-
-  function stopMobileVoiceDraft(): void {
-    setMobileRecording(false)
-    setMobileVoiceDraft(createComposerVoiceDraft())
+    setMobileAttachments(current => {
+      const pending: ComposerAttachmentDraft[] = []
+      for (const file of nextFiles) {
+        const kind = file.type.startsWith('image/') ? 'image' : 'file'
+        const baseId = stableAttachmentId({
+          name: file.name,
+          type: kind,
+          mimeType: file.type || null,
+          size: file.size,
+        })
+        pending.push({
+          id: uniqueComposerAttachmentId(baseId, current, pending),
+          kind,
+          name: file.name,
+          size: formatFileSize(file.size),
+          sizeBytes: file.size,
+          mime: file.type || null,
+        })
+      }
+      return [...current, ...pending].slice(0, 6)
+    })
   }
 
   function resetMobileMentionDrafts(): void {
     setMobileAttachments([])
-    setMobileVoiceDraft(null)
-    setMobileRecording(false)
   }
 
   async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
@@ -967,10 +1000,11 @@ function BdComposer() {
 
     event?.stopPropagation()
     const body = localBody.trim()
+    if (mobileQuickDisabled) return
     const message = mode === 'mention'
-      ? serializeComposerBody({ text: localBody, attachments: mobileAttachments, voice: mobileVoiceDraft })
+      ? serializeComposerBody({ text: localBody, attachments: [], voice: null })
       : body
-    if (!message || mobileQuickDisabled) return
+    if (!message) return
     setSubmitting(true)
     try {
       if (mode === 'mention') {
@@ -1086,7 +1120,7 @@ function BdComposer() {
               </div>
             `
             : null}
-          ${mobileAttachments.length > 0 || mobileVoiceDraft
+          ${mobileAttachments.length > 0
             ? html`
               <div class="bd-mobile-draft-tray composer-tray" data-testid="bd-composer-mobile-draft-tray">
                 ${mobileAttachments.map(attachment => html`
@@ -1096,7 +1130,7 @@ function BdComposer() {
                     </div>
                     <div class="cdraft-meta">
                       <span class="cdraft-name mono">${attachment.name}</span>
-                      <span class="cdraft-sub mono">${[attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')}</span>
+                      <span class="cdraft-sub mono">${composerAttachmentTrayMeta(attachment)} · transport unavailable</span>
                     </div>
                     <button
                       type="button"
@@ -1110,55 +1144,22 @@ function BdComposer() {
                     </button>
                   </div>
                 `)}
-                ${mobileVoiceDraft
-                  ? html`
-                    <div class="cdraft voice">
-                      <span class="cdraft-glyph mic">◌</span>
-                      <div class="cdraft-wave" aria-hidden="true">
-                        ${mobileVoiceDraft.wave.map((height, index) => html`<span class="vbar" key=${index} style=${{ height: `${Math.round(4 + height * 18)}px` }} />`)}
-                      </div>
-                      <span class="cdraft-dur mono">${formatClock(mobileVoiceDraft.secs)}</span>
-                      <div class="cdraft-tx">
-                        <span class="cdraft-tx-k">받아쓰기</span>
-                        <span class="cdraft-tx-v">${mobileVoiceDraft.transcript}</span>
-                      </div>
-                      <button
-                        type="button"
-                        class="cdraft-x"
-                        title="음성 제거"
-                        aria-label="Remove mobile voice draft"
-                        onClick=${() => { setMobileVoiceDraft(null) }}
-                        disabled=${mobileQuickBusy}
-                      >
-                        <${X} size=${10} aria-hidden="true" />
-                      </button>
-                    </div>
-                  `
-                  : null}
               </div>
             `
             : null}
-          ${mobileRecording
+          ${mobileVoice.state !== 'idle'
             ? html`
               <div class="bd-mobile-rec-bar rec-bar" data-testid="bd-composer-mobile-recorder">
                 <span class="rec-dot" aria-hidden="true"></span>
-                <span class="rec-lbl">녹음 중</span>
-                <span class="rec-clock mono">0:12</span>
+                <span class="rec-lbl">${mobileVoice.state === 'recording' ? '녹음 중' : '전사 중'}</span>
                 <div class="rec-wave" aria-hidden="true">
                   ${[0.4, 0.8, 0.5, 0.9, 0.45, 0.75, 0.52, 0.84, 0.48, 0.7].map((height, index) => html`<span class="rbar" key=${index} style=${{ height: `${Math.round(3 + height * 20)}px` }} />`)}
                 </div>
                 <button
                   type="button"
-                  class="rec-btn cancel"
-                  onClick=${() => { setMobileRecording(false) }}
-                  disabled=${mobileQuickBusy}
-                  data-testid="bd-composer-mobile-voice-cancel"
-                >취소</button>
-                <button
-                  type="button"
                   class="rec-btn stop"
-                  onClick=${stopMobileVoiceDraft}
-                  disabled=${mobileQuickBusy}
+                  onClick=${mobileVoice.stop}
+                  disabled=${mobileQuickBusy || mobileVoice.state !== 'recording'}
                   data-testid="bd-composer-mobile-voice-stop"
                 >
                   <${Square} size=${11} aria-hidden="true" />
@@ -1250,9 +1251,9 @@ function BdComposer() {
               type="button"
               class="bd-mobile-compose-tool"
               title="음성 입력"
-              aria-label="Start mobile mention voice draft"
-              disabled=${mobileQuickBusy || mobileRecording}
-              onClick=${() => { setMobileRecording(true) }}
+              aria-label="Start mobile mention voice input"
+              disabled=${mobileQuickBusy || mobileVoice.state !== 'idle' || !mobileVoice.supported}
+              onClick=${() => { void mobileVoice.start() }}
               data-testid="bd-composer-mobile-voice"
             >
               <${Mic} size=${15} strokeWidth=${2.2} aria-hidden="true" />

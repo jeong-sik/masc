@@ -797,6 +797,10 @@ export async function fetchKeeperTransitions(
 
 // --- Keeper lifecycle timeline (#12798) ---
 
+// Detail views need enough recent lifecycle entries to avoid silently truncating
+// active keepers, while compact surfaces can still pass an explicit lower limit.
+export const KEEPER_LIFECYCLE_DEFAULT_LIMIT = 200
+
 export interface KeeperLifecycleEvent {
   ts: number
   event: string
@@ -832,7 +836,7 @@ export function parseKeeperLifecycleResponse(raw: unknown): KeeperLifecycleTimel
 
 export async function fetchKeeperLifecycle(
   name: string,
-  limit = 50,
+  limit = KEEPER_LIFECYCLE_DEFAULT_LIMIT,
   opts?: { signal?: AbortSignal },
 ): Promise<KeeperLifecycleTimelineResponse> {
   const resp = await fetchWithTimeout(

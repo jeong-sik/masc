@@ -12,6 +12,8 @@ type t =
   | TurnCompleted
   | PacingShadowEvents
   | PacingShadowNextDueSec
+  | FailureRoute
+  | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped
@@ -115,6 +117,7 @@ type t =
   | ProviderTimeoutLoopPaused
   | TurnFailureStreakPaused
   | CycleExceptions
+  | SnapshotReadFailures
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
   | StateSnapshotInvalidGoal
@@ -226,6 +229,7 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
+  | MemoryOsReobserveEchoSuppressed
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts

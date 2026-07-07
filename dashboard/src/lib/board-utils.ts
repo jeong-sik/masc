@@ -54,7 +54,7 @@ import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
 import { stripStateBlocks } from '../keeper-message'
 import { clampPct } from './format-number'
-import type { BoardActorIdentity, BoardContributorQuality, BoardPost } from '../types'
+import type { BoardActorIdentity, BoardClaimEvidenceProjection, BoardContributorQuality, BoardPost } from '../types'
 
 /** Strip inline markdown formatting from title text (bold, italic, code). */
 export function stripInlineMarkdown(text: string): string {
@@ -221,6 +221,49 @@ export function contributorQualityBadgeClass(quality?: BoardContributorQuality |
     default:
       return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
   }
+}
+
+export function boardClaimEvidenceLabel(evidence?: BoardClaimEvidenceProjection | null): string | null {
+  if (!evidence) return null
+  if (evidence.label?.trim()) return evidence.label.trim()
+  switch (evidence.state) {
+    case 'artifact_missing':
+      return 'Artifact missing'
+    case 'source_snapshot_stale':
+      return 'Source snapshot stale'
+    case 'needs_evidence':
+      return 'Needs evidence'
+    case 'verified':
+      return 'Verified'
+    default:
+      return null
+  }
+}
+
+export function boardClaimEvidenceBadgeClass(evidence?: BoardClaimEvidenceProjection | null): string {
+  switch (evidence?.state) {
+    case 'verified':
+      return 'bg-[var(--ok-10)] text-[var(--ok-fg)] border-[var(--ok-20)]'
+    case 'source_snapshot_stale':
+      return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
+    case 'artifact_missing':
+    case 'needs_evidence':
+      return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
+    default:
+      return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
+  }
+}
+
+export function boardClaimEvidenceTitle(evidence?: BoardClaimEvidenceProjection | null): string {
+  const label = boardClaimEvidenceLabel(evidence) ?? 'Claim evidence'
+  if (!evidence) return label
+  return [
+    label,
+    `records ${evidence.total_count}`,
+    `rejects ${evidence.rejected_count}`,
+    `artifact_missing ${evidence.artifact_missing_count}`,
+    `artifact_unknown ${evidence.artifact_unknown_count}`,
+  ].join(' · ')
 }
 
 function contributorQualityDisplayScore(

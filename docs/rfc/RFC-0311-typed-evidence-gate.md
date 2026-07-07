@@ -1,13 +1,13 @@
 ---
 rfc: "0311"
 title: "Typed evidence gate — retire the substring incantation, judgment to the LLM boundary"
-status: Draft
+status: Accepted
 created: 2026-07-06
-updated: 2026-07-06
+updated: 2026-07-07
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0042", "0088", "0189", "0310"]
+related: ["0042", "0088", "0109", "0189", "0199", "0310"]
 implementation_prs: []
 ---
 
@@ -73,3 +73,52 @@ done 판정의 결정론 층이 substring 주문(incantation)으로 구현되어
 - Phase 1: `evidence_refs` typed 필드 추가 + 이중 수용 (typed 또는 legacy substring 통과 — 전환 기간, WARN 관측).
 - Phase 2: LLM fail-closed 배선 + force 감사 이벤트.
 - Phase 3 (removal): `placeholder_note_bodies`, 20자 임계값, `evidence_entry_satisfied` substring 매처, `default_verification_evidence_refs`, 하네스 매직 토큰. — #18840이 스코프한 잔존 안티패턴의 청산 지점.
+
+## 8. 구현 착수 (2026-07-07): 진단 확정 + 운영자 결정
+
+4-agent read-only 진단 워크플로(over-block / leak / current-gate 트랙 + spec)로 §1 문제를 실측 검증했다. Draft → Accepted.
+
+### 8.1 진단 확정 — 과잉차단과 누수는 같은 한 줄
+
+- [근거] `keepers/*.decisions.jsonl` error_preview 142건 중 **142/142가 contracted 경로**(`required_evidence` n_unsat 2/3/4), #23330 no-contract 규칙(`contract_required:false`)은 **0/142**. 원래 지목된 no-contract typed-ref 규칙은 실측 거부가 0건 — 지배적 과잉차단 원인이 아니다.
+- [근거] 모든 task는 생성 시 무조건 계약을 받는다: `workspace_task_create.ml:161` → `ensure_task_contract_for_verification`. 계약 없이 생성해도 `required_evidence` 기본값이 `["completion_notes"; "reviewable_evidence_ref"]`(`workspace_task_classify.ml:200`) 두 메타 토큰으로 채워진다.
+- [근거] 이 기본 토큰을 만족하는 유일한 방법은 리터럴 문자열을 notes에 붙여넣는 substring 매칭(`task_completion_gate.ml:40-56`)이다. trusted-ref 대안은 `evidence_ref_is_gate_trusted ref_ && r = entry_lower`(`:74-78`)로 ref 문자열이 메타 필드명과 **정확히 일치**해야 하는데 어떤 실제 `Evidence_ref`도 그 이름이 될 수 없다. 따라서 한 줄이 동시에 **누수**(라벨 붙여넣기 = fake-done)이자 **과잉차단**(토큰을 모르는 키퍼는 결정론적 거부: nick0cave task-1831 4회 거부 후 포기, sangsu 트레이스 "required_evidence 항목을 verbatim으로 다 써야 하는데 그게 뭔지 모른다").
+- [근거] non-code task의 구조적 블로커(해소 대상): trusted 형태(Url/Trace_ref)를 원리상 생산할 수 있어도 기존 제출 채널은 `masc_transition.handoff_context.evidence_refs`에만 있었고 keeper-facing `keeper_task_done`은 이를 노출하지 않았다. Phase 1 구현은 `keeper_task_done.evidence_refs`를 required field로 추가하고 runtime에서 `handoff_context.evidence_refs`로 운반해 이 제출 경로를 연다.
+
+### 8.2 운영자 결정 (2026-07-07 ratified)
+
+**제약(최우선)**: 어떤 계약 모델이든 **keeper가 완료 경로에서 멈추면 안 된다**. 이 제약이 아래 설계를 결정한다 — 판단은 task를 붙잡되(AwaitingVerification) keeper lane은 붙잡지 않는다(§3.2).
+
+1. **계약 부여**: 생성 시 필수(마찰↑, 예측 불가)나 분류기(CLAUDE.md/RFC-0042 금지 안티패턴)가 아니라, **항상 부여 + 기본값을 universal typed-ref 요구**(`{Pr, Commit, Url, Trace_ref} 중 임의 trusted ref ≥1`)로. 모든 turn이 산출하는 Trace_ref로 default 충족 가능 → Layer 1 항상 통과 가능(anti-stall). 생성/클레임 시 더 엄격한 kind로 정제 가능(`tool_task_handlers.ml:266`이 이미 typed 계약 인자 수용).
+2. **non-code trusted evidence**: `Url`(발행 링크) + `Trace_ref`(turn:/trace:/receipt:) + 작성 산출물용 `Artifact_exists` 클레임(RFC-0199, `file_bytes` probe로 결정론 검증). raw `File_path`/`File_uri`는 비신뢰 유지(base-path 미해결 = 검토 불가; `task_completion_gate.ml:32-37`의 fail-closed 근거 타당).
+3. **제출 채널 enabler(필수)**: `evidence_refs`를 Done/Submit 경로에 직접 수용 — release 전용 non-empty-summary 결합에서 분리. §8.1의 구조적 블로커 해소.
+
+### 8.3 구현 순서
+
+- **PR-A (본 PR, behavior-preserving decap)**: 게이트 모듈 리네임 `Cdal_evidence_gate` → `Task_completion_gate`(`lib/task_completion_gate.{ml,mli}`), Atomic `cdal_evidence_gate_decide_fn` → `task_completion_gate_decide_fn`, 로그 문자열. rule_id `"cdal_evidence_incomplete"`는 PR-B에서 §5 typed reason으로 교체될 때까지 유지. 행동 변화 0. CDAL 브랜드가 게이트에서 사라지는 지점(생산자 측 `lib/cdal/`·`lib/cdal_runtime/`는 라이브이므로 무관, 별도 정리).
+- **PR-B (behavioral Phase 1+3)**: §3.1 Layer 1 typed 충족 + §8.2 결정 1·2·3. `default_verification_evidence_refs` 매직 토큰 → universal typed-ref, `ref==entry` 동등성 → typed-kind 매칭, enabler, substring 매처 제거(§7 Phase 3), 하네스 매직 토큰 마이그레이션(§4). tripwire 테스트(§6).
+- **PR-C (Phase 2)**: §3.2 LLM fail-closed 판단 + §3.3 force 감사.
+- 영속 계약 마이그레이션: `required_evidence : string list`(문자열 SSOT) → typed kind. 레거시 문자열 계약은 compat read 필요(`types_core.ml:519-540` 주석이 이미 "legacy 문자열 파싱 migration" 경로를 지시).
+
+### 8.4 검증된 구현 계획 (2026-07-07 4-track 코드검증 workflow)
+
+PR-A(#23499 decap) MERGED, 그리고 permissive stopgap #23513(default `required_evidence=[]`) MERGED. 아래 계획이 #23513을 supersede한다. 4-track read-only 검증이 §8.3의 스케치를 코드 사실로 정정했다:
+
+**정정 (assumption → 코드 사실):**
+
+- **§8.2 결정3 enabler = 스키마 텍스트 1줄** (코드 변경 아님). `parse_handoff_context`가 이미 `Done_action`에서 `evidence_refs`를 받아 gate까지 전달한다(`tool_task_args.ml:143-145` → `tool_task.ml:462`). "release 전용" 제약은 오직 스키마 **설명 문자열**(`tool_task_schemas.ml:256`)에만 존재.
+- **`Evidence_ref.kind` enum 부재** → "required KINDS" 표현에 필요하나, **경계 제약**: `Evidence_ref`는 lib `masc`, `task_contract`는 lib `masc_types`(dune `libraries`에 `masc` 없음 = 하위 레이어)라 계약이 상위 타입을 참조하면 순환 의존이다. kind vocabulary는 masc_types에 신설해야 하며 per-kind 바인딩과 함께 **PR2로 이동**(초기 스케치가 `masc`에 넣은 kind enum은 계약이 소비 불가한 위치라 revert). §8.2 결정1(universal)은 kind 필드 없이 gate만으로 달성되므로 PR1에서 완결.
+- **`required_evidence : string list`는 description 역할** — LLM 리뷰어 프롬프트(`anti_rationalization.ml:366-397`)와 verifier 기록(`tool_task_completion_review.ml:74-76`)에 렌더된다. 재타입하면 이 텍스트 소비자가 깨진다. 따라서 kind는 **새 필드** `required_evidence_kinds : kind list`(그 필드만 custom yojson, **같은 PR에서 gate가 읽기** → fan-in-0 scar 회피).
+- **`evidence_claims` ≠ ref kinds**. 별개 probe 합타입이며 keeper auto-DONE(`keeper_tool_task_runtime.ml:578-607`)에 이미 배선. 재사용 금지. 단 non-code `Artifact_exists`(file_bytes probe)의 올바른 집. `decide`는 순수 함수라 probe verdict를 caller가 pre-eval해 주입.
+- **L2 LLM 리뷰어(anti_rationalization, RFC-0189) 존재 + Done 배선**. 단 `Done_action`·non-force만, `Submit_for_verification` 없음. **현 실행 순서 L2(`:404`) → L1(`:445`)** = §1이 원하는 순서의 역. **LLM 불가 시 fail-OPEN 자동승인**(mode=Open 기본, `env_config_governance.ml:176`) — §3.2/RFC-0305 정반대. HITL primitive `Keeper_approval_queue.submit_pending`(non-blocking) 존재하나 완료 경로 미배선. `Done_action → AwaitingVerification` 경로 없음(`Submit`만).
+- **`Done_forced` 코드 부재**(문서만). 현 force 감사 = transition-log `forced:bool`+`authority`(`workspace_task_transitions.ml:512-540`). **actorless/reasonless force 미거부**(비admin force 조용히 강등 `tool_task.ml:200`, reason optional `:181`). force는 L2(`:405`)를 skip하나 L1(`:445`, unguarded)은 못 skip = OK.
+- `ref==entry` trusted 경로는 **증명상 dead**(어떤 ref도 entry 이름과 같을 수 없음). `task_opt=None → Pass`도 dead(caller가 `:206-208`에서 먼저 reject).
+
+**4-PR 순서 (build green 유지, 경계 정정 반영):**
+
+- **PR1 — L1 universal-default gate (본 PR)**: `decide` 재작성 — task 있으면 `handoff_context.evidence_refs`에 trusted ref(Url/Pr/Commit/Trace_ref) ≥1이면 PASS, **notes 완전 무시**, `contract.required_evidence` 미참조, `task_opt=None` fail-closed. 삭제: `notes_mention_required_entry`/`notes_are_substantive`/`placeholder_note_bodies`/`evidence_entry_satisfied`(ref==entry 포함)/`evidence_is_substantive`/`unsatisfied_required_evidence`. 유지: `evidence_ref_is_gate_trusted`, rule_id `"cdal_evidence_incomplete"`. + 스키마 설명 2곳(evidence_refs는 release 전용 아님, done/submit에서 gate 통과에 필요) + 하네스 2스크립트 done에 `trace:` ref + gate 유닛테스트 21→14 마이그레이션(notes-only reject tripwire 포함) + 통합테스트 3건(`test_tool_task_coverage`) 수정. **`types_core` 미변경 = yojson 마이그레이션 0, 계약 fixture 무손상.** `Evidence_ref.kind`(초기 스케치)는 경계 문제로 revert.
+- **PR2 — per-kind typed 바인딩**: masc_types에 evidence-kind vocabulary 신설 + `Evidence_ref` → kind projection + `required_evidence_kinds : kind list` 필드(그 필드만 custom yojson) + gate가 K 소비(K∈{}면 universal) + masc_add_task 스키마 노출 + legacy 문자열 계약 → universal compat read(문자열 kind substring 파싱 **금지**). §8.2 결정2 non-code `Artifact_exists`(file_bytes probe, `decide`에 verdict pre-eval 주입).
+- **PR3 — L2 fail-closed + 순서 역전**: L1을 L2 위로 이동 → `review_completion_notes` 3-way(Approved|Rejected|**Unavailable**) → Unavailable → `AwaitingVerification` + `submit_pending`(HITL, keeper 안 막음), fail-open 제거.
+- **PR4 — L3 force 감사**: `Task_done_forced` 이벤트(taxonomy `workspace_task_classify.ml:438-445`, emit `workspace_task_transitions.ml:512-540` `forced=true` 시 actor/reason/at) + actorless/reasonless force 거부(`tool_task.ml:194-203` 하드닝).
+
+per-test 마이그레이션 표(21항)와 track별 근거는 workflow `wf_cdf1141b` 산출물에 있다.

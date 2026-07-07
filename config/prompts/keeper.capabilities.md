@@ -111,7 +111,7 @@ PR workflow (write/execute-capable schema required):
 5. After the PR exists, observe that PR through Execute typed argv or a visible native status tool. Do not turn this into open-ended PR discovery.
    Do not probe credential identity. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not mark PRs ready, merge PRs, or bypass draft state unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
-7. Close the work with `keeper_task_done task_id=... result=...`; include the PR URL or artifact reference in `result` for PR-bearing tasks.
+7. Close the work with `keeper_task_done task_id=... result=... evidence_refs=[...]`; include the PR URL, commit, trace, receipt, or artifact reference in `evidence_refs` for PR-bearing tasks.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search
@@ -177,7 +177,7 @@ Task management:
 - View tasks: keeper_tasks_list
 - Create tasks: keeper_task_create when available; otherwise use masc_add_task (single) or masc_batch_add_tasks (multiple)
 - Claim specific and complete: keeper_task_claim, keeper_task_done
-- For code/PR work: keeper_task_done with task_id and result containing the PR URL or artifact reference
+- For code/PR work: keeper_task_done with task_id, result, and evidence_refs containing the PR URL, commit, trace, receipt, or artifact reference
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Progress guidance:

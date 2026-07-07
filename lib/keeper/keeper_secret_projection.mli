@@ -3,6 +3,13 @@ type t =
   ; cleanup : unit -> unit
   }
 
+type github_app_token_minter =
+  app_id:string ->
+  installation_id:string ->
+  pem:string ->
+  now:int ->
+  (string, string) result
+
 type secret_root_info =
   { root : string
   ; source : string
@@ -22,6 +29,7 @@ val secret_roots : base_path:string -> keeper_name:string -> secret_root_info li
     For the literal [base] keeper, the root is returned once. *)
 
 val local_env_for_keeper :
+  ?mint_github_app_token:github_app_token_minter ->
   ?host_env:string array ->
   base_path:string ->
   keeper_name:string ->
@@ -36,12 +44,25 @@ val local_env_for_keeper :
     the effective env provides [GH_TOKEN] or [GITHUB_TOKEN] and does not
     provide [GIT_CONFIG_GLOBAL], local execution writes a per-keeper gitconfig
     under the keeper playground that points git-over-HTTPS at
-    [gh auth git-credential]. If the keeper does not supply [GH_CONFIG_DIR],
-    local execution points [gh] at an empty system config directory when
-    available to avoid ambient host config fallback. *)
+    [gh auth git-credential]. If the effective env configures GitHub App
+    issuance via [MASC_GITHUB_APP_ID]/[MASC_GITHUB_APP_INSTALLATION_ID],
+    missing config, unreadable PEM material, or mint failure is returned as an
+    error instead of falling back to a broader static token. If the keeper does
+    not supply [GH_CONFIG_DIR], local execution points [gh] at an empty system
+    config directory when available to avoid ambient host config fallback.
+    [?mint_github_app_token] defaults to the production GitHub App token
+    issuer and is injectable for deterministic projection tests. *)
 
 val docker_args_for_keeper :
-  base_path:string -> keeper_name:string -> container_name:string -> (t, string) result
+  ?mint_github_app_token:github_app_token_minter ->
+  base_path:string ->
+  keeper_name:string ->
+  container_name:string ->
+  unit ->
+  (t, string) result
+(** Build Docker secret projection arguments. GitHub App private-key PEM files
+    are projection-layer-only material: they may be read to mint the
+    installation token, but are not mounted into keeper containers. *)
 
 val secret_scope_of_string : string -> secret_scope option
 

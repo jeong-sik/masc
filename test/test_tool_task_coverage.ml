@@ -198,22 +198,22 @@ let start_task_001 ctx =
   in
   if not (Tool_result.is_success start) then failwith (Tool_result.message start)
 
-let with_cdal_evidence_gate_decide decide f =
-  let previous = Atomic.get Workspace_hooks.cdal_evidence_gate_decide_fn in
+let with_task_completion_gate_decide decide f =
+  let previous = Atomic.get Workspace_hooks.task_completion_gate_decide_fn in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn previous)
+      Atomic.set Workspace_hooks.task_completion_gate_decide_fn previous)
     (fun () ->
-       Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide;
+       Atomic.set Workspace_hooks.task_completion_gate_decide_fn decide;
        f ())
 
 let workspace_evidence_verdict_of_cdal = function
-  | Cdal_evidence_gate.Pass -> Workspace_hooks.Pass
-  | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
+  | Task_completion_gate.Pass -> Workspace_hooks.Pass
+  | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
 
-let real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff () =
-  Cdal_evidence_gate.decide
+let real_task_completion_gate ~task_id ~task_opt ~notes ~handoff () =
+  Task_completion_gate.decide
     ~task_id
     ~task_opt
     ~notes
@@ -657,10 +657,11 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
       | Some contract ->
           assert (not contract.strict);
           assert (contract.completion_contract <> []);
-          assert (List.mem "completion_notes" contract.required_evidence);
-          assert (List.mem "reviewable_evidence_ref" contract.required_evidence);
-          assert (List.mem "completion_notes" contract.verify_gate_evidence);
-          assert (List.mem "reviewable_evidence_ref" contract.verify_gate_evidence);
+          (* RFC-0311 §8: the default contract no longer carries magic-token
+             required_evidence. Completion is gated on substantive evidence
+             (notes or a trusted ref), not verbatim token mentions. *)
+          assert (contract.required_evidence = []);
+          assert (contract.verify_gate_evidence = []);
           assert (str_contains (List.hd contract.completion_contract)
                     "Default verification task")
       | None -> failwith "expected default verification contract")
@@ -688,8 +689,12 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
     (fun (task : Masc_domain.task) ->
        match task.contract with
        | Some contract ->
+           (* Default verification contract is injected (completion_contract
+              present); RFC-0311 §8: it no longer carries magic-token
+              required/verify evidence. *)
            assert (contract.completion_contract <> []);
-           assert (contract.verify_gate_evidence <> [])
+           assert (contract.required_evidence = []);
+           assert (contract.verify_gate_evidence = [])
        | None -> failwith "expected default verification contract for batch task")
     tasks
 )
@@ -726,6 +731,14 @@ let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fu
                 ( "notes",
                   `String
                     "Implemented deliverable-ready output and captured artifact:run_deliverable evidence." );
+                (* RFC-0311 Phase 1: completion needs a trusted evidence ref;
+                   notes are no longer inspected by the gate. *)
+                ( "handoff_context",
+                  `Assoc
+                    [
+                      ("summary", `String "Implemented deliverable-ready output");
+                      ("evidence_refs", `List [ `String "trace:run_deliverable" ]);
+                    ] );
               ])
         in
         if not (Tool_result.is_success result_done) then
@@ -1217,7 +1230,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
   assert (not (str_contains (Tool_result.message result) "contract verdict"))
 )
 
-let () = test "handle_transition_done_rejects_cdal_evidence_gate_failure" (fun () ->
+let () = test "handle_transition_done_rejects_task_completion_gate_failure" (fun () ->
   let ctx = make_test_ctx () in
   let add_result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1240,7 +1253,7 @@ let () = test "handle_transition_done_rejects_cdal_evidence_gate_failure" (fun (
           ()));
   start_task_001 ctx;
   let gate_calls = ref 0 in
-  with_cdal_evidence_gate_decide
+  with_task_completion_gate_decide
     (fun ~task_id ~task_opt ~notes ~handoff:_ () ->
        incr gate_calls;
        assert (String.equal task_id "task-001");
@@ -1289,7 +1302,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
   set_only_task_contract ctx None;
   start_task_001 ctx;
   let gate_calls = ref 0 in
-  with_cdal_evidence_gate_decide
+  with_task_completion_gate_decide
     (fun ~task_id ~task_opt ~notes ~handoff () ->
        incr gate_calls;
        assert (String.equal task_id "task-001");
@@ -1297,7 +1310,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
        (match task_opt with
         | Some { Masc_domain.contract = None; _ } -> ()
         | _ -> failwith "expected analysis-only task with no contract");
-       real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff ())
+       real_task_completion_gate ~task_id ~task_opt ~notes ~handoff ())
     (fun () ->
        let result =
          Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1328,7 +1341,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
               (Masc_domain.task_status_to_string other)))
 )
 
-let () = test "handle_transition_done_default_contract_accepts_default_evidence_tokens" (fun () ->
+let () = test "handle_transition_done_default_contract_accepts_trusted_evidence_ref" (fun () ->
   let ctx = make_test_ctx () in
   let add_result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1341,6 +1354,8 @@ let () = test "handle_transition_done_default_contract_accepts_default_evidence_
   if not (Tool_result.is_success add_result) then
     failwith (Tool_result.message add_result);
   start_task_001 ctx;
+  (* RFC-0311 Phase 1: a default-contract task completes on a trusted
+     handoff evidence ref (here a trace id), not on substantive notes alone. *)
   let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -1349,10 +1364,15 @@ let () = test "handle_transition_done_default_contract_accepts_default_evidence_
           ("action", `String "done");
           ( "notes",
             `String
-              "completion_notes: contract harness completed the live workflow. \
+              "Contract harness completed the live workflow with reviewer-visible notes. \
                Task scope satisfied: Default contract Done task - Mirrors \
-               contract harness task completion. \
-               reviewable_evidence_ref: contract-harness transcript." );
+               contract harness task completion." );
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "Default contract Done task completed");
+                ("evidence_refs", `List [ `String "trace:default-contract-done" ]);
+              ] );
         ])
   in
   if not (Tool_result.is_success result) then
@@ -1362,7 +1382,7 @@ let () = test "handle_transition_done_default_contract_accepts_default_evidence_
   | other ->
     failwith
       (Printf.sprintf
-         "expected Done after default-contract CDAL pass, got: %s"
+         "expected Done after default-contract evidence-gate pass, got: %s"
          (Masc_domain.task_status_to_string other))
 )
 
@@ -1397,10 +1417,10 @@ let () = test "handle_transition_force_done_still_rejects_cdal_evidence_incomple
          (fun ~base_path:_ ~agent_name ->
             String.equal agent_name "admin-agent");
        let gate_calls = ref 0 in
-       with_cdal_evidence_gate_decide
+       with_task_completion_gate_decide
          (fun ~task_id ~task_opt ~notes ~handoff () ->
             incr gate_calls;
-            real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff ())
+            real_task_completion_gate ~task_id ~task_opt ~notes ~handoff ())
          (fun () ->
             let result =
               Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -2041,7 +2061,7 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
    removes.  Phase E semantics is now pinned by
    [test/test_task_state_verification_phase_e.ml] (5 cases) and by
    the typed contract verdict consultation in
-   [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
+   [test/test_task_completion_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)
 
 let task_submit_evidence_notes =
@@ -2114,7 +2134,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
    assertion was the third lock-in of the retired behaviour and has
    been removed.  The remaining intent — contracted-task submit
    rejection when no contract verdict and no substantive evidence — is
-   covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
+   covered by [test/test_task_completion_gate.ml]'s missing-verdict
    arm. See issue #18830 Cluster A.1. *)
 
 let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun () ->
@@ -2666,6 +2686,13 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
     ("task_id", `String "task-001");
     ("action", `String "done");
     ("notes", `String "Completed");
+    (* RFC-0311 Phase 1: a trusted evidence ref is required for the done to
+       actually land the task in a terminal state (the precondition this test
+       depends on); notes alone no longer complete a task. *)
+    ("handoff_context", `Assoc [
+      ("summary", `String "Done task completed");
+      ("evidence_refs", `List [ `String "trace:done-task" ]);
+    ]);
   ]) in
   (* Now try to claim next from a different agent in same workspace *)
   let agent2_ctx = make_test_ctx_with_agent "agent-2" in

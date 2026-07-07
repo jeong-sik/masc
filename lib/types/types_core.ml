@@ -517,7 +517,7 @@ type task_execution_links = {
 (** Task contract - persisted deterministic gate inputs.
 
     [required_evidence : string list] is the live source of truth: the contract
-    evidence gate ([Cdal_evidence_gate]) substring-matches each entry against
+    evidence gate ([Task_completion_gate]) substring-matches each entry against
     task-completion notes / handoff refs to decide whether a contracted task
     may complete.
 

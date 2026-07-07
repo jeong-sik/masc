@@ -916,18 +916,56 @@ dominant source of the observed CAS race exhaustion after
                       (String.concat ", " committed_tools)
                       turn_event_summary.event_count
                       (String.concat ", " turn_event_summary.payload_kinds));
-                  (* RFC-0313 W1 shadow: record what pacing would schedule.
-                     Placed before the escalate call, which may raise
-                     [Keeper_fiber_crash] and must not skip the observation. *)
+                  (* RFC-0313 W2: route the failure (total over sdk_error) and
+                     record alongside the legacy machinery. The route is
+                     observe-only until the W3 flip: pacing shadow takes the
+                     typed retry_after hint, the route counter feeds Grafana,
+                     and Escalate_judgment enqueues a judgment stimulus
+                     ([enqueue_if_missing] identity-dedups repeats; no
+                     dedicated turn_reason, so scheduling cooldowns are
+                     unchanged). Placed before the escalate call, which may
+                     raise [Keeper_fiber_crash] and must not skip the
+                     observations. *)
+                  let failure_route = Keeper_runtime_failure_route.route_of_error err in
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string FailureRoute)
+                    ~labels:
+                      [ "keeper", meta.name
+                      ; (* RFC-0132-EXEMPT: internal observability — real runtime identity on a metric label, not a redacted public surface *)
+                        "runtime", final_execution.runtime_id
+                      ; "route", Keeper_runtime_failure_route.route_kind_label failure_route
+                      ; "class", Keeper_runtime_failure_route.route_class_label failure_route
+                      ]
+                    ();
                   Keeper_pacing_shadow.observe_failure
                     ~keeper_name:meta.name
                     ~runtime_id:final_execution.runtime_id
-                    ~retry_after:None;
+                    ~retry_after:
+                      (Keeper_runtime_failure_route.retry_after_of_route failure_route);
+                  (match failure_route with
+                   | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
+                     let fj : Keeper_event_queue.failure_judgment =
+                       { fj_runtime_id = final_execution.runtime_id
+                       ; fj_judgment = judgment
+                       ; fj_detail = detail
+                       }
+                     in
+                     Keeper_registry_event_queue.enqueue
+                       ~base_path:config.base_path
+                       meta.name
+                       { post_id = Keeper_event_queue.failure_judgment_post_id fj
+                       ; urgency = Keeper_event_queue.Normal
+                       ; arrived_at = Time_compat.now ()
+                       ; payload = Keeper_event_queue.Failure_judgment fj
+                       }
+                   | Keeper_runtime_failure_route.Retry_after_pacing _
+                   | Keeper_runtime_failure_route.Rotate_now _ -> ());
                   Keeper_unified_turn_failure.record_failure_and_maybe_escalate
                     ~config
                     ~meta
                     ~updated_meta
                     ~is_auto_recoverable
+                    ~pacing_enforced:(Keeper_pacing_shadow.pacing_enforced ())
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths

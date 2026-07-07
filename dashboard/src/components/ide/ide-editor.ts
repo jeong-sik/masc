@@ -5,8 +5,10 @@ import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import type { CodeDocumentStore } from './code-document-store'
 import type { KeeperLineOwnershipStore } from './keeper-line-ownership-store'
+import { ideEditorSelection } from './ide-editor-selection'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
+import type { IdeAnnotationDeleteOutcome } from '../../api/ide'
 import {
   readOnlyExt,
   themeExt,
@@ -68,6 +70,9 @@ interface IdeEditorProps {
   readonly onFindClose?: () => void
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
   readonly annotations?: ReadonlyArray<IdeAnnotation>
+  readonly onAnnotationDelete?: (
+    annotation: SelectedAnnotation,
+  ) => Promise<IdeAnnotationDeleteOutcome>
 }
 
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
@@ -93,6 +98,7 @@ export function IdeEditor({
   onFindClose,
   onKeeperLineSelect,
   annotations = [],
+  onAnnotationDelete,
 }: IdeEditorProps) {
   useStoreSubscription(documentStore.subscribe)
   useStoreSubscription(ownershipStore.subscribe)
@@ -266,6 +272,7 @@ export function IdeEditor({
               traceActive=${activeLayers.has('keeper-trace')}
               traceEvents=${replayTraceEvents}
               annotations=${annotations}
+              onAnnotationDelete=${onAnnotationDelete}
             />`
       }
     </div>
@@ -285,6 +292,7 @@ function CodeMirrorEditor({
   contextFocus,
   traceActive = false,
   traceEvents = EMPTY_TRACE_EVENTS,
+  onAnnotationDelete,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
@@ -295,6 +303,9 @@ function CodeMirrorEditor({
   readonly contextFocus?: IdeContextFocus | null
   readonly traceActive?: boolean
   readonly traceEvents?: ReadonlyArray<KeeperTraceEvent>
+  readonly onAnnotationDelete?: (
+    annotation: SelectedAnnotation,
+  ) => Promise<IdeAnnotationDeleteOutcome>
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -355,6 +366,16 @@ function CodeMirrorEditor({
             if (sel !== prevAnnRef.current) {
               prevAnnRef.current = sel
               setSelectedAnn(sel)
+            }
+            // #23471 FE-4: publish the human selection as 1-based line
+            // numbers for the annotation composer's default range.
+            if (update.selectionSet || update.docChanged) {
+              const main = update.state.selection.main
+              ideEditorSelection.value = {
+                filePath: mountFilePath,
+                lineStart: update.state.doc.lineAt(main.from).number,
+                lineEnd: update.state.doc.lineAt(main.to).number,
+              }
             }
           }),
           ...(onKeeperLineSelect
@@ -490,6 +511,7 @@ function CodeMirrorEditor({
             setSelectedAnn(null)
           }
         },
+        onDelete: onAnnotationDelete,
       }) : null}
     </div>
   `

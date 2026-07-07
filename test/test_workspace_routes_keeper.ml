@@ -572,9 +572,9 @@ let sha_a = "4f03f7437bab0d9926bf5f373d7e39259a663a8a"
 let sha_b = "9b2c33d4e5f60718293a4b5c6d7e8f9012345678"
 
 (* Two commits interleaved: sha_a owns lines 1-2 and 4, sha_b owns line 3.
-   git emits sha_a's metadata block only once (first group); line 4 repeats
-   the bare header, arriving AFTER sha_b's metadata — the regression case
-   where sequential state tracking would attribute line 4 to sha_b. *)
+   git emits sha_a's metadata block only once (first counted header); line 2
+   and line 4 repeat bare headers. Line 4 arrives AFTER sha_b's metadata: the
+   regression case where sequential state tracking would attribute it to sha_b. *)
 let porcelain_fixture =
   [ sha_a ^ " 1 1 2"
   ; "author Alice"
@@ -598,21 +598,21 @@ let porcelain_fixture =
   ]
 
 let test_blame_header_with_count () =
-  Alcotest.(check (option (pair string int)))
+  Alcotest.(check (option (triple string int int)))
     "header with group size parses final line"
-    (Some (sha_a, 1))
+    (Some (sha_a, 1, 2))
     (B.parse_blame_header (sha_a ^ " 1 1 2"))
 
 let test_blame_header_without_count () =
-  Alcotest.(check (option (pair string int)))
+  Alcotest.(check (option (triple string int int)))
     "bare repeated header parses final line"
-    (Some (sha_a, 2))
+    (Some (sha_a, 2, 1))
     (B.parse_blame_header (sha_a ^ " 2 2"))
 
 let test_blame_header_rejects_non_headers () =
   List.iter
     (fun line ->
-      Alcotest.(check (option (pair string int)))
+      Alcotest.(check (option (triple string int int)))
         (Printf.sprintf "non-header rejected: %S" line)
         None
         (B.parse_blame_header line))
@@ -630,6 +630,8 @@ let test_blame_porcelain_sha_join () =
   Alcotest.(check int) "all four lines attributed" 4 (List.length entries);
   let by_line n = List.find (fun e -> e.B.bl_line = n) entries in
   Alcotest.(check string) "line 1 author" "Alice" (by_line 1).B.bl_author;
+  Alcotest.(check string) "line 2 author from repeated bare header" "Alice"
+    (by_line 2).B.bl_author;
   Alcotest.(check string) "line 3 author" "Bob" (by_line 3).B.bl_author;
   Alcotest.(check int64) "line 1 time" 1700000100L (by_line 1).B.bl_time;
   Alcotest.(check int64) "line 3 time" 1700000200L (by_line 3).B.bl_time

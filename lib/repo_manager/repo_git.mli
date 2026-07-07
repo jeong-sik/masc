@@ -29,9 +29,10 @@ val fetch : repository:repository -> (string list, string) result
 val fast_forward :
   repository:repository -> target_ref:string -> (unit, string) result
 (** [fast_forward ~repository ~target_ref] advances the current branch to
-    [target_ref] with [git merge --ff-only]. Returns [Error] (without mutating
-    history) when the move is not a pure fast-forward, so a divergent working
-    tree is never overwritten. The target ref must already be fetched. *)
+    [target_ref] with a hook-suppressed [git merge --ff-only]. Returns [Error]
+    (without mutating history) when the move is not a pure fast-forward, so a
+    divergent working tree is never overwritten. The target ref must already be
+    fetched. *)
 
 val get_branches :
   repository:repository -> (string list, string) result
@@ -40,6 +41,19 @@ val get_branches :
 val get_origin_url : local_path:string -> (string, string) result
 (** [get_origin_url ~local_path] returns the configured [origin] remote URL
     for the repository at [local_path]. *)
+
+val current_branch : repository:repository -> (string, string) result
+(** [current_branch ~repository] returns the short name of the checked-out
+    branch via [git rev-parse --abbrev-ref HEAD]. A detached HEAD returns
+    ["HEAD"]. Read-only ([GIT_OPTIONAL_LOCKS=0]) with a bounded timeout. *)
+
+val ahead_behind :
+  repository:repository -> target_ref:string -> (int * int, string) result
+(** [ahead_behind ~repository ~target_ref] returns [(behind, ahead)]:
+    [behind] counts commits reachable from [target_ref] but not from HEAD,
+    [ahead] the reverse, via
+    [git rev-list --left-right --count <target_ref>...HEAD]. The target ref
+    must already be fetched. Read-only with a bounded timeout. *)
 
 val get_recent_commits :
   repository:repository -> branch:string -> limit:int -> (string list, string) result

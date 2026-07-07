@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
 import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
-import { fetchKeeperCompactionSnapshots, fetchRuntimeProviders } from '../../api/dashboard'
+import { fetchKeeperCompactionSnapshots, fetchKeeperTurnRecords, fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
@@ -30,6 +30,56 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       entries: [],
     }),
     fetchRuntimeProviders: vi.fn().mockResolvedValue({ providers: [] }),
+    fetchKeeperTurnRecords: vi.fn().mockResolvedValue({
+      keeper: 'masc-improver',
+      count: 2,
+      skipped_rows: 0,
+      source: 'turn_record',
+      producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+      durable_store: '.masc/keepers/masc-improver/turn-records',
+      dashboard_surface: '/api/v1/keepers/:name/turn-records',
+      freshness_slo_s: 300,
+      latest_ts_unix: 1_782_444_590,
+      latest_ts_iso: '2026-06-26T03:03:10Z',
+      latest_age_s: 3,
+      health: 'ok',
+      stale_reason: null,
+      coverage_gaps: [],
+      memory_os: null,
+      user_model: null,
+      entries: [
+        {
+          record: {
+            execution_ids: ['exec-cmp'],
+            keeper: 'masc-improver',
+            trace_id: 'trace-cmp',
+            absolute_turn: 12,
+            blocks: [
+              { block: 'persona', bytes: 2048, digest: 'persona-digest-aaaaaaaa' },
+              { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
+              { block: 'memory_os_recall', bytes: 512, digest: 'memory-digest-cccccccc' },
+            ],
+            runtime_profile: 'oas-seoul-1',
+            model: 'runtime',
+            finish_reason: 'completed',
+            input_tokens: 33000,
+            output_tokens: 120,
+            context_window: 200000,
+            ts: 1_782_444_590,
+          },
+          diff_vs_prev: {
+            added: [],
+            removed: [],
+            changed: [
+              {
+                prev: { block: 'dynamic_context', bytes: 900, digest: 'old-dynamic' },
+                next: { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
+              },
+            ],
+          },
+        },
+      ],
+    }),
     fetchKeeperCompactionSnapshots: vi.fn().mockResolvedValue({
       schema: 'keeper.compaction_snapshots.v1',
       keeper: 'masc-improver',
@@ -663,6 +713,13 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')
+    const promptContext = await findByTestId('compaction-prompt-context')
+    expect(fetchKeeperTurnRecords).toHaveBeenCalledWith('masc-improver', 12, expect.any(Object))
+    expect(promptContext.textContent).toContain('snapshot-linked turn-record')
+    expect(promptContext.textContent).toContain('trace-cmp#12')
+    expect(promptContext.textContent).toContain('dynamic_context')
+    expect(promptContext.textContent).toContain('memory_os_recall')
+    expect(promptContext.textContent).toContain('raw prompt text는 이 화면/API에서 노출하지 않습니다')
   })
 
   it('renders live durable compaction snapshots even when token counts are missing', async () => {
@@ -717,7 +774,9 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('pre_dispatch_hygiene')
     expect(container.textContent).toContain('runtime_manifest · compacted')
     expect(container.textContent).toContain('trace-live')
-    expect(container.textContent).toContain('before/after token count가 없습니다')
+    expect(container.textContent).toContain('before/after token count는 기록하지 않았습니다')
+    expect(container.textContent).toContain('latest turn-record')
+    expect(container.textContent).toContain('선택한 snapshot trace가 최근 2개 turn-records 안에 없어')
     expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
   })
 

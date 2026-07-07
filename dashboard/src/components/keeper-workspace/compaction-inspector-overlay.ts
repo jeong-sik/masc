@@ -9,7 +9,11 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper } from '../../types'
-import { fetchKeeperCompactionSnapshots } from '../../api/dashboard'
+import {
+  fetchKeeperCompactionSnapshots,
+  fetchKeeperTurnRecords,
+  type TurnRecordRow,
+} from '../../api/dashboard'
 import {
   hydrateCompactionSnapshots,
   keeperCompactionSnapshots,
@@ -34,13 +38,33 @@ type CompactionSnapshotLoadState = {
   readonly scanTruncated: boolean
 }
 
+type PromptContextLoadState = {
+  readonly loading: boolean
+  readonly error: string | null
+  readonly rows: readonly TurnRecordRow[]
+  readonly count: number | null
+  readonly health: string | null
+  readonly source: string | null
+  readonly producer: string | null
+}
+
 function isFiniteNumber(n: number | null | undefined): n is number {
   return typeof n === 'number' && Number.isFinite(n)
 }
 
 function fmtTok(n: number | null | undefined): string {
-  if (!isFiniteNumber(n)) return '미수신'
+  if (!isFiniteNumber(n)) return '계측 없음'
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`
+  if (n >= 1024) return `${(n / 1024).toFixed(1)}KB`
+  return `${n}B`
+}
+
+function shortDigest(digest: string): string {
+  return digest.length > 12 ? digest.slice(0, 12) : digest
 }
 
 function CmpStat({
@@ -74,23 +98,6 @@ function CmpStat({
       </div>
     </div>
   `
-}
-
-function cmpFullCtx(ev: CompactionSnapshot, side: 'before' | 'after'): string {
-  const tok = side === 'before' ? ev.before.tok : ev.after.tok
-  const otherTok = side === 'before' ? ev.after.tok : ev.before.tok
-  const label = side === 'before' ? '압축 전' : '압축 후'
-  const lines = [
-    `## ${label} 컨텍스트`,
-    '',
-    `- 총 토큰: ${fmtTok(tok)}`,
-    `- 메시지 수: ${ev.before.msgs != null && ev.after.msgs != null ? String(side === 'before' ? ev.before.msgs : ev.after.msgs) : '미수신'}`,
-    `- trace 수: ${ev.before.traces != null && ev.after.traces != null ? String(side === 'before' ? ev.before.traces : ev.after.traces) : '미수신'}`,
-    `- 반대쪽: ${fmtTok(otherTok)}`,
-    '',
-    '전체 프롬프트 텍스트는 이 API에서 노출하지 않습니다.',
-  ]
-  return lines.join('\n')
 }
 
 function DataGapNote({ children }: { children: string }): VNode {
@@ -177,6 +184,85 @@ function CompactionEmptyState({
   `
 }
 
+function selectPromptContextRow(
+  rows: readonly TurnRecordRow[],
+  ev: CompactionSnapshot,
+): { row: TurnRecordRow | null; linked: boolean } {
+  const linked = rows.find((row) => {
+    if (!ev.traceId || row.record.trace_id !== ev.traceId) return false
+    return ev.keeperTurnId == null || row.record.absolute_turn === ev.keeperTurnId
+  })
+  if (linked) return { row: linked, linked: true }
+  return { row: rows.length > 0 ? rows[rows.length - 1]! : null, linked: false }
+}
+
+function PromptContextEvidence({
+  ev,
+  loadState,
+}: {
+  ev: CompactionSnapshot
+  loadState: PromptContextLoadState
+}): VNode {
+  if (loadState.loading) {
+    return html`<div class="mem-empty mem-disclosure">최근 turn-records prompt blocks 불러오는 중...</div>`
+  }
+  if (loadState.error) {
+    return html`<div class="mem-read-error" role="alert">turn-records 조회 실패 — ${loadState.error}</div>`
+  }
+  const { row, linked } = selectPromptContextRow(loadState.rows, ev)
+  if (!row) {
+    return html`<div class="mem-empty">최근 turn-records가 없어 주입 컨텍스트를 검산할 수 없습니다.</div>`
+  }
+  const blocks = row.record.blocks
+  const totalBytes = blocks.reduce((sum, block) => sum + block.bytes, 0)
+  const inputTok = row.record.input_tokens
+  const ctxWin = row.record.context_window
+  const pct = inputTok != null && ctxWin != null && ctxWin > 0
+    ? Math.round((inputTok / ctxWin) * 100)
+    : null
+  const diff = row.diff_vs_prev
+  return html`
+    <div class="mem-compo" data-testid="compaction-prompt-context">
+      <div class="mem-compo-head">
+        <span class="mono mem-compo-tot">${fmtBytes(totalBytes)}</span>
+        <span class="mem-compo-sub">
+          ${inputTok != null
+            ? html`${fmtTok(inputTok)} tok${ctxWin != null ? html` / ${fmtTok(ctxWin)} window` : null}${pct != null ? html` · ${pct}%` : null}`
+            : html`${blocks.length} blocks`}
+        </span>
+      </div>
+      <div class="mem-trust-sub mono">
+        ${linked ? 'snapshot-linked turn-record' : 'latest turn-record'}
+        · ${row.record.trace_id}#${row.record.absolute_turn}
+        · ${loadState.source ?? 'turn_record'}${loadState.health ? ` · ${loadState.health}` : ''}
+      </div>
+      <div class="mem-trust-sub mono">${loadState.producer ?? 'keeper_turn_record_writer'}</div>
+      ${!linked
+        ? html`<div class="mem-empty mem-disclosure">선택한 snapshot trace가 최근 ${loadState.count ?? blocks.length}개 turn-records 안에 없어 최신 턴의 prompt block 증거를 표시합니다.</div>`
+        : null}
+      <div class="mem-legend">
+        ${blocks.map((block) => html`
+          <div key=${`${block.block}-${block.digest}`} class="mem-leg">
+            <span class="mem-leg-sw" style=${{ background: 'var(--volt-dim)' }}></span>
+            <span class="mem-leg-lbl">${block.block}</span>
+            <span class="mem-leg-v mono">${fmtBytes(block.bytes)} · ${shortDigest(block.digest)}</span>
+          </div>
+        `)}
+      </div>
+      ${diff
+        ? html`
+          <div class="mem-prompt-foot">
+            이전 턴 대비 added ${diff.added.length} · removed ${diff.removed.length} · changed ${diff.changed.length}
+          </div>
+        `
+        : null}
+      <div class="mem-prompt-foot">
+        raw prompt text는 이 화면/API에서 노출하지 않습니다. 이 표는 실제 주입된 prompt block의 이름, 크기, digest 증거입니다.
+      </div>
+    </div>
+  `
+}
+
 export function CompactionInspectorOverlay({
   keeper,
   onClose,
@@ -192,7 +278,6 @@ export function CompactionInspectorOverlay({
   const hydratedEvents = hydratedState.keeperName === keeper.name ? hydratedState.events : []
   const events = globalEvents.length > 0 ? globalEvents : hydratedEvents
   const [idx, setIdx] = useState(0)
-  const [side, setSide] = useState<'before' | 'after'>('after')
   const [loadState, setLoadState] = useState<CompactionSnapshotLoadState>({
     loading: true,
     error: null,
@@ -204,6 +289,15 @@ export function CompactionInspectorOverlay({
     readErrorCount: 0,
     readErrors: [],
     scanTruncated: false,
+  })
+  const [promptContextState, setPromptContextState] = useState<PromptContextLoadState>({
+    loading: true,
+    error: null,
+    rows: [],
+    count: null,
+    health: null,
+    source: null,
+    producer: null,
   })
 
   useEffect(() => {
@@ -265,6 +359,50 @@ export function CompactionInspectorOverlay({
           readErrorCount: 0,
           readErrors: [],
           scanTruncated: false,
+        })
+      })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [keeper.name])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setPromptContextState({
+      loading: true,
+      error: null,
+      rows: [],
+      count: null,
+      health: null,
+      source: null,
+      producer: null,
+    })
+    void fetchKeeperTurnRecords(keeper.name, 12, { signal: controller.signal })
+      .then((payload) => {
+        if (!active) return
+        setPromptContextState({
+          loading: false,
+          error: null,
+          rows: payload.entries,
+          count: payload.count,
+          health: payload.health ?? null,
+          source: payload.source ?? null,
+          producer: payload.producer ?? null,
+        })
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setPromptContextState({
+          loading: false,
+          error: err instanceof Error ? err.message : String(err),
+          rows: [],
+          count: null,
+          health: null,
+          source: null,
+          producer: null,
         })
       })
     return () => {
@@ -352,7 +490,7 @@ export function CompactionInspectorOverlay({
             </div>
             ${hasTokenPair
               ? html`<${CmpStat} label="토큰" a=${ev.before.tok} b=${ev.after.tok} unit="k" max=${Math.max(ev.before.tok, 1)} />`
-              : html`<${DataGapNote}>이 snapshot에는 before/after token count가 없습니다.</${DataGapNote}>`}
+              : html`<${DataGapNote}>이 snapshot은 compaction event는 확인하지만 before/after token count는 기록하지 않았습니다.</${DataGapNote}>`}
             ${ev.before.msgs != null && ev.after.msgs != null
               ? html`<${CmpStat} label="메시지" a=${ev.before.msgs} b=${ev.after.msgs} max=${Math.max(ev.before.msgs, 1)} />`
               : null}
@@ -364,7 +502,7 @@ export function CompactionInspectorOverlay({
           <div class="turn-sec">
             <h4>유지 · 요약 · 폐기</h4>
             ${ev.kept.length === 0 && ev.summarized.length === 0 && ev.dropped.length === 0
-              ? html`<${DataGapNote}>백엔드 API는 상세 분류(kept / summarized / dropped)와 raw prompt text를 노출하지 않습니다.</${DataGapNote}>`
+              ? html`<${DataGapNote}>현재 백엔드 projection은 kept / summarized / dropped 목록을 노출하지 않습니다. 이 snapshot은 "컴팩션 이벤트 발생"과 가능한 token 계측만 증명합니다.</${DataGapNote}>`
               : html`
                 <div class="cmp-diff">
                   <div class="cmp-col kept">
@@ -390,16 +528,8 @@ export function CompactionInspectorOverlay({
           </div>
 
           <div class="turn-sec">
-            <h4>전체 컨텍스트 (실제 프롬프트)</h4>
-            <div class="cmp-side-toggle">
-              <button type="button" class=${`cmp-side ${side === 'before' ? 'on' : ''}`} onClick=${() => setSide('before')}>
-                압축 전 · ${fmtTok(ev.before.tok)}
-              </button>
-              <button type="button" class=${`cmp-side ${side === 'after' ? 'on' : ''}`} onClick=${() => setSide('after')}>
-                압축 후 · ${fmtTok(ev.after.tok)}
-              </button>
-            </div>
-            <pre class="turn-pre cmp-ctx-pre">${cmpFullCtx(ev, side)}</pre>
+            <h4>최근 턴 주입 컨텍스트</h4>
+            <${PromptContextEvidence} ev=${ev} loadState=${promptContextState} />
           </div>
         </div>
       </div>

@@ -49,6 +49,33 @@ let is_agent name =
   | None -> false
 ;;
 
+let agent_id_arg ~field args =
+  let raw = get_string args field "" |> String.trim in
+  if String.equal raw ""
+  then Error (Board.Validation_error (field ^ " is required"))
+  else Board.Agent_id.of_string raw
+;;
+
+let same_agent_id left right =
+  String.equal (Board.Agent_id.to_string left) (Board.Agent_id.to_string right)
+;;
+
+let require_post_author ~post_id ~author =
+  match Board_dispatch.get_post ~post_id with
+  | Error _ as err -> err
+  | Ok post ->
+    if same_agent_id post.Board.author author
+    then Ok ()
+    else
+      Error
+        (Board.Unauthorized
+           (Printf.sprintf
+              "agent %s cannot delete post %s owned by %s"
+              (Board.Agent_id.to_string author)
+              post_id
+              (Board.Agent_id.to_string post.author)))
+;;
+
 let normalized_identity_candidate value =
   let value = String.lowercase_ascii (String.trim value) in
   if String.equal value "" || String.equal value "anonymous" then None else Some value
@@ -444,6 +471,12 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "post_id is required"
   else (
+    match agent_id_arg ~field:"author" args with
+    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Ok author ->
+    match require_post_author ~post_id ~author with
+    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Ok () ->
     match Board_dispatch.delete_post ~post_id with
     | Ok () ->
       Tool_result.make_ok

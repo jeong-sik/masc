@@ -10,19 +10,36 @@
 
 open Alcotest
 
-let toml_with_tcf tcf =
+let toml_with_tcf ?thinking_control_token tcf =
+  let token_line =
+    match thinking_control_token with
+    | None -> ""
+    | Some token -> Printf.sprintf "thinking-control-token = \"%s\"\n" token
+  in
   Printf.sprintf
     {|[models.m]
 max-context = 1000
 
 [models.m.capabilities]
 thinking-control-format = "%s"
+%s
 |}
     tcf
+    token_line
 
 let model_without_capabilities = {|[models.m]
 max-context = 1000
 |}
+
+let toml_with_token_without_tcf token =
+  Printf.sprintf
+    {|[models.m]
+max-context = 1000
+
+[models.m.capabilities]
+thinking-control-token = "%s"
+|}
+    token
 
 let is_error = function Ok _ -> false | Error _ -> true
 let is_ok = function Ok _ -> true | Error _ -> false
@@ -33,8 +50,8 @@ let render_errors errs =
     Printf.sprintf "%s: %s" err.path err.message)
   |> String.concat "\n"
 
-let parsed_thinking_control_format raw =
-  match Runtime_toml.parse_string (toml_with_tcf raw) with
+let parsed_thinking_control_format ?thinking_control_token raw =
+  match Runtime_toml.parse_string (toml_with_tcf ?thinking_control_token raw) with
   | Error errs -> failf "expected %S to parse:\n%s" raw (render_errors errs)
   | Ok cfg ->
     (match cfg.Runtime_schema.models with
@@ -55,8 +72,6 @@ let test_valid_values_load_and_map_to_oas_variants () =
       ; "thinking-object-only", Thinking_object_only
       ; "chat_template_kwargs", Chat_template_kwargs
       ; "chat-template-kwargs", Chat_template_kwargs
-      ; "chat_template_token", Chat_template_token
-      ; "chat-template-token", Chat_template_token
       ; "ollama_think", Ollama_think
       ; "ollama-think", Ollama_think
       ; "reasoning_effort", Reasoning_effort
@@ -71,11 +86,37 @@ let test_valid_values_load_and_map_to_oas_variants () =
          (Runtime_schema.equal_thinking_control_format
             (parsed_thinking_control_format raw)
             expected))
-    cases
+    cases;
+  List.iter
+    (fun raw ->
+       check bool ("thinking-control-format " ^ raw) true
+         (Runtime_schema.equal_thinking_control_format
+            (parsed_thinking_control_format
+               ~thinking_control_token:"<|think|>"
+               raw)
+            (Runtime_schema.Chat_template_token "<|think|>")))
+    [ "chat_template_token"; "chat-template-token" ]
 
 let test_unknown_value_fails_load () =
   check bool "unknown thinking-control-format fails the load (Error)" true
     (is_error (Runtime_toml.parse_string (toml_with_tcf "bogus-format")))
+
+let test_tokenless_chat_template_token_fails_load () =
+  check bool "tokenless chat-template-token fails the load (Error)" true
+    (is_error (Runtime_toml.parse_string (toml_with_tcf "chat_template_token")))
+
+let test_orphan_thinking_control_token_fails_load () =
+  check bool "orphan thinking-control-token fails the load (Error)" true
+    (is_error
+       (Runtime_toml.parse_string (toml_with_token_without_tcf "<|think|>")))
+
+let test_padded_thinking_control_token_fails_load () =
+  check bool "padded thinking-control-token fails the load (Error)" true
+    (is_error
+       (Runtime_toml.parse_string
+          (toml_with_tcf
+             ~thinking_control_token:" <|think|> "
+             "chat_template_token")))
 
 let test_absent_capabilities_loads () =
   (* No capabilities table at all is fine — absence defaults to no control. *)
@@ -90,6 +131,12 @@ let () =
           test_case "valid values map to OAS variants" `Quick
             test_valid_values_load_and_map_to_oas_variants;
           test_case "unknown value fails load" `Quick test_unknown_value_fails_load;
+          test_case "tokenless chat-template-token fails load" `Quick
+            test_tokenless_chat_template_token_fails_load;
+          test_case "orphan token fails load" `Quick
+            test_orphan_thinking_control_token_fails_load;
+          test_case "padded token fails load" `Quick
+            test_padded_thinking_control_token_fails_load;
           test_case "absent capabilities loads" `Quick
             test_absent_capabilities_loads;
         ] );

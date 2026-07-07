@@ -1431,17 +1431,18 @@ let runtime_default_runtime_id () =
   Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
 ;;
 
-(* Canonical wire strings for the thinking-control-format capability, matching
-   the forms lib/runtime/runtime_toml.ml's parser accepts so the projection
-   round-trips. Exhaustive by construction — a new variant fails to compile
-   here rather than silently emitting a stale label. *)
+(* Canonical wire labels for the thinking-control-format capability, matching
+   the forms lib/runtime/runtime_toml.ml's parser accepts. Token-bearing
+   formats still project their label here; the token remains config/catalog
+   data. Exhaustive by construction — a new variant fails to compile here rather
+   than silently emitting a stale label. *)
 let thinking_control_format_wire : Runtime_schema.thinking_control_format -> string = function
   | Runtime_schema.No_thinking_control -> "none"
   | Runtime_schema.Thinking_object -> "thinking-object"
   | Runtime_schema.Thinking_object_adaptive -> "thinking-object-adaptive"
   | Runtime_schema.Thinking_object_only -> "thinking-object-only"
   | Runtime_schema.Chat_template_kwargs -> "chat-template-kwargs"
-  | Runtime_schema.Chat_template_token -> "chat-template-token"
+  | Runtime_schema.Chat_template_token _ -> "chat-template-token"
   | Runtime_schema.Ollama_think -> "ollama-think"
   | Runtime_schema.Reasoning_effort -> "reasoning-effort"
   | Runtime_schema.Enable_thinking -> "enable-thinking"

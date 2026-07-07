@@ -1494,6 +1494,20 @@
  (libraries masc_test_deps masc_schedule masc_server))
 
 (test
+ (name test_server_dashboard_http_schedule_actions)
+ (modules test_server_dashboard_http_schedule_actions)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc_workspace
+  masc_schedule
+  masc_server
+  unix
+  yojson))
+
+(test
  (name test_schedule_tool_wiring)
  (modules test_schedule_tool_wiring)
  (libraries masc_test_deps masc_schedule))

@@ -169,6 +169,7 @@ streaming = true
 # choice. Do not re-enable without a serializer path + model-side proof.
 supports-tool-choice = false
 thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
 supports-native-streaming = true
 supports-top-k = true
 supports-seed = true
@@ -190,6 +191,7 @@ streaming = true
 # `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
 supports-tool-choice = false
 thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
 supports-native-streaming = true
 supports-top-k = true
 supports-seed = true

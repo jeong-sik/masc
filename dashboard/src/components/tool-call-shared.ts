@@ -1,5 +1,5 @@
-// Shared tool call rendering utilities — used by keeper-trajectory-timeline
-// and tool-call-timeline components.
+// Shared tool call rendering utilities — used by tool-call-timeline and
+// session-trace components.
 
 import { truncate } from '../lib/truncate'
 

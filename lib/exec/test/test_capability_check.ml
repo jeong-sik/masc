@@ -95,6 +95,17 @@ let test_git_push_mirror_destructive () =
   | [ Capability.Git (Git_op.Destructive `Push_mirror) ] -> ()
   | _ -> assert false
 
+let test_git_push_prune_destructive () =
+  let ir =
+    Shell_ir.Simple
+      (simple
+         ~args:[ lit "push"; lit "--prune"; lit "origin"; lit "main" ]
+         (bin_ok "git"))
+  in
+  match Capability_check.of_ir ir with
+  | [ Capability.Git (Git_op.Destructive `Push_delete) ] -> ()
+  | _ -> assert false
+
 let test_git_with_var_falls_back_to_exec_bin () =
   (* git ${REMOTE} push — can't classify statically, falls back. *)
   let ir =
@@ -175,6 +186,7 @@ let () =
   test_git_push_delete_short_flag_destructive ();
   test_git_push_force_with_lease_destructive ();
   test_git_push_mirror_destructive ();
+  test_git_push_prune_destructive ();
   test_git_with_var_falls_back_to_exec_bin ();
   test_env_set_prefix_emitted_first ();
   test_redirect_write_becomes_write_path ();

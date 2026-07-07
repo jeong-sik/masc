@@ -2123,6 +2123,8 @@
 
 (include stanzas/test_runtime_pause_threshold_toml.inc)
 
+(include stanzas/test_runtime_pacing_toml.inc)
+
 (include stanzas/test_runtime_model_temperature_toml.inc)
 
 (include stanzas/test_keeper_response_feedback.inc)

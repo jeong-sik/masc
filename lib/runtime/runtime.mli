@@ -254,6 +254,12 @@ val pause_threshold : unit -> pause_threshold
     invalid. Operational pause decision paths use this accessor instead of the
     legacy top-level fallback constants. *)
 
+val pacing : unit -> pacing
+(** [\[pacing\]] policy from runtime.toml (RFC-0313 W3), or
+    {!Runtime_schema.pacing_default} when runtime.toml is unavailable.
+    An unknown [pacing.mode] value fails config parse at load (fail-closed)
+    rather than defaulting. *)
+
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
     ["provider.model"] equals [id], or [None] if no such runtime is configured.

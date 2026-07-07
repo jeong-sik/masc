@@ -74,8 +74,9 @@ let try_handle
        | Error msg -> Read_target_error msg
        | Ok () -> repo_check target)
   in
-  let path_error e =
-    actionable_path_error ~op ~meta ~raw_path ~error:e
+  let path_error ?deterministic_reason e =
+    actionable_path_error ?deterministic_reason ~op ~config ~meta ~raw_path
+      ~error:e
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)

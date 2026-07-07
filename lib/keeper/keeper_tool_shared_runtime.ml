@@ -77,6 +77,52 @@ let actionable_path_action_for_class
       Printf.sprintf "Check the path. Your playground: %s" playground)
 ;;
 
+let safe_is_dir path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+;;
+
+let safe_file_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+;;
+
+let visible_sandbox_repositories ~config meta =
+  let repos_dir =
+    Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "repos"
+  in
+  if not (safe_is_dir repos_dir)
+  then []
+  else
+    try
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.filter (fun entry ->
+        let candidate = Filename.concat repos_dir entry in
+        safe_is_dir candidate && safe_file_exists (Filename.concat candidate ".git"))
+    with
+    | Sys_error _ -> []
+;;
+
+let visible_repo_hint = function
+  | [ repo ] -> Some repo
+  | _ -> None
+;;
+
+let repos_json repos =
+  `List (List.map (fun repo -> `String ("repos/" ^ repo)) repos)
+;;
+
+let registered_repository_ids ~base_path =
+  match Repo_store.load_all ~base_path with
+  | Ok repos ->
+    repos
+    |> List.map (fun (repo : Repo_manager_types.repository) -> repo.id)
+    |> List.sort String.compare
+  | Error _ -> []
+;;
+
 (** Actionable error for path resolution failures.
     Follows Samchon harness pattern: field-level diagnostics with
     exact path, expected constraint, and concrete next action.
@@ -94,7 +140,9 @@ let actionable_path_action_for_class
     exposes the typed mapping so Phase B PR-5 can route typed callers
     directly without a redundant classify pass. *)
 let actionable_path_error
+      ?deterministic_reason
       ~(op : string)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(raw_path : string)
       ~(error : string)
@@ -102,15 +150,42 @@ let actionable_path_error
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   let cls = Keeper_failure_circuit_breaker.classify_error error in
   let action = actionable_path_action_for_class ~playground ~raw_path cls in
+  let base_path = Keeper_alerting_path.project_root_of_config config in
+  let available_repos = visible_sandbox_repositories ~config meta in
+  let repo_hint = visible_repo_hint available_repos in
+  let registered_repos = registered_repository_ids ~base_path in
+  let deterministic_retry_fields =
+    match deterministic_reason with
+    | None -> []
+    | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
+  in
   Yojson.Safe.to_string
     (`Assoc
-        [ "ok", `Bool false
+       ([ "ok", `Bool false
         ; "op", `String op
         ; "error", `String error
         ; "tried", `String raw_path
         ; "your_playground", `String playground
+        ; "available_repos", repos_json available_repos
+        ; "registered_repos", repos_json registered_repos
+        ; ( "path_resolution"
+          , `Assoc
+              [ "same_path_retry_will_fail", `Bool true
+              ; ( "repo_cwd_hint"
+                , Json_util.string_opt_to_json
+                    (Option.map (fun repo -> "repos/" ^ repo) repo_hint) )
+              ; ( "basis"
+                , `String
+                    "Grep resolves path against the keeper sandbox, then validates \
+                     repository identity against repositories.toml id/name/aliases." )
+              ; ( "next_action"
+                , `String
+                    "Retry with a registered repos/<id> path, or register the visible \
+                     checkout name as an explicit repository alias before retrying." )
+              ] )
         ; "action", `String action
-        ])
+        ]
+        @ deterministic_retry_fields))
 ;;
 
 let file_not_found_prefix = "File not found:"
@@ -159,11 +234,6 @@ let missing_file_recovery_examples ~(raw_path : string option) ~(repo_hint : str
       ]
 ;;
 
-let visible_repo_hint = function
-  | [ repo ] -> Some repo
-  | _ -> None
-;;
-
 let missing_file_error_json
       ~(raw_path : string option)
       ~(cwd : string option)
@@ -180,31 +250,7 @@ let missing_file_error_json
      The generic error string already contains the path that was tried,
      which is sufficient for the LLM to self-correct. *)
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-  let safe_is_dir path =
-    try Sys.file_exists path && Sys.is_directory path with
-    | Sys_error _ -> false
-  in
-  let safe_file_exists path =
-    try Sys.file_exists path with
-    | Sys_error _ -> false
-  in
-  let available_repos =
-    let repos_dir =
-      Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "repos"
-    in
-    if not (safe_is_dir repos_dir)
-    then []
-    else
-      try
-        Sys.readdir repos_dir
-        |> Array.to_list
-        |> List.sort String.compare
-        |> List.filter (fun entry ->
-          let candidate = Filename.concat repos_dir entry in
-          safe_is_dir candidate && safe_file_exists (Filename.concat candidate ".git"))
-      with
-      | Sys_error _ -> []
-  in
+  let available_repos = visible_sandbox_repositories ~config meta in
   let repo_hint = visible_repo_hint available_repos in
   let next_action =
     match raw_path, repo_hint with
@@ -228,8 +274,7 @@ let missing_file_error_json
         ; "error", `String error
         ; "path", `String target
         ; "your_playground", `String playground
-        ; ( "available_repos"
-          , `List (List.map (fun repo -> `String ("repos/" ^ repo)) available_repos) )
+        ; "available_repos", repos_json available_repos
         ; "input_file_path", Json_util.string_opt_to_json raw_path
         ; ( "path_resolution"
           , `Assoc

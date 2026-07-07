@@ -30,7 +30,9 @@ val actionable_path_action_for_class
     [error] via [Keeper_failure_circuit_breaker.classify_error]
     and routes to [actionable_path_action_for_class]. *)
 val actionable_path_error
-  :  op:string
+  :  ?deterministic_reason:Keeper_tool_deterministic_error.deterministic_reason
+  -> op:string
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> error:string

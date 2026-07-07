@@ -149,6 +149,15 @@ let assert_repository_registration_policy_response ~raw =
     (Json.member "deterministic_retry" json |> Json.member "reason"
    |> Json.to_string_option)
 
+let json_list_contains_string json field value =
+  Yojson.Safe.from_string json
+  |> Json.member field
+  |> Json.to_list
+  |> List.exists (fun item ->
+    match item with
+    | `String s -> String.equal s value
+    | _ -> false)
+
 let write_executable path content =
   ignore (Fs_compat.save_file_atomic path content);
   Unix.chmod path 0o755
@@ -416,6 +425,57 @@ let test_local_keeper_rg_invalid_type_surfaces_stderr () =
           (String_util.contains_substring
              (String.lowercase_ascii detail)
              "unrecognized file type"))
+
+let test_grep_unregistered_visible_repo_marks_deterministic_policy_block () =
+  setup ~keeper_name:"base" ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~base ~config ~meta ~playground ->
+  save_repositories base [ sample_repo ~base_path:base "masc"; sample_repo ~base_path:base "oas" ];
+  let repo_root = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir (Filename.concat repo_root ".git");
+  ensure_dir (Filename.concat repo_root "lib");
+  let oas_root = Filename.concat playground "repos/oas" in
+  ensure_dir (Filename.concat oas_root ".git");
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_search_files
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+          [ "op", `String "rg"
+          ; "pattern", `String "Keeper_repo_mapping"
+          ; "path", `String "repos/masc-mcp/lib"
+          ])
+  in
+  Alcotest.(check (option bool))
+    "unregistered repo path fails"
+    (Some false)
+    (parse_bool_field raw "ok");
+  let json = Yojson.Safe.from_string raw in
+  let deterministic_retry = Json.member "deterministic_retry" json in
+  Alcotest.(check (option string))
+    "deterministic reason"
+    (Some "policy_blocked")
+    (Json.member "reason" deterministic_retry |> Json.to_string_option);
+  Alcotest.(check (option bool))
+    "same args retry disabled"
+    (Some false)
+    (Json.member "retry_same_args" deterministic_retry |> Json.to_bool_option);
+  Alcotest.(check bool)
+    "visible repo is surfaced"
+    true
+    (json_list_contains_string raw "available_repos" "repos/masc-mcp");
+  Alcotest.(check bool)
+    "registered repo is surfaced"
+    true
+    (json_list_contains_string raw "registered_repos" "repos/masc");
+  Alcotest.(check (option bool))
+    "same path retry will fail"
+    (Some true)
+    (Json.member "path_resolution" json
+     |> Json.member "same_path_retry_will_fail"
+     |> Json.to_bool_option)
 
 (* Validate that malformed ripgrep --type values are rejected without crossing
    the execution boundary. Regex/glob validity is owned by the actual rg
@@ -756,6 +816,10 @@ let () =
           Alcotest.test_case
             "local keeper rg invalid type surfaces stderr to keeper"
             `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
+          Alcotest.test_case
+            "Grep unregistered visible repo marks deterministic policy block"
+            `Quick
+            test_grep_unregistered_visible_repo_marks_deterministic_policy_block;
           Alcotest.test_case "docker keeper invalid type rejects before docker spawn"
             `Quick test_docker_keeper_invalid_type_rejects_before_docker_spawn;
           Alcotest.test_case "docker keeper blocks second rg outside" `Quick

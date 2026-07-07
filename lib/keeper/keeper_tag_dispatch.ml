@@ -138,7 +138,7 @@ let dispatch
       Tool_schedule.dispatch { Tool_schedule.config; agent_name } ~name ~args
     | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
     | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
-    | Mod_recurring -> Tool_recurring.dispatch ~agent_name ~name ~args
+    | Mod_recurring -> Keeper_recurring_tool.dispatch ~agent_name ~name ~args
     (* ── Tier A special: Tool_shard returns Yojson.Safe.t ──────── *)
     | Mod_shard ->
       let success, json = Tool_shard.execute name args in

@@ -1,7 +1,7 @@
-(** Tool_recurring — Keeper recurring task management.
+(** Keeper_recurring_tool — keeper recurring task management tool handler.
 
-    RFC-0314: Keeper Recurring Producer.
-    Provides list and remove operations for keeper-bound recurring tasks. *)
+    RFC-0314: Keeper Recurring Producer. Provides list and remove operations
+    for keeper-bound recurring tasks. *)
 
 open Keeper_recurring
 
@@ -22,16 +22,19 @@ let dispatch ~agent_name ~name ~args =
        (match list ~keeper_name with
         | Ok tasks ->
           let json_tasks =
-            `List (List.map (fun (t : Keeper_recurring.recurring_task) ->
-                `Assoc
-                  [ "id", `String t.id
-                  ; "label", `String t.label
-                  ; "interval_sec", `Int t.interval_sec
-                  ; "enabled", `Bool t.enabled
-                  ; "last_run_ts", `String t.last_run_ts
-                  ; "run_count", `Int t.run_count
-                  ; "failure_count", `Int t.failure_count
-                  ]) tasks)
+            `List
+              (List.map
+                 (fun (t : Keeper_recurring.recurring_task) ->
+                   `Assoc
+                     [ "id", `String t.id
+                     ; "label", `String t.label
+                     ; "interval_sec", `Int t.interval_sec
+                     ; "enabled", `Bool t.enabled
+                     ; "last_run_ts", `String t.last_run_ts
+                     ; "run_count", `Int t.run_count
+                     ; "failure_count", `Int t.failure_count
+                     ])
+                 tasks)
           in
           ok (`Assoc [ "tasks", json_tasks ])
         | Error e -> err ("Failed to list recurring tasks: " ^ e))
@@ -49,12 +52,13 @@ let dispatch ~agent_name ~name ~args =
           let action = Broadcast label in
           (match add ~keeper_name ~label ~interval_sec ~action with
            | Ok task ->
-             ok (`Assoc
-               [ "id", `String task.id
-               ; "label", `String task.label
-               ; "interval_sec", `Int task.interval_sec
-               ; "enabled", `Bool task.enabled
-               ])
+             ok
+               (`Assoc
+                 [ "id", `String task.id
+                 ; "label", `String task.label
+                 ; "interval_sec", `Int task.interval_sec
+                 ; "enabled", `Bool task.enabled
+                 ])
            | Error `Duplicate ->
              err ("Recurring task with label '" ^ label ^ "' already exists for " ^ keeper_name))
         | None, _ -> err "masc_recurring_add requires a string 'label' field"
@@ -69,10 +73,9 @@ let dispatch ~agent_name ~name ~args =
         | Some (`String id) ->
           (match remove ~id with
            | Ok () -> ok (`Assoc [ "removed", `String id ])
-           | Error `Not_found ->
-             err ("Recurring task not found: " ^ id)
-           | Error `Not_owner ->
-             err ("Task " ^ id ^ " does not belong to this keeper"))
+           | Error `Not_found -> err ("Recurring task not found: " ^ id)
+           | Error `Not_owner -> err ("Task " ^ id ^ " does not belong to this keeper"))
         | _ -> err "masc_recurring_remove requires a string 'id' field")
      | _ -> err "masc_recurring_remove requires an object argument")
   | _ -> None
+;;

@@ -348,7 +348,7 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_recurring ->
-                   Tool_recurring.dispatch ~agent_name ~name ~args:coerced_args
+                   Keeper_recurring_tool.dispatch ~agent_name ~name ~args:coerced_args
                  | Mod_external ->
                    (* Composition root wires the server boundary to the keeper
                       subsystem: [Mod_external] tools (keeper-management tools)

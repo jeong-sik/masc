@@ -728,6 +728,14 @@ let tool_sub_board_update : Masc_domain.tool_schema =
                     ; "description", `String "New member list (owner always included)"
                     ]
                 )
+              ; ( "owner"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Owner identity. Auto-filled from the caller's agent identity \
+                           when omitted by MCP runtime clients." )
+                    ] )
               ]
           )
         ; "required", `List [ `String "sub_board_id" ]
@@ -750,6 +758,14 @@ let tool_sub_board_delete : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; "description", `String "SubBoard slug or ID to delete" ]
                 )
+              ; ( "owner"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Owner identity. Auto-filled from the caller's agent identity \
+                           when omitted by MCP runtime clients." )
+                    ] )
               ]
           )
         ; "required", `List [ `String "sub_board_id" ]

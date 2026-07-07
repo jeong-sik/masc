@@ -16,7 +16,7 @@
 open Alcotest
 module Ksc = Masc.Keeper_sandbox_control
 
-let catalog = Masc.Config_dir_resolver.repositories_toml_basename
+let catalog = Config_dir_resolver.repositories_toml_basename
 let mapping = Masc.Keeper_repo_mapping.mappings_toml_basename
 
 let source_of s = Ksc.policy_source_basename_of_status s

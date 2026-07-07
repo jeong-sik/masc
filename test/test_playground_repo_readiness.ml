@@ -216,7 +216,7 @@ let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   check bool "policy marks default scope" true
     (json_bool "policy_default_scope" json);
   check string "policy source"
-    Masc.Config_dir_resolver.repositories_toml_basename
+    Config_dir_resolver.repositories_toml_basename
     (json_string "policy_source" json)
 
 let test_playground_repos_mark_registered_repo_outside_mapping_allowed () =

@@ -15,10 +15,10 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function stubFetch(response: unknown, ok = true): void {
+function stubFetch(response: unknown, ok = true, status?: number): void {
   mockFetch.mockResolvedValue({
     ok,
-    status: ok ? 200 : 500,
+    status: status ?? (ok ? 200 : 500),
     statusText: ok ? 'OK' : 'Internal Server Error',
     headers: new Headers(),
     json: () => Promise.resolve(response),
@@ -199,6 +199,31 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/annotations/ann-1?')
     expect(url).toContain('repo_id=masc')
     expect(url).not.toContain('keeper_id=')
+  })
+
+  it('deleteIdeAnnotation maps success to deleted', async () => {
+    stubFetch({}, true)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('deleted')
+  })
+
+  it('deleteIdeAnnotation maps 403 ownership/scope rejection to forbidden', async () => {
+    stubFetch({}, false, 403)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('forbidden')
+  })
+
+  it('deleteIdeAnnotation maps non-403 failures to error', async () => {
+    stubFetch({}, false)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')
+  })
+
+  it('deleteIdeAnnotation maps network failure to error', async () => {
+    mockFetch.mockRejectedValue(new Error('network down'))
+    vi.stubGlobal('fetch', mockFetch)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')
   })
 
   it('fetchIdeEvents appends event filters and parses bridge events', async () => {

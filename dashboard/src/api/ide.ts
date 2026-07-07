@@ -399,19 +399,26 @@ export async function createIdeAnnotation(
   return parseStrictRow('createIdeAnnotation', ideEnvelopeData(raw, 'createIdeAnnotation'), parseStrictIdeAnnotation)
 }
 
+// The DELETE route binds ownership to the token identity (task-1736 B3):
+// it answers 403 both for another identity's annotation and for a scope
+// the token may not mutate. Surface that apart from transport/server
+// failures so callers can explain the rejection instead of a generic error.
+export type IdeAnnotationDeleteOutcome = 'deleted' | 'forbidden' | 'error'
+
 export async function deleteIdeAnnotation(
   id: string,
   opts: IdeApiOptions = {},
-): Promise<boolean> {
+): Promise<IdeAnnotationDeleteOutcome> {
   const params = new URLSearchParams()
   appendWorkspaceParams(params, opts)
   const query = params.size > 0 ? `?${params.toString()}` : ''
   const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}${query}`
   try {
     const res = await fetchWithTimeout(path, { method: 'DELETE' }, 15_000)
-    return res.ok
+    if (res.ok) return 'deleted'
+    return res.status === 403 ? 'forbidden' : 'error'
   } catch {
-    return false
+    return 'error'
   }
 }
 

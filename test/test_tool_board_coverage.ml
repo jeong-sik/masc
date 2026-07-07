@@ -2224,13 +2224,15 @@ let test_resolve_file_path_records_content_digest () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  (* Create a real artifact at the exact path [resolve_file_path] computes (via
-     [Board_paths.board_base_path]), so the test is robust to whatever the
-     harness sets as base_path. Before [digest_of_file], the Exists arm returned
-     [digest=None] — "evidence" meant only "any file under the base existed". *)
+  (* Create a real artifact at the exact path [resolve_file_path] computes.
+     [Board_core.board_base_path] is the public alias of the gate's internal
+     [Board_paths.board_base_path] (a wrapped-library module the test cannot
+     name), so the test is robust to whatever the harness sets as base_path.
+     Before [digest_of_file], the Exists arm returned [digest=None] —
+     "evidence" meant only "any file under the base existed". *)
   let artifact_rel = Filename.concat Common.masc_dirname "claim_gate_digest_fixture.ml" in
   let artifact_content = "let proof = \"digest-fixture-v1\"\n" in
-  let artifact_path = Filename.concat (Board_paths.board_base_path ()) artifact_rel in
+  let artifact_path = Filename.concat (Board_core.board_base_path ()) artifact_rel in
   (try Unix.mkdir (Filename.dirname artifact_path) 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
   Out_channel.with_open_bin artifact_path (fun oc -> output_string oc artifact_content);
   let expected = Some ("sha256:" ^ sha256_hex artifact_content) in
@@ -2246,7 +2248,7 @@ let test_resolve_file_path_rejects_digest_unavailable () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let artifact_rel = Filename.concat Common.masc_dirname "claim_gate_digest_dir" in
-  let artifact_path = Filename.concat (Board_paths.board_base_path ()) artifact_rel in
+  let artifact_path = Filename.concat (Board_core.board_base_path ()) artifact_rel in
   (try Unix.mkdir (Filename.dirname artifact_path) 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
   (try Unix.mkdir artifact_path 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
   match Board_claim_gate.resolve_file_path artifact_rel with

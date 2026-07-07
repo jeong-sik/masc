@@ -155,6 +155,11 @@ export interface IdeRunProgressGoal {
 export interface IdeActivityPanelProps {
   readonly activeFile?: string | null
   readonly repoId?: string | null
+  /**
+   * Keeper whose repo-unattributed lane (turn/coordination events) is
+   * merged into the feed alongside repo-scoped events.
+   */
+  readonly keeperLane?: string | null
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly pollMs?: number
@@ -197,12 +202,19 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
   }
 }
 
-async function fetchActivityEvents(repoId?: string | null): Promise<ActivityFetchResult> {
+async function fetchActivityEvents(
+  repoId?: string | null,
+  keeperLane?: string | null,
+): Promise<ActivityFetchResult> {
   const graph = await fetchActivityGraphEvents()
-  const bridgeEvents = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId)
+  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId, keeperLane)
   return {
     ...graph,
-    events: mergeRunActivityEvents(graph.events, bridgeEvents),
+    // A bridge fetch failure must degrade the refresh tone instead of
+    // rendering an empty-but-"live" feed: an operator cannot distinguish
+    // "no keeper activity" from "the activity source is broken" otherwise.
+    ok: graph.ok && bridge.ok,
+    events: mergeRunActivityEvents(graph.events, bridge.events),
   }
 }
 
@@ -221,16 +233,44 @@ async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
   }
 }
 
+interface BridgeFetchResult {
+  readonly events: ReadonlyArray<RunActivityEvent>
+  readonly ok: boolean
+}
+
+/**
+ * Repo-scoped events cover file-attributed observations; the keeper lane
+ * covers turn/coordination events that carry no file and live in the
+ * repo-unattributed bucket, unreachable through any repo scope. Both
+ * sources are queried, and a failure in either is reported through
+ * [ok=false] rather than silently collapsing to an empty feed.
+ */
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
   repoId?: string | null,
-): Promise<ReadonlyArray<RunActivityEvent>> {
-  try {
-    const events = await fetchIdeEvents({ limit: 50, repoId })
-    return events.map((event, index) => mapIdeBridgeEvent(event, workspaceId, index))
-  } catch {
-    return EMPTY_ACTIVITY
+  keeperLane?: string | null,
+): Promise<BridgeFetchResult> {
+  const sources: Array<Promise<ReadonlyArray<IdeBridgeEvent>>> = []
+  const repo = repoId?.trim()
+  if (repo) sources.push(fetchIdeEvents({ limit: 50, repoId: repo }))
+  const lane = keeperLane?.trim()
+  if (lane) {
+    sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
   }
+  if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true }
+  const settled = await Promise.allSettled(sources)
+  const events: RunActivityEvent[] = []
+  let ok = true
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      for (const event of result.value) {
+        events.push(mapIdeBridgeEvent(event, workspaceId, events.length))
+      }
+    } else {
+      ok = false
+    }
+  }
+  return { events, ok }
 }
 
 function mergeRunActivityEvents(
@@ -425,6 +465,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
     repoId = null,
+    keeperLane = null,
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
     pollMs = 0,
@@ -449,7 +490,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok } = await fetchActivityEvents(repoId)
+      const { events, workspaceId, ok } = await fetchActivityEvents(repoId, keeperLane)
       if (cancelled) return
       if (ok) {
         store.reset(workspaceId)
@@ -475,7 +516,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       cancelled = true
       if (timer !== null) clearTimeout(timer)
     }
-  }, [store, refreshMs, repoId])
+  }, [store, refreshMs, repoId, keeperLane])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)

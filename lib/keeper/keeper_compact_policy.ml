@@ -396,11 +396,40 @@ let compact_if_needed_typed
          ~context_ratio:ratio
          ~message_count:msg_count);
     let messages, pair_repair_stats =
-      let msgs_after_compact =
+      let deterministic_compact () =
         (* Issue #8597 #1: dropped [~system_prompt] arg — compact
                ignored it (system prompt already present in messages
                when role=System). *)
         Context_compact_oas.compact ~messages:(messages_of_context ctx) ~strategies ()
+      in
+      (* RFC-0313-adjacent W2: [Llm] mode asks a librarian-lane summarizer for a
+         structured kept/summarized/dropped plan and applies it; any failure
+         (opt-in off, no Eio context, no schema provider, invalid plan) yields
+         [None] and falls back to the deterministic chain — the [Deterministic]
+         floor is always the guaranteed result. Emergency compaction (a
+         near-full context, [emergency] above) never calls the LLM: the reply
+         itself needs headroom and the cooldown is bypassed, so it stays on the
+         cheap deterministic path. *)
+      let msgs_after_compact =
+        match meta.compaction.mode with
+        | Keeper_config.Deterministic -> deterministic_compact ()
+        | Keeper_config.Llm ->
+          let emergency = ratio >= emergency_compact_ratio_threshold in
+          let runtime_id =
+            try Keeper_meta_contract.runtime_id_of_meta meta with Failure _ -> ""
+          in
+          if emergency || String.equal runtime_id "" then deterministic_compact ()
+          else begin
+            match
+              Compaction_llm_summarizer.make ~runtime_id ~keeper_name:meta.name ()
+            with
+            | None -> deterministic_compact ()
+            | Some summarizer ->
+              let msgs = messages_of_context ctx in
+              (match summarizer ~messages:msgs with
+               | Some plan -> Compaction_llm_summarizer.apply plan ~messages:msgs
+               | None -> deterministic_compact ())
+          end
       in
       (* Apply keeper-private fold after standard strategies *)
       let msgs_after_fold =

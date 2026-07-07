@@ -184,6 +184,12 @@ module For_testing : sig
     Runtime_candidate.t ->
     Keeper_turn_driver_provider_attempt.provider_cooldown_block option
 
+  (** #23456 P1 regression surface: mixed unknown+deterministic blocker
+      lists must aggregate to [None] (auto-recoverable). *)
+  val aggregate_cooldown_cause :
+    (string * Keeper_binding_health.provider_info) list ->
+    Keeper_internal_error.provider_cooldown_cause option
+
   val provider_cooldown_block_error :
     runtime_id:string ->
     Keeper_turn_driver_provider_attempt.provider_cooldown_block ->

@@ -77,19 +77,41 @@ let non_empty_string_member name input =
   | _ -> None
 ;;
 
-let observation_file_path_from_tool_input ~base_path input =
+(* #23469 (task-1733 completion): keeper file tools resolve relative paths
+   against the keeper's playground sandbox root ([keeper_default_read_root]),
+   never against the server base path. The observation join mirrors that
+   contract, otherwise the emitted partition describes a file the tool never
+   touched: a sandbox-rooted [repos/<id>/…] edit used to be re-anchored at
+   the server base path and attributed through whichever repository happened
+   to be registered there, and a bare relative path with no [cwd] leaked
+   through unanchored for the resolver to join at the base path. Every
+   relative shape therefore anchors at [sandbox_root]; absolute paths pass
+   through untouched, and a pathless tool call stays a keeper-timeline fact
+   at [base_path]. *)
+let observation_file_path_from_tool_input ~base_path ~sandbox_root input =
+  let under_sandbox p = Filename.concat sandbox_root p in
   match Tool_input_path.tool_input_file_path input with
   | None -> base_path
-  | Some p when Filename.is_relative p && not (sandbox_rooted_relative_path p) ->
-    (match non_empty_string_member "cwd" input with
-     | Some cwd -> Filename.concat cwd p
-     | None -> p)
+  | Some p when Filename.is_relative p ->
+    if sandbox_rooted_relative_path p
+    then under_sandbox p
+    else (
+      match non_empty_string_member "cwd" input with
+      | Some cwd when Filename.is_relative cwd ->
+        under_sandbox (Filename.concat cwd p)
+      | Some cwd -> Filename.concat cwd p
+      | None -> under_sandbox p)
   | Some p -> p
 ;;
 
-let observation_partition_for_tool_input ~config ~kind input =
+let observation_partition_for_tool_input ~config ~meta ~kind input =
   let base_dir = Keeper_alerting_path.project_root_of_config config in
-  let file_path = observation_file_path_from_tool_input ~base_path:base_dir input in
+  let sandbox_root =
+    Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta
+  in
+  let file_path =
+    observation_file_path_from_tool_input ~base_path:base_dir ~sandbox_root input
+  in
   Keeper_tool_filesystem_runtime.resolve_partition_for_write
     ~base_dir
     ~kind
@@ -233,10 +255,13 @@ let assemble_hooks
            in
            (* task-1733: resolve the partition from the tool's actual edited
               file (input.path / input.file_path, with explicit cwd honoured
-              for relative paths), not from the [.masc] runtime root. *)
+              for relative paths), not from the [.masc] runtime root.
+              #23469: relative shapes anchor at this keeper's playground
+              sandbox root, matching the file tools' own resolution. *)
            let partition, _ =
              observation_partition_for_tool_input
                ~config
+               ~meta:acc.meta
                ~kind:"tool_event"
                input
            in

@@ -309,6 +309,25 @@ let keeper_default_read_root ~(config : Workspace.config) ~(meta : keeper_meta) 
   keeper_playground_root ~config ~meta
 ;;
 
+(* #23469 (task-1733): observation partitions must interpret keeper-relative
+   tool paths against the same root the file tools resolve against — the
+   keeper's playground sandbox — never the server base path. Unlike
+   [keeper_playground_root] this is a pure path computation: the observation
+   write path is fire-and-forget and must not run the
+   [ensure_sandbox_bundle] directory side effect. Anchored at the normalised
+   project root so a [.masc]-suffixed [config.base_path] cannot double up,
+   and stripped of the bundle-root trailing slash so downstream structural
+   parsers never see an empty path segment. *)
+let keeper_observation_sandbox_root
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  =
+  Filename.concat
+    (Keeper_alerting_path.project_root_of_config config)
+    (Keeper_alerting_path.strip_trailing_slashes
+       (Keeper_sandbox.host_root_rel_of_meta ~meta))
+;;
+
 let safe_file_exists path =
   try Fs_compat.file_exists path with
   | Sys_error _ -> false

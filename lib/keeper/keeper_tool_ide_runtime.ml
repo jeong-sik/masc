@@ -13,7 +13,7 @@ open Keeper_tool_shared_runtime
 
 let handle_ide_annotate
       ~(config : Workspace.config)
-      ~(keeper_name : string)
+      ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   : string
   =
@@ -47,16 +47,31 @@ let handle_ide_annotate
       | Some k -> k
       | None -> Agent_observation.Comment
     in
-    let partition, _ =
+    (* #23469 (task-1733): the keeper hands us a path relative to its own
+       working root — the playground sandbox — so anchor it there before
+       partition resolution, exactly like the file tools resolve it. The
+       old join left the path for the resolver to anchor at the server
+       base path, which filed every keeper annotation under [_orphan/]
+       (or worse, under whichever repository the base path happened to
+       overlap), where repo-scoped IDE reads can never see it. *)
+    let anchored_file_path =
+      if Filename.is_relative file_path
+      then
+        Filename.concat
+          (keeper_observation_sandbox_root ~config ~meta)
+          file_path
+      else file_path
+    in
+    let partition, stored_file_path =
       Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir:base_dir ~kind:"annotation" ~file_path
+        ~base_dir:base_dir ~kind:"annotation" ~file_path:anchored_file_path
     in
     match
       Agent_observation.emit_annotation_request
         { base_path = base_dir
         ; partition
-        ; keeper_id = keeper_name
-        ; file_path
+        ; keeper_id = meta.name
+        ; file_path = stored_file_path
         ; line_start
         ; line_end
         ; kind

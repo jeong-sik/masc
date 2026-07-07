@@ -4,7 +4,8 @@
     that fire on a configurable interval.  The heartbeat loop calls
     [dispatch_due] each cycle to execute overdue tasks.
 
-    Tasks are stored in memory only — they do not survive keeper restart.
+    Tasks are scoped by [base_path] and keeper name, then stored in memory only;
+    they do not survive keeper restart.
     Re-register via MCP tools after restart if needed.
 
     Thread-safe: protected by Eio.Mutex when available. *)
@@ -14,6 +15,7 @@ type action =
 
 type recurring_task = {
   id : string;
+  base_path : string;
   keeper_name : string;
   label : string;          (** Human-readable description *)
   interval_sec : int;      (** Minimum seconds between runs *)
@@ -30,6 +32,7 @@ val generate_id : unit -> string
 
 (** Register a new recurring task. Returns the task. *)
 val add :
+  base_path:string ->
   keeper_name:string ->
   label:string ->
   interval_sec:int ->
@@ -38,19 +41,20 @@ val add :
   recurring_task
 
 (** Remove a recurring task by ID. Returns true if found and removed. *)
-val remove : id:string -> bool
+val remove : base_path:string -> id:string -> bool
 
-(** List all recurring tasks for a keeper. *)
-val list : keeper_name:string -> recurring_task list
+(** List all recurring tasks for a keeper in one base path. *)
+val list : base_path:string -> keeper_name:string -> recurring_task list
 
-(** List all recurring tasks across all keepers. *)
-val list_all : unit -> recurring_task list
+(** List all recurring tasks across all keepers in one base path. *)
+val list_all : base_path:string -> recurring_task list
 
 (** Dispatch all due recurring tasks for a given keeper.
     [~now_ts] is the current timestamp.
     [~dispatch] is called for each due task's action.
     Returns the number of tasks dispatched. *)
 val dispatch_due :
+  base_path:string ->
   keeper_name:string ->
   now_ts:float ->
   dispatch:(recurring_task -> action -> (unit, string) result) ->
@@ -67,6 +71,7 @@ val dispatch_due :
     Returns the number of tasks re-enabled this call.  Should be
     invoked from the keeper heartbeat tick before [dispatch_due]. *)
 val reenable_due_tasks :
+  base_path:string ->
   keeper_name:string ->
   now_ts:float ->
   int

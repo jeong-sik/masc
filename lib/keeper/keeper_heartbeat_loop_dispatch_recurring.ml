@@ -35,10 +35,14 @@ let dispatch_recurring_keepalive
      for the lifetime of the process, eventually triggering stale-kill
      runtimes.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
   let _reenabled =
-    Keeper_recurring.reenable_due_tasks ~keeper_name:meta_after_proactive.name ~now_ts
+    Keeper_recurring.reenable_due_tasks
+      ~base_path:ctx.config.base_path
+      ~keeper_name:meta_after_proactive.name
+      ~now_ts
   in
   try
     Keeper_recurring.dispatch_due
+      ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_proactive.name
       ~now_ts
       ~dispatch:(fun task action ->

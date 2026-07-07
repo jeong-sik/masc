@@ -3,9 +3,8 @@
     (loop liveness) with the recurring-task registry, so each case seeds those
     global stores and pins the projected wire shape.
 
-    Isolation: a unique base_path per case namespaces registry entries (queried
-    via [Keeper_registry.all ~base_path]); [Keeper_recurring.clear] resets the
-    recurring store, which is keyed by keeper name only. *)
+    Isolation: a unique base_path per case namespaces registry entries and
+    recurring entries; [Keeper_recurring.clear] resets the in-memory store. *)
 
 open Alcotest
 module Server_keeper_background = Masc.Server_keeper_background
@@ -67,7 +66,13 @@ let test_recurring_task_surfaced () =
   let config = Workspace_core.default_config base in
   let name = "watcher" in
   register_keeper ~base name;
-  ignore (Keeper_recurring.add ~keeper_name:name ~label:"board 감시" ~interval_sec:30 (Keeper_recurring.Broadcast "tick"));
+  ignore
+    (Keeper_recurring.add
+       ~base_path:base
+       ~keeper_name:name
+       ~label:"board 감시"
+       ~interval_sec:30
+       (Keeper_recurring.Broadcast "tick"));
   let json = Server_keeper_background.dashboard_json config in
   check int "one recurring keeper" 1 J.(json |> member "recurring_keeper_count" |> to_int);
   check int "one recurring task" 1 J.(json |> member "recurring_count" |> to_int);
@@ -97,12 +102,14 @@ let test_recurring_count_ignores_unregistered_keepers () =
   register_keeper ~base name;
   ignore
     (Keeper_recurring.add
+       ~base_path:base
        ~keeper_name:name
        ~label:"visible"
        ~interval_sec:30
        (Keeper_recurring.Broadcast "visible"));
   ignore
     (Keeper_recurring.add
+       ~base_path:base
        ~keeper_name:"orphan-keeper"
        ~label:"orphan"
        ~interval_sec:30
@@ -116,8 +123,42 @@ let test_recurring_count_ignores_unregistered_keepers () =
   | None -> fail "registered keeper missing from projection"
   | Some row ->
     (match recurring_of row with
-     | [ task ] -> check string "visible task only" "visible" J.(task |> member "label" |> to_string)
+      | [ task ] -> check string "visible task only" "visible" J.(task |> member "label" |> to_string)
      | other -> failf "expected one visible task, got %d" (List.length other))
+;;
+
+(* ── recurring tasks are scoped by base_path as well as keeper name; two
+      workspaces can legitimately have a keeper with the same name ── *)
+let test_same_keeper_name_is_base_path_scoped () =
+  Keeper_recurring.clear ();
+  let base_a = temp_base () in
+  let base_b = temp_base () in
+  let config_a = Workspace_core.default_config base_a in
+  let config_b = Workspace_core.default_config base_b in
+  let name = "watcher" in
+  register_keeper ~base:base_a name;
+  register_keeper ~base:base_b name;
+  ignore
+    (Keeper_recurring.add
+       ~base_path:base_b
+       ~keeper_name:name
+       ~label:"base-b-only"
+       ~interval_sec:30
+       (Keeper_recurring.Broadcast "base-b"));
+  let json_a = Server_keeper_background.dashboard_json config_a in
+  check int "base A has registered keeper" 1 J.(json_a |> member "keeper_count" |> to_int);
+  check int "base A has no recurring rows" 0 J.(json_a |> member "recurring_keeper_count" |> to_int);
+  check int "base A has no recurring tasks" 0 J.(json_a |> member "recurring_count" |> to_int);
+  check int "base A keeper list empty" 0 (json_a |> J.member "keepers" |> J.to_list |> List.length);
+  let json_b = Server_keeper_background.dashboard_json config_b in
+  check int "base B has recurring row" 1 J.(json_b |> member "recurring_keeper_count" |> to_int);
+  check int "base B has recurring task" 1 J.(json_b |> member "recurring_count" |> to_int);
+  match keeper_row json_b name with
+  | None -> fail "base B keeper with recurring task missing"
+  | Some row ->
+    (match recurring_of row with
+     | [ task ] -> check string "base B task only" "base-b-only" J.(task |> member "label" |> to_string)
+     | other -> failf "expected one base B task, got %d" (List.length other))
 ;;
 
 (* ── next_run is derived only for a task that has run and is still enabled;
@@ -129,7 +170,7 @@ let test_next_run_derivation () =
   let name = "cadence-keeper" in
   register_keeper ~base name;
   let task =
-    Keeper_recurring.add ~keeper_name:name ~label:"주기 브로드캐스트" ~interval_sec:60
+    Keeper_recurring.add ~base_path:base ~keeper_name:name ~label:"주기 브로드캐스트" ~interval_sec:60
       (Keeper_recurring.Broadcast "beat")
   in
   task.last_run_ts <- 1000.0;
@@ -167,6 +208,10 @@ let () =
               "recurring_count ignores unregistered keepers"
               `Quick
               test_recurring_count_ignores_unregistered_keepers )
+        ; ( test_case
+              "same keeper name is base_path scoped"
+              `Quick
+              test_same_keeper_name_is_base_path_scoped )
         ; test_case "next_run derivation and pause" `Quick test_next_run_derivation
         ] )
     ]

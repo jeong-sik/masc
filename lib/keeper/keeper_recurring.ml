@@ -4,6 +4,9 @@
     without locking when Eio runtime is not yet active, e.g. in
     non-Eio tests or module init).
 
+    Entries are scoped by [base_path] plus keeper name so multiple
+    workspaces in one process cannot share recurring tasks by name.
+
     @since #3190 *)
 
 type action =
@@ -11,6 +14,7 @@ type action =
 
 type recurring_task = {
   id : string;
+  base_path : string;
   keeper_name : string;
   label : string;
   interval_sec : int;
@@ -60,31 +64,38 @@ let generate_id () =
 (* CRUD                                                              *)
 (* ================================================================ *)
 
-let add ~keeper_name ~label ~interval_sec ?(max_failures = 5) action =
+let same_scope ~base_path ~keeper_name (task : recurring_task) =
+  String.equal task.base_path base_path && String.equal task.keeper_name keeper_name
+
+let add ~base_path ~keeper_name ~label ~interval_sec ?(max_failures = 5) action =
   let id = generate_id () in
   let task = {
-    id; keeper_name; label; interval_sec; action;
+    id; base_path; keeper_name; label; interval_sec; action;
     last_run_ts = 0.0; run_count = 0; failure_count = 0;
     max_failures; enabled = true;
   } in
   with_tasks_rw (fun () -> Hashtbl.replace tasks id task);
   task
 
-let remove ~id =
+let remove ~base_path ~id =
   with_tasks_rw (fun () ->
-    if Hashtbl.mem tasks id then begin
-      Hashtbl.remove tasks id; true
-    end else false)
+    match Hashtbl.find_opt tasks id with
+    | Some task when String.equal task.base_path base_path ->
+        Hashtbl.remove tasks id;
+        true
+    | Some _ | None -> false)
 
-let list ~keeper_name =
+let list ~base_path ~keeper_name =
   with_tasks_ro (fun () ->
     Hashtbl.fold (fun _id task acc ->
-      if task.keeper_name = keeper_name then task :: acc else acc
+      if same_scope ~base_path ~keeper_name task then task :: acc else acc
     ) tasks [])
 
-let list_all () =
+let list_all ~base_path =
   with_tasks_ro (fun () ->
-    Hashtbl.fold (fun _id task acc -> task :: acc) tasks [])
+    Hashtbl.fold (fun _id task acc ->
+      if String.equal task.base_path base_path then task :: acc else acc
+    ) tasks [])
 
 let record_failure ~task ~phase =
   Otel_metric_store.inc_counter
@@ -96,7 +107,7 @@ let record_failure ~task ~phase =
 (* Dispatch                                                          *)
 (* ================================================================ *)
 
-let dispatch_due ~keeper_name ~now_ts ~dispatch =
+let dispatch_due ~base_path ~keeper_name ~now_ts ~dispatch =
   (* Snapshot due tasks under the lock so [add]/[remove] cannot mutate
      the table while we iterate; then release the lock before invoking
      [dispatch], which runs arbitrary user code that may yield or call
@@ -104,7 +115,7 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
   let due_tasks =
     with_tasks_ro (fun () ->
       Hashtbl.fold (fun _id task acc ->
-        if task.keeper_name = keeper_name
+        if same_scope ~base_path ~keeper_name task
            && task.enabled
            && now_ts -. task.last_run_ts >= float_of_int task.interval_sec
         then task :: acc
@@ -141,11 +152,11 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
    permanently silencing the keeper's heartbeat broadcasts and
    eventually triggering stale-kill runtimes across dependent
    keepers. *)
-let reenable_due_tasks ~keeper_name ~now_ts =
+let reenable_due_tasks ~base_path ~keeper_name ~now_ts =
   let count = ref 0 in
   with_tasks_rw (fun () ->
     Hashtbl.iter (fun _id task ->
-      if task.keeper_name = keeper_name && not task.enabled then begin
+      if same_scope ~base_path ~keeper_name task && not task.enabled then begin
         let cooldown = float_of_int task.interval_sec *. 2.0 in
         if now_ts -. task.last_run_ts >= cooldown then begin
           task.enabled <- true;

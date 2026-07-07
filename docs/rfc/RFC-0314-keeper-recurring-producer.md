@@ -12,7 +12,7 @@
 - **Consumer exists and runs live.** `keeper_heartbeat_loop_dispatch_recurring.ml` calls `Keeper_recurring.reenable_due_tasks` then `Keeper_recurring.dispatch_due` on every keepalive cycle, executing due tasks (`Broadcast` today) and updating `last_run_ts` / `run_count` / `failure_count`.
 - **Producer does not exist.** `Keeper_recurring.add` — the only registration entry point — has **no caller in `lib/` or `bin/`**. No MCP tool, no config seed, no bootstrap path registers a recurring task. The module docstring says *"Re-register via MCP tools after restart if needed,"* but that tool was never built (or was removed).
 
-Consequence: `Keeper_recurring.list_all ()` is **always empty in production**. Any surface that reads it — including the `server_keeper_background` dashboard projection added in PR #23543 — renders nothing. The dispatch machinery is dead code in practice because nothing feeds it.
+Consequence: `Keeper_recurring.list_all ~base_path` is **always empty in production**. Any surface that reads it — including the `server_keeper_background` dashboard projection added in PR #23543 — renders nothing. The dispatch machinery is dead code in practice because nothing feeds it.
 
 This is why PR #23543's panel was **held**: shipping an always-empty panel would present a working feature that never has data.
 
@@ -28,8 +28,8 @@ This is why PR #23543's panel was **held**: shipping an always-empty panel would
 Add the missing producer as a typed MCP tool surface, mirroring existing keeper self-service tools.
 
 1. **MCP tools** (dashboard-and-keeper visible):
-   - `masc_recurring_add` — `{ label: string; interval_sec: int (>0); action: <closed variant> }` → registers via `Keeper_recurring.add ~keeper_name:<caller>`. `keeper_name` is bound to the calling actor (a keeper registers its own tasks; it cannot register for another).
-   - `masc_recurring_remove` — `{ id: string }` → `Keeper_recurring.remove`.
+   - `masc_recurring_add` — `{ label: string; interval_sec: int (>0); action: <closed variant> }` → registers via `Keeper_recurring.add ~base_path ~keeper_name:<caller>`. `base_path` comes from the authenticated workspace context; `keeper_name` is bound to the calling actor (a keeper registers its own tasks; it cannot register for another).
+   - `masc_recurring_remove` — `{ id: string }` → `Keeper_recurring.remove ~base_path`.
    - `masc_recurring_list` — read-only, returns the caller's tasks.
 2. **Action variant stays closed.** `Keeper_recurring.action` remains a sum type (`Broadcast` today). New actions are added by extending the variant, never by a string field — the projection's `action_kind_to_string` and the tool parser both fail to compile on an unhandled variant.
 3. **Persistence decision (open question).** Tasks are in-memory and die on restart. Either (a) keep ephemeral and document that keepers re-register on wake, or (b) persist under `.masc/keeper/<name>/recurring.json` and reload on register. Recommendation: start ephemeral (a) — matches current semantics; add persistence only if operators report churn.

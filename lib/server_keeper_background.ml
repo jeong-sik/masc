@@ -96,7 +96,7 @@ let dashboard_json (config : Workspace.config) =
     entries
     |> List.fold_left
          (fun (rows, total) (entry : Keeper_registry.registry_entry) ->
-            match Keeper_recurring.list ~keeper_name:entry.name with
+            match Keeper_recurring.list ~base_path ~keeper_name:entry.name with
             | [] -> rows, total
             | tasks -> keeper_json entry tasks :: rows, total + List.length tasks)
          ([], 0)

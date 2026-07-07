@@ -807,7 +807,12 @@ export function KeeperConversationPanel({
         ${!showInternal && hiddenCount > 0
           ? html`
               <div class="mx-10 mb-2 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
-                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. Tweaks의 "내부 메시지"로 볼 수 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다.
+                <button
+                  type="button"
+                  class="ml-1 cursor-pointer border-0 bg-transparent p-0 text-2xs font-semibold text-[var(--warn-bright)] underline"
+                  onClick=${() => { chatShowInternal.value = true }}
+                >바로 표시</button>
               </div>
             `
           : null}
@@ -932,7 +937,12 @@ export function KeeperConversationPanel({
         ${!showInternal && hiddenCount > 0
           ? html`
               <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
-                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. Tweaks의 "내부 메시지"로 볼 수 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다.
+                <button
+                  type="button"
+                  class="ml-1 cursor-pointer border-0 bg-transparent p-0 text-2xs font-semibold text-[var(--warn-bright)] underline"
+                  onClick=${() => { chatShowInternal.value = true }}
+                >바로 표시</button>
               </div>
             `
           : null}
@@ -1043,7 +1053,12 @@ export function KeeperConversationPanel({
         ${!showInternal && hiddenCount > 0
           ? html`
               <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
-                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. Tweaks의 "내부 메시지"로 볼 수 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다.
+                <button
+                  type="button"
+                  class="ml-1 cursor-pointer border-0 bg-transparent p-0 text-2xs font-semibold text-[var(--warn-bright)] underline"
+                  onClick=${() => { chatShowInternal.value = true }}
+                >바로 표시</button>
               </div>
             `
           : null}

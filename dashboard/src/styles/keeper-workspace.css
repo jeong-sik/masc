@@ -217,9 +217,13 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   min-width: 0;
   align-items: center;
   gap: 6px;
-  /* CJK chip labels have a wide min-content floor; at narrow roster widths the
-     sort <select> (margin-left:auto, min-width) overflowed the aside instead
-     of dropping to its own line. Wrap keeps every control inside the toolbar. */
+}
+/* CJK chip labels have a wide min-content floor; at narrow roster widths the
+   sort <select> overflowed the aside instead of dropping to its own line.
+   The element carries both class vocabularies and keeper-v2/v2.css
+   (.roster-filters, deliberately loaded last) re-asserts flex-wrap: nowrap —
+   double up the classes (0,2,0) so the wrap fix actually wins the cascade. */
+.kw-roster-filters.roster-filters {
   flex-wrap: wrap;
   row-gap: 6px;
 }
@@ -236,7 +240,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 /* 주의 chip: cross-cutting attention flag, not a lifecycle state — reuse the
    row badge (.kw-kp-att) palette so both surfaces read as the same signal. */
 .kw-rfilter.att { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.35); }
-.kw-rfilter.att:hover { border-color: rgb(var(--color-status-err-glow) / 0.6); }
+.kw-rfilter.att:hover {
+  color: var(--color-status-err);
+  border-color: rgb(var(--color-status-err-glow) / 0.6);
+  background: rgb(var(--color-status-err-glow) / 0.08);
+}
 .kw-rfilter.att[aria-pressed="true"] {
   background: rgb(var(--color-status-err-glow) / 0.16);
   border-color: rgb(var(--color-status-err-glow) / 0.6);
@@ -637,7 +645,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   cursor: pointer;
   transition: color .15s, border-color .15s, background .15s;
 }
-.kw-chat-command-icon:hover {
+.kw-chat-command-icon:not(:disabled):hover {
   color: var(--color-fg-primary);
   border-color: var(--color-border-strong);
   background: var(--color-bg-surface);
@@ -649,7 +657,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   background: var(--accent-10);
 }
 .kw-chat-command-icon.danger { color: var(--color-status-err); }
-.kw-chat-command-icon.danger:hover {
+.kw-chat-command-icon.danger:not(:disabled):hover {
   border-color: rgb(var(--color-status-err-glow) / 0.5);
   background: rgb(var(--color-status-err-glow) / 0.10);
 }

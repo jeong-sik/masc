@@ -157,8 +157,8 @@ export function keeperIsStuckOnRecoverableBlocker(keeper: Keeper): boolean {
  *  recoverable blocker. The blocker classes no longer gate this
  *  predicate (the old `if stuck return true; return true` had collapsed
  *  into a constant); keeperIsStuckOnRecoverableBlocker remains the
- *  advisory signal for surfaces that want to highlight *why* a wakeup
- *  is worth trying. */
+ *  advisory signal (currently pinned by tests only; no render surface
+ *  consumes it yet). */
 export function keeperCanWakeup(keeper: Keeper): boolean {
   return !isKeeperPaused(keeper) && !isKeeperOffline(keeper)
 }

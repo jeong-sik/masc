@@ -456,6 +456,7 @@ let test_status_hides_stale_agent_current_task_without_writing () =
            ~agent_name
            ~task_id:"task-001"
            ~action:Masc_domain.Submit_for_verification
+           ~notes:"verification setup notes"
            ()
        with
        | Ok _ -> ()
@@ -1107,6 +1108,29 @@ let test_transition_invalid () =
     match result with
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState")
+;;
+
+let test_transition_submit_for_verification_requires_notes () =
+  with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
+    with_test_env (fun config ->
+      let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
+      let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+      let result =
+        Workspace.transition_task_r
+          config
+          ~agent_name:"claude"
+          ~task_id:"task-001"
+          ~action:Masc_domain.Submit_for_verification
+          ()
+      in
+      match result with
+      | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
+        Alcotest.(check bool)
+          "empty notes rejected"
+          true
+          (str_contains msg "requires non-empty notes")
+      | Ok _ -> Alcotest.fail "Expected empty notes rejection"
+      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)))
 ;;
 
 let test_transition_version_mismatch () =
@@ -2260,6 +2284,10 @@ let () =
             test_transition_release_generated_nickname_alias
         ; Alcotest.test_case "release todo no-op" `Quick test_transition_release_todo_noop
         ; Alcotest.test_case "invalid" `Quick test_transition_invalid
+        ; Alcotest.test_case
+            "submit_for_verification requires notes"
+            `Quick
+            test_transition_submit_for_verification_requires_notes
         ; Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch
         ; Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent
         ; Alcotest.test_case

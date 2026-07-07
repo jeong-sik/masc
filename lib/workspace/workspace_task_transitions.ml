@@ -123,6 +123,24 @@ let transition_task_outcome_r
         let now = now_iso () in
         let now_ts = Time_compat.now () in
         let action_s = Masc_domain.task_action_to_string action in
+        let* () =
+          match action with
+          | Masc_domain.Submit_for_verification
+            when String.length (String.trim notes) = 0 ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "submit_for_verification requires non-empty notes describing the \
+                     deliverable and evidence references"))
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel
+          | Masc_domain.Release
+          | Masc_domain.Submit_for_verification
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification -> Ok ()
+        in
         let* decision =
           match
             Workspace_task_lifecycle.decide
@@ -219,11 +237,6 @@ let transition_task_outcome_r
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
-              | Masc_domain.Submit_for_verification, _
-                when String.length (String.trim notes) = 0 ->
-                " Remediation: submit_for_verification requires non-empty notes \
-                 describing the deliverable. Provide a summary of what was done \
-                 and evidence references."
               | _ -> ""
             in
             Error

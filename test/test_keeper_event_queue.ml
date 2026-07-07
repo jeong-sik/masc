@@ -311,6 +311,69 @@ let () =
    | Error msg ->
      Alcotest.fail ("Goal_verification_failed stimulus round-trip failed: " ^ msg));
 
+  (* --- RFC-0315 P3 W0: Goal_assigned --- *)
+  let assignment =
+    { ga_goal_id = "goal-9"
+    ; ga_goal_title = "Harden wake continuity"
+    ; ga_assigned_by = "keeper_up"
+    }
+  in
+  assert (
+    String.equal (goal_assignment_post_id assignment) "goal-assigned:goal-9");
+  assert (
+    String.equal (payload_kind_label (Goal_assigned assignment)) "goal_assigned");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = goal_assignment_post_id assignment
+          ; urgency = Normal
+          ; arrived_at = 7.0
+          ; payload = Goal_assigned assignment
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Goal_assigned ga ->
+        assert (String.equal ga.ga_goal_id "goal-9");
+        assert (String.equal ga.ga_goal_title "Harden wake continuity");
+        assert (String.equal ga.ga_assigned_by "keeper_up")
+      | _ -> Alcotest.fail "Goal_assigned codec round-trip changed payload shape")
+   | Error msg ->
+     Alcotest.fail ("Goal_assigned stimulus round-trip failed: " ^ msg));
+  (* Identity strips display-only fields: re-assigning the same goal via a
+     different actor or after a title edit still dedups. *)
+  let assignment_stim =
+    { post_id = goal_assignment_post_id assignment
+    ; urgency = Normal
+    ; arrived_at = 7.0
+    ; payload = Goal_assigned assignment
+    }
+  in
+  let assignment_retitled =
+    { assignment_stim with
+      arrived_at = 8.0
+    ; payload =
+        Goal_assigned
+          { assignment with
+            ga_goal_title = "Harden wake continuity (v2)"
+          ; ga_assigned_by = "toml_reconcile"
+          }
+    }
+  in
+  assert (stimulus_identity_equal assignment_stim assignment_retitled);
+  (* Producer diff is edge-only: additions wake, removals and unchanged ids
+     never do. *)
+  assert (
+    Masc.Keeper_goal_assignment_wake.added_goal_ids
+      ~old_ids:[ "goal-1"; "goal-2" ]
+      ~new_ids:[ "goal-2"; "goal-9" ]
+    = [ "goal-9" ]);
+  assert (
+    Masc.Keeper_goal_assignment_wake.added_goal_ids
+      ~old_ids:[ "goal-1" ]
+      ~new_ids:[]
+    = []);
+
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }

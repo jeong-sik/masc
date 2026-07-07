@@ -23,6 +23,12 @@ type save_result =
   ; working_state_saved : bool
   }
 
+(* Single owner of the latest-ledger filename: the prompt-side reader
+   (RFC-0315 Open Loops layer in [Keeper_unified_turn]) must resolve the
+   same path this module writes below. *)
+let latest_working_state_path ~session_dir =
+  Filename.concat session_dir "working-state.latest.json"
+
 (* Read back the previously-persisted working-state ledger from the latest
    sidecar so that resume/compaction can preserve active loops the current
    [STATE] snapshot omits. The saved payload wraps the ledger under the
@@ -93,7 +99,7 @@ let save_sidecars
       (Printf.sprintf "turn-%06d.json" keeper_turn_id)
   in
   let latest_working_state_sidecar_path =
-    Filename.concat session_dir "working-state.latest.json"
+    latest_working_state_path ~session_dir
   in
   let state_snapshot_ts = Masc_domain.now_iso () in
   let state_snapshot_updated_at_unix = Time_compat.now () in

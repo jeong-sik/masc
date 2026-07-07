@@ -17,6 +17,8 @@ type stimulus_kind =
       (* Goal verification rejection wake — resumes assigned goal work. *)
   | Failure_judgment
       (* RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
+  | Goal_assigned
+      (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
 
 type reaction_kind =
   | Turn_started
@@ -41,6 +43,7 @@ let stimulus_kind_to_string = function
   | Hitl_resolved -> "hitl_resolved"
   | Goal_verification_failed -> "goal_verification_failed"
   | Failure_judgment -> "failure_judgment"
+  | Goal_assigned -> "goal_assigned"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -58,6 +61,7 @@ let stimulus_kind_of_string = function
   | "hitl_resolved" -> Some Hitl_resolved
   | "goal_verification_failed" -> Some Goal_verification_failed
   | "failure_judgment" -> Some Failure_judgment
+  | "goal_assigned" -> Some Goal_assigned
   | _ -> None
 ;;
 
@@ -109,6 +113,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Goal_verification_failed _ -> Goal_verification_failed
   | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
+  | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -213,6 +218,11 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "failure_judgment runtime=%s class=%s"
       fj.fj_runtime_id
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
+  | Keeper_event_queue.Goal_assigned ga ->
+    Printf.sprintf
+      "goal_assigned goal_id=%s assigned_by=%s"
+      ga.ga_goal_id
+      ga.ga_assigned_by
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -230,7 +240,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Goal_verification_failed _
-    | Keeper_event_queue.Failure_judgment _ -> None
+    | Keeper_event_queue.Failure_judgment _
+    | Keeper_event_queue.Goal_assigned _ -> None
   in
   `Assoc
     (base_fields
@@ -915,7 +926,7 @@ let summarize_rows ~keeper_name ~limit rows =
        | Some
            ( Board_signal | Bootstrap | No_progress_recovery | Fusion_completed
            | Bg_completed | Schedule_due | Connector_attention | Hitl_resolved
-           | Goal_verification_failed | Failure_judgment )
+           | Goal_verification_failed | Failure_judgment | Goal_assigned )
          -> ())
   in
   let note_payload_parse_error row =
@@ -1010,7 +1021,7 @@ let summarize_rows ~keeper_name ~limit rows =
         | Some
             ( Board_signal | Bootstrap | Fusion_completed | Bg_completed
             | Schedule_due | Connector_attention | Hitl_resolved
-            | Goal_verification_failed | Failure_judgment )
+            | Goal_verification_failed | Failure_judgment | Goal_assigned )
         | None ->
           false)
       pending_stimulus_ids

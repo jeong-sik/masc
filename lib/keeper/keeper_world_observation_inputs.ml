@@ -104,6 +104,34 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     0, 0, 0, 0, false
 ;;
 
+(** Resolve the keeper's claimed task to its backlog record (RFC-0315). *)
+let read_current_task ~(config : Workspace.config) ~(meta : keeper_meta)
+  : Masc_domain.task option
+  =
+  match meta.current_task_id with
+  | None -> None
+  | Some task_id ->
+    let task_id = Keeper_id.Task_id.to_string task_id in
+    (try
+       let backlog = Workspace.read_backlog config in
+       List.find_opt
+         (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+         backlog.tasks
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | ex ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string ObservationQueryFailures)
+         ~labels:
+           [ ( "operation"
+             , Runtime_observation_query_operation.(to_label Read_current_task)
+             )
+           ]
+         ();
+       Log.Keeper.warn "read_current_task failed: %s" (Printexc.to_string ex);
+       None)
+;;
+
 (** Count live keeper fibers for keeper world state.
 
     Keepers do not write the legacy [.masc/agents/] registry.  That registry may

@@ -200,6 +200,10 @@ export type {
   DashboardKeeperWaitingRow,
   DashboardKeeperWaitingKeeper,
   DashboardKeeperWaitingInventory,
+  DashboardKeeperBackgroundLoop,
+  DashboardKeeperRecurringTask,
+  DashboardKeeperBackgroundKeeper,
+  DashboardKeeperBackground,
   DashboardToolsResponse,
 } from './dashboard-tools-prompts'
 

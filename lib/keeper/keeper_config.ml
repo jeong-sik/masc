@@ -273,6 +273,57 @@ let normalize_keep_recent_tool_results ?keeper_name (v : int) : int =
 
 let default_compaction_profile = "custom"
 
+(* RFC-0313-adjacent compaction summarizer strategy selector.
+   [profile] decides WHEN to compact (the gate); [mode] decides HOW the
+   checkpoint is summarized. Orthogonal axes, so a separate closed variant
+   rather than another [profile] string.
+
+   [Deterministic] = the extractive OAS strategy chain
+   ([Keeper_compact_policy.checkpoint_compaction_strategies]); this is the
+   fail-closed default (no provider spend, no latency, no re-arming loop).
+   [Llm] = opt-in provider-backed summarizer on the librarian lane (W2);
+   until W2 it delegates to the deterministic chain. *)
+type compaction_mode =
+  | Deterministic
+  | Llm
+
+let default_compaction_mode = Deterministic
+
+let compaction_mode_to_string = function
+  | Deterministic -> "deterministic"
+  | Llm -> "llm"
+
+(* Unknown → error, NOT a permissive default. Mirrors the
+   MASC_RUNTIME_ATTEMPT_LIVENESS canonical-or-config-error precedent
+   (env_config_snapshot.ml): explicit values must be canonical, so a
+   typo cannot silently pick a mode the operator did not intend
+   (CLAUDE.md "Unknown → Permissive Default" antipattern). *)
+let compaction_mode_of_string raw : (compaction_mode, string) result =
+  match String.lowercase_ascii (String.trim raw) with
+  | "deterministic" | "extractive" -> Ok Deterministic
+  | "llm" | "summarizer" -> Ok Llm
+  | other ->
+    Error
+      (Printf.sprintf
+         "invalid compaction_mode '%s' (allowed: deterministic, llm)"
+         other)
+
+(* Global default mode from env. Unset → [default_compaction_mode]; set but
+   non-canonical → [invalid_arg] (fail-closed at load, not a silent default),
+   matching the MASC_RUNTIME_ATTEMPT_LIVENESS precedent. Read at call time so
+   tests can set the env; there is no per-turn hot-path caller. *)
+let keeper_compaction_mode_env_key = "MASC_KEEPER_COMPACTION_MODE"
+
+let keeper_compaction_mode_default () : compaction_mode =
+  match Sys.getenv_opt keeper_compaction_mode_env_key with
+  | None -> default_compaction_mode
+  | Some raw ->
+    (match compaction_mode_of_string raw with
+     | Ok mode -> mode
+     | Error msg ->
+       invalid_arg
+         (Printf.sprintf "%s: %s" keeper_compaction_mode_env_key msg))
+
 let canonical_compaction_profile raw =
   match String.lowercase_ascii (String.trim raw) with
   | "aggressive" | "tight" -> Some "aggressive"

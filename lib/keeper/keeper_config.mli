@@ -130,6 +130,27 @@ val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 
 (** {1 Compaction Configuration} *)
 
+(** HOW a checkpoint is summarized (orthogonal to [profile], which decides
+    WHEN to compact). [Deterministic] = the extractive OAS strategy chain
+    (fail-closed default); [Llm] = opt-in provider-backed summarizer on the
+    librarian lane (wired in W2). *)
+type compaction_mode =
+  | Deterministic
+  | Llm
+
+val default_compaction_mode : compaction_mode
+val compaction_mode_to_string : compaction_mode -> string
+
+(** Parse a mode string; unknown → [Error] (never a permissive default). *)
+val compaction_mode_of_string : string -> (compaction_mode, string) result
+
+val keeper_compaction_mode_env_key : string
+
+(** Global default mode from [MASC_KEEPER_COMPACTION_MODE]. Unset →
+    [default_compaction_mode]; set-but-invalid → [invalid_arg] (fail-closed
+    at load), mirroring the MASC_RUNTIME_ATTEMPT_LIVENESS precedent. *)
+val keeper_compaction_mode_default : unit -> compaction_mode
+
 val default_compaction_profile : string
 val canonical_compaction_profile : string -> string option
 val parse_compaction_profile_opt :

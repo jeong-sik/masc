@@ -60,6 +60,9 @@ type pending_board_event_kind =
   | Failure_judgment
       (** RFC-0313 W2: deterministic turn failure escalated for an
           LLM-boundary verdict on the keeper's next turn. *)
+  | Goal_assigned
+      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
+          the assignment edge surfaces as actionable turn input. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;

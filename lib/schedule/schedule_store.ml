@@ -464,11 +464,13 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if Schedule_domain.is_terminal request.status || request.status = Running
+      if Schedule_domain.is_terminal request.status
+         || request.status = Running
+         || request.status = Due
       then
         Error
           (Invalid_status_transition
-             "only pending, scheduled, or due requests can be updated")
+             "only pending or scheduled requests can be updated")
       else
         let updated_request =
           { request with

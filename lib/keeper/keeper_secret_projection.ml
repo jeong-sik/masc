@@ -3,9 +3,20 @@ type t =
   ; cleanup : unit -> unit
   }
 
+type github_app_token_minter =
+  app_id:string ->
+  installation_id:string ->
+  pem:string ->
+  now:int ->
+  (string, string) result
+
 type source_kind =
   | Env_source
   | File_source
+
+type file_projection_policy =
+  | Mount_into_keeper
+  | Projection_layer_only
 
 type secret_root_info =
   { root : string
@@ -917,7 +928,22 @@ let ensure_local_git_config_global ~path =
          (if String.equal arg "" then "" else " " ^ arg))
 ;;
 
-let github_app_pem_subpath = "github-app/private-key.pem"
+let github_app_pem_rel = [ "github-app"; "private-key.pem" ]
+let github_app_pem_subpath = String.concat "/" github_app_pem_rel
+let github_app_pem_container_path = container_path_of_rel github_app_pem_rel
+
+let file_projection_policy ~container_path =
+  if String.equal container_path github_app_pem_container_path
+  then Projection_layer_only
+  else Mount_into_keeper
+
+let keeper_mount_file_entries entries =
+  List.filter
+    (fun (_, container_path) ->
+       match file_projection_policy ~container_path with
+       | Mount_into_keeper -> true
+       | Projection_layer_only -> false)
+    entries
 
 let github_app_pem_host_path ~base_path ~keeper_name =
   let root = secret_root ~base_path ~keeper_name in
@@ -933,13 +959,34 @@ let read_file_result path =
     | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
 ;;
 
+let default_github_app_token_minter ~app_id ~installation_id ~pem ~now =
+  match Eio_context.get_clock_opt () with
+  | None ->
+    Error "github_app_eio_clock_unavailable: token mint timeout cannot be enforced"
+  | Some clock ->
+    Keeper_github_app_installation_token.get
+      ~clock
+      ~timeout_sec:Keeper_github_app_installation_token.mint_timeout_sec
+      ~app_id
+      ~installation_id
+      ~pem
+      ~now
+      ()
+;;
+
 (* [github_app_token_overlay] mints (or reuses the cached) GitHub App
    installation token for the keeper. [Ok None] means no GitHub App config is
    present, so the existing static token path remains available. Once either
    GitHub App env key is configured, missing config, unreadable PEM, or mint
    failure returns [Error] so the keeper does not silently fall back to a
    broader static PAT. *)
-let github_app_token_overlay ~base_path ~keeper_name ~env_entries () =
+let github_app_token_overlay
+      ?(mint_github_app_token = default_github_app_token_minter)
+      ~base_path
+      ~keeper_name
+      ~env_entries
+      ()
+  =
   let app_id = List.assoc_opt "MASC_GITHUB_APP_ID" env_entries in
   let installation_id =
     List.assoc_opt "MASC_GITHUB_APP_INSTALLATION_ID" env_entries
@@ -956,18 +1003,7 @@ let github_app_token_overlay ~base_path ~keeper_name ~env_entries () =
             reason)
      | Ok pem ->
        let now = Time_compat.now () |> int_of_float in
-       (match Eio_context.get_clock_opt () with
-        | None ->
-          Error "github_app_eio_clock_unavailable: token mint timeout cannot be enforced"
-        | Some clock ->
-          Keeper_github_app_installation_token.get
-            ~clock
-            ~timeout_sec:Keeper_github_app_installation_token.mint_timeout_sec
-            ~app_id
-            ~installation_id
-            ~pem
-            ~now
-            ())
+       mint_github_app_token ~app_id ~installation_id ~pem ~now
        |> (function
         | Ok token -> Ok (Some token)
         | Error reason ->
@@ -997,19 +1033,37 @@ let with_github_app_token_env ~token entries =
   ("GH_TOKEN", token) :: without_github_token_env entries
 ;;
 
-let env_entries_with_github_app_overlay ~base_path ~keeper_name env_entries =
-  match github_app_token_overlay ~base_path ~keeper_name ~env_entries () with
+let env_entries_with_github_app_overlay
+      ?mint_github_app_token
+      ~base_path
+      ~keeper_name
+      env_entries
+  =
+  match
+    github_app_token_overlay
+      ?mint_github_app_token
+      ~base_path
+      ~keeper_name
+      ~env_entries
+      ()
+  with
   | Error _ as err -> err
   | Ok (Some token) -> Ok (with_github_app_token_env ~token env_entries)
   | Ok None -> Ok env_entries
 ;;
 
-let local_env_for_keeper ?host_env ~base_path ~keeper_name () =
+let local_env_for_keeper ?mint_github_app_token ?host_env ~base_path ~keeper_name () =
   match load_secret_roots ~base_path ~keeper_name with
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
-    (match env_entries_with_github_app_overlay ~base_path ~keeper_name env_entries with
+    (match
+       env_entries_with_github_app_overlay
+         ?mint_github_app_token
+         ~base_path
+         ~keeper_name
+         env_entries
+     with
      | Error _ as err -> err
      | Ok env_entries ->
        let git_config_path = local_git_config_global_path ~base_path ~keeper_name in
@@ -1067,15 +1121,21 @@ let ensure_docker_git_config_global ~base_path ~keeper_name =
          (if String.equal arg "" then "" else " " ^ arg))
 ;;
 
-let docker_args_for_keeper ~base_path ~keeper_name ~container_name =
+let docker_args_for_keeper ?mint_github_app_token ~base_path ~keeper_name ~container_name =
   match load_secret_roots ~base_path ~keeper_name with
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
-    (match env_entries_with_github_app_overlay ~base_path ~keeper_name env_entries with
+    (match
+       env_entries_with_github_app_overlay
+         ?mint_github_app_token
+         ~base_path
+         ~keeper_name
+         env_entries
+     with
      | Error _ as err -> err
      | Ok env_entries ->
-       let file_entries = merge_file_entries roots in
+       let file_entries = merge_file_entries roots |> keeper_mount_file_entries in
     let git_config =
       if env_entries_have git_config_global_env_name env_entries
          || not (has_github_token env_entries)

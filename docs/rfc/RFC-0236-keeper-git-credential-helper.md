@@ -117,7 +117,7 @@ Projection insertion (`keeper_secret_projection.ml`):
 - In `local_env_for_keeper` / `docker_args_for_keeper`, immediately after `merge_env_entries roots`, if the keeper has GitHub App config loaded, mint (or reuse cached) the installation token, remove any existing `GH_TOKEN`/`GITHUB_TOKEN` entries, and insert a single `("GH_TOKEN", token)` entry. This overlay flips `has_github_token` true, so the §3 git-config helper activates on the installation token exactly as it does on a PAT — no change to the credential-helper path.
 
 Per-keeper config storage:
-- PEM private key: `secrets/<keeper>/files/github-app/private-key.pem` (PEM is multiline, rejected by `validate_env_value`'s single-line env rule; the `files/` path is the existing file-projection channel, mounted read-only into the sandbox).
+- PEM private key: `secrets/<keeper>/files/github-app/private-key.pem` (PEM is multiline, rejected by `validate_env_value`'s single-line env rule). This path is projection-layer-only material: `keeper_secret_projection` reads it to mint the installation token and explicitly excludes it from Docker file mounts, so the keeper sandbox receives the short-lived `GH_TOKEN` rather than the App signing key.
 - `MASC_GITHUB_APP_ID` and `MASC_GITHUB_APP_INSTALLATION_ID`: numeric, single-line, valid as env at `secrets/<keeper>/env/`.
 
 Redaction (`observability_redact.ml`): redact complete or truncated PEM private-key blocks delimited by `-----BEGIN PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----` markers so leaked keys do not reach logs/argv.
@@ -126,7 +126,7 @@ Redaction (`observability_redact.ml`): redact complete or truncated PEM private-
 
 - An installation-token leak exposes at most 1 hour of installation-scoped authority, not the years-long PAT.
 - Per-keeper App config means one keeper's PEM is not another's — isolation the shared PAT cannot provide.
-- The PEM lives on disk under `files/` (read-only mount); it is never inlined into env or argv. Redaction denies it from logs.
+- The PEM lives on disk under `files/` as projection-layer-only material; it is never mounted into the keeper container and is never inlined into env or argv. Redaction denies it from logs if it appears in observability text.
 - The token still flows through the §3 credential helper — git resolves it from env at call time, nothing secret is written to git config (RFC-0236 §5 preserved).
 - Fail-closed on mint failure: projection rejects the env materialisation rather than silently keeping a static PAT fallback. Operators see the failure in the projection result and can rotate or repair the App config.
 
@@ -143,6 +143,7 @@ Redaction (`observability_redact.ml`): redact complete or truncated PEM private-
 
 - JWT RS256 unit test cross-checked with `openssl dgst -sha256 -sign` against the same PEM.
 - Installation-token mint + cache: mock GitHub API returns a token; assert reuse within the documented 1-hour lifetime window and re-mint after expiry.
+- Docker projection regression: App PEM is absent from `-v` mounts while the minted installation token is present as the only GitHub token env entry.
 - Redaction regression: PEM private-key literals are masked by `test_observability_redact_github_tokens`.
 - Integration: a keeper whose `files/github-app/private-key.pem` is populated pushes over HTTPS using the minted installation token (the §3 helper consumes it).
 - Census: `git_gh_auth_error` continues to drop; a new metric `keeper_github_app_mint_error` is watched over 168h.

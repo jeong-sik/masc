@@ -83,6 +83,15 @@ let env_value name env =
     else None)
 ;;
 
+let env_file_arg args =
+  let rec loop = function
+    | "--env-file" :: path :: _ -> Some path
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop args
+;;
+
 let assert_error_contains label needle = function
   | Error err ->
     Alcotest.(check bool)
@@ -164,6 +173,64 @@ let test_no_github_app_config_keeps_static_token () =
       (env_value "GH_TOKEN" env)
 ;;
 
+let test_docker_projection_excludes_github_app_pem () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "keeper-docker" in
+  let minted_token = "ghs_installation_token" in
+  write_keeper_env ~base_path ~keeper_name "MASC_GITHUB_APP_ID" "1\n";
+  write_keeper_env ~base_path ~keeper_name "MASC_GITHUB_APP_INSTALLATION_ID" "2\n";
+  write_keeper_env ~base_path ~keeper_name "GH_TOKEN" "ghp_static\n";
+  write_keeper_env ~base_path ~keeper_name "GITHUB_TOKEN" "ghu_static\n";
+  write_keeper_file
+    ~base_path
+    ~keeper_name
+    "github-app/private-key.pem"
+    "fake-pem";
+  write_keeper_file ~base_path ~keeper_name "config/visible.txt" "visible";
+  let mint_github_app_token ~app_id ~installation_id ~pem ~now:_ =
+    Alcotest.(check string) "app id" "1" app_id;
+    Alcotest.(check string) "installation id" "2" installation_id;
+    Alcotest.(check string) "pem" "fake-pem" pem;
+    Ok minted_token
+  in
+  match
+    Projection.docker_args_for_keeper
+      ~mint_github_app_token
+      ~base_path
+      ~keeper_name
+      ~container_name:"container"
+  with
+  | Error err -> Alcotest.failf "docker projection failed: %s" err
+  | Ok projection ->
+    let args = String.concat " " projection.docker_args in
+    Alcotest.(check bool)
+      "github app pem is not mounted"
+      false
+      (contains_substring args "github-app/private-key.pem");
+    Alcotest.(check bool)
+      "other files still mount"
+      true
+      (contains_substring args "/config/visible.txt:ro");
+    (match env_file_arg projection.docker_args with
+     | None -> Alcotest.fail "missing --env-file"
+     | Some env_file ->
+       let env = read_file env_file in
+       Alcotest.(check bool)
+         "minted token projected"
+         true
+         (contains_substring env ("GH_TOKEN=" ^ minted_token ^ "\n"));
+       Alcotest.(check bool)
+         "static GH_TOKEN removed"
+         false
+         (contains_substring env "GH_TOKEN=ghp_static\n");
+       Alcotest.(check bool)
+         "static GITHUB_TOKEN removed"
+         false
+         (contains_substring env "GITHUB_TOKEN=ghu_static\n");
+       projection.cleanup ();
+       Alcotest.(check bool) "env file cleaned up" false (Sys.file_exists env_file))
+;;
+
 let () =
   Alcotest.run
     "keeper_secret_projection_github_app"
@@ -186,6 +253,12 @@ let () =
             "no app config keeps static token"
             `Quick
             test_no_github_app_config_keeps_static_token
+        ] )
+    ; ( "docker_projection"
+      , [ Alcotest.test_case
+            "app PEM stays projection-layer-only"
+            `Quick
+            test_docker_projection_excludes_github_app_pem
         ] )
     ]
 ;;

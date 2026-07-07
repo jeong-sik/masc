@@ -1,9 +1,14 @@
 // Dedicated Schedule surface.
 //
-// The card/detail projection lives in tools/scheduled-automation-panel.ts and
-// is reused here so the route does not fork the backed schedule semantics.
-// Shell (header + KPI strip) ported to the keeper-v2 prototype (schedule.jsx):
-// `.ov.sch-surf` → `.ov-head` (eyebrow + title + sub) → `.ov-kpis` (4 KPIs).
+// Two views over one schedule projection (data.scheduled_automation):
+//   · 캘린더 — the always-on polling strip (interval) above a day agenda
+//     (scheduled + oneshot). Ported from the keeper-v2 prototype (schedule.jsx).
+//   · 목록   — the mature diagnostic list/cards/signal feed in
+//     tools/scheduled-automation-panel.ts (variant "v2"), reused verbatim so the
+//     route does not fork the backed schedule semantics.
+// A cadence filter (정기 · 폴링 · 1회) narrows both views. Both share one detail
+// overlay (SchDetail) and one selection state, so a row opens the same drawer
+// regardless of view.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -12,13 +17,23 @@ import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { StatusChip } from '../common/status-chip'
 import { KeeperWaitingInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
-import { ScheduleAside, ScheduledAutomationPanel, normalizedScheduleStatus, scheduledPendingApprovalCount } from '../tools/scheduled-automation-panel'
+import {
+  ScheduleAside,
+  ScheduledAutomationPanel,
+  SchDetail,
+  normalizedScheduleStatus,
+  scheduledPendingApprovalCount,
+} from '../tools/scheduled-automation-panel'
+import type { Cadence } from '../v2/schedule-constants'
+import { CadenceSummary, ScheduleCalendar, cadenceCounts } from './schedule-agenda'
 import {
   loadTools,
   toolsData,
   toolsError,
   toolsLoading,
 } from '../tools/tool-state'
+
+type ScheduleView = 'calendar' | 'list'
 
 function countLabel(count: number): string {
   return count.toLocaleString()
@@ -49,10 +64,14 @@ export function ScheduleSurface() {
   const scheduledCount = countByStatus(automation, ['scheduled'])
   const runningCount = countByStatus(automation, ['running'])
   const dueRunning = dueEffective + runningCount
-  const totalCount = automation?.requests?.length ?? 0
+  const requests = automation?.requests ?? []
+  const totalCount = requests.length
+  const cadCounts = cadenceCounts(requests)
 
-  // Detail-overlay selection is lifted here so the read-only operations aside
-  // (right column) and the panel's cards/feed drive the same overlay.
+  const [view, setView] = useState<ScheduleView>('calendar')
+  const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
+  // Detail-overlay selection is lifted here so the calendar view, the list
+  // panel, and the operations aside all drive the same overlay.
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -60,6 +79,21 @@ export function ScheduleSurface() {
       void loadTools()
     }
   }, [])
+
+  function switchView(next: ScheduleView) {
+    // Clear selection so a drawer opened in one view does not linger into the
+    // other (the list panel renders its own overlay from the same id).
+    setSelectedScheduleId(null)
+    setView(next)
+  }
+
+  const refresh = (): Promise<void> => loadTools()
+  // In the calendar view the list panel is unmounted, so the surface owns the
+  // overlay; the list panel renders its own overlay from the same selection.
+  const selectedRequest =
+    view === 'calendar' && selectedScheduleId
+      ? requests.find(request => request.schedule_id === selectedScheduleId) ?? null
+      : null
 
   return html`
     <main class="ov ov-2col sch-surf" data-screen-label="예약" data-testid="schedule-surface">
@@ -100,6 +134,28 @@ export function ScheduleSurface() {
           </div>
         </section>
 
+        <div class="sch-viewbar" data-testid="schedule-viewbar">
+          <div class="sch-viewseg" role="tablist" aria-label="예약 뷰">
+            <button
+              type="button"
+              role="tab"
+              aria-selected=${view === 'calendar' ? 'true' : 'false'}
+              class=${`sch-viewbtn ${view === 'calendar' ? 'on' : ''}`}
+              data-testid="schedule-view-calendar"
+              onClick=${() => switchView('calendar')}
+            >▦ 캘린더</button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected=${view === 'list' ? 'true' : 'false'}
+              class=${`sch-viewbtn ${view === 'list' ? 'on' : ''}`}
+              data-testid="schedule-view-list"
+              onClick=${() => switchView('list')}
+            >≡ 목록</button>
+          </div>
+          <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
+        </div>
+
         <section class="ov-card mt-4" aria-label="Keeper waiting inventory" data-testid="schedule-waiting-inventory">
           <div class="ov-card-h"><h3>Keeper Waiting Inventory</h3></div>
           <${KeeperWaitingInventoryPanel} inventory=${waitingInventory} />
@@ -107,18 +163,33 @@ export function ScheduleSurface() {
 
         ${loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
-          : html`<${ScheduledAutomationPanel}
-              automation=${automation}
-              variant="v2"
-              selectedScheduleId=${selectedScheduleId}
-              onSelectSchedule=${setSelectedScheduleId}
-            />`}
+          : view === 'calendar'
+            ? html`<${ScheduleCalendar}
+                requests=${requests}
+                nowMs=${Date.now()}
+                cadenceFilter=${cadenceFilter}
+                onOpen=${setSelectedScheduleId}
+              />`
+            : html`<${ScheduledAutomationPanel}
+                automation=${automation}
+                variant="v2"
+                onResolved=${refresh}
+                selectedScheduleId=${selectedScheduleId}
+                onSelectSchedule=${setSelectedScheduleId}
+              />`}
       </div>
       ${automation
         ? html`<${ScheduleAside}
             requests=${automation.requests ?? []}
             sum=${{ scheduled: scheduledCount, dueRunning, pending: pendingCount, total: totalCount }}
             onOpen=${setSelectedScheduleId}
+          />`
+        : null}
+      ${selectedRequest
+        ? html`<${SchDetail}
+            request=${selectedRequest}
+            onClose=${() => setSelectedScheduleId(null)}
+            onResolved=${refresh}
           />`
         : null}
     </main>

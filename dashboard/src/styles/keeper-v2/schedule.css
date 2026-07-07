@@ -140,3 +140,70 @@
 @media (max-width: 720px) {
   .sch-kv .k { width: 96px; }
 }
+
+/* ── cadence tag (예약 종류) — ported from prototype styles/schedule.css ── */
+.sch-cad { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.02em; padding: 1px 8px; border-radius: var(--radius-pill); white-space: nowrap; color: var(--tone, var(--text-dim)); border: 1px solid color-mix(in oklab, var(--tone, var(--text-dim)) 34%, transparent); background: color-mix(in oklab, var(--tone, var(--text-dim)) 9%, transparent); }
+.sch-cad.ok   { --tone: var(--status-ok); }
+.sch-cad.info { --tone: var(--info); }
+.sch-cad.volt { --tone: var(--volt-strong); }
+
+/* ── view toggle + cadence summary strip ── */
+.sch-viewbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 18px 0 14px; }
+.sch-viewseg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-pill); overflow: hidden; flex: none; }
+.sch-viewbtn { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 15px; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; transition: 0.14s; }
+.sch-viewbtn + .sch-viewbtn { border-left: 1px solid var(--border-main); }
+.sch-viewbtn:hover { color: var(--text-mid); }
+.sch-viewbtn.on { background: var(--volt-wash); color: var(--volt-strong); }
+.sch-cadsum { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.sch-cadsum-i { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 10px; border-radius: var(--radius-sm); border: 1px solid color-mix(in oklab, var(--tone) 28%, transparent); background: color-mix(in oklab, var(--tone) 6%, transparent); color: var(--text-mid); cursor: pointer; transition: 0.14s; --tone: var(--text-dim); }
+.sch-cadsum-i.ok   { --tone: var(--status-ok); }
+.sch-cadsum-i.info { --tone: var(--info); }
+.sch-cadsum-i.volt { --tone: var(--volt-strong); }
+.sch-cadsum-i.dim  { --tone: var(--text-dim); cursor: default; }
+.sch-cadsum-i:hover { border-color: color-mix(in oklab, var(--tone) 55%, transparent); }
+.sch-cadsum-i.on { background: color-mix(in oklab, var(--tone) 15%, transparent); border-color: var(--tone); color: var(--text-bright); }
+.sch-cadsum-i.off { opacity: 0.5; }
+.sch-cadsum-gl { color: var(--tone); font-size: var(--fs-12); }
+.sch-cadsum-n { font-size: var(--fs-13); color: var(--tone); }
+.sch-cadsum-l { font-size: var(--fs-11); }
+
+/* ── 상시 폴링 strip (interval) ── */
+.sch-poll { margin-bottom: 16px; padding: 14px; border: 1px solid var(--border-main); border-radius: var(--radius-md); background: color-mix(in oklab, var(--volt-strong) 4%, var(--bg-card)); }
+.sch-poll-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.sch-poll-sub { font-size: var(--fs-11); color: var(--text-dim); }
+.sch-poll-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.sch-poll-card { text-align: left; display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; border: 1px solid var(--border-main); border-left: 3px solid var(--tone, var(--volt-strong)); border-radius: var(--radius-sm); background: var(--bg-card); cursor: pointer; transition: 0.14s; --tone: var(--border-highlight); }
+.sch-poll-card.st-ok { --tone: var(--status-ok); } .sch-poll-card.st-warn { --tone: var(--status-warn); } .sch-poll-card.st-bad { --tone: var(--status-bad); } .sch-poll-card.st-info { --tone: var(--info); } .sch-poll-card.st-neutral { --tone: var(--border-highlight); }
+.sch-poll-card:hover { border-color: var(--border-highlight); border-left-color: var(--tone); }
+.sch-poll-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sch-poll-int { font-size: var(--fs-11); color: var(--volt-strong); }
+.sch-poll-title { font-size: 12.5px; line-height: 1.45; color: var(--text-primary); text-wrap: pretty; }
+.sch-poll-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sch-poll-by { font-size: var(--fs-11); color: var(--text-mid); }
+.sch-poll-next { margin-left: auto; font-size: 10.5px; color: var(--text-dim); }
+
+/* ── 캘린더 아젠다 (daily · cron · oneshot) ── */
+.sch-agenda { display: flex; flex-direction: column; }
+.sch-day { border-top: 1px solid var(--border-soft); padding: 2px 0 12px; }
+.sch-day:first-child { border-top: 0; }
+.sch-day.today { border-top: 2px solid var(--volt-dim); }
+.sch-day-h { display: flex; align-items: baseline; gap: 10px; padding: 12px 2px 9px; }
+.sch-day-rel { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-bright); }
+.sch-day.today .sch-day-rel { color: var(--volt-strong); }
+.sch-day-date { font-size: var(--fs-11); color: var(--text-dim); }
+.sch-day-now { margin-left: 4px; font-size: var(--fs-10); color: var(--volt-strong); border: 1px solid var(--volt-dim); border-radius: var(--radius-pill); padding: 1px 8px; }
+.sch-day-n { margin-left: auto; font-size: var(--fs-11); color: var(--text-dim); }
+.sch-day-empty { font-size: var(--fs-11); color: var(--text-dim); padding: 2px 2px 4px; opacity: 0.6; }
+.sch-day-evs { display: flex; flex-direction: column; gap: 7px; }
+.sch-ev { display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--border-main); border-left: 3px solid var(--tone, var(--border-main)); border-radius: var(--radius-sm); background: var(--bg-card); cursor: pointer; transition: 0.14s; --tone: var(--border-highlight); }
+.sch-ev.st-ok { --tone: var(--status-ok); } .sch-ev.st-warn { --tone: var(--status-warn); } .sch-ev.st-bad { --tone: var(--status-bad); } .sch-ev.st-info { --tone: var(--info); } .sch-ev.st-neutral { --tone: var(--border-highlight); }
+.sch-ev:hover { border-color: var(--border-highlight); border-left-color: var(--tone); background: var(--bg-card-hover); }
+.sch-ev.pending { border-style: dashed; }
+.sch-ev-time { flex: none; width: 44px; font-size: 12.5px; color: var(--text-bright); padding-top: 1px; }
+.sch-ev-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sch-ev-title { font-size: 12.5px; line-height: 1.45; color: var(--text-primary); text-wrap: pretty; }
+.sch-ev-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sch-ev-by { font-size: var(--fs-11); color: var(--text-mid); }
+.sch-ev-need { font-size: var(--fs-10); color: var(--status-warn); }
+.sch-ev [data-status-chip] { flex: none; align-self: flex-start; }
+.sch-poll-top [data-status-chip] { flex: none; }

@@ -150,6 +150,7 @@ let attempt_done
       ~ctx_work
       ~task_id
       ~result
+      ()
   =
   KET.execute_keeper_tool_call_with_outcome
     ~config
@@ -201,6 +202,7 @@ let test_completion_denied_for_non_owner () =
     let result =
       attempt_done ~config ~meta ~ctx_work ~task_id:"task-001"
         ~result:"I finished another agent's task on their behalf"
+        ()
     in
     check string "non-owner completion outcome" "failure" (outcome_label result.KET.outcome);
     check string "non-owner completion payload shape" "structured_error"
@@ -229,6 +231,7 @@ let test_completion_denied_when_unclaimed () =
     let result =
       attempt_done ~config ~meta ~ctx_work ~task_id:"task-001"
         ~result:"pretending an unclaimed backlog item is finished"
+        ()
     in
     check string "unclaimed completion outcome" "failure" (outcome_label result.KET.outcome);
     check string "unclaimed completion payload shape" "structured_error"
@@ -260,7 +263,9 @@ let test_completion_denied_for_thin_notes () =
     let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
     check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
     (* attack: complete own task with notes below the substance floor (<10 chars). *)
-    let result = attempt_done ~config ~meta ~ctx_work ~task_id:"task-001" ~result:"done" in
+    let result =
+      attempt_done ~config ~meta ~ctx_work ~task_id:"task-001" ~result:"done" ()
+    in
     check string "thin-notes completion outcome" "failure" (outcome_label result.KET.outcome);
     check string "thin-notes completion payload shape" "structured_error"
       (payload_kind result.KET.payload_shape);
@@ -290,6 +295,7 @@ let test_completion_with_evidence_refs_succeeds () =
         ~task_id:"task-001"
         ~result:"Implemented the deliverable and opened PR#123 for review."
         ~evidence_refs:[ "PR#123" ]
+        ()
     in
     check string "completion outcome" "success" (outcome_label result.KET.outcome);
     check string "completion payload shape" "structured_success"

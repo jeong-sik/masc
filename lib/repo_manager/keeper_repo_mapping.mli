@@ -76,8 +76,10 @@ val access_decision :
   base_path:string ->
   access_decision
 (** [access_decision ~keeper_id ~repository_id ~base_path] is the typed
-    repository access gate. Use it when a caller needs to distinguish a
-    claimable selected-scope miss from hard fail-closed cases. *)
+    repository access gate. Per-keeper mappings are advisory/default-scope
+    metadata, so selected-scope misses are not access denials and do not create
+    repository-claim HITL requests. Use this when callers need to distinguish
+    registered access from hard fail-closed catalog/store cases. *)
 
 type policy_decision =
   | Policy_decision_default_scope_allowed

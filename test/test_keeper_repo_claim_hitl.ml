@@ -131,7 +131,7 @@ let test_registered_repo_outside_advisory_mapping_is_allowed () =
 
 let test_unregistered_repository_does_not_request_hitl () =
   with_temp_base_path @@ fun base_path ->
-  let keeper_id = "keeper-repo-claim-unregistered" in
+  let keeper_id = "keeper-repo-unregistered" in
   let repo_a = sample_repo ~base_path "repo-a" in
   write_repositories base_path [ repo_a ];
   write_mapping base_path keeper_id [ repo_a.id ];
@@ -155,7 +155,7 @@ let test_unregistered_repository_does_not_request_hitl () =
 let () =
   Alcotest.run
     "Keeper_repo_claim_hitl"
-    [ ( "repo claim"
+    [ ( "repo advisory access"
       , [ Alcotest.test_case
             "registered repo outside advisory mapping is allowed"
             `Quick

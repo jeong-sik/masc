@@ -4,7 +4,9 @@
     not depend on keeper tool surfaces. This module is the composition layer
     that turns fail-closed repository denials into tool-facing responses.
     Keeper repository mappings are advisory/default-scope metadata and are not
-    claimable access caps. *)
+    claimable access caps. The module name is retained for compatibility with
+    the former repo-claim path; selected-scope misses no longer submit HITL
+    approvals. *)
 
 type access_result =
   | Access_allowed

@@ -216,7 +216,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
     | "masc_board_post" ->
         enforce_caller_identity ~tool:name ~field:"author" ~agent_name
           arguments
-    | "masc_board_comment" ->
+    | "masc_board_comment" | "masc_board_post_update" ->
         enforce_caller_identity ~tool:name ~field:"author" ~agent_name
           arguments
     | "masc_board_vote" | "masc_board_comment_vote" ->

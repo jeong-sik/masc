@@ -404,7 +404,10 @@ let parse_providers (toml : Otoml.t)
 
 (* --- Layer 2: Models --- *)
 
-let parse_thinking_control_format ~(path : string) (raw : string)
+let parse_thinking_control_format
+      ~(path : string)
+      ~(token : string option)
+      (raw : string)
   : (Runtime_schema.thinking_control_format, parse_error list) result
   =
   match String.lowercase_ascii (String.trim raw) with
@@ -414,7 +417,20 @@ let parse_thinking_control_format ~(path : string) (raw : string)
   | "thinking-object-only" | "thinking_object_only" ->
     Ok Runtime_schema.Thinking_object_only
   | "chat-template-kwargs" | "chat_template_kwargs" -> Ok Runtime_schema.Chat_template_kwargs
-  | "chat-template-token" | "chat_template_token" -> Ok Runtime_schema.Chat_template_token
+  | "chat-template-token" | "chat_template_token" ->
+    (* The token is model/catalog data carried in the constructor (OAS
+       abfffbd8, oas#2484): a tokenless row fails the load instead of
+       deferring to a hardcoded backend constant. *)
+    (match token with
+     | Some raw_token when String.trim raw_token <> "" ->
+       Ok (Runtime_schema.Chat_template_token (String.trim raw_token))
+     | Some _ | None ->
+       Error
+         (error
+            (path ^ ".thinking-control-token")
+            "thinking-control-format \"chat-template-token\" requires a \
+             non-empty thinking-control-token (the chat-template token is \
+             model data, not a backend constant)"))
   | "ollama-think" | "ollama_think" -> Ok Runtime_schema.Ollama_think
   | "reasoning-effort" | "reasoning_effort" -> Ok Runtime_schema.Reasoning_effort
   | "enable-thinking" | "enable_thinking" -> Ok Runtime_schema.Enable_thinking
@@ -451,7 +467,9 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let thinking_control_format_result =
     match Otoml.find_opt tbl Otoml.get_string [ "thinking-control-format" ] with
     | None -> Ok Runtime_schema.No_thinking_control
-    | Some raw -> parse_thinking_control_format ~path raw
+    | Some raw ->
+      let token = Otoml.find_opt tbl Otoml.get_string [ "thinking-control-token" ] in
+      parse_thinking_control_format ~path ~token raw
   in
   Result.map
     (fun thinking_control_format ->

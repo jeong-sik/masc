@@ -49,10 +49,9 @@ let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
 let digest_of_file path =
   (* Bind an artifact ref to the actual on-disk content: a sha256 of the file
      body, so "evidence" is more than "any file under the base happened to
-     exist". [None] only if the file vanished between the [Sys.file_exists]
-     check and the read (TOCTOU) or is unreadable. *)
-  try Some ("sha256:" ^ sha256_hex (In_channel.with_open_text path In_channel.input_all))
-  with Sys_error _ -> None
+     exist". *)
+  try Ok ("sha256:" ^ sha256_hex (In_channel.with_open_text path In_channel.input_all))
+  with Sys_error _ -> Error "file_path_digest_unavailable"
 
 let normalize_sha256 raw =
   let trimmed = String.trim raw in
@@ -204,7 +203,10 @@ let resolve_file_path raw =
     | None -> Unknown { ref_; checked_at; reason = "artifact_ref_outside_base_path" }
     | Some path ->
       if Sys.file_exists path
-      then Exists { ref_; kind = "file_path"; checked_at; digest = digest_of_file path }
+      then (
+        match digest_of_file path with
+        | Ok digest -> Exists { ref_; kind = "file_path"; checked_at; digest = Some digest }
+        | Error reason -> Unknown { ref_; checked_at; reason })
       else Missing { ref_; checked_at; reason = "file_path_missing" })
 ;;
 

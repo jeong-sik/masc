@@ -2230,6 +2230,25 @@ let test_resolve_file_path_records_content_digest () =
   in
   Alcotest.(check (option string)) "exists arm records content digest" expected got_digest
 
+let test_resolve_file_path_rejects_digest_unavailable () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let artifact_rel = Filename.concat Common.masc_dirname "claim_gate_digest_dir" in
+  let artifact_path = Filename.concat (Board_paths.board_base_path ()) artifact_rel in
+  (try Unix.mkdir (Filename.dirname artifact_path) 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  (try Unix.mkdir artifact_path 0o755 with Unix.Unix_error _ -> () | Sys_error _ -> ());
+  match Board_claim_gate.resolve_file_path artifact_rel with
+  | Board_claim_gate.Unknown { reason; _ } ->
+    Alcotest.(check string)
+      "digest unavailable is explicit"
+      "file_path_digest_unavailable"
+      reason
+  | Board_claim_gate.Exists _ ->
+    Alcotest.fail "digest-unavailable artifact must not resolve as existing evidence"
+  | Board_claim_gate.Missing _ ->
+    Alcotest.fail "digest-unavailable fixture should exist as a path"
+
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2699,6 +2718,8 @@ let () =
             test_comment_claim_gate_rejects_unknown_claim_kind;
           Alcotest.test_case "claim gate resolves artifact content digest" `Quick
             test_resolve_file_path_records_content_digest;
+          Alcotest.test_case "claim gate rejects digest-unavailable artifact" `Quick
+            test_resolve_file_path_rejects_digest_unavailable;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;

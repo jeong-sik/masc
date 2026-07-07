@@ -12,9 +12,10 @@
  (name board_tool_adapter)
  (public_name masc.board_tool_adapter)
  (wrapped false)
+ ;; board_claim_gate is not private: test_tool_board_coverage exercises its
+ ;; resolve_file_path / artifact_resolution surface directly (#23525).
  (private_modules
   board_tool_cache
-  board_claim_gate
   board_tool_curation
   board_tool_handlers
   board_tool_post

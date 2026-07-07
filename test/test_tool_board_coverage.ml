@@ -1,5 +1,12 @@
 module Types = Masc_domain
 
+(* [Board_paths] lives in the wrapped [masc.board_handlers] library, so
+   [open Masc] does not bring it into scope. [Board_claim_gate] is in the
+   unwrapped [masc.board_tool_adapter] library (accessible bare once removed
+   from that library's private_modules — see its dune). #23525 added bare
+   references to both without this alias / visibility fix, breaking the build. *)
+module Board_paths = Masc_board_handlers.Board_paths
+
 open Masc
 
 (** {1 Test helpers} *)

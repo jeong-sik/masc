@@ -25,7 +25,7 @@ import {
   scheduledPendingApprovalCount,
 } from '../tools/scheduled-automation-panel'
 import type { Cadence } from '../v2/schedule-constants'
-import { CadenceSummary, ScheduleCalendar, cadenceCounts } from './schedule-agenda'
+import { CadenceSummary, ScheduleCalendar, cadenceCounts, cadenceOfRequest } from './schedule-agenda'
 import {
   loadTools,
   toolsData,
@@ -37,6 +37,20 @@ type ScheduleView = 'calendar' | 'list'
 
 function countLabel(count: number): string {
   return count.toLocaleString()
+}
+
+// Narrow the projection handed to the list view so the cadence chip filters
+// both views consistently. Requests and their durable signals are narrowed
+// together (a signal for a filtered-out schedule would otherwise dangle).
+function filterAutomationByCadence(
+  automation: DashboardScheduledAutomation,
+  cadence: Cadence | null,
+): DashboardScheduledAutomation {
+  if (cadence === null) return automation
+  const requests = (automation.requests ?? []).filter(request => cadenceOfRequest(request) === cadence)
+  const ids = new Set(requests.map(request => request.schedule_id))
+  const signals = automation.signals?.filter(signal => ids.has(signal.schedule_id))
+  return { ...automation, requests, signals }
 }
 
 function countByStatus(
@@ -171,7 +185,7 @@ export function ScheduleSurface() {
                 onOpen=${setSelectedScheduleId}
               />`
             : html`<${ScheduledAutomationPanel}
-                automation=${automation}
+                automation=${automation ? filterAutomationByCadence(automation, cadenceFilter) : automation}
                 variant="v2"
                 onResolved=${refresh}
                 selectedScheduleId=${selectedScheduleId}

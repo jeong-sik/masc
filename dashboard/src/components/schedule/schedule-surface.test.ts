@@ -324,4 +324,30 @@ describe('ScheduleSurface', () => {
     // No mutation controls leak onto either view (surface stays read-only).
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
+
+  it('narrows the list view rows when a cadence chip is active', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      { ...automation.requests[0]!, schedule_id: 'sched-oneshot', recurrence: { kind: 'one_shot' }, recurrence_kind: 'one_shot' },
+      { ...automation.requests[0]!, schedule_id: 'sched-interval', recurrence: { kind: 'interval', interval_sec: 3600 }, recurrence_kind: 'interval' },
+    ]
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+    container.querySelector<HTMLButtonElement>('[data-testid="sch-cadsum-interval"]')?.click()
+    await flush()
+
+    // Only the interval schedule survives the 폴링 cadence filter in the list.
+    expect(container.querySelector('[data-schedule-id="sched-interval"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-oneshot"]')).toBeNull()
+  })
 })

@@ -611,7 +611,9 @@ let public_descriptors =
         "Search file contents with ripgrep: provide a regex `pattern` (and \
          optionally path/glob/type). To list a directory, read a file, or run \
          git status/log/diff, use the Execute tool (e.g. executable='ls' \
-         argv=['-la','<path>'])."
+         argv=['-la','<path>']). Patterns match within a single line; a \
+         literal newline in `pattern` is rejected. To match across lines, run \
+         `rg -U` through the Execute tool."
       ~input_schema:search_files_schema
       ~policy:
         (policy
@@ -656,7 +658,12 @@ let public_descriptors =
       ~id:"agent.edit_file"
       ~public_name:"Edit"
       ~internal_name:"tool_edit_file"
-      ~description:"Patch an existing file by replacing an exact string."
+      ~description:
+        "Patch an existing file by replacing an exact string. Read the file \
+         first and copy old_string verbatim from its current bytes, including \
+         leading whitespace, indentation, and newlines; the match is exact and \
+         byte-sensitive. On 'old_string not found', re-Read the file to get the \
+         current text instead of retrying the same string."
       ~input_schema:edit_file_schema
       ~policy:
         (policy

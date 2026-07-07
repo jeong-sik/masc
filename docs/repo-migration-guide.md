@@ -90,7 +90,8 @@ means every registered repository is in the default scope, selected IDs narrow
 only the displayed/default scope, and an explicit empty mapping selects no
 default repositories without denying access. Malformed mapping files are
 ignored for access decisions. Malformed repository catalogs and unregistered
-repository IDs still fail closed.
+repository IDs still fail closed. RFC-0312 records this as the explicit
+operator decision.
 
 ## Rollback
 

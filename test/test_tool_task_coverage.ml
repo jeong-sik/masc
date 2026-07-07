@@ -657,10 +657,11 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
       | Some contract ->
           assert (not contract.strict);
           assert (contract.completion_contract <> []);
-          assert (List.mem "completion_notes" contract.required_evidence);
-          assert (List.mem "reviewable_evidence_ref" contract.required_evidence);
-          assert (List.mem "completion_notes" contract.verify_gate_evidence);
-          assert (List.mem "reviewable_evidence_ref" contract.verify_gate_evidence);
+          (* RFC-0311 §8: the default contract no longer carries magic-token
+             required_evidence. Completion is gated on substantive evidence
+             (notes or a trusted ref), not verbatim token mentions. *)
+          assert (contract.required_evidence = []);
+          assert (contract.verify_gate_evidence = []);
           assert (str_contains (List.hd contract.completion_contract)
                     "Default verification task")
       | None -> failwith "expected default verification contract")
@@ -688,8 +689,12 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
     (fun (task : Masc_domain.task) ->
        match task.contract with
        | Some contract ->
+           (* Default verification contract is injected (completion_contract
+              present); RFC-0311 §8: it no longer carries magic-token
+              required/verify evidence. *)
            assert (contract.completion_contract <> []);
-           assert (contract.verify_gate_evidence <> [])
+           assert (contract.required_evidence = []);
+           assert (contract.verify_gate_evidence = [])
        | None -> failwith "expected default verification contract for batch task")
     tasks
 )
@@ -1328,7 +1333,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
               (Masc_domain.task_status_to_string other)))
 )
 
-let () = test "handle_transition_done_default_contract_accepts_default_evidence_tokens" (fun () ->
+let () = test "handle_transition_done_default_contract_accepts_substantive_notes" (fun () ->
   let ctx = make_test_ctx () in
   let add_result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1349,10 +1354,9 @@ let () = test "handle_transition_done_default_contract_accepts_default_evidence_
           ("action", `String "done");
           ( "notes",
             `String
-              "completion_notes: contract harness completed the live workflow. \
+              "Contract harness completed the live workflow with reviewer-visible notes. \
                Task scope satisfied: Default contract Done task - Mirrors \
-               contract harness task completion. \
-               reviewable_evidence_ref: contract-harness transcript." );
+               contract harness task completion." );
         ])
   in
   if not (Tool_result.is_success result) then

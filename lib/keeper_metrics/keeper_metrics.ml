@@ -19,6 +19,8 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
+  | PacingShadowEvents
+  | PacingShadowNextDueSec
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped
@@ -275,6 +277,8 @@ let to_string = function
   | TotalCostUsd -> "masc_keeper_total_cost_usd"
   | TurnScheduled -> "masc_keeper_turn_scheduled_total"
   | TurnCompleted -> "masc_keeper_turn_completed_total"
+  | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
+  | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
@@ -550,7 +554,7 @@ let to_string = function
 let all : t list =
   [ Turns; InputTokens; OutputTokens; CacheCreationTokens;
     CacheReadTokens; UsageAnomalies; TotalCostUsd; TurnScheduled;
-    TurnCompleted; IdleSeconds; ContractViolations; MetricEmitDropped;
+    TurnCompleted; PacingShadowEvents; PacingShadowNextDueSec; IdleSeconds; ContractViolations; MetricEmitDropped;
     ContextMaxObserved; TurnStarts; TurnReattempts; TurnRegressions;
     TurnLivelockBlocks; TurnLivelockBlocksRepeated; TurnLivelockBlocksThresholdPark; TurnLatencyBucket;
     TurnLatencyByModelBucket; ProviderCooldownSkip; ProviderCooldownRemainingSec; ProviderBlockDurationSec;

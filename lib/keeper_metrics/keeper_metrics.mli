@@ -10,6 +10,8 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
+  | PacingShadowEvents
+  | PacingShadowNextDueSec
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped

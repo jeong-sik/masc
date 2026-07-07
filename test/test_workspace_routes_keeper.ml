@@ -585,7 +585,6 @@ let porcelain_fixture =
   ; "summary first commit"
   ; "filename file.txt"
   ; "\tline one"
-  ; sha_a ^ " 2 2"
   ; "\tline two"
   ; sha_b ^ " 3 3 1"
   ; "author Bob"
@@ -598,21 +597,21 @@ let porcelain_fixture =
   ]
 
 let test_blame_header_with_count () =
-  Alcotest.(check (option (pair string int)))
+  Alcotest.(check (option (triple string int int)))
     "header with group size parses final line"
-    (Some (sha_a, 1))
+    (Some (sha_a, 1, 2))
     (B.parse_blame_header (sha_a ^ " 1 1 2"))
 
 let test_blame_header_without_count () =
-  Alcotest.(check (option (pair string int)))
+  Alcotest.(check (option (triple string int int)))
     "bare repeated header parses final line"
-    (Some (sha_a, 2))
+    (Some (sha_a, 2, 1))
     (B.parse_blame_header (sha_a ^ " 2 2"))
 
 let test_blame_header_rejects_non_headers () =
   List.iter
     (fun line ->
-      Alcotest.(check (option (pair string int)))
+      Alcotest.(check (option (triple string int int)))
         (Printf.sprintf "non-header rejected: %S" line)
         None
         (B.parse_blame_header line))
@@ -630,6 +629,8 @@ let test_blame_porcelain_sha_join () =
   Alcotest.(check int) "all four lines attributed" 4 (List.length entries);
   let by_line n = List.find (fun e -> e.B.bl_line = n) entries in
   Alcotest.(check string) "line 1 author" "Alice" (by_line 1).B.bl_author;
+  Alcotest.(check string) "line 2 author from group size" "Alice"
+    (by_line 2).B.bl_author;
   Alcotest.(check string) "line 3 author" "Bob" (by_line 3).B.bl_author;
   Alcotest.(check int64) "line 1 time" 1700000100L (by_line 1).B.bl_time;
   Alcotest.(check int64) "line 3 time" 1700000200L (by_line 3).B.bl_time

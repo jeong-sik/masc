@@ -666,8 +666,7 @@ let parse_blame_porcelain lines =
     | hd :: tl -> (
       match parse_blame_header hd with
       | Some (sha, final_line, group_size) ->
-        let start_line = final_line - group_size + 1 in
-        let lines = List.init group_size (fun i -> start_line + i, sha) in
+        let lines = List.init group_size (fun i -> final_line + i, sha) in
         collect (Some sha) (lines @ acc) tl
       | None ->
         (match cur_sha with

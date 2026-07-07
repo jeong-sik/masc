@@ -168,8 +168,9 @@ module For_testing_blame : sig
 
   type entry = { bl_line : int; bl_author : string; bl_time : int64 }
 
-  (** [parse_blame_header line] returns [(sha, final_line)] when [line] is a
-      porcelain group header ["<40-hex sha> <orig> <final>[ <count>]"]. *)
+  (** [parse_blame_header line] returns [(sha, final_line, group_size)] when
+      [line] is a porcelain group header
+      ["<40-hex sha> <orig> <final>[ <count>]"]. *)
   val parse_blame_header : string -> (string * int * int) option
 
   (** [parse_blame_porcelain lines] joins per-line headers with each sha's

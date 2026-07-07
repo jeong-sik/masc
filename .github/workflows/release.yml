@@ -74,7 +74,7 @@ jobs:
 
       - name: Refresh apt index
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq
+        run: bash scripts/ci/apt-refresh.sh
 
       - name: Install dependencies
         run: |

@@ -365,7 +365,7 @@ export function KeeperGithubAppConfigPanel({
             <${Trash2} size=${14} strokeWidth=${2.25} aria-hidden="true" />
             <span>${pending === 'deleting' ? 'Purging...' : 'Purge Credentials'}</span>
           <//>
-          
+
           <${ActionButton}
             type="submit"
             size="md"

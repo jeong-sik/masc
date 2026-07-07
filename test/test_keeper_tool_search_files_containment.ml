@@ -16,8 +16,11 @@ module Keeper_tool_execute_path = Masc.Keeper_tool_execute_path
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Keeper_tool_policy = Masc.Keeper_tool_policy
+module AQ = Masc.Keeper_approval_queue
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
+
+open Repo_manager_types
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
@@ -109,6 +112,60 @@ let write_executable path content =
 let normalize_realpath path =
   try Unix.realpath path with
   | _ -> path
+
+let run_git_quiet argv =
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close devnull)
+    (fun () ->
+       try
+         let pid = Unix.create_process "git" argv Unix.stdin devnull devnull in
+         match Unix.waitpid [] pid with
+         | _, Unix.WEXITED code -> code
+         | _, (Unix.WSIGNALED _ | Unix.WSTOPPED _) -> 1
+       with
+       | Unix.Unix_error _ -> 1)
+
+let git_available () = run_git_quiet [| "git"; "--version" |] = 0
+
+let init_git_repo dir url =
+  ensure_dir dir;
+  Alcotest.(check int) "git init" 0 (run_git_quiet [| "git"; "init"; "-q"; dir |]);
+  Alcotest.(check int)
+    "git remote add"
+    0
+    (run_git_quiet [| "git"; "-C"; dir; "remote"; "add"; "origin"; url |]);
+  Alcotest.(check int)
+    "git origin HEAD"
+    0
+    (run_git_quiet
+       [| "git"
+        ; "-C"
+        ; dir
+        ; "symbolic-ref"
+        ; "refs/remotes/origin/HEAD"
+        ; "refs/remotes/origin/main"
+       |])
+
+let sample_repo ~base_path id =
+  { id
+  ; name = id
+  ; url = "https://github.com/jeong-sik/" ^ id ^ ".git"
+  ; local_path = Filename.concat base_path (Filename.concat ".masc/repos" id)
+  ; aliases = []
+  ; default_branch = "main"
+  ; keepers = []
+  ; status = Active
+  ; auto_sync = false
+  ; sync_interval = 0
+  ; created_at = Int64.zero
+  ; updated_at = Int64.zero
+  }
+
+let save_repositories base_path repos =
+  match Repo_store.save_all ~base_path repos with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail ("save repositories failed: " ^ detail)
 
 let test_shell_command_available_uses_path_without_shell () =
   let dir = temp_dir () in
@@ -540,6 +597,67 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
       false
       (Sys.file_exists playground)
 
+let test_rg_unregistered_clone_queues_repository_hitl () =
+  if not (git_available ()) then ()
+  else (
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    setup ~keeper_name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Local
+    @@ fun ~base ~config ~meta ~playground ->
+    let registered = sample_repo ~base_path:base "masc" in
+    save_repositories base [ registered ];
+    let repo_root = Filename.concat playground "repos/masc-mcp" in
+    init_git_repo repo_root registered.url;
+    let raw =
+      Keeper_tool_command_runtime.handle_tool_search_files
+        ~turn_sandbox_factory:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:
+          (`Assoc
+            [ "op", `String "rg"
+            ; "pattern", `String "Repository"
+            ; "path", `String "repos/masc-mcp"
+            ])
+    in
+    let json = Yojson.Safe.from_string raw in
+    Alcotest.(check (option bool)) "policy response denies access" (Some false)
+      (Json.member "ok" json |> Json.to_bool_option);
+    Alcotest.(check (option string)) "policy response keeps original error"
+      (Some "Repository masc-mcp is not registered; access not allowed")
+      (Json.member "error" json |> Json.to_string_option);
+    Alcotest.(check (option string)) "approval kind"
+      (Some "repository_registration")
+      (Json.member "approval_pending" json |> Json.member "kind" |> Json.to_string_option);
+    Alcotest.(check (option bool)) "approval is non-blocking"
+      (Some true)
+      (Json.member "approval_pending" json |> Json.member "non_blocking"
+       |> Json.to_bool_option);
+    match
+      AQ.list_pending_entries ()
+      |> List.filter (fun (entry : AQ.pending_approval) ->
+        String.equal entry.keeper_name meta.name)
+    with
+    | [ pending ] ->
+      Alcotest.(check string)
+        "requested alias action"
+        "add_repository_alias"
+        (Json.member "requested_action" pending.input |> Json.to_string);
+      Alcotest.(check string)
+        "alias target"
+        "masc"
+        (Json.member "target_repository_id" pending.input |> Json.to_string);
+      Alcotest.(check string)
+        "alias"
+        "masc-mcp"
+        (Json.member "alias" pending.input |> Json.to_string)
+    | entries ->
+      Alcotest.failf
+        "expected one pending repository registration approval, got %d; raw=%s"
+        (List.length entries)
+        raw)
+
 
 let () =
   Alcotest.run "Keeper_tool_search_files_containment"
@@ -582,5 +700,9 @@ let () =
             "read-only Execute omitted cwd does not create write root"
             `Quick
             test_readonly_execute_omitted_cwd_does_not_create_write_root;
+          Alcotest.test_case
+            "rg unregistered clone queues repository HITL"
+            `Quick
+            test_rg_unregistered_clone_queues_repository_hitl;
         ] );
     ]

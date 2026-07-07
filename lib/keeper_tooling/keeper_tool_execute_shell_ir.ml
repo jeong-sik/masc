@@ -65,12 +65,25 @@ let gate_verdict_map verdict ~f_allow ~f_reject ~f_cannot_parse ~f_too_complex =
   | Shell_gate.Too_complex _ -> f_too_complex
 ;;
 
+type approval_required_kind =
+  | Gh_capability_requires_approval
+  | Privileged_program_floor
+
+let approval_required_kind_to_string = function
+  | Gh_capability_requires_approval -> "gh_capability_requires_approval"
+  | Privileged_program_floor -> "privileged_program_floor"
+;;
+
 type dispatch_error =
   | Gate_reject of string
   | Cannot_parse
   | Too_complex
   | Path_reject of string
-  | Approval_required of { summary : string; bin : string }
+  | Approval_required of {
+      summary : string;
+      bin : string;
+      kind : approval_required_kind;
+    }
   | Policy_denied of { reason : string }
 
 let rec first_privileged_program = function
@@ -151,6 +164,7 @@ let dispatch_classified
                    Shell IR approval resolver is configured, so it is blocked"
                   bin
             ; bin
+            ; kind = Privileged_program_floor
             })
      | None ->
        let gate_verdict =
@@ -219,9 +233,10 @@ let last_simple_of_ir ir =
     (the approval decision is made first, then [dispatch_classified] applies
     [Shell_gate.gate_typed] followed by [validate_paths]).
     [Ask] and [Deny] are surfaced as typed errors so the keeper runtime
-    can log them and return a structured failure to the model.  Even when the
-    policy overlay allows, [dispatch_classified] still applies the privileged
-    fail-closed floor before dispatch. *)
+    can log them and either enqueue non-blocking HITL for gh capabilities or
+    return a structured failure to the model.  Even when the policy overlay
+    allows, [dispatch_classified] still applies the privileged fail-closed
+    floor before dispatch. *)
 let dispatch_classified_with_approval
       ?allow_pipes
       ?redirect_allowed
@@ -261,20 +276,22 @@ let dispatch_classified_with_approval
          ?base_host_env
          ?on_output_chunk
          envelope
-     | Ask _request ->
-       (* The policy wants explicit approval, but the keeper runtime has no
-          approval channel yet (RFC v5 HITL path is not wired), so this is a
-          block.  Report the binary and risk class so the failure is
-          actionable instead of an opaque "approval check" string. *)
-       let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
+     | Ask { bin = request_bin; _ } ->
+       let kind =
+         match Masc_exec.Exec_program.known request_bin with
+         | Some Masc_exec.Exec_program.Gh -> Gh_capability_requires_approval
+         | Some _ | None -> Privileged_program_floor
+       in
+       let bin = Masc_exec.Exec_program.to_string request_bin in
        Error
          (Approval_required
             { summary =
                 Printf.sprintf
                   "command '%s' requires approval (audited/privileged risk \
-                   class); no approval channel is configured, so it is blocked"
+                   class)"
                   bin
             ; bin
+            ; kind
             })
      | Deny { reason; caps = _ } ->
        Error

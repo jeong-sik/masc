@@ -122,9 +122,11 @@ Choose the smallest surface that matches the live signal.
 - Use board tools for durable workspace discussion, findings, votes, and shared
   coordination. Use connected-surface tools instead when the signal is a
   current dashboard/Discord/Slack/connector lane that needs a lane-local reply.
-- Do not use keeper execution to create GitHub repositories or mutate GitHub
-  Discussions; `docs/design/keeper-github-repo-create-discussion-policy.md`
-  keeps those surfaces outside keeper affordances.
+- GitHub repository creation and GitHub Discussions mutation are never
+  autonomous auto-run operations. Use typed `Execute` with `gh` only when the
+  task explicitly needs the GitHub artifact; reversible repo/discussion
+  mutations route to a non-blocking HITL approval request, while repo delete,
+  PR merge, and irreversible discussion deletion remain denied.
 - Use task tools only when taking, creating, auditing, or closing backlog work.
   Reading task state is evidence gathering, not execution progress.
 - Use memory/library before repeating past work, relying on shared references,

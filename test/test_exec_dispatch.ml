@@ -1004,7 +1004,9 @@ let () =
   (* rm is Privileged; permissive_default sets privileged_trust = Enforced,
      so the policy yields Verdict.Ask -> Approval_required deterministically.
      A flip to Policy_denied (e.g. risk-class regression) must fail the test. *)
-  | Error (Keeper_tool_execute_shell_ir.Approval_required _) -> ()
+  | Error
+      (Keeper_tool_execute_shell_ir.Approval_required
+         { kind = Keeper_tool_execute_shell_ir.Privileged_program_floor; _ }) -> ()
   | Error _ -> assert false
 
 let () =
@@ -1035,8 +1037,9 @@ let () =
   with
   | Ok _ -> assert false
   | Error
-      (Keeper_tool_execute_shell_ir.Approval_required { summary = _; bin }) ->
-    assert (String.equal bin "chmod")
+      (Keeper_tool_execute_shell_ir.Approval_required { summary = _; bin; kind }) ->
+    assert (String.equal bin "chmod");
+    assert (kind = Keeper_tool_execute_shell_ir.Privileged_program_floor)
   | Error _ -> assert false
 
 (* --- Keeper_tool_execute_shell_ir.dispatch_classified: catastrophic floor is

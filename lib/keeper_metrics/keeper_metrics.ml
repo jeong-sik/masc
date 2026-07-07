@@ -246,6 +246,9 @@ type t =
   | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
   | ToolExecutePrActionTotal    (* counter: raw tool_execute gh PR actions *)
+  | GhClassificationTotal       (* counter: gh verb/risk/typed-hit classification coverage *)
+  | GatedGhLifecycleTotal       (* counter: non-blocking gated gh approval lifecycle events *)
+  | GatedGhBlockTimeSeconds     (* histogram: gated gh approval path turn-block time *)
   | KeeperRepoMappingDefaultScopeAllowed (* counter: missing mapping default-scope access allowed *)
   | KeeperRepoMappingDeniedUnregistered (* counter: repository policy denied an unregistered repo id *)
   | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
@@ -520,6 +523,9 @@ let to_string = function
   | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
   | ToolExecutePrActionTotal -> "masc_keeper_tool_execute_pr_action_total"
+  | GhClassificationTotal -> "masc_keeper_gh_classification_total"
+  | GatedGhLifecycleTotal -> "masc_keeper_gated_gh_lifecycle_total"
+  | GatedGhBlockTimeSeconds -> "masc_keeper_gated_gh_block_time_seconds"
   | KeeperRepoMappingDefaultScopeAllowed ->
     "masc_keeper_repo_mapping_default_scope_allowed_total"
   | KeeperRepoMappingDeniedUnregistered ->
@@ -598,6 +604,7 @@ let all : t list =
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;
+    GhClassificationTotal; GatedGhLifecycleTotal; GatedGhBlockTimeSeconds;
   KeeperRepoMappingDefaultScopeAllowed; KeeperRepoMappingDeniedUnregistered;
   KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;

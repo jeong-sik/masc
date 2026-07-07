@@ -11,19 +11,13 @@
     surface ([creates_durable_remote_surface]) — is risk-independent (G-4
     externality).
 
-    W2 scope: this is the policy SSOT. It is NOT yet consulted by the approval
-    floor — [Approval_policy.decide] still gates on the catastrophic floor and
-    the per-risk-band trust overlay only. W3 (G-7) wires [Requires_approval]
-    into the non-blocking HITL queue; until then this module is observability
-    and an executable specification of the target policy.
-
-    Ordering note (why [Requires_approval] does not fire for repo-create yet):
-    [disposition_of] reads [Shell_ir_risk.risk_of_gh_verb], and PR #23362 still
-    places repo-create/fork and the durable discussion mutations in the
-    irreversible table (R2), so they resolve to [Denied] here today. Moving them
-    to R1 (their true reversibility) is RFC-0309 W4/G-9 and must not land before
-    W3's approval wiring, or they would auto-run. The contract test pins both the
-    current dispositions and the W4 target. *)
+    W2/W3 scope: this is the policy SSOT for the gh capability axis.
+    [Approval_policy.decide] consults it after the catastrophic floor and before
+    the per-risk-band trust overlay. [Requires_approval] becomes [Verdict.Ask],
+    and the keeper runtime routes gh capability asks to the non-blocking HITL
+    queue. Reversible durable-remote mutations such as [gh repo create] and
+    [gh discussion create] therefore request approval instead of auto-running or
+    being disabled; irreversible operations remain [Denied]. *)
 
 type disposition =
   | Allowed

@@ -51,6 +51,12 @@ let bearer_re =
 
 let ghp_re = Re.compile (Re.seq [Re.bow; Re.str "ghp_"; Re.rep1 Re.alnum])
 
+let ghs_re = Re.compile (Re.seq [Re.bow; Re.str "ghs_"; Re.rep1 Re.alnum])
+
+let gho_re = Re.compile (Re.seq [Re.bow; Re.str "gho_"; Re.rep1 Re.alnum])
+
+let ghu_re = Re.compile (Re.seq [Re.bow; Re.str "ghu_"; Re.rep1 Re.alnum])
+
 let github_pat_re =
   Re.compile (Re.seq [Re.bow; Re.str "github_pat_"; Re.rep1 (Re.alt [Re.alnum; Re.char '_'])])
 
@@ -79,6 +85,9 @@ let secret_res () =
   [ url_credential_re
   ; bearer_re
   ; ghp_re
+  ; ghs_re
+  ; gho_re
+  ; ghu_re
   ; github_pat_re
   ; sk_re
   ; awsakia_re

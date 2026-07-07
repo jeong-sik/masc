@@ -917,11 +917,66 @@ let ensure_local_git_config_global ~path =
          (if String.equal arg "" then "" else " " ^ arg))
 ;;
 
+let github_app_pem_subpath = "github-app/private-key.pem"
+
+let github_app_pem_host_path ~base_path ~keeper_name =
+  let root = secret_root ~base_path ~keeper_name in
+  Filename.concat (Filename.concat root "files") github_app_pem_subpath
+;;
+
+let read_file_opt path =
+  if not (path_exists path) then None
+  else
+    try Some (read_file path) with
+    | Sys_error _ -> None
+;;
+
+(* [github_app_token_overlay] mints (or reuses the cached) GitHub App
+   installation token for the keeper and returns [Some ("GH_TOKEN", token)].
+   Returns [None] — leaving the existing static GH_TOKEN intact — when the
+   keeper has no GitHub App config, the PEM is not provisioned, or the mint
+   fails (fail-closed: a transient GitHub API outage must not brick the keeper;
+   the operator sees the warning and the static token still works).
+
+   On a successful overlay the ("GH_TOKEN", token) pair is prepended to the
+   caller's env_entries, so [has_github_token] is true and the §3 git-config
+   helper activates on the installation token exactly as on a PAT. *)
+let github_app_token_overlay ~base_path ~keeper_name ~env_entries () =
+  let app_id = List.assoc_opt "MASC_GITHUB_APP_ID" env_entries in
+  let installation_id =
+    List.assoc_opt "MASC_GITHUB_APP_INSTALLATION_ID" env_entries
+  in
+  match (app_id, installation_id) with
+  | Some app_id, Some installation_id ->
+    (match
+       github_app_pem_host_path ~base_path ~keeper_name |> read_file_opt
+     with
+     | None -> None
+     | Some pem ->
+       let now = Unix.gettimeofday () |> int_of_float in
+       (match
+          Keeper_github_app_installation_token.get
+            ~app_id ~installation_id ~pem ~now ()
+        with
+        | Ok token -> Some ("GH_TOKEN", token)
+        | Error reason ->
+          Log.Keeper.warn
+            "GitHub App installation token mint failed for keeper %s: %s"
+            keeper_name reason;
+          None))
+  | _ -> None
+;;
+
 let local_env_for_keeper ?host_env ~base_path ~keeper_name () =
   match load_secret_roots ~base_path ~keeper_name with
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
+    let env_entries =
+      match github_app_token_overlay ~base_path ~keeper_name ~env_entries () with
+      | Some entry -> entry :: env_entries
+      | None -> env_entries
+    in
     let git_config_path = local_git_config_global_path ~base_path ~keeper_name in
     let needs_managed_git_config =
       has_github_token env_entries
@@ -982,6 +1037,11 @@ let docker_args_for_keeper ~base_path ~keeper_name ~container_name =
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
+    let env_entries =
+      match github_app_token_overlay ~base_path ~keeper_name ~env_entries () with
+      | Some entry -> entry :: env_entries
+      | None -> env_entries
+    in
     let file_entries = merge_file_entries roots in
     let git_config =
       if env_entries_have git_config_global_env_name env_entries

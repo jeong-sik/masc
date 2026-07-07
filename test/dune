@@ -262,6 +262,7 @@
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
+  test_keeper_wake_turn_context
   test_keeper_post_turn_interruption_note
   test_keeper_unified_verification_surface
   test_keeper_observation_provenance
@@ -619,6 +620,7 @@
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
+  test_keeper_wake_turn_context
   test_keeper_post_turn_interruption_note
   test_keeper_unified_verification_surface
   test_keeper_observation_provenance

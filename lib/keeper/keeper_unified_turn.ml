@@ -26,6 +26,7 @@ let run_keeper_cycle
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
+      ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
       ?shared_context
       ?event_bus
       ()
@@ -257,11 +258,51 @@ let run_keeper_cycle
                Eio.Fiber.yield ();
                (* 2. Build unified prompt — diversity entropy recorded in decision_audit
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
+               (* RFC-0315: resolve the claimed task and goal titles here (the
+                  turn runner owns config), so the prompt can render what the
+                  keeper holds and why it woke. Both reads are total: a failed
+                  backlog read yields None, an unknown goal id remains a bare
+                  id instead of disappearing from the prompt. *)
+               let current_task =
+                 Keeper_world_observation_inputs.read_current_task ~config ~meta
+               in
+               let active_goal_summaries =
+                 List.map
+                   (fun goal_id ->
+                     match Goal_store.get_goal config ~goal_id with
+                     | Some { Goal_store.title; _ } -> (goal_id, title)
+                     | None -> (goal_id, ""))
+                   meta.active_goal_ids
+               in
+               (* RFC-0315: surface the working-state ledger's unresolved
+                  loops. The sidecar has persisted (and resume-merged) them
+                  since KeeperWorkingStateLifecycle landed, but no prompt ever
+                  read them back — persisted-but-never-shown. *)
+               let active_open_loops =
+                 let session_dir =
+                   Filename.concat
+                     (session_base_dir config)
+                     (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                 in
+                 match
+                   Keeper_agent_run_sidecar.read_persisted_working_state
+                     ~keeper_name:meta.name
+                     ~latest_path:
+                       (Keeper_agent_run_sidecar.latest_working_state_path
+                          ~session_dir)
+                 with
+                 | None -> []
+                 | Some state -> state.Keeper_working_state.active_loops
+               in
                let system_prompt, user_message =
                  Keeper_unified_prompt.build_prompt
                    ~meta
                    ~base_path:config.base_path
                    ~profile_defaults
+                   ?turn_decision
+                   ?current_task
+                   ~active_goal_summaries
+                   ~active_open_loops
                    ~observation
                    ()
                in

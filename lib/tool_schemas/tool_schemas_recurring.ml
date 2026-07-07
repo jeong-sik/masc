@@ -4,6 +4,32 @@
 open Masc_domain
 
 let schemas : Masc_domain.tool_schema list = [
+  (* masc_recurring_add *)
+  {
+    name = "masc_recurring_add";
+    description = "Register a new recurring task for the calling keeper. \
+Returns task id, label, interval_sec, and enabled status on success. \
+Fails if a task with the same label already exists for this keeper.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("label", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Short label for the recurring task (e.g. 'heartbeat-check').");
+        ]);
+        ("interval_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Interval in seconds between runs.");
+        ]);
+        ("keeper_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper name (defaults to calling keeper).");
+        ]);
+      ]);
+      ("required", `List [`String "label"; `String "interval_sec"]);
+    ];
+  };
+
   (* masc_recurring_list *)
   {
     name = "masc_recurring_list";

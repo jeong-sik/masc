@@ -523,8 +523,10 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
          entry.base_label;
-       check (option string) (model_id ^ " no request thinking knob") (Some "none")
-         entry.thinking_control_format;
+       check bool (model_id ^ " no request thinking knob") true
+         (match entry.thinking_control_format with
+          | Some Llm_provider.Capabilities.No_thinking_control -> true
+          | Some _ | None -> false);
        check (option string) (model_id ^ " always preserved thinking")
          (Some "always_preserved")
          entry.preserve_thinking_control_format;

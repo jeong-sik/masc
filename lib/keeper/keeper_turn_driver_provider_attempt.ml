@@ -324,7 +324,16 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
   | Llm_provider.Retry.RateLimited { message; _ } -> Some message
   | Llm_provider.Retry.PaymentRequired { message } -> Some message
   | Llm_provider.Retry.NetworkError { message; _ } -> Some message
-  | Llm_provider.Retry.Overloaded { message } -> Some message
+  (* Overloaded is the typed transient 529/CapacityExhausted signal; OAS
+     [Retry.is_hard_quota (Overloaded _) = false] and [is_retryable = true]. Do
+     NOT scan its message for hard-quota indicators: a transient 529 whose prose
+     coincidentally contains an indicator (e.g. "exhausted your capacity on this
+     model") would be reclassified permanent -> immediate pool-wide 1h
+     Cooldown_hard_quota, stealing it from the transient bucket. Every genuine
+     permanent quota routes to PaymentRequired/RateLimited (caught by the typed
+     [is_hard_quota] tried first), never Overloaded. Full retire of the substring
+     scan is deferred to RFC (typed SDK-boundary parse). *)
+  | Llm_provider.Retry.Overloaded _ -> None
   | Llm_provider.Retry.ServerError { message; _ } -> Some message
   | Llm_provider.Retry.InvalidRequest { message; _ } -> Some message
   | Llm_provider.Retry.AuthError _
@@ -344,7 +353,10 @@ let cli_wrapped_hard_quota_indicators = [
   "org's monthly usage limit";
   "session usage limit";
   "add extra usage";
-  "resets apr ";
+  (* NB: no month-literal indicators — a "resets apr " string matched only April
+     and was a silent dead branch the other 11 months. The month-agnostic
+     "you've hit your limit" / "monthly usage limit" indicators carry the real
+     signal; absolute reset-time parsing is deferred to the typed-root RFC. *)
   "reached your specified api usage limits";
   "you will regain access on";
 ]

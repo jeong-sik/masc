@@ -10,6 +10,8 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
+  | PacingShadowEvents
+  | PacingShadowNextDueSec
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped
@@ -236,6 +238,9 @@ type t =
   | AttemptWatchdogFired
   | ShellIrEffectTotal
   | ToolExecutePrActionTotal
+  | GhClassificationTotal
+  | GatedGhLifecycleTotal
+  | GatedGhBlockTimeSeconds
   | KeeperRepoMappingDefaultScopeAllowed
   | KeeperRepoMappingDeniedUnregistered
   | KeeperRepoMappingLoadError

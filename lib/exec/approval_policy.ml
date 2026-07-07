@@ -355,6 +355,39 @@ let gh_capability_of_simple (simple : Shell_ir.simple)
      literal argv words and any Shell IR opacity in the graphql [query] body. *)
   Gh_capability_policy.disposition_of_simple simple
 
+let gh_capability_policy_deny_rule_of_simple (simple : Shell_ir.simple)
+  : string option
+  =
+  Gh_capability_policy.repo_create_contract_rule_of_simple simple
+
+let gh_capability_policy_deny_rule (caps : Capability.t list) : string option =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      (match Exec_program.known bin with
+       | Some Exec_program.Gh ->
+         let simple : Shell_ir.simple =
+           { Shell_ir.bin
+           ; args
+           ; env = []
+           ; cwd = None
+           ; redirects = []
+           ; sandbox = Sandbox_target.host ()
+           }
+         in
+         (match gh_capability_policy_deny_rule_of_simple simple with
+          | Some _ as found -> found
+          | None -> scan rest)
+       | Some _ | None -> scan rest)
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
 (* RFC-0309 W3 (pipeline coverage): the capability Ask must fire for a gh
    durable-remote op in ANY pipeline stage, not only the representative (last)
    [simple] the caller extracts via [last_simple_of_ir]. [caps] folds over every
@@ -416,6 +449,9 @@ let decide (policy : t)
     (* Trust-independent: denied regardless of [overlay] (RFC-0254 §5.3). *)
     Verdict.Deny { caps; reason }
   | None ->
+    (match gh_capability_policy_deny_rule caps with
+     | Some rule -> Verdict.Deny { caps; reason = Verdict.Policy_deny { rule } }
+     | None ->
     (match gh_cap_requiring_approval caps with
      | Some gh_bin ->
        (* RFC-0309 W3: a gh verb the capability axis marks [Requires_approval]
@@ -437,4 +473,4 @@ let decide (policy : t)
          ~caps ~policy ~bin:simple.bin ~simple
      | `Safe ->
        trust_dispatch ~trust_level:overlay.safe_trust
-         ~caps ~policy ~bin:simple.bin ~simple))
+         ~caps ~policy ~bin:simple.bin ~simple)))

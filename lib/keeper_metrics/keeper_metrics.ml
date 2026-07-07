@@ -19,6 +19,8 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
+  | PacingShadowEvents
+  | PacingShadowNextDueSec
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped
@@ -246,6 +248,9 @@ type t =
   | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
   | ToolExecutePrActionTotal    (* counter: raw tool_execute gh PR actions *)
+  | GhClassificationTotal       (* counter: gh verb/risk/typed-hit classification coverage *)
+  | GatedGhLifecycleTotal       (* counter: non-blocking gated gh approval lifecycle events *)
+  | GatedGhBlockTimeSeconds     (* histogram: gated gh approval path turn-block time *)
   | KeeperRepoMappingDefaultScopeAllowed (* counter: missing mapping default-scope access allowed *)
   | KeeperRepoMappingDeniedUnregistered (* counter: repository policy denied an unregistered repo id *)
   | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
@@ -272,6 +277,8 @@ let to_string = function
   | TotalCostUsd -> "masc_keeper_total_cost_usd"
   | TurnScheduled -> "masc_keeper_turn_scheduled_total"
   | TurnCompleted -> "masc_keeper_turn_completed_total"
+  | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
+  | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
@@ -520,6 +527,9 @@ let to_string = function
   | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
   | ToolExecutePrActionTotal -> "masc_keeper_tool_execute_pr_action_total"
+  | GhClassificationTotal -> "masc_keeper_gh_classification_total"
+  | GatedGhLifecycleTotal -> "masc_keeper_gated_gh_lifecycle_total"
+  | GatedGhBlockTimeSeconds -> "masc_keeper_gated_gh_block_time_seconds"
   | KeeperRepoMappingDefaultScopeAllowed ->
     "masc_keeper_repo_mapping_default_scope_allowed_total"
   | KeeperRepoMappingDeniedUnregistered ->
@@ -544,7 +554,7 @@ let to_string = function
 let all : t list =
   [ Turns; InputTokens; OutputTokens; CacheCreationTokens;
     CacheReadTokens; UsageAnomalies; TotalCostUsd; TurnScheduled;
-    TurnCompleted; IdleSeconds; ContractViolations; MetricEmitDropped;
+    TurnCompleted; PacingShadowEvents; PacingShadowNextDueSec; IdleSeconds; ContractViolations; MetricEmitDropped;
     ContextMaxObserved; TurnStarts; TurnReattempts; TurnRegressions;
     TurnLivelockBlocks; TurnLivelockBlocksRepeated; TurnLivelockBlocksThresholdPark; TurnLatencyBucket;
     TurnLatencyByModelBucket; ProviderCooldownSkip; ProviderCooldownRemainingSec; ProviderBlockDurationSec;
@@ -558,7 +568,7 @@ let all : t list =
     MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
     CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
     FsFailures; CrashPersistenceFailures; GenerationLineageFailures; KeepaliveSignalFailures;
-    BoardSignalWakeupCappedTotal; BoardSignalNoWakeTotal; MetaJsonFailures; ToolsOasFailures;
+    BoardSignalWakeupCappedTotal; BoardSignalNoWakeTotal; BoardSignalAttentionCandidateTotal; MetaJsonFailures; ToolsOasFailures;
     ToolsOasDeterministicFailures; TurnUpUpdateFailures; AgentToolDispatchRuntimeFailures; CircuitBreakerTrips;
     PromptFailures; RunContextFailures; SearchFilesFailures; TagDispatchFailures;
     TraceEmitFailures; TransitionAuditFailures; ExecutionReceiptFailures; OperatorBroadcastSuppressed;
@@ -598,6 +608,7 @@ let all : t list =
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;
+    GhClassificationTotal; GatedGhLifecycleTotal; GatedGhBlockTimeSeconds;
   KeeperRepoMappingDefaultScopeAllowed; KeeperRepoMappingDeniedUnregistered;
   KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;

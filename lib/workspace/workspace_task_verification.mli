@@ -5,7 +5,7 @@
     [evidence_ref_has_verification_artifact_ref] /
     [notes_have_verification_artifact_ref] /
     [verification_evidence_error_message] are gone — gating decisions
-    live in [Cdal_evidence_gate] only. *)
+    were handled by the (now-retired) evidence gate. *)
 
 val flatten_lock_result : (('a, 'b) result, 'b) result -> ('a, 'b) result
 

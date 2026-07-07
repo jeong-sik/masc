@@ -1,3 +1,15 @@
+(** {1 Static ADT Classification}
+    RFC-0314 / task-1854: Replace heuristic string-matching predicates with
+    a static ADT that the compiler can exhaustively match. *)
+type error_classification =
+  | Transient_network
+  | Transient_internal_runner
+  | Transient_oas_timeout
+  | Non_transient
+  | Unclassified
+
+val classify_error : Agent_sdk.Error.sdk_error -> error_classification
+
 (** Keeper_error_classify — Error classification, side-effect safety,
     and retry constants for the unified keeper cycle.
 

@@ -13,6 +13,47 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
+(** {1 Static ADT Classification}
+    RFC-0314 / task-1854: Replace heuristic string-matching predicates with
+    a static ADT that the compiler can exhaustively match. *)
+type error_classification =
+  | Transient_network
+  | Transient_internal_runner
+  | Transient_oas_timeout
+  | Non_transient
+  | Unclassified
+
+(** Classify an [sdk_error] into a static [error_classification] variant.
+    Replaces the individual heuristic predicate functions with a single
+    exhaustive match. *)
+let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
+  match err with
+  | Agent_sdk.Error.Api (NetworkError _) -> Transient_network
+  | Agent_sdk.Error.Api (Timeout { message }) ->
+      if is_structural_oas_timeout_message message then Transient_oas_timeout
+      else Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError _) -> Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderTerminal _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.MissingApiKey _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
+  | Agent_sdk.Error.Api (InvalidRequest _ | Overloaded _ | ServerError _
+    | RateLimited _ | AuthError _ | NotFound _ | PaymentRequired _
+    | ContextOverflow _) -> Non_transient
+  | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _ | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _ | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> Unclassified
 let string_contains_substring = String_util.string_contains_substring
 
 (** {1 Retry & Side-Effect Safety}

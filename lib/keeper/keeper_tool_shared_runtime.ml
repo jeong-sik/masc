@@ -117,10 +117,11 @@ let repos_json repos =
 let registered_repository_ids ~base_path =
   match Repo_store.load_all ~base_path with
   | Ok repos ->
-    repos
-    |> List.map (fun (repo : Repo_manager_types.repository) -> repo.id)
-    |> List.sort String.compare
-  | Error _ -> []
+    Ok
+      (repos
+       |> List.map (fun (repo : Repo_manager_types.repository) -> repo.id)
+       |> List.sort String.compare)
+  | Error msg -> Error msg
 ;;
 
 (** Actionable error for path resolution failures.
@@ -153,7 +154,17 @@ let actionable_path_error
   let base_path = Keeper_alerting_path.project_root_of_config config in
   let available_repos = visible_sandbox_repositories ~config meta in
   let repo_hint = visible_repo_hint available_repos in
-  let registered_repos = registered_repository_ids ~base_path in
+  let registered_repo_fields, registered_repo_next_action =
+    match registered_repository_ids ~base_path with
+    | Ok registered_repos ->
+      ( [ "registered_repos", repos_json registered_repos ]
+      , "Retry with a registered repos/<id> path, or register the visible \
+         checkout name as an explicit repository alias before retrying." )
+    | Error msg ->
+      ( [ "registered_repos_error", `String msg ]
+      , "Repository catalog could not be loaded; repair \
+         .masc/config/repositories.toml before retrying repo alias hints." )
+  in
   let deterministic_retry_fields =
     match deterministic_reason with
     | None -> []
@@ -167,7 +178,6 @@ let actionable_path_error
         ; "tried", `String raw_path
         ; "your_playground", `String playground
         ; "available_repos", repos_json available_repos
-        ; "registered_repos", repos_json registered_repos
         ; ( "path_resolution"
           , `Assoc
               [ "same_path_retry_will_fail", `Bool true
@@ -179,12 +189,11 @@ let actionable_path_error
                     "Grep resolves path against the keeper sandbox, then validates \
                      repository identity against repositories.toml id/name/aliases." )
               ; ( "next_action"
-                , `String
-                    "Retry with a registered repos/<id> path, or register the visible \
-                     checkout name as an explicit repository alias before retrying." )
+                , `String registered_repo_next_action )
               ] )
         ; "action", `String action
         ]
+        @ registered_repo_fields
         @ deterministic_retry_fields))
 ;;
 

@@ -26,6 +26,10 @@ type error_classification =
 (** Classify an [sdk_error] into a static [error_classification] variant.
     Replaces the individual heuristic predicate functions with a single
     exhaustive match. *)
+let is_structural_oas_timeout_message message =
+  Keeper_oas_timeout_message.is_structural message
+
+
 let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   match err with
   | Agent_sdk.Error.Api (NetworkError _) -> Transient_network
@@ -70,9 +74,6 @@ let string_contains_substring = String_util.string_contains_substring
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
-let is_structural_oas_timeout_message message =
-  Keeper_oas_timeout_message.is_structural message
-
 let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Internal_unhandled_exception { site; exn_repr })

@@ -37,9 +37,10 @@
     Completion success is covered with a locally resolvable trace artifact, so
     the deterministic evidence gate validates the ref without a network/forge
     lookup. Evidence-gate rejection and recovery are covered by replaying a fake
-    prose ref followed by a trusted [PR#123] ref, proving the gate is selective
-    rather than reject-everything. The evaluator's Indeterminate-dominates
-    determinism remains covered by test_keeper_deterministic_evidence_probe.ml.
+    prose ref followed by a locally resolvable trace ref, proving the gate is
+    selective rather than reject-everything. The evaluator's
+    Indeterminate-dominates determinism remains covered by
+    test_keeper_deterministic_evidence_probe.ml.
 
     The fixture helpers below are intentionally a local copy of the minimal subset
     used by test_keeper_tool_dispatch_runtime.ml (Eio workspace + a registered
@@ -358,7 +359,7 @@ let test_completion_with_evidence_refs_succeeds () =
    1. block:    substantive result (clears the anti-rationalization length floor)
                 + a prose "reference" a keeper might paste to fake completion
                 -> workflow rejection, FSM unchanged (anti-vacuity).
-   2. recover:  the SAME work re-submitted with a trusted reference (PR#123)
+   2. recover:  the SAME work re-submitted with locally resolvable trace evidence
                 completes. The keeper is not frozen — this is the property the
                 CDAL redesign had to preserve: block fake-done without stalling. *)
 let test_untrusted_evidence_denied_then_recovers () =
@@ -396,15 +397,17 @@ let test_untrusted_evidence_denied_then_recovers () =
          meta.agent_name assignee
      | None ->
        fail "task-001 must remain Claimed/InProgress after the rejected fake completion");
-    (* recover: same work, now with a trusted reference, completes. *)
+    seed_trace_evidence ~config "completion-trust-recovery";
+    (* recover: same work, now with locally resolvable trace evidence, completes. *)
     let recovered =
       attempt_done
         ~config
         ~meta
         ~ctx_work
         ~task_id:"task-001"
-        ~result:"Completed the deliverable and verified it end to end."
-        ~evidence_refs:[ "PR#123" ]
+        ~result:
+          "Completed the deliverable and saved trace:completion-trust-recovery evidence."
+        ~evidence_refs:[ "trace:completion-trust-recovery" ]
         ()
     in
     check string "recovery completion outcome" "success" (outcome_label recovered.KET.outcome);
@@ -421,7 +424,9 @@ let test_untrusted_evidence_denied_then_recovers () =
         ; _
         } ->
       check string "recovered done assignee" meta.agent_name assignee;
-      check (list string) "recovered handoff evidence_refs" [ "PR#123" ] handoff.evidence_refs
+      check (list string) "recovered handoff evidence_refs"
+        [ "trace:completion-trust-recovery" ]
+        handoff.evidence_refs
     | Some task ->
       fail
         ("expected task-001 Done after recovery, got "

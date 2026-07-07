@@ -186,10 +186,15 @@ let provider_cooldown_cause_of_outcome_kind
    cause that may recover.  Only when every blocker's cause is deterministic
    does the block escalate — hence "any transient wins".  #23438. *)
 let aggregate_cooldown_cause provider_infos =
-  let causes =
+  let cause_options =
     provider_infos
-    |> List.filter_map (fun (_, info) -> info.Keeper_binding_health.cooldown_cause)
-    |> List.filter_map provider_cooldown_cause_of_outcome_kind
+    |> List.map (fun (_, info) ->
+      match info.Keeper_binding_health.cooldown_cause with
+      | Some kind -> provider_cooldown_cause_of_outcome_kind kind
+      | None -> None)
+  in
+  let causes =
+    cause_options |> List.filter_map (fun cause -> cause)
   in
   match
     List.find_opt
@@ -198,7 +203,10 @@ let aggregate_cooldown_cause provider_infos =
       causes
   with
   | Some transient -> Some transient
-  | None -> (match causes with [] -> None | c :: _ -> Some c)
+  | None ->
+    if List.exists Option.is_none cause_options
+    then None
+    else (match causes with [] -> None | c :: _ -> Some c)
 
 let cooldown_remaining_sec_of_info info =
   match info.Keeper_binding_health.cooldown_expires_at with

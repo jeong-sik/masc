@@ -111,26 +111,13 @@ and state_of_yojson = function
 
 and goal_of_yojson = function
   | `Assoc _ as json ->
-      begin
-        (* RFC-0294: a legacy [horizon] key may still be present on disk; it is
-           intentionally not read here. Goal_to_yojson no longer emits it, so it
-           evaporates on the next write (standard schema evolution, not a drop
-           that needs logging). *)
-        match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "title" json with
-        | Some (`String id), Some (`String title) ->
-            let legacy_status =
-              match Json_util.assoc_member_opt "status" json with
-              | None | Some `Null -> Ok Active
-              | Some status_json -> goal_status_of_yojson status_json
-            in
-            let phase =
-              match Json_util.assoc_member_opt "phase" json with
-              | None | Some `Null -> (
-                  match legacy_status with
-                  | Ok status -> Ok (phase_of_goal_status status)
-                  | Error msg -> Error msg)
-              | Some phase_json -> Goal_phase.of_yojson phase_json
-            in
+      match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "title" json with
+      | Some (`String id), Some (`String title) ->
+          let phase =
+            match Json_util.assoc_member_opt "phase" json with
+            | None | Some `Null -> Ok (phase_of_goal_status Active)
+            | Some phase_json -> Goal_phase.of_yojson phase_json
+          in
             let verifier_policy =
               match Json_util.assoc_member_opt "verifier_policy" json with
               | None | Some `Null -> Ok None

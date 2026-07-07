@@ -124,6 +124,31 @@ describe('IdeAnnotationComposer', () => {
     expect(el.textContent ?? '').toContain('내용을 입력하세요')
   })
 
+  it.each(['1.9', '1e3', '12abc', '-3', ''])(
+    'rejects non-integer line input %j instead of silently truncating it',
+    async raw => {
+      const el = mount(composer())
+      await open(el)
+
+      const content = el.querySelector<HTMLTextAreaElement>('[data-testid="ide-annotation-content"]')
+      if (content) {
+        content.value = '유효한 내용'
+        content.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+      const start = el.querySelector<HTMLInputElement>('[data-testid="ide-annotation-line-start"]')
+      expect(start).not.toBeNull()
+      if (start) {
+        start.value = raw
+        start.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+      await tick()
+
+      const submit = el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-submit"]')
+      expect(submit?.disabled).toBe(true)
+      expect(el.textContent ?? '').toContain('line_start는 1 이상의 정수')
+    },
+  )
+
   it('submits the draft with the repo scope and refreshes on success', async () => {
     createIdeAnnotationMock.mockResolvedValue({
       id: 'a-1',

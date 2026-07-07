@@ -48,9 +48,15 @@ function draftFromSelection(filePath: string): ComposerDraft {
   }
 }
 
+// Strict positive-integer parse. `Number.parseInt` would silently
+// truncate browser number-input strings like "1.9", "1e3", or "12abc"
+// and file the annotation onto the wrong line while the draft still
+// reads as valid — the digit-shape check rejects those outright.
 function parseLine(raw: string): number | null {
-  const value = Number.parseInt(raw, 10)
-  if (!Number.isInteger(value) || value < 1) return null
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const value = Number(trimmed)
+  if (!Number.isSafeInteger(value) || value < 1) return null
   return value
 }
 

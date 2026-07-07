@@ -42,6 +42,7 @@ let expected_structured_completion_files =
   List.sort
     String.compare
     [ "lib/keeper/hitl_summary_worker.ml"
+    ; "lib/keeper/keeper_compaction_llm_summarizer.ml"
     ; "lib/keeper/keeper_librarian_runtime.ml"
     ; "lib/keeper/keeper_memory_llm_summary.ml"
     ; "lib/keeper/keeper_memory_os_consolidation_runtime.ml"

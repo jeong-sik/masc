@@ -72,6 +72,9 @@ let test_current_dispositions () =
   (* local / in-repo reversible mutations: Allowed *)
   check "pr create" (verb ~sub:"pr" ~act:"create" ()) Pol.Allowed;
   check "pr comment" (verb ~sub:"pr" ~act:"comment" ()) Pol.Allowed;
+  (* RFC-0309 W4/G-9: [pr ready] is a reversible in-repo mutation (draft<->ready,
+     [--undo]); the [Pr] family is not a durable remote surface, so Allowed. *)
+  check "pr ready" (verb ~sub:"pr" ~act:"ready" ()) Pol.Allowed;
   check "issue create" (verb ~sub:"issue" ~act:"create" ()) Pol.Allowed;
   check "release create" (verb ~sub:"release" ~act:"create" ()) Pol.Allowed;
   (* genuinely irreversible (also risk-floored): Denied *)

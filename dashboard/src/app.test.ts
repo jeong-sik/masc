@@ -342,8 +342,10 @@ describe('App v2 header chrome', () => {
 
   it('keeps floating status and focus chrome on operational surfaces', () => {
     window.innerWidth = 1280
-    window.location.hash = '#monitoring/agents'
-    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+    // `command` is a non-primary operational surface; `monitoring` moved into
+    // V2_PRIMARY_SURFACE_IDS (#23578) so it now suppresses floating chrome.
+    window.location.hash = '#command/operations'
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
     renderApp()
 
     expect(container.querySelector('[data-testid="dashboard-status-tray"]')).not.toBeNull()
@@ -352,8 +354,8 @@ describe('App v2 header chrome', () => {
 
   it('focus mode does not permanently hide the rail', async () => {
     window.innerWidth = 1280
-    window.location.hash = '#monitoring/agents'
-    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+    window.location.hash = '#command/operations'
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
     renderApp()
 
     // Rail (now `nav.v2-nav`) should be visible initially.
@@ -430,16 +432,22 @@ describe('shouldSuppressFloatingChrome', () => {
       keeperDetailMode: false,
       mobileDrawerOpen: false,
     })).toBe(true)
-  })
-
-  it('keeps floating chrome for operational surfaces unless a shell overlay is active', () => {
+    // monitoring joined V2_PRIMARY_SURFACE_IDS in #23578 (Monitor in the v2 rail).
     expect(shouldSuppressFloatingChrome({
       currentTab: 'monitoring',
       keeperDetailMode: false,
       mobileDrawerOpen: false,
+    })).toBe(true)
+  })
+
+  it('keeps floating chrome for operational surfaces unless a shell overlay is active', () => {
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'command',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
     })).toBe(false)
     expect(shouldSuppressFloatingChrome({
-      currentTab: 'monitoring',
+      currentTab: 'command',
       keeperDetailMode: false,
       mobileDrawerOpen: true,
     })).toBe(true)

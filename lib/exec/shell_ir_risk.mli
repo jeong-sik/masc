@@ -128,6 +128,10 @@ type gh_verb_class =
 val classify_gh_verb : Gh_verb.t -> gh_verb_class
 (** Classify a gh verb. See {!gh_verb_class}. *)
 
+val gh_verb_class_to_string : gh_verb_class -> string
+(** Human-readable label for an operator approval rationale (why a gh command
+    is gated). *)
+
 val risk_of_gh_verb : Gh_verb.t -> risk_class
 (** RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command,
     projected from [classify_gh_verb]. Reads the same subcommand tables as

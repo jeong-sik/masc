@@ -1006,7 +1006,11 @@ let () =
      A flip to Policy_denied (e.g. risk-class regression) must fail the test. *)
   | Error
       (Keeper_tool_execute_shell_ir.Approval_required
-         { kind = Keeper_tool_execute_shell_ir.Privileged_program_floor; _ }) -> ()
+         { summary; kind = Keeper_tool_execute_shell_ir.Privileged_program_floor; _ }) ->
+    assert (
+      String.equal
+        summary
+        "command 'rm' requires approval (audited/privileged risk class)")
   | Error _ -> assert false
 
 let () =
@@ -1076,8 +1080,13 @@ let () =
   with
   | Ok _ -> assert false
   | Error
-      (Keeper_tool_execute_shell_ir.Approval_required { summary = _; bin; kind }) ->
+      (Keeper_tool_execute_shell_ir.Approval_required { summary; bin; kind }) ->
     assert (String.equal bin "gh");
+    assert (
+      String.equal
+        summary
+        "command 'gh' requires approval — gh repo create: reversible mutation \
+         (audited/privileged risk class)");
     assert (kind = Keeper_tool_execute_shell_ir.Gh_capability_requires_approval)
   | Error _ -> assert false
 

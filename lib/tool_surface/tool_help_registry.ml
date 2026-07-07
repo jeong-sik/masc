@@ -193,7 +193,7 @@ let manual_help_entry name =
           key_constraints =
             [
               "Caller must own the task unless using a force tool.";
-              "evidence_refs must include a PR, commit, trace, receipt, or reviewer-inspectable URL when applicable.";
+              "evidence_refs must include at least one locally validated base-path artifact, local git commit, or .masc trace/turn/receipt artifact when marking work done.";
             ];
           details_markdown =
             "Completes the task directly. For PR-bearing work, include the PR URL or artifact reference in evidence_refs instead of using a separate verification-evidence wrapper.";

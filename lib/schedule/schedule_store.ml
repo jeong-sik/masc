@@ -657,6 +657,40 @@ let fail_due_candidate config ~now ~schedule_id ~error =
         Ok updated)
 ;;
 
+let prune_completed config =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    let before_count = List.length state.schedules in
+    let schedules =
+      List.filter
+        (fun (request : schedule_request) ->
+           match request.status with
+           | Pending_approval | Scheduled | Due | Running -> true
+           | Succeeded | Failed | Rejected | Cancelled | Expired -> false)
+        state.schedules
+    in
+    let after_count = List.length schedules in
+    let pruned_count = before_count - after_count in
+    let remaining_ids =
+      List.map (fun (r : schedule_request) -> r.schedule_id) schedules
+    in
+    let grants =
+      List.filter
+        (fun (grant : execution_grant) ->
+           List.mem grant.schedule_id remaining_ids)
+        state.grants
+    in
+    let executions =
+      List.filter
+        (fun (exec : execution_record) ->
+           List.mem exec.schedule_id remaining_ids)
+        state.executions
+    in
+    let next_state = bump_state state ~schedules ~grants ~executions in
+    let* () = write_state config next_state in
+    Ok (next_state, pruned_count))
+;;
+
 let due_execution_candidates state =
   state.schedules
   |> List.filter (is_due_execution_candidate state)

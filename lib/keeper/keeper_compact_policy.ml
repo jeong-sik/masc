@@ -421,13 +421,13 @@ let compact_if_needed_typed
           if emergency || String.equal runtime_id "" then deterministic_compact ()
           else begin
             match
-              Compaction_llm_summarizer.make ~runtime_id ~keeper_name:meta.name ()
+              Keeper_compaction_llm_summarizer.make ~runtime_id ~keeper_name:meta.name ()
             with
             | None -> deterministic_compact ()
             | Some summarizer ->
               let msgs = messages_of_context ctx in
               (match summarizer ~messages:msgs with
-               | Some plan -> Compaction_llm_summarizer.apply plan ~messages:msgs
+               | Some plan -> Keeper_compaction_llm_summarizer.apply plan ~messages:msgs
                | None -> deterministic_compact ())
           end
       in

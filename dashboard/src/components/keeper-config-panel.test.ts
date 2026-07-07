@@ -985,6 +985,9 @@ const mocks = vi.hoisted(() => {
     pauseKeeper: vi.fn(async () => ({ ok: true, action: 'pause', name: 'keeper-sangsu' })),
     resumeKeeper: vi.fn(async () => ({ ok: true, action: 'resume', name: 'keeper-sangsu' })),
     wakeKeeper: vi.fn(async () => ({ ok: true, action: 'wakeup', name: 'keeper-sangsu' })),
+    // access tab surfaces the GitHub App panel, which reads secret_projection
+    // from the keeper composite; no existing config in the default fixture.
+    fetchKeeperComposite: vi.fn(async () => ({ secret_projection: null })),
   }
 })
 
@@ -1003,6 +1006,7 @@ vi.mock('../api/keeper', () => ({
   pauseKeeper: mocks.pauseKeeper,
   resumeKeeper: mocks.resumeKeeper,
   wakeKeeper: mocks.wakeKeeper,
+  fetchKeeperComposite: mocks.fetchKeeperComposite,
 }))
 
 import {
@@ -1050,6 +1054,7 @@ describe('KeeperConfigPanel', () => {
     mocks.pauseKeeper.mockClear()
     mocks.resumeKeeper.mockClear()
     mocks.wakeKeeper.mockClear()
+    mocks.fetchKeeperComposite.mockClear()
   })
 
   afterEach(() => {
@@ -1057,6 +1062,25 @@ describe('KeeperConfigPanel', () => {
     container.remove()
     resetKeeperConfig()
     resetRuntimeCatalog()
+  })
+
+  it('surfaces the GitHub App credentials panel under the access tab', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    // The credentials panel is scoped to the access tab, so the default
+    // (identity) tab must not render it.
+    expect(container.querySelector('[data-testid="keeper-github-app-config-panel"]')).toBeNull()
+
+    // 권한·샌드박스 (access) is where operators look for credentials; the panel
+    // is surfaced here in addition to the monitoring detail's 진단/운영 copy.
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    expect(container.querySelector('[data-testid="keeper-github-app-config-panel"]')).not.toBeNull()
+    expect(container.textContent).toContain('GitHub App 자격증명')
+    // The panel's initial projection is loaded from the keeper composite.
+    expect(mocks.fetchKeeperComposite).toHaveBeenCalledWith('keeper-sangsu', expect.anything())
   })
 
   it('separates editable prompt controls from read-only runtime metadata', async () => {

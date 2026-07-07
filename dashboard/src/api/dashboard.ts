@@ -114,6 +114,7 @@ export {
   resolveGovernanceApproval,
   deleteGovernanceApprovalRule,
   resolveScheduleApproval,
+  pruneSchedules,
   fetchGovernanceCaseStatus,
   submitGovernancePetition,
   submitGovernanceCaseBrief,

@@ -243,11 +243,21 @@ say approval enables the action.
 
 ### 3.5 What #23362 got right and keeps
 
-The genuine irreversibles stay floored exactly as before: `pr merge/ready`,
+The genuine irreversibles stay floored exactly as before: `pr merge`,
 `repo delete/archive/transfer/rename`, `release delete`, `secret delete`,
 `gh api -X DELETE`, `delete*` graphql mutations, `discussion delete`. The
 catastrophic floor (`Deny`) remains trust-independent. This RFC widens the
 space *between* Allow and Deny; it does not soften Deny.
+
+> **W4/G-9 follow-up (`pr ready` reclassified):** `pr ready` was originally
+> listed here alongside `pr merge`, but it toggles a PR between draft and
+> ready-for-review and is reversible via `gh pr ready --undo`. Its CI/notification
+> side-effects are an externality shared with `pr create` (already Allowed on the
+> capability axis), not a reversibility fact — the same policy-as-risk conflation
+> W4/G-9 closed for repo create/fork/discussion. It now classifies R1 in
+> `repo_hosting_cli_reversible_mutations` and, on the non-durable `Pr` family, the
+> capability axis leaves it `Allowed`. The `test_shell_ir_gh_capability_baseline`
+> corpus and `test_gh_capability_policy` dispositions were updated to match.
 
 ---
 

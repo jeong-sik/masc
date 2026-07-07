@@ -581,6 +581,82 @@ let test_gh_graphql_non_query_opaque_field_allowed_under_autonomous () =
     assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
   | _ -> Alcotest.fail "opaque non-query graphql variables must not Ask"
 
+(* External-body graphql: gh reads a [-f/-F/--field] value starting with '@'
+   from a file ('@-' = stdin), and [--input FILE] reads the whole body
+   externally. The mutation text is therefore not in argv, so the LITERAL body
+   scanners cannot see it. These forms are literal (no Shell_ir Var/Concat), so
+   the earlier $VAR opacity check does not fire; they must still Ask. *)
+let test_gh_graphql_external_body_asks_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf "%s: external graphql body must Ask under autonomous"
+           label)
+    [ ("-F query=@file", [ "api"; "graphql"; "-F"; "query=@mutation.graphql" ])
+    ; ("-f query=@- (stdin)", [ "api"; "graphql"; "-f"; "query=@-" ])
+    ; ("--input file", [ "api"; "graphql"; "--input"; "body.json" ])
+    ; ("attached -Fquery=@file", [ "api"; "graphql"; "-Fquery=@mutation.graphql" ])
+    ; ("--input=file attached", [ "api"; "graphql"; "--input=body.json" ])
+    ]
+
+(* Regression guard for the external-body fix: an '@'-file on a NON-query field
+   (a graphql variable) combined with an inline READ query must NOT be
+   over-blocked. Only the query body being external is a capability concern. *)
+let test_gh_graphql_external_non_query_field_allowed () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:
+        (List.map lit
+           [ "api"; "graphql"; "-F"; "owner=@owner.txt"; "-f"
+           ; "query=query { viewer { login } }" ])
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Allow _ -> ()
+  | _ ->
+    Alcotest.fail
+      "external @-file on a non-query field with an inline read query must not \
+       Ask"
+
+(* RFC-0309 W3 pipeline coverage: a gh durable-remote op in a NON-final pipeline
+   stage must still Ask. [gh repo create ... | cat] shifts the representative
+   (last) simple to [cat]; the capability axis folds over ALL caps so the create
+   is still seen. Without the fold this auto-runs (R1, no longer floored after
+   W4 moved repo/discussion create R2->R1). The caller hands [decide] the last
+   stage as [~simple], mirroring [last_simple_of_ir]. *)
+let test_gh_durable_remote_in_pipeline_asks_under_autonomous () =
+  let cat_stage = simple (bin_ok "cat") in
+  List.iter
+    (fun (label, gh_args) ->
+       let gh_stage = simple (bin_ok "gh") ~args:(List.map lit gh_args) in
+       let ir =
+         Shell_ir.Pipeline
+           [ Shell_ir.Simple gh_stage; Shell_ir.Simple cat_stage ]
+       in
+       let caps = Capability_check.of_ir ir in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:cat_stage
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ ->
+         Alcotest.failf "%s | cat must still Ask under autonomous" label)
+    [ ("gh repo create", [ "repo"; "create"; "o/new" ])
+    ; ("gh discussion create", [ "discussion"; "create"; "--title"; "T" ])
+    ; ( "gh api graphql -F query=@file (composed with pipeline)"
+      , [ "api"; "graphql"; "-F"; "query=@mutation.graphql" ] )
+    ]
+
 (* Regression guard: the W3 capability layer is ADDITIVE. Reads and local /
    in-repo reversible mutations stay [Allow] under autonomous — no over-block of
    routine keeper work. *)
@@ -726,6 +802,9 @@ let () =
   test_gh_graphql_durable_remote_asks_under_autonomous ();
   test_gh_graphql_opaque_query_asks_under_autonomous ();
   test_gh_graphql_non_query_opaque_field_allowed_under_autonomous ();
+  test_gh_graphql_external_body_asks_under_autonomous ();
+  test_gh_graphql_external_non_query_field_allowed ();
+  test_gh_durable_remote_in_pipeline_asks_under_autonomous ();
   test_gh_reads_and_local_still_allowed_under_autonomous ();
   test_non_gh_unaffected_by_capability_layer ();
   test_git_clean_bundled_force_denied ();

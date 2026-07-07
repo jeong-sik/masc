@@ -24,6 +24,22 @@ module Float = Stdlib.Float
 let masc_add_task_name =
   Tool_name.Task_name.to_string Tool_name.Task_name.Add_task
 
+let handoff_example_evidence_ref =
+  Filename.concat Common.masc_dirname "harness-evidence/proof.json"
+
+let handoff_context_description =
+  Printf.sprintf
+    "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
+     actions (done / submit_for_verification / release / cancel). On \
+     action='done' or 'submit_for_verification', include 'evidence_refs' with \
+     at least one locally validated reference: an existing base-path artifact \
+     file/file:// URI, a commit hash present in the local git repo, or a %s \
+     trace/turn/receipt ref that resolves on disk. Completion notes, URLs, PR \
+     numbers, and trace-shaped labels alone do NOT satisfy the gate. Example: \
+     {\"summary\": \"tests green, local proof saved\", \"evidence_refs\": [\"%s\"]}."
+    Common.masc_dirname
+    handoff_example_evidence_ref
+
 let schemas : Masc_domain.tool_schema list = [
   {
     name = masc_add_task_name;
@@ -253,7 +269,7 @@ they do not route normal completion through the verifier agent."
         ]);
         ("handoff_context", `Assoc [
           ("type", `String "object");
-          ("description", `String "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class actions (done / submit_for_verification / release / cancel). On action='done' or 'submit_for_verification', include 'evidence_refs' with at least one locally validated reference: an existing base-path artifact file/file:// URI, a commit hash present in the local git repo, or a .masc trace/turn/receipt ref that resolves on disk. Completion notes, URLs, PR numbers, and trace-shaped labels alone do NOT satisfy the gate. Example: {\"summary\": \"tests green, local proof saved\", \"evidence_refs\": [\".masc/harness-evidence/proof.json\"]}.");
+          ("description", `String handoff_context_description);
           ("properties", `Assoc [
             ("summary", `Assoc [
               ("type", `String "string");

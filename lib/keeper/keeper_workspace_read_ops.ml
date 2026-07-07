@@ -75,7 +75,7 @@ let try_handle
        | Ok () -> repo_check target)
   in
   let path_error ?deterministic_reason e =
-    actionable_path_error ?deterministic_reason ~op ~config ~meta ~raw_path
+    actionable_path_error ~deterministic_reason ~op ~config ~meta ~raw_path
       ~error:e
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the

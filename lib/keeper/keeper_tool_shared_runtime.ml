@@ -219,7 +219,7 @@ let requested_repo_registration_fields ~repositories ~raw_path =
     exposes the typed mapping so Phase B PR-5 can route typed callers
     directly without a redundant classify pass. *)
 let actionable_path_error
-      ?deterministic_reason
+      ~deterministic_reason
       ~(op : string)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)

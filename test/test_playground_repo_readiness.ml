@@ -102,7 +102,7 @@ let save_repositories base_path repositories =
   | Ok () -> ()
   | Error msg -> fail ("save_repositories failed: " ^ msg)
 
-let repository_fixture ?(aliases = []) ~id ~name ~url ~local_path
+let repository_fixture ~aliases ~id ~name ~url ~local_path
   : Repo_manager_types.repository =
   { id
   ; name
@@ -223,6 +223,7 @@ let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   let repo_path = playground_repo_path ~config ~meta "masc-mcp" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc-mcp"
         ~name:"masc-mcp"
         ~url:"https://github.com/jeong-sik/masc-mcp.git"
@@ -248,6 +249,7 @@ let test_playground_repos_mark_registered_repo_outside_mapping_allowed () =
   let repo_path = playground_repo_path ~config ~meta "masc" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
@@ -271,6 +273,7 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
   let repo_path = playground_repo_path ~config ~meta "masc" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
@@ -293,6 +296,7 @@ let test_playground_repos_policy_uses_registered_repository_id () =
   mkdir_p (Filename.concat repo_path ".git");
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"repo-masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
@@ -316,6 +320,7 @@ let test_playground_repos_mark_repository_identity_mismatch_denied () =
   mkdir_p (Filename.concat repo_path ".git");
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/secret.git"
@@ -362,6 +367,7 @@ let test_playground_repos_mark_mapping_load_error_allowed_for_registered_repo ()
   let repo_path = playground_repo_path ~config ~meta "masc" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
@@ -386,6 +392,7 @@ let test_playground_repos_projection_does_not_record_policy_metrics () =
   let repo_path = playground_repo_path ~config ~meta "masc" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"

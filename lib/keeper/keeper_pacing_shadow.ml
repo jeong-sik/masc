@@ -3,7 +3,10 @@
 let mu = Eio.Mutex.create ()
 let table : (string, Keeper_pacing.t) Hashtbl.t = Hashtbl.create 64
 
-let observed_runtime_ids state = List.map fst state
+(* [Keeper_pacing.t] is abstract; the observed runtime ids come from its
+   observability projection. #23524 landed this helper reading [state] as a
+   bare assoc list, which does not typecheck against the abstract [t]. *)
+let observed_runtime_ids state = List.map fst (Keeper_pacing.to_summary state)
 
 let next_due_remaining_of_state ~now state =
   match observed_runtime_ids state with

@@ -74,3 +74,8 @@ val due_candidates :
   (Schedule_domain.schedule_request list, service_error) result
 (** Refreshes due state and returns visible execution candidates. No execution
     is performed here. *)
+
+val prune :
+  Workspace_utils.config ->
+  (Schedule_store.state * int, service_error) result
+(** Deletes all terminal schedules and returns the new state and the number of pruned items. *)

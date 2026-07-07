@@ -149,12 +149,19 @@ fi
 
 # ── Step 8/8: done ──
 echo "[8/8] masc_transition (done)"
-# RFC-0311 Phase 1: the completion gate requires a trusted, reviewer-inspectable
-# evidence_refs entry on done (notes alone no longer satisfy it). A trace ref
-# naming this harness run is the appropriate evidence for a live MCP sweep.
+# RFC-0311 Phase 1: the completion gate requires a locally validated
+# evidence_refs entry on done (notes and trace-shaped labels alone no longer
+# satisfy it). Persist a base-path-local proof artifact and submit its relative
+# path so the gate can resolve it deterministically.
+evidence_ref=".masc/harness-evidence/golden_path_1_contract.json"
+evidence_path="${START_PATH}/${evidence_ref}"
+mkdir -p "$(dirname "$evidence_path")"
+jq -cn --arg session_id "$MCP_SESSION_ID" --arg agent_name "$AGENT_NAME" --arg task_id "$task_id" \
+  '{harness:"golden_path_1_contract",session_id:$session_id,agent_name:$agent_name,task_id:$task_id,status:"completed"}' \
+  >"$evidence_path"
 done_notes="Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success."
 done_summary="GP1 contract flow verified end to end via live MCP transcript"
-r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:["trace:golden_path_1_contract"]}}')")"
+r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 if require_ok "$r8"; then
   CLEANUP_TASK_FINALIZED=1
   step_pass

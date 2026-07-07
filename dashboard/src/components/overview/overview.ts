@@ -796,7 +796,9 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
               <div class="ov-attn-meta">
                 <div class="ov-attn-name">
                   ${displayName}
-                  <span class="ov-attn-ns mono">${k.name}</span>
+                  ${displayName === k.name
+                    ? null
+                    : html`<span class="ov-attn-ns mono">${k.name}</span>`}
                 </div>
                 <div class=${`ov-attn-reason sev-${reason.sev}`}>
                   <span class="inline-block size-1.5 rounded-full ${attentionToneClass(reason.sev)}"></span>

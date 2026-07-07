@@ -1195,6 +1195,23 @@ let memory_os_sanity_sweep_cmd =
       const memory_os_sanity_sweep_cmd_exit $ base_path $ memory_os_keeper
       $ memory_os_gc_json)
 
+let schedule_prune_cmd_exit base_path =
+  let config = Workspace_utils.default_config base_path in
+  match Schedule_service.prune config with
+  | Error err ->
+      prerr_endline (Schedule_service.service_error_to_string err);
+      1
+  | Ok (_, count) ->
+      Printf.printf "Successfully pruned %d completed schedule(s).\n" count;
+      0
+
+let schedule_prune_cmd =
+  let doc =
+    "Prune completed (Succeeded/Failed/Rejected/Cancelled/Expired) schedules and associated executions/grants."
+  in
+  let info = Cmd.info "schedule-prune" ~doc in
+  Cmd.v info Term.(const schedule_prune_cmd_exit $ base_path)
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -1223,6 +1240,7 @@ let cmd =
     ; runtime_wizard_catalog_cmd
     ; memory_os_gc_dry_run_cmd
     ; memory_os_sanity_sweep_cmd
+    ; schedule_prune_cmd
     ]
 
 let () =

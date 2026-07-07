@@ -332,12 +332,19 @@ r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_n
 expect_ok "masc_agent_timeline" "$r_agent_timeline"
 
 next_step "masc_transition done"
-# RFC-0311 Phase 1: the completion gate requires a trusted, reviewer-inspectable
-# evidence_refs entry on done (notes alone no longer satisfy it). A trace ref
-# naming this harness run is the appropriate evidence for a live MCP sweep.
+# RFC-0311 Phase 1: the completion gate requires a locally validated
+# evidence_refs entry on done (notes and trace-shaped labels alone no longer
+# satisfy it). Persist a base-path-local proof artifact and submit its relative
+# path so the gate can resolve it deterministically.
+evidence_ref=".masc/harness-evidence/public_tool_live_sweep.json"
+evidence_path="${BASE_PATH}/${evidence_ref}"
+mkdir -p "$(dirname "$evidence_path")"
+jq -cn --arg session_id "$MCP_SESSION_ID" --arg agent_name "$AGENT_NAME" --arg task_id "$task_id" \
+  '{harness:"public_tool_live_sweep",session_id:$session_id,agent_name:$agent_name,task_id:$task_id,status:"completed"}' \
+  >"$evidence_path"
 done_notes="Public MCP tool live sweep completed all requested tool calls and verified each response before task completion."
 done_summary="public tool live sweep verified across the public MCP surface"
-r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:["trace:public_tool_live_sweep"]}}')")"
+r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 expect_ok "masc_transition done" "$r_done"
 CLEANUP_TASK_FINALIZED=1
 

@@ -2,18 +2,21 @@
 
     A task may complete (Done / Submit_for_verification) only when the caller
     supplies at least one trusted, reviewer-inspectable evidence reference on
-    [handoff_context.evidence_refs]: a PR number, a commit hash, a trace id, or
-    a reviewer-inspectable URL. This is the RFC-0311 Phase 1 "universal default"
-    bar — one flexible requirement across code and non-code tasks.
+    [handoff_context.evidence_refs]. Trust is not inferred from string shape:
+    the ref must resolve under [base_path] to an existing artifact file, a local
+    git commit, or a local .masc trace/turn/receipt artifact. This is the
+    RFC-0311 Phase 1 "universal default" bar — one flexible requirement across
+    code and non-code tasks.
 
     What the gate deliberately does NOT accept as proof:
     - Completion [notes]. Free-text notes are not inspectable and were the
       substring surface that previously let both over-blocking (unknown keepers
       rejected) and fake-done (labels pasted to pass) through the same line.
-    - File-shaped references ([file://] URIs / relative paths). They are
-      shape-recognized by {!Evidence_ref} but cannot be proven to exist inside
-      the workspace without a base-path/artifact-store resolution layer, so they
-      fail closed.
+    - URLs and PR numbers. They are shape-recognized by {!Evidence_ref}, but
+      this deterministic gate does not perform network/forge validation, so they
+      fail closed until a verifier resolver proves them.
+    - File-shaped references ([file://] URIs / relative paths) that do not
+      resolve to an existing file inside [base_path].
 
     The contract's [required_evidence] entries are NOT consulted for this
     decision (they still feed the anti-rationalization reviewer prompt and
@@ -45,7 +48,8 @@ val rule_id_evidence_incomplete : string
     completion-trust audit. *)
 
 val decide
-  :  task_id:string
+  :  base_path:string
+  -> task_id:string
   -> task_opt:Masc_domain.task option
   -> notes:string
   -> handoff_context:Masc_domain.task_handoff_context option

@@ -1,5 +1,6 @@
 type t =
   | Read_backlog_counts
+  | Read_current_task
   | Count_running_keeper_fibers
   | Cursor_stale
   | Board_events
@@ -9,6 +10,7 @@ type t =
 
 let to_label = function
   | Read_backlog_counts -> "read_backlog_counts"
+  | Read_current_task -> "read_current_task"
   | Count_running_keeper_fibers -> "count_running_keeper_fibers"
   | Cursor_stale -> "cursor_stale"
   | Board_events -> "board_events"

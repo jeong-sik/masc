@@ -340,6 +340,23 @@ let playground_policy_reason = function
       Some
         "repository catalog could not be loaded; access is denied fail-closed"
 
+(* Which config file actually decided this status. The binding allow/deny gate
+   is the repository catalog (repositories.toml): a repo is usable iff it is
+   registered there, and [access_decision] never denies on the mapping — per
+   RFC-0312 the keeper_repo_mappings.toml scope is advisory. So every
+   catalog-sourced verdict (allowed / unregistered / identity mismatch / store
+   load error) is labelled with the catalog basename; only the
+   mapping-file-load failure is sourced from the advisory mapping. Exhaustive
+   so a new status cannot silently inherit the wrong source. *)
+let policy_source_basename_of_status : playground_policy_status -> string
+  = function
+  | Policy_allowed
+  | Policy_unregistered_repository
+  | Policy_repository_identity_mismatch
+  | Policy_repository_store_error ->
+      Config_dir_resolver.repositories_toml_basename
+  | Policy_mapping_load_error -> Keeper_repo_mapping.mappings_toml_basename
+
 let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
   match Keeper_repo_mapping.lookup_mapping ~base_path ~keeper_id:keeper_name with
   | Keeper_repo_mapping.Mapping_load_error msg as r ->
@@ -393,7 +410,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       if default_scope then [ ("policy_default_scope", `Bool true) ] else []
     in
     ( "policy_source"
-    , `String Keeper_repo_mapping.mappings_toml_basename )
+    , `String (policy_source_basename_of_status status) )
     :: ("policy_status", `String status_text)
     :: ("policy_allowed", `Bool allowed)
     :: (default_scope_fields @ repository_id_fields @ reason_fields

@@ -101,6 +101,13 @@ type stimulus_payload =
           [Goal_verification_failed] precedent: no dedicated turn_reason, so
           scheduling cooldowns are unchanged; the stable per-(runtime, class)
           post_id lets queue identity dedup collapse repeats. *)
+  | Goal_assigned of goal_assignment
+      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
+          (keeper_up tool args or TOML reconcile). Wakes the keeper once at
+          the assignment edge so the new standing objective arrives as
+          actionable turn input. Follows the [Goal_verification_failed]
+          precedent: no dedicated turn_reason; the injected pending
+          observation drives the turn. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -196,6 +203,17 @@ and failure_judgment = {
     summary bounded by [Keeper_internal_error.cap_blocker_detail] at the
     producer; it is never matched. *)
 
+and goal_assignment = {
+  ga_goal_id : string;
+  ga_goal_title : string;
+  ga_assigned_by : string;
+}
+(** RFC-0315 P3 W0 payload for [Goal_assigned]. [ga_goal_title] and
+    [ga_assigned_by] are display-only (title resolved from Goal_store at
+    enqueue time; actor is the tool caller name or ["toml_reconcile"]) and
+    are stripped from queue identity so repeat assignments of the same goal
+    dedup regardless of actor. *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
     sink created a board evidence post, otherwise falls back to
@@ -221,6 +239,11 @@ val failure_judgment_post_id : failure_judgment -> post_id
     ["failure-judgment:<runtime_id>:<class label>"]. Stable per
     (runtime, class) so repeats of the same deterministic failure collapse
     under queue identity dedup instead of accumulating a backlog. *)
+
+val goal_assignment_post_id : goal_assignment -> post_id
+(** Dedup/correlation id for [Goal_assigned]: ["goal-assigned:<goal_id>"].
+    Stable per goal so re-assignment before the first wake is consumed
+    collapses under queue identity dedup. *)
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

@@ -23,6 +23,10 @@
        notes below the substance floor ([min_notes_length] = 10) are rejected
        before Gate 3 ever calls an LLM. Reachable only when the caller owns the
        task (otherwise gate 1 above intercepts first).
+    3. [Task_completion_gate] — done attempts with substantive notes but no
+       trusted, reviewer-inspectable [handoff_context.evidence_refs] are
+       rejected, and a later retry with a trusted ref can still complete the
+       same task.
 
     Each reject asserts a gate-SPECIFIC signal (distinct rule_id / substring /
     failure_class), not merely outcome=failure — a tool-not-allowed or unknown-tool
@@ -30,17 +34,13 @@
     so the gate-specific assertion is what proves the *intended* gate fired. Each
     reject also asserts the task FSM was NOT mutated (anti-vacuity).
 
-    Deliberately NOT covered here, with rationale:
-    - A legitimate *completion* success: once notes clear the length floor, the
-      anti-rationalization review reaches its Gate-3 LLM branch, whose
-      unavailable-LLM verdict is governed by operator fail-mode config and is not
-      deterministic in a no-LLM CI fixture. The deterministic success anchor is
-      therefore the *claim* (Test D), which has no review gate.
-    - An evidence-gate rejection on keeper_task_done: the deterministic evidence
-      evaluator is wired into the *claim* auto-complete path, not the done path
-      (a Phase-3 / RFC-0199 gap). Asserting a done-evidence reject here would
-      assert a gate that does not exist. The evaluator's Indeterminate-dominates
-      determinism is already covered by test_keeper_deterministic_evidence_probe.ml.
+    Completion success is covered with a locally resolvable trace artifact, so
+    the deterministic evidence gate validates the ref without a network/forge
+    lookup. Evidence-gate rejection and recovery are covered by replaying a fake
+    prose ref followed by a locally resolvable trace ref, proving the gate is
+    selective rather than reject-everything. The evaluator's
+    Indeterminate-dominates determinism remains covered by
+    test_keeper_deterministic_evidence_probe.ml.
 
     The fixture helpers below are intentionally a local copy of the minimal subset
     used by test_keeper_tool_dispatch_runtime.ml (Eio workspace + a registered
@@ -51,6 +51,7 @@ open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
 module Workspace = Masc.Workspace
+module Task_completion_gate = Masc.Task_completion_gate
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -69,6 +70,22 @@ let cleanup_dir path =
       else Unix.unlink target
   in
   try rm path with _ -> ()
+
+let rec mkdir_p path =
+  if Sys.file_exists path then ()
+  else begin
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let write_file path contents =
+  mkdir_p (Filename.dirname path);
+  let output = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output contents)
 
 let make_meta ?(name = "keeper-completion-trust") () =
   match
@@ -166,6 +183,17 @@ let attempt_done
           , `List (List.map (fun ref_ -> `String ref_) evidence_refs) )
         ])
     ()
+
+let seed_trace_evidence ~config trace_id =
+  let path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat config.Workspace.base_path ".masc")
+         "trajectories/keeper-completion-trust")
+      (trace_id ^ ".jsonl")
+  in
+  write_file path
+    {|{"type":"completion_trust_evidence","turn":0,"trace_id":"test"}|}
 
 let claim_via_dispatch ~config ~meta ~ctx_work ~task_id =
   KET.execute_keeper_tool_call_with_outcome
@@ -287,14 +315,15 @@ let test_completion_with_evidence_refs_succeeds () =
          ~description:"claimed by the caller and completed with trusted proof");
     let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
     check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
+    seed_trace_evidence ~config "completion-trust-harness";
     let result =
       attempt_done
         ~config
         ~meta
         ~ctx_work
         ~task_id:"task-001"
-        ~result:"Implemented the deliverable and opened PR#123 for review."
-        ~evidence_refs:[ "PR#123" ]
+        ~result:"Implemented the deliverable and saved trace:completion-trust-harness evidence."
+        ~evidence_refs:[ "trace:completion-trust-harness" ]
         ()
     in
     check string "completion outcome" "success" (outcome_label result.KET.outcome);
@@ -311,12 +340,98 @@ let test_completion_with_evidence_refs_succeeds () =
         ; _
         } ->
       check string "done assignee" meta.agent_name assignee;
-      check (list string) "handoff evidence_refs" [ "PR#123" ] handoff.evidence_refs
+      check (list string) "handoff evidence_refs" [ "trace:completion-trust-harness" ] handoff.evidence_refs
     | Some task ->
       fail
         ("expected task-001 Done with handoff evidence refs, got "
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
+
+(* Test E — the evidence gate BLOCKS an untrusted (fake) reference on the *done*
+   path, and the block is RECOVERABLE. This closes the reject-path proof gap the
+   old harness docstring left open ("asserting a done-evidence reject here would
+   assert a gate that does not exist"): the deterministic evidence gate DOES run
+   on Done_action (tool_task.ml: needs_gate = Done_action -> true), so a done
+   attempt whose evidence_refs hold no trusted Evidence_ref shape is rejected here.
+
+   Two properties in one flow, mirroring test_completion_with_evidence_refs so the
+   ONLY changed variable is trusted-vs-untrusted evidence:
+   1. block:    substantive result (clears the anti-rationalization length floor)
+                + a prose "reference" a keeper might paste to fake completion
+                -> workflow rejection, FSM unchanged (anti-vacuity).
+   2. recover:  the SAME work re-submitted with locally resolvable trace evidence
+                completes. The keeper is not frozen — this is the property the
+                CDAL redesign had to preserve: block fake-done without stalling. *)
+let test_untrusted_evidence_denied_then_recovers () =
+  with_ws "completion_trust_untrusted_then_recover" (fun ~config ~meta ~ctx_work ->
+    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore
+      (Workspace.add_task config ~title:"complete with a fake reference" ~priority:1
+         ~description:"claimed by the caller, first faked then legitimately proven");
+    let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
+    check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
+    (* block: notes are substantive but the reference is untrusted prose. *)
+    let faked =
+      attempt_done
+        ~config
+        ~meta
+        ~ctx_work
+        ~task_id:"task-001"
+        ~result:"Completed the deliverable and verified it end to end."
+        ~evidence_refs:[ "trust me, it is done" ]
+        ()
+    in
+    check string "faked completion outcome" "failure" (outcome_label faked.KET.outcome);
+    check string "faked completion payload shape" "structured_error"
+      (payload_kind faked.KET.payload_shape);
+    let faked_json = parse_json faked.KET.raw_output in
+    check string "evidence reject is a workflow rejection" "workflow_rejection"
+      Yojson.Safe.Util.(member "failure_class" faked_json |> to_string);
+    check bool "reject names the trusted-evidence requirement (gate-specific signal)" true
+      (contains_substring faked.KET.raw_output
+         "no trusted, reviewer-inspectable evidence reference");
+    (* anti-vacuity: the faked attempt did NOT advance the FSM. *)
+    (match assignee_of config "task-001" with
+     | Some assignee ->
+       check string "task still owned by caller after the faked completion"
+         meta.agent_name assignee
+     | None ->
+       fail "task-001 must remain Claimed/InProgress after the rejected fake completion");
+    seed_trace_evidence ~config "completion-trust-recovery";
+    (* recover: same work, now with locally resolvable trace evidence, completes. *)
+    let recovered =
+      attempt_done
+        ~config
+        ~meta
+        ~ctx_work
+        ~task_id:"task-001"
+        ~result:
+          "Completed the deliverable and saved trace:completion-trust-recovery evidence."
+        ~evidence_refs:[ "trace:completion-trust-recovery" ]
+        ()
+    in
+    check string "recovery completion outcome" "success" (outcome_label recovered.KET.outcome);
+    check string "recovery payload shape" "structured_success"
+      (payload_kind recovered.KET.payload_shape);
+    match
+      List.find_opt
+        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
+        (Workspace.get_tasks_raw config)
+    with
+    | Some
+        { task_status = Masc_domain.Done { assignee; _ }
+        ; handoff_context = Some handoff
+        ; _
+        } ->
+      check string "recovered done assignee" meta.agent_name assignee;
+      check (list string) "recovered handoff evidence_refs"
+        [ "trace:completion-trust-recovery" ]
+        handoff.evidence_refs
+    | Some task ->
+      fail
+        ("expected task-001 Done after recovery, got "
+         ^ Masc_domain.task_status_to_string task.task_status)
+    | None -> fail "task-001 missing after recovery completion")
 
 (* Test D — positive control: the gates are SELECTIVE, not reject-everything.
    A keeper claiming its own backlog task is accepted on the same dispatch path. *)
@@ -344,6 +459,22 @@ let () =
      deterministic: notes below [min_notes_length] short-circuit before the
      Gate-3 LLM call, so no model runtime is ever invoked. *)
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
+  (* Wire the REAL evidence gate into the completion hook. The hook defaults to a
+     permissive stub (workspace_hooks.ml: always Pass); the running server swaps
+     in the deterministic gate at boot via Workspace_metric_hooks. Left unwired,
+     every done attempt passes the gate vacuously — a completion-with-evidence
+     test would go green without the gate ever running, and a fake-evidence
+     reject could never be observed. This replicates the boot adapter so the
+     reject/recover oracle (and the evidence_refs-success test) exercise the
+     gate itself rather than the stub. *)
+  Atomic.set Workspace_hooks.task_completion_gate_decide_fn
+    (fun ~base_path ~task_id ~task_opt ~notes ~handoff () ->
+      match
+        Task_completion_gate.decide ~base_path ~task_id ~task_opt ~notes ~handoff_context:handoff ()
+      with
+      | Task_completion_gate.Pass -> Workspace_hooks.Pass
+      | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
+        Workspace_hooks.Reject { reason; rule_id; hint; payload_json });
   run "Completion_trust_harness"
     [ ( "completion_trust_dispatch_oracle"
       , [ test_case "non-owner completion is denied (ownership gate)" `Quick
@@ -354,6 +485,8 @@ let () =
             `Quick test_completion_denied_for_thin_notes
         ; test_case "completion with evidence_refs succeeds"
             `Quick test_completion_with_evidence_refs_succeeds
+        ; test_case "untrusted evidence is denied then a trusted retry recovers"
+            `Quick test_untrusted_evidence_denied_then_recovers
         ; test_case "legitimate self-claim is accepted (selectivity control)" `Quick
             test_legitimate_claim_succeeds
         ] )

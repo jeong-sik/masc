@@ -46,4 +46,27 @@ describe('NavRailV2 schedule badge', () => {
 
     expect(scheduleNavItem(container)?.querySelector('.nav-badge')).toBeNull()
   })
+
+  // Rail order + group breaks mirror the 2026-07 keeper-v2 standalone export.
+  it('renders the v2 export rail order with Monitor after Keepers', () => {
+    render(html`<${NavRailV2} />`, container)
+
+    const rail = container.querySelector('.v2-nav')
+    const walk = Array.from(rail?.children ?? []).map(el => {
+      if (el.className.includes('nav-div')) return '|'
+      if (el.className.includes('nav-brand')) return 'brand'
+      if (el.className.includes('nav-spacer')) return 'spacer'
+      return el.getAttribute('title')
+    })
+    expect(walk).toEqual([
+      'brand',
+      '개요', '|',
+      'Keepers', 'Monitor', '|',
+      '작업', '승인', '예약', '|',
+      '보드', 'Fusion', '로그', '|',
+      'IDE', '커넥터',
+      'spacer',
+      '설정',
+    ])
+  })
 })

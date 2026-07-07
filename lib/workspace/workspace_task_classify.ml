@@ -205,9 +205,10 @@ let empty_task_contract =
    keepers who did not know the tokens and (b) let any completion be faked by
    pasting the labels. The completion gate ([Task_completion_gate]) no longer
    reads these entries at all: it accepts a completion only when the caller
-   supplies at least one trusted typed Evidence_ref (PR / commit / URL / trace
-   id) on handoff_context.evidence_refs — one flexible bar across code and
-   non-code tasks. [required_evidence] now serves only as human/LLM/verifier
+   supplies at least one locally validated typed Evidence_ref (base-path file /
+   file URI, local git commit, or local .masc trace/turn/receipt artifact) on
+   handoff_context.evidence_refs — one flexible bar across code and non-code
+   tasks. [required_evidence] now serves only as human/LLM/verifier
    description; typed-kind binding (a code task must cite a PR) is Phase 2. *)
 let default_verification_evidence_refs = []
 

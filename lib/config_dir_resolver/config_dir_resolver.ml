@@ -534,8 +534,11 @@ let locks_dir ~base_path =
 let data_dir ~base_path =
   Filename.concat base_path "data"
 
+let repositories_toml_basename = "repositories.toml"
+
 let repositories_toml_path ~base_path =
-  Filename.concat (masc_root ~base_path) "config/repositories.toml"
+  Filename.concat (masc_root ~base_path)
+    (Filename.concat "config" repositories_toml_basename)
 
 let keeper_repo_mappings_toml_path ~base_path =
   Filename.concat (masc_root ~base_path) "config/keeper_repo_mappings.toml"

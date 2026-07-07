@@ -1111,6 +1111,17 @@ let add_routes ~sw ~clock router =
                  (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
          )
          request reqd)
+  |> Http.Router.post "/api/v1/dashboard/schedule/prune" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           let config = Mcp_server.workspace_config state in
+           match dashboard_schedule_prune_http_json ~config ~operator_name with
+           | Ok json -> respond_json_value_with_cors request reqd json
+           | Error message ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (operator_error_json message)
+         )
+         request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/rules/delete" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

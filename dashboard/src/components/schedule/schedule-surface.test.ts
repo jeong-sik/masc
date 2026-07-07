@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
+  pruneSchedules: vi.fn(),
 }))
 
 vi.mock('../tools/tool-state', () => ({
@@ -23,6 +24,10 @@ vi.mock('../tools/tool-state', () => ({
   toolsData: mocks.toolsData,
   toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
+}))
+
+vi.mock('../../api/dashboard-governance', () => ({
+  pruneSchedules: mocks.pruneSchedules,
 }))
 
 import { ScheduleSurface } from './schedule-surface'
@@ -138,6 +143,7 @@ describe('ScheduleSurface', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.loadTools.mockClear()
+    mocks.pruneSchedules.mockReset()
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
@@ -279,6 +285,32 @@ describe('ScheduleSurface', () => {
 
     expect(container.textContent).toContain('dashboard tools unavailable')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+  })
+
+  it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+    mocks.pruneSchedules.mockResolvedValue({ ok: true, pruned_count: 5 })
+    const originalConfirm = window.confirm
+    window.confirm = vi.fn().mockReturnValue(true)
+
+    try {
+      render(html`<${ScheduleSurface} />`, container)
+      await flush()
+
+      container.querySelector<HTMLButtonElement>('[data-testid="schedule-prune-btn"]')?.click()
+      await flush()
+
+      expect(window.confirm).toHaveBeenCalledTimes(1)
+      expect(mocks.pruneSchedules).toHaveBeenCalledTimes(1)
+      expect(mocks.loadTools).toHaveBeenCalledTimes(1)
+    } finally {
+      window.confirm = originalConfirm
+    }
   })
 
   it('defaults to the calendar view with a cadence filter strip', async () => {

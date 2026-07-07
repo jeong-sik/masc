@@ -43,6 +43,7 @@
   test_advisory_only_affordance_never_drives_wake
   test_keeper_failed_task_orphan_does_not_livelock
   test_broadcast_wakeup_policy
+  test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_librarian_retry
@@ -262,6 +263,7 @@
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
+  test_keeper_wake_turn_context
   test_keeper_post_turn_interruption_note
   test_keeper_unified_verification_surface
   test_keeper_observation_provenance
@@ -399,6 +401,7 @@
   test_advisory_only_affordance_never_drives_wake
   test_keeper_failed_task_orphan_does_not_livelock
   test_broadcast_wakeup_policy
+  test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_librarian_retry
@@ -619,6 +622,7 @@
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
+  test_keeper_wake_turn_context
   test_keeper_post_turn_interruption_note
   test_keeper_unified_verification_surface
   test_keeper_observation_provenance

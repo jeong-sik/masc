@@ -1,5 +1,5 @@
 (** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
-    See compaction_llm_summarizer.mli. Structure mirrors
+    See keeper_compaction_llm_summarizer.mli. Structure mirrors
     Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
     schema-capable provider filter + timeout + fail-closed [None]. *)
 
@@ -54,7 +54,12 @@ let provider_for_plan (provider_cfg : Llm_provider.Provider_config.t) =
   ; tool_choice = None
   ; disable_parallel_tool_use = true
   }
-  |> Schema.apply_to_provider_config Schema.compaction_plan_output_schema
+  (* Full module path (not the [Schema] alias): the structured-output
+     coverage test resolves callees literally via Ast_grep.count_calls, so
+     this call must read [Keeper_structured_output_schema.apply_to_provider_config]
+     in source — same pattern as the other registry entries. *)
+  |> Keeper_structured_output_schema.apply_to_provider_config
+       Schema.compaction_plan_output_schema
 
 let plan_schema_supported provider_cfg =
   Schema.provider_config_accepts_schema Schema.compaction_plan_output_schema provider_cfg
@@ -167,12 +172,20 @@ let validate_non_empty_output ~message_count ~kept ~summarized =
 let plan_of_json ~message_count json =
   let* summary = string_field Schema.compaction_plan_field_summary json in
   let summary = String.trim summary in
-  let* () =
-    if summary = "" then Error "summary must be non-empty" else Ok ()
-  in
   let* kept = int_list_field Schema.compaction_plan_field_kept_indices json in
   let* summarized = int_list_field Schema.compaction_plan_field_summarized_indices json in
   let* dropped = int_list_field Schema.compaction_plan_field_dropped_indices json in
+  (* The summary stands in for the [summarized] messages; it is consumed by
+     [apply] only when [summarized] is non-empty. Requiring it non-empty
+     unconditionally would reject a legitimate "keep everything, nothing to
+     summarize" plan (summary="") and spuriously fall back to the
+     deterministic chain. So the summary must be non-empty iff it will be
+     used. *)
+  let* () =
+    if summarized <> [] && summary = ""
+    then Error "summary must be non-empty when summarized indices are present"
+    else Ok ()
+  in
   let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
   let* () = validate_non_empty_output ~message_count ~kept ~summarized in
   Ok { summary; kept; summarized; dropped }

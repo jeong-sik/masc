@@ -1607,7 +1607,8 @@ export function DashboardMain() {
 
   const routeLabel = dashboardRouteBoundaryKey(route.value)
   const soloMode = isWidgetSoloRoute(route.value)
-  const immersiveSurface = route.value.tab === 'code' || route.value.tab === 'keepers'
+  const immersiveSurface =
+    route.value.tab === 'code' || route.value.tab === 'keepers' || route.value.tab === 'schedule'
   const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
   const renderSurfaceLead = shouldRenderSurfaceLead(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`

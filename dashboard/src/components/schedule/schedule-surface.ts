@@ -15,7 +15,9 @@ import { useEffect, useState } from 'preact/hooks'
 import { ConnectionStatus } from '../dashboard-shell'
 import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
+import { ActionButton } from '../common/button'
 import { StatusChip } from '../common/status-chip'
+import { showToast } from '../common/toast'
 import { KeeperLaneInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
 import {
   ScheduleAside,
@@ -32,6 +34,7 @@ import {
   toolsError,
   toolsLoading,
 } from '../tools/tool-state'
+import { pruneSchedules } from '../../api/dashboard-governance'
 
 type ScheduleView = 'calendar' | 'list'
 
@@ -84,6 +87,7 @@ export function ScheduleSurface() {
 
   const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
+  const [pruning, setPruning] = useState(false)
   // Detail-overlay selection is lifted here so the calendar view, the list
   // panel, and the operations aside all drive the same overlay.
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
@@ -102,6 +106,27 @@ export function ScheduleSurface() {
   }
 
   const refresh = (): Promise<void> => loadTools()
+  async function handlePrune() {
+    if (
+      !window.confirm(
+        '완료되었거나 취소/만료/반려된 예약을 정리하시겠습니까?\n연관된 실행 기록 및 권한 승인도 함께 삭제됩니다.',
+      )
+    ) {
+      return
+    }
+    setPruning(true)
+    try {
+      const result = await pruneSchedules()
+      showToast(`완료된 예약 ${result.pruned_count.toLocaleString()}개를 정리했습니다.`, 'success')
+      await refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('[ScheduleSurface] prune failed:', error)
+      showToast(message, 'error')
+    } finally {
+      setPruning(false)
+    }
+  }
   // In the calendar view the list panel is unmounted, so the surface owns the
   // overlay; the list panel renders its own overlay from the same selection.
   const selectedRequest =
@@ -124,7 +149,19 @@ export function ScheduleSurface() {
               <span>schedule runner projection을 읽어 표시하며, 이 화면에서 keeper turn을 자동 구동하지 않습니다.</span>
             </div>
           </div>
-          <${ConnectionStatus} />
+          <div class="flex flex-col items-end gap-2">
+            <${ConnectionStatus} />
+            <${ActionButton}
+              variant="danger"
+              size="sm"
+              onClick=${handlePrune}
+              disabled=${pruning}
+              ariaBusy=${pruning}
+              testId="schedule-prune-btn"
+            >
+              ${pruning ? '정리 중...' : '완료된 예약 정리'}
+            <//>
+          </div>
         </header>
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}

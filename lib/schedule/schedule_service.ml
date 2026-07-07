@@ -124,3 +124,9 @@ let due_candidates config ~now =
   | Error err -> Error (Store_error err)
   | Ok (state, _) -> Ok (Schedule_store.due_execution_candidates state)
 ;;
+
+let prune config =
+  match Schedule_store.prune_completed config with
+  | Error err -> Error (Store_error err)
+  | Ok (state, count) -> Ok (state, count)
+;;

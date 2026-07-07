@@ -133,7 +133,9 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
       Transient_capacity
     | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
       Transient_capacity
-    | _ when is_transient_network_error err ->
+    | Agent_sdk.Error.Api (NetworkError _ | Timeout _) ->
+      Transient_network
+    | Agent_sdk.Error.Api (ServerError { status = (503 | 522 | 524); _ }) ->
       Transient_network
     | Agent_sdk.Error.Provider
         (Llm_provider.Error.NetworkError
@@ -143,6 +145,14 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
           ; _
           }) ->
       Non_transient
+    | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) ->
+      Transient_network
+    | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
+      Transient_network
+    | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
+      Transient_network
+    | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient = true; _ }) ->
+      Transient_network
     | Agent_sdk.Error.Api
         ( ServerError _
         | AuthError _
@@ -154,6 +164,7 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
     | Agent_sdk.Error.Provider
         ( Llm_provider.Error.AuthError _
         | Llm_provider.Error.ParseError _
+        | Llm_provider.Error.ServerError _
         | Llm_provider.Error.InvalidRequest _
         | Llm_provider.Error.HardQuota _
         | Llm_provider.Error.ProviderUnavailable _

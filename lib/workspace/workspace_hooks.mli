@@ -195,7 +195,8 @@ type evidence_gate_verdict =
   | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
 
 val task_completion_gate_decide_fn :
-  (task_id:string ->
+  (base_path:string ->
+   task_id:string ->
    task_opt:Masc_domain.task option ->
    notes:string ->
    handoff:Masc_domain.task_handoff_context option ->

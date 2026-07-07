@@ -109,6 +109,11 @@ let remote_branch_exists root branch =
       ]
     = 0
 
+let commit_exists ~root ~commit =
+  run_argv_exit
+    [ "git"; "-C"; root; "cat-file"; "-e"; commit ^ "^{commit}" ]
+  = 0
+
 let origin_head_branch root =
   let line = run_argv_line ["git"; "-C"; root; "symbolic-ref"; "-q"; "refs/remotes/origin/HEAD"] in
   match line with

@@ -123,6 +123,19 @@ let make_test_ctx_with_agent agent_name =
 
 let make_test_ctx () = make_test_ctx_with_agent "test-agent"
 
+let seed_trace_evidence ctx trace_id =
+  let base_path = ctx.Task.Tool.config.Workspace.base_path in
+  let path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat base_path ".masc")
+         "trajectories/test-agent")
+      (trace_id ^ ".jsonl")
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    {|{"type":"tool_task_coverage_evidence","turn":0,"trace_id":"test"}|}
+
 let make_temp_dir prefix =
   incr test_counter;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -212,8 +225,9 @@ let workspace_evidence_verdict_of_cdal = function
   | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
 
-let real_task_completion_gate ~task_id ~task_opt ~notes ~handoff () =
+let real_task_completion_gate ~base_path ~task_id ~task_opt ~notes ~handoff () =
   Task_completion_gate.decide
+    ~base_path
     ~task_id
     ~task_opt
     ~notes
@@ -717,12 +731,13 @@ let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fu
                         `List [ `String "deliverable-ready" ] );
                       ("required_evidence", `List [ `String "run_deliverable" ]);
                     ] );
-              ])
+                ])
         in
         let _ =
           Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
             (`Assoc [ ("task_id", `String "task-001") ])
         in
+        seed_trace_evidence ctx "run_deliverable";
         let result_done =
           Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
             (`Assoc
@@ -1254,7 +1269,7 @@ let () = test "handle_transition_done_rejects_task_completion_gate_failure" (fun
   start_task_001 ctx;
   let gate_calls = ref 0 in
   with_task_completion_gate_decide
-    (fun ~task_id ~task_opt ~notes ~handoff:_ () ->
+    (fun ~base_path:_ ~task_id ~task_opt ~notes ~handoff:_ () ->
        incr gate_calls;
        assert (String.equal task_id "task-001");
        assert (str_contains notes "artifact:run_deliverable");
@@ -1303,15 +1318,16 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
   start_task_001 ctx;
   let gate_calls = ref 0 in
   with_task_completion_gate_decide
-    (fun ~task_id ~task_opt ~notes ~handoff () ->
+    (fun ~base_path ~task_id ~task_opt ~notes ~handoff () ->
        incr gate_calls;
        assert (String.equal task_id "task-001");
        assert (str_contains notes "trace:task-1815");
        (match task_opt with
         | Some { Masc_domain.contract = None; _ } -> ()
         | _ -> failwith "expected analysis-only task with no contract");
-       real_task_completion_gate ~task_id ~task_opt ~notes ~handoff ())
+       real_task_completion_gate ~base_path ~task_id ~task_opt ~notes ~handoff ())
     (fun () ->
+       seed_trace_evidence ctx "task-1815";
        let result =
          Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
            (`Assoc
@@ -1356,6 +1372,7 @@ let () = test "handle_transition_done_default_contract_accepts_trusted_evidence_
   start_task_001 ctx;
   (* RFC-0311 Phase 1: a default-contract task completes on a trusted
      handoff evidence ref (here a trace id), not on substantive notes alone. *)
+  seed_trace_evidence ctx "default-contract-done";
   let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -1418,9 +1435,9 @@ let () = test "handle_transition_force_done_still_rejects_cdal_evidence_incomple
             String.equal agent_name "admin-agent");
        let gate_calls = ref 0 in
        with_task_completion_gate_decide
-         (fun ~task_id ~task_opt ~notes ~handoff () ->
+         (fun ~base_path ~task_id ~task_opt ~notes ~handoff () ->
             incr gate_calls;
-            real_task_completion_gate ~task_id ~task_opt ~notes ~handoff ())
+            real_task_completion_gate ~base_path ~task_id ~task_opt ~notes ~handoff ())
          (fun () ->
             let result =
               Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -2312,6 +2329,7 @@ let () = test "transition_done_completes_after_llm_review_and_clears_planning_cu
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
   assert (Tool_result.is_success claim_result);
+  seed_trace_evidence ctx "task-1815";
   let done_result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -2682,6 +2700,7 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
   let ctx = make_test_ctx () in
   (* Create a task, mark it as done *)
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done task")]) in
+  seed_trace_evidence ctx "done-task";
   let _ = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [
     ("task_id", `String "task-001");
     ("action", `String "done");

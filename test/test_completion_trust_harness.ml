@@ -34,9 +34,11 @@
     so the gate-specific assertion is what proves the *intended* gate fired. Each
     reject also asserts the task FSM was NOT mutated (anti-vacuity).
 
-    Completion success and evidence-gate recovery are covered with a trusted
-    evidence reference ([PR#123]), keeping the no-LLM fixture deterministic while
-    proving the gate is selective rather than reject-everything. The evaluator's
+    Completion success is covered with a locally resolvable trace artifact, so
+    the deterministic evidence gate validates the ref without a network/forge
+    lookup. Evidence-gate rejection and recovery are covered by replaying a fake
+    prose ref followed by a locally resolvable trace ref, proving the gate is
+    selective rather than reject-everything. The evaluator's
     Indeterminate-dominates determinism remains covered by
     test_keeper_deterministic_evidence_probe.ml.
 
@@ -68,6 +70,22 @@ let cleanup_dir path =
       else Unix.unlink target
   in
   try rm path with _ -> ()
+
+let rec mkdir_p path =
+  if Sys.file_exists path then ()
+  else begin
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let write_file path contents =
+  mkdir_p (Filename.dirname path);
+  let output = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output contents)
 
 let make_meta ?(name = "keeper-completion-trust") () =
   match
@@ -165,6 +183,17 @@ let attempt_done
           , `List (List.map (fun ref_ -> `String ref_) evidence_refs) )
         ])
     ()
+
+let seed_trace_evidence ~config trace_id =
+  let path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat config.Workspace.base_path ".masc")
+         "trajectories/keeper-completion-trust")
+      (trace_id ^ ".jsonl")
+  in
+  write_file path
+    {|{"type":"completion_trust_evidence","turn":0,"trace_id":"test"}|}
 
 let claim_via_dispatch ~config ~meta ~ctx_work ~task_id =
   KET.execute_keeper_tool_call_with_outcome
@@ -286,14 +315,15 @@ let test_completion_with_evidence_refs_succeeds () =
          ~description:"claimed by the caller and completed with trusted proof");
     let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
     check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
+    seed_trace_evidence ~config "completion-trust-harness";
     let result =
       attempt_done
         ~config
         ~meta
         ~ctx_work
         ~task_id:"task-001"
-        ~result:"Implemented the deliverable and opened PR#123 for review."
-        ~evidence_refs:[ "PR#123" ]
+        ~result:"Implemented the deliverable and saved trace:completion-trust-harness evidence."
+        ~evidence_refs:[ "trace:completion-trust-harness" ]
         ()
     in
     check string "completion outcome" "success" (outcome_label result.KET.outcome);
@@ -310,7 +340,7 @@ let test_completion_with_evidence_refs_succeeds () =
         ; _
         } ->
       check string "done assignee" meta.agent_name assignee;
-      check (list string) "handoff evidence_refs" [ "PR#123" ] handoff.evidence_refs
+      check (list string) "handoff evidence_refs" [ "trace:completion-trust-harness" ] handoff.evidence_refs
     | Some task ->
       fail
         ("expected task-001 Done with handoff evidence refs, got "
@@ -329,7 +359,7 @@ let test_completion_with_evidence_refs_succeeds () =
    1. block:    substantive result (clears the anti-rationalization length floor)
                 + a prose "reference" a keeper might paste to fake completion
                 -> workflow rejection, FSM unchanged (anti-vacuity).
-   2. recover:  the SAME work re-submitted with a trusted reference (PR#123)
+   2. recover:  the SAME work re-submitted with locally resolvable trace evidence
                 completes. The keeper is not frozen — this is the property the
                 CDAL redesign had to preserve: block fake-done without stalling. *)
 let test_untrusted_evidence_denied_then_recovers () =
@@ -367,15 +397,17 @@ let test_untrusted_evidence_denied_then_recovers () =
          meta.agent_name assignee
      | None ->
        fail "task-001 must remain Claimed/InProgress after the rejected fake completion");
-    (* recover: same work, now with a trusted reference, completes. *)
+    seed_trace_evidence ~config "completion-trust-recovery";
+    (* recover: same work, now with locally resolvable trace evidence, completes. *)
     let recovered =
       attempt_done
         ~config
         ~meta
         ~ctx_work
         ~task_id:"task-001"
-        ~result:"Completed the deliverable and verified it end to end."
-        ~evidence_refs:[ "PR#123" ]
+        ~result:
+          "Completed the deliverable and saved trace:completion-trust-recovery evidence."
+        ~evidence_refs:[ "trace:completion-trust-recovery" ]
         ()
     in
     check string "recovery completion outcome" "success" (outcome_label recovered.KET.outcome);
@@ -392,7 +424,9 @@ let test_untrusted_evidence_denied_then_recovers () =
         ; _
         } ->
       check string "recovered done assignee" meta.agent_name assignee;
-      check (list string) "recovered handoff evidence_refs" [ "PR#123" ] handoff.evidence_refs
+      check (list string) "recovered handoff evidence_refs"
+        [ "trace:completion-trust-recovery" ]
+        handoff.evidence_refs
     | Some task ->
       fail
         ("expected task-001 Done after recovery, got "
@@ -434,9 +468,9 @@ let () =
      reject/recover oracle (and the evidence_refs-success test) exercise the
      gate itself rather than the stub. *)
   Atomic.set Workspace_hooks.task_completion_gate_decide_fn
-    (fun ~task_id ~task_opt ~notes ~handoff () ->
+    (fun ~base_path ~task_id ~task_opt ~notes ~handoff () ->
       match
-        Task_completion_gate.decide ~task_id ~task_opt ~notes ~handoff_context:handoff ()
+        Task_completion_gate.decide ~base_path ~task_id ~task_opt ~notes ~handoff_context:handoff ()
       with
       | Task_completion_gate.Pass -> Workspace_hooks.Pass
       | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->

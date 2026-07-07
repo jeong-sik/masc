@@ -458,6 +458,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     if not needs_gate then Workspace_hooks.Pass
     else
       (Atomic.get Workspace_hooks.task_completion_gate_decide_fn)
+        ~base_path:ctx.config.base_path
         ~task_id
         ~task_opt
         ~notes

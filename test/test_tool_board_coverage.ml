@@ -1788,10 +1788,15 @@ let claim_gate_sidecar_path () =
 
 let claim_gate_posts_path () = Board.persist_path ()
 
+let claim_gate_source_post_seq = ref 0
+
 let create_claim_gate_source_post () =
+  incr claim_gate_source_post_seq;
   let correction =
-    "Correction: I did not create the PoC claimed here. \
-     repos/masc/scratch/task-1746-poc.ml does not exist."
+    Printf.sprintf
+      "Correction %d: I did not create the PoC claimed here. \
+       repos/masc/scratch/task-1746-poc.ml does not exist."
+      !claim_gate_source_post_seq
   in
   let ok, body =
     dispatch
@@ -1934,7 +1939,7 @@ let test_comment_claim_gate_allows_missing_artifact_block () =
   cleanup ();
   let source = create_claim_gate_source_post () in
   let post_id = Yojson.Safe.Util.(source |> member "id" |> to_string) in
-  let ok, body =
+  let ok, _body =
     dispatch
       "masc_board_comment"
       (make_args
@@ -1947,7 +1952,12 @@ let test_comment_claim_gate_allows_missing_artifact_block () =
          ])
   in
   Alcotest.(check bool) "missing-artifact block allowed" true ok;
-  Alcotest.(check bool) "comment added" true (contains_substring body "Comment added");
+  let comments =
+    match Board_dispatch.get_comments ~post_id with
+    | Ok comments -> comments
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check int) "comment persisted" 1 (List.length comments);
   let sidecar_body =
     In_channel.with_open_text (claim_gate_sidecar_path ()) In_channel.input_all
   in
@@ -1995,6 +2005,8 @@ let test_post_create_claim_gate_rolls_back_on_sidecar_failure () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let sidecar = claim_gate_sidecar_path () in
+  let parent = Filename.dirname sidecar in
+  if not (Sys.file_exists parent) then Unix.mkdir parent 0o755;
   Unix.mkdir sidecar 0o755;
   let result =
     dispatch_result

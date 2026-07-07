@@ -40,7 +40,9 @@ import {
   type KeeperCursorOverlay,
   type KeeperCursorStreamState,
 } from './keeper-cursor-overlay'
-import { lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
+import { lspStatusSnapshot, type LspStatusSnapshot, type SelectedAnnotation } from './ide-lsp-client'
+import { deleteIdeAnnotation, type IdeAnnotationDeleteOutcome } from '../../api/ide'
+import { showToast } from '../common/toast'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -1091,6 +1093,41 @@ export function IdeShell() {
     navigate('code', nextParams)
   }
 
+  // Annotation deletion (#23471 FE follow-up). Mirrors the composer's
+  // contract: mutations need a repo scope (keeper_lane is read-only) and
+  // ownership is decided server-side from the token identity, so the
+  // handler translates each outcome into a toast instead of pre-judging
+  // deletability in the FE.
+  const handleAnnotationDelete = async (
+    annotation: SelectedAnnotation,
+  ): Promise<IdeAnnotationDeleteOutcome> => {
+    const repoId = workspaceStore.activeRepositoryId()
+    if (repoId === null) {
+      showToast('주석 삭제에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)', 'error')
+      return 'error'
+    }
+    const outcome = await deleteIdeAnnotation(annotation.id, { repoId })
+    switch (outcome) {
+      case 'deleted':
+        showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
+        workspaceStore.refresh()
+        break
+      case 'rejected':
+        showToast('주석 삭제 거부 — 본인이 작성한 주석이 아니거나 이미 삭제된 주석입니다', 'error')
+        break
+      case 'forbidden':
+        showToast('주석 삭제 권한 없음 — 토큰에 쓰기 권한(CanBroadcast tier)이 필요합니다', 'error')
+        break
+      case 'unauthorized':
+        showToast('인증 실패 — 대시보드 토큰이 없거나 만료되었습니다', 'error')
+        break
+      case 'error':
+        showToast('주석 삭제 실패 — 서버/네트워크 오류', 'error')
+        break
+    }
+    return outcome
+  }
+
   const handleFindOpen = () => {
     navigate('code', {
       ...route.value.params,
@@ -1268,6 +1305,7 @@ export function IdeShell() {
             onFindClose=${handleFindClose}
             onKeeperLineSelect=${pinKeeper}
             annotations=${annotations}
+            onAnnotationDelete=${handleAnnotationDelete}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
         </div>

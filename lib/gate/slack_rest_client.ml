@@ -12,11 +12,13 @@
 
 type error =
   | Network of string
+  | Http_status of { code : int; body : string }
   | Slack_api of { error : string }
   | Other of string
 
 let pp_error fmt = function
   | Network msg -> Format.fprintf fmt "network: %s" msg
+  | Http_status { code; body } -> Format.fprintf fmt "http %d: %s" code body
   | Slack_api { error } -> Format.fprintf fmt "slack api: %s" error
   | Other msg -> Format.fprintf fmt "other: %s" msg
 
@@ -49,9 +51,9 @@ let build_post_message_request ~token ~channel_id ~text ?thread_ts () =
   let body = Yojson.Safe.to_string (`Assoc fields) in
   (url, headers, body)
 
-(* Slack returns HTTP 200 with [{ ok }] even on logical failure, so the parse
-   branches on the [ok] flag rather than the HTTP status. *)
-let parse_post_response ~body =
+(* Slack returns HTTP 200 with [{ ok }] even on logical failure; after the
+   transport-level 2xx check, branch on Slack's [ok] flag. *)
+let parse_post_json_response ~body =
   match parse_json_safe body with
   | None -> Error (Other ("response not JSON: " ^ body))
   | Some json ->
@@ -70,13 +72,17 @@ let parse_post_response ~body =
        | Some (`String ts) -> Ok ts
        | _ -> Error (Other "ok=true but missing 'ts'"))
 
+let parse_post_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else parse_post_json_response ~body
+
 let send_message ~token ~channel_id ~text ?thread_ts () =
   let (url, headers, body) =
     build_post_message_request ~token ~channel_id ~text ?thread_ts ()
   in
   match Masc_http_client.post_sync ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
-  | Ok (_status, body) -> parse_post_response ~body
+  | Ok (status, body) -> parse_post_response ~status ~body
 
 let build_update_request ~token ~channel_id ~ts ~text () =
   let url = "https://slack.com/api/chat.update" in
@@ -88,24 +94,28 @@ let build_update_request ~token ~channel_id ~ts ~text () =
   in
   (url, headers, body)
 
+let parse_update_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else
+    match parse_json_safe body with
+    | None -> Error (Other ("response not JSON: " ^ body))
+    | Some json ->
+        let ok =
+          match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
+        in
+        if ok then Ok ()
+        else
+          let err =
+            match field_opt "error" json with
+            | Some (`String e) -> e
+            | _ -> "update failed"
+          in
+          Error (Slack_api { error = err })
+
 let edit_message ~token ~channel_id ~ts ~text () =
   let (url, headers, body) =
     build_update_request ~token ~channel_id ~ts ~text ()
   in
   match Masc_http_client.post_sync ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
-  | Ok (_status, body) -> (
-    match parse_json_safe body with
-    | None -> Error (Other ("response not JSON: " ^ body))
-    | Some json ->
-      let ok =
-        match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
-      in
-      if ok then Ok ()
-      else
-        let err =
-          match field_opt "error" json with
-          | Some (`String e) -> e
-          | _ -> "update failed"
-        in
-        Error (Slack_api { error = err }))
+  | Ok (status, body) -> parse_update_response ~status ~body

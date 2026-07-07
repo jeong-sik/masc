@@ -1847,6 +1847,8 @@
 
 (include stanzas/test_discord_rest_client.inc)
 
+(include stanzas/test_slack_rest_client.inc)
+
 (include stanzas/test_discord_wss_bridge.inc)
 
 (include stanzas/test_discord_wss_lifecycle.inc)

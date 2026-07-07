@@ -81,7 +81,9 @@ let reject_payload ~task_id ~contract_required ~notes ~handoff_context : Yojson.
    live task fails closed. *)
 let decide ~task_id ~task_opt ~notes ~handoff_context () =
   let handoff_refs_count =
-    match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs
+    match (handoff_context : Masc_domain.task_handoff_context option) with
+    | None -> 0
+    | Some hc -> List.length hc.evidence_refs
   in
   match (task_opt : Masc_domain.task option) with
   | None ->

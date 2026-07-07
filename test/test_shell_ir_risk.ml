@@ -224,6 +224,12 @@ let test_gh_r1_reversible () =
   check "gh pr create" Shell_ir_risk.R1_Reversible_mutation;
   check "gh pr close 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh --repo owner/repo pr close 123" Shell_ir_risk.R1_Reversible_mutation;
+  (* RFC-0309 W4/G-9: [pr ready] is reversible ([--undo] toggles back to draft),
+     so the risk axis is R1 like [pr create]. The floor stays flag-robust for the
+     leading-global-flag form. *)
+  check "gh pr ready 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh pr ready 123 --undo" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh --repo owner/repo pr ready 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh pr checkout 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh pr reopen 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh issue create" Shell_ir_risk.R1_Reversible_mutation;
@@ -265,7 +271,6 @@ let test_gh_r1_reversible () =
 
 let test_gh_r2_irreversible () =
   check "gh pr merge 123" Shell_ir_risk.R2_Irreversible;
-  check "gh pr ready 123" Shell_ir_risk.R2_Irreversible;
   check "gh repo delete owner/repo" Shell_ir_risk.R2_Irreversible;
   check "gh repo archive owner/repo" Shell_ir_risk.R2_Irreversible;
   check "gh repo transfer owner/repo" Shell_ir_risk.R2_Irreversible;

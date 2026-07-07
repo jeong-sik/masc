@@ -564,6 +564,91 @@ let test_valid_ref_rejects_oversize () =
   Alcotest.(check bool) "oversize refused"
     false (W.valid_git_ref (String.make 257 'a'))
 
+(* --- blame --porcelain parsing --- *)
+
+module B = W.For_testing_blame
+
+let sha_a = "4f03f7437bab0d9926bf5f373d7e39259a663a8a"
+let sha_b = "9b2c33d4e5f60718293a4b5c6d7e8f9012345678"
+
+(* Two commits interleaved: sha_a owns lines 1-2 and 4, sha_b owns line 3.
+   git emits sha_a's metadata block only once (first group); line 4 repeats
+   the bare header, arriving AFTER sha_b's metadata — the regression case
+   where sequential state tracking would attribute line 4 to sha_b. *)
+let porcelain_fixture =
+  [ sha_a ^ " 1 1 2"
+  ; "author Alice"
+  ; "author-mail <alice@example.com>"
+  ; "author-time 1700000100"
+  ; "author-tz +0900"
+  ; "committer Alice"
+  ; "summary first commit"
+  ; "filename file.txt"
+  ; "\tline one"
+  ; sha_a ^ " 2 2"
+  ; "\tline two"
+  ; sha_b ^ " 3 3 1"
+  ; "author Bob"
+  ; "author-time 1700000200"
+  ; "summary second commit"
+  ; "filename file.txt"
+  ; "\tline three"
+  ; sha_a ^ " 9 4 1"
+  ; "\tline four"
+  ]
+
+let test_blame_header_with_count () =
+  Alcotest.(check (option (pair string int)))
+    "header with group size parses final line"
+    (Some (sha_a, 1))
+    (B.parse_blame_header (sha_a ^ " 1 1 2"))
+
+let test_blame_header_without_count () =
+  Alcotest.(check (option (pair string int)))
+    "bare repeated header parses final line"
+    (Some (sha_a, 2))
+    (B.parse_blame_header (sha_a ^ " 2 2"))
+
+let test_blame_header_rejects_non_headers () =
+  List.iter
+    (fun line ->
+      Alcotest.(check (option (pair string int)))
+        (Printf.sprintf "non-header rejected: %S" line)
+        None
+        (B.parse_blame_header line))
+    [ "author Alice"
+    ; "author-time 1700000100"
+    ; "\tline content 12 34"
+    ; "filename file.txt"
+    ; String.sub sha_a 0 39 ^ " 1 1"
+    ; sha_a ^ " 1 zero"
+    ; sha_a
+    ]
+
+let test_blame_porcelain_sha_join () =
+  let entries = B.parse_blame_porcelain porcelain_fixture in
+  Alcotest.(check int) "all four lines attributed" 4 (List.length entries);
+  let by_line n = List.find (fun e -> e.B.bl_line = n) entries in
+  Alcotest.(check string) "line 1 author" "Alice" (by_line 1).B.bl_author;
+  Alcotest.(check string) "line 3 author" "Bob" (by_line 3).B.bl_author;
+  Alcotest.(check int64) "line 1 time" 1700000100L (by_line 1).B.bl_time;
+  Alcotest.(check int64) "line 3 time" 1700000200L (by_line 3).B.bl_time
+
+let test_blame_porcelain_repeated_sha () =
+  let entries = B.parse_blame_porcelain porcelain_fixture in
+  let line4 = List.find (fun e -> e.B.bl_line = 4) entries in
+  Alcotest.(check string)
+    "line 4 (bare repeated sha_a header after Bob's metadata) is Alice's"
+    "Alice" line4.B.bl_author;
+  Alcotest.(check int64) "line 4 keeps sha_a's time" 1700000100L line4.B.bl_time
+
+let test_blame_group_adjacent () =
+  let entries = B.parse_blame_porcelain porcelain_fixture in
+  let grouped = B.group_blame_entries "file.txt" entries in
+  Alcotest.(check int)
+    "lines 1-2 fold into one range; 3 and 4 stay separate" 3
+    (List.length grouped)
+
 let () =
   Alcotest.run "workspace_routes_keeper"
     [ ( "classify_keeper_query"
@@ -633,6 +718,20 @@ let () =
         ; Alcotest.test_case "binary" `Quick test_parse_git_numstat_line_binary
         ; Alcotest.test_case "zero change ignored" `Quick
             test_parse_git_numstat_line_zero_change_is_ignored
+        ] )
+    ; ( "blame_porcelain"
+      , [ Alcotest.test_case "header with group count" `Quick
+            test_blame_header_with_count
+        ; Alcotest.test_case "header without group count" `Quick
+            test_blame_header_without_count
+        ; Alcotest.test_case "rejects non-header lines" `Quick
+            test_blame_header_rejects_non_headers
+        ; Alcotest.test_case "attributes lines via sha table" `Quick
+            test_blame_porcelain_sha_join
+        ; Alcotest.test_case "repeated sha inherits its own metadata" `Quick
+            test_blame_porcelain_repeated_sha
+        ; Alcotest.test_case "groups adjacent same-author lines" `Quick
+            test_blame_group_adjacent
         ] )
     ; ( "valid_git_ref"
       , [ Alcotest.test_case "main"              `Quick test_valid_ref_main

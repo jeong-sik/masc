@@ -41,13 +41,9 @@ let resolve_due_at ~requested_at recurrence args =
   match due_at with
   | Some due_at -> Ok due_at
   | None ->
-    (match Schedule_domain.first_due_after_result ~now:requested_at recurrence with
-     | Error err ->
-       Error
-         ("recurrence due_at calculation failed: "
-          ^ Schedule_domain.due_calculation_error_to_string err)
-     | Ok (Some due_at) -> Ok due_at
-     | Ok None ->
+    (match Schedule_domain.first_due_after ~now:requested_at recurrence with
+     | Some due_at -> Ok due_at
+     | None ->
        Error
          "one of due_at_unix or due_at_iso is required unless recurrence_kind is daily or cron")
 ;;
@@ -92,12 +88,14 @@ let required_int args key =
   | None -> Error (Printf.sprintf "%s is required" key)
 ;;
 
+let validate_recurrence_arg recurrence = Schedule_domain.validate_recurrence recurrence
+
 let recurrence_of_arg args =
   match string_opt args "recurrence_kind" with
-  | None | Some "one_shot" -> Ok Schedule_domain.One_shot
+  | None | Some "one_shot" -> validate_recurrence_arg Schedule_domain.One_shot
   | Some "interval" ->
     let* interval_sec = required_int args "recurrence_interval_sec" in
-    Ok (Schedule_domain.Interval { interval_sec })
+    validate_recurrence_arg (Schedule_domain.Interval { interval_sec })
   | Some "daily" ->
     let* hour = required_int args "recurrence_hour" in
     let* minute = required_int args "recurrence_minute" in
@@ -109,11 +107,11 @@ let recurrence_of_arg args =
       | Some second -> second
     in
     let* timezone = required_string args "recurrence_timezone" in
-    Ok (Schedule_domain.Daily { hour; minute; second; timezone })
+    validate_recurrence_arg (Schedule_domain.Daily { hour; minute; second; timezone })
   | Some "cron" ->
     let* expression = required_string args "recurrence_cron" in
     let* timezone = required_string args "recurrence_timezone" in
-    Ok (Schedule_domain.Cron { expression; timezone })
+    validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
   | Some other -> Error ("unknown recurrence_kind: " ^ other)
 ;;
 

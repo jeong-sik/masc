@@ -84,10 +84,9 @@ val dispatch_classified :
     typed gate -> path validation -> dispatch_decided. [redirect_allowed]
     defaults to [true] for the historical tool execute path; legacy code-shell
     callers pass [false].  Catastrophic operations are policy-denied, and
-    privileged programs are [Approval_required] until a Shell IR approval
-    resolver is wired; this also applies to the approval-gate kill-switch path.
-    [?on_output_chunk] is forwarded to the host dispatch path for live output
-    streaming. *)
+    typed gh capability asks and privileged programs are [Approval_required];
+    both also apply to the approval-gate kill-switch path. [?on_output_chunk] is
+    forwarded to the host dispatch path for live output streaming. *)
 
 val dispatch_classified_with_approval :
   ?allow_pipes:bool ->

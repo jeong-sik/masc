@@ -127,6 +127,37 @@ let tool_execute_command_context ?(allow_pipes = true) command =
 
 (* TEL-OK: facade is pure gate/path/dispatch routing; the Execute handler emits
    Shell IR dispatch telemetry with keeper, sandbox, status, elapsed_ms. *)
+let last_simple_of_ir ir =
+  match ir with
+  | Masc_exec.Shell_ir.Simple s -> Some s
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    (match List.rev stages with
+     | Masc_exec.Shell_ir.Simple s :: _ -> Some s
+     | _ -> None)
+;;
+
+let gh_capability_approval_required ir ~caps =
+  match last_simple_of_ir ir with
+  | None -> None
+  | Some simple ->
+    let raw_source = Format.asprintf "%a" Masc_exec.Shell_ir.pp ir in
+    let summary = "shell IR capability approval check" in
+    let policy_input = { Masc_exec.Approval_policy.raw_source; summary } in
+    (match
+       Masc_exec.Approval_policy.decide
+         policy_input
+         ~overlay:Masc_exec.Approval_config.autonomous
+         ~caps
+         ~simple
+     with
+     | Masc_exec.Verdict.Ask { bin; _ } ->
+       (match Masc_exec.Exec_program.known bin with
+        | Some Masc_exec.Exec_program.Gh -> Some bin
+        | Some _ | None -> None)
+     | Masc_exec.Verdict.Allow _ | Masc_exec.Verdict.Suggest_confirm (_, _)
+     | Masc_exec.Verdict.Deny _ -> None)
+;;
+
 let dispatch_classified
       ?(allow_pipes = true)
       ?(redirect_allowed = true)
@@ -153,42 +184,55 @@ let dispatch_classified
   | Some reason ->
     Error (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason })
   | None ->
-    (match first_privileged_program caps with
+    (match gh_capability_approval_required ir ~caps with
      | Some bin ->
        let bin = Masc_exec.Exec_program.to_string bin in
        Error
          (Approval_required
             { summary =
                 Printf.sprintf
-                  "privileged command '%s' requires explicit approval; no \
-                   Shell IR approval resolver is configured, so it is blocked"
+                  "command '%s' requires approval (audited/privileged risk class)"
                   bin
             ; bin
-            ; kind = Privileged_program_floor
+            ; kind = Gh_capability_requires_approval
             })
      | None ->
-       let gate_verdict =
-         Shell_gate.gate_typed
-           ~ir
-           ~syntax_policy:{ allow_pipes; redirect_allowed }
-           ~path_policy:Shell_gate.forbid_masc_internal_state_paths
-           ~sandbox:{ target = sandbox }
-           ()
-       in
-       gate_verdict_map
-         gate_verdict
-         ~f_reject:(fun diagnostic -> Error (Gate_reject diagnostic))
-         ~f_cannot_parse:(Error Cannot_parse)
-         ~f_too_complex:(Error Too_complex)
-         ~f_allow:(fun _context ->
-           match validate_paths ?keeper_id ?base_path ~workdir ir with
-           | Error e -> Error (Path_reject e)
-           | Ok () ->
-             Ok
-               (Masc_exec.Exec_dispatch.dispatch_decided
-                  ?base_host_env
-                  ?on_output_chunk
-                  envelope)))
+       (match first_privileged_program caps with
+        | Some bin ->
+          let bin = Masc_exec.Exec_program.to_string bin in
+          Error
+            (Approval_required
+               { summary =
+                   Printf.sprintf
+                     "privileged command '%s' requires explicit approval; no \
+                      Shell IR approval resolver is configured, so it is blocked"
+                     bin
+               ; bin
+               ; kind = Privileged_program_floor
+               })
+        | None ->
+          let gate_verdict =
+            Shell_gate.gate_typed
+              ~ir
+              ~syntax_policy:{ allow_pipes; redirect_allowed }
+              ~path_policy:Shell_gate.forbid_masc_internal_state_paths
+              ~sandbox:{ target = sandbox }
+              ()
+          in
+          gate_verdict_map
+            gate_verdict
+            ~f_reject:(fun diagnostic -> Error (Gate_reject diagnostic))
+            ~f_cannot_parse:(Error Cannot_parse)
+            ~f_too_complex:(Error Too_complex)
+            ~f_allow:(fun _context ->
+              match validate_paths ?keeper_id ?base_path ~workdir ir with
+              | Error e -> Error (Path_reject e)
+              | Ok () ->
+                Ok
+                  (Masc_exec.Exec_dispatch.dispatch_decided
+                     ?base_host_env
+                     ?on_output_chunk
+                     envelope))))
 ;;
 
 (* TEL-OK: wrapper only classifies before delegating to dispatch_classified. *)
@@ -213,19 +257,6 @@ let dispatch
     ?base_host_env
     ?on_output_chunk
     (classify ir)
-;;
-
-(** Extract the last simple stage from an IR for per-command approval policy.
-    For a [Simple] IR it is the command itself; for a pipeline it is the
-    final stage, whose risk class and binary usually drive the approval
-    decision. *)
-let last_simple_of_ir ir =
-  match ir with
-  | Masc_exec.Shell_ir.Simple s -> Some s
-  | Masc_exec.Shell_ir.Pipeline stages ->
-    (match List.rev stages with
-     | Masc_exec.Shell_ir.Simple s :: _ -> Some s
-     | _ -> None)
 ;;
 
 (** Same pipeline as [dispatch_classified], but runs the capability-based

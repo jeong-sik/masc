@@ -195,6 +195,12 @@ type config =
         [supports-structured-output]. [None] lets callers use their documented
         migration fallback; schema requests still fail loudly if the resolved
         runtime cannot satisfy them. *)
+  ; hitl_summary_runtime_id : string option
+    (** [\[runtime\].hitl_summary] — runtime id for the HITL approval
+        context-summary worker. A faster model is acceptable (the worker parses
+        a JSON object from response text, no provider-native structured output
+        required). [None] = fall back to [\[runtime\].structured_judge] then the
+        requesting keeper's runtime. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator (cross-model task verification). The evaluator requests JSON

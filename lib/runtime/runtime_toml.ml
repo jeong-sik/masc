@@ -1016,6 +1016,7 @@ type runtime_section =
   { default_runtime_id : string option
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
+  ; hitl_summary_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   }
@@ -1024,6 +1025,7 @@ let empty_runtime_section =
   { default_runtime_id = None
   ; librarian_runtime_id = None
   ; structured_judge_runtime_id = None
+  ; hitl_summary_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   }
@@ -1077,6 +1079,16 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
               | Ok structured_judge_runtime_id ->
                 ( { section with
                     structured_judge_runtime_id = Some structured_judge_runtime_id
+                  }
+                , errs )
+              | Error e -> section, errs @ e)
+           | "hitl_summary" ->
+             (match
+                parse_runtime_string_leaf ~path:"runtime.hitl_summary" ~key value
+              with
+              | Ok hitl_summary_runtime_id ->
+                ( { section with
+                    hitl_summary_runtime_id = Some hitl_summary_runtime_id
                   }
                 , errs )
               | Error e -> section, errs @ e)
@@ -1222,6 +1234,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; default_runtime_id = runtime_section.default_runtime_id
       ; librarian_runtime_id = runtime_section.librarian_runtime_id
       ; structured_judge_runtime_id = runtime_section.structured_judge_runtime_id
+      ; hitl_summary_runtime_id = runtime_section.hitl_summary_runtime_id
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover

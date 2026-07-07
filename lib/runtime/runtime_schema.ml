@@ -274,6 +274,12 @@ type config =
         judges. When set, it must resolve to a model declaring
         [supports-structured-output]. [None] lets callers use their documented
         migration fallback, but no caller may silently discard a schema request. *)
+  ; hitl_summary_runtime_id : string option
+    (** [\[runtime\].hitl_summary] — runtime id for the HITL approval
+        context-summary worker. A faster model is acceptable here because the
+        worker parses a JSON object from the response text rather than requiring
+        provider-native structured output. [None] = the worker falls back to
+        [\[runtime\].structured_judge] then the requesting keeper's runtime. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator. It requests JSON mode and must run on a model declaring

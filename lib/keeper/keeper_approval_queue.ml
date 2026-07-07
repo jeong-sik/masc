@@ -760,7 +760,13 @@ let provider_config_for_summary ~keeper_name =
     | Some id when String.trim id <> "" -> id
     | Some _ | None -> Keeper_config.default_runtime_id ()
   in
-  match resolve (Runtime.runtime_id_for_structured_judge ()) with
+  (* HITL context-summary is enrichment, not a structured-output judge call: the
+     worker parses a JSON object from the response text, so a faster model is
+     acceptable. Prefer the dedicated [hitl_summary] lane (which falls back to
+     [structured_judge] then [librarian] then [default] inside Runtime) over the
+     requesting keeper's own model so the summary stays consistent and
+     JSON-capable regardless of which keeper asked for approval. *)
+  match resolve (Runtime.runtime_id_for_hitl_summary ()) with
   | Some _ as cfg -> cfg
   | None -> resolve (keeper_runtime_id ())
 ;;

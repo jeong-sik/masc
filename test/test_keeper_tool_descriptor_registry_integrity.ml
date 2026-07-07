@@ -443,6 +443,57 @@ let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
     argv_description
 ;;
 
+let test_grep_descriptor_documents_multiline () =
+  (* Keepers passed a literal newline in `pattern` (11 rejects); the runtime
+     error referenced a --multiline flag Grep does not expose. Document single-
+     line matching and route cross-line matches to the working Execute rg -U. *)
+  let descriptor = required_public_descriptor "Grep" in
+  check_contains
+    "Grep description says patterns match within a single line"
+    ~sub:"match within a single line"
+    descriptor.description;
+  check_contains
+    "Grep description routes cross-line matches to rg -U"
+    ~sub:"rg -U"
+    descriptor.description
+;;
+
+let test_edit_descriptor_requires_read_first () =
+  (* old_string mismatch (31 rejects): keepers edited without Read or blind-
+     retried a non-matching string. Document byte-sensitivity + re-Read. *)
+  let descriptor = required_public_descriptor "Edit" in
+  check_contains
+    "Edit description says the match is byte-sensitive"
+    ~sub:"byte-sensitive"
+    descriptor.description;
+  check_contains
+    "Edit description directs re-Read on a missed match"
+    ~sub:"re-Read the file"
+    descriptor.description
+;;
+
+let test_board_descriptors_steer_concise_content () =
+  (* board_post/comment content-length rejects (53/day): keepers pasted full
+     logs/analyses (up to 8186 chars) past the max_content_length limit. The
+     descriptors now steer concise summaries + links. No hardcoded number —
+     the limit is env-configurable (Board_types.Limits.max_content_length),
+     and the rejection error already reports the actual count. *)
+  let post = required_internal_descriptor "keeper_board_post" in
+  let comment = required_internal_descriptor "keeper_board_comment" in
+  check_contains
+    "board_post description names the length limit"
+    ~sub:"maximum length"
+    post.description;
+  check_contains
+    "board_post description steers summary + link"
+    ~sub:"reference a file path, PR, or issue link"
+    post.description;
+  check_contains
+    "board_comment description names the length limit"
+    ~sub:"maximum length"
+    comment.description
+;;
+
 let test_board_descriptions_disambiguate_post_id_flow () =
   let get_descriptor = required_internal_descriptor "keeper_board_post_get" in
   let get_schema = required_board_schema "keeper_board_post_get" in
@@ -1146,6 +1197,18 @@ let () =
             "Execute argv/filesystem basis is explicit"
             `Quick
             test_execute_descriptor_spells_out_argv_and_filesystem_basis
+        ; test_case
+            "Grep documents single-line match and rg -U"
+            `Quick
+            test_grep_descriptor_documents_multiline
+        ; test_case
+            "Edit requires Read-first and byte-exact old_string"
+            `Quick
+            test_edit_descriptor_requires_read_first
+        ; test_case
+            "Board post/comment steer concise content"
+            `Quick
+            test_board_descriptors_steer_concise_content
         ; test_case
             "Board get/list descriptions disambiguate post_id flow"
             `Quick

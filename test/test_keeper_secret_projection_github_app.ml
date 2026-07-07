@@ -199,6 +199,7 @@ let test_docker_projection_excludes_github_app_pem () =
       ~base_path
       ~keeper_name
       ~container_name:"container"
+      ()
   with
   | Error err -> Alcotest.failf "docker projection failed: %s" err
   | Ok projection ->

@@ -1121,7 +1121,7 @@ let ensure_docker_git_config_global ~base_path ~keeper_name =
          (if String.equal arg "" then "" else " " ^ arg))
 ;;
 
-let docker_args_for_keeper ?mint_github_app_token ~base_path ~keeper_name ~container_name =
+let docker_args_for_keeper ?mint_github_app_token ~base_path ~keeper_name ~container_name () =
   match load_secret_roots ~base_path ~keeper_name with
   | Error _ as err -> err
   | Ok roots ->

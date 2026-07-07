@@ -58,6 +58,7 @@ val docker_args_for_keeper :
   base_path:string ->
   keeper_name:string ->
   container_name:string ->
+  unit ->
   (t, string) result
 (** Build Docker secret projection arguments. GitHub App private-key PEM files
     are projection-layer-only material: they may be read to mint the

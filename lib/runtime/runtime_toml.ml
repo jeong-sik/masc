@@ -1012,10 +1012,62 @@ let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
   }
 ;;
 
+(* [\[pacing\]] section → typed [Runtime_schema.pacing] (RFC-0313 W3).
+
+   Numeric knobs fail soft like [\[pause\]] above (warn + default). [mode]
+   fails closed: an unknown value aborts config load instead of defaulting,
+   because a typo such as "enfoce" silently reverting the W3 behavior flip
+   to shadow is exactly the permissive-default failure the flip removes.
+   Operational callers read this through [Runtime.pacing]. *)
+let parse_pacing (toml : Otoml.t)
+  : (Runtime_schema.pacing, parse_error list) result
+  =
+  let d = Runtime_schema.pacing_default in
+  let read_field ~key ~getter =
+    try Ok (Otoml.find_opt toml getter [ "pacing"; key ]) with
+    | Otoml.Type_error msg -> Error (Printf.sprintf "[pacing].%s: %s" key msg)
+  in
+  let pick_float ~key ~default =
+    match read_field ~key ~getter:Otoml.get_float with
+    | Ok (Some v) -> v
+    | Ok None -> default
+    | Error msg ->
+      Log.Runtime.warn "runtime_toml: %s — using default %g" msg default;
+      default
+  in
+  let mode_result =
+    match read_field ~key:"mode" ~getter:Otoml.get_string with
+    | Ok None -> Ok d.Runtime_schema.pacing_mode
+    | Ok (Some "shadow") -> Ok Runtime_schema.Pacing_shadow
+    | Ok (Some "enforce") -> Ok Runtime_schema.Pacing_enforce
+    | Ok (Some other) ->
+      Error
+        (error
+           "pacing.mode"
+           (Printf.sprintf
+              "unknown pacing mode %S (expected \"shadow\" or \"enforce\")"
+              other))
+    | Error msg -> Error (error "pacing.mode" msg)
+  in
+  match mode_result with
+  | Error _ as e -> e
+  | Ok pacing_mode ->
+    Ok
+      { Runtime_schema.pacing_mode
+      ; pacing_base_sec =
+          pick_float ~key:"base_sec" ~default:d.Runtime_schema.pacing_base_sec
+      ; pacing_multiplier =
+          pick_float ~key:"multiplier" ~default:d.Runtime_schema.pacing_multiplier
+      ; pacing_cap_sec =
+          pick_float ~key:"cap_sec" ~default:d.Runtime_schema.pacing_cap_sec
+      }
+;;
+
 type runtime_section =
   { default_runtime_id : string option
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
+  ; hitl_summary_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   }
@@ -1024,6 +1076,7 @@ let empty_runtime_section =
   { default_runtime_id = None
   ; librarian_runtime_id = None
   ; structured_judge_runtime_id = None
+  ; hitl_summary_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   }
@@ -1080,6 +1133,12 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                   }
                 , errs )
               | Error e -> section, errs @ e)
+           | "hitl_summary" ->
+             (match parse_runtime_string_leaf ~path:"runtime.hitl_summary" ~key value with
+              | Ok hitl_summary_runtime_id ->
+                { section with hitl_summary_runtime_id = Some hitl_summary_runtime_id },
+                errs
+              | Error e -> section, errs @ e)
            | "cross_verifier" ->
              (match
                 parse_runtime_string_leaf ~path:"runtime.cross_verifier" ~key value
@@ -1111,8 +1170,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    ("runtime." ^ key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, librarian, \
-                       cross_verifier, media_failover, [runtime.lanes], \
-                       [runtime.assignments], or a table-valued [runtime.<profile>]"
+                       structured_judge, hitl_summary, cross_verifier, \
+                       media_failover, [runtime.lanes], [runtime.assignments], \
+                       or a table-valued [runtime.<profile>]"
                       key) )
         )
         (empty_runtime_section, [])
@@ -1186,6 +1246,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
+  let pacing_result = parse_pacing toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result
@@ -1194,6 +1255,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs assignments_result
     @ errs bindings_result
     @ errs lanes_result
+    @ errs pacing_result
   in
   if all_errors <> []
   then Error all_errors
@@ -1214,6 +1276,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lane_decls =
       extract_after_all_errors_guard ~label:"lanes" lanes_result
     in
+    let pacing =
+      extract_after_all_errors_guard ~label:"pacing" pacing_result
+    in
     let pause_threshold = parse_pause_threshold toml in
     Ok
       { Runtime_schema.providers
@@ -1222,10 +1287,12 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; default_runtime_id = runtime_section.default_runtime_id
       ; librarian_runtime_id = runtime_section.librarian_runtime_id
       ; structured_judge_runtime_id = runtime_section.structured_judge_runtime_id
+      ; hitl_summary_runtime_id = runtime_section.hitl_summary_runtime_id
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover
       ; pause_threshold
+      ; pacing
       ; lane_decls
       })
 ;;

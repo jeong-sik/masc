@@ -9,7 +9,9 @@
 open Masc
 module KP = Keeper_pacing
 
-let policy = KP.default_policy
+(* Fixture pin: mirrors Runtime_schema.pacing_default (base 30s, x2, cap
+   3600s). The asserted schedules below are derived from these numbers. *)
+let policy = { KP.base_sec = 30.0; multiplier = 2.0; cap_sec = 3600.0 }
 let feq = Alcotest.(check (float 1e-6))
 
 let revisit_exn t runtime_id =
@@ -74,11 +76,33 @@ let test_next_turn_due_always_finite () =
   feq "empty state is due now" 7.0 (KP.next_turn_due ~catalog:[ "a" ] ~now:7.0 KP.empty)
 
 let test_shadow_snapshot_isolated_by_keeper () =
+  (* Keeper_pacing_shadow guards its table with Eio.Mutex.use_rw
+     ~protect:true, which needs a fiber context even when uncontended —
+     without Eio_main.run this raised
+     Effect.Unhandled(Cancel.Get_context) on main (2026-07-07). *)
+  Eio_main.run
+  @@ fun _env ->
   let keeper_name = "test-keeper-pacing-shadow-isolated" in
   Alcotest.(check int)
     "unknown keeper snapshot is empty"
     0
     (List.length (Keeper_pacing_shadow.snapshot ~keeper_name))
+
+let test_shadow_next_due_uses_observed_failures_only () =
+  Eio_main.run
+  @@ fun _env ->
+  let keeper_name = "test-keeper-pacing-shadow-observed-failures-only" in
+  Keeper_pacing_shadow.observe_failure
+    ~keeper_name
+    ~runtime_id:"observed-runtime"
+    ~retry_after:(Some 30.0);
+  match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
+  | Some remaining ->
+    Alcotest.(check bool)
+      "observed failure blocks despite unrelated catalog entries"
+      true
+      (remaining > 0.0)
+  | None -> Alcotest.fail "observed pending failure should pace next turn"
 
 let () =
   Alcotest.run
@@ -97,5 +121,10 @@ let () =
         ; Alcotest.test_case "always finite" `Quick test_next_turn_due_always_finite
         ] )
     ; ( "shadow"
-      , [ Alcotest.test_case "snapshot isolated by keeper" `Quick test_shadow_snapshot_isolated_by_keeper ] )
+      , [ Alcotest.test_case "snapshot isolated by keeper" `Quick test_shadow_snapshot_isolated_by_keeper
+        ; Alcotest.test_case
+            "next due uses observed failures only"
+            `Quick
+            test_shadow_next_due_uses_observed_failures_only
+        ] )
     ]

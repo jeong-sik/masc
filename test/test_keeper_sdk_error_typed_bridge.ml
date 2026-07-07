@@ -548,6 +548,7 @@ let test_soft_rate_limit_skips_same_credential_pool () =
   init_rate_limit_pool_runtime ();
   let retry =
     EC.degraded_rotation_after_recoverable_error
+      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"same.b"
       ~base_runtime:"same.a"
@@ -565,6 +566,7 @@ let test_soft_rate_limit_preserves_independent_pool_failover () =
   init_rate_limit_pool_runtime ();
   match
     EC.degraded_rotation_after_recoverable_error
+      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
       ~base_runtime:"same.a"
@@ -589,6 +591,7 @@ let test_hard_quota_skips_same_credential_pool () =
   init_rate_limit_pool_runtime ();
   let retry =
     EC.degraded_rotation_after_recoverable_error
+      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"same.b"
       ~base_runtime:"same.a"
@@ -606,6 +609,7 @@ let test_hard_quota_preserves_independent_pool_failover () =
   init_rate_limit_pool_runtime ();
   match
     EC.degraded_rotation_after_recoverable_error
+      ~pacing_enforced:false
       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
       ~base_runtime:"same.a"
@@ -924,6 +928,7 @@ let test_read_only_no_progress_rotates_to_default_runtime () =
    | None -> Alcotest.fail "expected read_only_no_progress recoverable reason");
   match
     EC.degraded_rotation_after_recoverable_error
+      ~pacing_enforced:false
       ~base_runtime:"same.b"
       ~effective_runtime:"same.b"
       ~attempted_runtimes:[ "same.b" ]
@@ -944,6 +949,7 @@ let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
   let err = read_only_no_progress_err ~scope:"same.a" in
   match
     EC.degraded_rotation_after_recoverable_error
+      ~pacing_enforced:false
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
       ~attempted_runtimes:[ "same.a" ]
@@ -961,13 +967,65 @@ let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
 ;;
 
 let test_capacity_backpressure_does_not_cycle_candidates () =
-  (* Regression: capacity_backpressure must cap rotation rather than cycle.
-     When this reason allowed candidate cycling, two runtimes that were both
-     in capacity cooldown looped forever (2026-05-21, 2026-07-06, #23373). *)
+  (* Regression: in shadow mode capacity_backpressure must cap rotation
+     rather than cycle. When this reason allowed candidate cycling, two
+     runtimes that were both in capacity cooldown looped forever
+     (2026-05-21, 2026-07-06, #23373). RFC-0313 W3: enforced pacing
+     bypasses this matrix (spacing replaces the cap); the matrix and this
+     pin go away with the kill-switch in W4. *)
   Alcotest.(check bool)
     "capacity_backpressure does not allow candidate cycle"
     false
     (EC.degraded_reason_allows_candidate_cycle EC.Capacity_backpressure)
+;;
+
+let test_rate_limit_exhaustion_cycles_under_enforced_pacing () =
+  (* RFC-0313 W3: same exhausted-candidate input, both switch positions.
+     Shadow keeps the legacy cap (rotation gives up -> the failure walked
+     the pause ladder); enforce re-cycles the pool-filtered candidates
+     because cross-turn retries are now spaced by revisit pacing. *)
+  init_rate_limit_pool_runtime ();
+  let attempted = [ "same.a"; "same.b"; "other.c" ] in
+  (match
+     EC.degraded_rotation_after_recoverable_error
+       ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
+       ~fallback_hint:"other.c"
+       ~pacing_enforced:false
+       ~base_runtime:"same.a"
+       ~effective_runtime:"same.a"
+       ~attempted_runtimes:attempted
+       soft_rate_limit_err
+   with
+   | None -> ()
+   | Some { EC.next_runtime; _ } ->
+     Alcotest.failf
+       "shadow mode must cap exhausted rate_limit rotation, got %s"
+       next_runtime);
+  match
+    EC.degraded_rotation_after_recoverable_error
+      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
+      ~fallback_hint:"other.c"
+      ~pacing_enforced:true
+      ~base_runtime:"same.a"
+      ~effective_runtime:"same.a"
+      ~attempted_runtimes:attempted
+      soft_rate_limit_err
+  with
+  | Some { EC.fallback_reason = EC.Rate_limit; next_runtime } ->
+    Alcotest.(check bool)
+      (Printf.sprintf
+         "enforced pacing recycles a pool-filtered candidate (got %s)"
+         next_runtime)
+      true
+      (not (String.equal next_runtime ""))
+  | Some { fallback_reason; next_runtime } ->
+    Alcotest.failf
+      "expected rate_limit cycle under enforced pacing, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None ->
+    Alcotest.fail
+      "enforced pacing must re-cycle candidates instead of capping"
 ;;
 
 let () =
@@ -1078,6 +1136,10 @@ let () =
             "capacity_backpressure does not cycle candidates"
             `Quick
             test_capacity_backpressure_does_not_cycle_candidates
+        ; Alcotest.test_case
+            "rate_limit exhaustion cycles under enforced pacing (RFC-0313 W3)"
+            `Quick
+            test_rate_limit_exhaustion_cycles_under_enforced_pacing
         ] )
     ]
 ;;

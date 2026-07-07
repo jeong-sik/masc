@@ -21,6 +21,7 @@
   keeper_binding_health_config
   keeper_recording_error_state
   keeper_internal_error
+  keeper_runtime_failure_route
   keeper_latched_reason
   keeper_event_queue
   keeper_event_queue_persistence)

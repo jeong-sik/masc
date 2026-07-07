@@ -6,7 +6,9 @@ type policy =
   ; cap_sec : float
   }
 
-let default_policy = { base_sec = 30.0; multiplier = 2.0; cap_sec = 3600.0 }
+(* Policy values live in config/runtime.toml [pacing]
+   (Runtime_schema.pacing_default when absent); callers build [policy]
+   through [Keeper_pacing_shadow.policy_of_runtime] (RFC-0313 W3). *)
 
 type revisit =
   { eligible_at : float

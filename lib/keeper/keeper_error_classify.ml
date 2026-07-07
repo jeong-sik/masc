@@ -722,6 +722,7 @@ let degraded_reason_allows_candidate_cycle = function
 let degraded_rotation_after_recoverable_error
       ?(credential_pool_of_runtime_id = fun _ -> None)
       ?fallback_hint
+      ~(pacing_enforced : bool)
       ~(base_runtime : string)
       ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
@@ -777,18 +778,25 @@ let degraded_rotation_after_recoverable_error
          Some { next_runtime; fallback_reason }
        | None
          when (not (is_completion_contract_violation err))
-              && degraded_reason_allows_candidate_cycle fallback_reason ->
+              && (pacing_enforced
+                  || degraded_reason_allows_candidate_cycle fallback_reason) ->
          (* Non-contract transient infrastructure errors (provider timeout,
             server error, capacity backpressure) may succeed on a later
             candidate pass. Quota/rate-limit classes cap after all candidates:
             retrying the same credential pool just amplifies an account-scoped
-            limit. #19930 *)
+            limit. #19930
+
+            RFC-0313 W3: under enforced pacing the class cap is bypassed —
+            in-turn cycling stays bounded by the turn cycle budget
+            (Candidates_filtered_after_cycles) and cross-turn retries are
+            spaced by revisit pacing, which is what the cap approximated. *)
          (match candidates with
           | [] -> None
           | first_candidate :: _ ->
             Some { next_runtime = first_candidate; fallback_reason })
        | None ->
-         (* Contract violation or quota/rate-limit exhaustion: cap rotation. *)
+         (* Contract violation, or (shadow mode) quota/rate-limit exhaustion:
+            cap rotation. *)
          None)
 
 (** [true] when a structured error indicates context overflow. *)

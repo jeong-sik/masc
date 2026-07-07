@@ -266,10 +266,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
-  Keeper_tool_ide_runtime.handle_ide_annotate
-    ~config
-    ~keeper_name:meta.name
-    ~args
+  Keeper_tool_ide_runtime.handle_ide_annotate ~config ~meta ~args
 ;;
 
 let handle_voice ~config ~(meta : keeper_meta) ~name ~args () =

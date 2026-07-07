@@ -21,6 +21,8 @@ type t =
   | TurnCompleted
   | PacingShadowEvents
   | PacingShadowNextDueSec
+  | FailureRoute
+  | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped
@@ -279,6 +281,8 @@ let to_string = function
   | TurnCompleted -> "masc_keeper_turn_completed_total"
   | PacingShadowEvents -> "masc_keeper_pacing_shadow_events_total"
   | PacingShadowNextDueSec -> "masc_keeper_pacing_shadow_next_due_sec"
+  | FailureRoute -> "masc_keeper_failure_route_total"
+  | FailureDrivenPause -> "masc_keeper_failure_driven_pause_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
@@ -554,7 +558,7 @@ let to_string = function
 let all : t list =
   [ Turns; InputTokens; OutputTokens; CacheCreationTokens;
     CacheReadTokens; UsageAnomalies; TotalCostUsd; TurnScheduled;
-    TurnCompleted; PacingShadowEvents; PacingShadowNextDueSec; IdleSeconds; ContractViolations; MetricEmitDropped;
+    TurnCompleted; PacingShadowEvents; PacingShadowNextDueSec; FailureRoute; FailureDrivenPause; IdleSeconds; ContractViolations; MetricEmitDropped;
     ContextMaxObserved; TurnStarts; TurnReattempts; TurnRegressions;
     TurnLivelockBlocks; TurnLivelockBlocksRepeated; TurnLivelockBlocksThresholdPark; TurnLatencyBucket;
     TurnLatencyByModelBucket; ProviderCooldownSkip; ProviderCooldownRemainingSec; ProviderBlockDurationSec;

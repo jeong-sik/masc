@@ -425,16 +425,17 @@ let posts_jsonl_unlocked store =
     store.posts;
   Buffer.contents buf
 ;;
-let save_posts_jsonl content =
+let save_posts_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = persist_path () in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_posts" msg
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_posts" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
 ;;
+let save_posts_jsonl content = ignore (save_posts_jsonl_result content)
 let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)
@@ -518,6 +519,28 @@ let rollback_fresh_post store (post : post) =
       invalidate_post_caches store
     | Some _ -> ())
 ;;
+
+let rollback_rolled_up_post store ~(previous : post) ~(rolled_up : post) =
+  let rollback =
+    with_lock store (fun () ->
+      let key = Post_id.to_string previous.id in
+      match Hashtbl.find_opt store.posts key with
+      | Some current when current = rolled_up ->
+        Hashtbl.replace store.posts key previous;
+        mark_dirty_post store key;
+        invalidate_post_caches store;
+        Ok (posts_jsonl_unlocked store)
+      | Some _ -> Error "rollup target changed before rollback"
+      | None -> Error "rollup target missing before rollback")
+  in
+  match rollback with
+  | Error _ as e -> e
+  | Ok posts_jsonl ->
+    (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+     | Ok () -> Ok ()
+     | Error e -> Error (Board_types.show_board_error e))
+;;
+
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
 let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
 let sub_board_post_counts_unlocked store =
@@ -584,6 +607,7 @@ let status_rollup_task_id = Board_core_status_rollup.status_rollup_task_id
 let is_status_rollup_candidate = Board_core_status_rollup.is_status_rollup_candidate
 let find_status_rollup_target_unlocked = Board_core_status_rollup.find_status_rollup_target_unlocked
 let create_post_with_outcome
+      ?after_rollup_persist
       store
       ~author
       ~content
@@ -760,7 +784,7 @@ let create_post_with_outcome
                       task_id
                       existing_id
                       (String.length normalized_body);
-                    Ok (`Rolled_up (updated, posts_jsonl_unlocked store))
+                    Ok (`Rolled_up (existing, updated, posts_jsonl_unlocked store))
                   | None -> create_fresh ())
                | None -> create_fresh ())))
       in
@@ -782,9 +806,31 @@ let create_post_with_outcome
          | Error e ->
            rollback_fresh_post store post;
            Error e)
-      | Ok (`Rolled_up (post, posts_jsonl)) ->
-        with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-        Ok (Rolled_up_post post)
+      | Ok (`Rolled_up (previous, post, posts_jsonl)) ->
+        (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+         | Error persist_error ->
+           let message =
+             "status-rollup persist failed: " ^ Board_types.show_board_error persist_error
+           in
+           (match rollback_rolled_up_post store ~previous ~rolled_up:post with
+            | Ok () -> Error persist_error
+            | Error rollback ->
+              Error
+                (Validation_error (message ^ "; rollback failed: " ^ rollback)))
+         | Ok () ->
+           (match after_rollup_persist with
+            | None -> Ok (Rolled_up_post post)
+            | Some hook ->
+              (match hook post with
+               | Ok () -> Ok (Rolled_up_post post)
+               | Error msg ->
+                 let message = "status-rollup post-persist hook failed: " ^ msg in
+                 (match rollback_rolled_up_post store ~previous ~rolled_up:post with
+                  | Ok () -> Error (Validation_error message)
+                  | Error rollback ->
+                    Error
+                      (Validation_error
+                         (message ^ "; rollback failed: " ^ rollback))))))
       | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;

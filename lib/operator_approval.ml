@@ -197,31 +197,45 @@ let approval_mode_status_json ~base_path =
 
 let set_approval_mode config ~actor mode =
   let base_path = (config : Workspace.config).base_path in
-  match read_approval_mode ~base_path with
-  | Error msg -> Error msg
-  | Ok previous ->
-    let changed_at = Masc_domain.now_iso () in
-    let dir = operator_dir_from_base_path ~base_path in
-    Fs_compat.mkdir_p dir;
-    let path = approval_mode_path ~base_path in
-    let json = approval_mode_state_json ~actor ~changed_at mode in
-    (match Workspace_utils.write_json_result config path json with
-     | Error msg -> Error (Printf.sprintf "approval mode write failed: %s" msg)
-     | Ok () ->
-       Audit_log.log_action config
-         ~agent_id:actor
-         ~action:(Audit_log.GovernanceDecision
-                    (Audit_log.Governance_other "approval_mode_set"))
-         ~details:
-           (`Assoc
-              [ "from_mode", `String (approval_mode_to_string previous)
-              ; "to_mode", `String (approval_mode_to_string mode)
-              ; "changed_at", `String changed_at
-              ; "actor", `String actor
-              ])
-         ~outcome:Audit_log.Success
-         ();
-       Ok { previous; current = mode; actor; changed_at })
+  let previous, previous_read_error =
+    match read_approval_mode ~base_path with
+    | Ok previous -> previous, None
+    | Error msg ->
+      Log.Governance.warn
+        "approval_mode: overwriting unreadable mode state for base_path=%s: %s"
+        base_path
+        msg;
+      Manual, Some msg
+  in
+  let changed_at = Masc_domain.now_iso () in
+  let dir = operator_dir_from_base_path ~base_path in
+  Fs_compat.mkdir_p dir;
+  let path = approval_mode_path ~base_path in
+  let json = approval_mode_state_json ~actor ~changed_at mode in
+  match Workspace_utils.write_json_result config path json with
+  | Error msg -> Error (Printf.sprintf "approval mode write failed: %s" msg)
+  | Ok () ->
+    let read_error_field =
+      match previous_read_error with
+      | None -> []
+      | Some msg -> [ "previous_read_error", `String msg ]
+    in
+    Audit_log.log_action config
+      ~agent_id:actor
+      ~action:
+        (Audit_log.GovernanceDecision
+           (Audit_log.Governance_other "approval_mode_set"))
+      ~details:
+        (`Assoc
+           ([ "from_mode", `String (approval_mode_to_string previous)
+            ; "to_mode", `String (approval_mode_to_string mode)
+            ; "changed_at", `String changed_at
+            ; "actor", `String actor
+            ]
+            @ read_error_field))
+      ~outcome:Audit_log.Success
+      ();
+    Ok { previous; current = mode; actor; changed_at }
 
 let approval_mode_change_json change =
   `Assoc

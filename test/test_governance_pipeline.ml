@@ -1037,10 +1037,10 @@ let test_decide_front_door_none_allows_noncritical () =
   | `Deny _ ->
     Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
 
-let test_oas_callback_critical_queues_by_sod_floor () =
+let test_oas_callback_critical_rejects_hard_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "sod-floor-critical-queue-test" in
+  let keeper_name = "hard-forbidden-critical-reject-test" in
   let initial_pending = AQ.pending_count () in
   let tmpdir = make_tmpdir () in
   Fun.protect
@@ -1054,37 +1054,16 @@ let test_oas_callback_critical_queues_by_sod_floor () =
            ~keeper_name
            ()
        in
-       Eio.Switch.run @@ fun sw ->
-       let result = ref None in
-       Eio.Fiber.fork ~sw (fun () ->
-         result := Some (callback ~tool_name:"masc_delete_workspace" ~input:`Null));
-       yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
-       let id =
-         match pending_id_for_keeper ~keeper_name with
-         | Some id -> id
-         | None -> Alcotest.fail "expected Critical request in operator approval queue"
-       in
        Alcotest.(check bool)
-         "Critical request enters operator approval queue"
+         "Critical request is hard-forbidden"
          true
-         (AQ.pending_count () > initial_pending);
+         (match callback ~tool_name:"masc_delete_workspace" ~input:`Null with
+          | Agent_sdk.Hooks.Reject _ -> true
+          | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ -> false);
        Alcotest.(check int)
-         "one pending for keeper"
-         1
+         "hard-forbidden request never enters operator approval queue"
+         0
          (AQ.pending_count_for_keeper ~keeper_name);
-       Alcotest.(check bool)
-         "callback waits for operator"
-         true
-         (Option.is_none !result);
-       resolve_pending_or_fail ~id ~decision:Agent_sdk.Hooks.Approve;
-       yield_until (fun () -> Option.is_some !result);
-       (match !result with
-        | Some Agent_sdk.Hooks.Approve -> ()
-        | Some (Agent_sdk.Hooks.Reject reason) ->
-          Alcotest.fail ("expected operator approval, got reject: " ^ reason)
-        | Some (Agent_sdk.Hooks.Edit _) ->
-          Alcotest.fail "expected operator approval, got edit"
-        | None -> Alcotest.fail "callback did not resume after operator approval");
        Alcotest.(check int)
          "pending count restored"
          initial_pending
@@ -1375,8 +1354,8 @@ let () =
         `Quick test_decide_runtime_blocker_requires_confirm;
       Alcotest.test_case "decide: front-door None allows non-Critical" `Quick
         test_decide_front_door_none_allows_noncritical;
-      Alcotest.test_case "OAS callback: Critical queues by SoD floor" `Quick
-        test_oas_callback_critical_queues_by_sod_floor;
+      Alcotest.test_case "OAS callback: Critical rejects hard-forbidden" `Quick
+        test_oas_callback_critical_rejects_hard_forbidden;
     ];
     "trace_id", [
       Alcotest.test_case "has gov_ prefix" `Quick test_decision_has_trace_id;

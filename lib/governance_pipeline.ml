@@ -396,30 +396,34 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
       | None -> false
     in
-    let runtime_blocked = runtime_auto_approval_blocked meta in
-    if runtime_blocked
+    let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
+    let soft_forbidden = auto_approval_soft_forbidden ~tool_name ~input in
+    if hard_forbidden
     then (
       Log.Governance.debug
-        "[%s] runtime_hard_forbidden tool=%s base=%s effective=%s: rejecting outright"
+        "[%s] hard_forbidden tool=%s base=%s effective=%s: rejecting outright"
         keeper_name
         tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk);
       reject_hard_forbidden ~config ~keeper_name ~tool_name ~input ~risk ~meta ())
     else (
+      let auto_approval_forbidden = soft_forbidden in
+      let requires_operator_approval = needs_approval || auto_approval_forbidden in
+      let base_path = (config : Workspace.config).base_path in
       if trifecta_active
       then
         Log.Governance.debug
           "[%s] trifecta_active tool=%s base=%s effective=%s needs_approval=%b \
-           approval_mode=%s"
+           requires_operator_approval=%b approval_mode=%s"
           keeper_name
           tool_name
           (risk_level_to_string base_risk)
           (risk_level_to_string risk)
           needs_approval
+          requires_operator_approval
           (Operator_approval.approval_mode_to_string
-             (Operator_approval.read_approval_mode_or_manual
-                ~base_path:(config : Workspace.config).base_path));
+             (Operator_approval.read_approval_mode_or_manual ~base_path));
       if trifecta_active && risk_level_to_int risk > risk_level_to_int base_risk
       then
         Log.Governance.warn
@@ -428,98 +432,160 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
           tool_name
           (risk_level_to_string base_risk)
           (risk_level_to_string risk);
-      let turn_id =
-        Option.map
-          (fun (meta : Keeper_meta_contract.keeper_meta) ->
-             meta.runtime.usage.total_turns + 1)
-          meta
-      in
-      let task_id =
-        Option.bind meta (fun keeper_meta ->
-          Keeper_runtime_contract.current_task_id_opt keeper_meta)
-      in
-      let goal_id =
-        Option.bind meta (fun keeper_meta ->
-          Keeper_runtime_contract.primary_goal_id_opt keeper_meta)
-      in
-      let goal_ids =
-        match meta with
-        | Some (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids
-        | None -> []
-      in
-      let runtime_contract =
-        Option.map
-          (fun keeper_meta ->
-             Keeper_runtime_contract.runtime_contract_json ~config keeper_meta)
-          meta
-      in
-      let sandbox_profile, backend, sandbox_target =
-        match meta with
-        | Some keeper_meta ->
-          let backend = Keeper_runtime_contract.backend_of_meta keeper_meta in
-          ( Some (Keeper_types_profile.sandbox_profile_to_string keeper_meta.sandbox_profile)
-          , Some backend
-          , Some backend )
-        | None -> None, None, None
-      in
-      let selected_model = selected_model_of_meta meta in
-      let risk_level = queue_risk_level risk in
-      let base_path = (config : Workspace.config).base_path in
-      let mode = Operator_approval.read_approval_mode_or_manual ~base_path in
-      let band = approval_band_of_risk risk in
-      let mode_decision = Operator_approval.decide_approval_mode ~mode ~band in
-      let submit_for_operator reason =
-        Keeper_approval_queue.submit_and_await
-          ~keeper_name
-          ~tool_name
-          ~input
-          ~base_path
-          ?turn_id
-          ?task_id
-          ?goal_id
-          ~goal_ids
-          ?sandbox_target
-          ?sandbox_profile
-          ?backend
-          ?runtime_contract
-          ?selected_model
-          ~disposition:"Blocked"
-          ~disposition_reason:(Operator_approval.approval_mode_queue_reason_to_string reason)
-          ~risk_level
-          ?clock
-          ()
-      in
-      match mode_decision with
-      | Operator_approval.Auto_approved { mode; band } ->
-        Keeper_approval_queue.audit_approval_event
-          ~base_path
-          ~event_type:Keeper_approval_queue.approval_audit_resolved_event
-          ~id:(Keeper_approval_queue.generate_id ())
-          ~keeper_name
-          ~tool_name
-          ~risk_level
-          ?turn_id
-          ?task_id
-          ?goal_id
-          ~goal_ids
-          ?sandbox_target
-          ?runtime_contract
-          ?selected_model
-          ~disposition:"Pass"
-          ~disposition_reason:"approval_mode_auto_low_risk"
-          ~auto_approved:true
-          ~actor:"auto_mode"
-          ~approval_mode:(Operator_approval.approval_mode_to_string mode)
-          ~authorizing_band:(Operator_approval.risk_band_to_string band)
-          ~decision:(Keeper_approval_queue.Approval_resolved Agent_sdk.Hooks.Approve)
-          ();
-        Agent_sdk.Hooks.Approve
-      | Operator_approval.Queue_for_operator { reason; mode = _; band = _ } -> (
-        match reason with
-        | Operator_approval.Separation_of_duties_floor ->
-          submit_for_operator Operator_approval.Separation_of_duties_floor
-        | Operator_approval.Manual_mode ->
-          submit_for_operator Operator_approval.Manual_mode
-        | Operator_approval.Not_auto_eligible ->
-          submit_for_operator Operator_approval.Not_auto_eligible))
+      if not requires_operator_approval
+      then Agent_sdk.Hooks.Approve
+      else (
+        let turn_id =
+          Option.map
+            (fun (meta : Keeper_meta_contract.keeper_meta) ->
+               meta.runtime.usage.total_turns + 1)
+            meta
+        in
+        let task_id =
+          Option.bind meta (fun keeper_meta ->
+            Keeper_runtime_contract.current_task_id_opt keeper_meta)
+        in
+        let goal_id =
+          Option.bind meta (fun keeper_meta ->
+            Keeper_runtime_contract.primary_goal_id_opt keeper_meta)
+        in
+        let goal_ids =
+          match meta with
+          | Some (keeper_meta : Keeper_meta_contract.keeper_meta) ->
+            keeper_meta.active_goal_ids
+          | None -> []
+        in
+        let runtime_contract =
+          Option.map
+            (fun keeper_meta ->
+               Keeper_runtime_contract.runtime_contract_json ~config keeper_meta)
+            meta
+        in
+        let sandbox_profile, backend, sandbox_target =
+          match meta with
+          | Some keeper_meta ->
+            let backend = Keeper_runtime_contract.backend_of_meta keeper_meta in
+            ( Some (Keeper_types_profile.sandbox_profile_to_string keeper_meta.sandbox_profile)
+            , Some backend
+            , Some backend )
+          | None -> None, None, None
+        in
+        let selected_model = selected_model_of_meta meta in
+        let risk_level = queue_risk_level risk in
+        let always_approve =
+          match meta with
+          | Some (m : Keeper_meta_contract.keeper_meta) ->
+            (match m.always_approve with
+             | Some enabled -> enabled
+             | None -> false)
+          | None -> false
+        in
+        let rule_match =
+          Keeper_approval_queue.find_matching_rule
+            ~base_path
+            ~keeper_name
+            ~tool_name
+            ~input
+            ~risk_level
+            ?sandbox_profile
+            ?backend
+            ?runtime_contract
+            ()
+        in
+        if (not auto_approval_forbidden) && always_approve
+        then (
+          Keeper_approval_queue.audit_approval_event
+            ~base_path
+            ~event_type:"auto_approved_always"
+            ~id:(Printf.sprintf "auto_always_%s_%s" keeper_name tool_name)
+            ~keeper_name
+            ~tool_name
+            ~risk_level
+            ?turn_id
+            ?task_id
+            ?goal_id
+            ~goal_ids
+            ?sandbox_target
+            ?runtime_contract
+            ?selected_model
+            ~disposition:"Pass"
+            ~disposition_reason:"always_approve_enabled"
+            ~auto_approved:true
+            ();
+          Agent_sdk.Hooks.Approve)
+        else
+          match rule_match with
+          | Some matched ->
+            Keeper_approval_queue.audit_approval_event
+              ~base_path
+              ~event_type:"auto_approved_rule_match"
+              ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
+              ~keeper_name
+              ~tool_name
+              ~risk_level
+              ?turn_id
+              ?task_id
+              ?goal_id
+              ~goal_ids
+              ?sandbox_target
+              ?runtime_contract
+              ?selected_model
+              ~disposition:"Pass"
+              ~disposition_reason:"healthy"
+              ~rule_match:matched
+              ~auto_approved:true
+              ();
+            Agent_sdk.Hooks.Approve
+          | None ->
+            let mode = Operator_approval.read_approval_mode_or_manual ~base_path in
+            let band = approval_band_of_risk risk in
+            let submit_for_operator reason =
+              Keeper_approval_queue.submit_and_await
+                ~keeper_name
+                ~tool_name
+                ~input
+                ~base_path
+                ?turn_id
+                ?task_id
+                ?goal_id
+                ~goal_ids
+                ?sandbox_target
+                ?sandbox_profile
+                ?backend
+                ?runtime_contract
+                ?selected_model
+                ~disposition:"Blocked"
+                ~disposition_reason:
+                  (Operator_approval.approval_mode_queue_reason_to_string reason)
+                ~risk_level
+                ?clock
+                ()
+            in
+            (match Operator_approval.decide_approval_mode ~mode ~band with
+             | Operator_approval.Auto_approved { mode; band } ->
+               Keeper_approval_queue.audit_approval_event
+                 ~base_path
+                 ~event_type:Keeper_approval_queue.approval_audit_resolved_event
+                 ~id:(Keeper_approval_queue.generate_id ())
+                 ~keeper_name
+                 ~tool_name
+                 ~risk_level
+                 ?turn_id
+                 ?task_id
+                 ?goal_id
+                 ~goal_ids
+                 ?sandbox_target
+                 ?runtime_contract
+                 ?selected_model
+                 ~disposition:"Pass"
+                 ~disposition_reason:"approval_mode_auto_low_risk"
+                 ~auto_approved:true
+                 ~actor:"auto_mode"
+                 ~approval_mode:(Operator_approval.approval_mode_to_string mode)
+                 ~authorizing_band:(Operator_approval.risk_band_to_string band)
+                 ~decision:(Keeper_approval_queue.Approval_resolved Agent_sdk.Hooks.Approve)
+                 ();
+               Agent_sdk.Hooks.Approve
+             | Operator_approval.Queue_for_operator { reason; mode = _; band = _ } ->
+               submit_for_operator reason)))
 ;;

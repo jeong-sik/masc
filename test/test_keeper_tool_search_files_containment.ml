@@ -149,6 +149,11 @@ let assert_repository_registration_policy_response ~raw =
     (Json.member "deterministic_retry" json |> Json.member "reason"
    |> Json.to_string_option)
 
+let json_field_present raw field =
+  match Yojson.Safe.from_string raw |> Json.member field with
+  | `Null -> false
+  | _ -> true
+
 let json_list_contains_string json field value =
   Yojson.Safe.from_string json
   |> Json.member field
@@ -157,6 +162,11 @@ let json_list_contains_string json field value =
     match item with
     | `String s -> String.equal s value
     | _ -> false)
+
+let write_malformed_repositories ~base =
+  let path = Filename.concat base ".masc/config/repositories.toml" in
+  ensure_dir (Filename.dirname path);
+  ignore (Fs_compat.save_file_atomic path "[repository.demo\n")
 
 let write_executable path content =
   ignore (Fs_compat.save_file_atomic path content);
@@ -470,12 +480,61 @@ let test_grep_unregistered_visible_repo_marks_deterministic_policy_block () =
     "registered repo is surfaced"
     true
     (json_list_contains_string raw "registered_repos" "repos/masc");
+	  Alcotest.(check (option bool))
+	    "same path retry will fail"
+	    (Some true)
+	    (Json.member "path_resolution" json
+	     |> Json.member "same_path_retry_will_fail"
+	     |> Json.to_bool_option)
+
+let test_grep_repo_catalog_load_error_is_not_empty_repo_hint () =
+  setup ~keeper_name:"base" ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~base ~config ~meta ~playground ->
+  write_malformed_repositories ~base;
+  let repo_root = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir (Filename.concat repo_root ".git");
+  ensure_dir (Filename.concat repo_root "lib");
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_search_files
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+          [ "op", `String "rg"
+          ; "pattern", `String "Keeper_repo_mapping"
+          ; "path", `String "repos/masc-mcp/lib"
+          ])
+  in
   Alcotest.(check (option bool))
-    "same path retry will fail"
-    (Some true)
+    "catalog load error fails closed"
+    (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool)
+    "visible repo is still surfaced"
+    true
+    (json_list_contains_string raw "available_repos" "repos/masc-mcp");
+  Alcotest.(check bool)
+    "registered repo list is omitted when catalog is unreadable"
+    false
+    (json_field_present raw "registered_repos");
+  (match parse_field raw "registered_repos_error" with
+   | None -> Alcotest.failf "registered_repos_error absent: raw=%s" raw
+   | Some msg ->
+     Alcotest.(check bool)
+       "registered repo load error is explicit"
+       true
+       (String.trim msg <> ""));
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool)
+    "next action points at catalog repair"
+    true
     (Json.member "path_resolution" json
-     |> Json.member "same_path_retry_will_fail"
-     |> Json.to_bool_option)
+     |> Json.member "next_action"
+     |> Json.to_string_option
+     |> Option.value ~default:""
+     |> fun action -> String_util.contains_substring action "repositories.toml")
 
 (* Validate that malformed ripgrep --type values are rejected without crossing
    the execution boundary. Regex/glob validity is owned by the actual rg
@@ -816,12 +875,16 @@ let () =
           Alcotest.test_case
             "local keeper rg invalid type surfaces stderr to keeper"
             `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
-          Alcotest.test_case
-            "Grep unregistered visible repo marks deterministic policy block"
-            `Quick
-            test_grep_unregistered_visible_repo_marks_deterministic_policy_block;
-          Alcotest.test_case "docker keeper invalid type rejects before docker spawn"
-            `Quick test_docker_keeper_invalid_type_rejects_before_docker_spawn;
+	          Alcotest.test_case
+	            "Grep unregistered visible repo marks deterministic policy block"
+	            `Quick
+	            test_grep_unregistered_visible_repo_marks_deterministic_policy_block;
+	          Alcotest.test_case
+	            "Grep repo catalog load error is not empty repo hint"
+	            `Quick
+	            test_grep_repo_catalog_load_error_is_not_empty_repo_hint;
+	          Alcotest.test_case "docker keeper invalid type rejects before docker spawn"
+	            `Quick test_docker_keeper_invalid_type_rejects_before_docker_spawn;
           Alcotest.test_case "docker keeper blocks second rg outside" `Quick
             test_docker_keeper_blocks_second_rg_outside;
           Alcotest.test_case "docker keeper allows inside playground"

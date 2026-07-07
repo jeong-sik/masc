@@ -26,6 +26,13 @@ describe('parseGateConnectorsData', () => {
     expect(result.connectors[0].capabilities).toEqual([])
     expect(result.connectors[0].available).toBe(false)
     expect(result.connectors[0].guild_count).toBe(0)
+    expect(result.connectors[0].source_health).toEqual({
+      storage_paths: 'fallback',
+      runtime_summary: 'fallback',
+      binding_summary: 'fallback',
+      names: 'fallback',
+      observed_channel: 'missing',
+    })
     expect(result.total).toBe(1)
     expect(result.active_count).toBe(1)
     expect(result.generated_at).toBe('2024-01-01T00:00:00Z')
@@ -177,6 +184,7 @@ describe('parseGateConnectorsData', () => {
       audit_path: '/audit',
       names_path: '/names',
     })
+    expect(result.connectors[0].source_health.storage_paths).toBe('present')
   })
 
   it('parses runtime_summary with defaults when missing', () => {
@@ -236,6 +244,7 @@ describe('parseGateConnectorsData', () => {
     expect(result.connectors[0].runtime_summary.connected).toBe(true)
     expect(result.connectors[0].runtime_summary.stale_after_sec).toBe(300)
     expect(result.connectors[0].runtime_summary.gate_healthy).toBe(true)
+    expect(result.connectors[0].source_health.runtime_summary).toBe('present')
   })
 
   it('parses binding_summary with cross-field default for configured_bindings_count', () => {
@@ -280,11 +289,13 @@ describe('parseGateConnectorsData', () => {
     expect(result.connectors[0].binding_summary.configured_bindings_count).toBe(5)
     expect(result.connectors[0].binding_summary.binding_source).toBe('config')
     expect(result.connectors[0].binding_summary.runtime_bindings_count).toBe(3)
+    expect(result.connectors[0].source_health.binding_summary).toBe('present')
   })
 
   it('parses observed_channel as null when missing', () => {
     const result = parseGateConnectorsData(minimalOuter)
     expect(result.connectors[0].observed_channel).toBeNull()
+    expect(result.connectors[0].source_health.observed_channel).toBe('missing')
   })
 
   it('filters names via filteredStringMap (drops empty strings and non-strings)', () => {
@@ -308,6 +319,7 @@ describe('parseGateConnectorsData', () => {
     expect(result.connectors[0].names.channel_names).toEqual({ c1: 'Channel One' })
     expect(result.connectors[0].names.channel_to_guild).toEqual({ c1: 'g1' })
     expect(result.connectors[0].names.updated_at).toBe('2024-01-01')
+    expect(result.connectors[0].source_health.names).toBe('present')
   })
 
   it('returns default names when names field is missing', () => {

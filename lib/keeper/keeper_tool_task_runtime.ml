@@ -331,6 +331,33 @@ let task_op_of_name name =
   | None -> None
 ;;
 
+let parse_keeper_task_done_evidence_refs args =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "evidence_refs" fields with
+     | None ->
+       Error
+         "evidence_refs is required. Include at least one PR, commit, trace, \
+          receipt, or reviewer-inspectable URL reference."
+     | Some (`List refs) ->
+       let rec collect acc = function
+         | [] ->
+           let refs = List.rev acc in
+           if refs = []
+           then Error "evidence_refs must contain at least one non-empty string."
+           else Ok refs
+         | `String ref_ :: rest ->
+           let ref_ = String.trim ref_ in
+           if ref_ = ""
+           then Error "evidence_refs must contain only non-empty strings."
+           else collect (ref_ :: acc) rest
+         | _ :: _ -> Error "evidence_refs must be an array of non-empty strings."
+       in
+       collect [] refs
+     | Some _ -> Error "evidence_refs must be an array of non-empty strings.")
+  | _ -> Error "keeper_task_done arguments must be an object."
+;;
+
 let handle_keeper_task_tool
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -787,6 +814,15 @@ let handle_keeper_task_tool
         "result is required. Audit trail: describe what you completed. \
          Example: result='Refactored module X, all tests green, no flake'."
     else (
+      match parse_keeper_task_done_evidence_refs args with
+      | Error message ->
+        workflow_rejection_error_json
+          ~alternatives:[ "keeper_task_done" ]
+          ~typed_outcome:
+            (Keeper_tool_outcome.Error
+               { reason = "keeper_task_done rejected: evidence_refs required" })
+          message
+      | Ok evidence_refs ->
       (* Map keeper vocabulary (`result`) onto MASC domain typed
          handoff_context.summary so the action=done strict-contract
          path can read the completion summary directly from a typed
@@ -797,7 +833,10 @@ let handle_keeper_task_tool
           "action", `String "done";
           "notes", `String result_text;
           ( "handoff_context",
-            `Assoc [ "summary", `String result_text ] );
+            `Assoc
+              [ "summary", `String result_text
+              ; "evidence_refs", Json_util.json_string_list evidence_refs
+              ] );
         ]
       in
       let transition_result =

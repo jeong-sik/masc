@@ -1,0 +1,505 @@
+<style>
+  :root {
+    --ground: #0e1013;
+    --raised: #161a20;
+    --raised-2: #1b212a;
+    --line: #262e39;
+    --line-soft: #1c232c;
+    --ink: #e9ecf2;
+    --ink-dim: #9aa4b3;
+    --ink-mute: #6a7382;
+    --volt: #b9f24a;
+    --volt-dim: #8bbf34;
+    --amber: #e6a13a;
+    --ok: #57c98a;
+    --warn: #e6b84a;
+    --bad: #ec5f6b;
+    --info: #5fa8e8;
+    --dormant: #a98bf0;
+    --shadow: 0 1px 0 rgba(255,255,255,.02), 0 12px 34px -20px rgba(0,0,0,.7);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ground: #f4f5f2;
+      --raised: #ffffff;
+      --raised-2: #f0f2ee;
+      --line: #dde0d9;
+      --line-soft: #e7eae3;
+      --ink: #1a1e24;
+      --ink-dim: #566072;
+      --ink-mute: #838d9c;
+      --volt: #5f8f14;
+      --volt-dim: #7aa82a;
+      --amber: #b5771a;
+      --ok: #2f9c5f;
+      --warn: #a9791a;
+      --bad: #cc3846;
+      --info: #2f6fbf;
+      --dormant: #6f4fd0;
+      --shadow: 0 1px 0 rgba(0,0,0,.02), 0 12px 30px -22px rgba(0,0,0,.28);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1013; --raised: #161a20; --raised-2: #1b212a; --line: #262e39;
+    --line-soft: #1c232c; --ink: #e9ecf2; --ink-dim: #9aa4b3; --ink-mute: #6a7382;
+    --volt: #b9f24a; --volt-dim: #8bbf34; --amber: #e6a13a; --ok: #57c98a;
+    --warn: #e6b84a; --bad: #ec5f6b; --info: #5fa8e8; --dormant: #a98bf0;
+    --shadow: 0 1px 0 rgba(255,255,255,.02), 0 12px 34px -20px rgba(0,0,0,.7);
+  }
+  :root[data-theme="light"] {
+    --ground: #f4f5f2; --raised: #ffffff; --raised-2: #f0f2ee; --line: #dde0d9;
+    --line-soft: #e7eae3; --ink: #1a1e24; --ink-dim: #566072; --ink-mute: #838d9c;
+    --volt: #5f8f14; --volt-dim: #7aa82a; --amber: #b5771a; --ok: #2f9c5f;
+    --warn: #a9791a; --bad: #cc3846; --info: #2f6fbf; --dormant: #6f4fd0;
+    --shadow: 0 1px 0 rgba(0,0,0,.02), 0 12px 30px -22px rgba(0,0,0,.28);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    background-image: radial-gradient(120% 80% at 80% -10%, color-mix(in oklab, var(--volt) 6%, transparent), transparent 60%);
+  }
+  .wrap { max-width: 1140px; margin: 0 auto; padding: 56px 28px 100px; }
+  .mono { font-family: var(--mono); }
+  code, .fl {
+    font-family: var(--mono); font-size: .82em;
+    background: color-mix(in oklab, var(--ink) 8%, transparent);
+    border: 1px solid var(--line); border-radius: 5px; padding: .5px 6px;
+    color: var(--ink-dim); white-space: nowrap;
+  }
+  a { color: var(--volt); text-decoration-color: color-mix(in oklab, var(--volt) 40%, transparent); }
+
+  /* ── header ── */
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--volt-dim); margin: 0 0 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 1px; background: var(--volt-dim); }
+  h1 {
+    font-size: clamp(30px, 4.4vw, 46px); line-height: 1.06; margin: 0 0 18px;
+    letter-spacing: -.02em; font-weight: 680; text-wrap: balance; max-width: 22ch;
+  }
+  .lede { font-size: 18px; color: var(--ink-dim); max-width: 68ch; margin: 0 0 8px; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 22px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--ink-mute);
+  }
+  .meta b { color: var(--ink-dim); font-weight: 500; }
+
+  /* ── section scaffold ── */
+  section { margin-top: 58px; }
+  .sec-h {
+    display: flex; align-items: baseline; gap: 14px; margin: 0 0 6px;
+    padding-bottom: 12px; border-bottom: 1px solid var(--line);
+  }
+  .sec-n {
+    font-family: var(--mono); font-size: 13px; color: var(--volt);
+    font-weight: 600; flex: none;
+  }
+  .sec-h h2 { font-size: 21px; margin: 0; letter-spacing: -.01em; font-weight: 640; }
+  .sec-h .sub { margin-left: auto; font-size: 12.5px; color: var(--ink-mute); font-family: var(--mono); }
+  .prose { color: var(--ink-dim); max-width: 74ch; margin: 18px 0 0; }
+  .prose p { margin: 0 0 14px; }
+  .prose strong { color: var(--ink); font-weight: 600; }
+
+  /* ── thesis callout ── */
+  .thesis {
+    margin-top: 22px; display: grid; grid-template-columns: 4px 1fr; gap: 18px;
+    background: var(--raised); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px 24px; box-shadow: var(--shadow);
+  }
+  .thesis-bar { background: var(--volt); border-radius: 4px; }
+  .thesis p { margin: 0 0 12px; color: var(--ink); }
+  .thesis p:last-child { margin-bottom: 0; color: var(--ink-dim); }
+
+  /* ── verdict chips ── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .04em;
+    padding: 2px 9px; border-radius: 999px; text-transform: uppercase;
+    color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 42%, transparent);
+    background: color-mix(in oklab, var(--tone) 12%, transparent); --tone: var(--ink-mute);
+  }
+  .chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tone); }
+  .chip.observable { --tone: var(--ok); }
+  .chip.shipped { --tone: var(--volt); }
+  .chip.partial { --tone: var(--warn); }
+  .chip.dormant { --tone: var(--dormant); }
+  .chip.absent { --tone: var(--bad); }
+  .chip.info { --tone: var(--info); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 20px; }
+  .legend .li { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-dim); }
+
+  /* ── tables ── */
+  .tbl-scroll { overflow-x: auto; margin-top: 22px; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; min-width: 720px; background: var(--raised); font-size: 13.5px; }
+  thead th {
+    text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-mute); font-weight: 500;
+    padding: 13px 16px; border-bottom: 1px solid var(--line); background: var(--raised-2);
+    position: sticky; top: 0;
+  }
+  tbody td { padding: 14px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: top; color: var(--ink-dim); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody td:first-child { color: var(--ink); font-weight: 500; }
+  tbody tr:hover td { background: color-mix(in oklab, var(--volt) 3%, transparent); }
+  .tnote { display: block; margin-top: 5px; font-size: 12px; color: var(--ink-mute); }
+
+  /* ── goal matrix cards ── */
+  .goals { display: grid; gap: 16px; margin-top: 24px; }
+  .goal {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 14px;
+    padding: 0; overflow: hidden; box-shadow: var(--shadow);
+    display: grid; grid-template-columns: 128px 1fr; align-items: stretch;
+  }
+  .goal-rail {
+    padding: 20px 18px; border-right: 1px solid var(--line);
+    background: color-mix(in oklab, var(--phase, var(--volt)) 8%, var(--raised-2));
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .goal-id { font-family: var(--mono); font-size: 22px; font-weight: 680; color: var(--phase, var(--volt)); letter-spacing: -.02em; }
+  .goal-phase { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-mute); }
+  .goal-body { padding: 20px 22px; }
+  .goal-body h3 { margin: 0 0 8px; font-size: 16.5px; letter-spacing: -.01em; }
+  .goal-body > p { margin: 0 0 16px; color: var(--ink-dim); font-size: 14px; max-width: 70ch; }
+  .kv { display: grid; grid-template-columns: 132px 1fr; gap: 4px 16px; font-size: 13px; }
+  .kv dt { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-mute); padding-top: 3px; }
+  .kv dd { margin: 0 0 10px; color: var(--ink-dim); }
+  .kv dd:last-of-type { margin-bottom: 0; }
+  .goal[data-phase="1"] { --phase: var(--volt); }
+  .goal[data-phase="2"] { --phase: var(--amber); }
+  .goal[data-phase="3"] { --phase: var(--dormant); }
+
+  /* ── connection map ── */
+  .map { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 14px; margin-top: 24px; }
+  .node {
+    background: var(--raised); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; box-shadow: var(--shadow); border-left: 3px solid var(--tone, var(--line));
+  }
+  .node.live { --tone: var(--ok); } .node.dormant { --tone: var(--dormant); }
+  .node.absent { --tone: var(--bad); } .node.shipped { --tone: var(--volt); }
+  .node h4 { margin: 0 0 4px; font-size: 14.5px; display: flex; align-items: center; gap: 8px; }
+  .node .path { font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute); word-break: break-all; }
+  .node p { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-dim); }
+
+  /* ── build steps ── */
+  .steps { margin-top: 24px; display: grid; gap: 12px; counter-reset: step; }
+  .step {
+    display: grid; grid-template-columns: 40px 1fr; gap: 16px; align-items: start;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+  }
+  .step::before {
+    counter-increment: step; content: counter(step, upper-alpha);
+    font-family: var(--mono); font-weight: 680; font-size: 15px; color: var(--ground);
+    background: var(--volt); width: 30px; height: 30px; border-radius: 8px;
+    display: grid; place-items: center;
+  }
+  .step h4 { margin: 0 0 4px; font-size: 14.5px; }
+  .step p { margin: 0; font-size: 13px; color: var(--ink-dim); }
+  .step .files { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .callout {
+    margin-top: 22px; background: color-mix(in oklab, var(--warn) 9%, var(--raised));
+    border: 1px solid color-mix(in oklab, var(--warn) 34%, var(--line));
+    border-radius: 12px; padding: 18px 20px; font-size: 14px; color: var(--ink-dim);
+  }
+  .callout b { color: var(--ink); }
+
+  footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-mute); font-family: var(--mono); }
+  .tabular { font-variant-numeric: tabular-nums; }
+  @media (max-width: 640px) {
+    .goal { grid-template-columns: 1fr; }
+    .goal-rail { flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--line); }
+    .kv, .step { grid-template-columns: 1fr; }
+    .kv dt { padding-top: 8px; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">MASC · Design · Goal Matrix</p>
+    <h1>Keeper 자율 백그라운드 — 관측 레이어 설계</h1>
+    <p class="lede">
+      대시보드 스케줄 화면의 마지막 조각 <strong>“Keeper 자율 백그라운드”</strong>(폴링 루프 · 비동기 도구 호출)를
+      <strong>stub 없이</strong> 실데이터로 그리기 위한 연결점 감사와 phased 목표 매트릭스.
+    </p>
+    <p class="lede" style="margin-top:12px">
+      결론부터: 시안의 4개 poll 행은 대부분 <em>개별 관측 백엔드가 없다</em>. 실제로 관측 가능한 것과,
+      이미 <span class="mono">상시 폴링 strip</span>으로 출하된 것, dormant한 “정답 집”, 그리고 신규 관측 레이어가 필요한 것을 분리한다.
+    </p>
+    <div class="meta">
+      <span><b>subject</b> keeper-v2 · schedule.jsx › SchKeeperBg</span>
+      <span><b>repo</b> yousleepwhen/masc</span>
+      <span><b>base</b> lib/schedule (출하됨) · PR #23533</span>
+      <span><b>date</b> 2026-07-07</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-h"><span class="sec-n">§1</span><h2>Reality thesis</h2><span class="sub">왜 시안대로 못 그리는가</span></div>
+    <div class="thesis">
+      <div class="thesis-bar"></div>
+      <div>
+        <p>masc keeper에는 <strong>“poll 대상마다 fiber”라는 모델이 없다.</strong> keeper의 자율 백그라운드는 사실상
+        <strong>단일 keepalive heartbeat 루프 1개</strong>이고(<span class="fl">keeper_heartbeat_loop.ml:235</span>),
+        board 감시·recurring 실행·snapshot은 그 한 사이클의 <em>인라인 stage</em>일 뿐이다.</p>
+        <p>따라서 시안의 “board 30s · git 300s · LSP 60s · connector 120s” 4개 poll 행은 개별 cadence·상태·since로
+        관측되는 백엔드가 <strong>대부분 존재하지 않는다.</strong> 그리고 cadence 기반 반복이라는 개념의 실체는 keeper가 아니라
+        <strong><span class="fl">lib/schedule/</span> (Interval recurrence)</strong> — 즉 이번 PR에서 이미 <span class="chip shipped">shipped</span>한 <strong>상시 폴링 strip</strong>이다.</p>
+        <p>그러므로 이 기능의 정직한 정의는 “가짜 4행 재현”이 아니라, <strong>실제로 관측 가능한 자율 활동을 keeper 단위로 투영</strong>하고,
+        관측 불가능한 것은 신규 레이어(Phase 2/3)로 escalate하는 것이다.</p>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="li"><span class="chip observable">observable</span> 런타임에 이미 기록/조회 가능</span>
+      <span class="li"><span class="chip shipped">shipped</span> 이번 PR에서 이미 출하</span>
+      <span class="li"><span class="chip partial">partial</span> 활동은 일어나나 관측 레코드 없음</span>
+      <span class="li"><span class="chip dormant">dormant</span> 설계됐으나 런타임 미배선</span>
+      <span class="li"><span class="chip absent">absent</span> 개념 자체가 부재 (신규 필요)</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="sec-n">§2</span><h2>연결점 매트릭스</h2><span class="sub">시안 요소 → 실제 백엔드 → 판정</span></div>
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr><th>시안 요소</th><th>실제 백엔드 (file:line)</th><th>판정</th><th>Phase</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>폴링 루프 · 고정 간격 반복</td>
+            <td><code>lib/schedule</code> Interval recurrence → 상시 폴링 strip<span class="tnote">schedule_domain.ml:264 <span class="mono">is_recurring</span> · 대시보드 PollingStrip (PR #23533)</span></td>
+            <td><span class="chip shipped">shipped</span></td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td>keeper 자율 루프 (running/paused/since)</td>
+            <td><code>keeper_registry_types.ml:70,88,96</code><span class="tnote"><span class="mono">first_started_at · started_at · phase · last_restart_ts · dead_since_ts</span></span></td>
+            <td><span class="chip observable">observable</span></td>
+            <td>1</td>
+          </tr>
+          <tr>
+            <td>주기 반복 작업 (cadence + 상태 + 마지막 실행)</td>
+            <td><code>keeper_recurring.ml</code><span class="tnote"><span class="mono">interval_sec · last_run_ts · run_count · enabled(paused)</span> — 소비자(heartbeat dispatch)는 라이브지만 <b>생산자(add) 호출이 프로덕션에 0</b> → <span class="mono">list_all()</span> 항상 empty. 등록 경로 = RFC-0314.</span></td>
+            <td><span class="chip absent">producer 0</span></td>
+            <td>2·RFC</td>
+          </tr>
+          <tr>
+            <td>비동기 · deferred (bg shell · fusion · hitl)</td>
+            <td><code>server_keeper_waiting_inventory.ml:400,374,310</code><span class="tnote"><span class="mono">Background_task · Fusion_running · Hitl_pending</span> — <b>이미 스케줄 화면 KeeperWaitingInventoryPanel로 출하됨.</b> 재projection 금지 → 프론트에서 재사용.</span></td>
+            <td><span class="chip shipped">shipped</span></td>
+            <td>1·reuse</td>
+          </tr>
+          <tr>
+            <td>도구 호출 단위 in-flight (issued·tool·ETA·status)</td>
+            <td><code>tool_orchestration/tool_event.mli:29</code><span class="tnote">완전한 상태머신(Job_scheduled→Started→Progress→Succeeded/Failed/Cancelled, append-only) — <b>외부 참조 0, 런타임 미배선</b></span></td>
+            <td><span class="chip dormant">dormant</span></td>
+            <td>2</td>
+          </tr>
+          <tr>
+            <td>board 새 post·comment 감시 (30s)</td>
+            <td><code>keeper_heartbeat_loop_board_events.ml:145</code><span class="tnote">heartbeat stage로 폴링은 하나 독립 cadence·since·관측 레코드 없음</span></td>
+            <td><span class="chip partial">partial</span></td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td>git fetch (300s) · LSP watch (60s) · connector heartbeat (120s)</td>
+            <td>keeper poll 루프 부재<span class="tnote">git=타임아웃 knob만(env_config_core.ml:530) · LSP=server push-proxy(server_ide_lsp_proxy.ml:409) · connector 모듈 없음</span></td>
+            <td><span class="chip absent">absent</span></td>
+            <td>3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <b>핵심 정직성:</b> 시안의 4개 poll 행 중 <b>실데이터로 채울 수 있는 건 0개</b>다. Phase 1은 대신 <b>keeper 단위 자율 루프 + recurring + bg/fusion deferred</b>라는
+      <em>실제로 관측되는</em> 자율 활동을 투영한다. board/git/LSP/connector 개별 관측은 신규 레이어(Phase 3)이며, <b>정말 필요한지부터 질문</b>한다 — heartbeat 루프가 이미 그 일을 하므로 per-target 관측은 과설계일 수 있다.
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="sec-n">§3</span><h2>Goal Matrix</h2><span class="sub">phased · 검증 가능한 완료 기준</span></div>
+    <div class="goals">
+
+      <article class="goal" data-phase="2">
+        <div class="goal-rail"><span class="goal-id">G1</span><span class="goal-phase">projection 머지 · 패널 보류</span></div>
+        <div class="goal-body">
+          <div class="callout" style="margin:0 0 14px">
+            <b>적대 검증 정정 (2026-07-07):</b> recurring은 대시보드 소비자도 0이지만 <b>생산자(add)도 0</b>인 죽은 소스로 확인됨 → 패널은 프로덕션에서 항상 empty. <b>패널은 보류</b>하고 백엔드 projection + 설계만 머지. 생산자(등록 MCP 도구)는 <b>RFC-0314</b>로 선행. 빈 패널을 프로덕션에 내보내지 않음.
+          </div>
+          <h3>백엔드 projection <code>server_keeper_background</code> — <em>display-ready infra</em></h3>
+          <p><b>SSOT 경계:</b> bg/fusion/hitl(비동기·deferred)은 이미 <span class="mono">keeper_waiting_inventory</span>로 출하됐으므로 <b>재projection하지 않는다</b>.
+            이 모듈은 대시보드에 <em>전혀 노출되지 않던</em> keeper-native 자율 활동만 투영한다: <b>루프 liveness</b>(registry phase·started_at·restart) + <b>주기 반복 작업</b>(recurring: cadence·last_run·enabled).</p>
+          <dl class="kv">
+            <dt>산출물</dt><dd><code>lib/server_keeper_background.ml</code> + <code>.mli</code>, schema <span class="mono">masc.dashboard.keeper_background.v1</span></dd>
+            <dt>연결점</dt><dd>keeper_registry_types (loop) · keeper_recurring (cadence) — <span class="mono">keeper_metrics</span> 외 대시보드 소비자 0</dd>
+            <dt>불변식</dt><dd>next-run/last-run 없는 행은 <span class="mono">None</span>으로 정직 표기. bg/fusion/hitl은 <b>재사용</b>(프론트가 <span class="mono">data.keeper_waiting_inventory</span> 소비).</dd>
+            <dt>검증</dt><dd><code>test/test_server_keeper_background.ml</code> — loop·recurring 매핑, 빈 상태, per-keeper 그룹핑</dd>
+            <dt>의존</dt><dd>없음 (기존 관측 소스만)</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="goal" data-phase="1">
+        <div class="goal-rail"><span class="goal-id">G2</span><span class="goal-phase">Phase 1 · 지금</span></div>
+        <div class="goal-body">
+          <h3>HTTP projection 배선 + 대시보드 타입</h3>
+          <p>pull 기반 <span class="fl">/api/v1/dashboard/tools</span> 응답에 형제 필드로 노출(SSE 불필요 — scheduled_automation과 동일 경로).</p>
+          <dl class="kv">
+            <dt>산출물</dt><dd><code>attach_live_tools_projections</code>에 한 줄 · <code>DashboardKeeperBackground</code> 타입 + <span class="mono">DashboardToolsResponse.keeper_background?</span></dd>
+            <dt>연결점</dt><dd>server_dashboard_http_runtime_info.ml:3423 · dashboard-tools-prompts.ts:332</dd>
+            <dt>검증</dt><dd>대시보드 api 타입 tsc green · projection JSON round-trip 테스트</dd>
+            <dt>의존</dt><dd>G1</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="goal" data-phase="1">
+        <div class="goal-rail"><span class="goal-id">G3</span><span class="goal-phase">Phase 1 · 지금</span></div>
+        <div class="goal-body">
+          <h3>프론트 <code>KeeperBackgroundPanel</code> + 스케줄 화면 배선</h3>
+          <p>시안 <span class="mono">SchKeeperBg</span>의 2그룹을 <b>서로 다른 소스에서</b> 렌더: <b>자율 루프/반복</b>은 신규 <span class="mono">data.keeper_background</span>, <b>비동기·deferred</b>는 이미 fetch된 <span class="mono">data.keeper_waiting_inventory</span>(bg/fusion 필터) 재사용 — 새 projection 없음.</p>
+          <dl class="kv">
+            <dt>산출물</dt><dd><code>components/schedule/keeper-background-panel.ts</code> + <code>schedule-surface.ts</code> 마운트 + CSS</dd>
+            <dt>연결점</dt><dd>기존 <code>keeper-waiting-inventory-panel.ts</code> 톤 재사용 · tools-main.ts 패턴</dd>
+            <dt>불변식</dt><dd>관측 전용(mutation 없음). ETA 없는 행은 “—”로 표기, 날조 금지.</dd>
+            <dt>검증</dt><dd>vitest 렌더 — 2그룹, per-keeper, 빈 상태, ETA 부재 표기</dd>
+            <dt>의존</dt><dd>G2</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="goal" data-phase="2">
+        <div class="goal-rail"><span class="goal-id">G4</span><span class="goal-phase">Phase 2 · RFC</span></div>
+        <div class="goal-body">
+          <h3>도구 호출 단위 in-flight 관측 (Tool_job/Tool_event 배선)</h3>
+          <p>dormant한 <code>tool_orchestration</code> 상태머신을 keeper 런타임에 배선해 <b>진짜</b> (issued · tool_name · ETA · in_flight/awaiting)를 관측. <span class="mono">keeper_tool_call</span> SSE(이미 emit됨)로 라이브 레지스트리를 채우는 경로 검토.</p>
+          <dl class="kv">
+            <dt>산출물</dt><dd>RFC + <span class="mono">Tool_call_inflight</span> waiting_source 신설 · 라이브 레지스트리</dd>
+            <dt>연결점</dt><dd>tool_event.mli:29 (dormant) · keeper_tools_oas_handler_telemetry.ml:65 (SSE) · waiting_inventory enum</dd>
+            <dt>이유</dt><dd>Phase 1의 bg/fusion/hitl은 근사치 — 도구별 in-flight의 정답 집은 여기</dd>
+            <dt>의존</dt><dd>G1–G3 (표시 계층 선행)</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="goal" data-phase="3">
+        <div class="goal-rail"><span class="goal-id">G5</span><span class="goal-phase">Phase 3 · 질문 먼저</span></div>
+        <div class="goal-body">
+          <h3>per-target poll 관측 (board/git/LSP/connector)</h3>
+          <p>시안의 4개 개별 poll 행. <b>구현 전에 필요성부터 검증</b>한다 — heartbeat 루프가 이미 board를 감시하므로 per-target 관측 레코드는 과설계일 수 있다. 필요하다면 heartbeat stage마다 typed tick 이벤트를 emit하는 관측 레이어.</p>
+          <dl class="kv">
+            <dt>선결 질문</dt><dd>운영자가 “board watch가 언제부터/다음 언제”를 keeper 루프 상태와 <em>별개로</em> 볼 실효가 있는가?</dd>
+            <dt>연결점</dt><dd>keeper_heartbeat_loop_board_events.ml:145 · keeper_world_observation.ml:815</dd>
+            <dt>판정</dt><dd><span class="chip absent">absent</span> — 신규 관측 레이어. RFC 없이는 착수 금지.</dd>
+            <dt>의존</dt><dd>G1 (루프 상태가 먼저 서면 per-target 필요성이 재평가됨)</dd>
+          </dl>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="sec-n">§4</span><h2>직교 연결점 지도</h2><span class="sub">주변 코드가 어디서 맞물리는가</span></div>
+    <div class="map">
+      <div class="node live">
+        <h4>keeper registry <span class="chip observable">live</span></h4>
+        <span class="path">keeper_registry_types.ml:70</span>
+        <p>keeper 루프의 started_at · phase · restart/dead. 자율 루프 행의 기반.</p>
+      </div>
+      <div class="node live">
+        <h4>keeper_recurring <span class="chip observable">live</span></h4>
+        <span class="path">keeper_recurring.ml</span>
+        <p>per-task cadence + last_run + enabled. cadence 상태가 있는 유일한 keeper-native 구조.</p>
+      </div>
+      <div class="node live">
+        <h4>bg_task <span class="chip observable">live</span></h4>
+        <span class="path">lib/process/bg_task.ml</span>
+        <p>장수명 shell task roster + started_at. 폴링 루프/in-flight exec의 실 소스.</p>
+      </div>
+      <div class="node live">
+        <h4>waiting_inventory <span class="chip observable">live</span></h4>
+        <span class="path">server_keeper_waiting_inventory.ml</span>
+        <p>bg/fusion/hitl을 이미 join하는 read-model. G1은 이 조인 로직을 재사용.</p>
+      </div>
+      <div class="node shipped">
+        <h4>schedule polling strip <span class="chip shipped">shipped</span></h4>
+        <span class="path">components/schedule/schedule-agenda.ts</span>
+        <p>Interval recurrence = cadence 폴링의 실체. 시안 “폴링”의 상당수는 이미 여기.</p>
+      </div>
+      <div class="node dormant">
+        <h4>tool_orchestration <span class="chip dormant">dormant</span></h4>
+        <span class="path">tool_orchestration/tool_event.mli</span>
+        <p>도구 호출 상태머신. 미배선. Phase 2의 정답 집.</p>
+      </div>
+      <div class="node dormant">
+        <h4>keeper_tool_call SSE <span class="chip info">stream</span></h4>
+        <span class="path">keeper_tools_oas_handler_telemetry.ml:65</span>
+        <p>도구 호출이 이미 SSE로 흐름. Phase 2 라이브 레지스트리의 급전.</p>
+      </div>
+      <div class="node absent">
+        <h4>per-target poll <span class="chip absent">absent</span></h4>
+        <span class="path">— (신규)</span>
+        <p>board/git/LSP/connector 개별 관측. 필요성부터 검증(Phase 3).</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="sec-n">§5</span><h2>Phase 1 착지 계획</h2><span class="sub">최소 변경 코어 + 검증</span></div>
+    <div class="steps">
+      <div class="step">
+        <div>
+          <h4>projection 모듈 신설</h4>
+          <p>관측 소스만 join. bg/fusion/hitl은 waiting_inventory 조인 재사용, 루프/recurring은 registry·recurring에서. typed 그룹 2종, ETA 부재는 None.</p>
+          <div class="files"><code>lib/server_keeper_background.ml(+.mli)</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h4>HTTP 배선</h4>
+          <p><code>attach_live_tools_projections</code> 리스트에 <span class="mono">"keeper_background", Server_keeper_background.dashboard_json config</span> 한 줄.</p>
+          <div class="files"><code>server_dashboard_http_runtime_info.ml:3423</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h4>대시보드 타입</h4>
+          <p><code>DashboardKeeperBackground</code> + 행 타입 정의, <span class="mono">DashboardToolsResponse.keeper_background?</span> 형제 필드 추가.</p>
+          <div class="files"><code>dashboard/src/api/dashboard-tools-prompts.ts</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h4>패널 + 스케줄 화면 배선</h4>
+          <p>시안 SchKeeperBg 2그룹 렌더. 캘린더 뷰의 보류 자리에 마운트. 관측 전용, ETA 없음은 “—”.</p>
+          <div class="files"><code>components/schedule/keeper-background-panel.ts</code><code>schedule-surface.ts</code><code>styles/keeper-v2/schedule.css</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h4>테스트</h4>
+          <p>OCaml: 소스→typed 그룹 매핑·빈상태·per-keeper. TS: 2그룹 렌더·ETA 부재 표기·mutation 0. dune 빌드는 CI.</p>
+          <div class="files"><code>test/test_server_keeper_background.ml</code><code>keeper-background-panel.test.ts</code></div>
+        </div>
+      </div>
+    </div>
+    <div class="callout">
+      <b>워크어라운드 거부선:</b> Phase 1은 관측되는 것만 그린다. “도구별 in-flight를 그럴듯하게 보이려” bg_task를 tool-call인 척 라벨링하거나 ETA를 추정하면
+      telemetry-as-fix/문자열 분류기 안티패턴이다 — <b>하지 않는다</b>. 진짜 도구 호출 관측은 Phase 2 RFC(G4)로만.
+    </div>
+  </section>
+
+  <footer>
+    MASC keeper-v2 · Keeper Autonomous Background · Goal Matrix v1 · grounded in lib/keeper · lib/schedule · lib/process/bg_task · server_keeper_waiting_inventory
+  </footer>
+</div>

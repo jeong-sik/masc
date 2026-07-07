@@ -366,9 +366,12 @@ describe('FusionSurface', () => {
     // 3 first-tier nodes become cards (meta is not a card); the failed one is isolated
     expect(grid?.querySelectorAll('.fus-jnode')).toHaveLength(3)
 
-    // decision badges are mapped from the free-form wire decision via the shared spec
-    expect(grid?.textContent).toContain('권고') // skeptic -> Recommend
-    expect(grid?.textContent).toContain('심의 무효') // literalist -> Insufficient
+    // Free-form wire decisions are not substring-promoted into semantic badges.
+    // They stay raw/neutral so protocol drift remains visible.
+    expect(grid?.textContent).toContain('recommend — patch first')
+    expect(grid?.textContent).toContain('insufficient — missing: benchmarks')
+    expect(grid?.textContent).not.toContain('권고')
+    expect(grid?.textContent).not.toContain('심의 무효')
     // resolved-answer gist as the card summary
     expect(grid?.textContent).toContain('Skeptic: patch the isolation first')
 
@@ -816,6 +819,29 @@ describe('FusionSurface', () => {
     expect(cards[0]?.classList.contains('answered')).toBe(true)
     expect(cards[0]?.classList.contains('failed')).toBe(false)
     expect(cards[1]?.classList.contains('failed')).toBe(true)
+  })
+
+  it('does not derive judge run status from status substrings', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-judge-status-substring',
+        title: 'Fusion deliberation (run fus-judge-status-substring): pending',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-judge-status-substring',
+          question: 'Judge status edge cases?',
+          panel: [{ model: 'm1', status: 'answered', answer: 'Panel answer.' }],
+          judge: { status: 'failover' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).toContain('running')
+    expect(container.querySelector('.fus-rdot.run')).not.toBeNull()
+    expect(container.querySelector('.fus-rdot.deny')).toBeNull()
   })
 
   it('renders the panel reason_code as a category chip on a failed panel card', () => {

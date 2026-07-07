@@ -20,6 +20,14 @@ import type { BoardPost, OperatorSnapshot } from '../../types'
 
 import '@testing-library/jest-dom'
 
+const voiceStartMock = vi.hoisted(() => vi.fn())
+const voiceStopMock = vi.hoisted(() => vi.fn())
+const voiceInputState = vi.hoisted(() => ({
+  state: 'idle' as 'idle' | 'recording' | 'transcribing',
+  supported: true,
+  transcript: '스케줄러 결과 확인 바람',
+}))
+
 vi.mock('../../store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../store')>()
   return {
@@ -61,6 +69,18 @@ vi.mock('../../operator-store', async (importOriginal) => {
     dispatchOperatorAction: vi.fn(),
   }
 })
+
+vi.mock('../chat/voice-input', () => ({
+  useVoiceInput: (options: { onTranscribed: (text: string) => void }) => ({
+    state: voiceInputState.state,
+    supported: voiceInputState.supported,
+    start: voiceStartMock.mockImplementation(() => {
+      options.onTranscribed(voiceInputState.transcript)
+      return Promise.resolve()
+    }),
+    stop: voiceStopMock,
+  }),
+}))
 
 vi.mock('./board-state', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('./board-state')
@@ -189,6 +209,11 @@ describe('BoardSurface Component', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    voiceStartMock.mockReset()
+    voiceStopMock.mockReset()
+    voiceInputState.state = 'idle'
+    voiceInputState.supported = true
+    voiceInputState.transcript = '스케줄러 결과 확인 바람'
     clearLocalStorage()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ posts: [] }), {
@@ -914,7 +939,7 @@ describe('BoardSurface Component', () => {
     expect(screen.getByLabelText('Mobile mention target')).toHaveValue('keeper:sangsu')
   })
 
-  it('serializes compact mobile mention attachment and voice drafts before sending', () => {
+  it('blocks compact mobile mention attachments until block transport is available', () => {
     const dispatchMock = vi.mocked(dispatchOperatorAction)
     render(h(BoardSurface, null))
 
@@ -926,36 +951,20 @@ describe('BoardSurface Component', () => {
     fireEvent.change(fileInput, {
       target: { files: [new File(['trace'], 'trace.log', { type: 'text/plain' })] },
     })
-    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice'))
-    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice-stop'))
     fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), {
-      target: { value: 'check trace' },
+      target: { value: 'check trace\n\n스케줄러 결과 확인 바람' },
     })
 
     expect(screen.getByTestId('bd-composer-mobile-draft-tray')).toHaveTextContent('trace.log')
-    expect(screen.getByTestId('bd-composer-mobile-draft-tray')).toHaveTextContent('받아쓰기')
+    expect(screen.getByTestId('bd-composer-mobile-draft-tray')).toHaveTextContent('transport unavailable')
+    expect(screen.getByTestId('bd-composer-mobile-body')).toHaveValue('check trace\n\n스케줄러 결과 확인 바람')
+    expect(screen.getByTestId('bd-composer-mobile-send')).toBeDisabled()
     fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
 
-    expect(dispatchMock).toHaveBeenCalledWith({
-      actor: 'dashboard-test',
-      action_type: 'keeper_message',
-      target_type: 'keeper',
-      target_id: 'sangsu',
-      payload: {
-        message: [
-          'Attachments:',
-          '- trace.log (5 B · file)',
-          '',
-          'Voice memo 0:12 (40 KB)',
-          '스케줄러 p99 스파이크와 compact 타이밍을 비교해서 결과만 알려줘.',
-          '',
-          'check trace',
-        ].join('\n'),
-      },
-    })
+    expect(dispatchMock).not.toHaveBeenCalled()
   })
 
-  it('removes compact mobile mention multimodal drafts and re-disables send', () => {
+  it('removes compact mobile mention attachment drafts', () => {
     render(h(BoardSurface, null))
 
     fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
@@ -966,16 +975,8 @@ describe('BoardSurface Component', () => {
     fireEvent.change(screen.getByTestId('bd-composer-mobile-file-input'), {
       target: { files: [new File(['trace'], 'trace.log', { type: 'text/plain' })] },
     })
-    expect(send).not.toBeDisabled()
-    fireEvent.click(screen.getByLabelText('Remove mobile attachment trace.log'))
-    expect(screen.queryByTestId('bd-composer-mobile-draft-tray')).not.toBeInTheDocument()
     expect(send).toBeDisabled()
-
-    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice'))
-    expect(screen.getByTestId('bd-composer-mobile-recorder')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice-stop'))
-    expect(send).not.toBeDisabled()
-    fireEvent.click(screen.getByLabelText('Remove mobile voice draft'))
+    fireEvent.click(screen.getByLabelText('Remove mobile attachment trace.log'))
     expect(screen.queryByTestId('bd-composer-mobile-draft-tray')).not.toBeInTheDocument()
     expect(send).toBeDisabled()
   })

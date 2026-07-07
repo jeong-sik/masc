@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { EditorView } from '@codemirror/view'
+import type { IdeAnnotationDeleteOutcome } from '../../api/ide'
 import type { SelectedAnnotation } from './ide-lsp-client'
 import {
   openIdeContextRouteLink,
@@ -54,14 +56,95 @@ export function EditorContextRouteCount({
   `
 }
 
+// Two-click destructive control: the first click arms, the second runs.
+// Deletability is not knowable up front — the dashboard has no whoami and
+// the DELETE route decides ownership from the token identity — so the
+// button is always offered and a 'forbidden' outcome (another identity's
+// annotation, or a scope the token may not mutate) simply disarms; the
+// delete handler owns the explanatory toast.
+export function AnnotationDeleteControl({
+  annotation,
+  onDelete,
+  onDeleted,
+}: {
+  readonly annotation: SelectedAnnotation
+  readonly onDelete: (annotation: SelectedAnnotation) => Promise<IdeAnnotationDeleteOutcome>
+  readonly onDeleted: () => void
+}) {
+  // Armed/pending state is keyed to the annotation id: switching the
+  // popover to a different annotation reuses this component instance
+  // (same vDOM slot), and a plain boolean would carry the armed click
+  // over to the new target — one click would then delete an annotation
+  // the user never armed.
+  const [armedFor, setArmedFor] = useState<string | null>(null)
+  const [pendingFor, setPendingFor] = useState<string | null>(null)
+  const latestIdRef = useRef(annotation.id)
+  latestIdRef.current = annotation.id
+
+  // Disarm on target switch, not just mask: without this, arming ann-1,
+  // browsing to ann-2 and coming back would leave ann-1 pre-armed.
+  useEffect(() => {
+    setArmedFor(current =>
+      current !== null && current !== annotation.id ? null : current)
+  }, [annotation.id])
+
+  const armed = armedFor === annotation.id
+  const pending = pendingFor === annotation.id
+
+  const run = async () => {
+    if (pendingFor !== null) return
+    if (!armed) {
+      setArmedFor(annotation.id)
+      return
+    }
+    const target = annotation
+    setPendingFor(target.id)
+    let outcome: IdeAnnotationDeleteOutcome
+    try {
+      outcome = await onDelete(target)
+    } catch {
+      outcome = 'error'
+    }
+    if (outcome === 'deleted' && latestIdRef.current === target.id) {
+      // The popover unmounts with the deleted annotation — skip state
+      // updates that would land on an unmounted component.
+      onDeleted()
+      return
+    }
+    // Non-deleted outcome, or the popover moved to a different annotation
+    // while the delete was in flight — closing now would dismiss a target
+    // the user is looking at, so just settle the control.
+    setPendingFor(null)
+    setArmedFor(null)
+  }
+
+  return html`
+    <button
+      type="button"
+      class="v2-ide-action"
+      data-testid="ide-annotation-delete"
+      disabled=${pendingFor !== null}
+      title=${armed
+        ? '한 번 더 누르면 삭제됩니다'
+        : '주석 삭제 (본인이 작성한 주석만 서버가 허용)'}
+      style=${{ color: armed ? 'var(--color-fg-warning)' : undefined, marginLeft: 'auto' }}
+      onClick=${() => void run()}
+    >
+      ${pending ? '삭제 중…' : armed ? '삭제 확인' : '삭제'}
+    </button>
+  `
+}
+
 export function AnnotationPopover({
   annotation,
   view,
   onClose,
+  onDelete,
 }: {
   readonly annotation: SelectedAnnotation
   readonly view: EditorView
   readonly onClose: () => void
+  readonly onDelete?: (annotation: SelectedAnnotation) => Promise<IdeAnnotationDeleteOutcome>
 }) {
   const line = annotation.line_start
   const lineInfo = line >= 1 && line <= view.state.doc.lines
@@ -159,6 +242,13 @@ export function AnnotationPopover({
           <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
             task: ${annotation.task_id}
           </span>
+        ` : null}
+        ${onDelete ? html`
+          <${AnnotationDeleteControl}
+            annotation=${annotation}
+            onDelete=${onDelete}
+            onDeleted=${onClose}
+          />
         ` : null}
       </div>
     </div>

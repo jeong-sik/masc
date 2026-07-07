@@ -1029,6 +1029,53 @@ describe('createPost', () => {
       hearth: 'ops',
     })
   })
+
+  it('passes typed metadata through to the board post tool', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createPost('Plan', 'Body', 'dashboard-user', {
+      meta: {
+        attachments: [{
+          id: 'att-1',
+          kind: 'external_link',
+          origin_url: 'https://example.test/trace.log',
+          origin_name: 'trace.log',
+          origin_size_bytes: 4,
+          mime_type: 'text/plain',
+          width: null,
+          height: null,
+          created_at: 1_799_000_000,
+        }],
+      },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      title: 'Plan',
+      content: 'Body',
+      author: 'dashboard-user',
+      meta: {
+        attachments: [{
+          id: 'att-1',
+          kind: 'external_link',
+          origin_url: 'https://example.test/trace.log',
+          origin_name: 'trace.log',
+          origin_size_bytes: 4,
+          mime_type: 'text/plain',
+          width: null,
+          height: null,
+          created_at: 1_799_000_000,
+        }],
+      },
+    })
+  })
 })
 
 describe('SubBoard API helpers', () => {

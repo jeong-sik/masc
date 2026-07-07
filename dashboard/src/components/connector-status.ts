@@ -499,6 +499,13 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       runtime_bindings_count: 0,
       configured_bindings_count: 0,
     },
+    source_health: {
+      storage_paths: 'fallback',
+      runtime_summary: 'fallback',
+      binding_summary: 'fallback',
+      names: 'fallback',
+      observed_channel: 'missing',
+    },
     observed_channel: null,
     names_path: '',
     names: {
@@ -508,6 +515,51 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       updated_at: '',
     },
   }
+}
+
+type ConnectorSourceHealthKey = keyof GateConnectorInfo['source_health']
+
+const CONNECTOR_SOURCE_HEALTH_ROWS: Array<{ key: ConnectorSourceHealthKey; label: string }> = [
+  { key: 'storage_paths', label: 'storage paths' },
+  { key: 'runtime_summary', label: 'runtime summary' },
+  { key: 'binding_summary', label: 'binding summary' },
+  { key: 'names', label: 'names' },
+  { key: 'observed_channel', label: 'observed channel' },
+]
+
+function connectorSourceHealthClass(state: GateConnectorInfo['source_health'][ConnectorSourceHealthKey]): string {
+  switch (state) {
+    case 'present':
+      return 'border-[var(--color-status-ok)] text-[var(--color-status-ok)]'
+    case 'missing':
+      return 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)]'
+    case 'fallback':
+      return 'border-[var(--color-status-warn)] text-[var(--color-status-warn)]'
+  }
+}
+
+function ConnectorSourceHealthStrip({ connector }: { connector: GateConnectorInfo | null }) {
+  const sourceHealth = connector?.source_health
+  return html`
+    <div
+      class="mt-2 flex flex-wrap items-center gap-1.5 text-3xs"
+      data-testid="connector-source-health"
+      aria-label="Connector source health"
+    >
+      <span class="uppercase tracking-4 text-[var(--color-fg-disabled)]">source health</span>
+      ${CONNECTOR_SOURCE_HEALTH_ROWS.map(row => {
+        const state = sourceHealth?.[row.key] ?? 'missing'
+        return html`
+          <span
+            key=${row.key}
+            class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 ${connectorSourceHealthClass(state)}`}
+            data-connector-source-health=${row.key}
+            data-connector-source-health-state=${state}
+          >${row.label} ${state}</span>
+        `
+      })}
+    </div>
+  `
 }
 
 // Native lifecycle hits the new /api/v1/sidecar/{start,stop} endpoints
@@ -857,6 +909,7 @@ function ConnectorLivePanel({
           getRailInflight(connectorId),
         )}
       />
+      <${ConnectorSourceHealthStrip} connector=${connector} />
 
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 

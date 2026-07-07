@@ -1097,19 +1097,25 @@ export async function requestBoardContextInference(
   return normalized
 }
 
+export interface CreateBoardPostOptions {
+  hearth?: string
+  meta?: Record<string, unknown>
+}
+
 export function createPost(
   title: string,
   content: string,
   author: string,
-  options: { hearth?: string } = {},
+  options: CreateBoardPostOptions = {},
 ): Promise<unknown> {
-  const body: Record<string, string> = {
+  const body: Record<string, unknown> = {
     title,
     content,
     author,
   }
   const hearth = options.hearth?.trim()
   if (hearth) body.hearth = hearth
+  if (options.meta && Object.keys(options.meta).length > 0) body.meta = options.meta
   return post(`/api/v1/tools/masc_board_post`, body)
 }
 

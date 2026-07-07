@@ -248,3 +248,23 @@
 .sch-ev-need { font-size: var(--fs-10); color: var(--status-warn); }
 .sch-ev [data-status-chip] { flex: none; align-self: flex-start; }
 .sch-poll-top [data-status-chip] { flex: none; }
+
+/* ── Keeper 자율 백그라운드 ── */
+.sch-bg { margin-top: 24px; padding: 14px; border: 1px solid var(--border-main); border-radius: var(--radius-md); background: color-mix(in oklab, var(--volt-strong) 2%, var(--bg-deep)); }
+.sch-bg-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.sch-bg-sub { font-size: var(--fs-11); color: var(--text-dim); }
+.sch-bg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) { .sch-bg-grid { grid-template-columns: 1fr; } }
+.sch-bg-col { display: flex; flex-direction: column; gap: 10px; }
+.sch-bg-colh { font-family: var(--font-ui); font-size: 11.5px; color: var(--text-bright); border-bottom: 1px solid var(--border-soft); padding-bottom: 6px; }
+.sch-bg-list { display: flex; flex-direction: column; gap: 8px; }
+.sch-bg-row { text-align: left; display: flex; align-items: flex-start; gap: 11px; width: 100%; padding: 10px 12px; border: 1px solid var(--border-main); border-left: 3px solid var(--tone, var(--border-main)); border-radius: var(--radius-sm); background: var(--bg-card); cursor: pointer; transition: 0.14s; --tone: var(--border-highlight); }
+.sch-bg-row.st-ok { --tone: var(--status-ok); } .sch-bg-row.st-idle { --tone: var(--text-dim); } .sch-bg-row.st-warn { --tone: var(--status-warn); }
+.sch-bg-row:hover { border-color: var(--border-highlight); border-left-color: var(--tone); background: var(--bg-card-hover); }
+.sch-bg-when { flex: none; width: 48px; font-size: 11px; color: var(--text-bright); padding-top: 2px; }
+.sch-bg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sch-bg-title { font-size: 12px; line-height: 1.4; color: var(--text-primary); text-wrap: pretty; }
+.sch-bg-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sch-bg-by { font-size: var(--fs-10); color: var(--text-mid); }
+.sch-bg-since { font-size: 9.5px; color: var(--text-dim); }
+

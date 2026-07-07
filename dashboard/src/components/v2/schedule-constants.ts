@@ -45,11 +45,17 @@ export const SCHED_PAYLOAD: Readonly<Record<string, { glyph: string; lbl: string
 }
 
 export function schedStatusSpec(status: string | null | undefined): SchedStatusSpec {
-  return (status && SCHED_STATUS[status]) || { lbl: status || '알 수 없음', cls: 'dim', glyph: '◌' }
+  if (!status) return { lbl: '알 수 없음', cls: 'dim', glyph: '◌' }
+  const normalized = status.replace(/_/g, '').toLowerCase()
+  const key = Object.keys(SCHED_STATUS).find(k => k.replace(/_/g, '').toLowerCase() === normalized)
+  return (key && SCHED_STATUS[key]) || { lbl: status, cls: 'dim', glyph: '◌' }
 }
 
 export function schedRiskSpec(risk: string | null | undefined): { lbl: string; cls: string } {
-  return (risk && SCHED_RISK[risk]) || { lbl: risk || '미상', cls: 'dim' }
+  if (!risk) return { lbl: '미상', cls: 'dim' }
+  const normalized = risk.replace(/_/g, '').toLowerCase()
+  const key = Object.keys(SCHED_RISK).find(k => k.replace(/_/g, '').toLowerCase() === normalized)
+  return (key && SCHED_RISK[key]) || { lbl: risk, cls: 'dim' }
 }
 
 export function schedPayloadSpec(kind: string | null | undefined): { glyph: string; lbl: string } {

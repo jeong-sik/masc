@@ -14,7 +14,6 @@
 
 import { html } from 'htm/preact'
 import type { DashboardScheduledAutomationRequest } from '../../api'
-import { StatusChip } from '../common/status-chip'
 import {
   automationTone,
   recurrenceLabel,
@@ -27,8 +26,12 @@ import {
   parseRecurrenceKind,
   schedPayloadSpec,
   schedRiskSpec,
+  schedStatusSpec,
   type Cadence,
 } from '../v2/schedule-constants'
+import { kSigil, kSlot } from '../keeper-badge'
+import { SigilBadge } from '../v2/primitives-v2'
+import { MOCK_KEEPER_BG } from './schedule-mock-data'
 
 const MS_PER_DAY = 86_400_000
 const AGENDA_DAYS = 7
@@ -201,7 +204,9 @@ function scheduledBy(request: DashboardScheduledAutomationRequest): string {
 }
 
 function summaryText(request: DashboardScheduledAutomationRequest): string {
-  return request.payload_summary?.trim() || schedPayloadSpec(request.payload_kind).lbl
+  const spec = schedPayloadSpec(request.payload_kind)
+  const summary = request.payload_summary?.trim() || spec.lbl
+  return `${spec.glyph} ${summary}`
 }
 
 function isPending(request: DashboardScheduledAutomationRequest): boolean {
@@ -271,6 +276,11 @@ export function CadenceSummary({
   `
 }
 
+function StatusTag({ status }: { status: string | null | undefined }) {
+  const spec = schedStatusSpec(status)
+  return html`<span class=${`sch-pill ${spec.cls}`}>${spec.glyph} ${spec.lbl}</span>`
+}
+
 function PollingCard({
   request,
   nextTickMs,
@@ -281,6 +291,7 @@ function PollingCard({
   onOpen: (scheduleId: string) => void
 }) {
   const tone = automationTone(request.effective_status ?? request.status)
+  const by = scheduledBy(request)
   return html`
     <button
       class=${`sch-poll-card st-${tone}`}
@@ -290,11 +301,12 @@ function PollingCard({
     >
       <div class="sch-poll-top">
         <span class="sch-poll-int mono">↻ ${recurrenceLabel(request)}</span>
-        <${StatusChip} tone=${tone} uppercase=${false}>${request.effective_status ?? request.status}<//>
+        <${StatusTag} status=${request.effective_status ?? request.status} />
       </div>
       <div class="sch-poll-title">${summaryText(request)}</div>
       <div class="sch-poll-foot">
-        <span class="mono sch-poll-by">${scheduledBy(request)}</span>
+        <${SigilBadge} slot=${kSlot(by)} sigil=${kSigil(by)} size=${14} />
+        <span class="mono sch-poll-by">${by}</span>
         <${RiskTag} risk=${request.risk_class} />
         <span class="sch-poll-next mono" title="다음 tick (next_due_at)">
           ${nextTickMs === null ? '다음 tick 미상' : `다음 ~${formatClock(nextTickMs)}`}
@@ -348,6 +360,7 @@ function AgendaEventRow({
   const request = event.request
   const tone = automationTone(request.effective_status ?? request.status)
   const pending = isPending(request)
+  const by = scheduledBy(request)
   return html`
     <button
       class=${`sch-ev st-${tone} ${pending ? 'pending' : ''}`}
@@ -362,12 +375,13 @@ function AgendaEventRow({
       <span class="sch-ev-body">
         <span class="sch-ev-title">${summaryText(request)}</span>
         <span class="sch-ev-meta">
-          <span class="mono sch-ev-by">${scheduledBy(request)}</span>
+          <${SigilBadge} slot=${kSlot(by)} sigil=${kSigil(by)} size=${14} />
+          <span class="mono sch-ev-by">${by}</span>
           <${RiskTag} risk=${request.risk_class} />
           ${pending ? html`<span class="sch-ev-need mono">⊙ 승인 필요</span>` : null}
         </span>
       </span>
-      <${StatusChip} tone=${tone} uppercase=${false}>${request.effective_status ?? request.status}<//>
+      <${StatusTag} status=${request.effective_status ?? request.status} />
     </button>
   `
 }
@@ -425,18 +439,118 @@ export function Agenda({
   `
 }
 
+interface BackgroundSignal {
+  readonly id: string
+  readonly keeper: string
+  readonly kind: 'poll' | 'async_tool'
+  readonly label: string
+  readonly cadence_sec?: number
+  readonly status: string
+  readonly risk_class: string
+  readonly since?: string
+  readonly tool?: string
+  readonly issued?: string
+  readonly eta?: string
+}
+
+function SchKeeperBgRow({
+  row,
+  onOpenKeeper,
+}: {
+  row: BackgroundSignal
+  onOpenKeeper: (keeperId: string) => void
+}) {
+  const tone = row.status === 'running' || row.status === 'in_flight' ? 'ok' : row.status === 'paused' ? 'idle' : 'warn'
+  const isPoll = row.kind === 'poll'
+  const cadenceText = isPoll ? `↻ ${row.cadence_sec}s` : '⇢ 비동기'
+  const stateLabel = row.status === 'running' || row.status === 'in_flight' ? '▶ 도는 중' : row.status === 'paused' ? '⏸ 일시정지' : '⊙ 대기 중'
+  const slot = kSlot(row.keeper)
+  const sigil = kSigil(row.keeper)
+  
+  return html`
+    <button
+      key=${row.id}
+      class=${`sch-bg-row st-${tone}`}
+      onClick=${() => onOpenKeeper(row.keeper)}
+      title=${`${row.keeper} 대화 열기`}
+      data-testid="sch-bg-row"
+    >
+      <span class="sch-bg-when mono">${cadenceText}</span>
+      <span class="sch-bg-body">
+        <span class="sch-bg-title">${row.label}</span>
+        <span class="sch-bg-meta">
+          <${SigilBadge} slot=${slot} sigil=${sigil} size=${16} />
+          <span class="mono sch-bg-by">${row.keeper}</span>
+          <span class=${`sch-risk ${schedRiskSpec(row.risk_class).cls}`} title=${`risk_class = ${row.risk_class}`}>
+            ${schedRiskSpec(row.risk_class).lbl}
+          </span>
+          <span class="sch-bg-since mono">
+            ${isPoll ? `since ${row.since}` : `issued ${row.issued} · eta ${row.eta}`}
+          </span>
+        </span>
+      </span>
+      <span class=${`sch-pill ${tone === 'ok' ? 'ok' : tone === 'idle' ? 'dim' : 'warn'}`}>${stateLabel}</span>
+    </button>
+  `
+}
+
+export function SchKeeperBg({
+  signals: _signals,
+  demoMode,
+  onOpenKeeper,
+}: {
+  signals: any[]
+  demoMode: boolean
+  onOpenKeeper: (keeperId: string) => void
+}) {
+  const rows = demoMode ? MOCK_KEEPER_BG : []
+  if (rows.length === 0) return null
+
+  const polls = rows.filter(r => r.kind === 'poll')
+  const asyncs = rows.filter(r => r.kind === 'async_tool')
+
+  return html`
+    <section class="sch-bg" data-testid="sch-keeper-background">
+      <div class="sch-bg-h">
+        <span class="sch-cad ok">◈ Keeper 자율 백그라운드</span>
+        <span class="sch-bg-sub">컨텍스트 루프에서 독립 구동되는 백그라운드 워커 (상시 폴링 + 비동기 도구)</span>
+      </div>
+      <div class="sch-bg-grid">
+        <div class="sch-bg-col">
+          <div class="sch-bg-colh">↻ 폴링 루프 (${polls.length})</div>
+          <div class="sch-bg-list">
+            ${polls.map(row => html`<${SchKeeperBgRow} key=${row.id} row=${row} onOpenKeeper=${onOpenKeeper} />`)}
+          </div>
+        </div>
+        <div class="sch-bg-col">
+          <div class="sch-bg-colh">⇢ 비동기 도구 호출 (${asyncs.length})</div>
+          <div class="sch-bg-list">
+            ${asyncs.map(row => html`<${SchKeeperBgRow} key=${row.id} row=${row} onOpenKeeper=${onOpenKeeper} />`)}
+          </div>
+        </div>
+      </div>
+    </section>
+  `
+}
+
 /** Calendar view: always-on polling strip (interval) above the day agenda
  * (scheduled + oneshot). Cadence filter narrows both. */
 export function ScheduleCalendar({
   requests,
+  signals,
+  demoMode,
   nowMs,
   cadenceFilter,
   onOpen,
+  onOpenKeeper,
 }: {
   requests: readonly DashboardScheduledAutomationRequest[]
+  signals: readonly any[]
+  demoMode: boolean
   nowMs: number
   cadenceFilter: Cadence | null
   onOpen: (scheduleId: string) => void
+  onOpenKeeper: (keeperId: string) => void
 }) {
   const showPolling = cadenceFilter === null || cadenceFilter === 'interval'
   const showAgenda = cadenceFilter === null || cadenceFilter !== 'interval'
@@ -448,6 +562,7 @@ export function ScheduleCalendar({
     <div data-testid="sch-calendar">
       ${showPolling ? html`<${PollingStrip} requests=${requests} onOpen=${onOpen} />` : null}
       ${showAgenda ? html`<${Agenda} requests=${agendaRequests} nowMs=${nowMs} onOpen=${onOpen} />` : null}
+      <${SchKeeperBg} signals=${signals} demoMode=${demoMode} onOpenKeeper=${onOpenKeeper} />
     </div>
   `
 }

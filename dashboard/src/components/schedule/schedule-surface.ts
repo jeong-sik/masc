@@ -11,7 +11,7 @@
 // regardless of view.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useState, useMemo } from 'preact/hooks'
 import { ConnectionStatus } from '../dashboard-shell'
 import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
@@ -35,6 +35,7 @@ import {
   toolsLoading,
 } from '../tools/tool-state'
 import { pruneSchedules } from '../../api/dashboard-governance'
+import { MOCK_SCHEDULES, MOCK_SIGNALS } from './schedule-mock-data'
 
 type ScheduleView = 'calendar' | 'list'
 
@@ -70,18 +71,39 @@ function countByStatus(
 }
 
 export function ScheduleSurface() {
+  const [demoMode, setDemoMode] = useState<boolean>(true)
   const data = toolsData.value
   const automation = data?.scheduled_automation ?? null
   const waitingInventory = data?.keeper_waiting_inventory ?? null
   const loading = toolsLoading.value
   const error = toolsError.value
-  const dueEffective = automation?.derived_counts?.due_effective ?? 0
+
+  const activeAutomation = useMemo((): DashboardScheduledAutomation | null => {
+    if (demoMode) {
+      return {
+        requests: MOCK_SCHEDULES,
+        signals: MOCK_SIGNALS,
+        counts: {
+          pending_approval: MOCK_SCHEDULES.filter(r => ['pending_approval', 'awaiting_approval'].includes(normalizedScheduleStatus(r.effective_status ?? r.status))).length,
+          scheduled: MOCK_SCHEDULES.filter(r => normalizedScheduleStatus(r.effective_status ?? r.status) === 'scheduled').length,
+          due: MOCK_SCHEDULES.filter(r => normalizedScheduleStatus(r.effective_status ?? r.status) === 'due').length,
+          running: MOCK_SCHEDULES.filter(r => normalizedScheduleStatus(r.effective_status ?? r.status) === 'running').length,
+        },
+        derived_counts: {
+          due_effective: MOCK_SCHEDULES.filter(r => normalizedScheduleStatus(r.effective_status ?? r.status) === 'due').length,
+        }
+      } as any
+    }
+    return automation
+  }, [demoMode, automation])
+
+  const dueEffective = activeAutomation?.derived_counts?.due_effective ?? 0
   // Shared with the nav badge + topbar chip so '승인 대기' has one derivation.
-  const pendingCount = scheduledPendingApprovalCount(automation)
-  const scheduledCount = countByStatus(automation, ['scheduled'])
-  const runningCount = countByStatus(automation, ['running'])
+  const pendingCount = scheduledPendingApprovalCount(activeAutomation)
+  const scheduledCount = countByStatus(activeAutomation, ['scheduled'])
+  const runningCount = countByStatus(activeAutomation, ['running'])
   const dueRunning = dueEffective + runningCount
-  const requests = automation?.requests ?? []
+  const requests = activeAutomation?.requests ?? []
   const totalCount = requests.length
   const cadCounts = cadenceCounts(requests)
 
@@ -151,16 +173,26 @@ export function ScheduleSurface() {
           </div>
           <div class="flex flex-col items-end gap-2">
             <${ConnectionStatus} />
-            <${ActionButton}
-              variant="danger"
-              size="sm"
-              onClick=${handlePrune}
-              disabled=${pruning}
-              ariaBusy=${pruning}
-              testId="schedule-prune-btn"
-            >
-              ${pruning ? '정리 중...' : '완료된 예약 정리'}
-            <//>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class=${`btn ${demoMode ? 'primary' : 'ghost'}`}
+                style=${{ fontSize: '10px', padding: '4px 8px' }}
+                onClick=${() => setDemoMode(!demoMode)}
+              >
+                ◈ 데모 모드 (${demoMode ? '온' : '오프'})
+              </button>
+              <${ActionButton}
+                variant="danger"
+                size="sm"
+                onClick=${handlePrune}
+                disabled=${pruning}
+                ariaBusy=${pruning}
+                testId="schedule-prune-btn"
+              >
+                ${pruning ? '정리 중...' : '완료된 예약 정리'}
+              <//>
+            </div>
           </div>
         </header>
 
@@ -212,26 +244,29 @@ export function ScheduleSurface() {
           <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
         </section>
 
-        ${loading && !automation
+        ${loading && !automation && !demoMode
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
           : view === 'calendar'
             ? html`<${ScheduleCalendar}
                 requests=${requests}
+                signals=${activeAutomation?.signals ?? []}
+                demoMode=${demoMode}
                 nowMs=${Date.now()}
                 cadenceFilter=${cadenceFilter}
                 onOpen=${setSelectedScheduleId}
+                onOpenKeeper=${(id: string) => showToast(`${id} 대화 열기 (데모)`, 'success')}
               />`
             : html`<${ScheduledAutomationPanel}
-                automation=${automation ? filterAutomationByCadence(automation, cadenceFilter) : automation}
+                automation=${activeAutomation ? filterAutomationByCadence(activeAutomation, cadenceFilter) : activeAutomation}
                 variant="v2"
                 onResolved=${refresh}
                 selectedScheduleId=${selectedScheduleId}
                 onSelectSchedule=${setSelectedScheduleId}
               />`}
       </div>
-      ${automation
+      ${activeAutomation
         ? html`<${ScheduleAside}
-            requests=${automation.requests ?? []}
+            requests=${activeAutomation.requests ?? []}
             sum=${{ scheduled: scheduledCount, dueRunning, pending: pendingCount, total: totalCount }}
             onOpen=${setSelectedScheduleId}
           />`

@@ -665,9 +665,11 @@ let parse_blame_porcelain lines =
     | [] -> List.rev acc
     | hd :: tl -> (
       match parse_blame_header hd with
-      | Some (sha, final_line, group_size) ->
-        let lines = List.init group_size (fun i -> final_line + i, sha) in
-        collect (Some sha) (lines @ acc) tl
+      | Some (sha, final_line, _group_size) ->
+        (* Porcelain still emits a header for every final line. The counted
+           first header only scopes the following metadata block; expanding it
+           would duplicate the later bare headers and corrupt attribution. *)
+        collect (Some sha) ((final_line, sha) :: acc) tl
       | None ->
         (match cur_sha with
          | Some sha when String.starts_with ~prefix:"author " hd ->

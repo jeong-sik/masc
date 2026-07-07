@@ -142,9 +142,21 @@
 
 .fus-claim, .fus-insight { padding: 8px 0; border-top: 1px solid var(--border-soft); }
 .fus-claim:first-of-type, .fus-insight:first-of-type { border-top: 0; padding-top: 0; }
-.fus-claim p, .fus-insight p { margin: 0 0 6px; font-size: 12.5px; color: var(--text-primary); line-height: 1.5; }
+.fus-claim p,
+.fus-insight p,
+.fus-claim-text,
+.fus-insight-text {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
 .fus-insight { display: flex; align-items: flex-start; gap: 10px; }
-.fus-insight p { flex: 1; margin: 0; }
+.fus-insight p,
+.fus-insight-text {
+  flex: 1;
+  margin: 0;
+}
 
 .fus-mchips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .fus-mchip { font-size: var(--fs-9); color: var(--text-dim); border: 1px solid var(--border-main); border-radius: var(--radius-xs); padding: 1px 6px; background: var(--bg-sunken); white-space: nowrap; }

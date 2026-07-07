@@ -832,7 +832,7 @@ export function parseKeeperLifecycleResponse(raw: unknown): KeeperLifecycleTimel
 
 export async function fetchKeeperLifecycle(
   name: string,
-  limit = 50,
+  limit = 200,
   opts?: { signal?: AbortSignal },
 ): Promise<KeeperLifecycleTimelineResponse> {
   const resp = await fetchWithTimeout(

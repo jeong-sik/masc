@@ -249,8 +249,11 @@ val enqueue : t -> stimulus -> t
 
 val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
-    intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
-    not create an unbounded backlog of otherwise identical stimuli. *)
+    intentionally ignores [arrived_at] — and display-only payload fields
+    ([failure_judgment.fj_detail], whose provider text carries volatile
+    fragments) — so restart/bootstrap re-enqueues and repeats of the same
+    deterministic failure do not create an unbounded backlog of otherwise
+    identical stimuli. *)
 
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)

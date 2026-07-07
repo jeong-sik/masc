@@ -236,6 +236,56 @@ let test_queue_stimulus_roundtrip () =
       (Keeper_event_queue.stimulus_identity_equal stimulus parsed)
   | Error msg -> Alcotest.failf "roundtrip failed: %s" msg
 
+let failure_judgment_stimulus ~detail : Keeper_event_queue.stimulus =
+  let fj : Keeper_event_queue.failure_judgment =
+    { fj_runtime_id = "glm-coding.glm-5-turbo"
+    ; fj_judgment = KFR.Deterministic_request
+    ; fj_detail = detail
+    }
+  in
+  { post_id = Keeper_event_queue.failure_judgment_post_id fj
+  ; urgency = Keeper_event_queue.Normal
+  ; arrived_at = 1000.0
+  ; payload = Keeper_event_queue.Failure_judgment fj
+  }
+
+(* RFC-0313 W2 loop-safety: the same deterministic failure class repeats
+   with volatile provider text (token counts, addresses) in [fj_detail];
+   the queue must stay bounded to one pending judgment per
+   (runtime, class), or repeated failures self-stimulate judgment turns.
+   Pins the identity semantics that
+   [Keeper_registry_event_queue.enqueue_if_missing] relies on. *)
+let test_queue_bounded_across_detail_variants () =
+  let first = failure_judgment_stimulus ~detail:"chat template token missing (request 1281 tokens)" in
+  let second = failure_judgment_stimulus ~detail:"chat template token missing (request 4096 tokens)" in
+  Alcotest.(check bool)
+    "differing detail is the same durable event"
+    true
+    (Keeper_event_queue.stimulus_identity_equal first second);
+  let queue =
+    Keeper_event_queue.enqueue (Keeper_event_queue.enqueue Keeper_event_queue.empty first) second
+  in
+  Alcotest.(check int)
+    "identity dedup bounds the queue to one entry"
+    1
+    (Keeper_event_queue.length (Keeper_event_queue.dedup_by_identity queue));
+  let other_class =
+    let fj : Keeper_event_queue.failure_judgment =
+      { fj_runtime_id = "glm-coding.glm-5-turbo"
+      ; fj_judgment = KFR.Protocol_error
+      ; fj_detail = "mcp handshake failed"
+      }
+    in
+    { first with
+      post_id = Keeper_event_queue.failure_judgment_post_id fj
+    ; payload = Keeper_event_queue.Failure_judgment fj
+    }
+  in
+  Alcotest.(check bool)
+    "a different judgment class is a distinct durable event"
+    false
+    (Keeper_event_queue.stimulus_identity_equal first other_class)
+
 let () =
   Alcotest.run
     "keeper_failure_route"
@@ -259,5 +309,10 @@ let () =
     ; ( "labels"
       , [ Alcotest.test_case "judgment roundtrip" `Quick test_judgment_label_roundtrip ] )
     ; ( "queue"
-      , [ Alcotest.test_case "stimulus roundtrip" `Quick test_queue_stimulus_roundtrip ] )
+      , [ Alcotest.test_case "stimulus roundtrip" `Quick test_queue_stimulus_roundtrip
+        ; Alcotest.test_case
+            "bounded across detail variants"
+            `Quick
+            test_queue_bounded_across_detail_variants
+        ] )
     ]

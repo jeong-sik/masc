@@ -216,8 +216,23 @@ let is_empty q = q.length = 0
 let enqueue (queue : t) (s : stimulus) : t =
   { queue with back_rev = s :: queue.back_rev; length = queue.length + 1 }
 
+(* Identity projection: durable-event identity must ignore display-only
+   payload fields, or repeats of the same event with volatile text (token
+   counts, addresses, timestamps inside provider error strings) defeat
+   [enqueue_if_missing]/[dedup_by_identity] and the queue grows unbounded
+   (RFC-0313 W2 loop-safety requirement). Exhaustive on purpose: a new
+   payload kind must decide its identity fields here at compile time. *)
+let identity_payload = function
+  | Failure_judgment fj -> Failure_judgment { fj with fj_detail = "" }
+  | ( Board_signal _ | Bootstrap | No_progress_recovery | Fusion_completed _
+    | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
+    | Goal_verification_failed _ ) as payload ->
+    payload
+
 let stimulus_identity_equal a b =
-  String.equal a.post_id b.post_id && a.urgency = b.urgency && a.payload = b.payload
+  String.equal a.post_id b.post_id
+  && a.urgency = b.urgency
+  && identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with

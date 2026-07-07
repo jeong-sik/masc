@@ -319,6 +319,55 @@ export interface DashboardKeeperWaitingInventory {
   global_waiting_on?: DashboardKeeperWaitingRow[]
 }
 
+// Keeper autonomous background (server_keeper_background.dashboard_json). Surfaces
+// per-keeper recurring tasks with the owning keeper's loop liveness as context.
+// Deferred async work (bg-shell / fusion / hitl) is NOT here — it is reused from
+// DashboardKeeperWaitingInventory rather than re-projected.
+export interface DashboardKeeperBackgroundLoop {
+  phase: string
+  started_at?: number | null
+  started_at_iso?: string | null
+  restart_count: number
+  last_restart_at?: number | null
+  last_restart_at_iso?: string | null
+  dead_since?: number | null
+  dead_since_iso?: string | null
+}
+
+export interface DashboardKeeperRecurringTask {
+  id: string
+  label: string
+  action_kind: string
+  interval_sec: number
+  enabled: boolean
+  run_count: number
+  failure_count: number
+  max_failures: number
+  // null until the task first runs (never epoch 0), and next_run is null while
+  // the task is paused or has never run.
+  last_run_at?: number | null
+  last_run_at_iso?: string | null
+  next_run_at?: number | null
+  next_run_at_iso?: string | null
+}
+
+export interface DashboardKeeperBackgroundKeeper {
+  keeper_name: string
+  loop: DashboardKeeperBackgroundLoop
+  recurring: DashboardKeeperRecurringTask[]
+  recurring_count: number
+}
+
+export interface DashboardKeeperBackground {
+  schema?: string
+  source?: string
+  generated_at?: string
+  keeper_count: number
+  recurring_keeper_count: number
+  recurring_count: number
+  keepers: DashboardKeeperBackgroundKeeper[]
+}
+
 export interface DashboardToolsResponse {
   generated_at?: string
   status?: string
@@ -330,6 +379,7 @@ export interface DashboardToolsResponse {
   tool_usage: ToolMetricsResponse
   scheduled_automation?: DashboardScheduledAutomation
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
+  keeper_background?: DashboardKeeperBackground
 }
 
 // --- Runtime probe (KV-cache / model load probe) ---

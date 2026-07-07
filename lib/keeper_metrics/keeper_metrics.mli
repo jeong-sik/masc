@@ -117,6 +117,7 @@ type t =
   | ProviderTimeoutLoopPaused
   | TurnFailureStreakPaused
   | CycleExceptions
+  | SnapshotReadFailures
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
   | StateSnapshotInvalidGoal

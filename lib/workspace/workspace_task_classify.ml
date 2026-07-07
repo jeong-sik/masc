@@ -197,18 +197,18 @@ let empty_task_contract =
   }
 ;;
 
-(* RFC-0311 §8: the default verification contract requires no *specific*
-   evidence entries. The prior default
+(* RFC-0311 Phase 1: the default verification contract declares no *specific*
+   descriptive evidence entries. The prior default
    [ "completion_notes"; "reviewable_evidence_ref" ] could be satisfied only by
    pasting those two literal tokens into the completion notes (the gate matched
    them as substrings). That single mechanism simultaneously (a) over-blocked
    keepers who did not know the tokens and (b) let any completion be faked by
-   pasting the labels. With no required entries the gate accepts a completion
-   backed by substantive notes OR any trusted typed Evidence_ref (PR / commit /
-   URL / trace id) — one flexible bar across code and non-code tasks. A task
-   that needs stricter, kind-specific evidence sets an explicit contract at
-   creation (masc_add_task takes a full typed contract). Requiring a trusted
-   ref unconditionally and typed-kind binding are deferred to Phase 2/3. *)
+   pasting the labels. The completion gate ([Task_completion_gate]) no longer
+   reads these entries at all: it accepts a completion only when the caller
+   supplies at least one trusted typed Evidence_ref (PR / commit / URL / trace
+   id) on handoff_context.evidence_refs — one flexible bar across code and
+   non-code tasks. [required_evidence] now serves only as human/LLM/verifier
+   description; typed-kind binding (a code task must cite a PR) is Phase 2. *)
 let default_verification_evidence_refs = []
 
 let first_line text =

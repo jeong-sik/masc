@@ -142,7 +142,7 @@
 }
 
 /* ── cadence tag (예약 종류) — ported from prototype styles/schedule.css ── */
-.sch-cad { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.02em; padding: 1px 8px; border-radius: var(--radius-pill); white-space: nowrap; color: var(--tone, var(--text-dim)); border: 1px solid color-mix(in oklab, var(--tone, var(--text-dim)) 34%, transparent); background: color-mix(in oklab, var(--tone, var(--text-dim)) 9%, transparent); }
+.sch-cad { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.02em; padding: 1px 8px; border-radius: var(--radius-pill); white-space: nowrap; color: var(--tone, var(--text-dim)); border: 1px solid color-mix(in oklab, var(--tone, var(--text-dim)) 34%, transparent); background: color-mix(in oklab, var(--tone, var(--text-dim)) 9%, transparent); }
 .sch-cad.ok   { --tone: var(--status-ok); }
 .sch-cad.info { --tone: var(--info); }
 .sch-cad.volt { --tone: var(--volt-strong); }

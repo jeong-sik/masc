@@ -9,7 +9,9 @@
 open Masc
 module KP = Keeper_pacing
 
-let policy = KP.default_policy
+(* Fixture pin: mirrors Runtime_schema.pacing_default (base 30s, x2, cap
+   3600s). The asserted schedules below are derived from these numbers. *)
+let policy = { KP.base_sec = 30.0; multiplier = 2.0; cap_sec = 3600.0 }
 let feq = Alcotest.(check (float 1e-6))
 
 let revisit_exn t runtime_id =

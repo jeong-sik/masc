@@ -1,4 +1,4 @@
-(* RFC-0313 W1 — observe-only pacing shadow. See keeper_pacing_shadow.mli. *)
+(* RFC-0313 W1/W3 — process-wide pacing state store. See keeper_pacing_shadow.mli. *)
 
 let mu = Eio.Mutex.create ()
 let table : (string, Keeper_pacing.t) Hashtbl.t = Hashtbl.create 64
@@ -7,6 +7,18 @@ let catalog_runtime_ids () =
   match Runtime.get_runtime_ids () with
   | [] -> []
   | ids -> ids
+
+let policy_of_runtime () =
+  let p = Runtime.pacing () in
+  { Keeper_pacing.base_sec = p.Runtime_schema.pacing_base_sec
+  ; multiplier = p.Runtime_schema.pacing_multiplier
+  ; cap_sec = p.Runtime_schema.pacing_cap_sec
+  }
+
+let pacing_enforced () =
+  match (Runtime.pacing ()).Runtime_schema.pacing_mode with
+  | Runtime_schema.Pacing_enforce -> true
+  | Runtime_schema.Pacing_shadow -> false
 
 let emit_telemetry ~keeper_name ~runtime_id ~kind ~state ~now =
   Otel_metric_store.inc_counter
@@ -40,7 +52,7 @@ let update ~keeper_name ~runtime_id ~kind f =
 let observe_failure ~keeper_name ~runtime_id ~retry_after =
   update ~keeper_name ~runtime_id ~kind:"failure" (fun ~now state ->
     Keeper_pacing.on_failure
-      ~policy:Keeper_pacing.default_policy
+      ~policy:(policy_of_runtime ())
       ~runtime_id
       ~retry_after
       ~now
@@ -55,3 +67,18 @@ let snapshot ~keeper_name =
     match Hashtbl.find_opt table keeper_name with
     | Some state -> Keeper_pacing.to_summary state
     | None -> [])
+
+let next_due_remaining ~keeper_name =
+  let now = Time_compat.now () in
+  let state =
+    Eio.Mutex.use_rw ~protect:true mu (fun () -> Hashtbl.find_opt table keeper_name)
+  in
+  match state with
+  | None -> None
+  | Some state ->
+    (match catalog_runtime_ids () with
+     | [] -> None
+     | catalog ->
+       let due = Keeper_pacing.next_turn_due ~catalog ~now state in
+       let remaining = due -. now in
+       if remaining > 0.0 then Some remaining else None)

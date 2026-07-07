@@ -318,6 +318,88 @@ let test_completion_with_evidence_refs_succeeds () =
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
 
+(* Test E — the evidence gate BLOCKS an untrusted (fake) reference on the *done*
+   path, and the block is RECOVERABLE. This closes the reject-path proof gap the
+   docstring above left open ("asserting a done-evidence reject here would assert
+   a gate that does not exist"): the deterministic evidence gate DOES run on
+   Done_action (tool_task.ml: needs_gate = Done_action -> true), so a done attempt
+   whose evidence_refs hold no trusted Evidence_ref shape is rejected here.
+
+   Two properties in one flow, mirroring test_completion_with_evidence_refs so the
+   ONLY changed variable is trusted-vs-untrusted evidence:
+   1. block:    substantive result (clears the anti-rationalization length floor)
+                + a prose "reference" a keeper might paste to fake completion
+                -> workflow rejection, FSM unchanged (anti-vacuity).
+   2. recover:  the SAME work re-submitted with a trusted reference (PR#123)
+                completes. The keeper is not frozen — this is the property the
+                CDAL redesign had to preserve: block fake-done without stalling. *)
+let test_untrusted_evidence_denied_then_recovers () =
+  with_ws "completion_trust_untrusted_then_recover" (fun ~config ~meta ~ctx_work ->
+    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore
+      (Workspace.add_task config ~title:"complete with a fake reference" ~priority:1
+         ~description:"claimed by the caller, first faked then legitimately proven");
+    let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
+    check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
+    (* block: notes are substantive but the reference is untrusted prose. *)
+    let faked =
+      attempt_done
+        ~config
+        ~meta
+        ~ctx_work
+        ~task_id:"task-001"
+        ~result:"Completed the deliverable and verified it end to end."
+        ~evidence_refs:[ "trust me, it is done" ]
+        ()
+    in
+    check string "faked completion outcome" "failure" (outcome_label faked.KET.outcome);
+    check string "faked completion payload shape" "structured_error"
+      (payload_kind faked.KET.payload_shape);
+    let faked_json = parse_json faked.KET.raw_output in
+    check string "evidence reject is a workflow rejection" "workflow_rejection"
+      Yojson.Safe.Util.(member "failure_class" faked_json |> to_string);
+    check bool "reject names the trusted-evidence requirement (gate-specific signal)" true
+      (contains_substring faked.KET.raw_output
+         "no trusted, reviewer-inspectable evidence reference");
+    (* anti-vacuity: the faked attempt did NOT advance the FSM. *)
+    (match assignee_of config "task-001" with
+     | Some assignee ->
+       check string "task still owned by caller after the faked completion"
+         meta.agent_name assignee
+     | None ->
+       fail "task-001 must remain Claimed/InProgress after the rejected fake completion");
+    (* recover: same work, now with a trusted reference, completes. *)
+    let recovered =
+      attempt_done
+        ~config
+        ~meta
+        ~ctx_work
+        ~task_id:"task-001"
+        ~result:"Completed the deliverable and verified it end to end."
+        ~evidence_refs:[ "PR#123" ]
+        ()
+    in
+    check string "recovery completion outcome" "success" (outcome_label recovered.KET.outcome);
+    check string "recovery payload shape" "structured_success"
+      (payload_kind recovered.KET.payload_shape);
+    match
+      List.find_opt
+        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
+        (Workspace.get_tasks_raw config)
+    with
+    | Some
+        { task_status = Masc_domain.Done { assignee; _ }
+        ; handoff_context = Some handoff
+        ; _
+        } ->
+      check string "recovered done assignee" meta.agent_name assignee;
+      check (list string) "recovered handoff evidence_refs" [ "PR#123" ] handoff.evidence_refs
+    | Some task ->
+      fail
+        ("expected task-001 Done after recovery, got "
+         ^ Masc_domain.task_status_to_string task.task_status)
+    | None -> fail "task-001 missing after recovery completion")
+
 (* Test D — positive control: the gates are SELECTIVE, not reject-everything.
    A keeper claiming its own backlog task is accepted on the same dispatch path. *)
 let test_legitimate_claim_succeeds () =
@@ -354,6 +436,8 @@ let () =
             `Quick test_completion_denied_for_thin_notes
         ; test_case "completion with evidence_refs succeeds"
             `Quick test_completion_with_evidence_refs_succeeds
+        ; test_case "untrusted evidence is denied then a trusted retry recovers"
+            `Quick test_untrusted_evidence_denied_then_recovers
         ; test_case "legitimate self-claim is accepted (selectivity control)" `Quick
             test_legitimate_claim_succeeds
         ] )

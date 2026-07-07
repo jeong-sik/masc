@@ -53,6 +53,7 @@ import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
+import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
 import { FsmHub } from './fsm-hub'
 import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
@@ -194,6 +195,7 @@ export function KeeperDetailBody({
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
+          <${KeeperGithubAppConfigPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>
             <${KeeperLiveTruthPanel}

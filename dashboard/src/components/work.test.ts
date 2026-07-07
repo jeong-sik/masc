@@ -306,9 +306,10 @@ describe('Work', () => {
 
       const kpis = screen.getByTestId('work-kpis')
       expect(kpis.textContent).toContain('활성 목표')
-      expect(kpis.textContent).toContain('전체 Task')
+      expect(kpis.textContent).toContain('전체 작업')
       expect(kpis.textContent).not.toContain('목표 TASK')
-      expect((kpis.textContent?.match(/Task/g) ?? []).length).toBe(1)
+      expect(kpis.textContent).not.toContain('Task')
+      expect(kpis.textContent).not.toContain('TASK')
 
       fireEvent.click(screen.getByTestId('work-view-kanban'))
 

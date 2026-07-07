@@ -1370,7 +1370,7 @@ function WorkSurfaceV2() {
               <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">전체 Task</div>
+              <div class="wk-kpi-k">전체 작업</div>
               <div class="wk-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
             </div>
             <div class="wk-kpi">
@@ -1438,7 +1438,7 @@ function WorkSurfaceV2() {
               />
             `}
 
-          <div class="wk-foot mono">목표 지표 · Task 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 claim</div>
+          <div class="wk-foot mono">목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 claim</div>
       </div>
       ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
         <${WorkAside}

@@ -293,7 +293,7 @@ describe('Work', () => {
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
 
-    it('separates Goal KPI language from Task pipeline labels', () => {
+    it('avoids repeating Task scope labels across the KPI row and kanban columns', () => {
       goals.value = [
         { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
@@ -305,20 +305,24 @@ describe('Work', () => {
       render(html`<${Work} />`)
 
       const kpis = screen.getByTestId('work-kpis')
-      expect(kpis.textContent).toContain('GOAL')
-      expect(kpis.textContent).toContain('TASK')
-      expect(kpis.textContent).toContain('활성')
-      expect(kpis.textContent).toContain('전체')
+      expect(kpis.textContent).toContain('활성 목표')
+      expect(kpis.textContent).toContain('전체 작업')
       expect(kpis.textContent).not.toContain('목표 TASK')
+      expect(kpis.textContent).not.toContain('Task')
+      expect(kpis.textContent).not.toContain('TASK')
 
       fireEvent.click(screen.getByTestId('work-view-kanban'))
 
+      const section = screen.getByTestId('work-board-section')
+      expect(section.textContent).toContain('칸반 · 상태별')
+      expect(section.textContent).toContain('todo → claimed → in_progress → verify → done')
+
       const todoCol = screen.getByTestId('kanban-col-todo')
       const claimedCol = screen.getByTestId('kanban-col-claimed')
-      expect(todoCol.querySelector('.wk-kcol-scope')?.textContent).toBe('TASK')
-      expect(todoCol.querySelector('.wk-kcol-label')?.textContent).toBe('미배정')
-      expect(claimedCol.querySelector('.wk-kcol-scope')?.textContent).toBe('TASK')
-      expect(claimedCol.querySelector('.wk-kcol-label')?.textContent).toBe('클레임됨')
+      expect(todoCol.querySelector('.wk-kcol-title')?.textContent).toBe('미배정')
+      expect(todoCol.textContent).not.toContain('TASK')
+      expect(claimedCol.querySelector('.wk-kcol-title')?.textContent).toBe('클레임됨')
+      expect(claimedCol.textContent).not.toContain('TASK')
 
       fireEvent.click(screen.getByTestId('work-view-list'))
       expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
@@ -972,6 +976,7 @@ describe('Work', () => {
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
         // Kanban board present; list view gone
+        expect(screen.getByTestId('work-board-section').textContent).toContain('칸반 · 상태별')
         const board = screen.getByTestId('work-kanban')
         expect(board).toBeTruthy()
         expect(screen.queryByTestId('work-goal-list')).toBeNull()

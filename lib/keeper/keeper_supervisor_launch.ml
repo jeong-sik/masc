@@ -697,5 +697,9 @@ let handle_provider_timeout_pause ctx entry =
   Pause_policy.handle_provider_timeout_pause ~publish_phase_lifecycle ctx entry
 ;;
 
+let handle_turn_failure_streak_pause ctx entry =
+  Pause_policy.handle_turn_failure_streak_pause ~publish_phase_lifecycle ctx entry
+;;
+
 let failure_reason_policy_decision = Pause_policy.failure_reason_policy_decision
 let failure_reason_policy_decision_for_test = failure_reason_policy_decision

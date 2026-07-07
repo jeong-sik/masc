@@ -64,6 +64,9 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
                 log_synthetic_backoff ~synthetic_sec:syn_sec
                   ~source:"Provider_capacity" ~detail:message;
                 Synthetic_default syn_sec);
+           (* Genuine upstream capacity exhaustion, not a pre-dispatch health
+              cooldown block — no arming cause to carry.  #23438. *)
+           cooldown_cause = None;
          })
   | Some
       (Llm_provider.Http_client.NetworkError
@@ -78,10 +81,11 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            source = Option.value source ~default:Runtime_slot;
            detail = message;
            retry_after =
-               let syn_sec = synthetic_retry_after_sec in
-               log_synthetic_backoff ~synthetic_sec:syn_sec
-                 ~source:"Runtime_slot" ~detail:message;
-               Synthetic_default syn_sec;
+             (let syn_sec = synthetic_retry_after_sec in
+              log_synthetic_backoff ~synthetic_sec:syn_sec
+                ~source:"Runtime_slot" ~detail:message;
+              Synthetic_default syn_sec);
+           cooldown_cause = None;
          })
   | Some
       (Llm_provider.Http_client.HttpError _
@@ -102,55 +106,14 @@ let capacity_backpressure_of_pending ~runtime_id = function
            source;
            detail;
            retry_after;
+           cooldown_cause = None;
          })
   | None -> None
 
-let capacity_backpressure_of_sdk_error
-    ~runtime_id
-    ~message_looks_like_capacity_backpressure
-    ~sdk_error_of_masc_internal_error
-    sdk_err =
-  match sdk_err with
-  | Agent_sdk.Error.Provider
-      (Llm_provider.Error.CapacityExhausted { retry_after; detail; _ }) ->
-    Some
-      (sdk_error_of_masc_internal_error
-         (Capacity_backpressure
-            {
-              runtime_id;
-              source = Provider_capacity;
-              detail;
-              retry_after =
-                (match retry_after with
-                 | Some s -> Explicit s
-                 | None ->
-                   let syn_sec = synthetic_retry_after_sec in
-                   log_synthetic_backoff ~synthetic_sec:syn_sec
-                     ~source:"Provider_capacity" ~detail;
-                   Synthetic_default syn_sec);
-            }))
-  | Agent_sdk.Error.Internal msg
-    when message_looks_like_capacity_backpressure msg ->
-    Some
-      (sdk_error_of_masc_internal_error
-         (Capacity_backpressure
-            {
-              runtime_id;
-              source = Provider_capacity;
-              detail = msg;
-              retry_after =
-                let syn_sec = synthetic_retry_after_sec in
-                log_synthetic_backoff ~synthetic_sec:syn_sec
-                  ~source:"Provider_capacity" ~detail:msg;
-                Synthetic_default syn_sec;
-            }))
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ ->
-    None
+(* [capacity_backpressure_of_sdk_error] was removed (#23438).  It classified an
+   [Agent_sdk.Error.Internal msg] into [Capacity_backpressure] via a substring
+   match ([message_looks_like_capacity_backpressure]) — a string classifier that
+   laundered opaque internal errors into the permanently-transient (auto-
+   recoverable, not-counting-toward-crash) class, the same failure mode that
+   made deterministic cooldowns oscillate.  The typed [cooldown_cause] on the
+   pre-dispatch gate replaces it; the function had no live callers. *)

@@ -96,6 +96,9 @@ let of_argv = function
              Ok (Destructive `Push_mirror)
            else if
              has_flag rest "--delete" || has_short_flag rest 'd'
+             (* [git push --prune] deletes remote refs that no longer exist
+                locally, so it belongs to the remote-ref deletion floor. *)
+             || has_long_flag rest "--prune"
              (* [:dst] (empty source) deletes the remote ref *)
              || has_leading_char_token ':' rest
            then

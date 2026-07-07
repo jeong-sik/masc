@@ -117,7 +117,7 @@ let run_cmd ~cwd argv =
        | _, Unix.WSTOPPED s -> Error (Printf.sprintf "stopped %d" s))
 
 let git ~cwd args =
-  match run_cmd ~cwd ("git" :: args) with
+  match run_cmd ~cwd ("git" :: "-c" :: "core.hooksPath=/dev/null" :: args) with
   | Ok () -> ()
   | Error e ->
       failwith (Printf.sprintf "git %s failed: %s" (String.concat " " args) e)
@@ -210,6 +210,24 @@ let test_sync_advances_clean_clone () =
             "working tree file advanced" "two\n"
             (read_file (Filename.concat clone "file.txt"))))
 
+let test_sync_fast_forward_suppresses_post_merge_hook () =
+  with_temp_base_path (fun base_path ->
+      with_advance_fixture base_path (fun ~origin ~clone repo ->
+          let marker = Filename.concat clone ".git/post-merge-ran" in
+          let hook = Filename.concat clone ".git/hooks/post-merge" in
+          write_file hook "#!/bin/sh\nprintf ran > .git/post-merge-ran\n";
+          Unix.chmod hook 0o755;
+          commit_origin origin "two\n" "second";
+          (match sync_ok ~base_path repo with
+           | Repo_sync.Advanced { behind } ->
+               Alcotest.(check int) "advanced over one commit" 1 behind
+           | other -> check_outcome "advanced" other);
+          Alcotest.(check string)
+            "working tree file advanced" "two\n"
+            (read_file (Filename.concat clone "file.txt"));
+          Alcotest.(check bool)
+            "post-merge hook did not run" false (Sys.file_exists marker)))
+
 let test_sync_already_current () =
   with_temp_base_path (fun base_path ->
       with_advance_fixture base_path (fun ~origin:_ ~clone:_ repo ->
@@ -274,6 +292,8 @@ let () =
       ( "advance_working_tree",
         [
           Alcotest.test_case "advances clean clone" `Quick test_sync_advances_clean_clone;
+          Alcotest.test_case "suppresses post-merge hook" `Quick
+            test_sync_fast_forward_suppresses_post_merge_hook;
           Alcotest.test_case "already current" `Quick test_sync_already_current;
           Alcotest.test_case "preserves dirty tree" `Quick test_sync_preserves_dirty_tree;
           Alcotest.test_case "refuses diverged clone" `Quick test_sync_refuses_diverged_clone;

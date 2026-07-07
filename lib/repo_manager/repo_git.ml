@@ -104,7 +104,8 @@ let fetch ~repository : (string list, string) result =
    merge is local; the ref must already be fetched). *)
 let fast_forward ~repository ~target_ref : (unit, string) result =
   match
-    run_git ~cwd:repository.local_path [ "merge"; "--ff-only"; target_ref ]
+    run_git ~cwd:repository.local_path
+      [ "-c"; "core.hooksPath=/dev/null"; "merge"; "--ff-only"; target_ref ]
   with
   | Ok _ -> Ok ()
   | Error msg -> Error msg
@@ -135,7 +136,7 @@ let current_branch ~repository =
   | Ok [] -> Error "git rev-parse --abbrev-ref HEAD returned no output"
   | Error msg -> Error msg
 
-let ahead_behind ~repository ~target_ref =
+let ahead_behind ~repository ~target_ref : (int * int, string) result =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
       ~timeout_sec:inspect_timeout_sec

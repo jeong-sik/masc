@@ -525,6 +525,33 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText('모더레이션 대기')).toBeInTheDocument()
   })
 
+  it('renders claim evidence state badges on post cards', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-needs-evidence',
+        title: 'Evidence state',
+        body: 'content',
+        author: 'ani1999',
+        claim_evidence: {
+          state: 'needs_evidence',
+          label: 'Needs evidence',
+          total_count: 1,
+          allowed_count: 0,
+          rejected_count: 1,
+          artifact_missing_count: 0,
+          artifact_unknown_count: 0,
+          missing_source_snapshot_count: 1,
+          stale_source_snapshot_count: 0,
+          artifact_not_verified_count: 0,
+        },
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText(/Needs evidence/)).toHaveTextContent('Needs evidence')
+  })
+
   it('renders vote-blind post scores as hidden until voting', () => {
     boardPosts.value = [
       makePost({

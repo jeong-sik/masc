@@ -148,6 +148,29 @@ export interface BoardContributorQuality {
   evidence_state?: 'default' | 'measured'
 }
 
+export type BoardClaimEvidenceState =
+  | 'needs_evidence'
+  | 'source_snapshot_stale'
+  | 'artifact_missing'
+  | 'verified'
+
+export interface BoardClaimEvidenceProjection {
+  source?: string
+  target_post_id?: string
+  state: BoardClaimEvidenceState
+  label: string
+  total_count: number
+  allowed_count: number
+  rejected_count: number
+  artifact_missing_count: number
+  artifact_unknown_count: number
+  missing_source_snapshot_count: number
+  stale_source_snapshot_count: number
+  artifact_not_verified_count: number
+  latest_decision?: string
+  latest_recorded_at?: number
+}
+
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
   id: string
@@ -200,6 +223,7 @@ export interface BoardPost {
   report_count?: number
   moderation_status?: BoardModerationStatus
   contributor_quality?: BoardContributorQuality | null
+  claim_evidence?: BoardClaimEvidenceProjection | null
   reactions?: BoardReactionSummary[]
   origin?: BoardPostOrigin | null
 }

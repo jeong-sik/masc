@@ -102,6 +102,7 @@ val find_status_rollup_target_unlocked :
   post option
 
 val create_post_with_outcome :
+  ?after_rollup_persist:(post -> (unit, string) result) ->
   store ->
   author:string ->
   content:string ->

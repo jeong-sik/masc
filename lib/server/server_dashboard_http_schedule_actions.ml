@@ -79,9 +79,13 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
     let* decision = decision_of_json args in
     let approved_by = actor_of_operator_name operator_name in
     let service_result =
+      let map_service_error result =
+        Result.map_error Schedule_service.service_error_to_string result
+      in
       match decision with
       | Approve ->
         Schedule_service.approve config ~schedule_id ~approved_by ()
+        |> map_service_error
       | Reject ->
         let reason =
           match string_opt "reason" args with
@@ -92,16 +96,18 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
             default_rejection_reason ~operator_name
         in
         Schedule_service.reject config ~schedule_id ~approved_by ~reason ()
-      | Cancel -> Schedule_service.cancel config ~schedule_id
+        |> map_service_error
+      | Cancel ->
+        Schedule_service.cancel config ~schedule_id |> map_service_error
       | Update ->
         let* due_at = required_number "due_at" args in
         let expires_at = number_opt "expires_at" args in
         let* payload_json = required_payload "payload" args in
         let* payload = Schedule_domain.payload_of_yojson payload_json in
         Schedule_service.update config ~schedule_id ~due_at ~expires_at ~payload
+        |> map_service_error
     in
     service_result
-    |> Result.map_error Schedule_service.service_error_to_string
     |> Result.map (fun schedule ->
       `Assoc
         [ "ok", `Bool true

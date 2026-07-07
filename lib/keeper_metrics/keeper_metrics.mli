@@ -235,6 +235,9 @@ type t =
   | AttemptWatchdogFired
   | ShellIrEffectTotal
   | ToolExecutePrActionTotal
+  | GhClassificationTotal
+  | GatedGhLifecycleTotal
+  | GatedGhBlockTimeSeconds
   | KeeperRepoMappingDefaultScopeAllowed
   | KeeperRepoMappingDeniedUnregistered
   | KeeperRepoMappingLoadError

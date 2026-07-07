@@ -12,6 +12,7 @@
 module D = Masc.Keeper_tool_deterministic_error
 module Execute_runtime = Masc.Keeper_tool_execute_runtime.For_testing
 module Shell_dispatch = Keeper_tool_execute_shell_ir
+module AQ = Masc.Keeper_approval_queue
 
 let reason_testable =
   let pp ppf reason = Format.pp_print_string ppf (D.to_telemetry_key reason) in
@@ -55,6 +56,23 @@ let dispatch_error_marker_raw error =
     (`Assoc
        ([ "ok", `Bool false; "error", `String "execute_dispatch_rejected" ]
         @ Execute_runtime.dispatch_error_deterministic_retry_fields error))
+;;
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_shell_ir_approval_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm_rf path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Sys.remove path
+  in
+  try rm_rf dir with _ -> ()
 ;;
 
 let test_command_shape_blocked () =
@@ -218,10 +236,92 @@ let test_dispatch_policy_rejects_mark_policy_blocked () =
         (dispatch_error_marker_raw error))
     [ ( "dispatch approval_required marker"
       , Shell_dispatch.Approval_required
-          { summary = "approval required"; bin = "gh" } )
+          { summary = "approval required"
+          ; bin = "gh"
+          ; kind = Shell_dispatch.Gh_capability_requires_approval
+          } )
     ; ( "dispatch policy_denied marker"
       , Shell_dispatch.Policy_denied { reason = "policy denied" } )
     ]
+;;
+
+let string_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `String s -> s
+  | other ->
+    Alcotest.failf
+      "expected string field %s, got %s"
+      name
+      (Yojson.Safe.to_string other)
+;;
+
+let bool_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `Bool b -> b
+  | other ->
+    Alcotest.failf
+      "expected bool field %s, got %s"
+      name
+      (Yojson.Safe.to_string other)
+;;
+
+let test_gh_approval_pending_helper_enqueues_nonblocking () =
+  let base_path = temp_dir () in
+  let approval_id = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      (match !approval_id with
+       | Some id ->
+         ignore (AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup"))
+       | None -> ());
+      cleanup_dir base_path)
+    (fun () ->
+       let before = AQ.pending_count () in
+       let id =
+         Execute_runtime.submit_shell_ir_approval_pending
+           ~base_path
+           ~keeper_name:"typed-gh-keeper"
+           ~task_id:"task-typed-gh"
+           ~goal_ids:[ "goal-typed-gh" ]
+           ~cmd:"gh repo create owner/new-repo --public"
+           ~cwd:"/tmp/masc"
+           ~bin:"gh"
+           ~summary:"command 'gh' requires approval (audited/privileged risk class)"
+           ~sandbox_profile:"host"
+           ~sandbox_target:"host"
+           ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
+           ~typed_hit:true
+           ()
+       in
+       approval_id := Some id;
+       Alcotest.(check bool) "approval id nonempty" true (String.length id > 0);
+       Alcotest.(check int) "pending count increments" (before + 1) (AQ.pending_count ());
+       match AQ.get_pending_entry ~id with
+       | None -> Alcotest.fail "pending entry missing"
+       | Some entry ->
+         Alcotest.(check string) "keeper" "typed-gh-keeper" entry.keeper_name;
+         Alcotest.(check string) "tool" "tool_execute" entry.tool_name;
+         Alcotest.(check string)
+           "disposition"
+           "requires_approval"
+           (Option.value entry.disposition ~default:"");
+         Alcotest.(check string)
+           "task_id"
+           "task-typed-gh"
+           (Option.value entry.task_id ~default:"");
+         Alcotest.(check (list string))
+           "goal_ids"
+           [ "goal-typed-gh" ]
+           entry.goal_ids;
+         Alcotest.(check string)
+           "kind"
+           "gh_capability_requires_approval"
+           (string_member "kind" entry.input);
+         Alcotest.(check bool) "typed_hit" true (bool_member "typed_hit" entry.input);
+         Alcotest.(check string)
+           "risk_class"
+           "R1_Reversible_mutation"
+           (string_member "risk_class" entry.input))
 ;;
 
 let test_plain_error_codes_are_observed_only () =
@@ -606,6 +706,12 @@ let () =
             "unknown_error_code"
             `Quick
             test_unknown_error_code_returns_none
+        ] )
+    ; ( "shell_ir_approval_queue"
+      , [ Alcotest.test_case
+            "gh_capability_requires_approval_enqueues_pending_without_wait"
+            `Quick
+            test_gh_approval_pending_helper_enqueues_nonblocking
         ] )
     ; ( "telemetry_key_invariants"
       , [ Alcotest.test_case "key_format" `Quick test_telemetry_key_format

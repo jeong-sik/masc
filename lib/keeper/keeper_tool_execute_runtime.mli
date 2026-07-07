@@ -13,6 +13,15 @@ val handle_tool_execute :
   string
 
 module For_testing : sig
+  module Exec_grant_store : sig
+    type grant_entry = {
+      keeper_name : string;
+      cmd : string;
+      approved_at : float;
+    }
+    val has_approved_grant : base_path:string -> keeper_name:string -> cmd:string -> unit -> bool
+    val consume_grant : base_path:string -> keeper_name:string -> cmd:string -> unit -> unit
+  end
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
   val path_probe_json : cwd:string -> string -> Yojson.Safe.t
   val repo_root_public_prefix_from_cwd : string -> string option

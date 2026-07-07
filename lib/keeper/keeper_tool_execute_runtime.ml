@@ -439,6 +439,85 @@ let shell_ir_approval_input
     ]
 ;;
 
+module Exec_grant_store = struct
+  type grant_entry = {
+    keeper_name : string;
+    cmd : string;
+    approved_at : float;
+  }
+
+  let grants_mu = Stdlib.Mutex.create ()
+
+  let grants_path ~base_path =
+    Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "exec-grants.json"
+
+  let entry_to_yojson (e : grant_entry) : Yojson.Safe.t =
+    `Assoc
+      [ "keeper_name", `String e.keeper_name
+      ; "cmd", `String e.cmd
+      ; "approved_at", `Float e.approved_at
+      ]
+
+  let entry_of_yojson = function
+    | `Assoc fields ->
+      let keeper_name =
+        match List.assoc_opt "keeper_name" fields with
+        | Some (`String s) -> s
+        | _ -> failwith "missing/invalid keeper_name"
+      in
+      let cmd =
+        match List.assoc_opt "cmd" fields with
+        | Some (`String s) -> s
+        | _ -> failwith "missing/invalid cmd"
+      in
+      let approved_at =
+        match List.assoc_opt "approved_at" fields with
+        | Some (`Float f) -> f
+        | Some (`Int i) -> float_of_int i
+        | _ -> failwith "missing/invalid approved_at"
+      in
+      Some { keeper_name; cmd; approved_at }
+    | _ -> None
+
+  let load_grants ~base_path () =
+    let path = grants_path ~base_path in
+    if not (Sys.file_exists path) then []
+    else (
+      try
+        match Yojson.Safe.from_file path with
+        | `List l -> List.filter_map entry_of_yojson l
+        | _ -> []
+      with _ -> [])
+
+  let save_grants ~base_path (grants : grant_entry list) =
+    let path = grants_path ~base_path in
+    let dir = Filename.dirname path in
+    (try if not (Sys.file_exists dir) then Workspace_utils.mkdir_p dir with _ -> ());
+    try
+      let json = `List (List.map entry_to_yojson grants) in
+      Yojson.Safe.to_file path json
+    with exn ->
+      Log.Keeper.warn "Exec_grant_store.save_grants failed: %s" (Printexc.to_string exn)
+
+  let record_grant ~base_path ~keeper_name ~cmd () =
+    Stdlib.Mutex.protect grants_mu (fun () ->
+      let grants = load_grants ~base_path () in
+      let entry = { keeper_name; cmd; approved_at = Unix.gettimeofday () } in
+      let filtered = List.filter (fun g -> not (String.equal g.keeper_name keeper_name && String.equal g.cmd cmd)) grants in
+      save_grants ~base_path (entry :: filtered))
+
+  let has_approved_grant ~base_path ~keeper_name ~cmd () =
+    Stdlib.Mutex.protect grants_mu (fun () ->
+      let grants = load_grants ~base_path () in
+      List.exists (fun g -> String.equal g.keeper_name keeper_name && String.equal g.cmd cmd) grants)
+
+  let consume_grant ~base_path ~keeper_name ~cmd () =
+    Stdlib.Mutex.protect grants_mu (fun () ->
+      let grants = load_grants ~base_path () in
+      let filtered = List.filter (fun g -> not (String.equal g.keeper_name keeper_name && String.equal g.cmd cmd)) grants in
+      save_grants ~base_path filtered)
+end
+
 let submit_shell_ir_approval_pending
       ~base_path
       ~keeper_name
@@ -472,6 +551,8 @@ let submit_shell_ir_approval_pending
       | Agent_sdk.Hooks.Reject _ -> "denied"
       | Agent_sdk.Hooks.Edit _ -> "edited"
     in
+    if decision = Agent_sdk.Hooks.Approve then
+      Exec_grant_store.record_grant ~base_path ~keeper_name ~cmd ();
     record_gated_gh_lifecycle ~keeper_name ~event ~risk_class ~typed_hit;
     Log.Keeper.info
       "shell_ir approval resolved keeper=%s decision=%s cmd=%s"
@@ -515,6 +596,7 @@ let redact_execute_output redaction ~stdout ~stderr =
   stdout, stderr, output
 
 module For_testing = struct
+  module Exec_grant_store = Exec_grant_store
   let elapsed_duration_ms = elapsed_duration_ms
   let path_probe_json ~cwd path = path_probe_json ~cwd (path_probe ~cwd path)
   let repo_root_public_prefix_from_cwd = repo_root_public_prefix_from_cwd
@@ -1008,7 +1090,22 @@ let handle_tool_execute_typed
             ~source:"execute"
             ();
           let dispatch_result =
-            if Env_config_runtime.Shell_ir_approval_gate.enabled ()
+            if Exec_grant_store.has_approved_grant ~base_path:config.base_path ~keeper_name:meta.name ~cmd:cmd_for_log ()
+            then (
+              let () = Exec_grant_store.consume_grant ~base_path:config.base_path ~keeper_name:meta.name ~cmd:cmd_for_log () in
+              Log.Keeper.info
+                "shell_ir approved grant matched keeper=%s cmd=%s"
+                meta.name
+                cmd_for_log;
+              Keeper_tool_execute_shell_ir.dispatch_classified
+                ~keeper_id:meta.name
+                ~base_path:root
+                ~workdir:cwd
+                ~sandbox:dispatch_sandbox
+                ?base_host_env
+                ~on_output_chunk
+                envelope)
+            else if Env_config_runtime.Shell_ir_approval_gate.enabled ()
             then (
               let agent_id = Masc_exec.Agent_id.of_string meta.name in
               (* RFC-0254 §5.2/§5.5: the keeper lane is autonomous — no human or

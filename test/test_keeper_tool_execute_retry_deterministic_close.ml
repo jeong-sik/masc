@@ -320,8 +320,52 @@ let test_gh_approval_pending_helper_enqueues_nonblocking () =
          Alcotest.(check bool) "typed_hit" true (bool_member "typed_hit" entry.input);
          Alcotest.(check string)
            "risk_class"
-           "R1_Reversible_mutation"
-           (string_member "risk_class" entry.input))
+           "R1"
+            (string_member "risk_class" entry.input))
+;;
+
+let test_gh_approval_grant_bypass () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let keeper_name = "typed-gh-keeper" in
+       let cmd = "gh repo create owner/new-repo --public" in
+       (* Initially no grant *)
+       Alcotest.(check bool) "no initial grant" false
+         (Masc.Keeper_tool_execute_runtime.For_testing.Exec_grant_store.has_approved_grant
+            ~base_path ~keeper_name ~cmd ());
+       (* Submit pending *)
+       let id =
+         Execute_runtime.submit_shell_ir_approval_pending
+           ~base_path
+           ~keeper_name
+           ~task_id:"task-typed-gh"
+           ~goal_ids:[ "goal-typed-gh" ]
+           ~cmd
+           ~cwd:"/tmp/masc"
+           ~bin:"gh"
+           ~summary:"requires approval"
+           ~sandbox_profile:"host"
+           ~sandbox_target:"host"
+           ~risk_class:Masc_exec.Shell_ir_risk.R1_Reversible_mutation
+           ~typed_hit:true
+           ()
+       in
+       (* Approve *)
+       let res = AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve in
+       Alcotest.(check (result unit string)) "resolved Ok" (Ok ()) (Result.map_error AQ.resolve_error_to_string res);
+       (* Now has grant *)
+       Alcotest.(check bool) "has grant after approve" true
+         (Masc.Keeper_tool_execute_runtime.For_testing.Exec_grant_store.has_approved_grant
+            ~base_path ~keeper_name ~cmd ());
+       (* Consume *)
+       Masc.Keeper_tool_execute_runtime.For_testing.Exec_grant_store.consume_grant
+         ~base_path ~keeper_name ~cmd ();
+       (* Grant is gone *)
+       Alcotest.(check bool) "grant consumed" false
+         (Masc.Keeper_tool_execute_runtime.For_testing.Exec_grant_store.has_approved_grant
+            ~base_path ~keeper_name ~cmd ()))
 ;;
 
 let test_plain_error_codes_are_observed_only () =
@@ -712,6 +756,10 @@ let () =
             "gh_capability_requires_approval_enqueues_pending_without_wait"
             `Quick
             test_gh_approval_pending_helper_enqueues_nonblocking
+        ; Alcotest.test_case
+            "gh_capability_approval_grant_bypass"
+            `Quick
+            test_gh_approval_grant_bypass
         ] )
     ; ( "telemetry_key_invariants"
       , [ Alcotest.test_case "key_format" `Quick test_telemetry_key_format

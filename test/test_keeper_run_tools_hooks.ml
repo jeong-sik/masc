@@ -264,7 +264,7 @@ let test_partition_docker_visible_path_maps_to_playground_repo () =
     (fun ~config ~meta ->
        let container_repo_path =
          Filename.concat
-           (Keeper_sandbox.container_root meta.name)
+           (Masc.Keeper_sandbox.container_root meta.name)
            "repos/masc/lib/docker.ml"
        in
        let partition, rel_path =

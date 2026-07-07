@@ -220,6 +220,6 @@ val run_keeper_cycle
     @param observation World state snapshot
     @param generation Current generation counter
     @param turn_decision The scheduler's cycle decision that fired this turn
-    (RFC-0314). Threaded into [Keeper_unified_prompt.build_prompt] so the
+    (RFC-0315). Threaded into [Keeper_unified_prompt.build_prompt] so the
     prompt renders the real wake reason instead of a context-blind recompute.
     Callers that predate the threading may omit it. *)

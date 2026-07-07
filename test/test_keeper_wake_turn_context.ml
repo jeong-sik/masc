@@ -1,4 +1,4 @@
-(* RFC-0314 — wake-turn self-description.
+(* RFC-0315 — wake-turn self-description.
 
    Pins the three prompt additions that let a woken keeper resume instead of
    acting lost:
@@ -237,7 +237,7 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
 
 let test_legacy_recompute_renders_no_reason_on_empty_world () =
   (* Same empty world without the threaded decision: the recompute sees no
-     trigger, so no wake-reason section renders — the pre-RFC-0314 blindness
+     trigger, so no wake-reason section renders — the pre-RFC-0315 blindness
      this change removes for stimulus wakes. *)
   let user = user_message base_observation in
   check bool "no reactive scheduler line" false

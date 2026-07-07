@@ -34,7 +34,7 @@ val build_prompt :
     [meta.{will,needs,desires,instructions}] directly (legacy behavior).
     Production hot path supplies it; tests can keep the bare call.
 
-    RFC-0314 wake-turn self-description:
+    RFC-0315 wake-turn self-description:
     - [?turn_decision]: the scheduler's actual cycle decision. When present it
       replaces the internal recompute, so the rendered wake reason matches the
       decision that fired the turn (the recompute cannot see [reactive_wake]

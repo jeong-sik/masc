@@ -104,7 +104,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     0, 0, 0, 0, false
 ;;
 
-(** Resolve the keeper's claimed task to its backlog record (RFC-0314). *)
+(** Resolve the keeper's claimed task to its backlog record (RFC-0315). *)
 let read_current_task ~(config : Workspace.config) ~(meta : keeper_meta)
   : Masc_domain.task option
   =

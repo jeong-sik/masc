@@ -18,7 +18,7 @@ val read_current_task
   :  config:Workspace.config
   -> meta:keeper_meta
   -> Masc_domain.task option
-(** Resolve [meta.current_task_id] to its backlog record (RFC-0314). [None]
+(** Resolve [meta.current_task_id] to its backlog record (RFC-0315). [None]
     when the keeper holds no task, the id is absent from the backlog, or the
     backlog read fails (failure is logged and counted, never raised). *)
 

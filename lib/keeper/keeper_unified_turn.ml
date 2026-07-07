@@ -258,7 +258,7 @@ let run_keeper_cycle
                Eio.Fiber.yield ();
                (* 2. Build unified prompt — diversity entropy recorded in decision_audit
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
-               (* RFC-0314: resolve the claimed task and goal titles here (the
+               (* RFC-0315: resolve the claimed task and goal titles here (the
                   turn runner owns config), so the prompt can render what the
                   keeper holds and why it woke. Both reads are total: a failed
                   backlog read yields None, an unknown goal id is skipped. *)
@@ -273,7 +273,7 @@ let run_keeper_cycle
                      | None -> None)
                    meta.active_goal_ids
                in
-               (* RFC-0314: surface the working-state ledger's unresolved
+               (* RFC-0315: surface the working-state ledger's unresolved
                   loops. The sidecar has persisted (and resume-merged) them
                   since KeeperWorkingStateLifecycle landed, but no prompt ever
                   read them back — persisted-but-never-shown. *)

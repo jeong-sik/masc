@@ -24,7 +24,7 @@ type save_result =
   }
 
 (* Single owner of the latest-ledger filename: the prompt-side reader
-   (RFC-0314 Open Loops layer in [Keeper_unified_turn]) must resolve the
+   (RFC-0315 Open Loops layer in [Keeper_unified_turn]) must resolve the
    same path this module writes below. *)
 let latest_working_state_path ~session_dir =
   Filename.concat session_dir "working-state.latest.json"

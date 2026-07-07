@@ -1,5 +1,5 @@
 ---
-rfc: "0314"
+rfc: "0315"
 title: "Wake-turn self-description & self-directed work lane"
 status: Draft
 created: 2026-07-07
@@ -11,7 +11,7 @@ related: ["0303", "0310", "0313", "keeper-proactive-wake-actionability-invariant
 implementation_prs: []
 ---
 
-# RFC-0314: Wake-turn self-description & self-directed work lane
+# RFC-0315: Wake-turn self-description & self-directed work lane
 
 깨어난 keeper가 (1) 왜 깨어났는지, (2) 무엇을 쥐고 있는지, (3) 상시 목표가 무엇인지 아는 턴을 만든다.
 

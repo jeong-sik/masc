@@ -40,7 +40,7 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
-(** Format active goals with their titles (RFC-0314). Falls back to
+(** Format active goals with their titles (RFC-0315). Falls back to
     [format_goals] at the call site when the caller did not resolve titles. *)
 let format_goal_summaries (summaries : (string * string) list) : string =
   String.concat "\n"
@@ -50,7 +50,7 @@ let format_goal_summaries (summaries : (string * string) list) : string =
          else Printf.sprintf "- %s — %s" gid title)
        summaries)
 
-(** Render the keeper's own claimed task as standing context (RFC-0314).
+(** Render the keeper's own claimed task as standing context (RFC-0315).
     A claimed task is what admits scheduled-autonomous turns
     ([proactive_work_signal_present] counts [current_task_id] as the
     opportunity), so the turn must show the work that admitted it: id, title,
@@ -95,7 +95,7 @@ let format_current_task (task : Masc_domain.task) : string =
 let max_open_loops_rendered = 5
 
 (** Render unresolved open loops from the keeper's working-state ledger
-    (RFC-0314). These are the keeper's OWN prior [STATE] obligations that
+    (RFC-0315). These are the keeper's OWN prior [STATE] obligations that
     survived compaction/handoff via the sidecar; before this section the
     ledger was persisted but never shown back to the model. *)
 let format_open_loops (loops : Keeper_working_state.loop list) : string =
@@ -716,7 +716,7 @@ let autonomous_trigger_lines
       in
       List.filter_map Fun.id lines
   | Keeper_world_observation.Reactive, true ->
-      (* RFC-0314: when the scheduler's real decision is threaded in, a
+      (* RFC-0315: when the scheduler's real decision is threaded in, a
          stimulus-driven turn states its wake reasons instead of rendering
          nothing. Reactive payloads (mentions, board events, scope messages)
          still render in their own layers; event-queue stimuli (bootstrap,
@@ -776,7 +776,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             the operator explicitly requested new repo, goal, or task creation.\n\
             Do not stay silent when you have no goal.\n"
          else
-           (* RFC-0314: parity with the no-goal branch. Before this, only
+           (* RFC-0315: parity with the no-goal branch. Before this, only
               goalless keepers received a self-direction directive; a keeper
               WITH goals woke into 'end your turn with the [STATE] block',
               which legitimized no-op turns. *)
@@ -917,7 +917,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       observation.connected_surfaces
   in
   let turn_decision =
-    (* RFC-0314: prefer the scheduler's actual decision (threaded through the
+    (* RFC-0315: prefer the scheduler's actual decision (threaded through the
        turn runner) over a local recompute. The recompute cannot see
        [reactive_wake] or the drained event-queue triggers, so stimulus-driven
        wakes would render no wake reason. The recompute remains the fallback
@@ -943,7 +943,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
-       resolved them (RFC-0314); bare ids remain the fallback so legacy
+       resolved them (RFC-0315); bare ids remain the fallback so legacy
        callers keep their output. *)
     | Keeper_context_layers.Active_goals ->
       if observation.active_goals <> [] then
@@ -955,12 +955,12 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
              | Some [] | None -> format_goals observation.active_goals)
           ^ "\n\n")
       else None
-    (* 1b. Current task — the claim that admitted this turn (RFC-0314).
+    (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
       Option.map format_current_task current_task
     (* 1c. Working state — unresolved open loops from the keeper's own prior
-       [STATE] blocks, restored from the working-state sidecar (RFC-0314:
+       [STATE] blocks, restored from the working-state sidecar (RFC-0315:
        the ledger was persisted-but-never-shown before this layer). *)
     | Keeper_context_layers.Working_state ->
       (match active_open_loops with

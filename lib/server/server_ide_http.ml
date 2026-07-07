@@ -859,7 +859,7 @@ let add_routes router =
              match scope with
              | Scope_keeper_lane { keeper_id } ->
                List.filter
-                 (fun (r : Ide_annotation_types.region) ->
+                 (fun (r : Ide_annotation_types.code_region) ->
                    String.equal r.keeper_id keeper_id)
                  regions
              | Scope_canonical_url _ | Scope_repo_id _ -> regions

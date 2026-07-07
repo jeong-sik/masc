@@ -8,14 +8,16 @@ type decision =
       }
 
 let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
+let no_contract_evidence_ref_required = "handoff_context.evidence_refs"
 
 let hint_evidence_incomplete =
-  "Supply task-completion evidence: notes >= 20 chars summarising what \
-   changed AND every contract.required_evidence entry mentioned verbatim, \
-   OR at least one handoff_context.evidence_refs reference (PR number, commit \
-   hash, trace id, or reviewer-inspectable URL). Pure-placeholder \
-   notes ('done', 'ok', etc.) with no required_evidence mention and no \
-   handoff evidence_refs keep this gate closed."
+  "Supply task-completion evidence: no-contract tasks require at least one \
+   trusted handoff_context.evidence_refs reference (PR number, commit hash, \
+   trace id, or reviewer-inspectable URL). Contracted tasks require notes >= \
+   20 chars summarising what changed AND every contract.required_evidence \
+   entry mentioned verbatim, OR a trusted handoff_context.evidence_refs \
+   reference that satisfies the required evidence. Pure-placeholder notes \
+   ('done', 'ok', etc.) keep this gate closed."
 
 let reason_evidence_incomplete ~required_evidence =
   Printf.sprintf
@@ -85,15 +87,16 @@ let unsatisfied_required_evidence
   =
   match contract with
   | None ->
-          (* task-1815: Layer 2 — reject no-contract completions without
-             evidence_refs. Uses explicit handoff_context.evidence_refs presence,
-             not heuristic classification. Blueprint-compliant. *)
-          let has_refs =
-            match handoff_context with
-            | Some hc -> hc.evidence_refs <> []
-            | None -> false
-          in
-          if has_refs then [] else [rule_id_evidence_incomplete]
+    (* task-1815: Layer 2: reject no-contract completions without
+       reviewer-inspectable evidence_refs. Reuse the same typed evidence-ref
+       parser as the contracted path so placeholder prose cannot bypass the
+       no-contract gate by being merely non-empty. *)
+    let has_trusted_refs =
+      match handoff_context with
+      | Some hc -> List.exists evidence_ref_is_gate_trusted hc.evidence_refs
+      | None -> false
+    in
+    if has_trusted_refs then [] else [no_contract_evidence_ref_required]
   | Some c ->
     List.filter
       (fun e -> not (evidence_entry_satisfied ~notes ~handoff_context e))
@@ -175,18 +178,23 @@ let evidence_summary_payload
 
 let decide ~task_id ~task_opt ~notes ~handoff_context () =
   match (task_opt : Masc_domain.task option) with
-  | Some t when Option.is_some t.contract ->
-    if evidence_is_substantive ~notes ~handoff_context t.contract
+  | Some t ->
+    let unsatisfied =
+      unsatisfied_required_evidence ~notes ~handoff_context t.contract
+    in
+    let evidence_sufficient =
+      match t.contract with
+      | None -> unsatisfied = []
+      | Some _ -> evidence_is_substantive ~notes ~handoff_context t.contract
+    in
+    if evidence_sufficient
     then begin
       Log.Task.info "cdal_evidence_gate PASS task=%s notes_len=%d handoff_refs=%d"
         task_id (String.length (String.trim notes))
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs);
       Pass
     end
-    else
-      let unsatisfied =
-        unsatisfied_required_evidence ~notes ~handoff_context t.contract
-      in
+    else begin
       Log.Task.warn "cdal_evidence_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
         task_id (List.length unsatisfied) (String.length (String.trim notes))
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
@@ -198,13 +206,14 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
         ; payload_json =
             `Assoc
               [ "task_id", `String task_id
-              ; "contract_required", `Bool true
+              ; "contract_required", `Bool (Option.is_some t.contract)
               ; ( "required_evidence_unsatisfied"
                 , Json_util.json_string_list unsatisfied )
               ; ( "evidence_summary"
                 , evidence_summary_payload ~notes ~handoff_context )
               ]
         }
+    end
   | _ ->
     (* Analysis-only task bypass: a task with no contract has nothing to
        verify, so the gate must not block keeper_task_done. *)

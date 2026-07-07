@@ -14,6 +14,7 @@
 
 type layer_id =
   | Active_goals
+  | Current_task
   | Connected_surfaces
   | Namespace_state
   | Context_health

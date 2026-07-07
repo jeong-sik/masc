@@ -61,6 +61,9 @@ let run_keeper_cycle_admitted
         ~observation:obs
         ~generation:meta_after_triage.runtime.generation
         ~channel:turn_decision.channel
+        (* RFC-0314: pass the whole decision, not just its channel — the
+           prompt renders the verdict reasons so the turn knows why it woke. *)
+        ~turn_decision
         ~shared_context
         ?event_bus
         ())

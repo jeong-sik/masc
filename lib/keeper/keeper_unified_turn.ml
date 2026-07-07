@@ -26,6 +26,7 @@ let run_keeper_cycle
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
+      ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
       ?shared_context
       ?event_bus
       ()
@@ -257,11 +258,29 @@ let run_keeper_cycle
                Eio.Fiber.yield ();
                (* 2. Build unified prompt — diversity entropy recorded in decision_audit
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
+               (* RFC-0314: resolve the claimed task and goal titles here (the
+                  turn runner owns config), so the prompt can render what the
+                  keeper holds and why it woke. Both reads are total: a failed
+                  backlog read yields None, an unknown goal id is skipped. *)
+               let current_task =
+                 Keeper_world_observation_inputs.read_current_task ~config ~meta
+               in
+               let active_goal_summaries =
+                 List.filter_map
+                   (fun goal_id ->
+                     match Goal_store.get_goal config ~goal_id with
+                     | Some { Goal_store.id; title; _ } -> Some (id, title)
+                     | None -> None)
+                   meta.active_goal_ids
+               in
                let system_prompt, user_message =
                  Keeper_unified_prompt.build_prompt
                    ~meta
                    ~base_path:config.base_path
                    ~profile_defaults
+                   ?turn_decision
+                   ?current_task
+                   ~active_goal_summaries
                    ~observation
                    ()
                in

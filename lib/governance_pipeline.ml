@@ -118,7 +118,7 @@ let decide ?meta ~governance_level ~tool_name ~input () =
   let trace_id = generate_trace_id () in
   let action =
     if auto_approval_hard_forbidden ~risk meta then
-      `Require_confirm
+      if Env_config_core.disable_hitl () then `Deny else `Require_confirm
         (Printf.sprintf
            "Governance (%s): %s risk tool %S requires confirmation: auto-approval is \
             hard-forbidden"

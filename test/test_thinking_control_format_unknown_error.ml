@@ -128,6 +128,19 @@ let test_orphan_token_fails () =
        (Runtime_toml.parse_string
           (toml_with_tcf_and_token "reasoning-effort" "<|think|>")))
 
+let test_non_string_token_fails_as_parse_error () =
+  let toml =
+    {|[models.m]
+max-context = 1000
+
+[models.m.capabilities]
+thinking-control-format = "chat-template-token"
+thinking-control-token = 123
+|}
+  in
+  check bool "non-string thinking-control-token fails as Error" true
+    (is_error (Runtime_toml.parse_string toml))
+
 let test_absent_capabilities_loads () =
   (* No capabilities table at all is fine — absence defaults to no control. *)
   check bool "model without a capabilities table loads" true
@@ -150,5 +163,7 @@ let () =
           test_case "blank/padded token fails" `Quick
             test_chat_template_token_padded_token_fails;
           test_case "orphan token fails" `Quick test_orphan_token_fails;
+          test_case "non-string token fails as parse error" `Quick
+            test_non_string_token_fails_as_parse_error;
         ] );
     ]

@@ -404,6 +404,21 @@ let parse_providers (toml : Otoml.t)
 
 (* --- Layer 2: Models --- *)
 
+let thinking_control_token_key = "thinking-control-token"
+
+let exact_non_empty_string_opt_field ~(path : string) (tbl : Otoml.t) (key : string)
+  : (string option, parse_error list) result
+  =
+  match typed_find "string" path tbl key Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when String.trim value = "" ->
+    Error (error (path ^ "." ^ key) (key ^ " must be non-empty"))
+  | Ok (Some value) when value <> String.trim value ->
+    Error (error (path ^ "." ^ key) (key ^ " must not have leading or trailing whitespace"))
+  | Ok (Some value) -> Ok (Some value)
+;;
+
 let parse_thinking_control_format ~(path : string) ~(token : string option) (raw : string)
   : (Runtime_schema.thinking_control_format, parse_error list) result
   =
@@ -417,7 +432,7 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
     | Some _ ->
       Error
         (error
-           (path ^ ".thinking-control-token")
+           (path ^ "." ^ thinking_control_token_key)
            (Printf.sprintf
               "thinking-control-token is only valid with \
                thinking-control-format = \"chat-template-token\" (got %S)"
@@ -439,7 +454,7 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
      | Some _ ->
        Error
          (error
-            (path ^ ".thinking-control-token")
+            (path ^ "." ^ thinking_control_token_key)
             "thinking-control-token must be a non-empty string without \
              leading or trailing whitespace")
      | None ->
@@ -484,18 +499,21 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       None
   in
   let thinking_control_format_result =
-    let token = Otoml.find_opt tbl Otoml.get_string [ "thinking-control-token" ] in
-    match Otoml.find_opt tbl Otoml.get_string [ "thinking-control-format" ] with
-    | None ->
+    match
+      ( typed_find "string" path tbl "thinking-control-format" Otoml.get_string
+      , exact_non_empty_string_opt_field ~path tbl thinking_control_token_key )
+    with
+    | Error errs, _ | _, Error errs -> Error errs
+    | Ok None, Ok token ->
       (match token with
        | None -> Ok Runtime_schema.No_thinking_control
        | Some _ ->
          Error
            (error
-              (path ^ ".thinking-control-token")
+              (path ^ "." ^ thinking_control_token_key)
               "thinking-control-token requires thinking-control-format = \
                \"chat-template-token\""))
-    | Some raw -> parse_thinking_control_format ~path ~token raw
+    | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
   Result.map
     (fun thinking_control_format ->

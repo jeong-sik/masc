@@ -751,6 +751,10 @@ module For_testing = struct
   let success_selected_model_raw = success_selected_model_raw
   let record_candidate_health_error = record_candidate_health_error
   let provider_cooldown_block = provider_cooldown_block
+
+  let aggregate_cooldown_cause =
+    Keeper_turn_driver_provider_attempt.aggregate_cooldown_cause
+
   let provider_cooldown_block_error = provider_cooldown_block_error
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
   let max_execution_time_for_attempt =

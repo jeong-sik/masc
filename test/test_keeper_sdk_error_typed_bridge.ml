@@ -786,6 +786,100 @@ let test_soft_rate_limit_cooldown_blocks_candidate_before_dispatch () =
       (Agent_sdk.Error.to_string mapped)
 ;;
 
+(* #23456 P1 regression: a cooldown restored from persistence carries no
+   arming cause (provider_info.cooldown_cause = None). The aggregate must
+   treat that unknown as possibly-transient: mixed unknown+deterministic
+   blocker lists stay auto-recoverable instead of falsely escalating, while
+   deterministic-only lists still escalate. *)
+let test_mixed_unknown_and_deterministic_cooldown_stays_recoverable () =
+  let keeper_name = "mixed-cooldown-keeper" in
+  let candidate =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"mixed-cooldown-test"
+      ~base_url:"https://mixed-cooldown.example/v1"
+      ()
+    |> RC.of_provider_config ~max_concurrent:None
+  in
+  let raw_key =
+    match RC.health_keys candidate with
+    | [ key ] -> key
+    | keys ->
+      Alcotest.failf
+        "expected one health key, got [%s]"
+        (String.concat "; " keys)
+  in
+  let scoped_key = keeper_name ^ "@" ^ raw_key in
+  (* Deterministic blocker: hard quota on the credential-pool key. *)
+  BH.record_hard_quota BH.global ~provider_key:raw_key ();
+  (* Restored/unknown blocker: an active cooldown loaded from persistence
+     reports no arming cause until re-armed. *)
+  let restored_count =
+    BH.restore_providers
+      BH.global
+      [ { BH.restore_provider_key = scoped_key
+        ; restore_consecutive_failures = 3
+        ; restore_cooldown_until = Some (Unix.gettimeofday () +. 120.0)
+        ; restore_last_failure_at = Some (Unix.gettimeofday ())
+        ; restore_top_fingerprints = []
+        ; restore_latency_ms = None
+        ; restore_confidence = None
+        ; restore_cost_usd = None
+        }
+      ]
+  in
+  Alcotest.(check int) "restored one provider" 1 restored_count;
+  let info key =
+    match BH.provider_info BH.global ~provider_key:key with
+    | Some info -> info
+    | None -> Alcotest.failf "expected provider info for %s" key
+  in
+  let unknown_info = info scoped_key in
+  let det_info = info raw_key in
+  Alcotest.(check bool)
+    "restored cooldown is active"
+    true
+    unknown_info.in_cooldown;
+  Alcotest.(check bool)
+    "restored cooldown has no arming cause"
+    true
+    (unknown_info.cooldown_cause = None);
+  Alcotest.(check bool) "hard quota cooldown is active" true det_info.in_cooldown;
+  Alcotest.(check bool)
+    "mixed unknown+deterministic aggregates to None"
+    true
+    (KTD.For_testing.aggregate_cooldown_cause
+       [ scoped_key, unknown_info; raw_key, det_info ]
+     = None);
+  (match KTD.For_testing.aggregate_cooldown_cause [ raw_key, det_info ] with
+   | Some cause ->
+     Alcotest.(check bool)
+       "deterministic-only aggregate still escalates"
+       true
+       (KTD.provider_cooldown_cause_is_deterministic cause)
+   | None -> Alcotest.fail "deterministic-only aggregate lost its cause");
+  (* Block path: the scoped restored/unknown info wins candidate resolution,
+     so the block reports no cause and the mapped error stays auto-recoverable. *)
+  let block =
+    match KTD.For_testing.provider_cooldown_block ~keeper_name candidate with
+    | Some block -> block
+    | None -> Alcotest.fail "expected provider cooldown block"
+  in
+  Alcotest.(check bool)
+    "restored/unknown block carries no cause"
+    true
+    (block.cooldown_cause = None);
+  let mapped =
+    KTD.For_testing.provider_cooldown_block_error
+      ~runtime_id:"runtime.mixed-cooldown"
+      block
+  in
+  Alcotest.(check bool)
+    "mixed/unknown cooldown block stays auto-recoverable"
+    true
+    (EC.is_auto_recoverable_turn_error mapped)
+;;
+
 let test_read_only_no_progress_rotates_to_default_runtime () =
   init_rate_limit_pool_runtime ();
   let err = read_only_no_progress_err ~scope:"same.b" in
@@ -920,6 +1014,10 @@ let () =
             "soft rate limit blocks candidate before dispatch"
             `Quick
             test_soft_rate_limit_cooldown_blocks_candidate_before_dispatch
+        ; Alcotest.test_case
+            "mixed unknown+deterministic cooldown stays recoverable"
+            `Quick
+            test_mixed_unknown_and_deterministic_cooldown_stays_recoverable
         ; Alcotest.test_case
             "generic accept rejection is completion contract violation"
             `Quick

@@ -636,10 +636,15 @@ let is_hex_digit = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false
 
 let parse_blame_header line =
   match String.split_on_char ' ' line with
-  | sha :: _orig_line :: final_line :: _rest
+  | sha :: _orig_line :: final_line :: rest
     when String.length sha = 40 && String.for_all is_hex_digit sha -> (
       match int_of_string_opt final_line with
-      | Some n when n > 0 -> Some (sha, n)
+      | Some n when n > 0 ->
+        let group_size = match rest with
+          | gs :: _ -> (match int_of_string_opt gs with Some g when g > 0 -> g | _ -> 1)
+          | [] -> 1
+        in
+        Some (sha, n, group_size)
       | Some _ | None -> None)
   | _ -> None
 
@@ -660,7 +665,11 @@ let parse_blame_porcelain lines =
     | [] -> List.rev acc
     | hd :: tl -> (
       match parse_blame_header hd with
-      | Some (sha, final_line) -> collect (Some sha) ((final_line, sha) :: acc) tl
+      | Some (sha, final_line, _group_size) ->
+        (* Porcelain still emits a header for every final line. The counted
+           first header only scopes the following metadata block; expanding it
+           would duplicate the later bare headers and corrupt attribution. *)
+        collect (Some sha) ((final_line, sha) :: acc) tl
       | None ->
         (match cur_sha with
          | Some sha when String.starts_with ~prefix:"author " hd ->

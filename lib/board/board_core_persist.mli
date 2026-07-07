@@ -58,6 +58,7 @@ val max_jsonl_bytes : int
 val rotate_if_needed : string -> unit
 
 val posts_jsonl_unlocked : store -> string
+val save_posts_jsonl_result : string -> (unit, board_error) result
 val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit

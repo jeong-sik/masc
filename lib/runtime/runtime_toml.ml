@@ -404,20 +404,55 @@ let parse_providers (toml : Otoml.t)
 
 (* --- Layer 2: Models --- *)
 
-let parse_thinking_control_format ~(path : string) (raw : string)
+let parse_thinking_control_format ~(path : string) ~(token : string option) (raw : string)
   : (Runtime_schema.thinking_control_format, parse_error list) result
   =
+  (* Mirrors the OAS catalog contract (oas#2484): [Chat_template_token]
+     carries its token, so a chat-template-token declaration without a
+     [thinking-control-token] key — or a blank/padded token, or a token on a
+     non-token format — fails the load instead of detonating per request. *)
+  let reject_orphan_token format =
+    match token with
+    | None -> Ok format
+    | Some _ ->
+      Error
+        (error
+           (path ^ ".thinking-control-token")
+           (Printf.sprintf
+              "thinking-control-token is only valid with \
+               thinking-control-format = \"chat-template-token\" (got %S)"
+              raw))
+  in
   match String.lowercase_ascii (String.trim raw) with
   | "" | "none" | "no-thinking-control" | "no_thinking_control" ->
-    Ok Runtime_schema.No_thinking_control
-  | "thinking-object" | "thinking_object" -> Ok Runtime_schema.Thinking_object
+    reject_orphan_token Runtime_schema.No_thinking_control
+  | "thinking-object" | "thinking_object" ->
+    reject_orphan_token Runtime_schema.Thinking_object
   | "thinking-object-only" | "thinking_object_only" ->
-    Ok Runtime_schema.Thinking_object_only
-  | "chat-template-kwargs" | "chat_template_kwargs" -> Ok Runtime_schema.Chat_template_kwargs
-  | "chat-template-token" | "chat_template_token" -> Ok Runtime_schema.Chat_template_token
-  | "ollama-think" | "ollama_think" -> Ok Runtime_schema.Ollama_think
-  | "reasoning-effort" | "reasoning_effort" -> Ok Runtime_schema.Reasoning_effort
-  | "enable-thinking" | "enable_thinking" -> Ok Runtime_schema.Enable_thinking
+    reject_orphan_token Runtime_schema.Thinking_object_only
+  | "chat-template-kwargs" | "chat_template_kwargs" ->
+    reject_orphan_token Runtime_schema.Chat_template_kwargs
+  | "chat-template-token" | "chat_template_token" ->
+    (match token with
+     | Some t when String.trim t = t && t <> "" ->
+       Ok (Runtime_schema.Chat_template_token t)
+     | Some _ ->
+       Error
+         (error
+            (path ^ ".thinking-control-token")
+            "thinking-control-token must be a non-empty string without \
+             leading or trailing whitespace")
+     | None ->
+       Error
+         (error
+            (path ^ ".thinking-control-format")
+            "chat-template-token requires a thinking-control-token key \
+             naming the template token (e.g. \"<|think|>\")"))
+  | "ollama-think" | "ollama_think" -> reject_orphan_token Runtime_schema.Ollama_think
+  | "reasoning-effort" | "reasoning_effort" ->
+    reject_orphan_token Runtime_schema.Reasoning_effort
+  | "enable-thinking" | "enable_thinking" ->
+    reject_orphan_token Runtime_schema.Enable_thinking
   | other ->
     (* Unknown enum members fail the load, mirroring how this parser already
        rejects unknown protocols / credential types. A silent downgrade to
@@ -449,9 +484,18 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       None
   in
   let thinking_control_format_result =
+    let token = Otoml.find_opt tbl Otoml.get_string [ "thinking-control-token" ] in
     match Otoml.find_opt tbl Otoml.get_string [ "thinking-control-format" ] with
-    | None -> Ok Runtime_schema.No_thinking_control
-    | Some raw -> parse_thinking_control_format ~path raw
+    | None ->
+      (match token with
+       | None -> Ok Runtime_schema.No_thinking_control
+       | Some _ ->
+         Error
+           (error
+              (path ^ ".thinking-control-token")
+              "thinking-control-token requires thinking-control-format = \
+               \"chat-template-token\""))
+    | Some raw -> parse_thinking_control_format ~path ~token raw
   in
   Result.map
     (fun thinking_control_format ->

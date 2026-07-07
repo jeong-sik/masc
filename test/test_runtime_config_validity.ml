@@ -429,7 +429,7 @@ let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
     check bool "RunPod RTX A6000 Gemma seed" true caps.supports_seed;
     check bool "RunPod RTX A6000 Gemma chat-template token thinking" true
       (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_token))
+         caps.thinking_control_format = Chat_template_token "<|think|>"))
 
 let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
   with_repo_oas_model_catalog @@ fun catalog ->
@@ -451,7 +451,10 @@ let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
        (option string)
        (provider_model_id ^ " thinking token")
        (Some "<|think|>")
-       entry.thinking_control_token);
+       (match entry.thinking_control_format with
+        | Some (Llm_provider.Capabilities.Chat_template_token token) ->
+          Some token
+        | Some _ | None -> None));
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~allow_bare_fallback:false
@@ -469,7 +472,7 @@ let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
     check bool "Local Gemma4 E2B audio input" true caps.supports_audio_input;
     check bool "Local Gemma4 E2B chat-template token thinking" true
       (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_token));
+         caps.thinking_control_format = Chat_template_token "<|think|>"));
     check
       (option string)
       "Local Gemma4 E2B thinking token"
@@ -520,8 +523,10 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
          entry.base_label;
-       check (option string) (model_id ^ " no request thinking knob") (Some "none")
-         entry.thinking_control_format;
+       check bool (model_id ^ " no request thinking knob") true
+         (match entry.thinking_control_format with
+          | Some Llm_provider.Capabilities.No_thinking_control -> true
+          | Some _ | None -> false);
        check (option string) (model_id ^ " always preserved thinking")
          (Some "always_preserved")
          entry.preserve_thinking_control_format;
@@ -672,7 +677,7 @@ let test_repo_runtime_toml_loads () =
           check bool "Gemma4 chat-template-token thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
-               Runtime_schema.Chat_template_token);
+               (Runtime_schema.Chat_template_token "<|think|>"));
           (* Native Ollama /api/chat never serializes tool_choice
              (oas backend_ollama.ml:24); declaring true here would override
              oas models.toml false while the transport drops forced tool
@@ -702,7 +707,7 @@ let test_repo_runtime_toml_loads () =
           check bool "Gemma4 E2B chat-template-token thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
-               Runtime_schema.Chat_template_token);
+               (Runtime_schema.Chat_template_token "<|think|>"));
           check bool "Gemma4 E2B forced tool_choice disabled" false
             caps.supports_tool_choice;
           check bool "Gemma4 E2B image input" true caps.supports_image_input;

@@ -425,6 +425,8 @@ let test_gh_pr_merge_admin_denied_under_autonomous () =
        | Verdict.Deny { reason = Policy_deny { rule }; _ } ->
          if rule <> "gh_pr_merge_admin_bypass" then
            Alcotest.failf "%s: unexpected deny rule %s" label rule
+       | Verdict.Deny _ ->
+         Alcotest.failf "%s: gh pr merge --admin must deny via Policy_deny" label
        | Verdict.Allow _ ->
          Alcotest.failf "%s: gh pr merge --admin must NOT auto-run" label
        | Verdict.Ask _ ->

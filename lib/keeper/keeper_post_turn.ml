@@ -463,7 +463,7 @@ let read_existing_interruption_progress_snapshot ~(progress_path : string) =
     No_existing_progress_snapshot
   else
     match Fs_compat.load_file progress_path with
-    | exception Eio.Cancel.Cancelled _ as e -> raise e
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
         Existing_progress_snapshot_read_failed (Printexc.to_string exn)
     | text -> (

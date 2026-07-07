@@ -1333,7 +1333,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
               (Masc_domain.task_status_to_string other)))
 )
 
-let () = test "handle_transition_done_default_contract_accepts_default_evidence_tokens" (fun () ->
+let () = test "handle_transition_done_default_contract_accepts_substantive_notes" (fun () ->
   let ctx = make_test_ctx () in
   let add_result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1354,10 +1354,9 @@ let () = test "handle_transition_done_default_contract_accepts_default_evidence_
           ("action", `String "done");
           ( "notes",
             `String
-              "completion_notes: contract harness completed the live workflow. \
+              "Contract harness completed the live workflow with reviewer-visible notes. \
                Task scope satisfied: Default contract Done task - Mirrors \
-               contract harness task completion. \
-               reviewable_evidence_ref: contract-harness transcript." );
+               contract harness task completion." );
         ])
   in
   if not (Tool_result.is_success result) then

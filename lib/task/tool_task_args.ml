@@ -122,8 +122,8 @@ let parse_handoff_context ~(agent_name : string)
                 (Printf.sprintf
                    "handoff_context.summary is required for action=%s \
                     (non-empty string). Example: {\"summary\": \"tests \
-                    green, PR #123 pending review\", \"next_step\": \"wait \
-                    for CI\", \"evidence_refs\": [\"PR#123\"]}. \
+                    green, local proof saved\", \"next_step\": \"wait \
+                    for CI\", \"evidence_refs\": [\".masc/harness-evidence/proof.json\"]}. \
                     Alternatively pass a non-empty top-level 'notes' or \
                     'reason' and it will be synthesized into summary \
                     automatically."

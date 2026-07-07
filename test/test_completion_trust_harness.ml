@@ -30,12 +30,14 @@
     so the gate-specific assertion is what proves the *intended* gate fired. Each
     reject also asserts the task FSM was NOT mutated (anti-vacuity).
 
+    Positive coverage:
+    - A legitimate *completion* success is covered only when it carries a
+      locally resolvable evidence_ref. The test seeds a trace artifact under
+      the workspace base path before calling keeper_task_done, so the
+      deterministic evidence gate can validate the ref without a network/forge
+      lookup.
+
     Deliberately NOT covered here, with rationale:
-    - A legitimate *completion* success: once notes clear the length floor, the
-      anti-rationalization review reaches its Gate-3 LLM branch, whose
-      unavailable-LLM verdict is governed by operator fail-mode config and is not
-      deterministic in a no-LLM CI fixture. The deterministic success anchor is
-      therefore the *claim* (Test D), which has no review gate.
     - An evidence-gate rejection on keeper_task_done: the deterministic evidence
       evaluator is wired into the *claim* auto-complete path, not the done path
       (a Phase-3 / RFC-0199 gap). Asserting a done-evidence reject here would
@@ -167,6 +169,18 @@ let attempt_done
         ])
     ()
 
+let seed_trace_evidence ~config trace_id =
+  let path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat config.Workspace.base_path ".masc")
+         "trajectories/keeper-completion-trust")
+      (trace_id ^ ".jsonl")
+  in
+  Masc.Fs_compat.mkdir_p (Filename.dirname path);
+  Masc.Fs_compat.save_file path
+    {|{"type":"completion_trust_evidence","turn":0,"trace_id":"test"}|}
+
 let claim_via_dispatch ~config ~meta ~ctx_work ~task_id =
   KET.execute_keeper_tool_call_with_outcome
     ~config
@@ -287,14 +301,15 @@ let test_completion_with_evidence_refs_succeeds () =
          ~description:"claimed by the caller and completed with trusted proof");
     let claim = claim_via_dispatch ~config ~meta ~ctx_work ~task_id:"task-001" in
     check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
+    seed_trace_evidence ~config "completion-trust-harness";
     let result =
       attempt_done
         ~config
         ~meta
         ~ctx_work
         ~task_id:"task-001"
-        ~result:"Implemented the deliverable and opened PR#123 for review."
-        ~evidence_refs:[ "PR#123" ]
+        ~result:"Implemented the deliverable and saved trace:completion-trust-harness evidence."
+        ~evidence_refs:[ "trace:completion-trust-harness" ]
         ()
     in
     check string "completion outcome" "success" (outcome_label result.KET.outcome);
@@ -311,7 +326,7 @@ let test_completion_with_evidence_refs_succeeds () =
         ; _
         } ->
       check string "done assignee" meta.agent_name assignee;
-      check (list string) "handoff evidence_refs" [ "PR#123" ] handoff.evidence_refs
+      check (list string) "handoff evidence_refs" [ "trace:completion-trust-harness" ] handoff.evidence_refs
     | Some task ->
       fail
         ("expected task-001 Done with handoff evidence refs, got "

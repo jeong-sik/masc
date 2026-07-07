@@ -119,3 +119,24 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
   in
   result
 ;;
+
+let prune_http_json ~config ~operator_name
+  : (Yojson.Safe.t, string) result
+  =
+  let operator_name = String.trim operator_name in
+  let result =
+    let* () =
+      if String.equal operator_name ""
+      then Error "authenticated operator is required"
+      else Ok ()
+    in
+    match Schedule_service.prune config with
+    | Error err -> Error (Schedule_service.service_error_to_string err)
+    | Ok (_, count) ->
+      Ok (`Assoc
+            [ "ok", `Bool true
+            ; "pruned_count", `Int count
+            ])
+  in
+  result
+;;

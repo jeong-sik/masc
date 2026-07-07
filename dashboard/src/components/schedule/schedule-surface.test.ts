@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
+  pruneSchedules: vi.fn(),
 }))
 
 vi.mock('../tools/tool-state', () => ({
@@ -23,6 +24,11 @@ vi.mock('../tools/tool-state', () => ({
   toolsData: mocks.toolsData,
   toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
+}))
+
+vi.mock('../../api/dashboard-governance', () => ({
+  pruneSchedules: mocks.pruneSchedules,
+  resolveScheduleApproval: vi.fn(),
 }))
 
 import { ScheduleSurface } from './schedule-surface'
@@ -273,5 +279,35 @@ describe('ScheduleSurface', () => {
 
     expect(container.textContent).toContain('dashboard tools unavailable')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+  })
+
+  it('calls pruneSchedules when the prune button is clicked', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+    mocks.pruneSchedules.mockResolvedValue({ ok: true, pruned_count: 5 })
+    
+    // Mock window.confirm to return true
+    const originalConfirm = window.confirm
+    window.confirm = vi.fn().mockReturnValue(true)
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const pruneBtn = container.querySelector('[data-testid="schedule-prune-btn"]') as HTMLButtonElement
+    expect(pruneBtn).not.toBeNull()
+    
+    // Click prune button
+    pruneBtn.click()
+    await flush()
+
+    expect(window.confirm).toHaveBeenCalled()
+    expect(mocks.pruneSchedules).toHaveBeenCalled()
+    expect(mocks.loadTools).toHaveBeenCalled()
+    
+    window.confirm = originalConfirm
   })
 })

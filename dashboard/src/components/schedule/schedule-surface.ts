@@ -19,6 +19,9 @@ import {
   toolsError,
   toolsLoading,
 } from '../tools/tool-state'
+import { ActionButton } from '../common/button'
+import { showToast } from '../common/toast'
+import { pruneSchedules } from '../../api/dashboard-governance'
 
 function countLabel(count: number): string {
   return count.toLocaleString()
@@ -54,6 +57,24 @@ export function ScheduleSurface() {
   // Detail-overlay selection is lifted here so the read-only operations aside
   // (right column) and the panel's cards/feed drive the same overlay.
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+  const [pruning, setPruning] = useState(false)
+
+  const handlePrune = async () => {
+    if (!window.confirm('완료되었거나 취소/만료/반려된 예약을 정말로 정리하시겠습니까?\n연관된 실행 기록 및 권한 승인도 함께 삭제됩니다.')) {
+      return
+    }
+    setPruning(true)
+    try {
+      const res = await pruneSchedules()
+      showToast(`성공적으로 ${res.pruned_count}개의 완료된 예약을 정리했습니다.`, 'success')
+      await loadTools()
+    } catch (err: any) {
+      console.error('[ScheduleSurface] prune failed:', err)
+      showToast(err.message || String(err), 'error')
+    } finally {
+      setPruning(false)
+    }
+  }
 
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) {
@@ -76,7 +97,18 @@ export function ScheduleSurface() {
               <span>schedule runner projection을 읽어 표시하며, 이 화면에서 keeper turn을 자동 구동하지 않습니다.</span>
             </div>
           </div>
-          <${ConnectionStatus} />
+          <div style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+            <${ConnectionStatus} />
+            <${ActionButton}
+              variant="danger"
+              size="sm"
+              onClick=${handlePrune}
+              disabled=${pruning}
+              testId="schedule-prune-btn"
+            >
+              ${pruning ? '정리 중...' : '완료된 예약 정리 (Prune)'}
+            <//>
+          </div>
         </header>
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}

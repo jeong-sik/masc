@@ -448,6 +448,16 @@ let dashboard_schedule_resolve_http_json
     ~args
 ;;
 
+let dashboard_schedule_prune_http_json
+      ~config
+      ~operator_name
+  : (Yojson.Safe.t, string) result
+  =
+  Server_dashboard_http_schedule_actions.prune_http_json
+    ~config
+    ~operator_name
+;;
+
 (* Dashboard-initiated verification verdict. Mirrors the tool_task path for
    Approve_verification / Reject_verification: persist the Verification store
    verdict before the task FSM transition, then publish Board + SSE

@@ -88,6 +88,17 @@ val cancel_request :
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
 
+val update_request :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  due_at:float ->
+  expires_at:float option ->
+  payload:Schedule_domain.payload ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Replaces [due_at], [expires_at], and [payload] of a pending, scheduled, or
+    due request. Returns [Invalid_status_transition] for terminal or [Running]
+    requests, mirroring [cancel_request]. *)
+
 val refresh_due :
   Workspace_utils.config ->
   now:float ->

@@ -1,6 +1,8 @@
 type schedule_decision =
   | Approve
   | Reject
+  | Cancel
+  | Update
 
 let ( let* ) = Result.bind
 
@@ -21,17 +23,35 @@ let required_string key json =
   | None -> Error (key ^ " is required")
 ;;
 
+let required_number key json =
+  match Server_dashboard_http_json_utils.json_number key json with
+  | None -> Error (key ^ " is required")
+  | Some value -> Ok value
+;;
+
+let number_opt key json = Server_dashboard_http_json_utils.json_number key json
+
+let required_payload key json =
+  match Server_dashboard_http_json_utils.json_assoc key json with
+  | None -> Error (key ^ " is required")
+  | Some payload -> Ok payload
+;;
+
 let decision_of_json json =
   let* raw = required_string "decision" json in
   match String.lowercase_ascii raw with
   | "approve" -> Ok Approve
   | "reject" -> Ok Reject
-  | _ -> Error "decision must be 'approve' or 'reject'"
+  | "cancel" -> Ok Cancel
+  | "update" -> Ok Update
+  | _ -> Error "decision must be 'approve', 'reject', 'cancel', or 'update'"
 ;;
 
 let decision_to_string = function
   | Approve -> "approve"
   | Reject -> "reject"
+  | Cancel -> "cancel"
+  | Update -> "update"
 ;;
 
 let default_rejection_reason ~operator_name =
@@ -72,6 +92,13 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
             default_rejection_reason ~operator_name
         in
         Schedule_service.reject config ~schedule_id ~approved_by ~reason ()
+      | Cancel -> Schedule_service.cancel config ~schedule_id
+      | Update ->
+        let* due_at = required_number "due_at" args in
+        let expires_at = number_opt "expires_at" args in
+        let* payload_json = required_payload "payload" args in
+        let* payload = Schedule_domain.payload_of_yojson payload_json in
+        Schedule_service.update config ~schedule_id ~due_at ~expires_at ~payload
     in
     service_result
     |> Result.map_error Schedule_service.service_error_to_string

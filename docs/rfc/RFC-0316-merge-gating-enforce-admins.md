@@ -42,7 +42,7 @@ main의 required check는 `CI Gate` 하나로 선언되어 있으나, `enforce_a
 1. `enforce_admins=true` — admin 포함 모든 머지가 `CI Gate` 성공 완료를 전제.
 2. `BRANCH_PROTECTION_AUDIT_TOKEN` 유지 — Watchdog이 계속 branch protection을 읽고 실제 드리프트만 red로 보고하게 한다.
 
-Non-goal: merge queue 도입(소유권/플랜 제약은 적용 검토 시 GitHub 공식 문서로 재검증), `strict`(require branches up-to-date) 활성화(§5), required contexts 확장.
+Non-goal: merge queue 도입. [근거] GitHub Docs "Managing a merge queue"는 merge queue 가용 대상을 organization 소유 public repository 또는 GitHub Enterprise Cloud organization 소유 private repository로 제한한다(확인일시: 2026-07-07, 신뢰도: High, 출처: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue). 현재 `jeong-sik/masc`는 user-owned repository이므로 이 RFC 범위에서는 사용할 수 없다. `strict`(require branches up-to-date) 활성화(§5), required contexts 확장도 비목표다.
 
 ## 3. Design
 
@@ -101,7 +101,7 @@ keeper가 required green을 기다리지 않고 merge를 시도하는 기존 행
 
 ## 5. Alternatives considered
 
-- **merge queue**: cancelled-at-merge와 stale merge-ref를 동시에 푸는 정답이지만 User 소유 repo에서 불가. org 이전은 이 RFC 범위 밖.
+- **merge queue**: cancelled-at-merge와 stale merge-ref를 동시에 푸는 정답이지만 user-owned repo에서 불가. [근거] GitHub Docs "Managing a merge queue" 가용 조건은 organization 소유 repository로 한정된다(확인일시: 2026-07-07, 신뢰도: High, 출처: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue). org 이전은 이 RFC 범위 밖.
 - **strict=true (up-to-date 강제)**: stale merge-ref 기준 green 머지를 막지만, fleet 규모(동시 수십 PR)에서 매 main 착지마다 전 PR 리베이스 경쟁이 발생해 처리량이 급감한다. merge queue 없이 strict만 켜는 것은 비용 대비 이득이 없어 보류.
 - **required contexts 확장** (Build and Test 등 개별 추가): CI Gate가 이미 aggregator이므로 중복. 우회 경로는 contexts 수가 아니라 enforce_admins에 있었다.
 - **프로세스 규칙만으로 해결** ("green 확인 후 머지하기로 약속"): 오늘 4계열이 반증. 규칙은 admin 토큰의 기술적 우회 앞에서 강제력이 없다.

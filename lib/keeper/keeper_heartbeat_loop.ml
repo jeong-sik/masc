@@ -156,7 +156,8 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.No_progress_recovery
       | Keeper_event_queue.Hitl_resolved _
-      | Keeper_event_queue.Goal_verification_failed _ ->
+      | Keeper_event_queue.Goal_verification_failed _
+      | Keeper_event_queue.Failure_judgment _ ->
         None)
     stimuli
 ;;
@@ -174,7 +175,8 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.No_progress_recovery
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _ -> ())
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _ -> ())
     stimuli
 ;;
 
@@ -191,7 +193,8 @@ let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.No_progress_recovery
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _ -> ())
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _ -> ())
     stimuli
 ;;
 

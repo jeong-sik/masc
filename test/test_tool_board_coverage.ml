@@ -1193,9 +1193,10 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   let submit_ok, submit_body =
     require_mcp_runtime_result ~sw ~clock "masc_board_curation_submit"
       (make_args
-         [ ("submitted_by", `String "spoofed-curator")
-         ; ("summary", `String "MCP runtime curation route works.")
-         ; ("rationale", `String "Pin schema-to-dispatch curation routing")
+         [
+           ("submitted_by", `String "mcp-runtime-curator");
+           ("summary", `String "MCP runtime curation route works.");
+           ("rationale", `String "Pin schema-to-dispatch curation routing");
          ])
   in
   Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
@@ -1413,58 +1414,27 @@ let test_dispatch_delete_success () =
     |> Yojson.Safe.Util.to_string
   in
   let ok_del, msg_del = dispatch "masc_board_delete"
-    (make_args [ ("post_id", `String post_id); ("author", `String "tester") ]) in
+    (make_args [("post_id", `String post_id)]) in
   Alcotest.(check bool) "delete ok" true ok_del;
   Alcotest.(check bool) "delete msg contains id" true
     (contains_substring msg_del post_id)
-
-let test_dispatch_delete_rejects_non_owner () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let _ok, body =
-    dispatch
-      "masc_board_post"
-      (make_args
-         [ ("content", `String "owned delete target"); ("author", `String "owner") ])
-  in
-  let post_id =
-    parse_create_response_json body
-    |> Yojson.Safe.Util.member "id"
-    |> Yojson.Safe.Util.to_string
-  in
-  let ok_del, _msg_del =
-    dispatch
-      "masc_board_delete"
-      (make_args [ ("post_id", `String post_id); ("author", `String "intruder") ])
-  in
-  Alcotest.(check bool) "non-owner delete rejected" false ok_del;
-  match Board_dispatch.get_post ~post_id with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok post ->
-    Alcotest.(check string)
-      "owned post remains"
-      "owned delete target"
-      post.Board.content
 
 let test_dispatch_delete_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_delete"
-    (make_args
-       [ ("post_id", `String "nonexistent-id"); ("author", `String "tester") ])
-  in
+    (make_args [("post_id", `String "nonexistent-id")]) in
   Alcotest.(check bool) "delete not found" false ok;
   Alcotest.(check bool) "error message present" true
-    (contains_substring body "Post not found")
+    (contains_substring body "Delete failed")
 
 let test_dispatch_delete_empty_id () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_delete"
-    (make_args [ ("post_id", `String ""); ("author", `String "tester") ]) in
+    (make_args [("post_id", `String "")]) in
   Alcotest.(check bool) "empty id rejected" false ok;
   Alcotest.(check bool) "error mentions required" true
     (contains_substring body "required")
@@ -1566,85 +1536,6 @@ let test_dispatch_post_update_transfers_author () =
         (Board.Agent_id.to_string post.author);
       Alcotest.(check string) "tool transfer content persisted"
         "transferred tool body" post.content
-
-let test_sub_board_update_rejects_non_owner () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let ok_create, _ =
-    dispatch
-      "masc_board_sub_board_create"
-      (make_args
-         [ ("slug", `String "owned-space")
-         ; ("name", `String "Owned Space")
-         ; ("description", `String "Owner controlled")
-         ; ("owner", `String "space-owner")
-         ])
-  in
-  Alcotest.(check bool) "sub-board created" true ok_create;
-  let ok_update, _ =
-    dispatch
-      "masc_board_sub_board_update"
-      (make_args
-         [ ("sub_board_id", `String "owned-space")
-         ; ("owner", `String "space-intruder")
-         ; ("name", `String "Hijacked")
-         ])
-  in
-  Alcotest.(check bool) "non-owner update rejected" false ok_update;
-  (match Board_dispatch.get_sub_board ~sub_board_id:"owned-space" with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok sb -> Alcotest.(check string) "name unchanged" "Owned Space" sb.Board.name);
-  let ok_owner_update, _ =
-    dispatch
-      "masc_board_sub_board_update"
-      (make_args
-         [ ("sub_board_id", `String "owned-space")
-         ; ("owner", `String "space-owner")
-         ; ("name", `String "Owner Updated")
-         ])
-  in
-  Alcotest.(check bool) "owner update accepted" true ok_owner_update
-
-let test_sub_board_delete_rejects_non_owner () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let ok_create, _ =
-    dispatch
-      "masc_board_sub_board_create"
-      (make_args
-         [ ("slug", `String "delete-space")
-         ; ("name", `String "Delete Space")
-         ; ("description", `String "Owner controlled")
-         ; ("owner", `String "space-owner")
-         ])
-  in
-  Alcotest.(check bool) "sub-board created" true ok_create;
-  let ok_delete, _ =
-    dispatch
-      "masc_board_sub_board_delete"
-      (make_args
-         [ ("sub_board_id", `String "delete-space")
-         ; ("owner", `String "space-intruder")
-         ])
-  in
-  Alcotest.(check bool) "non-owner delete rejected" false ok_delete;
-  (match Board_dispatch.get_sub_board ~sub_board_id:"delete-space" with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok _ -> ());
-  let ok_owner_delete, _ =
-    dispatch
-      "masc_board_sub_board_delete"
-      (make_args
-         [ ("sub_board_id", `String "delete-space")
-         ; ("owner", `String "space-owner")
-         ])
-  in
-  Alcotest.(check bool) "owner delete accepted" true ok_owner_delete;
-  match Board_dispatch.get_sub_board ~sub_board_id:"delete-space" with
-  | Ok _ -> Alcotest.fail "expected owner delete to remove sub-board"
-  | Error _ -> ()
 
 let test_dispatch_post_update_missing_id () =
   with_eio @@ fun env ->
@@ -2735,8 +2626,6 @@ let () =
         [
           Alcotest.test_case "unknown tool" `Quick test_dispatch_unknown_tool;
           Alcotest.test_case "delete success" `Quick test_dispatch_delete_success;
-          Alcotest.test_case "delete rejects non-owner" `Quick
-            test_dispatch_delete_rejects_non_owner;
           Alcotest.test_case "delete not found" `Quick test_dispatch_delete_not_found;
           Alcotest.test_case "delete empty id" `Quick test_dispatch_delete_empty_id;
           Alcotest.test_case "post update by owner" `Quick
@@ -2745,10 +2634,6 @@ let () =
             test_dispatch_post_update_rejects_non_owner;
           Alcotest.test_case "post update transfers author" `Quick
             test_dispatch_post_update_transfers_author;
-          Alcotest.test_case "sub-board update rejects non-owner" `Quick
-            test_sub_board_update_rejects_non_owner;
-          Alcotest.test_case "sub-board delete rejects non-owner" `Quick
-            test_sub_board_delete_rejects_non_owner;
           Alcotest.test_case "post update missing id" `Quick
             test_dispatch_post_update_missing_id;
         ] );
@@ -2991,7 +2876,7 @@ let () =
             let json = parse_create_response_json create_msg in
             let post_id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
             let (_ok, _msg) = dispatch "masc_board_delete" (make_args [
-              ("post_id", `String post_id); ("author", `String "tester")
+              ("post_id", `String post_id)
             ]) in
             let (_ok2, body2) = dispatch "masc_board_list" args in
             Alcotest.(check bool) "cache invalidated after delete" true

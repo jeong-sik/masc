@@ -43,6 +43,7 @@
   test_advisory_only_affordance_never_drives_wake
   test_keeper_failed_task_orphan_does_not_livelock
   test_broadcast_wakeup_policy
+  test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_librarian_retry
@@ -400,6 +401,7 @@
   test_advisory_only_affordance_never_drives_wake
   test_keeper_failed_task_orphan_does_not_livelock
   test_broadcast_wakeup_policy
+  test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_librarian_retry

@@ -485,7 +485,7 @@ let test_gh_durable_remote_asks_under_autonomous () =
        the floor Deny path — the active-keeper enablement. Plus the R1
        durable-remote ops that already existed (repo edit/sync/set-default) and
        unknown gh. *)
-    [ "gh repo create", [ "repo"; "create"; "o/new" ]
+    [ "gh repo create", [ "repo"; "create"; "o/new"; "--private" ]
     ; "gh repo fork", [ "repo"; "fork"; "o/r" ]
     ; "gh discussion create", [ "discussion"; "create"; "--title"; "T" ]
     ; "gh discussion comment", [ "discussion"; "comment"; "42"; "--body"; "B" ]
@@ -497,6 +497,32 @@ let test_gh_durable_remote_asks_under_autonomous () =
        auto-runs as a read — it Asks under autonomous. *)
     ; "gh repo upsert-magic (unknown action)", [ "repo"; "upsert-magic"; "o/r" ]
     ; "gh pr teleport (unknown action)", [ "pr"; "teleport"; "123" ]
+    ]
+
+let test_gh_repo_create_contract_denies_under_autonomous () =
+  List.iter
+    (fun (label, args, expected_rule) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Policy_deny { rule }; _ } ->
+         Alcotest.(check string) label expected_rule rule
+       | Verdict.Ask _ ->
+         Alcotest.failf "%s: invalid repo-create contract must Deny, not Ask" label
+       | Verdict.Allow _ | Verdict.Suggest_confirm _ | Verdict.Deny _ ->
+         Alcotest.failf "%s: expected Policy_deny for repo-create contract" label)
+    [ ( "missing visibility"
+      , [ "repo"; "create"; "o/new" ]
+      , "gh_repo_create_contract:missing_visibility" )
+    ; ( "missing owner"
+      , [ "repo"; "create"; "new"; "--private" ]
+      , "gh_repo_create_contract:missing_owner" )
+    ; ( "ambiguous visibility"
+      , [ "repo"; "create"; "o/new"; "--private"; "--public" ]
+      , "gh_repo_create_contract:ambiguous_visibility" )
     ]
 
 (* RFC-0309 W4 axis-symmetry regression: the string-borne GraphQL form of a
@@ -678,7 +704,7 @@ let test_gh_durable_remote_in_pipeline_asks_under_autonomous () =
        | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
        | _ ->
          Alcotest.failf "%s | cat must still Ask under autonomous" label)
-    [ ("gh repo create", [ "repo"; "create"; "o/new" ])
+    [ ("gh repo create", [ "repo"; "create"; "o/new"; "--private" ])
     ; ("gh discussion create", [ "discussion"; "create"; "--title"; "T" ])
     ; ( "gh api graphql -F query=@file (composed with pipeline)"
       , [ "api"; "graphql"; "-F"; "query=@mutation.graphql" ] )
@@ -871,6 +897,7 @@ let () =
   test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_gh_durable_remote_asks_under_autonomous ();
+  test_gh_repo_create_contract_denies_under_autonomous ();
   test_gh_graphql_durable_remote_asks_under_autonomous ();
   test_gh_graphql_opaque_query_asks_under_autonomous ();
   test_gh_graphql_non_query_opaque_field_allowed_under_autonomous ();

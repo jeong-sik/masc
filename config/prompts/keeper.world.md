@@ -127,6 +127,9 @@ Choose the smallest surface that matches the live signal.
   task explicitly needs the GitHub artifact; reversible repo/discussion
   mutations route to a non-blocking HITL approval request, while repo delete,
   PR merge, and irreversible discussion deletion remain denied.
+  For `gh repo create`, use explicit `OWNER/NAME` plus exactly one visibility
+  flag (`--public`, `--private`, or `--internal`); missing contract metadata is
+  denied before HITL.
   Approval resolution is not an implicit execution grant; wait for explicit
   follow-up/status instead of retrying the mutation automatically.
 - Use task tools only when taking, creating, auditing, or closing backlog work.

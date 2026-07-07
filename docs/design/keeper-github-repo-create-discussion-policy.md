@@ -68,7 +68,11 @@ approval queue was wired into the Shell IR approval verdict:
 
 The current Shell IR path separates risk from capability policy:
 
-- `gh repo create|fork|edit|sync|rename ...` -> `Requires_approval`
+- `gh repo create OWNER/NAME --public|--private|--internal ...` with a
+  literal target and exactly one visibility flag -> `Requires_approval`; missing
+  owner, missing/ambiguous visibility, or opaque repo target -> `Deny` before
+  HITL.
+- `gh repo fork|edit|sync|rename ...` -> `Requires_approval`
 - `gh discussion create|comment|edit|close|reopen|lock|unlock|answer|unanswer ...`
   -> `Requires_approval`
 - `gh api graphql` bodies containing durable repository/discussion create or
@@ -81,6 +85,10 @@ to the keeper turn. The keeper must not block waiting for the operator decision;
 resolution is delivered later through the HITL wake path. Resolution only wakes
 the keeper to observe the resolved state; it does not execute the stored command,
 create a one-shot approval grant, or authorize an automatic retry.
+For repo creation, the pending approval input includes the structured
+`repo_create_contract` (`owner`, `name`, `visibility`, and lifecycle flags such
+as `source`, `template`, `remote`, `clone`, `push`, and `add_readme`) so the
+operator is judging explicit metadata rather than ambient `gh` defaults.
 
 ## 5. Non-goals
 

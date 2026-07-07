@@ -38,12 +38,17 @@ val decide :
          Catastrophic_program];
        - a destructive SQL statement ([DROP]/[TRUNCATE]/[DELETE]) handed to a
          database CLI ([psql -c], [mysql -e]) → [Deny Destructive_db].
-    2. Otherwise, a [gh] verb whose capability disposition is
+    2. Otherwise, a [gh repo create] request that lacks the G-10 contract
+       ([OWNER/NAME] plus exactly one visibility flag) → [Deny
+       (Policy_deny ...)]. Invalid repo-create requests must be corrected before
+       HITL; the approval queue only receives explicit ownership/visibility
+       metadata.
+    3. Otherwise, a [gh] verb whose capability disposition is
        [Requires_approval] → [Ask], independent of the risk overlay. This is
        how reversible durable-remote mutations such as [gh repo create] and
        [gh discussion create] enter HITL rather than auto-running or being
        disabled.
-    3. Otherwise the highest program risk class is graded by the matching
+    4. Otherwise the highest program risk class is graded by the matching
        [overlay.*_trust] level:
        [Enforced] → [Ask], [Auto_safe]/[Observe] → [Allow],
        [Suggest] → [Suggest_confirm].

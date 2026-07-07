@@ -138,6 +138,22 @@ describe('buildAgenda', () => {
     expect(columns.flatMap(column => column.events)).toHaveLength(0)
   })
 
+  it('keeps an unrecognized-cadence row on the agenda rather than dropping it', () => {
+    const columns = buildAgenda(
+      [
+        req({ schedule_id: 'unknown', recurrence: { kind: 'lunar' }, recurrence_kind: undefined, due_at: localEpochSeconds(2026, 6, 7, 18) }),
+        req({ schedule_id: 'interval', recurrence: { kind: 'interval', interval_sec: 3600 }, due_at: localEpochSeconds(2026, 6, 7, 15) }),
+      ],
+      { nowMs: NOW_MS, days: 7 },
+    )
+    const events = columns.flatMap(column => column.events)
+    // The unknown-cadence row is surfaced (cadence null); the interval row is not
+    // (it belongs in the polling strip).
+    expect(events.map(event => event.request.schedule_id)).toContain('unknown')
+    expect(events.map(event => event.request.schedule_id)).not.toContain('interval')
+    expect(events.find(event => event.request.schedule_id === 'unknown')?.cadence).toBeNull()
+  })
+
   it('clamps an overdue wake onto today and drops rows beyond the window', () => {
     const columns = buildAgenda(
       [

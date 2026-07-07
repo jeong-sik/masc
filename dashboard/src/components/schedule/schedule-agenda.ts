@@ -127,7 +127,9 @@ export function selectPollingSchedules(
 export interface AgendaEvent {
   readonly request: DashboardScheduledAutomationRequest
   readonly atMs: number
-  readonly cadence: Exclude<Cadence, 'interval'>
+  // scheduled | oneshot for a recognized recurrence kind; null when the kind is
+  // outside the closed backend set (surfaced, never silently dropped).
+  readonly cadence: Exclude<Cadence, 'interval'> | null
 }
 
 export interface AgendaColumn {
@@ -136,8 +138,10 @@ export interface AgendaColumn {
   readonly events: AgendaEvent[]
 }
 
-/** Project active scheduled/oneshot schedules onto `days` day columns starting
- * today. Interval schedules are excluded (they live in the polling strip). A row
+/** Project active, non-interval schedules onto `days` day columns starting
+ * today. Interval schedules are excluded (they live in the polling strip);
+ * scheduled, oneshot, AND unrecognized-cadence rows all belong here so an
+ * unknown recurrence kind is never silently dropped from the calendar. A row
  * whose next wake predates today is clamped onto today (overdue → visible now);
  * a row without a concrete wake time is dropped. */
 export function buildAgenda(
@@ -153,7 +157,9 @@ export function buildAgenda(
   for (const request of requests) {
     if (isTerminalRequest(request)) continue
     const cadence = cadenceOfRequest(request)
-    if (cadence !== 'scheduled' && cadence !== 'oneshot') continue
+    // interval → polling strip; everything else (scheduled, oneshot, unknown)
+    // belongs on the day agenda.
+    if (cadence === 'interval') continue
     const atMs = fireTimestampMs(request)
     if (atMs === null) continue
     const rawOffset = Math.round((startOfDayMs(atMs) - todayStart) / MS_PER_DAY)
@@ -350,7 +356,9 @@ function AgendaEventRow({
       onClick=${() => onOpen(request.schedule_id)}
     >
       <span class="sch-ev-time mono">${formatClock(event.atMs)}</span>
-      <${CadenceTag} cadence=${event.cadence} />
+      ${event.cadence === null
+        ? html`<span class="sch-cad dim" title="recurrence kind가 알려진 집합(one_shot·interval·daily·cron) 밖입니다 — projection/버전 불일치">⧗ 미상</span>`
+        : html`<${CadenceTag} cadence=${event.cadence} />`}
       <span class="sch-ev-body">
         <span class="sch-ev-title">${summaryText(request)}</span>
         <span class="sch-ev-meta">

@@ -13,16 +13,10 @@ export const selectedKeeper = signal<Keeper | null>(null)
 registerKeeperTurnRefresh((keeperName: string) => {
   if (keeperName !== activeKeeperName.value) return
   void hydrateKeeperStatus(keeperName, true)
-  void import('./keeper-trajectory-timeline')
-    .then(({ loadTrajectory }) => {
-      void loadTrajectory(keeperName)
-    })
-    .catch(err => {
-      // Mirrors sse-store.ts §256: when the trajectory module fails to load,
-      // the keeper detail timeline goes stale silently. Promote to warn so
-      // operators see it without changing DevTools filter level.
-      console.warn('[keeper] trajectory refresh unavailable', err instanceof Error ? err.message : '')
-    })
+  // The keeper-trajectory-timeline refresh that used to fire here was dead
+  // weight: its UI was retired and loadTrajectory wrote into a signal with
+  // zero readers, costing one /api/v1/keepers/:name/trajectory request per
+  // turn event. Module deleted with this change.
 })
 
 function selectedKeeperMatches(keeperName: string): boolean {

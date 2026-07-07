@@ -658,6 +658,7 @@ streaming = true
 
 [models.gemma4.capabilities]
 thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
 
 [ollama.gemma4]
 max-concurrent = 1
@@ -679,7 +680,8 @@ max-concurrent = 1
        (match model.capabilities with
         | Some caps ->
           check bool "chat template token parsed" true
-            (caps.thinking_control_format = Runtime_schema.Chat_template_token)
+            (caps.thinking_control_format
+             = Runtime_schema.Chat_template_token "<|think|>")
         | None -> fail "expected model capabilities")
      | models -> failf "expected one model, got %d" (List.length models))
 

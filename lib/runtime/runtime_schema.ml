@@ -84,7 +84,7 @@ type thinking_control_format =
   | Thinking_object_adaptive
   | Thinking_object_only
   | Chat_template_kwargs
-  | Chat_template_token
+  | Chat_template_token of string
   | Ollama_think
   | Reasoning_effort
   | Enable_thinking

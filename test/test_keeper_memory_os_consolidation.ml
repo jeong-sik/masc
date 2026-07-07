@@ -584,6 +584,25 @@ let () =
                let fresh_dk = fact ~last_verified_at:(Some (now -. 10.0))
                  ~claim_kind:(Some Types.Durable_knowledge) "fresh_dk" in
                Alcotest.(check bool) "fresh dk" true (Consolidation.eligible ~now fresh_dk))
+        ; Alcotest.test_case "not_stale delegates to fact_effective_valid_until first" `Quick
+            (fun () ->
+               (* P1 regression: fact with valid_until in the future passes
+                  even when last_verified_at is old. *)
+               let old_but_valid =
+                 fact ~last_verified_at:(Some (now -. 50. *. 86400.))
+                   ~valid_until:(Some (now +. 365. *. 86400.))
+                   ~claim_kind:(Some Types.External_state) "external"
+               in
+               Alcotest.(check bool) "valid_until overrides staleness"
+                 true (Consolidation.not_stale ~now old_but_valid);
+               (* Expired valid_until blocks even if recently verified. *)
+               let fresh_but_expired =
+                 fact ~last_verified_at:(Some (now -. 1.0))
+                   ~valid_until:(Some (now -. 100.0))
+                   ~claim_kind:(Some Types.External_state) "expired"
+               in
+               Alcotest.(check bool) "expired valid_until blocks"
+                 false (Consolidation.not_stale ~now fresh_but_expired))
         ] )
 	    ]
 ;;

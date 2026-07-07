@@ -63,14 +63,16 @@ type contribution =
    and [Diagnostic] is system-authored evidence for operators, not shared semantic
    memory. Keep this exhaustive so a future [claim_kind] cannot promote by
    accident. *)
-(** Maximum age (seconds) before a fact is considered too stale for consensus
-    promotion.  Only enforced when the fact carries no explicit [valid_until]. *)
-let max_consensus_staleness = 30. *. 86400.
-
 let not_stale ~now fact =
-  match fact.last_verified_at with
-  | Some t -> now -. t <= max_consensus_staleness
-  | None -> now -. fact.first_seen <= max_consensus_staleness
+  match fact_effective_valid_until fact with
+  | Some deadline -> now <= deadline
+  | None ->
+    (* No explicit TTL (Durable_knowledge, legacy). Apply consensus
+       staleness bound from the policy SSOT. *)
+    let max_age = Keeper_memory_os_policy.max_consensus_staleness in
+    match fact.last_verified_at with
+    | Some t -> now -. t <= max_age
+    | None -> now -. fact.first_seen <= max_age
 
 let eligible ~now fact =
   is_promotable fact.category

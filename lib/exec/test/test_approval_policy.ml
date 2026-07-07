@@ -492,7 +492,11 @@ let test_gh_durable_remote_asks_under_autonomous () =
     ; "gh repo edit", [ "repo"; "edit"; "--description"; "d" ]
     ; "gh repo sync", [ "repo"; "sync" ]
     ; "gh repo set-default", [ "repo"; "set-default"; "o/r" ]
-    ; "gh frobnicate (unknown -> Requires_approval)", [ "frobnicate"; "now" ]
+    ; "gh frobnicate (unknown family -> Requires_approval)", [ "frobnicate"; "now" ]
+    (* Gap fix: an unrecognized ACTION on a known mutating family no longer
+       auto-runs as a read — it Asks under autonomous. *)
+    ; "gh repo upsert-magic (unknown action)", [ "repo"; "upsert-magic"; "o/r" ]
+    ; "gh pr teleport (unknown action)", [ "pr"; "teleport"; "123" ]
     ]
 
 (* RFC-0309 W4 axis-symmetry regression: the string-borne GraphQL form of a

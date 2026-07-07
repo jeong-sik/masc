@@ -98,12 +98,21 @@ let test_current_dispositions () =
      work. *)
   check "repo clone (local -> Allowed)" (verb ~sub:"repo" ~act:"clone" ())
     Pol.Allowed;
-  (* unrecognized area: a human adjudicates *)
+  (* unrecognized top-level area: a human adjudicates *)
   check "unknown verb" (verb ~sub:"frobnicate" ~act:"now" ()) Pol.Requires_approval;
-  check "unknown action in known family"
-    (verb ~sub:"repo" ~act:"upsert-magic" ()) Pol.Allowed
-    (* known family + table-absent action -> R0 (read) -> Allowed; the
-       unknown-action gap is deferred to W3, same as the risk axis. *)
+  (* GAP CLOSED: an unrecognized action on a known mutating-capable family no
+     longer auto-runs as a read — it asks. (Was Allowed while the gap was open.) *)
+  check "unknown action in known family -> Requires_approval"
+    (verb ~sub:"repo" ~act:"upsert-magic" ()) Pol.Requires_approval;
+  check "unknown action under pr -> Requires_approval"
+    (verb ~sub:"pr" ~act:"teleport" ()) Pol.Requires_approval;
+  (* Known reads on the same families stay Allowed — no over-block of routine
+     work. This is the reads-set guard that keeps the gap fix from flooring
+     legitimate reads. *)
+  check "repo view (known read)" (verb ~sub:"repo" ~act:"view" ()) Pol.Allowed;
+  check "pr diff (known read)" (verb ~sub:"pr" ~act:"diff" ()) Pol.Allowed;
+  check "pr checks (known read)" (verb ~sub:"pr" ~act:"checks" ()) Pol.Allowed;
+  check "run list (known read)" (verb ~sub:"run" ~act:"list" ()) Pol.Allowed
 ;;
 
 (* --- W4 axis symmetry: string-borne graphql vs typed (disposition_of_words) --

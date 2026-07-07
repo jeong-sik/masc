@@ -161,8 +161,14 @@ let corpus : (string * string * expectation) list =
        read ("gh repo view") without a reads table, so fail-closing here
        would over-block reads. Stays R0; deferred to W3, where an unknown
        action routes to non-blocking approval instead of auto-run. -------- *)
+    (* Known-family unknown-action: the RISK axis keeps this R0 (its
+       reversibility is genuinely unknown — not fabricated). The
+       auto-run GAP is now CLOSED on the CAPABILITY axis
+       (Gh_capability_policy.disposition_of -> Requires_approval), proven in
+       test_gh_capability_policy and test_approval_policy. So this is no longer
+       a permissive DEFECT on the risk axis; it is the intended honest R0. *)
     ("unknown-repo-action", "gh repo upsert-magic owner/repo",
-     Defect_unknown_permissive Shell_ir_risk.R0_Read);
+     Stable Shell_ir_risk.R0_Read);
   ]
 ;;
 
@@ -267,7 +273,10 @@ let test_ledger () =
   Alcotest.(check int) "R2 count" 11 r2;
   Alcotest.(check int) "Destructive count" 0 dp;
   Alcotest.(check int) "defect: policy-as-risk (CLOSED by W4)" 0 policy_as_risk;
-  Alcotest.(check int) "defect: unknown-permissive (residual)" 1
+  (* Was 1 (unknown-repo-action). CLOSED: the auto-run gap moved to the
+     capability axis (Requires_approval); the risk R0 is now intended, so the
+     corpus carries zero permissive defects. *)
+  Alcotest.(check int) "defect: unknown-permissive (CLOSED, capability-gated)" 0
     unknown_permissive;
   Alcotest.(check int) "W1: fail-closed opinion" 3 fail_closed_opinion
 ;;

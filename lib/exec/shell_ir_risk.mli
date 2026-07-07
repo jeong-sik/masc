@@ -102,17 +102,41 @@ val repo_hosting_cli_floor_risk : string list -> Shell_ir.simple -> risk_class
     family stay [R0_Read]; fail-closing unknown gh is RFC-0309 W3, not here.
     Used by [Approval_policy.repo_hosting_cli_is_floored]. *)
 
+type gh_verb_class =
+  | Gh_read
+  | Gh_reversible_mutation
+  | Gh_irreversible_mutation
+  | Gh_unrecognized_action
+  | Gh_string_borne
+  | Gh_unrecognized_family
+      (** Typed classification of a gh verb, the single source both the risk
+          axis ([risk_of_gh_verb]) and the capability axis
+          ([Gh_capability_policy.disposition_of]) read.
+          - [Gh_read]: a known read action ([view]/[list]/[status]/...) or a
+            bare family invocation ([gh repo]).
+          - [Gh_reversible_mutation] / [Gh_irreversible_mutation]: the action is
+            in the reversible / irreversible subcommand table.
+          - [Gh_unrecognized_action]: a known mutating-capable family with an
+            action that is neither a table mutation nor a known read
+            (e.g. [gh repo upsert-magic]). The capability axis routes this to
+            approval; the risk axis keeps it [R0_Read] because its reversibility
+            is genuinely unknown.
+          - [Gh_string_borne]: [gh api] — risk is the -X method / graphql body,
+            owned by the word-list floor (RFC-0208).
+          - [Gh_unrecognized_family]: [Gh_verb.Other]. *)
+
+val classify_gh_verb : Gh_verb.t -> gh_verb_class
+(** Classify a gh verb. See {!gh_verb_class}. *)
+
 val risk_of_gh_verb : Gh_verb.t -> risk_class
-(** RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command.
-    Reads the same subcommand tables as [classify_repo_hosting_cli] for known
-    families (so the two agree for every recognized [family/action] pair) and
-    differs only for [Gh_verb.Other] (an unrecognized top-level area), which is
-    fail-closed to [R2_Irreversible] rather than the word-list [R0_Read]
-    fall-through. [Gh_verb.Api] returns [R0_Read] — its risk is string-borne
-    (HTTP method / graphql body) and owned by the word-list floor. Known
-    families with a table-absent action stay [R0_Read] (treated as reads).
-    Never returns [Destructive_protected]. Capability-identity substrate for
-    W2 (per-keeper policy) and W3 (non-blocking approval routing). *)
+(** RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command,
+    projected from [classify_gh_verb]. Reads the same subcommand tables as
+    [classify_repo_hosting_cli] for known families (so the two agree for every
+    recognized [family/action] pair). [Gh_verb.Other] is fail-closed to
+    [R2_Irreversible]; [Gh_verb.Api] returns [R0_Read] (string-borne, floor);
+    a known read and an unrecognized action both stay [R0_Read] on the RISK
+    axis (an unrecognized action's reversibility is genuinely unknown — the
+    capability axis, not risk, gates it). Never returns [Destructive_protected]. *)
 
 val gh_api_graphql_creates_durable_remote : string list -> bool
 (** True when [words] is a [gh api graphql ...] invocation whose (comment-

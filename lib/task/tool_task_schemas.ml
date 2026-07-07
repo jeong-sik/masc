@@ -253,7 +253,7 @@ they do not route normal completion through the verifier agent."
         ]);
         ("handoff_context", `Assoc [
           ("type", `String "object");
-          ("description", `String "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class actions (done / submit_for_verification / release / cancel). On action='done' or 'submit_for_verification', include 'evidence_refs' with at least one trusted reference (PR number, commit hash, trace id, or reviewer-inspectable URL): the task-completion evidence gate accepts a completion only when such a reference is present — completion notes alone do NOT satisfy it. Example: {\"summary\": \"tests green, PR #123 merged\", \"evidence_refs\": [\"PR#123\"]}.");
+          ("description", `String "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class actions (done / submit_for_verification / release / cancel). On action='done' or 'submit_for_verification', include 'evidence_refs' with at least one locally validated reference: an existing base-path artifact file/file:// URI, a commit hash present in the local git repo, or a .masc trace/turn/receipt ref that resolves on disk. Completion notes, URLs, PR numbers, and trace-shaped labels alone do NOT satisfy the gate. Example: {\"summary\": \"tests green, local proof saved\", \"evidence_refs\": [\".masc/harness-evidence/proof.json\"]}.");
           ("properties", `Assoc [
             ("summary", `Assoc [
               ("type", `String "string");
@@ -280,7 +280,7 @@ they do not route normal completion through the verifier agent."
             ("evidence_refs", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String "Trusted references substantiating completion: PR number (PR#123), commit hash, trace id (trace:/turn:/receipt:), or reviewer-inspectable URL. At least one trusted reference is required to pass the task-completion evidence gate on done/submit_for_verification. File paths and file:// URIs are recorded but NOT accepted as proof by the gate.");
+              ("description", `String "Trusted references substantiating completion. At least one reference must validate against local state to pass the task-completion evidence gate on done/submit_for_verification: existing base-path file/file:// URI, local git commit hash, or .masc trace/turn/receipt ref. URLs, PR numbers, and trace-shaped labels are recorded but not trusted by shape alone.");
             ]);
           ]);
           ("required", `List [`String "summary"]);

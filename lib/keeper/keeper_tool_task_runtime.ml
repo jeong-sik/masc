@@ -337,8 +337,9 @@ let parse_keeper_task_done_evidence_refs args =
     (match List.assoc_opt "evidence_refs" fields with
      | None ->
        Error
-         "evidence_refs is required. Include at least one PR, commit, trace, \
-          receipt, or reviewer-inspectable URL reference."
+         "evidence_refs is required. Include at least one locally validated \
+          base-path artifact, local git commit, or .masc trace/turn/receipt \
+          reference."
      | Some (`List refs) ->
        let rec collect acc = function
          | [] ->

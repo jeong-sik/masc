@@ -146,11 +146,12 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ; "minItems", `Int 1
                       ; ( "description"
                         , `String
-                            "Trusted references substantiating completion: PR number \
-                             (PR#123), commit hash, trace id (trace:/turn:/receipt:), \
-                             or reviewer-inspectable URL. At least one trusted \
-                             reference is required by the task-completion gate; \
-                             result text alone does not satisfy it." )
+                            "Trusted references substantiating completion. At least \
+                             one reference must validate against local state: an \
+                             existing base-path file/file:// URI, local git commit \
+                             hash, or .masc trace/turn/receipt ref that resolves on \
+                             disk. Result text, URLs, PR numbers, and trace-shaped \
+                             labels alone do not satisfy the task-completion gate." )
                       ] )
                 ; ( "notes"
                   , `Assoc

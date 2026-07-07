@@ -1201,7 +1201,11 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   in
   Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
   let submitted = Yojson.Safe.from_string submit_body in
-  Alcotest.(check string) "MCP runtime submitted_by persisted" "mcp-runtime-curator"
+  (* #23489 routes curation_submit through [enforce_caller_identity]:
+     a same-keeper surface form ("mcp-runtime-curator") is stored as the
+     canonical keeper name via [Server_utils.board_actor_author_for_write],
+     with the raw surface preserved in meta. *)
+  Alcotest.(check string) "MCP runtime submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
     require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])

@@ -72,13 +72,21 @@ let record_failure_and_maybe_escalate
       ~base_path:config.base_path
       meta.name
       (Some (Keeper_registry.Turn_consecutive_failures count));
+  (* RFC-0313 W3: with [pacing.mode = enforce] a turn failure never writes
+     [paused=true] — the failure was already recorded as pacing (revisit
+     widening) and, for judgment classes, as a [Failure_judgment] stimulus at
+     the routing site in [Keeper_unified_turn]. The three auto-pause flags
+     below stay reachable only in shadow mode (kill-switch, removed in W4). *)
+  let pacing_enforced = Keeper_pacing_shadow.pacing_enforced () in
   let runtime_auto_paused =
-    EC.is_runtime_exhausted_error err
+    (not pacing_enforced)
+    && EC.is_runtime_exhausted_error err
     && count >= turn_fail_streak_threshold
     && not updated_meta.paused
   in
   let completion_contract_auto_paused =
-    EC.is_accept_no_usable_progress_error err
+    (not pacing_enforced)
+    && EC.is_accept_no_usable_progress_error err
     && count >= turn_fail_streak_threshold
     && not updated_meta.paused
   in
@@ -86,7 +94,8 @@ let record_failure_and_maybe_escalate
     completion_contract_auto_paused && EC.is_read_only_no_progress_accept_rejection err
   in
   let idle_detected_auto_paused =
-    is_idle_detected_error err
+    (not pacing_enforced)
+    && is_idle_detected_error err
     && count >= turn_fail_streak_threshold
     && not updated_meta.paused
   in
@@ -131,6 +140,10 @@ let record_failure_and_maybe_escalate
           ~resume_policy
       with
       | Ok _ ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string FailureDrivenPause)
+          ~labels:[ "keeper", meta.name; "site", "turn_failure_streak" ]
+          ();
         Keeper_registry.set_failure_reason
           ~base_path:config.base_path
           meta.name

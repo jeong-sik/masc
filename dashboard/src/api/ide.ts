@@ -1,4 +1,4 @@
-import { get, post, fetchWithTimeout, type GetOptions } from './core'
+import { get, post, fetchWithTimeout, authHeaders, type GetOptions } from './core'
 import {
   type IdeAnnotation,
   type IdeCodeRegion,
@@ -399,19 +399,57 @@ export async function createIdeAnnotation(
   return parseStrictRow('createIdeAnnotation', ideEnvelopeData(raw, 'createIdeAnnotation'), parseStrictIdeAnnotation)
 }
 
+// Typed outcome of a DELETE (task-1736 B3 route, token-bound):
+// - 'rejected'     403 with the server's annotation_delete_rejected code —
+//                  the stored annotation is not owned by the token identity,
+//                  or it no longer exists (the server flattens the two).
+// - 'forbidden'    403 from the auth layer — the token's tier lacks the
+//                  write permission; ownership was never evaluated.
+// - 'unauthorized' 401 — missing/expired bearer token.
+// - 'error'        transport failure or any other server error.
+export type IdeAnnotationDeleteOutcome =
+  | 'deleted'
+  | 'rejected'
+  | 'forbidden'
+  | 'unauthorized'
+  | 'error'
+
+// Wire constant mirrored from server_ide_http.ml annotation_delete_rejected_code.
+const ANNOTATION_DELETE_REJECTED_CODE = 'annotation_delete_rejected'
+
+async function responseErrorCode(res: Response): Promise<string | null> {
+  try {
+    const body: unknown = await res.json()
+    if (isRecord(body) && typeof body.code === 'string') return body.code
+    return null
+  } catch {
+    return null
+  }
+}
+
 export async function deleteIdeAnnotation(
   id: string,
   opts: IdeApiOptions = {},
-): Promise<boolean> {
+): Promise<IdeAnnotationDeleteOutcome> {
   const params = new URLSearchParams()
   appendWorkspaceParams(params, opts)
   const query = params.size > 0 ? `?${params.toString()}` : ''
   const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}${query}`
   try {
-    const res = await fetchWithTimeout(path, { method: 'DELETE' }, 15_000)
-    return res.ok
+    const res = await fetchWithTimeout(
+      path,
+      { method: 'DELETE', headers: authHeaders() },
+      15_000,
+    )
+    if (res.ok) return 'deleted'
+    if (res.status === 401) return 'unauthorized'
+    if (res.status === 403) {
+      const code = await responseErrorCode(res)
+      return code === ANNOTATION_DELETE_REJECTED_CODE ? 'rejected' : 'forbidden'
+    }
+    return 'error'
   } catch {
-    return false
+    return 'error'
   }
 }
 

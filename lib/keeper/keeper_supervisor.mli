@@ -32,13 +32,20 @@ val pending_hitl_approval_keeper_names : Workspace.config -> string list
 val sweep_and_recover :
      load_or_materialize_keeper_meta:
        ('a context -> string -> (keeper_meta option, string) result)
+  -> pacing_enforced:bool
   -> 'a context
   -> unit
 (** Scan all supervised keepers in [Keeper_registry]. Detect zombies
     (resolved Promise), restart with exponential backoff if within
     budget, mark dead otherwise, and materialize configured keepalive
     keepers through the required callback. Called periodically by the
-    keeper supervisor loop. *)
+    keeper supervisor loop.
+
+    [pacing_enforced] is the RFC-0313 W3 mode, read once per sweep by the
+    caller (production wires [Keeper_pacing_shadow.pacing_enforced ()]).
+    When [true] (default runtime config), [Pause_keeper] policy verdicts
+    route to the standard restart/backoff path; when [false] (shadow
+    kill-switch, removed in W4), the legacy failure-driven pause arms run. *)
 
 (** {1 Pure Helpers (exposed for testing)} *)
 

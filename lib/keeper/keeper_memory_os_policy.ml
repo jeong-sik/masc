@@ -27,6 +27,12 @@ let recall_default_max_episodes = 2
 let recall_default_max_shared_facts = 4
 let recall_episode_tail_scan = 32
 
+(** Maximum age (seconds) before a Durable_knowledge fact with no explicit
+    [valid_until] is considered too stale for consensus promotion.
+    Only enforced when [fact_effective_valid_until] returns [None].
+    Per task-1855 AC-3: default 24h. *)
+let max_consensus_staleness = 86400.
+
 (* RFC-0247 §-1: structural retention rank for the bounded store cap. This is NOT
    a relevance score — it is a deterministic two-tier lexicographic order used
    ONLY to decide which rows the size cap drops when the store grows past its
@@ -48,6 +54,15 @@ let retention_rank ~now (f : fact) =
   tier +. recency
 ;;
 
+(* RFC-0285 §8: how the re-observed claim reached the librarian. The write
+   boundary decides this once (the production caller joins the incoming claim's
+   identity against [Keeper_recall_injection_window]); the policy below is a
+   pure function of the decision. A closed sum — not an optional flag — so no
+   call site can skip the judgment and silently default to anchor refresh. *)
+type reobservation_provenance =
+  | Independent_observation
+  | Recalled_echo
+
 (* RFC-0247 (purge): fold a re-observation of an existing fact into that fact.
    [existing] is the persisted row; [incoming] is the newly extracted claim with
    the same producer identity. Identity and first-seen provenance are preserved.
@@ -59,25 +74,37 @@ let retention_rank ~now (f : fact) =
    The prior merge also blended a confidence float and bumped an access counter;
    both fed the deleted composite score and are gone. There is no numeric
    strength to move — re-observation is a binary "seen again now". *)
-let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
-  match existing.claim_kind with
-  | Some Self_observation ->
-    (* RFC-0285 §3.3: inherit the prior row; do NOT advance
-       [last_verified_at]. The librarian re-extracting a recalled
-       self-observation is not re-verification; it is the same self-narrative
-       re-emitted from memory. *)
+let reobserve_fact ~now ~provenance ~existing ~incoming:(_ : fact) =
+  match provenance with
+  | Recalled_echo ->
+    (* RFC-0285 §8: the claim was recall-injected into the very window the
+       librarian summarized. Restating what the prompt just said is an echo of
+       stored memory, not re-verification — under the pre-§8 rule an echo
+       advanced [last_verified_at], which kept the fact at the top of the
+       recency-ranked recall window, which caused the next echo: a fact could
+       sustain its own recall slot indefinitely. Inherit the row whole; the
+       anchor advances only through independent re-observation after the fact
+       rotates out of the recall window. *)
     existing
-  | Some External_state ->
-    (* RFC-0259 P7: do not advance [last_verified_at] on mere re-assertion, but
-       do materialize the compatibility-derived horizon for legacy rows whose
-       on-disk [valid_until] was absent before P7. The anchor remains
-       [first_seen], not [now], so re-observation cannot extend stale external
-       state. *)
-    { existing with valid_until = fact_effective_valid_until existing }
-  | Some Durable_knowledge | Some Diagnostic | None ->
-    (* Durable/diagnostic re-observe: re-asserting a timeless claim from fresh
-       context is enough to advance the staleness marker. *)
-    { existing with last_verified_at = Some now }
+  | Independent_observation ->
+    (match existing.claim_kind with
+     | Some Self_observation ->
+       (* RFC-0285 §3.3: inherit the prior row; do NOT advance
+          [last_verified_at]. The librarian re-extracting a recalled
+          self-observation is not re-verification; it is the same self-narrative
+          re-emitted from memory. *)
+       existing
+     | Some External_state ->
+       (* RFC-0259 P7: do not advance [last_verified_at] on mere re-assertion, but
+          do materialize the compatibility-derived horizon for legacy rows whose
+          on-disk [valid_until] was absent before P7. The anchor remains
+          [first_seen], not [now], so re-observation cannot extend stale external
+          state. *)
+       { existing with valid_until = fact_effective_valid_until existing }
+     | Some Durable_knowledge | Some Diagnostic | None ->
+       (* Durable/diagnostic re-observe: re-asserting a timeless claim from fresh
+          context is enough to advance the staleness marker. *)
+       { existing with last_verified_at = Some now })
 ;;
 
 let events_to_facts_ratio_attention_threshold = 2.0

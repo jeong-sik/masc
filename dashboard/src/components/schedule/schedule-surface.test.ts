@@ -158,8 +158,11 @@ describe('ScheduleSurface', () => {
       .toContain('관측 전용')
     expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
       .toContain('keeper turn을 자동 구동하지 않습니다')
-    expect(container.textContent).toContain('예약 자동화')
-    expect(container.textContent).toContain('예약 자동화 projection 없음')
+    // Calendar is the default view; with no projection it renders the empty
+    // agenda/polling states rather than the diagnostic panel's placeholder.
+    expect(container.querySelector('[data-testid="schedule-viewbar"]')).not.toBeNull()
+    expect(container.textContent).toContain('다가오는 7일에 예정된 예약이 없습니다')
+    expect(container.textContent).toContain('활성 폴링 없음')
   })
 
   it('renders backed schedule summary and reuses read-only schedule cards', async () => {
@@ -188,7 +191,10 @@ describe('ScheduleSurface', () => {
     expect(summary?.textContent).not.toContain('활성')
     expect(summary?.textContent).not.toContain('유효 도래')
     expect(summary?.textContent).not.toContain('승인 차단')
-    // The wake-signal feed header is renamed in v2.
+    // The diagnostic wake-signal feed lives in the 목록 (list) view; the surface
+    // now defaults to the 캘린더 view, so toggle before asserting the feed.
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
     expect(container.querySelector('[data-testid="schedule-waiting-inventory"]')?.textContent)
       .toContain('Keeper Waiting Inventory')
@@ -273,5 +279,75 @@ describe('ScheduleSurface', () => {
 
     expect(container.textContent).toContain('dashboard tools unavailable')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+  })
+
+  it('defaults to the calendar view with a cadence filter strip', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    // Calendar view is active by default (aria-selected), and the cadence strip
+    // renders a chip per operator cadence.
+    expect(container.querySelector('[data-testid="schedule-view-calendar"]')?.getAttribute('aria-selected'))
+      .toBe('true')
+    expect(container.querySelector('[data-testid="sch-cadsum"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="sch-cadsum-oneshot"]')).not.toBeNull()
+    // The sample request (one_shot, non-terminal) surfaces as an agenda event,
+    // not the diagnostic list; the wake-signal feed is list-only.
+    expect(container.querySelector('[data-testid="sch-agenda"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('wake signal 피드 · schedule_runner.tick')
+  })
+
+  it('toggles to the list view revealing the diagnostic wake-signal feed', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+
+    expect(container.querySelector('[data-testid="schedule-view-list"]')?.getAttribute('aria-selected'))
+      .toBe('true')
+    expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    // No mutation controls leak onto either view (surface stays read-only).
+    expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
+  })
+
+  it('narrows the list view rows when a cadence chip is active', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      { ...automation.requests[0]!, schedule_id: 'sched-oneshot', recurrence: { kind: 'one_shot' }, recurrence_kind: 'one_shot' },
+      { ...automation.requests[0]!, schedule_id: 'sched-interval', recurrence: { kind: 'interval', interval_sec: 3600 }, recurrence_kind: 'interval' },
+    ]
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+    container.querySelector<HTMLButtonElement>('[data-testid="sch-cadsum-interval"]')?.click()
+    await flush()
+
+    // Only the interval schedule survives the 폴링 cadence filter in the list.
+    expect(container.querySelector('[data-schedule-id="sched-interval"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-oneshot"]')).toBeNull()
   })
 })

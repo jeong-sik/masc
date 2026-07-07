@@ -234,6 +234,40 @@ let pause_threshold_default =
   }
 ;;
 
+(** {1 Pacing (RFC-0313 W3)}
+
+    Typed record mirroring the [\[pacing\]] runtime.toml section. Failure
+    outcomes modulate per-runtime revisit pacing instead of keeper existence
+    (pause / crash / dead); this record carries the pacing policy knobs and
+    the W3 behavior switch. *)
+
+type pacing_mode =
+  | Pacing_shadow
+    (** Pacing is computed and logged but the legacy failure-driven pause
+        paths and the cycle-cap matrix stay live. Kill-switch position for
+        one release (RFC-0313 W3); the switch is removed in W4. *)
+  | Pacing_enforce
+    (** Failure-driven pause paths are skipped and the scheduler delays the
+        keeper's next turn until the earliest per-runtime revisit becomes
+        eligible. *)
+[@@deriving show, eq]
+
+type pacing =
+  { pacing_mode : pacing_mode
+  ; pacing_base_sec : float
+  ; pacing_multiplier : float
+  ; pacing_cap_sec : float
+  }
+[@@deriving show, eq]
+
+let pacing_default =
+  { pacing_mode = Pacing_enforce
+  ; pacing_base_sec = 30.0
+  ; pacing_multiplier = 2.0
+  ; pacing_cap_sec = 3600.0
+  }
+;;
+
 (** {1 Lanes}
 
     Lanes are ordered failover candidate lists declared in [runtime.lanes.<id>].
@@ -309,6 +343,14 @@ type config =
         [Pause_threshold.default]. Wrong-type value → load-time warn + fallback
         to default (fail-soft: wrong value is not catastrophic at boot).
         Operational callers read this through [Runtime.pause_threshold]. *)
+  ; pacing : pacing
+    (** [\[pacing\]] (RFC-0313 W3) — per-runtime failure revisit pacing policy
+        plus the shadow/enforce behavior switch. Missing section →
+        [pacing_default]. Numeric knobs fail soft like [\[pause\]]; [mode]
+        fails closed at load (an unknown value aborts config parse) because a
+        typo silently reverting the behavior flip is the permissive-default
+        failure the flip removes. Operational callers read this through
+        [Runtime.pacing]. *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

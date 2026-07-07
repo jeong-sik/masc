@@ -556,6 +556,7 @@ let run_docker_shell_command_with_status_internal
                             ~base_path:config.base_path
                             ~keeper_name:meta.name
                             ~container_name
+                            ()
                         with
                         | Error err ->
                           sandbox_error ("docker_shell_failed: secret_projection: " ^ err)

@@ -783,6 +783,51 @@ let test_push_mirror_floored_under_autonomous () =
   | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_mirror); _ } -> ()
   | _ -> assert false
 
+let test_push_prune_floored_under_autonomous () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "push"; lit "--prune"; lit "origin"; lit "main" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_delete); _ }
+    -> ()
+  | _ -> assert false
+
+(* Refspec-borne destructive push must hit the trust-independent floor under the
+   autonomous overlay, exactly like the flag forms. [:dst] deletes the remote
+   ref; [+ref] force-overwrites it. Without refspec parsing these auto-ran. *)
+let test_push_delete_refspec_floored_under_autonomous () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "push"; lit "origin"; lit ":refs/heads/main" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_delete); _ }
+    -> ()
+  | _ -> assert false
+
+let test_push_force_refspec_floored_under_autonomous () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "push"; lit "origin"; lit "+refs/heads/main" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:s
+  with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_force); _ }
+    -> ()
+  | _ -> assert false
+
 (* RFC-0255 §4.5: [worktree remove] is NOT recoverable (discards uncommitted
    worktree state and races concurrent keepers/the conveyor) — it STAYS in the
    floor and is [Deny] under every overlay including autonomous. *)
@@ -843,6 +888,9 @@ let () =
   test_push_delete_short_flag_floored_under_autonomous ();
   test_push_force_with_lease_floored_under_autonomous ();
   test_push_mirror_floored_under_autonomous ();
+  test_push_prune_floored_under_autonomous ();
+  test_push_delete_refspec_floored_under_autonomous ();
+  test_push_force_refspec_floored_under_autonomous ();
   test_worktree_remove_floored_under_autonomous ();
   test_rm_root_allowed_at_policy_layer_jailed_downstream ();
   test_autonomous_allows_toolchain ();

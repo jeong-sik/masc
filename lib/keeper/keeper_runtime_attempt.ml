@@ -258,8 +258,8 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
 let message_looks_like_cli_wrapped_hard_quota =
   Keeper_turn_driver_provider_attempt.message_looks_like_cli_wrapped_hard_quota
 
-let message_looks_like_capacity_backpressure =
-  Keeper_turn_driver_provider_attempt.message_looks_like_capacity_backpressure
+(* [message_looks_like_capacity_backpressure] alias removed with the substring
+   classifier it re-exported (#23438). *)
 
 let sdk_error_is_hard_quota =
   Keeper_turn_driver_provider_attempt.sdk_error_is_hard_quota

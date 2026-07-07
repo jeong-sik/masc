@@ -39,6 +39,12 @@ let write_file path value =
     (fun () -> output_string oc value)
 ;;
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+;;
+
 let with_temp_base f =
   let base_path = Filename.temp_file "masc-secret-projection-github-app-" "" in
   Sys.remove base_path;

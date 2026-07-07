@@ -8,23 +8,26 @@ import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 const refs = vi.hoisted(() => ({
   config: null as unknown,
   status: 'loaded' as string,
-  patch: vi.fn(),
   providers: vi.fn(),
-  applied: vi.fn(),
   load: vi.fn(),
+  // Spy for the deep-link tab focus. The card is read-only; it no longer writes
+  // runtime_id — it only opens the config modal pre-focused on the 런타임 tab.
+  focusTab: vi.fn(),
 }))
 
-// Only [patchKeeperConfig] is exercised; the other two satisfy keeper-config-panel's
-// real module-level imports when [vi.importActual] loads it below.
+// [patchKeeperConfig] is no longer exercised by this card (the write path moved to
+// the config modal), but keeper-config-panel — loaded below via [vi.importActual] —
+// still imports it at module scope, so the mock must provide it.
 vi.mock('../api/dashboard', () => ({
-  patchKeeperConfig: refs.patch,
+  patchKeeperConfig: vi.fn(),
   fetchRuntimeProviders: refs.providers,
   fetchKeeperConfig: vi.fn(),
   fetchDashboardGoalsTree: vi.fn(),
 }))
 
-// Keep the real [InlineSelectRow] (via ...actual); override the shared-config
-// accessors so each test drives the loaded config directly.
+// Keep the real keeper-config-panel (via ...actual) so [keeperRuntimeConfigCanWrite]
+// gates on the driven config; override the shared-config accessors and the tab
+// focus so each test drives state directly and can assert the deep-link target.
 vi.mock('./keeper-config-panel', async () => {
   const actual = await vi.importActual<typeof import('./keeper-config-panel')>('./keeper-config-panel')
   return {
@@ -32,19 +35,19 @@ vi.mock('./keeper-config-panel', async () => {
     peekLoadedKeeperConfig: (_name: string) => refs.config as KeeperConfig | null,
     peekKeeperConfigLoadStatus: (_name: string) => refs.status as KeeperConfigLoadStatus,
     loadKeeperConfig: refs.load,
-    applyKeeperConfigUpdate: refs.applied,
+    focusKeeperConfigTab: refs.focusTab,
   }
 })
 
 vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
 
-import { KeeperRuntimeModelEditor, canEditRuntime, uniqueNonEmpty } from './keeper-runtime-model-editor'
+import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
-// Partial config carrying only the fields the editor reads. The single cast is
+// Partial config carrying only the fields the card reads. The single cast is
 // confined to this helper; the component never sees an untyped value.
 function makeConfig(
   execution: Partial<KeeperConfig['execution']> = {},
@@ -265,31 +268,7 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
   }
 }
 
-describe('uniqueNonEmpty', () => {
-  it('drops empties and dedupes, preserving first-seen order', () => {
-    expect(uniqueNonEmpty(['a.one', '', '  ', 'b.two', 'a.one', ' b.two '])).toEqual(['a.one', 'b.two'])
-  })
-
-  it('returns [] for all-empty input', () => {
-    expect(uniqueNonEmpty(['', '   '])).toEqual([])
-  })
-})
-
-describe('canEditRuntime', () => {
-  it('is true only for a toml source with a manifest path', () => {
-    expect(canEditRuntime(makeConfig({}, { default_source_kind: 'toml', default_manifest_path: '/x.toml' }))).toBe(true)
-  })
-
-  it('is false for a persona source', () => {
-    expect(canEditRuntime(makeConfig({}, { default_source_kind: 'persona', default_manifest_path: '/x.toml' }))).toBe(false)
-  })
-
-  it('is false when the toml manifest path is missing', () => {
-    expect(canEditRuntime(makeConfig({}, { default_source_kind: 'toml', default_manifest_path: null }))).toBe(false)
-  })
-})
-
-describe('KeeperRuntimeModelEditor', () => {
+describe('KeeperRuntimeModelEditor (read-only card)', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -297,7 +276,6 @@ describe('KeeperRuntimeModelEditor', () => {
     document.body.appendChild(container)
     refs.config = null
     refs.status = 'loaded'
-    refs.patch.mockReset()
     refs.providers.mockReset()
     refs.providers.mockResolvedValue({
       providers: [
@@ -305,8 +283,8 @@ describe('KeeperRuntimeModelEditor', () => {
         makeRuntimeProvider('b.two', 'Provider B', 'model-b'),
       ],
     })
-    refs.applied.mockReset()
     refs.load.mockReset()
+    refs.focusTab.mockReset()
   })
 
   afterEach(() => {
@@ -314,105 +292,83 @@ describe('KeeperRuntimeModelEditor', () => {
     container.remove()
   })
 
-  it('renders an editable model selector for a toml-sourced keeper', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one', runtime_options: ['a.one', 'b.two'] })
-    render(html`<${KeeperRuntimeModelEditor} keeperName="editable-keeper" />`, container)
+  it('renders the current runtime + catalog summary read-only, with no editable <select>', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="editable-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
     await flush()
 
+    // Regression guard: the duplicate write UI (a runtime <select> that patched
+    // runtime_id) must be gone. The config modal now owns the single write path.
+    expect(container.querySelector('select[aria-label="runtime"]')).toBeNull()
+    expect(Array.from(container.querySelectorAll('button')).some(b => b.textContent?.includes('저장'))).toBe(false)
+
+    // Still surfaces the current assignment + read-only catalog facts.
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('a.one')
-    const select = container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement | null
-    expect(select).not.toBeNull()
-    expect(select!.value).toBe('a.one')
-    await flush()
     expect(container.textContent).toContain('Provider A')
     expect(container.textContent).toContain('claude')
     expect(container.textContent).toContain('caps:declared')
-    expect(container.textContent).toContain('source:oas-provider-config-model')
-    expect(container.textContent).toContain('input:multimodal,image,audio')
-    expect(container.textContent).toContain('wire:chat-template-kwargs')
-    expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
-    expect(container.textContent).toContain('format:json,schema')
-    expect(container.textContent).toContain('prompt-cache@1024')
-    expect(container.textContent).toContain('declared')
     expect(container.textContent).toContain('api:chat-completions')
-    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
-    expect(container.textContent).toContain('match:claude-')
-    expect(container.textContent).toContain('concurrency:4')
-    expect(container.textContent).toContain('wire:responses.reasoning')
-    expect(container.textContent).toContain('tool-call-replay:required')
-    expect(container.textContent).toContain('responses-api')
-    expect(container.textContent).toContain('budget:4096')
   })
 
-  it('patches runtime_id with the selected runtime and updates shared config', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one', runtime_options: ['a.one', 'b.two'] })
-    refs.patch.mockResolvedValueOnce(makeConfig({ selected_runtime_id: 'b.two', runtime_options: ['a.one', 'b.two'] }))
-
-    render(html`<${KeeperRuntimeModelEditor} keeperName="patch-keeper" />`, container)
+  it('deep-links to the 설정 런타임 tab: focuses runtime then invokes onOpenRuntimeConfig', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    const onOpen = vi.fn()
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="deeplink-keeper" onOpenRuntimeConfig=${onOpen} />`,
+      container,
+    )
     await flush()
 
-    const select = container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement
-    select.value = 'b.two'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    const link = Array.from(container.querySelectorAll('button')).find(b =>
+      b.textContent?.includes('설정에서 변경'),
+    )
+    expect(link).toBeTruthy()
+    link!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('저장'))
-    expect(saveButton).toBeTruthy()
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    await flush()
-
-    expect(refs.patch).toHaveBeenCalledWith('patch-keeper', { runtime_id: 'b.two' })
-    expect(refs.applied).toHaveBeenCalledTimes(1)
+    // The card owns the tab target (런타임) and delegates opening to the host.
+    expect(refs.focusTab).toHaveBeenCalledWith('runtime')
+    expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
-  it('does not patch when the selection equals the current value', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one', runtime_options: ['a.one', 'b.two'] })
-    render(html`<${KeeperRuntimeModelEditor} keeperName="noop-keeper" />`, container)
+  it('hides the deep-link when no host wires onOpenRuntimeConfig (still read-only)', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    render(html`<${KeeperRuntimeModelEditor} keeperName="unwired-keeper" />`, container)
     await flush()
 
-    // No selection change → save button is disabled and patch is never called.
-    const saveButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('저장'))
-    expect((saveButton as HTMLButtonElement).disabled).toBe(true)
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    expect(refs.patch).not.toHaveBeenCalled()
+    expect(Array.from(container.querySelectorAll('button')).some(b =>
+      b.textContent?.includes('설정에서 변경'),
+    )).toBe(false)
+    // Content is still there — the card degrades to pure display.
+    expect(container.textContent).toContain('a.one')
+    expect(container.querySelector('select[aria-label="runtime"]')).toBeNull()
   })
 
-  it('shows an actionable read-only hint for a non-toml keeper', async () => {
+  it('shows an actionable read-only hint (no deep-link) for a non-toml keeper', async () => {
     refs.config = makeConfig({ selected_runtime_id: 'a.one' }, { default_source_kind: 'persona', default_manifest_path: null })
-    render(html`<${KeeperRuntimeModelEditor} keeperName="persona-keeper" />`, container)
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="persona-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
     await flush()
 
     expect(container.querySelector('select[aria-label="runtime"]')).toBeNull()
+    // Non-toml sources cannot be written from the config modal either, so the
+    // card explains the runtime.toml path instead of deep-linking.
     expect(container.textContent).toContain('편집 가능한 TOML 소스가 아니')
-    // Hint names the runtime assignment surface so the operator can unlock editing.
     expect(container.textContent).toContain('runtime.toml')
     expect(container.textContent).toContain('[runtime.assignments]')
+    expect(Array.from(container.querySelectorAll('button')).some(b =>
+      b.textContent?.includes('설정에서 변경'),
+    )).toBe(false)
+    // Catalog facts still render for observability.
     expect(container.textContent).toContain('caps:declared')
     expect(container.textContent).toContain('api:chat-completions')
-    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
-    expect(container.textContent).toContain('responses-api')
-  })
-
-  it('clears a pending selection when the viewed keeper changes', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one', runtime_options: ['a.one', 'b.two'] })
-    render(html`<${KeeperRuntimeModelEditor} keeperName="keeper-alpha" />`, container)
-    await flush()
-
-    const select = container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement
-    select.value = 'b.two'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    await flush()
-    expect((container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement).value).toBe('b.two')
-
-    // Navigate to a different keeper: the stale pending 'b.two' must not leak.
-    refs.config = makeConfig({ selected_runtime_id: 'c.three', runtime_options: ['c.three', 'b.two'] })
-    render(html`<${KeeperRuntimeModelEditor} keeperName="keeper-beta" />`, container)
-    await flush()
-
-    expect((container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement).value).toBe('c.three')
   })
 
   it('renders a loading state until the config is available', async () => {

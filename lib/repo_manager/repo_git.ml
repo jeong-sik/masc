@@ -141,13 +141,26 @@ let worktree_root ~local_path =
   | Error msg -> Stdlib.Error msg
 
 let branch_of_origin_head_ref refname =
-  match List.rev (String.split_on_char '/' (String.trim refname)) with
-  | branch :: _ when String.trim branch <> "" -> Stdlib.Ok (String.trim branch)
-  | _ ->
+  let refname = String.trim refname in
+  let prefix = "refs/remotes/origin/" in
+  if String.starts_with ~prefix refname
+  then
+    let branch =
+      String.sub refname (String.length prefix) (String.length refname - String.length prefix)
+      |> String.trim
+    in
+    if String.equal branch ""
+    then
       Stdlib.Error
         (Printf.sprintf
            "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
            refname)
+    else Stdlib.Ok branch
+  else
+    Stdlib.Error
+      (Printf.sprintf
+         "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
+         refname)
 ;;
 
 let origin_head_branch ~local_path =

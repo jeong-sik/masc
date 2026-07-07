@@ -12,6 +12,7 @@ let repository_registration_next_action = "wait_for_operator_approval"
 type registration_candidate =
   { repository_id : Repo_manager_types.repository_id
   ; repo_root : string
+  ; expected_repo_root : string option
   ; origin_url : string
   ; default_branch : string
   }
@@ -64,6 +65,34 @@ let canonical_url_equal left right =
 
 let origin_url_matches left right = String.equal left right || canonical_url_equal left right
 
+let normalized_root_for_compare path =
+  let trimmed = String.trim path in
+  let trimmed =
+    if String.ends_with ~suffix:"/" trimmed
+    then String.sub trimmed 0 (String.length trimmed - 1)
+    else trimmed
+  in
+  try Unix.realpath trimmed with
+  | Unix.Unix_error _ | Sys_error _ -> trimmed
+;;
+
+let candidate_expected_repo_root_mismatch candidate =
+  match candidate.expected_repo_root with
+  | None -> None
+  | Some expected_repo_root ->
+    if
+      String.equal
+        (normalized_root_for_compare candidate.repo_root)
+        (normalized_root_for_compare expected_repo_root)
+    then None
+    else
+      Some
+        (Printf.sprintf
+           "git worktree root %s does not match expected playground repository root %s"
+           candidate.repo_root
+           expected_repo_root)
+;;
+
 let revalidate_registration_candidate candidate =
   match Repo_git.worktree_root ~local_path:candidate.repo_root with
   | Error reason -> Error ("worktree root recheck failed: " ^ reason)
@@ -76,6 +105,9 @@ let revalidate_registration_candidate candidate =
            candidate.repo_root
            repo_root)
     else (
+      match candidate_expected_repo_root_mismatch { candidate with repo_root } with
+      | Some reason -> Error reason
+      | None ->
       match Repo_git.get_origin_url ~local_path:repo_root with
       | Error reason -> Error ("origin recheck failed: " ^ reason)
       | Ok origin_url ->
@@ -124,6 +156,9 @@ let log_stale_approved_candidate ~keeper_id candidate detail =
 ;;
 
 let registration_operation ~keeper_id ~base_path candidate =
+  match candidate_expected_repo_root_mismatch candidate with
+  | Some reason -> Manual_catalog_review { reason; candidate }
+  | None -> (
   match find_existing_repository_by_origin ~base_path candidate.origin_url with
   | Error reason -> Manual_catalog_review { reason; candidate }
   | Ok (Some existing) ->
@@ -135,7 +170,7 @@ let registration_operation ~keeper_id ~base_path candidate =
       Manual_catalog_review
         { reason = "origin URL basename does not match requested repository id"
         ; candidate
-        }
+        })
 ;;
 
 let operation_candidate = function
@@ -295,11 +330,15 @@ let registration_operation_input ~keeper_id ~base_path operation =
      ; "repository_id", `String candidate.repository_id
      ; "policy_source", `String Config_dir_resolver.repositories_toml_basename
      ; "requested_action", `String (operation_name operation)
-     ; "base_path", `String base_path
-     ; "repo_root", `String candidate.repo_root
-     ; "origin_url", `String candidate.origin_url
-     ; "default_branch", `String candidate.default_branch
-     ; "identity_valid", `Bool (candidate_identity_is_valid ~keeper_id candidate)
+	     ; "base_path", `String base_path
+	     ; "repo_root", `String candidate.repo_root
+     ; ( "expected_repo_root"
+       , match candidate.expected_repo_root with
+         | None -> `Null
+         | Some expected_repo_root -> `String expected_repo_root )
+	     ; "origin_url", `String candidate.origin_url
+	     ; "default_branch", `String candidate.default_branch
+	     ; "identity_valid", `Bool (candidate_identity_is_valid ~keeper_id candidate)
      ]
      @ operation_fields)
 ;;
@@ -323,7 +362,7 @@ let path_for_git_probe path =
   | Sys_error _ -> Filename.dirname path
 ;;
 
-let registration_candidate_of_path ~repository_id ~path =
+let registration_candidate_of_path ~repository_id ~expected_repo_root ~path =
   let probe_path = path_for_git_probe path in
   match Repo_git.worktree_root ~local_path:probe_path with
   | Error reason -> Error reason
@@ -333,7 +372,8 @@ let registration_candidate_of_path ~repository_id ~path =
     | Ok origin_url -> (
       match Repo_git.origin_head_branch ~local_path:repo_root with
       | Error reason -> Error reason
-      | Ok default_branch -> Ok { repository_id; repo_root; origin_url; default_branch }))
+      | Ok default_branch ->
+        Ok { repository_id; repo_root; expected_repo_root; origin_url; default_branch }))
 ;;
 
 let pending_operator_action_message detail =
@@ -375,10 +415,10 @@ let request_repository_access ~keeper_id ~base_path ~repository_id =
 let request_path_access ~keeper_id ~base_path ~path =
   match Keeper_repo_mapping.repository_resolution_of_path ~base_path ~path with
   | Keeper_repo_mapping.No_repository -> Access_allowed
-  | Keeper_repo_mapping.Repository repository_id ->
+  | Keeper_repo_mapping.Repository { repository_id; repo_root = expected_repo_root } ->
     (match request_repository_access ~keeper_id ~base_path ~repository_id with
      | Access_denied detail ->
-       (match registration_candidate_of_path ~repository_id ~path with
+       (match registration_candidate_of_path ~repository_id ~expected_repo_root ~path with
         | Ok candidate ->
           let operation = registration_operation ~keeper_id ~base_path candidate in
           let approval_id = submit_registration_hitl ~keeper_id ~base_path operation in

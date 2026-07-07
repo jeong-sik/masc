@@ -636,14 +636,21 @@ let repository_matches_token ~base_path token (repo : repository) =
 
 type repository_resolution =
   | No_repository
-  | Repository of repository_id
+  | Repository of repository_match
   | Repository_identity_mismatch of repository_identity_mismatch
   | Repository_store_error of string
+
+and repository_match =
+  { repository_id : repository_id
+  ; repo_root : string option
+  }
+
+let repository_match ?repo_root repository_id = { repository_id; repo_root }
 
 let repository_resolution_of_repo ?repo_root ~segment repo =
   match repository_identity_mismatch ?repo_root ~segment repo with
   | Some mismatch -> Repository_identity_mismatch mismatch
-  | None -> Repository repo.id
+  | None -> Repository (repository_match ?repo_root repo.id)
 
 let repository_identity_mismatch_for_url_basename_token ?repo_root ~segment
     token repos =
@@ -665,7 +672,7 @@ let unresolved_repository_segment_resolution ?repo_root ~segment repos =
       segment repos
   with
   | Some mismatch -> Repository_identity_mismatch mismatch
-  | None -> Repository segment
+  | None -> Repository (repository_match ?repo_root segment)
 
 let resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment repos =
   match List.find_opt (repository_matches_token ~base_path segment) repos with
@@ -729,7 +736,7 @@ let repository_resolution_of_path ~base_path ~path =
     if the path is not under any registered repository. *)
 let repository_id_of_path ~base_path ~path =
   match repository_resolution_of_path ~base_path ~path with
-  | Repository repo_id -> Some repo_id
+  | Repository { repository_id; _ } -> Some repository_id
   | No_repository | Repository_identity_mismatch _ | Repository_store_error _ -> None
 
 (** [validate_path_access ~keeper_id ~base_path ~path] checks that [path]
@@ -741,7 +748,8 @@ let repository_id_of_path ~base_path ~path =
 let validate_path_access ~keeper_id ~base_path ~path =
   match repository_resolution_of_path ~base_path ~path with
   | No_repository -> Ok ()
-  | Repository repo_id -> validate_access ~keeper_id ~repository_id:repo_id ~base_path
+  | Repository { repository_id; _ } ->
+      validate_access ~keeper_id ~repository_id ~base_path
   | Repository_identity_mismatch mismatch ->
       Error (repository_identity_mismatch_message mismatch)
   | Repository_store_error msg ->

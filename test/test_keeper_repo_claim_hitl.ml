@@ -354,9 +354,60 @@ let test_unregistered_clone_matching_existing_remote_requests_alias () =
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
+	      Alcotest.(check bool)
+	        "alias persisted"
+	        true
+	        (List.exists (String.equal "masc-mcp") repo.aliases))
+	;;
+
+let test_nested_git_root_queues_manual_review_without_alias () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "keeper-repo-nested-root" in
+    let registered = sample_repo ~base_path "masc" in
+    let registered =
+      { registered with url = "https://github.com/jeong-sik/masc.git"; aliases = [] }
+    in
+    write_repositories base_path [ registered ];
+    let expected_repo_root =
+      Filename.concat
+        base_path
+        (Filename.concat ".masc/playground" (keeper_id ^ "/repos/masc-mcp"))
+    in
+    let nested_root = Filename.concat expected_repo_root "nested" in
+    let target = Filename.concat nested_root "README.md" in
+    init_git_repo nested_root registered.url;
+    write_file target "nested\n";
+    (match Claim.request_path_access ~keeper_id ~base_path ~path:target with
+     | Claim.Access_denied_hitl_pending _ -> ()
+     | Claim.Access_allowed -> Alcotest.fail "expected manual review HITL denial"
+     | Claim.Access_denied detail ->
+       Alcotest.fail ("expected manual review HITL pending denial, got: " ^ detail));
+    let pending = require_one_pending ~keeper_id in
+    Alcotest.(check string)
+      "requested action"
+      "review_repository_catalog"
+      (string_field "requested_action" pending.input);
+    Alcotest.(check string)
+      "expected repo root"
+      expected_repo_root
+      (string_field "expected_repo_root" pending.input);
+    Alcotest.(check string)
+      "git root"
+      (canonical_path nested_root)
+      (string_field "repo_root" pending.input);
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    match Repo_store.find ~base_path "masc" with
+    | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
+    | Ok repo ->
       Alcotest.(check bool)
-        "alias persisted"
-        true
+        "manual review approval does not persist alias"
+        false
         (List.exists (String.equal "masc-mcp") repo.aliases))
 ;;
 
@@ -419,13 +470,17 @@ let () =
             "registration approval rechecks clone origin"
             `Quick
             test_registration_approval_rechecks_clone_origin
+	        ; Alcotest.test_case
+	            "clone name mismatch queues alias HITL"
+	            `Quick
+	            test_unregistered_clone_matching_existing_remote_requests_alias
         ; Alcotest.test_case
-            "clone name mismatch queues alias HITL"
+            "nested git root queues manual review without alias"
             `Quick
-            test_unregistered_clone_matching_existing_remote_requests_alias
-        ; Alcotest.test_case
-            "alias approval rechecks clone origin"
-            `Quick
+            test_nested_git_root_queues_manual_review_without_alias
+	        ; Alcotest.test_case
+	            "alias approval rechecks clone origin"
+	            `Quick
             test_alias_approval_rechecks_clone_origin
         ] )
     ]

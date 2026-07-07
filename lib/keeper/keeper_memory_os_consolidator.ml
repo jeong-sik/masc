@@ -63,9 +63,19 @@ type contribution =
    and [Diagnostic] is system-authored evidence for operators, not shared semantic
    memory. Keep this exhaustive so a future [claim_kind] cannot promote by
    accident. *)
-let eligible fact =
+(** Maximum age (seconds) before a fact is considered too stale for consensus
+    promotion.  Only enforced when the fact carries no explicit [valid_until]. *)
+let max_consensus_staleness = 30. *. 86400.
+
+let not_stale ~now fact =
+  match fact.last_verified_at with
+  | Some t -> now -. t <= max_consensus_staleness
+  | None -> now -. fact.first_seen <= max_consensus_staleness
+
+let eligible ~now fact =
   is_promotable fact.category
   && is_outcome_positive_for_shared_promotion fact.category
+  && not_stale ~now fact
   &&
   match fact.claim_kind with
   | Some Durable_knowledge | None -> true
@@ -162,7 +172,7 @@ let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
     (fun (keeper_id, facts) ->
        List.iter
          (fun fact ->
-            if eligible fact
+            if eligible ~now fact
             then (
               let key = claim_identity fact in
               let prev = Option.value (Hashtbl.find_opt groups key) ~default:[] in
@@ -181,12 +191,12 @@ let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
 
 let sum ints = List.fold_left ( + ) 0 ints
 
-let source_fact_counts keeper_facts =
+let source_fact_counts ~now keeper_facts =
   List.map
     (fun (keeper_id, facts) ->
        ( keeper_id
        , List.length facts
-       , List.length (List.filter eligible facts) ))
+       , List.length (List.filter (eligible ~now) facts) ))
     keeper_facts
 
 let source_fact_counts_json counts =
@@ -200,8 +210,8 @@ let source_fact_counts_json counts =
             ])
        counts)
 
-let log_run_summary ~dry_run ~min_keepers ~source_ids ~keeper_facts ~considered ~promoted =
-  let counts = source_fact_counts keeper_facts in
+let log_run_summary ~now ~dry_run ~min_keepers ~source_ids ~keeper_facts ~considered ~promoted =
+  let counts = source_fact_counts ~now keeper_facts in
   let input_facts = sum (List.map (fun (_, facts, _) -> facts) counts) in
   let eligible_facts = sum (List.map (fun (_, _, eligible_facts) -> eligible_facts) counts) in
   let promoted_count = List.length promoted in
@@ -269,6 +279,7 @@ let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
         promote_facts ~min_keepers ~now ~keeper_facts ()
       in
       log_run_summary
+        ~now
         ~dry_run
         ~min_keepers
         ~source_ids

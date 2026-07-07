@@ -916,6 +916,13 @@ dominant source of the observed CAS race exhaustion after
                       (String.concat ", " committed_tools)
                       turn_event_summary.event_count
                       (String.concat ", " turn_event_summary.payload_kinds));
+                  (* RFC-0313 W1 shadow: record what pacing would schedule.
+                     Placed before the escalate call, which may raise
+                     [Keeper_fiber_crash] and must not skip the observation. *)
+                  Keeper_pacing_shadow.observe_failure
+                    ~keeper_name:meta.name
+                    ~runtime_id:final_execution.runtime_id
+                    ~retry_after:None;
                   Keeper_unified_turn_failure.record_failure_and_maybe_escalate
                     ~config
                     ~meta
@@ -945,6 +952,11 @@ dominant source of the observed CAS race exhaustion after
                        ~keeper_name:meta.name
                        trajectory_acc
                        Trajectory.Completed;
+                  (* RFC-0313 W1 shadow: a success clears this runtime's
+                     shadow revisit. *)
+                  Keeper_pacing_shadow.observe_success
+                    ~keeper_name:meta.name
+                    ~runtime_id:final_execution.runtime_id;
                   (* SSOT: success-path terminal FSM transitions
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them

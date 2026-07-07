@@ -564,7 +564,7 @@ let all : t list =
     MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
     CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
     FsFailures; CrashPersistenceFailures; GenerationLineageFailures; KeepaliveSignalFailures;
-    BoardSignalWakeupCappedTotal; BoardSignalNoWakeTotal; MetaJsonFailures; ToolsOasFailures;
+    BoardSignalWakeupCappedTotal; BoardSignalNoWakeTotal; BoardSignalAttentionCandidateTotal; MetaJsonFailures; ToolsOasFailures;
     ToolsOasDeterministicFailures; TurnUpUpdateFailures; AgentToolDispatchRuntimeFailures; CircuitBreakerTrips;
     PromptFailures; RunContextFailures; SearchFilesFailures; TagDispatchFailures;
     TraceEmitFailures; TransitionAuditFailures; ExecutionReceiptFailures; OperatorBroadcastSuppressed;

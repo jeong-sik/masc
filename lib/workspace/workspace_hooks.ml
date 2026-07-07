@@ -424,7 +424,7 @@ type evidence_gate_verdict =
   | Pass
   | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
 
-let cdal_evidence_gate_decide_fn
+let task_completion_gate_decide_fn
   : (task_id:string ->
      task_opt:Masc_domain.task option ->
      notes:string ->

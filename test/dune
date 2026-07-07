@@ -235,7 +235,9 @@
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
   test_keeper_pacing
+  test_keeper_pacing_replay
   test_keeper_failure_route
+  test_keeper_runtime_failure_route
   test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
@@ -308,7 +310,7 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
-  test_cdal_evidence_gate
+  test_task_completion_gate
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
   test_tool_bridge_externalize
@@ -587,7 +589,9 @@
   test_keeper_contract_classifier_pure
   test_keeper_compact_policy_pure
   test_keeper_pacing
+  test_keeper_pacing_replay
   test_keeper_failure_route
+  test_keeper_runtime_failure_route
   test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
@@ -662,7 +666,7 @@
   test_tool_input_validation
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
-  test_cdal_evidence_gate
+  test_task_completion_gate
   test_ocaml_north_star_task_lifecycle
   ; test_risk_digest removed (team session cleanup)
   test_tool_blob_store

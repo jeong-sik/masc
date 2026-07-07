@@ -198,22 +198,22 @@ let start_task_001 ctx =
   in
   if not (Tool_result.is_success start) then failwith (Tool_result.message start)
 
-let with_cdal_evidence_gate_decide decide f =
-  let previous = Atomic.get Workspace_hooks.cdal_evidence_gate_decide_fn in
+let with_task_completion_gate_decide decide f =
+  let previous = Atomic.get Workspace_hooks.task_completion_gate_decide_fn in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn previous)
+      Atomic.set Workspace_hooks.task_completion_gate_decide_fn previous)
     (fun () ->
-       Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide;
+       Atomic.set Workspace_hooks.task_completion_gate_decide_fn decide;
        f ())
 
 let workspace_evidence_verdict_of_cdal = function
-  | Cdal_evidence_gate.Pass -> Workspace_hooks.Pass
-  | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
+  | Task_completion_gate.Pass -> Workspace_hooks.Pass
+  | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
 
-let real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff () =
-  Cdal_evidence_gate.decide
+let real_task_completion_gate ~task_id ~task_opt ~notes ~handoff () =
+  Task_completion_gate.decide
     ~task_id
     ~task_opt
     ~notes
@@ -1217,7 +1217,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
   assert (not (str_contains (Tool_result.message result) "contract verdict"))
 )
 
-let () = test "handle_transition_done_rejects_cdal_evidence_gate_failure" (fun () ->
+let () = test "handle_transition_done_rejects_task_completion_gate_failure" (fun () ->
   let ctx = make_test_ctx () in
   let add_result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1240,7 +1240,7 @@ let () = test "handle_transition_done_rejects_cdal_evidence_gate_failure" (fun (
           ()));
   start_task_001 ctx;
   let gate_calls = ref 0 in
-  with_cdal_evidence_gate_decide
+  with_task_completion_gate_decide
     (fun ~task_id ~task_opt ~notes ~handoff:_ () ->
        incr gate_calls;
        assert (String.equal task_id "task-001");
@@ -1289,7 +1289,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
   set_only_task_contract ctx None;
   start_task_001 ctx;
   let gate_calls = ref 0 in
-  with_cdal_evidence_gate_decide
+  with_task_completion_gate_decide
     (fun ~task_id ~task_opt ~notes ~handoff () ->
        incr gate_calls;
        assert (String.equal task_id "task-001");
@@ -1297,7 +1297,7 @@ let () = test "handle_transition_done_no_contract_passes_real_cdal_gate" (fun ()
        (match task_opt with
         | Some { Masc_domain.contract = None; _ } -> ()
         | _ -> failwith "expected analysis-only task with no contract");
-       real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff ())
+       real_task_completion_gate ~task_id ~task_opt ~notes ~handoff ())
     (fun () ->
        let result =
          Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1397,10 +1397,10 @@ let () = test "handle_transition_force_done_still_rejects_cdal_evidence_incomple
          (fun ~base_path:_ ~agent_name ->
             String.equal agent_name "admin-agent");
        let gate_calls = ref 0 in
-       with_cdal_evidence_gate_decide
+       with_task_completion_gate_decide
          (fun ~task_id ~task_opt ~notes ~handoff () ->
             incr gate_calls;
-            real_cdal_evidence_gate ~task_id ~task_opt ~notes ~handoff ())
+            real_task_completion_gate ~task_id ~task_opt ~notes ~handoff ())
          (fun () ->
             let result =
               Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -2041,7 +2041,7 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
    removes.  Phase E semantics is now pinned by
    [test/test_task_state_verification_phase_e.ml] (5 cases) and by
    the typed contract verdict consultation in
-   [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
+   [test/test_task_completion_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)
 
 let task_submit_evidence_notes =
@@ -2114,7 +2114,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
    assertion was the third lock-in of the retired behaviour and has
    been removed.  The remaining intent — contracted-task submit
    rejection when no contract verdict and no substantive evidence — is
-   covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
+   covered by [test/test_task_completion_gate.ml]'s missing-verdict
    arm. See issue #18830 Cluster A.1. *)
 
 let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun () ->

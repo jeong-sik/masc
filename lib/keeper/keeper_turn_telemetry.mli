@@ -2,7 +2,7 @@
 
     Extracted from keeper_agent_run.ml as part of #5732 god-module split.
     Contract-verification proof / contract-verdict / friction logging helpers were removed
-    when verification collapsed to [Cdal_evidence_gate]; only memory-bank
+    when verification collapsed to [Task_completion_gate]; only memory-bank
     write logging remains. *)
 
 (** Log a memory-bank write summary. Promoted to info level when

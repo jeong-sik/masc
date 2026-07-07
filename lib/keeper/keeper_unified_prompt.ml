@@ -144,6 +144,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
   | Keeper_world_observation.Goal_verification_failed -> "goal_verification_failed"
+  | Keeper_world_observation.Failure_judgment -> "failure_judgment"
 ;;
 
 let quote_prompt_field value =
@@ -181,7 +182,8 @@ let board_event_note = function
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
   | Keeper_world_observation.External_attention
-  | Keeper_world_observation.Goal_verification_failed -> ""
+  | Keeper_world_observation.Goal_verification_failed
+  | Keeper_world_observation.Failure_judgment -> ""
 ;;
 
 let format_board_event_text

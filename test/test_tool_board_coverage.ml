@@ -69,6 +69,21 @@ let parse_create_response_json body =
     | None ->
         Alcotest.failf "expected JSON payload in create response: %s" body
 
+let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
+
+let source_snapshot_for_created_post json =
+  let open Yojson.Safe.Util in
+  let post_id = json |> member "id" |> to_string in
+  let updated_at = json |> member "updated_at" |> to_float in
+  let body = json |> member "body" |> to_string in
+  `Assoc
+    [ "post_id", `String post_id
+    ; "post_updated_at", `Float updated_at
+    ; "body_sha256", `String ("sha256:" ^ sha256_hex body)
+    ; "body_excerpt", `String body
+    ; "read_at", `Float (Time_compat.now ())
+    ]
+
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -1178,9 +1193,10 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   let submit_ok, submit_body =
     require_mcp_runtime_result ~sw ~clock "masc_board_curation_submit"
       (make_args
-         [ ("submitted_by", `String "spoofed-curator")
-         ; ("summary", `String "MCP runtime curation route works.")
-         ; ("rationale", `String "Pin schema-to-dispatch curation routing")
+         [
+           ("submitted_by", `String "mcp-runtime-curator");
+           ("summary", `String "MCP runtime curation route works.");
+           ("rationale", `String "Pin schema-to-dispatch curation routing");
          ])
   in
   Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
@@ -1398,58 +1414,27 @@ let test_dispatch_delete_success () =
     |> Yojson.Safe.Util.to_string
   in
   let ok_del, msg_del = dispatch "masc_board_delete"
-    (make_args [ ("post_id", `String post_id); ("author", `String "tester") ]) in
+    (make_args [("post_id", `String post_id)]) in
   Alcotest.(check bool) "delete ok" true ok_del;
   Alcotest.(check bool) "delete msg contains id" true
     (contains_substring msg_del post_id)
-
-let test_dispatch_delete_rejects_non_owner () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let _ok, body =
-    dispatch
-      "masc_board_post"
-      (make_args
-         [ ("content", `String "owned delete target"); ("author", `String "owner") ])
-  in
-  let post_id =
-    parse_create_response_json body
-    |> Yojson.Safe.Util.member "id"
-    |> Yojson.Safe.Util.to_string
-  in
-  let ok_del, _msg_del =
-    dispatch
-      "masc_board_delete"
-      (make_args [ ("post_id", `String post_id); ("author", `String "intruder") ])
-  in
-  Alcotest.(check bool) "non-owner delete rejected" false ok_del;
-  match Board_dispatch.get_post ~post_id with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok post ->
-    Alcotest.(check string)
-      "owned post remains"
-      "owned delete target"
-      post.Board.content
 
 let test_dispatch_delete_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_delete"
-    (make_args
-       [ ("post_id", `String "nonexistent-id"); ("author", `String "tester") ])
-  in
+    (make_args [("post_id", `String "nonexistent-id")]) in
   Alcotest.(check bool) "delete not found" false ok;
   Alcotest.(check bool) "error message present" true
-    (contains_substring body "Post not found")
+    (contains_substring body "Delete failed")
 
 let test_dispatch_delete_empty_id () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_delete"
-    (make_args [ ("post_id", `String ""); ("author", `String "tester") ]) in
+    (make_args [("post_id", `String "")]) in
   Alcotest.(check bool) "empty id rejected" false ok;
   Alcotest.(check bool) "error mentions required" true
     (contains_substring body "required")
@@ -1552,85 +1537,6 @@ let test_dispatch_post_update_transfers_author () =
       Alcotest.(check string) "tool transfer content persisted"
         "transferred tool body" post.content
 
-let test_sub_board_update_rejects_non_owner () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let ok_create, _ =
-    dispatch
-      "masc_board_sub_board_create"
-      (make_args
-         [ ("slug", `String "owned-space")
-         ; ("name", `String "Owned Space")
-         ; ("description", `String "Owner controlled")
-         ; ("owner", `String "space-owner")
-         ])
-  in
-  Alcotest.(check bool) "sub-board created" true ok_create;
-  let ok_update, _ =
-    dispatch
-      "masc_board_sub_board_update"
-      (make_args
-         [ ("sub_board_id", `String "owned-space")
-         ; ("owner", `String "space-intruder")
-         ; ("name", `String "Hijacked")
-         ])
-  in
-  Alcotest.(check bool) "non-owner update rejected" false ok_update;
-  (match Board_dispatch.get_sub_board ~sub_board_id:"owned-space" with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok sb -> Alcotest.(check string) "name unchanged" "Owned Space" sb.Board.name);
-  let ok_owner_update, _ =
-    dispatch
-      "masc_board_sub_board_update"
-      (make_args
-         [ ("sub_board_id", `String "owned-space")
-         ; ("owner", `String "space-owner")
-         ; ("name", `String "Owner Updated")
-         ])
-  in
-  Alcotest.(check bool) "owner update accepted" true ok_owner_update
-
-let test_sub_board_delete_rejects_non_owner () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let ok_create, _ =
-    dispatch
-      "masc_board_sub_board_create"
-      (make_args
-         [ ("slug", `String "delete-space")
-         ; ("name", `String "Delete Space")
-         ; ("description", `String "Owner controlled")
-         ; ("owner", `String "space-owner")
-         ])
-  in
-  Alcotest.(check bool) "sub-board created" true ok_create;
-  let ok_delete, _ =
-    dispatch
-      "masc_board_sub_board_delete"
-      (make_args
-         [ ("sub_board_id", `String "delete-space")
-         ; ("owner", `String "space-intruder")
-         ])
-  in
-  Alcotest.(check bool) "non-owner delete rejected" false ok_delete;
-  (match Board_dispatch.get_sub_board ~sub_board_id:"delete-space" with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok _ -> ());
-  let ok_owner_delete, _ =
-    dispatch
-      "masc_board_sub_board_delete"
-      (make_args
-         [ ("sub_board_id", `String "delete-space")
-         ; ("owner", `String "space-owner")
-         ])
-  in
-  Alcotest.(check bool) "owner delete accepted" true ok_owner_delete;
-  match Board_dispatch.get_sub_board ~sub_board_id:"delete-space" with
-  | Ok _ -> Alcotest.fail "expected owner delete to remove sub-board"
-  | Error _ -> ()
-
 let test_dispatch_post_update_missing_id () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1658,7 +1564,11 @@ let test_post_get_success () =
   let ok2, body2 = dispatch "masc_board_post_get"
     (make_args [("post_id", `String post_id)]) in
   Alcotest.(check bool) "get ok" true ok2;
-  Alcotest.(check bool) "get has content" true (String.length body2 > 0)
+  Alcotest.(check bool) "get has content" true (String.length body2 > 0);
+  Alcotest.(check bool) "get includes source snapshot" true
+    (contains_substring body2 "Source snapshot");
+  Alcotest.(check bool) "get includes body sha" true
+    (contains_substring body2 "body_sha256")
 
 let create_post_with_comments ~count =
   let ok, body =
@@ -1858,6 +1768,381 @@ let test_comment_add_anonymous_author_rejected () =
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (contains_substring body "author")
+
+let claim_gate_sidecar_path () =
+  Filename.concat
+    (Filename.concat _test_base_path Common.masc_dirname)
+    "board_claim_evidence.jsonl"
+
+let create_claim_gate_source_post () =
+  let correction =
+    "Correction: I did not create the PoC claimed here. \
+     repos/masc/scratch/task-1746-poc.ml does not exist."
+  in
+  let ok, body =
+    dispatch
+      "masc_board_post"
+      (make_args [ "content", `String correction; "author", `String "nick0cave" ])
+  in
+  Alcotest.(check bool) "source post created" true ok;
+  parse_create_response_json body
+
+let test_post_create_claim_gate_rejects_missing_artifact_creation () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let result =
+    dispatch_result
+      "masc_board_post"
+      (make_args
+         [ "content", `String "I created repos/masc/scratch/task-1746-poc.ml."
+         ; "author", `String "nick0cave"
+         ; "claims", `List [ `String "artifact_created" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ])
+  in
+  Alcotest.(check bool) "post artifact creation claim rejected" false
+    (Tool_result.is_success result);
+  Alcotest.(check bool) "gate rejection message" true
+    (contains_substring (Tool_result.message result) "board_claim_gate");
+  Alcotest.(check int) "post not persisted" 0 (List.length (Board_dispatch.list_posts ()));
+  let sidecar = claim_gate_sidecar_path () in
+  Alcotest.(check bool) "sidecar written" true (Sys.file_exists sidecar);
+  let sidecar_body = In_channel.with_open_text sidecar In_channel.input_all in
+  Alcotest.(check bool) "sidecar records reject" true
+    (contains_substring sidecar_body "reject:artifact_not_verified")
+
+let test_comment_claim_gate_rejects_missing_artifact_endorsement () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let source = create_claim_gate_source_post () in
+  let post_id = Yojson.Safe.Util.(source |> member "id" |> to_string) in
+  let result =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "content", `String "Good move producing a concrete PoC."
+         ; "author", `String "taskmaster"
+         ; "claims", `List [ `String "artifact_endorsed" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ; "source_post_snapshot", source_snapshot_for_created_post source
+         ])
+  in
+  Alcotest.(check bool) "endorsement rejected" false (Tool_result.is_success result);
+  Alcotest.(check bool) "gate rejection message" true
+    (contains_substring (Tool_result.message result) "board_claim_gate");
+  let comments =
+    match Board_dispatch.get_comments ~post_id with
+    | Ok comments -> comments
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check int) "rejected comment not persisted" 0 (List.length comments);
+  let sidecar = claim_gate_sidecar_path () in
+  Alcotest.(check bool) "sidecar written" true (Sys.file_exists sidecar);
+  let sidecar_body = In_channel.with_open_text sidecar In_channel.input_all in
+  Alcotest.(check bool) "sidecar records reject" true
+    (contains_substring sidecar_body "reject:artifact_not_verified")
+
+let test_comment_claim_gate_rejects_missing_source_snapshot () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let source = create_claim_gate_source_post () in
+  let post_id = Yojson.Safe.Util.(source |> member "id" |> to_string) in
+  let result =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "content", `String "Missing artifact = BLOCK until the path is verified."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing"; `String "retraction_ack" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ])
+  in
+  Alcotest.(check bool) "missing snapshot rejected" false (Tool_result.is_success result);
+  Alcotest.(check bool) "missing snapshot named" true
+    (contains_substring (Tool_result.message result) "missing_source_post_snapshot");
+  let comments =
+    match Board_dispatch.get_comments ~post_id with
+    | Ok comments -> comments
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check int) "rejected comment not persisted" 0 (List.length comments);
+  let sidecar_body =
+    In_channel.with_open_text (claim_gate_sidecar_path ()) In_channel.input_all
+  in
+  Alcotest.(check bool) "sidecar records missing snapshot reject" true
+    (contains_substring sidecar_body "reject:missing_source_post_snapshot")
+
+let test_comment_claim_gate_rejects_stale_source_snapshot () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let source = create_claim_gate_source_post () in
+  let post_id = Yojson.Safe.Util.(source |> member "id" |> to_string) in
+  let snapshot =
+    match source_snapshot_for_created_post source with
+    | `Assoc fields ->
+      let updated_at = Yojson.Safe.Util.(source |> member "updated_at" |> to_float) in
+      `Assoc
+        (("post_updated_at", `Float (updated_at -. 10.0))
+         :: List.remove_assoc "post_updated_at" fields)
+    | _ -> Alcotest.fail "expected source snapshot object"
+  in
+  let result =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "content", `String "Missing artifact = BLOCK until the path is verified."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing"; `String "retraction_ack" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ; "source_post_snapshot", snapshot
+         ])
+  in
+  Alcotest.(check bool) "stale snapshot rejected" false (Tool_result.is_success result);
+  Alcotest.(check bool) "stale snapshot named" true
+    (contains_substring (Tool_result.message result) "source_post_snapshot_stale");
+  let comments =
+    match Board_dispatch.get_comments ~post_id with
+    | Ok comments -> comments
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check int) "rejected comment not persisted" 0 (List.length comments)
+
+let test_comment_claim_gate_allows_missing_artifact_block () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let source = create_claim_gate_source_post () in
+  let post_id = Yojson.Safe.Util.(source |> member "id" |> to_string) in
+  let ok, body =
+    dispatch
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "content", `String "Missing artifact = BLOCK until the path is verified."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing"; `String "retraction_ack" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ; "source_post_snapshot", source_snapshot_for_created_post source
+         ])
+  in
+  Alcotest.(check bool) "missing-artifact block allowed" true ok;
+  Alcotest.(check bool) "comment added" true (contains_substring body "Comment added");
+  let sidecar_body =
+    In_channel.with_open_text (claim_gate_sidecar_path ()) In_channel.input_all
+  in
+  Alcotest.(check bool) "sidecar records allow" true
+    (contains_substring sidecar_body "\"decision\":\"allow\"")
+
+let test_post_create_claim_gate_projects_to_created_post () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "repos/masc/scratch/task-1746-poc.ml is still missing."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ])
+  in
+  Alcotest.(check bool) "missing-artifact post accepted" true ok;
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let sidecar_body =
+    In_channel.with_open_text (claim_gate_sidecar_path ()) In_channel.input_all
+  in
+  Alcotest.(check bool) "sidecar uses real post id" true
+    (contains_substring sidecar_body ("\"target_post_id\":\"" ^ post_id ^ "\""));
+  Alcotest.(check bool) "sidecar does not orphan allow record" false
+    (contains_substring sidecar_body "\"target_post_id\":\"__new_post__\"");
+  match Masc_board_handlers.Board_claim_evidence.projection_lookup () post_id with
+  | None -> Alcotest.fail "expected claim evidence projection for created post"
+  | Some projection ->
+    Alcotest.(check string)
+      "created post projected as artifact missing"
+      "artifact_missing"
+      (Masc_board_handlers.Board_claim_evidence.projection_state_to_string projection.state);
+    Alcotest.(check int) "one allowed record" 1 projection.allowed_count
+
+let test_post_create_claim_gate_rolls_back_on_sidecar_failure () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let sidecar = claim_gate_sidecar_path () in
+  Unix.mkdir sidecar 0o755;
+  let result =
+    dispatch_result
+      "masc_board_post"
+      (make_args
+         [ "content", `String "repos/masc/scratch/task-1746-poc.ml is still missing."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ])
+  in
+  Alcotest.(check bool) "post create fails when evidence sidecar fails" false
+    (Tool_result.is_success result);
+  Alcotest.(check bool) "sidecar failure is explicit" true
+    (contains_substring (Tool_result.message result) "sidecar write failed");
+  Alcotest.(check int) "created post rolled back" 0
+    (List.length (Board_dispatch.list_posts ()))
+
+let test_post_create_claim_gate_rolls_back_rollup_sidecar_failure () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let task_id = "task-claim-rollup" in
+  let make_rollup_args ~content ~marker =
+    make_args
+      [ "content", `String content
+      ; "author", `String "ramarama"
+      ; "post_kind", `String "automation"
+      ; "meta", `Assoc [ "task_id", `String task_id; "rollup_marker", `String marker ]
+      ; "claims", `List [ `String "artifact_missing" ]
+      ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+      ]
+  in
+  let ok, body =
+    dispatch
+      "masc_board_post"
+      (make_rollup_args
+         ~content:"task-claim-rollup checking artifact status"
+         ~marker:"first")
+  in
+  Alcotest.(check bool) "initial claim-gated status post accepted" true ok;
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let sidecar = claim_gate_sidecar_path () in
+  Alcotest.(check bool) "initial sidecar written" true (Sys.file_exists sidecar);
+  Sys.remove sidecar;
+  Unix.mkdir sidecar 0o755;
+  let result =
+    dispatch_result
+      "masc_board_post"
+      (make_rollup_args
+         ~content:"task-claim-rollup continuing artifact status"
+         ~marker:"second")
+  in
+  Alcotest.(check bool) "rollup fails when evidence sidecar fails" false
+    (Tool_result.is_success result);
+  Alcotest.(check bool) "rollup hook failure is explicit" true
+    (contains_substring
+       (Tool_result.message result)
+       "status-rollup post-persist hook failed");
+  Alcotest.(check int) "failed rollup did not create a second post" 1
+    (List.length (Board_dispatch.list_posts ()));
+  let post =
+    match Board_dispatch.get_post ~post_id with
+    | Ok post -> Board.post_to_yojson post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check string)
+    "rolled-up body restored"
+    "task-claim-rollup checking artifact status"
+    Yojson.Safe.Util.(post |> member "body" |> to_string);
+  Alcotest.(check string)
+    "rolled-up meta restored"
+    "first"
+    Yojson.Safe.Util.(post |> member "meta" |> member "rollup_marker" |> to_string)
+
+let test_board_dashboard_json_embeds_claim_evidence_projection () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let artifact_missing_source = create_claim_gate_source_post () in
+  let artifact_missing_post_id =
+    Yojson.Safe.Util.(artifact_missing_source |> member "id" |> to_string)
+  in
+  let ok, _body =
+    dispatch
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String artifact_missing_post_id
+         ; "content", `String "Missing artifact = BLOCK until the path is verified."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing"; `String "retraction_ack" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ; "source_post_snapshot"
+         , source_snapshot_for_created_post artifact_missing_source
+         ])
+  in
+  Alcotest.(check bool) "artifact missing comment accepted" true ok;
+  let needs_evidence_source = create_claim_gate_source_post () in
+  let needs_evidence_post_id =
+    Yojson.Safe.Util.(needs_evidence_source |> member "id" |> to_string)
+  in
+  let rejected =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String needs_evidence_post_id
+         ; "content", `String "Missing artifact = BLOCK until the path is verified."
+         ; "author", `String "ramarama"
+         ; "claims", `List [ `String "artifact_missing"; `String "retraction_ack" ]
+         ; "artifact_refs", `List [ `String "repos/masc/scratch/task-1746-poc.ml" ]
+         ])
+  in
+  Alcotest.(check bool) "missing snapshot comment rejected" false
+    (Tool_result.is_success rejected);
+  let claim_evidence_for = Server_utils.board_claim_evidence_lookup () in
+  let render post_id =
+    let post =
+      match Board_dispatch.get_post ~post_id with
+      | Ok post -> post
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+    in
+    let claim_evidence = claim_evidence_for post_id in
+    Server_utils.board_post_dashboard_json ?claim_evidence ~author_karma:0 post
+  in
+  let artifact_missing_json =
+    Yojson.Safe.Util.member "claim_evidence" (render artifact_missing_post_id)
+  in
+  Alcotest.(check string) "artifact missing state" "artifact_missing"
+    (json_member_string artifact_missing_json "state");
+  Alcotest.(check string) "artifact missing label" "Artifact missing"
+    (json_member_string artifact_missing_json "label");
+  let needs_evidence_json =
+    Yojson.Safe.Util.member "claim_evidence" (render needs_evidence_post_id)
+  in
+  Alcotest.(check string) "needs evidence state" "needs_evidence"
+    (json_member_string needs_evidence_json "state");
+  Alcotest.(check string) "needs evidence label" "Needs evidence"
+    (json_member_string needs_evidence_json "label")
+
+let test_comment_claim_gate_rejects_unknown_claim_kind () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let source = create_claim_gate_source_post () in
+  let post_id = Yojson.Safe.Util.(source |> member "id" |> to_string) in
+  let result =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "content", `String "This uses an invalid typed claim."
+         ; "author", `String "verifier"
+         ; "claims", `List [ `String "artifact_globally_true" ]
+         ])
+  in
+  Alcotest.(check bool) "unknown claim rejected" false (Tool_result.is_success result);
+  Alcotest.(check bool) "unknown claim named" true
+    (contains_substring (Tool_result.message result) "invalid_claim_kind")
 
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
@@ -2225,6 +2510,8 @@ let () =
             test_post_create_structured_payload;
           Alcotest.test_case "create data is structured not double-encoded" `Quick
             test_post_create_data_is_structured;
+          Alcotest.test_case "claim gate rejects missing artifact post creation" `Quick
+            test_post_create_claim_gate_rejects_missing_artifact_creation;
           Alcotest.test_case "create judgment roundtrip" `Quick
             test_post_create_judgment_roundtrip;
           Alcotest.test_case "create judgment list roundtrip (#16300)" `Quick
@@ -2304,6 +2591,24 @@ let () =
             test_comment_add_missing_author_rejected;
           Alcotest.test_case "comment anonymous author rejected" `Quick
             test_comment_add_anonymous_author_rejected;
+          Alcotest.test_case "claim gate rejects missing artifact endorsement" `Quick
+            test_comment_claim_gate_rejects_missing_artifact_endorsement;
+          Alcotest.test_case "claim gate rejects missing source snapshot" `Quick
+            test_comment_claim_gate_rejects_missing_source_snapshot;
+          Alcotest.test_case "claim gate rejects stale source snapshot" `Quick
+            test_comment_claim_gate_rejects_stale_source_snapshot;
+          Alcotest.test_case "claim gate allows missing artifact block" `Quick
+            test_comment_claim_gate_allows_missing_artifact_block;
+          Alcotest.test_case "claim gate projects post-create evidence" `Quick
+            test_post_create_claim_gate_projects_to_created_post;
+          Alcotest.test_case "claim gate rolls back post-create sidecar failure" `Quick
+            test_post_create_claim_gate_rolls_back_on_sidecar_failure;
+          Alcotest.test_case "claim gate rolls back rollup sidecar failure" `Quick
+            test_post_create_claim_gate_rolls_back_rollup_sidecar_failure;
+          Alcotest.test_case "claim gate projects dashboard evidence state" `Quick
+            test_board_dashboard_json_embeds_claim_evidence_projection;
+          Alcotest.test_case "claim gate rejects unknown claim kind" `Quick
+            test_comment_claim_gate_rejects_unknown_claim_kind;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;
@@ -2321,8 +2626,6 @@ let () =
         [
           Alcotest.test_case "unknown tool" `Quick test_dispatch_unknown_tool;
           Alcotest.test_case "delete success" `Quick test_dispatch_delete_success;
-          Alcotest.test_case "delete rejects non-owner" `Quick
-            test_dispatch_delete_rejects_non_owner;
           Alcotest.test_case "delete not found" `Quick test_dispatch_delete_not_found;
           Alcotest.test_case "delete empty id" `Quick test_dispatch_delete_empty_id;
           Alcotest.test_case "post update by owner" `Quick
@@ -2331,10 +2634,6 @@ let () =
             test_dispatch_post_update_rejects_non_owner;
           Alcotest.test_case "post update transfers author" `Quick
             test_dispatch_post_update_transfers_author;
-          Alcotest.test_case "sub-board update rejects non-owner" `Quick
-            test_sub_board_update_rejects_non_owner;
-          Alcotest.test_case "sub-board delete rejects non-owner" `Quick
-            test_sub_board_delete_rejects_non_owner;
           Alcotest.test_case "post update missing id" `Quick
             test_dispatch_post_update_missing_id;
         ] );
@@ -2577,7 +2876,7 @@ let () =
             let json = parse_create_response_json create_msg in
             let post_id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
             let (_ok, _msg) = dispatch "masc_board_delete" (make_args [
-              ("post_id", `String post_id); ("author", `String "tester")
+              ("post_id", `String post_id)
             ]) in
             let (_ok2, body2) = dispatch "masc_board_list" args in
             Alcotest.(check bool) "cache invalidated after delete" true

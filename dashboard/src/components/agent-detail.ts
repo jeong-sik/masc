@@ -263,6 +263,7 @@ export function AgentDetailOverlay() {
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
+                  <${KeeperPhaseBadge} phase=${keeper.phase} compact=${true} />
                   ${unified.description !== unified.label ? html`<span class="text-2xs font-medium py-1 px-2 border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)] whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
                   ${!agent && missionBrief?.archived_reason

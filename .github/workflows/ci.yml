@@ -369,7 +369,7 @@ jobs:
 
       - name: Install meta shell dependencies
         run: |
-          sudo apt-get update -qq
+          bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y -qq ripgrep
 
       - name: Guard pending release tag on main PRs
@@ -503,7 +503,7 @@ jobs:
 
       - name: Install health shell dependencies
         run: |
-          sudo apt-get update -qq
+          bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y -qq ripgrep bc
 
       - name: Setup OCaml toolchain

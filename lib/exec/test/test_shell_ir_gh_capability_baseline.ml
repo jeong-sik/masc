@@ -103,6 +103,12 @@ let corpus : (string * string * expectation) list =
        deferred to is the capability axis, and [pr ready] on the [Pr] family does
        not touch a durable remote surface, so it stays Allowed there. *)
     ("pr-ready", "gh pr ready 123", Stable Shell_ir_risk.R1_Reversible_mutation);
+    (* [pr merge] is reversible ([git revert] restores the base-branch tree, as a
+       created repo can be deleted). The "shouldn't merge unsupervised" decision
+       is durable-remote externality on the capability axis (-> Requires_approval),
+       not a reversibility fact. Was R2; now R1 (operator decision 2026-07-08). *)
+    ("pr-merge", "gh pr merge 123 --squash",
+     Stable Shell_ir_risk.R1_Reversible_mutation);
     ("issue-create", "gh issue create --title T",
      Stable Shell_ir_risk.R1_Reversible_mutation);
     ("issue-edit", "gh issue edit 123",
@@ -111,7 +117,6 @@ let corpus : (string * string * expectation) list =
      Stable Shell_ir_risk.R1_Reversible_mutation);
     (* --- genuinely irreversible: stable R2 (floor stands, RFC-0309
        does not soften Deny) ------------------------------------------- *)
-    ("pr-merge", "gh pr merge 123 --squash", Stable Shell_ir_risk.R2_Irreversible);
     ("repo-delete", "gh repo delete owner/repo --yes",
      Stable Shell_ir_risk.R2_Irreversible);
     ("repo-archive", "gh repo archive owner/repo",
@@ -213,7 +218,8 @@ let test_typed_path_verb_opinion () =
   in
   check "gh pr view 123" Shell_ir_risk.R0_Read;
   check "gh pr create --title T" Shell_ir_risk.R1_Reversible_mutation;
-  check "gh pr merge 123" Shell_ir_risk.R2_Irreversible;
+  (* pr merge is R1 (revertable); capability axis gates it (Requires_approval). *)
+  check "gh pr merge 123" Shell_ir_risk.R1_Reversible_mutation;
   (* W4/G-9: repo create is reversible (R1); the capability axis carries the
      "requires approval" decision. Was R2 under #23362. *)
   check "gh repo create owner/new-repo" Shell_ir_risk.R1_Reversible_mutation;

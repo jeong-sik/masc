@@ -368,21 +368,47 @@ let test_gh_irreversible_repo_hosting_ops_denied_under_autonomous () =
        to R1 (reversible) — they are no longer Deny; they Ask via the capability
        axis (asserted in [test_gh_durable_remote_asks_under_autonomous]). Only
        the genuinely irreversible ops remain Deny here. *)
-    [ "gh pr merge", [ "pr"; "merge"; "123"; "--squash" ]
-    ; "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
+    [ "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
     ; "gh discussion delete", [ "discussion"; "delete"; "42" ]
     ; "gh api delete", [ "api"; "-X"; "DELETE"; "/repos/owner/repo" ]
     ; "gh graphql deleteDiscussion"
       , [ "api"; "graphql"; "-f"; "query=mutation{deleteDiscussion}" ]
     ]
 
-let test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous () =
+(* Operator decision 2026-07-08: gh pr merge routes to non-blocking approval
+   (Ask), not Deny. R1 (revertable) + durable-remote (base branch) ->
+   Requires_approval, mirroring gh repo create. Holds for a dynamic PR number:
+   the action token "merge" is literal, so the durable-remote gate still fires. *)
+let test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous () =
   let s = simple (bin_ok "gh") ~args:[ lit "pr"; lit "merge"; var "PR_NUMBER" ] in
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
-  | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
-    assert (Exec_program.to_string bin = "gh")
-  | _ -> Alcotest.fail "gh pr merge with dynamic PR number should be denied"
+  | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+  | _ -> Alcotest.fail "gh pr merge with dynamic PR number should ask (durable-remote)"
+
+(* pr merge -> Ask under autonomous: R1 (revertable) + durable-remote base branch
+   -> Requires_approval. The safety-critical assertions are that it is NOT Allow
+   (a keeper must never auto-merge to the base branch) and NOT Deny (the operator
+   chose non-blocking approval over a hard block, 2026-07-08). Covers plain,
+   squash, admin-flag, and trailing-repo-flag forms. *)
+let test_gh_pr_merge_asks_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | Verdict.Allow _ ->
+         Alcotest.failf "%s: gh pr merge must NOT auto-run (keeper self-merge)" label
+       | _ -> Alcotest.failf "%s: gh pr merge must ask, not deny/other" label)
+    [ "gh pr merge 123", [ "pr"; "merge"; "123" ]
+    ; "gh pr merge 123 --squash", [ "pr"; "merge"; "123"; "--squash" ]
+    ; "gh pr merge 123 --admin", [ "pr"; "merge"; "123"; "--admin" ]
+    ; "gh pr merge --repo o/r 123", [ "pr"; "merge"; "--repo"; "o/r"; "123" ]
+    ]
 
 let test_gh_reversible_repo_hosting_ops_allowed_under_autonomous () =
   let s =
@@ -499,11 +525,12 @@ let test_gh_leading_flag_destructive_floored_under_autonomous () =
          assert (Exec_program.to_string bin = "gh")
        | _ ->
          Alcotest.failf "%s: leading-flag destructive op must be floored" label)
-    [ "gh --repo o/r pr merge", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
-      (* [pr ready] moved off this floor (RFC-0309 W4/G-9: reversible via --undo);
-         its leading-flag disposition is covered by
-         [test_gh_pr_ready_leading_flag_allowed_under_autonomous]. *)
-    ; "gh --repo o/r repo delete"
+    [ (* [pr ready] and [pr merge] both moved off this floor (RFC-0309 W4/G-9 +
+         2026-07-08 operator decision): reversible, so they Ask via the capability
+         axis, not the destructive floor. Covered by
+         [test_gh_pr_ready_leading_flag_allowed_under_autonomous] and
+         [test_gh_pr_merge_asks_under_autonomous]. [repo delete] stays floored. *)
+      "gh --repo o/r repo delete"
       , [ "--repo"; "o/r"; "repo"; "delete"; "o/r"; "--yes" ]
     ]
 
@@ -520,11 +547,11 @@ let test_gh_leading_dynamic_flag_destructive_floored_under_autonomous () =
          assert (Exec_program.to_string bin = "gh")
        | _ ->
          Alcotest.failf "%s: dynamic leading-flag destructive op must be floored" label)
-    [ ( "gh --repo $REPO pr merge"
-      , [ lit "--repo"; var "REPO"; lit "pr"; lit "merge"; lit "5" ] )
-    ; ( "gh --repo o/r pr merge $PR_NUMBER"
-      , [ lit "--repo"; lit "o/r"; lit "pr"; lit "merge"; var "PR_NUMBER" ] )
-    ; ( "gh --hostname $HOST api -X DELETE"
+    [ (* dynamic [pr merge] forms moved off the floor to the capability Ask
+         (RFC-0309 + 2026-07-08 operator decision); see
+         [test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous]. The
+         genuinely destructive [api -X DELETE] stays floored. *)
+      ( "gh --hostname $HOST api -X DELETE"
       , [ lit "--hostname"; var "HOST"; lit "api"; lit "-X"; lit "DELETE"
         ; lit "/repos/owner/repo"
         ] )
@@ -980,7 +1007,8 @@ let () =
   test_destructive_sql_later_flag_denied_under_autonomous ();
   test_read_sql_allowed_under_autonomous ();
   test_gh_irreversible_repo_hosting_ops_denied_under_autonomous ();
-  test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous ();
+  test_gh_pr_merge_asks_under_autonomous ();
+  test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous ();
   test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
   test_gh_pr_ready_allowed_under_autonomous ();
   test_gh_pr_ready_leading_flag_allowed_under_autonomous ();

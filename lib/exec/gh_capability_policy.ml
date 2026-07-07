@@ -48,6 +48,15 @@ let creates_durable_remote_surface (v : Gh_verb.t) : bool =
   | (Gh_verb.Repo | Gh_verb.Discussion), Some action ->
     not (local_or_read_repo_action action)
   | (Gh_verb.Repo | Gh_verb.Discussion), None -> false
+  (* [pr merge] writes the base branch — a durable remote surface whose
+     post-merge state (deploys, release history, protected-branch history) is
+     not modeled in keeper tool contracts. It is the ONE Pr action that mutates a
+     shared durable surface; every other Pr action acts within the PR. Risk says
+     it is reversible (R1, [git revert]); the capability axis gates it to
+     Requires_approval, mirroring [gh repo create]. "merge" is the literal gh
+     subcommand, matched the same way [local_or_read_repo_action] matches gh
+     action tokens. *)
+  | Gh_verb.Pr, Some "merge" -> true
   | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Release | Gh_verb.Secret
       | Gh_verb.Ssh_key | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist
       | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache

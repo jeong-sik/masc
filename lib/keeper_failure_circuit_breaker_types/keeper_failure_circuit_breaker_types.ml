@@ -19,7 +19,9 @@ let classify_typed_path_check (error : Path_check_error.t) : error_class =
   | Path_check_error.Path_outside_whitelist _ -> Path_not_allowed
 ;;
 
-let classify_typed_path_rejection (error : Path_rejection.t) : error_class =
+let classify_typed_path_rejection (error : Path_rejection.keeper_path_rejection)
+  : error_class
+  =
   match error with
   | Path_rejection.Not_found_relative _ -> Path_not_found
   | Path_rejection.Absolute_path_rejected _

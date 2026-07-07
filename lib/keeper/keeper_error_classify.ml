@@ -190,8 +190,18 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
       (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
-  | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      true
+  | Some (Keeper_turn_driver.Capacity_backpressure { cooldown_cause; _ }) ->
+      (* A pre-dispatch provider-health cooldown block carries the failure that
+         armed the cooldown.  Deterministic causes (config/build error, depleted
+         balance, structural provider failure) re-fail on the next tick, so they
+         must NOT be auto-recoverable: returning [false] makes [counts_toward_crash]
+         true so the existing failure-streak policy escalates instead of the
+         keeper oscillating (#23438).  Genuine upstream capacity backpressure
+         ([None]) and transient causes stay auto-recoverable. *)
+      (match cooldown_cause with
+       | Some cause ->
+         not (Keeper_turn_driver.provider_cooldown_cause_is_deterministic cause)
+       | None -> true)
   | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       false
   | Some (Keeper_turn_driver.Accept_rejected _)

@@ -45,6 +45,22 @@ let payload_json () =
     ]
 ;;
 
+let updated_payload_json () =
+  `Assoc
+    [ "kind", `String "consumer.note"
+    ; "schema_version", `Int 1
+    ; "body", `Assoc [ "text", `String "do now" ]
+    ]
+;;
+
+let payload_exn json =
+  match payload_of_yojson json with
+  | Ok payload -> payload
+  | Error msg -> fail msg
+;;
+
+let updated_payload () = payload_exn (updated_payload_json ())
+
 let has_prefix prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len
@@ -139,6 +155,46 @@ let test_reject_marks_rejected () =
   | Error err -> fail (service_error_to_string err)
 ;;
 
+let test_update_scheduled_request () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_ok ~schedule_id:"service-update-1" ~risk_class:Read_only config
+  in
+  let payload_json = updated_payload_json () in
+  let payload = payload_exn payload_json in
+  match
+    update config ~schedule_id:request.schedule_id ~due_at:260.0
+      ~expires_at:(Some 360.0) ~payload
+  with
+  | Ok updated ->
+    check_status "updated stays scheduled" Scheduled updated.status;
+    check (float 0.001) "due_at" 260.0 updated.due_at;
+    check (option (float 0.001)) "expires_at" (Some 360.0) updated.expires_at;
+    check string "payload" (Yojson.Safe.to_string payload_json)
+      (Yojson.Safe.to_string (payload_to_yojson updated.payload))
+  | Error err -> fail (service_error_to_string err)
+;;
+
+let test_update_due_request_reports_store_error () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_ok ~schedule_id:"service-update-due" ~risk_class:Read_only config
+  in
+  (match due_candidates config ~now:201.0 with
+   | Ok [ candidate ] -> check_status "candidate due" Due candidate.status
+   | Ok candidates ->
+     fail (Printf.sprintf "expected one candidate, got %d" (List.length candidates))
+   | Error err -> fail (service_error_to_string err));
+  check_service_error "due update"
+    (Store_error
+       (Schedule_store.Invalid_status_transition
+          "only pending or scheduled requests can be updated"))
+    (update config ~schedule_id:request.schedule_id ~due_at:260.0
+       ~expires_at:None ~payload:(updated_payload ()))
+;;
+
 let test_due_candidates_do_not_execute_and_require_approval () =
   with_workspace
   @@ fun config ->
@@ -185,6 +241,12 @@ let () =
           test_case "reject marks rejected" `Quick test_reject_marks_rejected;
           test_case "missing schedule reports store error" `Quick
             test_missing_schedule_approval_reports_store_error;
+        ] );
+      ( "update",
+        [
+          test_case "updates scheduled request" `Quick test_update_scheduled_request;
+          test_case "due request reports store error" `Quick
+            test_update_due_request_reports_store_error;
         ] );
       ( "due",
         [

@@ -238,7 +238,6 @@ type t =
   | ToolExecutePrActionTotal
   | KeeperRepoMappingDefaultScopeAllowed
   | KeeperRepoMappingDeniedUnregistered
-  | KeeperRepoMappingDeniedNotInMapping
   | KeeperRepoMappingLoadError
   | KeeperRepoMappingRepositoryIdentityMismatch
   | KeeperRepoMappingRepositoryStoreError

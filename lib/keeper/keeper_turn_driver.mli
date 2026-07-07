@@ -30,13 +30,13 @@ include
       Keeper_internal_error.accept_response_shape
      and type tool_progress_effect =
       Keeper_internal_error.tool_progress_effect
+     and type provider_cooldown_cause =
+      Keeper_internal_error.provider_cooldown_cause
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Provider error helpers} *)
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
-
-val message_looks_like_capacity_backpressure : string -> bool
 
 val sdk_error_is_terminal_provider_runtime_failure :
   Agent_sdk.Error.sdk_error -> bool

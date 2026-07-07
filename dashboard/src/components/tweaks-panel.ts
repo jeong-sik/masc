@@ -3,6 +3,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useRef } from 'preact/hooks'
 import { persistentSignal } from '../lib/persistent-signal'
+import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 import { ringFocusClasses } from './common/ring'
 import { Settings2, X } from 'lucide-preact'
 
@@ -609,6 +610,18 @@ export function TweaksPanel() {
           label="컨텍스트 레일"
           value=${tweaksCtxOpen.value}
           onChange=${(v: boolean) => { tweaksCtxOpen.value = v }}
+        />
+
+        <${TweakSection} label="대화" />
+        <${TweakToggle}
+          label="메타데이터"
+          value=${chatShowMetadata.value}
+          onChange=${(v: boolean) => { chatShowMetadata.value = v }}
+        />
+        <${TweakToggle}
+          label="내부 메시지"
+          value=${chatShowInternal.value}
+          onChange=${(v: boolean) => { chatShowInternal.value = v }}
         />
 
         <${TweakSection} label="타이포" />

@@ -27,6 +27,7 @@
 
 (tests
  (names
+  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_os_io_fd
@@ -374,6 +375,7 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (modules
+  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_os_io_fd
@@ -727,11 +729,7 @@
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution)
- (libraries
-  masc_test_deps
-  masc_schedule
-  multimodal
-  bigstringaf))
+ (libraries masc_test_deps masc_schedule multimodal bigstringaf))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 
@@ -1492,6 +1490,20 @@
  (name test_schedule_consumer_dispatch)
  (modules test_schedule_consumer_dispatch)
  (libraries masc_test_deps masc_schedule masc_server))
+
+(test
+ (name test_server_dashboard_http_schedule_actions)
+ (modules test_server_dashboard_http_schedule_actions)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc_workspace
+  masc_schedule
+  masc_server
+  unix
+  yojson))
 
 (test
  (name test_schedule_tool_wiring)

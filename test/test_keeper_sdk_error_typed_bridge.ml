@@ -754,16 +754,29 @@ let test_soft_rate_limit_cooldown_blocks_candidate_before_dispatch () =
          { source = KTD.Provider_capacity
          ; retry_after = KTD.Synthetic_default retry_after
          ; detail
+         ; cooldown_cause
          ; _
          }) ->
     Alcotest.(check string)
-      "detail is explicit"
-      "provider health cooldown active before dispatch"
+      "detail names the true cooldown cause"
+      "provider health cooldown active before dispatch (cause=soft_rate_limited)"
       detail;
     Alcotest.(check bool)
       "synthetic retry-after preserves cooldown"
       true
-      (retry_after > 0.0)
+      (retry_after > 0.0);
+    (* Soft rate limit is transient — the cooldown block must carry the cause
+       and stay auto-recoverable so today's behavior is preserved. *)
+    Alcotest.(check bool)
+      "soft rate limit cooldown carries transient cause"
+      true
+      (match cooldown_cause with
+       | Some KTD.Cooldown_soft_rate_limited -> true
+       | _ -> false);
+    Alcotest.(check bool)
+      "transient cooldown block stays auto-recoverable"
+      true
+      (EC.is_auto_recoverable_turn_error mapped)
   | Some other ->
     Alcotest.failf
       "expected capacity_backpressure, got %s"

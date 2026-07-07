@@ -291,7 +291,9 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
+    // Bridge events are fetched only under an explicit scope: without a
+    // repo or keeper lane the server rejects unscoped /api/v1/ide/events.
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', repoId: 'masc' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('tool:execute')
@@ -514,13 +516,16 @@ describe('IdeActivityPanel', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-1')
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // Without a repo or keeper-lane scope there is no bridge fetch: the
+    // server rejects unscoped /api/v1/ide/events, so only the activity
+    // graph is polled (one call per load).
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
       expect(container.textContent).toContain('goal goal-refresh')
     })
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('turn-2')
     expect(container.textContent).not.toContain('turn-1')
 
@@ -574,7 +579,7 @@ describe('IdeActivityPanel', () => {
     vi.setSystemTime(new Date('2026-05-05T10:00:10Z'))
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(4)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 
     expect(container.textContent).toContain('turn-stable')
@@ -594,6 +599,68 @@ describe('IdeActivityPanel', () => {
       expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
     })
     expect(container.textContent).toContain('no recent activity')
+  })
+
+  it('degrades the refresh tone when the keeper lane fetch fails', async () => {
+    const fetchMock = vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({ ok: false, error: 'lane unavailable' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', keeperLane: 'sangsu' }), container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
+    })
+    const laneUrl = fetchMock.mock.calls
+      .map(call => String(call[0]))
+      .find(url => url.includes('/api/v1/ide/events'))
+    expect(laneUrl).toContain('keeper_lane=sangsu')
+  })
+
+  it('merges keeper lane events into the feed when the lane fetch succeeds', async () => {
+    const fetchMock = vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            events: [{
+              type: 'turn',
+              keeper_id: 'sangsu',
+              turn_id: 'turn-lane-1',
+              phase: 'completed',
+              timestamp_ms: 1717400000000,
+            }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', keeperLane: 'sangsu' }), container)
+
+    // Single load without polling reports 'loaded' on success.
+    await waitFor(() => {
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('loaded')
+    })
+    expect(container.textContent).toContain('sangsu')
   })
 
   it('renders active run goal progress from activity goal and task links', async () => {

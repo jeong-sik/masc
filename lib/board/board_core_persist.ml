@@ -425,16 +425,17 @@ let posts_jsonl_unlocked store =
     store.posts;
   Buffer.contents buf
 ;;
-let save_posts_jsonl content =
+let save_posts_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = persist_path () in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_posts" msg
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_posts" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
 ;;
+let save_posts_jsonl content = ignore (save_posts_jsonl_result content)
 let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)
@@ -535,8 +536,9 @@ let rollback_rolled_up_post store ~(previous : post) ~(rolled_up : post) =
   match rollback with
   | Error _ as e -> e
   | Ok posts_jsonl ->
-    with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-    Ok ()
+    (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+     | Ok () -> Ok ()
+     | Error e -> Error (Board_types.show_board_error e))
 ;;
 
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
@@ -805,20 +807,30 @@ let create_post_with_outcome
            rollback_fresh_post store post;
            Error e)
       | Ok (`Rolled_up (previous, post, posts_jsonl)) ->
-        with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-        (match after_rollup_persist with
-         | None -> Ok (Rolled_up_post post)
-         | Some hook ->
-           (match hook post with
-            | Ok () -> Ok (Rolled_up_post post)
-            | Error msg ->
-              let message = "status-rollup post-persist hook failed: " ^ msg in
-              (match rollback_rolled_up_post store ~previous ~rolled_up:post with
-               | Ok () -> Error (Validation_error message)
-               | Error rollback ->
-                 Error
-                   (Validation_error
-                      (message ^ "; rollback failed: " ^ rollback)))))
+        (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+         | Error persist_error ->
+           let message =
+             "status-rollup persist failed: " ^ Board_types.show_board_error persist_error
+           in
+           (match rollback_rolled_up_post store ~previous ~rolled_up:post with
+            | Ok () -> Error persist_error
+            | Error rollback ->
+              Error
+                (Validation_error (message ^ "; rollback failed: " ^ rollback)))
+         | Ok () ->
+           (match after_rollup_persist with
+            | None -> Ok (Rolled_up_post post)
+            | Some hook ->
+              (match hook post with
+               | Ok () -> Ok (Rolled_up_post post)
+               | Error msg ->
+                 let message = "status-rollup post-persist hook failed: " ^ msg in
+                 (match rollback_rolled_up_post store ~previous ~rolled_up:post with
+                  | Ok () -> Error (Validation_error message)
+                  | Error rollback ->
+                    Error
+                      (Validation_error
+                         (message ^ "; rollback failed: " ^ rollback))))))
       | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;

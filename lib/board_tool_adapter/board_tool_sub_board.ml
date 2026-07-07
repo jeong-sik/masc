@@ -17,10 +17,13 @@ open Tool_args
    Workflow_rejection matches observed semantics. *)
 
 let owner_arg args =
-  let raw = get_string_opt args "owner" |> Option.value ~default:"" |> String.trim in
-  if String.equal raw ""
-  then Error (Board.Validation_error "owner is required")
-  else Board.Agent_id.of_string raw
+  match get_string_opt args "owner" with
+  | None -> Error (Board.Validation_error "owner is required")
+  | Some raw ->
+    let raw = String.trim raw in
+    if String.equal raw ""
+    then Error (Board.Validation_error "owner is required")
+    else Board.Agent_id.of_string raw
 ;;
 
 let same_agent_id left right =

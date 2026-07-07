@@ -37,14 +37,15 @@
 /* routing lanes */
 .rt-lane { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 14px 0; border-top: 1px solid var(--border-soft); }
 .rt-lane:first-of-type { border-top: 0; }
-.rt-lane-l { flex: 1 1 140px; min-width: 0; }
+.rt-lane-l { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
 .rt-lane-lbl { font-size: var(--fs-13); color: var(--text-primary); }
-.rt-lane-hint { font-size: var(--fs-11); color: var(--text-dim); margin-top: 3px; }
+.rt-lane-hint { font-size: var(--fs-11); color: var(--text-dim); margin-top: 3px; overflow-wrap: anywhere; }
 .rt-lane-c { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; min-width: 0; }
-.rt-select { background: var(--bg-sunken); border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text-bright); font-size: var(--fs-12); cursor: pointer; min-width: 0; width: 100%; max-width: 320px; }
+.rt-select { background: var(--bg-sunken); border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text-bright); font-size: var(--fs-12); cursor: pointer; min-width: 0; width: 100%; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rt-select:focus { outline: none; border-color: var(--volt-dim); }
-.rt-warn { font-size: var(--fs-11); color: var(--status-bad); white-space: nowrap; }
-.rt-ok { font-size: var(--fs-11); color: var(--status-ok); white-space: nowrap; }
+.rt-warn { font-size: var(--fs-11); color: var(--status-bad); overflow-wrap: anywhere; }
+.rt-ok { font-size: var(--fs-11); color: var(--status-ok); overflow-wrap: anywhere; }
+.rt-unknown { font-size: var(--fs-11); color: var(--status-warn); overflow-wrap: anywhere; }
 
 /* provider cards */
 .rt-cards { display: flex; flex-direction: column; gap: 12px; }

@@ -16,7 +16,7 @@ import { ConnectionStatus } from '../dashboard-shell'
 import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { StatusChip } from '../common/status-chip'
-import { KeeperWaitingInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
+import { KeeperLaneInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
 import {
   ScheduleAside,
   ScheduledAutomationPanel,
@@ -170,9 +170,9 @@ export function ScheduleSurface() {
           <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
         </div>
 
-        <section class="ov-card mt-4" aria-label="Keeper waiting inventory" data-testid="schedule-waiting-inventory">
-          <div class="ov-card-h"><h3>Keeper Waiting Inventory</h3></div>
-          <${KeeperWaitingInventoryPanel} inventory=${waitingInventory} />
+        <section class="ov-card mt-4" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
+          <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
+          <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
         </section>
 
         ${loading && !automation

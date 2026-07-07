@@ -625,6 +625,96 @@ function ReactionEvidenceBlock({
   `
 }
 
+function wakeEvidenceStatus(value: { projection_status?: string | null } | null | undefined): string {
+  const status = value?.projection_status?.trim()
+  return status && status.length > 0 ? status : 'missing'
+}
+
+function wakeEvidenceTone(
+  value: { projection_status?: string | null } | null | undefined,
+  tone: StatusChipTone,
+): StatusChipTone {
+  return value ? tone : 'warn'
+}
+
+function isKeeperWakePayload(request: DashboardScheduledAutomationRequest): boolean {
+  return request.payload_kind === 'masc.keeper_wake'
+}
+
+function hasWakeEvidenceSummary(request: DashboardScheduledAutomationRequest): boolean {
+  return isKeeperWakePayload(request) ||
+    request.dispatch_receipt != null ||
+    request.keeper_queue_evidence != null ||
+    request.keeper_reaction_evidence != null
+}
+
+function wakeEvidenceJoinKey(request: DashboardScheduledAutomationRequest): string | null {
+  const candidates = [
+    request.dispatch_receipt?.post_id,
+    request.keeper_queue_evidence?.post_id,
+    request.keeper_reaction_evidence?.post_id,
+    request.dispatch_receipt?.stimulus_id,
+    request.keeper_reaction_evidence?.stimulus_id,
+  ]
+  for (const candidate of candidates) {
+    const value = candidate?.trim()
+    if (value) return value
+  }
+  return null
+}
+
+function WakeEvidenceSummary({ request }: { request: DashboardScheduledAutomationRequest }) {
+  if (!hasWakeEvidenceSummary(request)) return null
+  const receiptStatus = wakeEvidenceStatus(request.dispatch_receipt)
+  const queueStatus = wakeEvidenceStatus(request.keeper_queue_evidence)
+  const reactionStatus = wakeEvidenceStatus(request.keeper_reaction_evidence)
+  const joinKey = wakeEvidenceJoinKey(request)
+  const items: ReadonlyArray<{
+    key: string
+    label: string
+    status: string
+    tone: StatusChipTone
+  }> = [
+    {
+      key: 'receipt',
+      label: 'receipt',
+      status: receiptStatus,
+      tone: wakeEvidenceTone(request.dispatch_receipt, dispatchReceiptTone(request.dispatch_receipt)),
+    },
+    {
+      key: 'queue',
+      label: 'queue',
+      status: queueStatus,
+      tone: wakeEvidenceTone(request.keeper_queue_evidence, queueEvidenceTone(request.keeper_queue_evidence)),
+    },
+    {
+      key: 'reaction',
+      label: 'reaction',
+      status: reactionStatus,
+      tone: wakeEvidenceTone(request.keeper_reaction_evidence, reactionEvidenceTone(request.keeper_reaction_evidence)),
+    },
+  ]
+  return html`
+    <div
+      class="sch-wake-evidence"
+      data-schedule-wake-evidence-summary=${request.schedule_id}
+      data-schedule-wake-evidence-receipt=${receiptStatus}
+      data-schedule-wake-evidence-queue=${queueStatus}
+      data-schedule-wake-evidence-reaction=${reactionStatus}
+    >
+      <span class="sch-wake-title">wake evidence</span>
+      ${items.map(item => html`
+        <span class="sch-wake-item" data-schedule-wake-evidence-item=${item.key}>
+          ${item.label} <${StatusChip} tone=${item.tone} uppercase=${false}>${enumLabel(item.status)}<//>
+        </span>
+      `)}
+      ${joinKey
+        ? html`<span class="sch-wake-join mono" title=${joinKey}>post ${joinKey}</span>`
+        : null}
+    </div>
+  `
+}
+
 function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest }) {
   const kind = request.payload_kind ?? '-'
   const target = request.payload_target?.trim() || null
@@ -1572,23 +1662,178 @@ function cardRailTone(cls: string): string {
 
 // Prototype filter tabs (audit P0 #3): 5 tabs, prototype labels/ordering.
 type SchTabKey = 'pending' | 'scheduled' | 'active' | 'done' | 'all'
+type SchCadenceKey = 'oneshot' | 'interval' | 'daily' | 'cron' | 'unknown'
 interface SchTabDef {
   readonly key: SchTabKey
   readonly label: string
   // Effective-status values (live, normalized) this tab includes; null = all.
   readonly statuses: readonly string[] | null
 }
+interface SchCadenceDef {
+  readonly key: SchCadenceKey
+  readonly label: string
+  readonly shortLabel: string
+  readonly glyph: string
+  readonly cls: string
+}
+const SCH_TERMINAL_STATUSES = ['succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired'] as const
 const SCH_TABS: readonly SchTabDef[] = [
   { key: 'pending', label: '승인 대기', statuses: ['pending_approval', 'awaiting_approval', 'blocked_approval'] },
   { key: 'scheduled', label: '예약됨', statuses: ['scheduled'] },
   { key: 'active', label: 'due · 실행', statuses: ['due', 'due_pending_refresh', 'running'] },
-  { key: 'done', label: '완료 · 종료', statuses: ['succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired'] },
+  { key: 'done', label: '완료 · 종료', statuses: SCH_TERMINAL_STATUSES },
   { key: 'all', label: '전체', statuses: null },
+]
+const SCH_TERMINAL_STATUS_SET: ReadonlySet<string> = new Set(SCH_TERMINAL_STATUSES)
+const SCH_CADENCES: readonly SchCadenceDef[] = [
+  { key: 'daily', label: '정기 · 매일', shortLabel: '정기', glyph: '◈', cls: 'ok' },
+  { key: 'interval', label: '폴링 · 주기', shortLabel: '폴링', glyph: '↻', cls: 'volt' },
+  { key: 'oneshot', label: '1회 · ad-hoc', shortLabel: '1회', glyph: '•', cls: 'info' },
+  { key: 'cron', label: 'cron', shortLabel: 'cron', glyph: '⌁', cls: 'warn' },
+  { key: 'unknown', label: 'unknown', shortLabel: 'unknown', glyph: '?', cls: 'dim' },
 ]
 
 function schTabMatches(tab: SchTabDef, request: DashboardScheduledAutomationRequest): boolean {
   if (tab.statuses === null) return true
   return tab.statuses.includes(normalized(effectiveStatus(request)))
+}
+
+function recurrenceKind(request: DashboardScheduledAutomationRequest): string | null {
+  const kind = request.recurrence?.kind ?? request.recurrence_kind ?? null
+  const value = normalized(kind)
+  return value === '' ? null : value
+}
+
+function scheduleCadence(request: DashboardScheduledAutomationRequest): SchCadenceKey {
+  switch (recurrenceKind(request)) {
+    case 'one_shot':
+    case 'oneshot':
+      return 'oneshot'
+    case 'interval':
+      return 'interval'
+    case 'daily':
+      return 'daily'
+    case 'cron':
+      return 'cron'
+    case null:
+    default:
+      return 'unknown'
+  }
+}
+
+function schCadenceDef(key: SchCadenceKey): SchCadenceDef {
+  return SCH_CADENCES.find(definition => definition.key === key) ?? SCH_CADENCES[SCH_CADENCES.length - 1]!
+}
+
+function SchCadenceTag({ request }: { request: DashboardScheduledAutomationRequest }) {
+  const cadence = scheduleCadence(request)
+  const definition = schCadenceDef(cadence)
+  return html`
+    <span
+      class=${`sch-cad ${definition.cls}`}
+      data-schedule-cadence-card=${request.schedule_id}
+      data-schedule-cadence=${cadence}
+      title=${`recurrence.kind = ${recurrenceKind(request) ?? 'missing'}`}
+    >${definition.glyph} ${definition.shortLabel}</span>
+  `
+}
+
+function SchCadenceSummary({
+  requests,
+  active,
+  onSelect,
+}: {
+  requests: readonly DashboardScheduledAutomationRequest[]
+  active: SchCadenceKey | null
+  onSelect: (key: SchCadenceKey | null) => void
+}) {
+  const counts = new Map<SchCadenceKey, number>(SCH_CADENCES.map(definition => [definition.key, 0]))
+  for (const request of requests) {
+    const cadence = scheduleCadence(request)
+    counts.set(cadence, (counts.get(cadence) ?? 0) + 1)
+  }
+  return html`
+    <div
+      class="sch-cadsum"
+      data-schedule-cadence-summary
+      data-schedule-cadence-active=${active ?? 'all'}
+    >
+      ${SCH_CADENCES.map(definition => {
+        const selected = active === definition.key
+        const count = counts.get(definition.key) ?? 0
+        return html`
+          <button
+            type="button"
+            class=${`sch-cadsum-i ${definition.cls} ${selected ? 'on' : ''} ${active && !selected ? 'off' : ''}`}
+            aria-pressed=${selected ? 'true' : 'false'}
+            data-schedule-cadence-filter=${definition.key}
+            data-schedule-cadence-count=${count}
+            onClick=${() => { onSelect(selected ? null : definition.key) }}
+          >
+            <span class="sch-cadsum-gl">${definition.glyph}</span>
+            <span class="sch-cadsum-n mono">${count.toLocaleString()}</span>
+            <span class="sch-cadsum-l">${definition.label}</span>
+          </button>
+        `
+      })}
+    </div>
+  `
+}
+
+function isTerminalSchedule(request: DashboardScheduledAutomationRequest): boolean {
+  return SCH_TERMINAL_STATUS_SET.has(normalized(effectiveStatus(request)))
+}
+
+function SchPollingStrip({
+  requests,
+  onOpen,
+}: {
+  requests: readonly DashboardScheduledAutomationRequest[]
+  onOpen: (request: DashboardScheduledAutomationRequest) => void
+}) {
+  const polls = requests.filter(request => scheduleCadence(request) === 'interval' && !isTerminalSchedule(request))
+  return html`
+    <section
+      class="sch-poll"
+      data-schedule-polling-strip
+      data-schedule-polling-count=${polls.length}
+    >
+      <div class="sch-poll-h">
+        <span class="sch-cad volt">↻ 상시 폴링</span>
+        <span class="sch-poll-sub">recurrence.kind=interval · terminal 상태 제외</span>
+      </div>
+      ${polls.length === 0
+        ? html`<div class="sch-day-empty mono">활성 폴링 없음</div>`
+        : html`
+            <div class="sch-poll-list">
+              ${polls.map(request => {
+                const payload = schedPayloadSpec(request.payload_kind)
+                const status = statusSpecForLive(effectiveStatus(request))
+                const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+                return html`
+                  <button
+                    type="button"
+                    class=${`sch-poll-card st-${cardRailTone(status.cls)}`}
+                    data-schedule-polling-card=${request.schedule_id}
+                    onClick=${() => { onOpen(request) }}
+                  >
+                    <div class="sch-poll-top">
+                      <span class="sch-poll-int mono">↻ ${recurrenceText(request)}</span>
+                      <${SchStatusPill} status=${effectiveStatus(request)} />
+                    </div>
+                    <div class="sch-poll-title">${payload.glyph} ${request.payload_summary?.trim() || request.payload_kind || request.schedule_id}</div>
+                    <div class="sch-poll-foot">
+                      <${SchKeeperMeta} actor=${request.scheduled_by} />
+                      <${SchRiskChip} risk=${request.risk_class} />
+                      <span class="sch-poll-next mono" title="next_due_at">${formatDateTimeKo(dueIso)}</span>
+                    </div>
+                  </button>
+                `
+              })}
+            </div>
+          `}
+    </section>
+  `
 }
 
 function recurrenceText(request: DashboardScheduledAutomationRequest): string {
@@ -1648,6 +1893,7 @@ function SchCard({
         >
           <span class="sch-kind">${payload.glyph} ${payload.lbl}</span>
           <span class="sch-id mono">${request.schedule_id}</span>
+          <${SchCadenceTag} request=${request} />
           <${SchRiskChip} risk=${request.risk_class} />
           ${request.payload_support && request.payload_support !== 'supported'
             ? html`<${SchPayloadSupportChip} support=${request.payload_support} />`
@@ -1666,6 +1912,7 @@ function SchCard({
             ? html`<span class="sch-need mono" title="별도 사람(operator) 승인 필요">⊙ 승인 필요</span>`
             : null}
         </div>
+        <${WakeEvidenceSummary} request=${request} />
       </div>
     </article>
   `
@@ -1913,13 +2160,17 @@ function SchedulePrototypeSurface({
   onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [tab, setTab] = useState<SchTabKey>('pending')
+  const [cadenceFilter, setCadenceFilter] = useState<SchCadenceKey | null>(null)
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null)
   const selectedScheduleId = controlledSelectedId !== undefined ? controlledSelectedId : internalSelectedId
   const setSelectedScheduleId = onSelectSchedule ?? setInternalSelectedId
 
   const rows = automation.requests ?? []
   const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
-  const filtered = rows.filter(request => schTabMatches(tabDef, request))
+  const cadenceRows = cadenceFilter
+    ? rows.filter(request => scheduleCadence(request) === cadenceFilter)
+    : rows
+  const filtered = cadenceRows.filter(request => schTabMatches(tabDef, request))
   // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
   const durableSignalContract = durableWakeSignalContract(automation)
   const durableSignals = durableSignalContract.visibleSignals
@@ -1940,11 +2191,26 @@ function SchedulePrototypeSurface({
         onOpen=${setSelectedScheduleId}
       />
 
+      <${SchCadenceSummary}
+        requests=${rows}
+        active=${cadenceFilter}
+        onSelect=${setCadenceFilter}
+      />
+
+      ${cadenceFilter === null || cadenceFilter === 'interval'
+        ? html`
+            <${SchPollingStrip}
+              requests=${rows}
+              onOpen=${(next: DashboardScheduledAutomationRequest) => { setSelectedScheduleId(next.schedule_id) }}
+            />
+          `
+        : null}
+
       <div class="sch-tabs" role="tablist" aria-label="예약 필터">
         ${SCH_TABS.map(definition => {
           const count = definition.statuses === null
-            ? rows.length
-            : rows.filter(request => schTabMatches(definition, request)).length
+            ? cadenceRows.length
+            : cadenceRows.filter(request => schTabMatches(definition, request)).length
           const active = definition.key === tab
           return html`
             <button

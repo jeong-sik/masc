@@ -159,7 +159,8 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Goal_verification_failed _
       | Keeper_event_queue.Failure_judgment _
-      | Keeper_event_queue.Goal_assigned _ ->
+      | Keeper_event_queue.Goal_assigned _
+      | Keeper_event_queue.Goal_stagnation _ ->
         None)
     stimuli
 ;;
@@ -179,7 +180,8 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Goal_verification_failed _
        | Keeper_event_queue.Failure_judgment _
-       | Keeper_event_queue.Goal_assigned _ -> ())
+       | Keeper_event_queue.Goal_assigned _
+       | Keeper_event_queue.Goal_stagnation _ -> ())
     stimuli
 ;;
 
@@ -198,7 +200,8 @@ let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Goal_verification_failed _
        | Keeper_event_queue.Failure_judgment _
-       | Keeper_event_queue.Goal_assigned _ -> ())
+       | Keeper_event_queue.Goal_assigned _
+       | Keeper_event_queue.Goal_stagnation _ -> ())
     stimuli
 ;;
 
@@ -276,6 +279,24 @@ let run_keepalive_unified_turn
     let consumed_stimuli = ref [] in
     let consumed_stimuli_turn_completed = ref false in
     try
+      (* RFC-0310 §3.3: before intake, surface any live goal that has gone
+         stale as a Goal_stagnation stimulus so it flows through the normal
+         event-queue intake below and drives this turn. The producer is
+         edge-gated (episode key = goal_id + updated_at) and deduped against
+         the reaction ledger, so re-scanning an unadvanced goal each tick does
+         not re-enqueue — no blind cadence is introduced here. *)
+      (if meta_after_triage.active_goal_ids <> []
+       then
+         ignore
+           (Keeper_goal_stagnation_wake.enqueue_goal_stagnation_wakes
+              ~config:ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~active_goal_ids:meta_after_triage.active_goal_ids
+              ~now:(Time_compat.now ())
+              ~threshold_sec:
+                (float_of_int
+                   (Keeper_config.keeper_goal_stagnation_threshold_sec ()))
+              ()));
       let event_intake =
         heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
       in

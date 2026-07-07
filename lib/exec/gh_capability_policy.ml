@@ -673,7 +673,18 @@ let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
       Exec_program.to_string simple.Shell_ir.bin
       :: List.map arg_word simple.Shell_ir.args
     in
-    let verb = Gh_verb.classify words in
+    (* Flag-robust verb (RFC-0309 W3, #23599): the typed lowering locates the
+       subcommand past leading value-taking global flags, so [gh --repo O/R pr
+       view] is read as [Pr/view] (Allowed) rather than [Gh_verb.Other] (Ask).
+       Falls back to the word-list [Gh_verb.classify] only for the [Generic]
+       escape hatch (non-literal argv), preserving prior behavior there. The
+       typed parser preserves the [Api]/[gh api graphql] identity, so the graphql
+       opacity fail-closed below still fires (RFC-0208). *)
+    let verb =
+      match Shell_ir_risk.gh_verb_of_simple simple with
+      | Some v -> v
+      | None -> Gh_verb.classify words
+    in
     if is_graphql_api verb && graphql_query_body_is_opaque simple.Shell_ir.args
     then Some Requires_approval
     else Some (disposition_of_words words verb))

@@ -63,6 +63,9 @@ type pending_board_event_kind =
   | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)
+  | Goal_stagnation
+      (** RFC-0310 §3.3: a live goal went stale past the threshold; the
+          stagnation edge surfaces as a resume-or-hand-off prompt. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;

@@ -1,6 +1,6 @@
 import type { DashboardScheduledAutomationRequest, DashboardScheduledAutomationSignal } from '../../api'
 
-const baseTime = new Date()
+export const baseTime = new Date()
 baseTime.setHours(14, 0, 0, 0)
 
 export const MOCK_SCHEDULES: DashboardScheduledAutomationRequest[] = [
@@ -30,7 +30,7 @@ export const MOCK_SCHEDULES: DashboardScheduledAutomationRequest[] = [
     recurrence: { kind: 'daily', hour: 2, minute: 0, timezone: 'KST' },
     payload_kind: 'index.reindex',
     payload_summary: 'search/index 전체 재색인 — 야간 윈도우, 예상 $4.20',
-    due_at_iso: new Date(baseTime.getTime() + 41400 * 1000).toISOString(),
+    due_at_iso: new Date(baseTime.getTime() + 43200 * 1000).toISOString(),
     requested_at_iso: new Date(baseTime.getTime() - 3600 * 1000).toISOString(),
     expires_at_iso: new Date(baseTime.getTime() + 86400 * 1000).toISOString(),
   },
@@ -45,7 +45,7 @@ export const MOCK_SCHEDULES: DashboardScheduledAutomationRequest[] = [
     recurrence: { kind: 'daily', hour: 9, minute: 0, timezone: 'KST' },
     payload_kind: 'report.generate',
     payload_summary: '리텐션 주간 리포트 생성 후 Slack #kidsnote-growth 게시',
-    due_at_iso: new Date(baseTime.getTime() + 66600 * 1000).toISOString(),
+    due_at_iso: new Date(baseTime.getTime() + 68400 * 1000).toISOString(),
     requested_at_iso: new Date(baseTime.getTime() - 4800 * 1000).toISOString(),
     expires_at_iso: new Date(baseTime.getTime() + 86400 * 1000).toISOString(),
   },
@@ -60,7 +60,7 @@ export const MOCK_SCHEDULES: DashboardScheduledAutomationRequest[] = [
     recurrence: { kind: 'interval', interval_sec: 21600 },
     payload_kind: 'compact.sweep',
     payload_summary: 'lib/trace-store 컨텍스트 스윕 — 85% 초과 keeper 자동 compact',
-    due_at_iso: new Date(baseTime.getTime() + 15120 * 1000).toISOString(),
+    due_at_iso: new Date(baseTime.getTime() + 14400 * 1000).toISOString(),
     requested_at_iso: new Date(baseTime.getTime() - 7200 * 1000).toISOString(),
     expires_at_iso: new Date(baseTime.getTime() + 30000 * 1000).toISOString(),
   },
@@ -75,9 +75,9 @@ export const MOCK_SCHEDULES: DashboardScheduledAutomationRequest[] = [
     recurrence: { kind: 'interval', interval_sec: 3600 },
     payload_kind: 'gate.recheck',
     payload_summary: '커넥터 게이트 헬스 재점검 (slack · discord · amplitude)',
-    due_at_iso: new Date(baseTime.getTime() - 40 * 1000).toISOString(),
+    due_at_iso: new Date(baseTime.getTime() + 3600 * 1000).toISOString(),
     requested_at_iso: new Date(baseTime.getTime() - 3640 * 1000).toISOString(),
-    expires_at_iso: new Date(baseTime.getTime() + 560 * 1000).toISOString(),
+    expires_at_iso: new Date(baseTime.getTime() + 5600 * 1000).toISOString(),
   },
   {
     schedule_id: 'sch_2e55',
@@ -90,14 +90,14 @@ export const MOCK_SCHEDULES: DashboardScheduledAutomationRequest[] = [
     recurrence: { kind: 'one_shot' },
     payload_kind: 'report.generate',
     payload_summary: 'docs/site 링크 점검 리포트 — PR 프리뷰 검증',
-    due_at_iso: new Date(baseTime.getTime() - 120 * 1000).toISOString(),
+    due_at_iso: baseTime.toISOString(),
     requested_at_iso: new Date(baseTime.getTime() - 2000 * 1000).toISOString(),
     expires_at_iso: new Date(baseTime.getTime() + 3600 * 1000).toISOString(),
     last_execution: {
       execution_id: 'exec-1',
       schedule_id: 'sch_2e55',
       status: 'running',
-      started_at_iso: new Date(baseTime.getTime() - 120 * 1000).toISOString(),
+      started_at_iso: baseTime.toISOString(),
     },
   },
   {
@@ -227,7 +227,7 @@ export const MOCK_KEEPER_BG = [
   { id: 'bg_p01', keeper: 'masc-improver', kind: 'poll', label: 'board 새 post·comment 감시', cadence_sec: 30,  status: 'running', risk_class: 'read_only', since: '09:12' },
   { id: 'bg_p02', keeper: 'qa-king',       kind: 'poll', label: 'git worktree fetch · origin/main', cadence_sec: 300, status: 'running', risk_class: 'read_only', since: '11:40' },
   { id: 'bg_p03', keeper: 'nick0cave',     kind: 'poll', label: 'LSP diagnostics watch · round.ml', cadence_sec: 60,  status: 'running', risk_class: 'read_only', since: '13:20' },
-  { id: 'bg_p04', keeper: 'sangsu',        kind: 'poll', label: 'connector gate heartbeat', cadence_sec: 120, status: 'paused',  risk_class: 'read_only', since: '—' },
+  { id: 'bg_p04', keeper: 'sangsu',        kind: 'poll', label: 'connector gate heartbeat', cadence_sec: 60, status: 'paused',  risk_class: 'read_only', since: '—' },
   { id: 'bg_a01', keeper: 'masc-improver', kind: 'async_tool', label: 'tool_execute · 회귀 스위트 빌드', tool: 'tool_execute', status: 'in_flight', risk_class: 'workspace_write', issued: '13:58', eta: '~2m' },
   { id: 'bg_a02', keeper: 'analyst',       kind: 'async_tool', label: 'amplitude 쿼리 · retention 30d', tool: 'mcp.amplitude', status: 'awaiting',  risk_class: 'external_write', issued: '13:55', eta: '응답 대기' },
   { id: 'bg_a03', keeper: 'nick0cave',     kind: 'async_tool', label: 'MCP fetch · docs 링크 검증', tool: 'mcp.fetch', status: 'in_flight', risk_class: 'read_only', issued: '14:00', eta: '~40s' },

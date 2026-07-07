@@ -35,7 +35,7 @@ import {
   toolsLoading,
 } from '../tools/tool-state'
 import { pruneSchedules } from '../../api/dashboard-governance'
-import { MOCK_SCHEDULES, MOCK_SIGNALS } from './schedule-mock-data'
+import { MOCK_SCHEDULES, MOCK_SIGNALS, baseTime } from './schedule-mock-data'
 
 type ScheduleView = 'calendar' | 'list'
 
@@ -251,7 +251,7 @@ export function ScheduleSurface() {
                 requests=${requests}
                 signals=${activeAutomation?.signals ?? []}
                 demoMode=${demoMode}
-                nowMs=${Date.now()}
+                nowMs=${demoMode ? baseTime.getTime() : Date.now()}
                 cadenceFilter=${cadenceFilter}
                 onOpen=${setSelectedScheduleId}
                 onOpenKeeper=${(id: string) => showToast(`${id} 대화 열기 (데모)`, 'success')}

@@ -16,7 +16,6 @@ import { html } from 'htm/preact'
 import type { DashboardScheduledAutomationRequest } from '../../api'
 import {
   automationTone,
-  recurrenceLabel,
 } from '../tools/scheduled-automation-panel'
 import {
   SCHED_CADENCE,
@@ -219,7 +218,7 @@ export function CadenceTag({ cadence, full }: { cadence: Cadence; full?: boolean
   const spec = SCHED_CADENCE[cadence]
   return html`
     <span class=${`sch-cad ${spec.cls}`} title=${spec.hint}>
-      ${spec.glyph} ${full ? spec.lbl : spec.short}
+      ${spec.glyph ? `${spec.glyph} ` : ''}${full ? spec.lbl : spec.short}
     </span>
   `
 }
@@ -281,6 +280,13 @@ function StatusTag({ status }: { status: string | null | undefined }) {
   return html`<span class=${`sch-pill ${spec.cls}`}>${spec.glyph} ${spec.lbl}</span>`
 }
 
+function formatIntervalCadence(seconds: number): string {
+  if (seconds % 86400 === 0) return `매 ${seconds / 86400}d`
+  if (seconds % 3600 === 0) return `매 ${seconds / 3600}h`
+  if (seconds % 60 === 0) return `매 ${seconds / 60}m`
+  return `매 ${seconds}s`
+}
+
 function PollingCard({
   request,
   nextTickMs,
@@ -300,7 +306,7 @@ function PollingCard({
       onClick=${() => onOpen(request.schedule_id)}
     >
       <div class="sch-poll-top">
-        <span class="sch-poll-int mono">↻ ${recurrenceLabel(request)}</span>
+        <span class="sch-poll-int mono">↻ ${formatIntervalCadence(request.recurrence?.interval_sec ?? 0)}</span>
         <${StatusTag} status=${request.effective_status ?? request.status} />
       </div>
       <div class="sch-poll-title">${summaryText(request)}</div>
@@ -460,10 +466,19 @@ function SchKeeperBgRow({
   row: BackgroundSignal
   onOpenKeeper: (keeperId: string) => void
 }) {
-  const tone = row.status === 'running' || row.status === 'in_flight' ? 'ok' : row.status === 'paused' ? 'idle' : 'warn'
   const isPoll = row.kind === 'poll'
-  const cadenceText = isPoll ? `↻ ${row.cadence_sec}s` : '⇢ 비동기'
-  const stateLabel = row.status === 'running' || row.status === 'in_flight' ? '▶ 도는 중' : row.status === 'paused' ? '⏸ 일시정지' : '⊙ 대기 중'
+  const cadenceText = isPoll ? `↻ ${formatIntervalCadence(row.cadence_sec ?? 0)}` : '⇢ 비동기'
+  
+  let tone = 'idle'
+  let stateLabel = ''
+  if (isPoll) {
+    tone = row.status === 'running' ? 'ok' : 'idle'
+    stateLabel = row.status === 'running' ? '▶ 도는 중' : '⏸ 일시정지'
+  } else {
+    tone = row.status === 'in_flight' || row.status === 'running' ? 'ok' : 'warn'
+    stateLabel = row.status === 'in_flight' || row.status === 'running' ? '▶ 실행 중' : '⧗ 결과 대기'
+  }
+
   const slot = kSlot(row.keeper)
   const sigil = kSigil(row.keeper)
   

@@ -12,8 +12,8 @@ export interface SchedStatusSpec {
 
 export const SCHED_STATUS: Readonly<Record<string, SchedStatusSpec>> = {
   pending_approval: { lbl: '승인 대기', cls: 'warn', glyph: '◷' },
-  scheduled: { lbl: '예약됨', cls: 'info', glyph: '◈' },
-  due: { lbl: 'due', cls: 'warn', glyph: '◉' },
+  scheduled: { lbl: '예약됨', cls: 'info', glyph: '●' },
+  due: { lbl: 'due', cls: 'warn', glyph: '●' },
   running: { lbl: '실행 중', cls: 'ok', glyph: '▶' },
   succeeded: { lbl: '완료', cls: 'ok', glyph: '✓' },
   failed: { lbl: '실패', cls: 'bad', glyph: '✕' },
@@ -117,7 +117,7 @@ export const SCHED_CADENCE: Readonly<Record<Cadence, SchedCadenceSpec>> = {
     key: 'scheduled',
     lbl: '정기 · 시각',
     short: '정기',
-    glyph: '◈',
+    glyph: '',
     cls: 'ok',
     hint: '지정 시각에 반복되는 정기 잡 (daily · cron)',
   },

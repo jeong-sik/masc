@@ -40,7 +40,7 @@ let dispatch ~agent_name ~name ~args =
           then err ("Recurring task with label '" ^ label ^ "' already exists for " ^ keeper_name)
           else (
             let action = Broadcast label in
-            let task = add ~keeper_name ~label ~interval_sec ~action in
+            let task = add ~keeper_name ~label ~interval_sec action in
             ok (task_to_json task))
         | None, _ -> err "masc_recurring_add requires a string 'label' field"
         | _, None -> err "masc_recurring_add requires an int 'interval_sec' field"

@@ -5,11 +5,13 @@
 
 open Keeper_recurring
 
+(* TEL-OK: this keeper adapter returns [Tool_result] values through the shared
+   tool dispatch path, where tool-call telemetry/audit observers run. *)
 let dispatch ~agent_name ~name ~args =
   let open Tool_result in
   let start_time = Time_compat.now () in
-  let ok data = make_ok ~tool_name:name ~start_time ~data () in
-  let err msg = make_err ~tool_name:name ~class_:Workflow_rejection ~start_time msg in
+  let ok data = Some (make_ok ~tool_name:name ~start_time ~data ()) in
+  let err msg = Some (make_err ~tool_name:name ~class_:Workflow_rejection ~start_time msg) in
   let keeper_name_of_fields fields =
     match List.assoc_opt "keeper_name" fields with
     | Some (`String s) -> s

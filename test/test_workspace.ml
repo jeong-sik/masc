@@ -1521,6 +1521,21 @@ let keeper_meta_for_self_filter agent_name =
   | Ok meta -> { meta with active_goal_ids = [] }
   | Error err -> Alcotest.fail ("keeper_meta_for_self_filter failed: " ^ err)
 
+let keeper_meta_for_goal_filter agent_name active_goal_ids =
+  let json =
+    `Assoc
+      [ ("name", `String "goal-filter-keeper")
+      ; ("agent_name", `String agent_name)
+      ; ("trace_id", `String "trace-goal-filter")
+      ; ("goal", `String "goal filter regression")
+      ; ( "active_goal_ids"
+        , `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) )
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("keeper_meta_for_goal_filter failed: " ^ err)
+
 (* Keepers can claim without a materialized [.masc/agents/] record. The keeper
    backlog failed-task count must exclude the keeper's own claimed task so it
    does not re-trigger a self-wake loop. *)
@@ -1536,6 +1551,23 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
+  )
+
+let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
+  with_test_env (fun config ->
+    let keeper = "keeper-goal-filter-agent" in
+    let _ =
+      Workspace.add_task config ~goal_id:"goal-b" ~title:"Goal B work"
+        ~priority:1 ~description:""
+    in
+    let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
+    let _, claimable, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "claimable count falls back to unscoped todo"
+      1
+      claimable
   )
 
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
@@ -2053,6 +2085,9 @@ let () =
         test_audit_orphan_spares_keeper_owned_meta_within_grace;
       Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
         test_read_backlog_counts_excludes_self_owned_orphan;
+      Alcotest.test_case "read backlog counts falls back to unscoped claimable"
+        `Quick
+        test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
       Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;

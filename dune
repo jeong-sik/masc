@@ -15,11 +15,11 @@
   (flags
    (:standard -warn-error +8))))
 
-; Build-time check: reject OPERATOR_TODO placeholders in source code.
-; This prevents deployment of code with unresolved placeholders.
+; Build-time check: reject OPERATOR_TODO placeholders in persona profiles.
+; Runs automatically with `dune build @check` — no more opt-in alias.
 (rule
- (alias check-operator-todo)
+ (alias @check)
  (deps
-  (source_tree .))
+  (source_tree config/personas))
  (action
-  (run scripts/ci/check-persona-profile-placeholders.sh .)))
+  (run scripts/ci/check-persona-profile-placeholders.sh config/personas)))

@@ -84,15 +84,32 @@ let deliver_slack ~config ~keeper_name ~channel_id ~content =
             ~content ();
           Delivered { kind = "slack" })
 
-let maybe_deliver ~config ~keeper_name ~channel ~already_replied ~content =
-  if String.trim content = "" then Skipped_empty
-  else if already_replied then Skipped_already_replied
+type gate =
+  | Deliver
+  | Skip of outcome
+
+let gate_decision ~channel ~already_replied ~content : gate =
+  if String.trim content = "" then Skip Skipped_empty
+  else if already_replied then Skip Skipped_already_replied
   else
     match (channel : Keeper_continuation_channel.t) with
-    | Keeper_continuation_channel.Unrouted _ -> Skipped_unrouted
-    | Keeper_continuation_channel.Dashboard { thread_id = _ } ->
-        deliver_dashboard ~config ~keeper_name ~content
-    | Keeper_continuation_channel.Discord { channel_id; _ } ->
-        deliver_discord ~config ~keeper_name ~channel_id ~content
-    | Keeper_continuation_channel.Slack { channel_id; _ } ->
-        deliver_slack ~config ~keeper_name ~channel_id ~content
+    | Keeper_continuation_channel.Unrouted _ -> Skip Skipped_unrouted
+    | Keeper_continuation_channel.Dashboard _
+    | Keeper_continuation_channel.Discord _
+    | Keeper_continuation_channel.Slack _ ->
+        Deliver
+
+let maybe_deliver ~config ~keeper_name ~channel ~already_replied ~content =
+  match gate_decision ~channel ~already_replied ~content with
+  | Skip outcome -> outcome
+  | Deliver -> (
+      match (channel : Keeper_continuation_channel.t) with
+      | Keeper_continuation_channel.Dashboard { thread_id = _ } ->
+          deliver_dashboard ~config ~keeper_name ~content
+      | Keeper_continuation_channel.Discord { channel_id; _ } ->
+          deliver_discord ~config ~keeper_name ~channel_id ~content
+      | Keeper_continuation_channel.Slack { channel_id; _ } ->
+          deliver_slack ~config ~keeper_name ~channel_id ~content
+      (* [gate_decision] returns [Skip] for [Unrouted]; this arm keeps the
+         match exhaustive and is unreachable via [Deliver]. *)
+      | Keeper_continuation_channel.Unrouted _ -> Skipped_unrouted)

@@ -19,6 +19,22 @@ type outcome =
 (** [describe_outcome o] is a stable one-line tag for logs/observability. *)
 val describe_outcome : outcome -> string
 
+(** The pure delivery decision, separated from the I/O so it can be tested
+    without a live connector. *)
+type gate =
+  | Deliver  (** the channel is routable and no dedup/empty skip applies *)
+  | Skip of outcome  (** delivery is skipped; carries the reason *)
+
+(** [gate_decision ~channel ~already_replied ~content] is the fail-closed gate:
+    empty content, an already-replied turn, or an [Unrouted] channel each yield
+    [Skip] with the matching outcome; a routable channel yields [Deliver]. Pure
+    (no I/O), so tests can assert the gate without a connector. *)
+val gate_decision :
+  channel:Keeper_continuation_channel.t ->
+  already_replied:bool ->
+  content:string ->
+  gate
+
 (** [maybe_deliver ~config ~keeper_name ~channel ~already_replied ~content]
     delivers [content] to [channel] via the existing send infrastructure, gated:
 

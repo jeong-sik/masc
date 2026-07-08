@@ -24,8 +24,7 @@
   keeper_runtime_failure_route
   keeper_latched_reason
   keeper_event_queue
-  keeper_event_queue_persistence
-  keeper_continuation_channel)
+  keeper_event_queue_persistence)
  (libraries
   agent_sdk
   agent_sdk.llm_provider

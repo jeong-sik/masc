@@ -386,8 +386,13 @@ let run_try_provider
       (ctx : try_provider_ctx)
       ?resume_checkpoint
       ?per_provider_timeout_s
+      ?enable_thinking_override
       candidate
   =
+  (* [enable_thinking_override] lets the caller re-issue the SAME candidate with a
+     different thinking policy without mutating [ctx]. RFC-0271 §4.1 uses it for the
+     [Retry_no_thinking] recovery arm: a [Thinking_only_no_progress] rejection is
+     retried once with thinking forced off before rerouting to the next candidate. *)
   let config_result =
     match
       Runtime_candidate.resolve_tool_lane_for_oas_tools
@@ -467,7 +472,10 @@ let run_try_provider
           ; checkpoint_dir = ctx.checkpoint_dir
           ; context_injector = ctx.context_injector
           ; context = ctx.context
-          ; enable_thinking = ctx.enable_thinking
+          ; enable_thinking =
+              (match enable_thinking_override with
+               | Some v -> Some v
+               | None -> ctx.enable_thinking)
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; approval = ctx.approval

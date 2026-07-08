@@ -140,3 +140,39 @@ recovery 재시도가 `autonomous_max_turns_per_call` budget을 silent 소비하
 - recovery retry의 budget 회계를 `autonomous_max_turns_per_call`에 포함할지 별도 ceiling으로 격리할지는 PR-1에서 측정 후 결정.
 - `Reroute_tool_reliable`의 "tool-reliable" 판정 기준: capability 선언(`tools-support`)은 신뢰 불가(이 RFC의 동기)이므로, 라이브 tool-call 성공률 메트릭(keeper×runtime별 `thinking_chars` 분포 포함)을 별도 진단 축으로 수집해야 정확한 후보 선택이 가능하다. 초기 구현은 config 선언 순서(media_failover 류)로 시작.
 - RFC number allocation: `.next-number=0272`는 RFC-0270(CI Gate merge guard)와 이 RFC-0271이 모두 배정됐기 때문이다. RFC-0271은 RFC-0270에 runtime/design dependency를 갖지 않는다.
+
+## 9. Implementation status & diagnosis refresh (2026-07-08)
+
+> Verified against `origin/main` @ current HEAD. RFC-0271's original §3 diagnosis
+> ("recovery arm 0", `keeper_turn_driver_try_runtime.ml:196-212`) predates the
+> current tree and is partially stale — the reroute arm has since landed.
+
+### What already exists on current main (not this RFC's work)
+
+- The accept rejection is already typed as `Thinking_only_no_progress` /
+  `Empty_no_progress` / `Read_only_no_progress`
+  (`Keeper_internal_error.accept_no_progress_retry_kind`).
+- The **reroute arm** (§4.1 rule 2 — `Reroute_tool_reliable`) is already
+  implemented: `accept_rejected_result_should_try_next` +
+  `checkpoint_for_accept_rejected_retry` route a no-progress rejection to the next
+  runtime candidate. This is the "failover works" behavior the live diagnosis
+  observed (it just costs a full-turn re-run on a more expensive lane).
+
+### What the first implementation PR does (§4.1 rule 1 — the remaining gap)
+
+- **`Retry_no_thinking`**: a `Thinking_only_no_progress` rejection on a
+  thinking-enabled attempt now gets ONE same-candidate retry with thinking forced
+  off (new `?enable_thinking_override` on `run_try_provider`) BEFORE the existing
+  reroute. Bounded to once per turn (`recovered_no_thinking`); emits a fresh
+  provider-attempt-started so the RFC-0012 watchdog sees progress (§4.3). The
+  decision is a pure `should_retry_no_thinking` gate (unit-tested truth table).
+
+### Deferred / re-scoped
+
+- **§4.2 thinking-budget wiring does NOT fit the observed `deepseek-v4-flash`
+  case.** flash declares `thinking-control-format = "reasoning-effort"`
+  (`config/runtime.toml`) and has no `max_thinking_budget`, so a token-budget
+  ceiling (`with_thinking_budget n`) is the wrong control surface. A flash
+  preventive would need a **reasoning-effort cap**, a separate mechanism outside
+  §4.2's token-budget scope — a follow-up, not this arm. §4.2 remains valid for
+  token-budget runtimes (Anthropic-style).

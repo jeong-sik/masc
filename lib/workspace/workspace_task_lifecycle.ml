@@ -74,7 +74,18 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
   | Masc_domain.Done { assignee; _ } ->
     (match Masc_domain.task_claim_decision task with
      | Masc_domain.Claim_available Masc_domain.Claim_ready ->
-       Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
+       (* WORKAROUND: interim self-livelock guard. A completed [Allow_reclaim]
+          task is reclaimable by a DIFFERENT actor (coordination hand-off), but
+          the completer re-claiming its own [Done] task busy-loops
+          (complete -> reclaim -> complete). Every other owned state already
+          returns [Self_owned] for [same_actor]; the [Done] arm is the only one
+          missing that invariant, so restore it here. Root fix: model recurring
+          coordination work as RFC-0314 recurrence (a new task instance per
+          interval) instead of reclaiming a terminal task in place, removing the
+          reclaim-on-[Done] path entirely. removal target: RFC-0323 merge. *)
+       if same_actor assignee
+       then Self_owned
+       else Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
      | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_reclaim_policy reason) ->
        Blocked_by_reclaim_policy reason
      | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->

@@ -437,6 +437,15 @@ let test_resolve_claim_outcomes () =
    with
    | L.Worker_claim (D.Claimed { assignee = "w"; _ }) -> ()
    | _ -> fail "Done with Allow_reclaim should resolve to Worker_claim Claimed");
+  (* Self-livelock guard: the completer must not reclaim its own Done task, even
+     with Allow_reclaim — that busy-loops complete -> reclaim. Only a different
+     actor may reclaim (asserted above). *)
+  (match
+     L.resolve_claim ~same_actor:(actor other) ~agent_name:other ~now
+       (mk_task ~reclaim_policy:D.Allow_reclaim (mk_done other))
+   with
+   | L.Self_owned -> ()
+   | _ -> fail "own Done+Allow_reclaim must resolve to Self_owned (self-livelock guard)");
   match
     L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
       (mk_task ~reclaim_policy:D.Block_reclaim (mk_done other))

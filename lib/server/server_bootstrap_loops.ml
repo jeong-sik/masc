@@ -779,14 +779,9 @@ let start_keeper_loops
           interaction_judge_ctx));
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
-  fork_subsystem "verification_timeout" (fun () ->
-    let interval = Env_config_runtime.Verification.timeout_check_interval_seconds in
-    let rec loop () =
-      Eio.Time.sleep clock interval;
-      Verification_protocol.check_timeouts ~config:(Mcp_server.workspace_config state);
-      loop ()
-    in
-    loop ());
+  (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —
+     the wall-clock deadline rescue was removed in §5 and the fork had been
+     spinning on a no-op since PR-1. *)
   (* HITL approval queue death-spiral fix.
      [Keeper_approval_queue.expire_stale] has been a complete
      implementation (queue removal, audit event, promise [Reject]

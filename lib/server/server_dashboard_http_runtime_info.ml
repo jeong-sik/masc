@@ -1970,6 +1970,51 @@ let governance_hitl_json () =
     ]
 ;;
 
+let shell_ir_approval_json () =
+  let gate_enabled = Env_config_runtime.Shell_ir_approval_gate.enabled () in
+  let raw_overlay = Env_config_runtime.Shell_ir_approval.raw_overlay () in
+  let parsed_overlay =
+    match raw_overlay with
+    | Some raw -> Masc_exec.Approval_config.shell_ir_approval_overlay_of_string raw
+    | None -> None
+  in
+  let effective_overlay =
+    Option.value parsed_overlay ~default:Masc_exec.Approval_config.autonomous
+  in
+  let source =
+    match raw_overlay with
+    | None -> `String "default_autonomous"
+    | Some _ when Option.is_some parsed_overlay -> `String "raw_overlay"
+    | Some _ -> `String "invalid_overlay_fallback_autonomous"
+  in
+  let reason =
+    match gate_enabled, raw_overlay, parsed_overlay with
+    | false, _, _ ->
+      `String "shell-ir approval gate disabled via MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
+    | true, None, _ ->
+      `String "using fallback overlay: Masc_exec.Approval_config.autonomous"
+    | true, Some raw, Some _ ->
+      `String ("using parsed MASC_SHELL_IR_APPROVAL value: " ^ raw)
+    | true, Some raw, None ->
+      `String
+        ("invalid MASC_SHELL_IR_APPROVAL value; fallback to autonomous: " ^ raw)
+  in
+  `Assoc
+    [ "schema", `String "masc.shell_ir_approval.v1"
+    ; "enabled", `Bool gate_enabled
+    ; "env_key", `String "MASC_SHELL_IR_APPROVAL"
+    ; "raw_overlay", Json_util.string_opt_to_json raw_overlay
+    ; ( "trust"
+      , `Assoc
+          [ "safe", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.safe_trust)
+          ; "audited", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.audited_trust)
+          ; "privileged", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.privileged_trust)
+          ] )
+    ; "source", source
+    ; "reason", reason
+    ]
+;;
+
 let runtime_inventory_json () =
   let runtimes = Runtime.get_runtimes () in
   let default_id = runtime_default_runtime_id () in
@@ -2255,6 +2300,7 @@ let runtime_resolution_json (config : Workspace.config) =
         , deployment_state_json ~build ~server_repo_commit ~workspace_commit
             ~resolved_base_commit ~upstream_status ~source_mismatch )
       ; "governance_hitl", governance_hitl_json ()
+      ; "shell_ir_approval", shell_ir_approval_json ()
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
@@ -2334,6 +2380,7 @@ let light_runtime_resolution_json (config : Workspace.config) =
       ; "diagnostics", `List []
       ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
       ; "build", Build_identity.to_yojson build
+      ; "shell_ir_approval", shell_ir_approval_json ()
       ]
       @ fleet_fields )
 ;;

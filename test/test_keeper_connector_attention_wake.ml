@@ -99,9 +99,13 @@ let external_attention_item ?(urgency = A.Ambient) ?(preview = "ambient TOKEN-12
         };
     source_label = "discord";
     continuation_channel =
-      Keeper_continuation_channel.routed
-        (Keeper_chat_connector.Discord
-           { channel_id = "chan-1"; user_id = "user-1" });
+      Keeper_continuation_channel.Discord
+        { guild_id = Some "guild-1"
+        ; channel_id = "chan-1"
+        ; parent_channel_id = None
+        ; thread_id = None
+        ; user_id = "user-1"
+        };
     actor =
       {
         actor_id = Some "user-1";
@@ -172,31 +176,62 @@ let test_connector_attention_codec_roundtrips () =
     { Q.post_id = "evt-77"
     ; urgency = Q.Normal
     ; arrived_at = 1.0
-    ; payload = Q.Connector_attention { event_id = "evt-77" }
+    ; payload =
+        Q.Connector_attention
+          { event_id = "evt-77"
+          ; channel =
+              Keeper_continuation_channel.Discord
+                { guild_id = Some "guild-77"
+                ; channel_id = "chan-77"
+                ; parent_channel_id = Some "parent-77"
+                ; thread_id = Some "thread-77"
+                ; user_id = "user-77"
+                }
+          }
     }
   in
   match Q.stimulus_of_yojson (Q.stimulus_to_yojson s) with
   | Ok s' -> (
     match s'.Q.payload with
-    | Q.Connector_attention { event_id } ->
-      check string "event_id survives the JSON round-trip" "evt-77" event_id
+    | Q.Connector_attention { event_id; channel } ->
+      check string "event_id survives the JSON round-trip" "evt-77" event_id;
+      check bool "connector coordinates survive the JSON round-trip" true
+        (Keeper_continuation_channel.same_route
+           channel
+           (Keeper_continuation_channel.Discord
+              { guild_id = Some "guild-77"
+              ; channel_id = "chan-77"
+              ; parent_channel_id = Some "parent-77"
+              ; thread_id = Some "thread-77"
+              ; user_id = "user-77"
+              }))
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
 
 let check_continuation_roundtrip label channel =
   match Continuation.of_yojson (Continuation.to_yojson channel) with
   | Ok decoded ->
-    check string label (Continuation.to_string channel) (Continuation.to_string decoded)
+    check string label (Continuation.describe channel) (Continuation.describe decoded)
   | Error err -> fail (label ^ " decode failed: " ^ err)
 
 let test_continuation_channel_codec_roundtrips () =
   check_continuation_roundtrip "Dashboard continuation round-trip"
-    (Continuation.routed Connector.Dashboard);
+    (Continuation.Dashboard { thread_id = "dashboard-thread" });
   check_continuation_roundtrip "Discord continuation round-trip"
-    (Continuation.routed
-       (Connector.Discord { channel_id = "chan-1"; user_id = "user-1" }));
+    (Continuation.Discord
+       { guild_id = Some "guild-1"
+       ; channel_id = "chan-1"
+       ; parent_channel_id = None
+       ; thread_id = None
+       ; user_id = "user-1"
+       });
   check_continuation_roundtrip "Slack continuation round-trip"
-    (Continuation.routed (Connector.Slack { channel = "C123"; user_id = "U123" }));
+    (Continuation.Slack
+       { team_id = Some "team-1"
+       ; channel_id = "C123"
+       ; thread_ts = None
+       ; user_id = "U123"
+       });
   check_continuation_roundtrip "Unrouted continuation round-trip"
     (Continuation.unrouted "fixture missing connector")
 
@@ -205,11 +240,10 @@ let test_unknown_continuation_kind_fails_closed () =
     Continuation.of_yojson
       (`Assoc [ ("kind", `String "teams"); ("channel_id", `String "c") ])
   with
-  | Ok (Continuation.Unrouted { reason }) ->
-    check bool "unknown kind is surfaced in reason" true
-      (contains ~needle:"unsupported continuation channel kind: teams" reason)
-  | Ok (Continuation.Routed _) -> fail "unknown kind decoded as a routed channel"
-  | Error err -> fail ("unknown kind should be Unrouted, got error: " ^ err)
+  | Error err ->
+    check bool "unknown kind is surfaced in error" true
+      (contains ~needle:"unknown kind: teams" err)
+  | Ok _ -> fail "unknown kind decoded successfully"
 
 let test_connector_decode_error_contract () =
   let queue_error =
@@ -260,7 +294,7 @@ let () =
             test_connector_attention_codec_roundtrips
         ; test_case "continuation_channel JSON round-trips" `Quick
             test_continuation_channel_codec_roundtrips
-        ; test_case "unknown continuation kind becomes Unrouted" `Quick
+        ; test_case "unknown continuation kind fails closed" `Quick
             test_unknown_continuation_kind_fails_closed
         ; test_case "connector decode errors have queue mapping" `Quick
             test_connector_decode_error_contract

@@ -44,9 +44,13 @@ let item ?(dedupe_key = "discord:chan-1:msg-1") ?(keeper_name = "sangsu")
     external_message;
     source_label = "discord";
     continuation_channel =
-      Keeper_continuation_channel.routed
-        (Keeper_chat_connector.Discord
-           { channel_id = "chan-1"; user_id = "actor-1" });
+      Keeper_continuation_channel.Discord
+        { guild_id = Some "guild-1"
+        ; channel_id = "chan-1"
+        ; parent_channel_id = None
+        ; thread_id = None
+        ; user_id = "actor-1"
+        };
     actor =
       {
         actor_id = Some "user-1";

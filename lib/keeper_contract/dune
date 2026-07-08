@@ -9,7 +9,6 @@
   keeper_transition_audit_types
   keeper_world_observation_turn_types
   keeper_chat_connector
-  keeper_continuation_channel
   keeper_approval_queue_rules_types
   keeper_invariant
   keeper_path_rejection)
@@ -18,6 +17,7 @@
   eio
   masc.keeper_registry
   masc.keeper_metrics
+  masc.keeper_runtime
   masc.masc_core
   masc.masc_types
   unix

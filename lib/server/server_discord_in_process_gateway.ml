@@ -266,8 +266,13 @@ let discord_continuation_channel ~channel_id ~author_id =
     Keeper_continuation_channel.unrouted
       "discord attention missing channel_id or author_id"
   else
-    Keeper_continuation_channel.routed
-      (Keeper_chat_connector.Discord { channel_id; user_id = author_id })
+    Keeper_continuation_channel.Discord
+      { guild_id = None
+      ; channel_id
+      ; parent_channel_id = None
+      ; thread_id = None
+      ; user_id = author_id
+      }
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
@@ -601,6 +606,8 @@ let handle_ambient ~base_dir
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_too_long
     else begin
+      let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+      let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
           ~message_id ~author_id ~author_name ~content:trimmed
@@ -614,8 +621,8 @@ let handle_ambient ~base_dir
              {
                guild_id;
                channel_id;
-               parent_channel_id = None;
-               thread_id = None;
+               parent_channel_id;
+               thread_id;
              })
         ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
         ~external_message_id:message_id
@@ -648,7 +655,20 @@ let handle_ambient ~base_dir
            ; urgency = Keeper_event_queue.Low
            ; arrived_at = Unix.gettimeofday ()
              (* NDT-OK: stimulus receipt time, used only for ordering/age *)
-           ; payload = Keeper_event_queue.Connector_attention { event_id }
+           ; payload =
+               (* RFC-0320: carry the originating Discord channel+author so a
+                  woken keeper replies into the same thread, not its own state. *)
+               Keeper_event_queue.Connector_attention
+                 { event_id
+                 ; channel =
+                     Keeper_continuation_channel.Discord
+                       { guild_id
+                       ; channel_id
+                       ; parent_channel_id
+                       ; thread_id
+                       ; user_id = author_id
+                       }
+                 }
            }
          in
          Keeper_registry_event_queue.enqueue ~base_path:base_dir keeper_name stimulus;

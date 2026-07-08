@@ -181,6 +181,9 @@ let audit_approval_event
       ?source_approval_id
       ?auto_approved
       ?continuation_channel
+      ?actor
+      ?approval_mode
+      ?authorizing_band
       ?decision
       ()
   =
@@ -240,6 +243,15 @@ let audit_approval_event
             | None -> [])
          @ (match decision_reason with
             | Some reason -> [ "decision_reason", `String reason ]
+            | None -> [])
+         @ (match actor with
+            | Some value -> [ "actor", `String value ]
+            | None -> [])
+         @ (match approval_mode with
+            | Some value -> [ "approval_mode", `String value ]
+            | None -> [])
+         @ (match authorizing_band with
+            | Some value -> [ "authorizing_band", `String value ]
             | None -> [])
          @
          match auto_approved with
@@ -379,6 +391,10 @@ let resolved_approval_json_of_audit_event json =
     ; "disposition", json_member_or_null "disposition" json
     ; "disposition_reason", json_member_or_null "disposition_reason" json
     ; "rule_match", json_member_or_null "rule_match" json
+    ; "actor", json_member_or_null "actor" json
+    ; "approval_mode", json_member_or_null "approval_mode" json
+    ; "authorizing_band", json_member_or_null "authorizing_band" json
+    ; "auto_approved", json_member_or_null "auto_approved" json
     ]
 ;;
 
@@ -1156,32 +1172,46 @@ let submit_and_await
          Eio.Promise.await promise)
     | None, _ -> Eio.Promise.await promise
   in
-  Eio_guard.protect await_with_timeout ~finally:(fun () ->
-    Safe_ops.protect ~default:() (fun () ->
+  let cleanup_cancelled_await () =
+    if SMap.mem id (Atomic.get pending)
+    then (
       (match Eio.Promise.peek promise with
        | Some _ -> ()
        | None ->
          let reason = "approval await cancelled before operator decision" in
-         audit_approval_event
-           ~base_path:entry.audit_base_path
-           ~event_type:"cancelled"
-           ~id
-           ~keeper_name
-           ~tool_name
-           ~risk_level
-           ?turn_id
-           ?task_id
-           ?goal_id
-           ~goal_ids
-           ~sandbox_target:entry.sandbox_target
-           ?runtime_contract
-           ?selected_model
-           ?disposition
-           ?disposition_reason
-           ~continuation_channel:entry.continuation_channel
-           ~decision:(Approval_expired reason)
-           ());
-      atomic_update pending (fun map -> SMap.remove id map)))
+         (try
+            audit_approval_event
+              ~base_path:entry.audit_base_path
+              ~event_type:"cancelled"
+              ~id
+              ~keeper_name
+              ~tool_name
+              ~risk_level
+              ?turn_id
+              ?task_id
+              ?goal_id
+              ~goal_ids
+              ~sandbox_target:entry.sandbox_target
+              ?runtime_contract
+              ?selected_model
+              ?disposition
+              ?disposition_reason
+              ~continuation_channel:entry.continuation_channel
+              ~decision:(Approval_expired reason)
+              ()
+          with
+          | Eio.Cancel.Cancelled _ -> ()
+          | exn ->
+            Log.Keeper.warn
+              "approval_queue: cancellation audit failed id=%s err=%s"
+              id
+              (Printexc.to_string exn)));
+      atomic_update pending (fun map -> SMap.remove id map))
+  in
+  try Fun.protect ~finally:cleanup_cancelled_await await_with_timeout with
+  | Eio.Cancel.Cancelled _ as e ->
+    cleanup_cancelled_await ();
+    raise e
 ;;
 
 let submit_pending

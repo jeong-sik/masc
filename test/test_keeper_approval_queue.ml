@@ -8,7 +8,6 @@
 
 module AQ = Masc.Keeper_approval_queue
 module Continuation = Keeper_continuation_channel
-module Connector = Keeper_chat_connector
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
@@ -146,8 +145,13 @@ let test_resolve_fires_keeper_wake_hook () =
              ~risk_level:AQ.Critical
              ~base_path
              ~continuation_channel:
-               (Continuation.routed
-                  (Connector.Discord { channel_id = "chan-7"; user_id = "user-9" }))
+               (Continuation.Discord
+                  { guild_id = None
+                  ; channel_id = "chan-7"
+                  ; parent_channel_id = None
+                  ; thread_id = None
+                  ; user_id = "user-9"
+                  })
              ()
          in
          result := Some decision);
@@ -184,8 +188,8 @@ let test_approval_entry_carries_continuation_channel () =
     (fun () ->
        let keeper_name = "approval-continuation-channel-test" in
        let channel =
-         Continuation.routed
-           (Connector.Slack { channel = "C123"; user_id = "U456" })
+         Continuation.Slack
+           { team_id = None; channel_id = "C123"; thread_ts = None; user_id = "U456" }
        in
        let id =
          AQ.submit_pending
@@ -209,8 +213,8 @@ let test_approval_entry_carries_continuation_channel () =
        in
        Alcotest.(check string)
          "entry carries captured continuation channel"
-         (Continuation.to_string channel)
-         (Continuation.to_string entry.continuation_channel);
+         (Continuation.describe channel)
+         (Continuation.describe entry.continuation_channel);
        let detail =
          match AQ.get_pending_json ~id with
          | Some json -> json
@@ -225,7 +229,7 @@ let test_approval_entry_carries_continuation_channel () =
        Alcotest.(check string)
          "detail JSON carries channel id"
          "C123"
-         (json_channel |> member "channel" |> to_string);
+         (json_channel |> member "channel_id" |> to_string);
        (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
         | Ok () -> ()
         | Error err ->
@@ -245,7 +249,7 @@ let test_approval_entry_carries_continuation_channel () =
          Alcotest.(check string)
            (label ^ " audit channel id")
            "C123"
-           (audit_channel |> member "channel" |> to_string)
+           (audit_channel |> member "channel_id" |> to_string)
        in
        let pending_audit =
          match find_audit_event AQ.approval_audit_pending_event with

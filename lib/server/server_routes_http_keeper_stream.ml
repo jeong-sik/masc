@@ -142,12 +142,20 @@ let continuation_channel_of_request payload =
     let channel_user_id = String.trim payload.channel_user_id in
     match channel with
     | "discord" when channel_workspace_id <> "" && channel_user_id <> "" ->
-      Keeper_continuation_channel.routed
-        (Keeper_chat_connector.Discord
-           { channel_id = channel_workspace_id; user_id = channel_user_id })
+      Keeper_continuation_channel.Discord
+        { guild_id = None
+        ; channel_id = channel_workspace_id
+        ; parent_channel_id = None
+        ; thread_id = None
+        ; user_id = channel_user_id
+        }
     | "slack" when channel_workspace_id <> "" && channel_user_id <> "" ->
-      Keeper_continuation_channel.routed
-        (Keeper_chat_connector.Slack { channel = channel_workspace_id; user_id = channel_user_id })
+      Keeper_continuation_channel.Slack
+        { team_id = None
+        ; channel_id = channel_workspace_id
+        ; thread_ts = None
+        ; user_id = channel_user_id
+        }
     | "discord" | "slack" ->
       Keeper_continuation_channel.unrouted
         "connector continuation missing channel_workspace_id or channel_user_id"
@@ -157,7 +165,7 @@ let continuation_channel_of_request payload =
     | other ->
       Keeper_continuation_channel.unrouted
         ("unsupported connector continuation channel: " ^ other))
-  else Keeper_continuation_channel.routed Keeper_chat_connector.Dashboard
+  else Keeper_continuation_channel.Dashboard { thread_id = payload.name }
 
 let args_of_request payload : Yojson.Safe.t =
   let message = message_for_request payload in

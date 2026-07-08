@@ -208,6 +208,7 @@ let review_completion_notes
         completion_notes = notes;
         agent_name = ctx.agent_name;
         task_id = task.id;
+        evidence_refs = [];
       } in
       (* task-1664: the persisted contract's evidence obligations must reach
          the LLM prompt too, not only [completion_contract]. Read them from

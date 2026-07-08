@@ -56,8 +56,6 @@ let generate_trace_id () =
     of silently allowing every tool through. Mirrors the fail-closed posture
     of [audit_threshold] just below. See #7641 / #8605. *)
 let confirm_threshold governance_level =
-  if Env_config_core.disable_hitl () then None
-  else
     match governance_level with
     | "paranoid" -> Some Medium
     | "enterprise" -> Some High
@@ -72,8 +70,6 @@ let confirm_threshold governance_level =
 ;;
 
 let keeper_confirm_threshold governance_level =
-  if Env_config_core.disable_hitl () then None
-  else
     match governance_level with
     | "production" -> Some High
     | other -> confirm_threshold other

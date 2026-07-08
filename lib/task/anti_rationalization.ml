@@ -739,10 +739,15 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
-  (* Gate 0: empty evidence_refs — disabled until call site is wired (PR #23666 regression) *)
-  if List.is_empty req.evidence_refs then
-    task_warn "Gate 0 skipped: empty evidence_refs (call site not yet wired)"
-  else
+  (* Gate 0: empty evidence_refs — disabled until call site is wired (PR #23666 regression).
+     WORKAROUND: the enforcing Reject stays disabled; log a warning and fall through
+     to the remaining gates. 근본 해결: wire evidence_refs at the submission call site
+     (PR #23706 task-1882), then restore the terminal Reject.
+     Sequenced (not [else]) so an empty evidence set still runs Gates 1-3 instead of
+     short-circuiting to unit — the [else] form was also a type error
+     (unit vs review_result), which is what broke the build in #23708. *)
+  if List.is_empty req.evidence_refs
+  then task_warn "Gate 0 skipped: empty evidence_refs (call site not yet wired)";
   (* Gate 1: empty or trivially short notes *)
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length

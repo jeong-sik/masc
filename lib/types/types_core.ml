@@ -604,13 +604,15 @@ type task_reclaim_gate =
   | Reclaim_gate_open
   | Reclaim_gate_blocked_by_policy of string
 
+let task_reclaim_block_reason t =
+  (* DET-OK: typed reclaim policy branch makes this fallback unreachable for deterministic transitions.
+     It is used only as diagnostic text, never as a branching input. *)
+  Option.value t.do_not_reclaim_reason ~default:"reclaim blocked by typed policy"
+;;
+
 let task_reclaim_gate (t : task) =
   match t.reclaim_policy with
-  | Some Block_reclaim ->
-    Reclaim_gate_blocked_by_policy
-      (Option.value
-         t.do_not_reclaim_reason
-         ~default:"reclaim blocked by typed policy")
+  | Some Block_reclaim -> Reclaim_gate_blocked_by_policy (task_reclaim_block_reason t)
   | Some Allow_reclaim | None -> Reclaim_gate_open
 ;;
 
@@ -648,9 +650,21 @@ let task_claim_decision (task : task) =
        cross-agent check (self-verification block) happens in claim_task_r.
        Issue #19314. verification_id is a non-empty string — always claimable. *)
     Claim_available (task_claim_readiness task)
+  | Done _ ->
+    (* Coordination-role tasks with Allow_reclaim policy are reclaimable
+       after completion. task-1869: 6 TaskError fingerprints show
+       coordination-role tasks blocked from re-claim by completion. The
+       opt-in must be explicit: [None] is the historical default for ordinary
+       terminal tasks and stays terminal. *)
+    (match task.reclaim_policy with
+     | Some Allow_reclaim ->
+       Claim_available (task_claim_readiness task)
+     | Some Block_reclaim ->
+       Claim_unavailable (Claim_block_reclaim_policy (task_reclaim_block_reason task))
+     | None ->
+       Claim_unavailable (Claim_block_not_todo task.task_status))
   | Claimed _
   | InProgress _
-  | Done _
   | Cancelled _ ->
     Claim_unavailable (Claim_block_not_todo task.task_status)
 ;;

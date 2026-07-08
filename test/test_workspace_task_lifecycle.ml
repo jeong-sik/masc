@@ -32,6 +32,23 @@ let mk_cancelled cancelled_by =
   D.Cancelled { cancelled_by; cancelled_at = now; reason = None }
 ;;
 
+let mk_task ?reclaim_policy status =
+  { D.id = "task-claim"
+  ; title = "claim lifecycle task"
+  ; description = ""
+  ; task_status = status
+  ; priority = 1
+  ; files = []
+  ; created_at = now
+  ; created_by = None
+  ; contract = None
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy
+  ; do_not_reclaim_reason = None
+  }
+;;
+
 let action_to_string = function
   | D.Claim -> "claim"
   | D.Start -> "start"
@@ -381,24 +398,60 @@ let test_claim_awaiting_by_self_blocked () =
   | Ok _ -> fail "submitter must not claim (self-verify) their own AwaitingVerification"
 ;;
 
-(* [resolve_claim] is the single claim decision shared by both writers. Pin all
-   four outcomes, including the self-block. *)
+(* [resolve_claim] is the single claim decision shared by both writers. Pin the
+   worker, verifier, self-block, held-by-other, and typed reclaim-block outcomes. *)
 let test_resolve_claim_outcomes () =
   let actor x a = String.equal a x in
-  (match L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now D.Todo with
+  (match L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now (mk_task D.Todo) with
    | L.Worker_claim (D.Claimed { assignee = "w"; _ }) -> ()
    | _ -> fail "Todo should resolve to Worker_claim Claimed");
-  (match L.resolve_claim ~same_actor:(actor "v") ~agent_name:"v" ~now (mk_awaiting other) with
+  (match
+     L.resolve_claim ~same_actor:(actor "v") ~agent_name:"v" ~now
+       (mk_task (mk_awaiting other))
+   with
    | L.Verifier_claim
        (D.AwaitingVerification { phase = D.Verifier_assigned { verifier = "v" }; assignee; _ })
      when String.equal assignee other -> ()
    | _ -> fail "cross-agent AwaitingVerification should resolve to Verifier_claim (verifier bound, submitter preserved)");
-  (match L.resolve_claim ~same_actor:(actor other) ~agent_name:other ~now (mk_awaiting other) with
+  (match
+     L.resolve_claim ~same_actor:(actor other) ~agent_name:other ~now
+       (mk_task (mk_awaiting other))
+   with
    | L.Self_owned -> ()
    | _ -> fail "own AwaitingVerification should resolve to Self_owned (the self-block)");
-  (match L.resolve_claim ~same_actor:(actor "z") ~agent_name:"z" ~now (mk_claimed other) with
+  (match
+     L.resolve_claim ~same_actor:(actor "z") ~agent_name:"z" ~now
+       (mk_task (mk_claimed other))
+   with
    | L.Held_by_other h when String.equal h other -> ()
-   | _ -> fail "Claimed-by-other should resolve to Held_by_other naming the holder")
+   | _ -> fail "Claimed-by-other should resolve to Held_by_other naming the holder");
+  (match
+     L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
+       (mk_task (mk_done other))
+   with
+   | L.Held_by_other h when String.equal h other -> ()
+   | _ -> fail "Done without explicit Allow_reclaim should stay held/terminal");
+  (match
+     L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
+       (mk_task ~reclaim_policy:D.Allow_reclaim (mk_done other))
+   with
+   | L.Worker_claim (D.Claimed { assignee = "w"; _ }) -> ()
+   | _ -> fail "Done with Allow_reclaim should resolve to Worker_claim Claimed");
+  (* Self-livelock guard: the completer must not reclaim its own Done task, even
+     with Allow_reclaim — that busy-loops complete -> reclaim. Only a different
+     actor may reclaim (asserted above). *)
+  (match
+     L.resolve_claim ~same_actor:(actor other) ~agent_name:other ~now
+       (mk_task ~reclaim_policy:D.Allow_reclaim (mk_done other))
+   with
+   | L.Self_owned -> ()
+   | _ -> fail "own Done+Allow_reclaim must resolve to Self_owned (self-livelock guard)");
+  match
+    L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
+      (mk_task ~reclaim_policy:D.Block_reclaim (mk_done other))
+  with
+  | L.Blocked_by_reclaim_policy _ -> ()
+  | _ -> fail "Done with Block_reclaim should resolve to Blocked_by_reclaim_policy"
 ;;
 
 (* [Verifier_assigned] must survive a serialize -> parse round-trip so the

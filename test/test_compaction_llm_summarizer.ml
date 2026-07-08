@@ -152,6 +152,53 @@ let test_apply_all_kept_is_identity () =
       (texts sample)
       (texts out)
 
+(* -- plan_of_response: RFC-0327 B-0 tool-call fallback extraction -- *)
+
+let mk_tool_response ?(content = []) ?(stop_reason = Agent_sdk.Types.StopToolUse) () :
+    Agent_sdk.Types.api_response =
+  { id = "r-fallback"
+  ; model = "m-fallback"
+  ; content
+  ; usage = None
+  ; stop_reason
+  ; telemetry = None
+  }
+
+(* The tool-fallback path must pull the plan out of a tool_use block whose name
+   matches [compaction_plan_tool_name], run it through the same validation as
+   the native path, and yield a real plan. We prove it is real by applying it
+   (the [compaction_plan] fields are private) and checking the same shape the
+   apply test checks: summary replaces 0,1; index 2 dropped; index 3 kept. *)
+let test_tool_fallback_extracts_plan_from_tool_use () =
+  let json = plan_json ~summary:"folded" ~kept:[ 3 ] ~summarized:[ 0; 1 ] ~dropped:[ 2 ] in
+  let response =
+    mk_tool_response
+      ~content:
+        [ Agent_sdk.Types.ToolUse
+            { id = "tu"; name = C.compaction_plan_tool_name; input = json } ]
+      ()
+  in
+  match C.plan_of_response ~message_count:4 ~path:C.Tool_fallback_plan response with
+  | Error e -> Alcotest.failf "tool_use plan should parse, got %s" e
+  | Ok plan ->
+    let out = C.apply plan ~messages:sample in
+    Alcotest.(check int) "tool-fallback plan yields two messages" 2 (List.length out)
+
+(* A provider on the fallback path that answers with plain text instead of a
+   tool call must not silently produce a plan — there is no tool_use to extract,
+   so the runtime retries and ultimately falls back to deterministic. *)
+let test_tool_fallback_rejects_when_no_tool_use () =
+  let response =
+    mk_tool_response
+      ~content:[ Agent_sdk.Types.Text "not a tool call" ]
+      ~stop_reason:Agent_sdk.Types.EndTurn
+      ()
+  in
+  Alcotest.(check bool)
+    "no tool_use block is rejected on the fallback path"
+    true
+    (is_error (C.plan_of_response ~message_count:2 ~path:C.Tool_fallback_plan response))
+
 let () =
   Alcotest.run "compaction_llm_summarizer"
     [ ( "plan_of_json"
@@ -173,5 +220,11 @@ let () =
     ; ( "apply"
       , [ Alcotest.test_case "keeps/summarizes/drops" `Quick test_apply_keeps_summarizes_drops
         ; Alcotest.test_case "all-kept is identity" `Quick test_apply_all_kept_is_identity
+        ] )
+    ; ( "plan_of_response"
+      , [ Alcotest.test_case "tool-fallback extracts plan from tool_use" `Quick
+            test_tool_fallback_extracts_plan_from_tool_use
+        ; Alcotest.test_case "tool-fallback rejects when no tool_use" `Quick
+            test_tool_fallback_rejects_when_no_tool_use
         ] )
     ]

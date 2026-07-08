@@ -87,19 +87,6 @@ let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
       ) backlog.tasks in
       Ok tasks
 
-(** Validate that a state transition is allowed.
-    Terminal states (Done, Cancelled) cannot transition to each other. *)
-let validate_transition ~(current : task_status) ~(next : task_status) ~task_id =
-  match current, next with
-  | Done _, Done _ | Done _, Cancelled _ | Cancelled _, Done _ | Cancelled _, Cancelled _ ->
-      Error (Task (Task_error.InvalidState
-               (Printf.sprintf
-                  "task %s: cannot transition from %s to %s"
-                  task_id
-                  (task_status_to_string current)
-                  (task_status_to_string next))))
-  | _ -> Ok ()
-
 let backlog_lock_path config =
   Filename.concat (Workspace.tasks_dir config) ".backlog"
 
@@ -112,44 +99,11 @@ let with_locked_backlog
     | Error msg -> Error (System (System_error.IoError msg))
     | Ok backlog -> f backlog)
 
-(** Update task status (claim, start, complete, cancel) *)
-let update_status config ~task_id ~status =
-  match backend () with
-  | Jsonl ->
-      with_locked_backlog config (fun backlog ->
-        let task_opt =
-          List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks
-        in
-        match task_opt with
-        | None -> Error (Task (Task_error.NotFound task_id))
-        | Some t -> (
-            match validate_transition ~current:t.task_status ~next:status ~task_id with
-            | Error e -> Error e
-            | Ok () ->
-                let updated_tasks =
-                  List.map
-                    (fun (t : task) ->
-                      if t.id = task_id then { t with task_status = status } else t)
-                    backlog.tasks
-                in
-                let new_backlog =
-                  {
-                    tasks = updated_tasks;
-                    last_updated = now_iso ();
-                    version = backlog.version + 1;
-                  }
-                in
-                let clear_stale () =
-                  if Task_cache_invariant.is_terminal status
-                  then
-                    Task_cache_invariant.clear_stale_agent_task_for_task
-                      config
-                      ~task_id
-                      ~status
-                      ~module_name:"task_dispatch.update_status"
-                in
-                Workspace.write_backlog ~after_commit:clear_stale config new_backlog;
-                Ok ()))
+(* update_status / validate_transition were retired by RFC-0323 G-7: the
+   direct status writer bypassed the workspace FSM (Workspace.transition_task_r)
+   — its private terminal-pair check enforced none of the FSM's ownership,
+   RFC-0308 done-guard, or #23719 evidence rules — and had zero production
+   callers. Status changes go through the FSM; there is no side door. *)
 
 (** Delete a task.  Also clears any agent [current_task] cache that still
     points to the deleted task id, so the backlog write and cache

@@ -90,12 +90,24 @@ let transition_task_outcome_r
                     (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
              | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ())
           | Masc_domain.Start
-          | Masc_domain.Done_action
           | Masc_domain.Cancel
-          | Masc_domain.Release
+          | Masc_domain.Release -> Ok ()
+          | Masc_domain.Done_action
           | Masc_domain.Submit_for_verification
           | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification -> Ok ()
+          | Masc_domain.Reject_verification ->
+            (match handoff_context with
+             | None ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Code task submission requires handoff_context with evidence_refs"))
+             | Some ctx when ctx.evidence_refs = [] ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Code task submission requires at least one evidence_ref in handoff_context"))
+             | Some _ -> Ok ())
         in
         let* () =
           (match action, task.task_status with

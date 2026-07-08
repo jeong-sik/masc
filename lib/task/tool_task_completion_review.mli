@@ -22,4 +22,7 @@ val concrete_verification_evidence_refs :
   Masc_domain.task ->
   string list
 
-val verification_evidence_refs_for_task : Masc_domain.task -> string list
+val verification_evidence_refs_for_task :
+  ?handoff_context:Masc_domain.task_handoff_context ->
+  Masc_domain.task ->
+  string list

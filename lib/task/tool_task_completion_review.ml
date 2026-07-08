@@ -107,5 +107,5 @@ let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
   |> non_empty_trimmed_strings
   |> List.filter (fun s -> not (is_placeholder_evidence_ref s))
 
-let verification_evidence_refs_for_task (task : Masc_domain.task) =
-  concrete_verification_evidence_refs task
+let verification_evidence_refs_for_task ?handoff_context (task : Masc_domain.task) =
+  concrete_verification_evidence_refs ?handoff_context task

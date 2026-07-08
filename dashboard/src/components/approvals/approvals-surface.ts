@@ -45,6 +45,7 @@ import {
   governanceApprovalActing,
   refreshGovernance,
   respondToKeeperApproval,
+  setKeeperApprovalMode,
 } from '../governance-store'
 
 type ApprovalsView = 'queue' | 'history'
@@ -470,6 +471,18 @@ function ApAside({
   const recent = [...resolvedItems]
     .sort((a, b) => resolvedAtMs(b) - resolvedAtMs(a))
     .slice(0, 5)
+  // RFC-0319 operator approval mode. Bound to the real backend posture
+  // (hitl.approval_mode), NOT to rules.length. The separation-of-duties floor
+  // — critical/high/medium never auto-approve — is enforced backend-side; this
+  // toggle only flips manual ↔ auto_low_risk.
+  const approvalMode = hitl?.approval_mode
+  const autoOn = approvalMode?.mode === 'auto_low_risk'
+  const hitlDisabledByEnv = hitl?.disabled_by_env ?? false
+  const acting = governanceApprovalActing.value
+  // The toggle is meaningless while HITL is env-disabled (nothing gates), and
+  // must not race a decision already in flight.
+  const toggleDisabled = acting !== null || hitlDisabledByEnv
+  const eligibleBands = approvalMode?.auto_eligible_bands ?? []
   return html`
     <aside class="ap-aside" data-testid="approvals-aside">
       <section class="wka-card ap-auto-card">
@@ -482,17 +495,36 @@ function ApAside({
         <div class="wka-auto">
           <div class="wka-auto-top">
             <span class="wka-auto-lbl">
-              자동 승인
-              <b>${rules.length > 0 ? 'Always 규칙 기반' : '수동 결재 중'}</b>
+              자동 승인 모드
+              <b>${autoOn ? '자동 승인 (low-risk)' : '수동 결재'}</b>
             </span>
-            <span class=${`wka-switch ${rules.length > 0 ? 'on' : ''}`} aria-hidden="true"></span>
+            <button
+              type="button"
+              class=${`wka-switch ${autoOn ? 'on' : ''}`}
+              role="switch"
+              aria-checked=${autoOn ? 'true' : 'false'}
+              aria-label="자동 승인 모드 전환"
+              data-testid="approval-mode-toggle"
+              title=${hitlDisabledByEnv
+                ? 'HITL이 비활성화되어 있어 자동 승인 모드를 변경할 수 없습니다'
+                : autoOn
+                  ? '수동 결재로 전환합니다'
+                  : 'low-risk 요청만 자동 승인하도록 전환합니다'}
+              onClick=${() => void setKeeperApprovalMode(autoOn ? 'manual' : 'auto_low_risk')}
+              disabled=${toggleDisabled}
+            ></button>
           </div>
           <div class="wka-auto-stat">${rules.length.toLocaleString()}개 Always 규칙 · 열린 승인 ${openCount.toLocaleString()}건</div>
           <div class="wka-auto-note">
-            <b>비가역·파괴적 요청은 수동 결재</b> · 규칙 생성은 카드의 “항상 승인” 액션으로만 수행됩니다.
+            <b>비가역·파괴적·high-risk 요청은 항상 수동 결재</b>${eligibleBands.length > 0
+              ? ` · 자동 승인 대상: ${eligibleBands.join(', ')}`
+              : ''} · 직무분리 원칙(RFC-0319)
           </div>
-          ${hitl?.disabled_by_env
-            ? html`<div class="ap-env-warn mono">${hitl.env_name} disables HITL</div>`
+          ${approvalMode?.fail_closed
+            ? html`<div class="ap-env-warn mono">approval-mode 상태를 읽지 못해 수동 결재로 처리 중</div>`
+            : null}
+          ${hitlDisabledByEnv
+            ? html`<div class="ap-env-warn mono">${hitl?.env_name ?? 'MASC_DISABLE_HITL'} disables HITL</div>`
             : null}
         </div>
       </section>

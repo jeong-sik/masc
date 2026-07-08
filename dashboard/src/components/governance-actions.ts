@@ -3,9 +3,11 @@ import {
   deleteGovernanceApprovalRule,
   decideGovernanceExecutionOrder,
   resolveGovernanceApproval,
+  setApprovalMode,
   submitGovernanceCaseBrief,
   submitGovernancePetition,
 } from '../api/dashboard-governance'
+import type { ApprovalMode } from '../types'
 import { getSelectedDecision } from './governance-utils'
 import { refreshGovernance, selectDecision } from './governance-refresh'
 import {
@@ -113,6 +115,30 @@ export async function deleteKeeperApprovalRule(id: string) {
     await refreshGovernance({ force: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Always 규칙을 삭제하지 못했습니다'
+    governanceError.value = message
+    showToast(message, 'error')
+  } finally {
+    governanceApprovalActing.value = null
+  }
+}
+
+// Busy-state key for the RFC-0319 approval-mode toggle. Distinct from the
+// per-approval and per-rule keys so the toggle disables independently.
+export const APPROVAL_MODE_ACTING_KEY = 'approval-mode'
+
+export async function setKeeperApprovalMode(mode: ApprovalMode) {
+  governanceApprovalActing.value = APPROVAL_MODE_ACTING_KEY
+  try {
+    await setApprovalMode(mode)
+    showToast(
+      mode === 'auto_low_risk'
+        ? '자동 승인 모드(low-risk)를 켰습니다'
+        : '수동 결재 모드로 전환했습니다',
+      'success',
+    )
+    await refreshGovernance({ force: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '자동 승인 모드를 변경하지 못했습니다'
     governanceError.value = message
     showToast(message, 'error')
   } finally {

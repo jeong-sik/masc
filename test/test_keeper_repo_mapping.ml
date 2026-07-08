@@ -662,7 +662,7 @@ let test_validate_path_access_rejects_empty_url_basename () =
             "mentions identity mismatch" true
             (contains_substring msg "Repository identity mismatch"))
 
-let test_validate_path_access_playground_rejects_git_remote_only_identity () =
+let test_validate_path_access_playground_allows_git_remote_only_visible_clone () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -687,13 +687,12 @@ let test_validate_path_access_playground_rejects_git_remote_only_identity () =
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
       with
-      | Ok () -> Alcotest.fail "expected git remote-only identity to be denied"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions unregistered repository" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected git remote-only visible clone to be allowed, got: " ^ msg))
 
-let test_validate_path_access_playground_rejects_exact_remote_url_identity () =
+let test_validate_path_access_playground_allows_exact_remote_url_visible_clone () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -718,13 +717,12 @@ let test_validate_path_access_playground_rejects_exact_remote_url_identity () =
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
       with
-      | Ok () -> Alcotest.fail "expected exact remote URL identity to be denied"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions unregistered repository" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected exact remote URL visible clone to be allowed, got: " ^ msg))
 
-let test_validate_path_access_playground_rejects_secondary_remote_url_spoof ()
+let test_validate_path_access_playground_allows_secondary_remote_visible_clone ()
   =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -753,13 +751,12 @@ let test_validate_path_access_playground_rejects_secondary_remote_url_spoof ()
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
       with
-      | Ok () -> Alcotest.fail "expected secondary remote spoof to be denied"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions unregistered repository" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected secondary remote visible clone to be allowed, got: " ^ msg))
 
-let test_validate_path_access_playground_rejects_gitdir_remote_identity () =
+let test_validate_path_access_playground_allows_gitdir_visible_clone () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -788,13 +785,12 @@ let test_validate_path_access_playground_rejects_gitdir_remote_identity () =
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
       with
-      | Ok () -> Alcotest.fail "expected gitdir remote identity to be denied"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions unregistered repository" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected gitdir visible clone to be allowed, got: " ^ msg))
 
-let test_validate_path_access_playground_large_git_config_denied () =
+let test_validate_path_access_playground_large_git_config_allowed () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -822,13 +818,12 @@ let test_validate_path_access_playground_large_git_config_denied () =
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
       with
-      | Ok () -> Alcotest.fail "expected oversized git config to be denied"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions not registered" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected oversized git config visible clone to be allowed, got: " ^ msg))
 
-let test_validate_path_access_playground_unknown_repo_denied () =
+let test_validate_path_access_playground_unknown_repo_allowed () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -854,13 +849,12 @@ let test_validate_path_access_playground_unknown_repo_denied () =
         Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
           ~base_path ~path
       with
-      | Ok () -> Alcotest.fail "expected unknown playground repo to be denied"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions not registered" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected unknown playground repo to be allowed, got: " ^ msg))
 
-let test_validate_path_access_playground_unknown_repo_wildcard_denied () =
+let test_validate_path_access_playground_unknown_repo_wildcard_allowed () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -886,15 +880,13 @@ let test_validate_path_access_playground_unknown_repo_wildcard_denied () =
         Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
           ~base_path ~path
       with
-      | Ok () ->
-          Alcotest.fail
-            "expected unknown playground repo under wildcard to be denied as unregistered"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions not registered" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected unknown playground repo under wildcard to be allowed, got: "
+             ^ msg))
 
-let test_validate_path_access_playground_unknown_repo_no_mapping_denied () =
+let test_validate_path_access_playground_unknown_repo_no_mapping_allowed () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -919,13 +911,11 @@ let test_validate_path_access_playground_unknown_repo_no_mapping_denied () =
         Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
           ~base_path ~path
       with
-      | Ok () ->
-          Alcotest.fail
-            "expected unknown playground repo without mapping to be denied as unregistered"
+      | Ok () -> ()
       | Error msg ->
-          Alcotest.(check bool)
-            "mentions not registered" true
-            (contains_substring msg "not registered"))
+          Alcotest.fail
+            ("expected unknown playground repo without mapping to be allowed, got: "
+             ^ msg))
 
 let test_apply_mapping_explicit () =
   with_temp_base_path (fun base_path ->
@@ -1055,22 +1045,22 @@ let () =
             test_validate_path_access_wildcard_rejects_mismatched_url_basename;
           Alcotest.test_case "empty URL basename is identity mismatch" `Quick
             test_validate_path_access_rejects_empty_url_basename;
-          Alcotest.test_case "playground rejects git remote-only identity" `Quick
-            test_validate_path_access_playground_rejects_git_remote_only_identity;
-          Alcotest.test_case "playground rejects exact remote URL identity" `Quick
-            test_validate_path_access_playground_rejects_exact_remote_url_identity;
-          Alcotest.test_case "playground rejects secondary remote URL spoof" `Quick
-            test_validate_path_access_playground_rejects_secondary_remote_url_spoof;
-          Alcotest.test_case "playground rejects gitdir remote identity" `Quick
-            test_validate_path_access_playground_rejects_gitdir_remote_identity;
-          Alcotest.test_case "playground large git config is denied" `Quick
-            test_validate_path_access_playground_large_git_config_denied;
-          Alcotest.test_case "playground unknown repo denied as unregistered" `Quick
-            test_validate_path_access_playground_unknown_repo_denied;
-          Alcotest.test_case "playground unknown repo under wildcard denied as unregistered" `Quick
-            test_validate_path_access_playground_unknown_repo_wildcard_denied;
-          Alcotest.test_case "playground unknown repo no mapping denied" `Quick
-            test_validate_path_access_playground_unknown_repo_no_mapping_denied;
+          Alcotest.test_case "playground allows git remote-only visible clone" `Quick
+            test_validate_path_access_playground_allows_git_remote_only_visible_clone;
+          Alcotest.test_case "playground allows exact remote URL visible clone" `Quick
+            test_validate_path_access_playground_allows_exact_remote_url_visible_clone;
+          Alcotest.test_case "playground allows secondary remote visible clone" `Quick
+            test_validate_path_access_playground_allows_secondary_remote_visible_clone;
+          Alcotest.test_case "playground allows gitdir visible clone" `Quick
+            test_validate_path_access_playground_allows_gitdir_visible_clone;
+          Alcotest.test_case "playground large git config is allowed" `Quick
+            test_validate_path_access_playground_large_git_config_allowed;
+          Alcotest.test_case "playground unknown repo allowed" `Quick
+            test_validate_path_access_playground_unknown_repo_allowed;
+          Alcotest.test_case "playground unknown repo under wildcard allowed" `Quick
+            test_validate_path_access_playground_unknown_repo_wildcard_allowed;
+          Alcotest.test_case "playground unknown repo no mapping allowed" `Quick
+            test_validate_path_access_playground_unknown_repo_no_mapping_allowed;
         ] );
       ( "apply_mapping",
         [

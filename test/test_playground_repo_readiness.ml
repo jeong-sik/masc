@@ -288,6 +288,31 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
     (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
     (json_string "policy_status" json)
 
+let test_playground_repos_mark_unregistered_visible_repo_allowed () =
+  let base_path = temp_dir "masc-playground-repo-policy" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc-mcp" in
+  save_repositories base_path
+    [ repository_fixture
+        ~aliases:[]
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:(Filename.concat base_path ".masc/repos/masc")
+    ];
+  write_mapping base_path meta.name [ "masc" ];
+  mkdir_p (Filename.concat repo_path ".git");
+  let json = playground_repo_entry ~config ~meta ~repo_name:"masc-mcp" in
+  check bool "policy allows visible unregistered repo" true
+    (json_bool "policy_allowed" json);
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string
+       Policy_unregistered_repository)
+    (json_string "policy_status" json);
+  check string "policy repository id is visible repo name" "masc-mcp"
+    (json_string "policy_repository_id" json)
+
 let test_playground_repos_policy_uses_registered_repository_id () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
@@ -760,6 +785,9 @@ let () =
           test_playground_repos_mark_registered_repo_outside_mapping_allowed;
         test_case "filesystem repo under wildcard mapping is marked allowed"
           `Quick test_playground_repos_mark_wildcard_mapping_allowed;
+        test_case "unregistered visible filesystem repo is marked allowed"
+          `Quick
+          test_playground_repos_mark_unregistered_visible_repo_allowed;
         test_case "filesystem repo policy uses registered repository id"
           `Quick test_playground_repos_policy_uses_registered_repository_id;
         test_case "repository identity mismatch is marked denied" `Quick

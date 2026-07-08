@@ -106,49 +106,6 @@ let parse_field raw field =
 let parse_bool_field raw field =
   Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
 
-let unregistered_masc_mcp_policy_error =
-  "Repository masc-mcp is not registered; access not allowed"
-
-let assert_repository_registration_policy_response ~raw =
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check (option bool)) "policy response denies access" (Some false)
-    (Json.member "ok" json |> Json.to_bool_option);
-  Alcotest.(check (option string)) "policy error keeps original denial"
-    (Some unregistered_masc_mcp_policy_error)
-    (Json.member "policy_error" json |> Json.to_string_option);
-  Alcotest.(check bool) "visible error changes from bare denial" true
-    (not
-       (String.equal
-          (Json.member "error" json |> Json.to_string_option |> Option.value ~default:"")
-          unregistered_masc_mcp_policy_error));
-  Alcotest.(check (option bool)) "operator action required" (Some true)
-    (Json.member "operator_action_required" json |> Json.to_bool_option);
-  Alcotest.(check (option string)) "operator action kind"
-    (Some "repository_registration")
-    (Json.member "operator_action_kind" json |> Json.to_string_option);
-  Alcotest.(check (option string)) "operator action reason"
-    (Some "repository_unregistered")
-    (Json.member "operator_action_reason" json |> Json.to_string_option);
-  Alcotest.(check (option string)) "next action"
-    (Some "wait_for_operator_approval")
-    (Json.member "next_action" json |> Json.to_string_option);
-  Alcotest.(check (option string)) "approval kind"
-    (Some "repository_registration")
-    (Json.member "approval_pending" json |> Json.member "kind"
-   |> Json.to_string_option);
-  Alcotest.(check (option string)) "approval reason"
-    (Some "repository_unregistered")
-    (Json.member "approval_pending" json |> Json.member "reason"
-   |> Json.to_string_option);
-  Alcotest.(check (option bool)) "approval is non-blocking"
-    (Some true)
-    (Json.member "approval_pending" json |> Json.member "non_blocking"
-   |> Json.to_bool_option);
-  Alcotest.(check (option string)) "deterministic retry reason"
-    (Some "policy_blocked")
-    (Json.member "deterministic_retry" json |> Json.member "reason"
-   |> Json.to_string_option)
-
 let json_field_present raw field =
   match Yojson.Safe.from_string raw |> Json.member field with
   | `Null -> false
@@ -441,64 +398,46 @@ let test_local_keeper_rg_invalid_type_surfaces_stderr () =
              (String.lowercase_ascii detail)
              "unrecognized file type"))
 
-let test_grep_unregistered_visible_repo_marks_deterministic_policy_block () =
+let test_grep_unregistered_visible_repo_is_readable () =
   setup ~keeper_name:"base" ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~base ~config ~meta ~playground ->
-  save_repositories base [ sample_repo ~base_path:base "masc"; sample_repo ~base_path:base "oas" ];
-  let repo_root = Filename.concat playground "repos/masc-mcp" in
-  ensure_dir (Filename.concat repo_root ".git");
-  ensure_dir (Filename.concat repo_root "lib");
-  let oas_root = Filename.concat playground "repos/oas" in
-  ensure_dir (Filename.concat oas_root ".git");
-  let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files
-      ~turn_sandbox_factory:None
-      ~exec_cache:None
-      ~config
-      ~meta
-      ~args:
-        (`Assoc
-          [ "op", `String "rg"
-          ; "pattern", `String "Keeper_repo_mapping"
-          ; "path", `String "repos/masc-mcp/lib"
-          ])
-  in
-  Alcotest.(check (option bool))
-    "unregistered repo path fails"
-    (Some false)
-    (parse_bool_field raw "ok");
-  let json = Yojson.Safe.from_string raw in
-  let deterministic_retry = Json.member "deterministic_retry" json in
-  Alcotest.(check (option string))
-    "deterministic reason"
-    (Some "policy_blocked")
-    (Json.member "reason" deterministic_retry |> Json.to_string_option);
-  Alcotest.(check (option bool))
-    "same args retry disabled"
-    (Some false)
-    (Json.member "retry_same_args" deterministic_retry |> Json.to_bool_option);
-  Alcotest.(check bool)
-    "visible repo is surfaced"
-    true
-    (json_list_contains_string raw "available_repos" "repos/masc-mcp");
-  Alcotest.(check bool)
-    "registered repo is surfaced"
-    true
-    (json_list_contains_string raw "registered_repos" "repos/masc");
-  Alcotest.(check bool)
-    "registered repo paths include canonical id"
-    true
-    (json_list_contains_string raw "registered_repo_paths" "repos/masc");
-  Alcotest.(check bool)
-    "registered repo paths do not invent absent aliases"
-    false
-    (json_list_contains_string raw "registered_repo_paths" "repos/masc-mcp");
-  Alcotest.(check (option bool))
-    "same path retry will fail"
-    (Some true)
-    (Json.member "path_resolution" json
-     |> Json.member "same_path_retry_will_fail"
-     |> Json.to_bool_option)
+  if not (Keeper_tool_execute_path.shell_command_available "rg")
+  then ()
+  else (
+    save_repositories base
+      [ sample_repo ~base_path:base "masc"; sample_repo ~base_path:base "oas" ];
+    let repo_root = Filename.concat playground "repos/masc-mcp" in
+    ensure_dir (Filename.concat repo_root ".git");
+    ensure_dir (Filename.concat repo_root "lib");
+    ignore
+      (Fs_compat.save_file_atomic
+         (Filename.concat repo_root "lib/demo.ml")
+         "let visible_unregistered_repo = true\n");
+    let raw =
+      Keeper_tool_command_runtime.handle_tool_search_files
+        ~turn_sandbox_factory:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:
+          (`Assoc
+            [ "op", `String "rg"
+            ; "pattern", `String "visible_unregistered_repo"
+            ; "path", `String "repos/masc-mcp/lib"
+            ])
+    in
+    Alcotest.(check (option bool))
+      "unregistered visible repo path succeeds"
+      (Some true)
+      (parse_bool_field raw "ok");
+    Alcotest.(check (option string))
+      "unregistered visible repo is not policy blocked"
+      None
+      (parse_field raw "policy_error");
+    Alcotest.(check (option string))
+      "unregistered visible repo has no operator action"
+      None
+      (parse_field raw "operator_action_kind"))
 
 let test_grep_registered_alias_repo_path_is_allowed () =
   setup ~keeper_name:"base" ~sandbox:Keeper_types_profile_sandbox.Local
@@ -811,8 +750,11 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
       false
       (Sys.file_exists playground)
 
-let test_rg_unregistered_clone_queues_repository_hitl () =
-  if not (git_available ()) then ()
+let test_rg_unregistered_clone_does_not_queue_repository_hitl () =
+  if
+    (not (git_available ()))
+    || not (Keeper_tool_execute_path.shell_command_available "rg")
+  then ()
   else (
     AQ.For_testing.reset_audit_store ();
     Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
@@ -835,32 +777,21 @@ let test_rg_unregistered_clone_queues_repository_hitl () =
             ; "path", `String "repos/masc-mcp"
             ])
     in
-    assert_repository_registration_policy_response ~raw;
-    match
+    Alcotest.(check (option bool))
+      "unregistered visible clone grep succeeds"
+      (Some true)
+      (parse_bool_field raw "ok");
+    let entries =
       AQ.list_pending_entries ()
       |> List.filter (fun (entry : AQ.pending_approval) ->
         String.equal entry.keeper_name meta.name)
-    with
-    | [ pending ] ->
-      Alcotest.(check string)
-        "requested alias action"
-        "add_repository_alias"
-        (Json.member "requested_action" pending.input |> Json.to_string);
-      Alcotest.(check string)
-        "alias target"
-        "masc"
-        (Json.member "target_repository_id" pending.input |> Json.to_string);
-      Alcotest.(check string)
-        "alias"
-        "masc-mcp"
-        (Json.member "alias" pending.input |> Json.to_string)
-    | entries ->
-      Alcotest.failf
-        "expected one pending repository registration approval, got %d; raw=%s"
-        (List.length entries)
-        raw)
+    in
+    Alcotest.(check int)
+      "read-side repo access does not queue repository HITL"
+      0
+      (List.length entries))
 
-let test_read_unregistered_clone_surfaces_repository_hitl () =
+let test_read_unregistered_clone_does_not_surface_repository_hitl () =
   if not (git_available ()) then ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -882,30 +813,19 @@ let test_read_unregistered_clone_surfaces_repository_hitl () =
           (`Assoc
             [ "path", `String "repos/masc-mcp/README.md"; "max_bytes", `Int 4096 ])
     in
-    assert_repository_registration_policy_response ~raw;
-    match
+    Alcotest.(check (option bool))
+      "unregistered visible clone read succeeds"
+      (Some true)
+      (parse_bool_field raw "ok");
+    let entries =
       AQ.list_pending_entries ()
       |> List.filter (fun (entry : AQ.pending_approval) ->
         String.equal entry.keeper_name meta.name)
-    with
-    | [ pending ] ->
-      Alcotest.(check string)
-        "requested alias action"
-        "add_repository_alias"
-        (Json.member "requested_action" pending.input |> Json.to_string);
-      Alcotest.(check string)
-        "alias target"
-        "masc"
-        (Json.member "target_repository_id" pending.input |> Json.to_string);
-      Alcotest.(check string)
-        "alias"
-        "masc-mcp"
-        (Json.member "alias" pending.input |> Json.to_string)
-    | entries ->
-      Alcotest.failf
-        "expected one pending repository registration approval, got %d; raw=%s"
-        (List.length entries)
-        raw)
+    in
+    Alcotest.(check int)
+      "read-side file access does not queue repository HITL"
+      0
+      (List.length entries))
 
 
 let () =
@@ -927,9 +847,9 @@ let () =
             "local keeper rg invalid type surfaces stderr to keeper"
             `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
           Alcotest.test_case
-            "Grep unregistered visible repo marks deterministic policy block"
+            "Grep unregistered visible repo is readable"
             `Quick
-            test_grep_unregistered_visible_repo_marks_deterministic_policy_block;
+            test_grep_unregistered_visible_repo_is_readable;
           Alcotest.test_case
             "Grep registered alias repo path is allowed"
             `Quick
@@ -962,12 +882,12 @@ let () =
             `Quick
             test_readonly_execute_omitted_cwd_does_not_create_write_root;
           Alcotest.test_case
-            "rg unregistered clone queues repository HITL"
+            "rg unregistered clone does not queue repository HITL"
             `Quick
-            test_rg_unregistered_clone_queues_repository_hitl;
+            test_rg_unregistered_clone_does_not_queue_repository_hitl;
           Alcotest.test_case
-            "Read unregistered clone surfaces repository HITL"
+            "Read unregistered clone does not surface repository HITL"
             `Quick
-            test_read_unregistered_clone_surfaces_repository_hitl;
+            test_read_unregistered_clone_does_not_surface_repository_hitl;
         ] );
     ]

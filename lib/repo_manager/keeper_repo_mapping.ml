@@ -672,7 +672,7 @@ let unresolved_repository_segment_resolution ?repo_root ~segment repos =
       segment repos
   with
   | Some mismatch -> Repository_identity_mismatch mismatch
-  | None -> Repository (repository_match ?repo_root segment)
+  | None -> No_repository
 
 let resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment repos =
   match List.find_opt (repository_matches_token ~base_path segment) repos with
@@ -703,8 +703,11 @@ let path_under_repo ~base_path repo path =
 (** [repository_resolution_of_path ~base_path ~path] returns the registered
     repository for [path], or an identity mismatch when the path points at a
     declared repository whose URL basename contradicts its declared identity.
-    Repository store load failures remain explicit so access callers can deny
-    instead of treating an unknown repository catalog as "not a repository". *)
+    A visible playground clone that is absent from the catalog is not an
+    authorization failure: playground containment owns read access, and the
+    catalog remains metadata/alias state. Repository store load failures remain
+    explicit so access callers can deny instead of treating an unreadable
+    repository catalog as "not a repository". *)
 let repository_resolution_of_path_from_catalog ~base_path ~path repos =
   match playground_path_of_path ~base_path ~path with
   | Some Playground_internal | Some Playground_repos_root -> No_repository
@@ -742,7 +745,9 @@ let repository_id_of_path ~base_path ~path =
 (** [validate_path_access ~keeper_id ~base_path ~path] checks that [path]
     either is outside registered repositories or resolves to a valid
     registered repository. Per-keeper mappings are advisory/default-scope
-    metadata and do not cap access. This is the integration point for keeper
+    metadata and do not cap access; visible playground clones that are not in
+    the catalog are outside repo-policy authorization and stay governed by the
+    sandbox containment boundary. This is the integration point for keeper
     execution paths that operate on filesystem paths rather than explicit
     repository IDs. *)
 let validate_path_access ~keeper_id ~base_path ~path =

@@ -744,13 +744,38 @@ let autonomous_trigger_lines
          still render in their own layers; event-queue stimuli (bootstrap,
          no-progress recovery, schedule-due, connector attention) surface
          ONLY here — before this arm the model had no trace of why it woke. *)
-      "- Scheduler: reactive turn (external stimulus)."
-      :: (match
-            Keeper_world_observation.verdict_reasons_to_strings decision.verdict
-          with
-          | [] -> []
-          | reasons ->
-              [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ])
+      let hitl_continuation_steer =
+        (* RFC-0320 W3b: when this reactive turn was opened by a resolved HITL
+           approval, steer the keeper back to the conversation it asked from.
+           The routing (which surface) stays the keeper's own recent context;
+           this only tells it to answer there rather than proceed silently. A
+           keeper whose original turn already resumed (fast approval) can
+           ignore this soft line, so it does not force a duplicate reply. *)
+        let has_hitl_resolution =
+          match decision.verdict with
+          | Keeper_world_observation.Run { reasons = first, rest } ->
+              List.exists
+                (function
+                  | Keeper_world_observation.Hitl_resolved_pending -> true
+                  | _ -> false)
+                (first :: rest)
+          | Keeper_world_observation.Skip _ -> false
+        in
+        if has_hitl_resolution then
+          [ "- Continuation: an approval you were waiting on was just resolved. \
+             If you requested it inside a conversation (dashboard / Discord / \
+             Slack), reply back into that conversation with keeper_surface_post \
+             instead of only proceeding on your own state." ]
+        else []
+      in
+      ("- Scheduler: reactive turn (external stimulus)."
+       :: (match
+             Keeper_world_observation.verdict_reasons_to_strings decision.verdict
+           with
+           | [] -> []
+           | reasons ->
+               [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
+      @ hitl_continuation_steer
   | _ -> []
 
 let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)

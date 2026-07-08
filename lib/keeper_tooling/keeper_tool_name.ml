@@ -262,6 +262,8 @@ let is_keeper_board_tool = function
   | Time_now
   | Tool_search
   | Tools_list
+  | Persona_create
+  | Persona_update
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -310,6 +312,8 @@ let masc_board_name_of_keeper_tool = function
   | Time_now
   | Tool_search
   | Tools_list
+  | Persona_create
+  | Persona_update
   | Voice_agent
   | Voice_listen
   | Voice_session_end

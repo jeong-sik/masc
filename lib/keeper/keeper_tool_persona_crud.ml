@@ -14,6 +14,23 @@ let personas_dir () =
       in
       Filename.concat base "personas"
 
+(** Reject any [persona_name] that is not a single, self-contained path
+    component. [Filename.basename ".." = ".."] and [Filename.basename "." =
+    "."] (verified against the OCaml 5.4 stdlib), so the basename-equality
+    check alone does not stop "." / ".." — they must be rejected explicitly.
+    Mirrors the [Filename.basename target = target] guard already used in
+    [Auth_credential_base.redirect_target_file] for the same class of
+    problem: without this, [persona_name] flows unsanitized into
+    [Filename.concat] and can escape [personas_dir ()]. *)
+let validate_persona_name persona_name : (unit, string) result =
+  if String.trim persona_name = "" then
+    Error "persona_name must not be empty"
+  else if persona_name = "." || persona_name = ".." then
+    Error "persona_name must not be '.' or '..'"
+  else if Filename.basename persona_name <> persona_name then
+    Error "persona_name must not contain path separators"
+  else Ok ()
+
 let profile_path persona_name =
   Filename.concat (personas_dir ()) (Filename.concat persona_name "profile.json")
 
@@ -43,19 +60,9 @@ let write_profile persona_name json =
   | Ok () ->
       (try
          Fs_compat.rename tmp path;
-         Ok (`Assoc [("status", `String "ok"); ("persona_name", `String persona_name); ("path", `String path)])
+         Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)])
        with exn ->
          Error ("Failed to rename tmp file: " ^ Printexc.to_string exn))
-
-let is_safe_persona_name name =
-  let trimmed = String.trim name in
-  trimmed <> ""
-  && not (String.contains trimmed '/')
-  && not (String.contains trimmed '\\')
-  && not (String.contains trimmed ':')
-  && trimmed <> "."
-  && trimmed <> ".."
-  && not (String.starts_with ~prefix:".." trimmed)
 
 let validate_create_args args =
   let persona_name = get_string_opt ~key:"persona_name" args in
@@ -63,10 +70,10 @@ let validate_create_args args =
   match persona_name, display_name with
   | None, _ -> ["Missing required field: persona_name"]
   | _, None -> ["Missing required field: display_name"]
-  | Some pn, _ when String.trim pn = "" -> ["persona_name must not be empty"]
-  | Some pn, _ when not (is_safe_persona_name pn) -> ["persona_name contains unsafe characters (path separators, '..', or ':' not allowed)"]
-  | _, Some dn when String.trim dn = "" -> ["display_name must not be empty"]
-  | _ -> []
+  | Some pn, Some dn ->
+      (match validate_persona_name pn with
+       | Error msg -> [msg]
+       | Ok () -> if String.trim dn = "" then ["display_name must not be empty"] else [])
 
 let profile_from_create_args args =
   let persona_name = get_string ~key:"persona_name" args in
@@ -93,88 +100,94 @@ let profile_from_create_args args =
   @ (match proactive_enabled with Some v -> [("proactive_enabled", `Bool v)] | None -> [])
   @ (match auto_handoff with Some v -> [("auto_handoff", `Bool v)] | None -> []))
 
-let merge_update_args_into_profile existing_json args =
-  let existing = match existing_json with
-    | `Assoc items -> items
-    | _ -> []  (* non-object JSON: no existing fields to merge, proceed with only update args *)
-  in
-  let update_field key to_json =
-    match get_string_opt ~key args with
-    | Some v -> Some (key, to_json v)
-    | None -> None
-  in
-  let update_bool_field key =
-    match get_bool_opt ~key args with
-    | Some v -> Some (key, `Bool v)
-    | None -> None
-  in
-  let update_list_field key =
-    match get_string_list_opt ~key args with
-    | Some v -> Some (key, `List (List.map (fun s -> `String s) v))
-    | None -> None
-  in
-  let updates =
-    List.filter_map (fun x -> x) [
-      update_field "display_name" (fun v -> `String v);
-      update_field "role" (fun v -> `String v);
-      update_field "trait" (fun v -> `String v);
-      update_field "goal" (fun v -> `String v);
-      update_field "instructions" (fun v -> `String v);
-      update_list_field "mention_targets";
-      update_list_field "tool_denylist";
-      update_bool_field "proactive_enabled";
-      update_bool_field "auto_handoff";
-    ]
-  in
-  let merged =
-    List.map (fun (k, v) ->
-      match List.find_opt (fun (uk, _) -> uk = k) updates with
-      | Some (_, uv) -> (k, uv)
-      | None -> (k, v)
-    ) existing
-  in
-  let existing_keys = List.map fst existing in
-  let new_items =
-    List.filter (fun (k, _) -> not (List.mem k existing_keys)) updates
-  in
-  `Assoc (merged @ new_items)
+(** Merge [args] into [existing_json]. Returns [Error] rather than
+    fabricating a placeholder persona when [existing_json] is not a JSON
+    object — a persisted profile that failed to parse as an object means
+    something else already corrupted it (disk, manual edit, prior bug),
+    and papering over it with [persona_name = "unknown"] would silently
+    rewrite the caller's data under the wrong identity on every future
+    update. *)
+let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) result =
+  match existing_json with
+  | `Assoc existing ->
+      let update_field key to_json =
+        match get_string_opt ~key args with
+        | Some v -> Some (key, to_json v)
+        | None -> None
+      in
+      let update_bool_field key =
+        match get_bool_opt ~key args with
+        | Some v -> Some (key, `Bool v)
+        | None -> None
+      in
+      let update_list_field key =
+        match get_string_list_opt ~key args with
+        | Some v -> Some (key, `List (List.map (fun s -> `String s) v))
+        | None -> None
+      in
+      let updates =
+        List.filter_map (fun x -> x) [
+          update_field "display_name" (fun v -> `String v);
+          update_field "role" (fun v -> `String v);
+          update_field "trait" (fun v -> `String v);
+          update_field "goal" (fun v -> `String v);
+          update_field "instructions" (fun v -> `String v);
+          update_list_field "mention_targets";
+          update_list_field "tool_denylist";
+          update_bool_field "proactive_enabled";
+          update_bool_field "auto_handoff";
+        ]
+      in
+      let merged =
+        List.map (fun (k, v) ->
+          match List.find_opt (fun (uk, _) -> uk = k) updates with
+          | Some (_, uv) -> (k, uv)
+          | None -> (k, v)
+        ) existing
+      in
+      let existing_keys = List.map fst existing in
+      let new_items =
+        List.filter (fun (k, _) -> not (List.mem k existing_keys)) updates
+      in
+      Ok (`Assoc (merged @ new_items))
+  | other ->
+      Error
+        (Printf.sprintf "Corrupt persona profile: expected a JSON object, got %s"
+           (Json_util.kind_name other))
 
 let handle_persona_create ctx args =
   let errors = validate_create_args args in
   if errors <> [] then
-    `Assoc [
-      ("status", `String "error");
-      ("errors", `List (List.map (fun e -> `String e) errors));
-    ]
+    error_assoc [("errors", `List (List.map (fun e -> `String e) errors))]
   else
     let persona_name = get_string ~key:"persona_name" args in
     if persona_exists persona_name then
-      `Assoc [
-        ("status", `String "error");
-        ("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."));
-      ]
+      error_assoc
+        [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))]
     else
       let profile = profile_from_create_args args in
       match write_profile persona_name profile with
       | Ok result -> result
-      | Error msg ->
-          `Assoc [("status", `String "error"); ("error", `String msg)]
+      | Error msg -> error_assoc [("error", `String msg)]
 
 let handle_persona_update ctx args =
   let persona_name = get_string_opt ~key:"persona_name" args in
   match persona_name with
-  | None ->
-      `Assoc [("status", `String "error"); ("error", `String "Missing required field: persona_name")]
+  | None -> error_assoc [("error", `String "Missing required field: persona_name")]
   | Some pn ->
-      if not (is_safe_persona_name pn) then
-        `Assoc [("status", `String "error"); ("error", `String "persona_name contains unsafe characters (path separators, '..', or ':' not allowed)")]
-      else if not (persona_exists pn) then
-        `Assoc [("status", `String "error"); ("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))]
-      else
-        match read_profile pn with
-        | Error msg -> `Assoc [("status", `String "error"); ("error", `String msg)]
-        | Ok existing_json ->
-            let updated = merge_update_args_into_profile existing_json args in
-            match write_profile pn updated with
-            | Ok result -> result
-            | Error msg -> `Assoc [("status", `String "error"); ("error", `String msg)]
+      (match validate_persona_name pn with
+       | Error msg -> error_assoc [("error", `String msg)]
+       | Ok () ->
+           if not (persona_exists pn) then
+             error_assoc
+               [("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))]
+           else
+             (match read_profile pn with
+              | Error msg -> error_assoc [("error", `String msg)]
+              | Ok existing_json ->
+                  (match merge_update_args_into_profile existing_json args with
+                   | Error msg -> error_assoc [("error", `String msg)]
+                   | Ok updated ->
+                       (match write_profile pn updated with
+                        | Ok result -> result
+                        | Error msg -> error_assoc [("error", `String msg)]))))

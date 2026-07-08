@@ -495,9 +495,24 @@ let run_keepalive_unified_turn
             ~keeper_name:meta_after_triage.name
             !consumed_stimuli;
           let event_bus = Keeper_event_bus.get () in
+          (* RFC-0320 W3c: if this cycle was opened by a Hitl_resolved wake,
+             carry that wake's captured originating channel into the turn so the
+             reply is deterministically delivered back to the conversation the
+             approval was requested from. First routable resolution wins; other
+             lanes leave this [None] (fail-closed: no delivery). *)
+          let hitl_delivery_channel =
+            List.find_map
+              (fun (stim : Keeper_event_queue.stimulus) ->
+                match stim.Keeper_event_queue.payload with
+                | Keeper_event_queue.Hitl_resolved resolution ->
+                  Some resolution.Keeper_event_queue.channel
+                | _ -> None)
+              !consumed_stimuli
+          in
           let meta_after_cycle =
             run_keeper_cycle
               ?event_bus
+              ?hitl_delivery_channel
               ~ctx
               ~meta_after_triage
               ~stop

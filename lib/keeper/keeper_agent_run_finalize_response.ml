@@ -316,6 +316,7 @@ let finalize
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     ~capture_replay_response
+    ?hitl_delivery_channel
     () =
   let budget_exhausted =
     Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
@@ -421,6 +422,29 @@ let finalize
        assistant_msg;
      capture_replay_response ~response_text
    | _ -> ());
+  (* RFC-0320 W3c: deterministic HITL continuation delivery. When this turn was
+     opened by a Hitl_resolved wake carrying a routable originating channel, and
+     the keeper did not itself post a reply this turn (the W3b prompt steer is
+     best-effort), deliver the visible response to that channel so the
+     conversation is always answered. Routing is deterministic (the captured
+     channel); [Keeper_continuation_delivery] fails closed on [Unrouted]. *)
+  (match hitl_delivery_channel, replay_response_text with
+   | Some channel, Some content ->
+     let already_replied =
+       List.exists
+         (fun name ->
+           String.equal name "keeper_surface_post"
+           || String.equal name "masc_keeper_msg")
+         actual_keeper_tool_names
+     in
+     let outcome =
+       Keeper_continuation_delivery.maybe_deliver ~config
+         ~keeper_name:meta.name ~channel ~already_replied ~content
+     in
+     Log.Keeper.info ~keeper_name:meta.name
+       "RFC-0320 W3c continuation delivery: %s"
+       (Keeper_continuation_delivery.describe_outcome outcome)
+   | (None, _) | (_, None) -> ());
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->

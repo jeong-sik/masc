@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   formatElapsed, formatDuration, formatDurationMs,
-  formatElapsedCompact, formatDelta,
+  formatElapsedCompact, formatDelta, formatCompactAge,
   formatRelativeSec, formatRelativeUntilSec, formatTimeAgo,
 } from './format-time'
 
@@ -45,6 +45,24 @@ describe('formatDelta', () => {
   it('formats negative without plus', () => { expect(formatDelta(-0.3)).toBe('-0.3000') })
   it('formats zero with plus', () => { expect(formatDelta(0)).toBe('+0.0000') })
   it('uses custom decimals', () => { expect(formatDelta(1.234, 2)).toBe('+1.23') })
+})
+
+describe('formatCompactAge', () => {
+  it('shows 방금 for sub-minute ages', () => {
+    expect(formatCompactAge(0)).toBe('방금')
+    expect(formatCompactAge(19)).toBe('방금')
+    expect(formatCompactAge(59)).toBe('방금')
+  })
+  it('formats minutes without a 전 suffix', () => {
+    expect(formatCompactAge(60)).toBe('1분')
+    expect(formatCompactAge(41 * 60)).toBe('41분')
+  })
+  it('formats hours and days', () => {
+    expect(formatCompactAge(2 * 3600)).toBe('2시간')
+    expect(formatCompactAge(86400)).toBe('1일')
+  })
+  it('clamps negative to 방금', () => { expect(formatCompactAge(-5)).toBe('방금') })
+  it('returns 정보 없음 for non-finite input', () => { expect(formatCompactAge(Infinity)).toBe('정보 없음') })
 })
 
 describe('relative time finite guards', () => {

@@ -124,6 +124,57 @@ let get_origin_url ~local_path =
   | Ok [] -> Error "git remote get-url origin returned no output"
   | Error msg -> Error msg
 
+let worktree_root ~local_path =
+  match
+    run_git
+      ~cwd:local_path
+      ~env:read_only_git_env
+      ~timeout_sec:status_summary_timeout_sec
+      [ "rev-parse"; "--show-toplevel" ]
+  with
+  | Ok (root :: _) ->
+    let root = String.trim root in
+    if String.equal root ""
+    then Stdlib.Error "git rev-parse --show-toplevel returned blank"
+    else Stdlib.Ok root
+  | Ok [] -> Stdlib.Error "git rev-parse --show-toplevel returned no output"
+  | Error msg -> Stdlib.Error msg
+
+let branch_of_origin_head_ref refname =
+  let refname = String.trim refname in
+  let prefix = "refs/remotes/origin/" in
+  if String.starts_with ~prefix refname
+  then
+    let branch =
+      String.sub refname (String.length prefix) (String.length refname - String.length prefix)
+      |> String.trim
+    in
+    if String.equal branch ""
+    then
+      Stdlib.Error
+        (Printf.sprintf
+           "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
+           refname)
+    else Stdlib.Ok branch
+  else
+    Stdlib.Error
+      (Printf.sprintf
+         "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
+         refname)
+;;
+
+let origin_head_branch ~local_path =
+  match
+    run_git
+      ~cwd:local_path
+      ~env:read_only_git_env
+      ~timeout_sec:status_summary_timeout_sec
+      [ "symbolic-ref"; "-q"; "refs/remotes/origin/HEAD" ]
+  with
+  | Ok (refname :: _) -> branch_of_origin_head_ref refname
+  | Ok [] -> Stdlib.Error "git symbolic-ref refs/remotes/origin/HEAD returned no output"
+  | Error msg -> Stdlib.Error msg
+
 let inspect_timeout_sec = status_summary_timeout_sec
 
 let current_branch ~repository =

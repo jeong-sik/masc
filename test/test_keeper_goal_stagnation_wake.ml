@@ -1,10 +1,14 @@
-(** RFC-0310 §3.3 — Goal_stagnation detection core.
+(** RFC-0310 §3.3 — Goal_stagnation detection and fire-once dedup.
 
-    Pins [Keeper_goal_stagnation_wake.stagnation_of_goal], the pure predicate
-    that decides whether a goal earns a one-shot stagnation wake. The full
-    enqueue path (event queue + reaction-ledger episode dedup) rides on the
-    same [Goal_store.goal] input; this file fixes the decision so a phase or
-    threshold regression is caught without a base-path fixture. *)
+    Two layers:
+    - [stagnation_of_goal], the pure predicate that decides whether a goal
+      earns a one-shot stagnation wake (phase gate, threshold, fail-closed
+      parse). Pinned without a base-path fixture.
+    - [enqueue_goal_stagnation_wakes], the producer whose fire-once-per-episode
+      invariant depends on the reaction-ledger [turn_started_seen] gate.
+      [test_episode_fires_once_across_rescans] drives it against a real
+      base-path fixture to prove it re-fires while the episode is unattended
+      and goes silent once the [Turn_started] reaction is on the ledger. *)
 
 open Alcotest
 
@@ -46,6 +50,25 @@ let stale_ts = "2026-07-07T23:00:00Z"
 let fresh_ts = "2026-07-08T01:55:00Z"
 
 let is_some = function Some _ -> true | None -> false
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_goal_stagnation_refire_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.is_directory path
+    then (
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Unix.unlink path
+  in
+  try rm dir with
+  | _ -> ()
+
+let keeper_name = "goal-stagnation-keeper"
 
 let test_stale_executing_goal_wakes () =
   let result =
@@ -108,6 +131,90 @@ let test_phase_predicate_exhaustive () =
         (Goal_phase.admits_self_directed_progress phase))
     Goal_phase.all
 
+(* Fire-once-per-episode (RFC-0310 §3.3) — the invariant the edge redesign
+   exists to hold, and the one the pure-predicate cases above cannot reach. The
+   re-fire loop lives in [enqueue_goal_stagnation_wakes], whose only durable
+   fire-once gate is the reaction ledger's [turn_started_seen]. That flag is
+   armed by the [Turn_started] reaction the stagnation turn records when it
+   consumes the stimulus (keeper_heartbeat_stimulus_intake, Goal_stagnation
+   arm — mirroring No_progress_recovery). Without that reaction the queue-level
+   identity dedup collapses duplicate queue *entries* but does not stop the
+   *wake*: the producer keeps returning the goal id and re-waking every scan —
+   the blind cadence RFC-0303 forbids. This test drives the producer across
+   scans against a real base-path fixture and asserts it re-fires while no
+   reaction exists, then goes silent once the episode reaction is recorded. *)
+let test_episode_fires_once_across_rescans () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      let persisted =
+        match
+          Goal_store.upsert_goal config ~title:"Advance the wake redesign"
+            ~phase:Goal_phase.Executing ()
+        with
+        | Ok (goal_rec, _) -> goal_rec
+        | Error err -> Alcotest.failf "goal upsert failed: %s" err
+      in
+      let goal_id = persisted.Goal_store.id in
+      (* [upsert_goal] stamps [updated_at] at persist time; pick a [now] past
+         the threshold so the goal reads as stale without a hand-computed
+         epoch. *)
+      let updated_ts =
+        match Masc_domain.parse_iso8601_opt persisted.Goal_store.updated_at with
+        | Some ts -> ts
+        | None ->
+          Alcotest.failf "persisted updated_at did not parse: %s"
+            persisted.Goal_store.updated_at
+      in
+      let now = updated_ts +. threshold_sec +. 1.0 in
+      let scan () =
+        SW.enqueue_goal_stagnation_wakes ~config ~keeper_name
+          ~active_goal_ids:[ goal_id ] ~now ~threshold_sec ()
+      in
+      check (list string) "first scan fires the stale episode" [ goal_id ]
+        (scan ());
+      (* No turn has recorded a Turn_started reaction yet, so the producer must
+         re-fire. This is the defect the intake fix closes: queue dedup alone
+         does not stop the wake. *)
+      check (list string)
+        "re-fires while the episode has no turn_started reaction" [ goal_id ]
+        (scan ());
+      (* Record the reaction exactly as the fixed intake arm does: same episode
+         [gs], [arrived_at] pinned to the episode timestamp so the stimulus id
+         matches what the producer recomputes on the next scan. *)
+      let gs =
+        match SW.stagnation_of_goal ~now ~threshold_sec persisted with
+        | Some gs -> gs
+        | None ->
+          Alcotest.fail "the persisted goal must be stale for this fixture"
+      in
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = Keeper_event_queue.goal_stagnation_post_id gs
+        ; urgency = Keeper_event_queue.Normal
+        ; arrived_at = updated_ts
+        ; payload = Keeper_event_queue.Goal_stagnation gs
+        }
+      in
+      Masc.Keeper_reaction_ledger.record_event_queue_reaction ~base_path
+        ~keeper_name ~reaction_kind:Masc.Keeper_reaction_ledger.Turn_started
+        stimulus;
+      let evidence =
+        Masc.Keeper_reaction_ledger.event_queue_reaction_evidence ~base_path
+          ~keeper_name
+          ~stimulus_id:
+            (Masc.Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus)
+      in
+      check bool "turn_started_seen arms after the episode reaction" true
+        evidence.Masc.Keeper_reaction_ledger.turn_started_seen;
+      check (list string) "silent after the episode has been attended" []
+        (scan ()))
+
 let () =
   run
     "keeper goal stagnation wake"
@@ -122,5 +229,9 @@ let () =
             test_unparseable_timestamp_silent
         ; test_case "phase predicate exhaustive" `Quick
             test_phase_predicate_exhaustive
+        ] )
+    ; ( "enqueue_goal_stagnation_wakes"
+      , [ test_case "episode fires once across re-scans" `Quick
+            test_episode_fires_once_across_rescans
         ] )
     ]

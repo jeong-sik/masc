@@ -201,6 +201,20 @@ let consume_single_heartbeat_stimulus
       gs.gs_goal_id
       gs.gs_stale_since
       meta_after_triage.name;
+    (* Arm [Keeper_goal_stagnation_wake]'s fire-once-per-episode gate. The
+       producer skips re-enqueue only when [turn_started_seen] is true for the
+       episode stimulus id; that flag is set solely from a [Turn_started]
+       reaction row. Without recording it here the gate stays inert, so once
+       [ack_consumed] drops the stimulus the next scan re-detects the same
+       stale episode ((goal_id, updated_at) unchanged) and re-wakes every tick
+       — the blind cadence RFC-0303 forbids and RFC-0310 §3.3 exists to avoid.
+       [stim] carries the episode-pinned [arrived_at], so this row stamps the
+       exact stimulus id the producer recomputes next scan. Mirrors the
+       No_progress_recovery arm below. *)
+    record_event_queue_stimulus_turn_started
+      ~ctx
+      ~keeper_name:meta_after_triage.name
+      stim;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Failure_judgment fj ->
     (* RFC-0313 W2: a deterministic turn failure awaits an LLM-boundary

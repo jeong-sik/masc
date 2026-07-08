@@ -90,6 +90,7 @@ let dummy_pending_approval
   ; on_resolution = None
   ; context_summary = None
   ; summary_status = Q.Summary_not_requested
+  ; channel = None
   }
 ;;
 

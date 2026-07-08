@@ -1385,7 +1385,9 @@ let test_audit_orphan_awaiting_verification_tasks () =
         let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
         match
           Workspace.transition_task_r config ~agent_name:test_agent_a
-            ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
+            ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
+            ~notes:"verification orphan setup notes"
+            ()
         with
         | Error err ->
             Alcotest.failf "submit for verification failed: %s"

@@ -1530,7 +1530,9 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
     let _ = Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
     let _ =
       Workspace.transition_task_r ctx.config ~agent_name:"test-agent"
-        ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
+        ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
+        ~notes:"strict contract verification setup notes"
+        ()
     in
     let result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx

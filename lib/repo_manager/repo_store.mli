@@ -70,6 +70,12 @@ val find_url_by_id : base_path:string -> repository_id -> string option
     field for the given repository, or [None] when the repository is
     not registered or has an empty URL. *)
 
+val find_url_by_identity : base_path:string -> string -> string option
+(** [find_url_by_identity ~base_path token] returns the raw [url] field for a
+    unique registered repository id, name, or explicit alias. It returns
+    [None] when the token is absent, ambiguous, or the matched repository has
+    an empty URL. *)
+
 val find_repo_by_path_prefix
   :  base_path:string
   -> string

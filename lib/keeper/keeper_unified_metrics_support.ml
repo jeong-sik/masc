@@ -366,21 +366,24 @@ let validated_evidence_preview
         (String.concat ", " names)
 
 (* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
-   precedence. Text wins whenever it is present, including scheduled autonomous
-   turns that are not reply-surface [Visible_reply] outcomes; then substantive
-   tool calls, then validated evidence, else the prior preview is kept (never
-   overwritten with a synthetic filler). Pure so the precedence is unit-testable
-   without a keeper_meta. *)
+   precedence. [is_visible_reply] is the typed reply-surface outcome
+   ([Keeper_turn_outcome.of_result_surface]) — a budget-exhausted turn
+   substitutes a synthetic continuation notice for the reply text, and a
+   completed runtime turn may still have no visible reply. Neither case may be
+   sniffed as model output, so visible model text only wins when the outcome is
+   [Visible_reply]. Then substantive tool calls, then validated evidence, else
+   the prior preview is kept (never overwritten with a synthetic filler). Pure
+   so the precedence is unit-testable without a keeper_meta. *)
 let select_proactive_preview
     ~(previous : string)
     ~(has_text : bool)
-    ~is_visible_reply:(_ : bool)
+    ~(is_visible_reply : bool)
     ~(has_substantive_tools : bool)
     ~(tool_names : string list)
     ~(response_text : string)
     ~(validated_evidence_preview : string option)
   : string =
-  if has_text then short_preview response_text
+  if has_text && is_visible_reply then short_preview response_text
   else if has_substantive_tools then
     Printf.sprintf "(tools: %s)" (String.concat ", " tool_names)
   else match validated_evidence_preview with

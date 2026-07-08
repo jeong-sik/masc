@@ -10,7 +10,6 @@ code_refs:
   - lib/keeper/keeper_world_observation.ml
   - lib/institution_eio.ml
   - lib/procedural_memory.ml
-  - lib/auto_recall.ml
   - lib/keeper/keeper_memory_recall.ml
   - lib/context_compact_oas.ml
 ---
@@ -21,7 +20,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Keeper |
-| Maps to | `lib/keeper/keeper_memory*.ml`, `lib/institution_eio.ml`, `lib/procedural_memory.ml`, `lib/context_*.ml`, `lib/auto_recall.ml` |
+| Maps to | `lib/keeper/keeper_memory*.ml`, `lib/institution_eio.ml`, `lib/procedural_memory.ml`, `lib/context_*.ml` |
 | Dependencies | 05-keeper-agent, 13-oas-integration |
 
 ---
@@ -57,9 +56,7 @@ graph TB
     CB[context_budget_manager.ml]
     CC[context_compact_oas.ml]
     CR[context_router.ml]
-    AR[auto_recall.ml]
   end
-  CR --> AR
   CC -->|"Context_reducer"| OAS["OAS runtime"]
 ```
 
@@ -350,36 +347,20 @@ Heuristic 분류는 ~80% 정확도를 보인다 (개발자 추정).
 
 ---
 
-## 8. Auto Recall
+## 8. Retired Auto Recall
 
 ### 8.1 개요
 
-`auto_recall.ml`은 에이전트 프롬프트에 자동으로 관련 컨텍스트를 주입한다.
+`lib/auto_recall.ml`(프롬프트 자동 컨텍스트 주입)은 2026-07-08 census에서
+production 소비자 0으로 확인되어 제거되었다. 유일한 참조는 자기 자신의
+coverage 테스트였고, 이 문서의 이전 판이 주장하던 `context_router` 통합
+(`CR --> AR` 다이어그램 엣지, `to_recall_config`)은 코드에 존재하지 않는
+drift였다.
 
-### 8.2 Sources
-
-| Source | 설명 |
-|--------|------|
-| `Masc_cache` | 공유 컨텍스트 스토어 |
-| `Recent_broadcasts` | 방 내 최근 N개 broadcast |
-| `File_context` | 최근 수정 파일 (mtime scan 기반 구현 완료) |
-
-Keeper turn path는 이것과 별도로 현재 backlog와 scheduled autonomous trigger를
-live world state로 재확인한다.
-
-### 8.3 Configuration
-
-```ocaml
-type recall_config = {
-  enabled: bool;
-  sources: recall_source list;
-  max_tokens: int;
-  max_broadcasts: int;
-  cache_tags: string list;
-}
-```
-
-`fetch_context_smart`가 쿼리 기반 relevance boosting을 적용한다. Context Router와 통합 시 `to_recall_config`가 routing decision에 맞는 config를 생성한다.
+현행 recall은 keeper memory bank(`keeper_memory_recall.ml`, §3)와 institution
+episodes(§4)가 담당하며, keeper turn path는 현재 backlog와 scheduled
+autonomous trigger를 live world state로 재확인한다. relevance recall의 확장은
+lexical 재랭커가 아니라 dense/embedding 경로로만 진행한다(§13).
 
 ---
 
@@ -462,7 +443,6 @@ type synapse = {
 
 ## 13. Future Work
 
-- `File_context` recall source 구현 (Auto_recall에서 TODO 상태)
 - Broader memory unification: MASC 자체 4개 메모리를 `Masc.Memory.t` 아래로 점진 정리
 - Vector DB 기반 semantic recall 도입 (현재 Jaccard 유사도만 사용)
 - Memory bank에 대한 cross-keeper sharing 메커니즘

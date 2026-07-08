@@ -1123,7 +1123,6 @@
   test_build_identity
   test_economy
   test_lifecycle
-  test_auto_recall_activity_coverage
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
@@ -1319,7 +1318,6 @@
   test_build_identity
   test_economy
   test_lifecycle
-  test_auto_recall_activity_coverage
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect

@@ -715,6 +715,7 @@ let review
       ?(verify_gate_evidence = [])
       ?(on_verdict : (review_result -> unit) option)
       ?(few_shot_block = "")
+      ?(operator_override : bool = false)
       ?sw
       (req : review_request)
   : review_result
@@ -854,7 +855,16 @@ let review
            ; fallback_reason = None
            }
        | None ->
-         (* Gate 3: LLM review via evaluator runtime (structured tool output, ADR D3) *)
+         if operator_override then begin
+           emit
+             { verdict = Approve
+             ; evaluator_runtime
+             ; generator_runtime
+             ; gate = Fallback
+             ; fallback_reason = Some "operator override: shared-account self-approval deadlock"
+             }
+         end else begin
+           (* Gate 3: LLM review via evaluator runtime (structured tool output, ADR D3) *)
          let prompt =
            build_prompt
              ~few_shot_block
@@ -1087,5 +1097,5 @@ let review
                   ; generator_runtime
                   ; gate = Fallback
                   ; fallback_reason = Some msg
-                  }))))
+                  })))) end
 ;;

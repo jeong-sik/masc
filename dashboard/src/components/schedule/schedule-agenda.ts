@@ -19,6 +19,7 @@ import {
   automationTone,
   recurrenceLabel,
 } from '../tools/scheduled-automation-panel'
+import { isCalendarVisible, queueDrainStatusOf } from './queue-drain-status'
 import {
   SCHED_CADENCE,
   SCHED_CADENCE_ORDER,
@@ -281,6 +282,9 @@ function PollingCard({
   onOpen: (scheduleId: string) => void
 }) {
   const tone = automationTone(request.effective_status ?? request.status)
+  // Interval loops drain through the same queue; surface the last execution's
+  // drain status so a silently-failing poll is visible without opening the row.
+  const drain = queueDrainStatusOf(request)
   return html`
     <button
       class=${`sch-poll-card st-${tone}`}
@@ -296,6 +300,14 @@ function PollingCard({
       <div class="sch-poll-foot">
         <span class="mono sch-poll-by">${scheduledBy(request)}</span>
         <${RiskTag} risk=${request.risk_class} />
+        ${drain && isCalendarVisible(drain)
+          ? html`<${StatusChip}
+              tone=${drain.tone}
+              uppercase=${false}
+              title=${drain.title}
+              testId="sch-drain-chip"
+            >${drain.label}<//>`
+          : null}
         <span class="sch-poll-next mono" title="다음 tick (next_due_at)">
           ${nextTickMs === null ? '다음 tick 미상' : `다음 ~${formatClock(nextTickMs)}`}
         </span>
@@ -348,6 +360,9 @@ function AgendaEventRow({
   const request = event.request
   const tone = automationTone(request.effective_status ?? request.status)
   const pending = isPending(request)
+  // Queue-drain status of the last keeper-wake execution (calendar parity with
+  // the list view). Only the actionable states render — see isCalendarVisible.
+  const drain = queueDrainStatusOf(request)
   return html`
     <button
       class=${`sch-ev st-${tone} ${pending ? 'pending' : ''}`}
@@ -365,6 +380,14 @@ function AgendaEventRow({
           <span class="mono sch-ev-by">${scheduledBy(request)}</span>
           <${RiskTag} risk=${request.risk_class} />
           ${pending ? html`<span class="sch-ev-need mono">⊙ 승인 필요</span>` : null}
+          ${drain && isCalendarVisible(drain)
+            ? html`<${StatusChip}
+                tone=${drain.tone}
+                uppercase=${false}
+                title=${drain.title}
+                testId="sch-drain-chip"
+              >${drain.label}<//>`
+            : null}
         </span>
       </span>
       <${StatusChip} tone=${tone} uppercase=${false}>${request.effective_status ?? request.status}<//>

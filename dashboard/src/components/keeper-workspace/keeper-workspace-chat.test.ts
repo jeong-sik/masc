@@ -4,12 +4,42 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { act, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Keeper } from '../../types'
+import type { DashboardGovernanceResponse, Keeper, KeeperApprovalQueueItem } from '../../types'
 
 const mockKeeper: Keeper = {
   name: 'sangsu',
   koreanName: '상수',
   status: 'running',
+}
+
+// The pending-approval cue reads the governance approval_queue (the HITL SSOT)
+// via governanceData — NOT keeper.trust.approval_state (#23678). Tests drive the
+// cue by setting this signal, which loadChat() injects in place of the real
+// computed. Reset in beforeEach so it never leaks across cases.
+const mockGovernanceData = signal<DashboardGovernanceResponse | undefined>(undefined)
+
+function approvalItem(id: string, keeperName: string, toolName: string): KeeperApprovalQueueItem {
+  return {
+    id,
+    keeper_name: keeperName,
+    tool_name: toolName,
+    risk_level: 'critical',
+    waiting_s: 10,
+    input_preview: 'x',
+    task_id: 'T-1',
+  } as KeeperApprovalQueueItem
+}
+
+function governanceResponse(queue: KeeperApprovalQueueItem[]): DashboardGovernanceResponse {
+  return {
+    generated_at: '2026-07-08T00:00:00Z',
+    summary: { judge_online: false },
+    items: [],
+    activity: [],
+    judgments: [],
+    pending_actions: [],
+    approval_queue: queue,
+  } as DashboardGovernanceResponse
 }
 
 async function loadChat() {
@@ -87,10 +117,20 @@ async function loadChat() {
     keeperMobilePane: signal<'roster' | 'chat'>('chat'),
   }))
   // Preserve the real router but capture navigate() so the pending-approval cue's
-  // "결재 큐에서 처리" link can be asserted.
+  // "결재 큐 →" link can be asserted.
   vi.doMock('../../router', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../../router')>()),
     navigate: vi.fn(),
+  }))
+  // The cue reads governanceData.approval_queue; inject a controllable signal in
+  // place of the real computed so a test can populate the queue directly.
+  vi.doMock('../governance-signals', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../governance-signals')>()),
+    governanceData: mockGovernanceData,
+  }))
+  vi.doMock('../../api/dashboard-governance', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../api/dashboard-governance')>()),
+    resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
   }))
   return import('./keeper-workspace-chat')
 }
@@ -101,11 +141,13 @@ describe('KeeperWorkspaceChat', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    mockGovernanceData.value = undefined
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
+    mockGovernanceData.value = undefined
     vi.clearAllMocks()
     vi.restoreAllMocks()
     vi.resetModules()
@@ -118,29 +160,32 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../keeper-action-panel')
     vi.doUnmock('../keeper-detail-state')
     vi.doUnmock('../../router')
+    vi.doUnmock('../governance-signals')
+    vi.doUnmock('../../api/dashboard-governance')
   })
 
   it('shows a pending-approval cue linking to the approvals queue when the keeper awaits a decision', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
     const { navigate } = await import('../../router')
-    const pendingKeeper: Keeper = {
-      ...mockKeeper,
-      trust: { approval_state: { pending_first: { id: 'appr-1', tool_name: 'fs_write' } } },
-    }
+    // The cue derives from the governance approval_queue (HITL SSOT), not
+    // keeper.trust.approval_state (#23678).
+    mockGovernanceData.value = governanceResponse([approvalItem('appr-1', 'sangsu', 'fs_write')])
 
     await act(async () => {
-      render(html`<${KeeperWorkspaceChat} keeper=${pendingKeeper} />`, container)
+      render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
     })
 
     const cue = container.querySelector('[data-testid="keeper-pending-approval-cue"]')
     expect(cue).not.toBeNull()
-    expect(cue?.textContent).toContain('결재 대기')
+    expect(cue?.textContent).toContain('승인 대기')
     expect(cue?.textContent).toContain('fs_write')
 
-    const link = cue?.querySelector('button')
-    expect(link?.textContent).toContain('결재 큐에서 처리')
+    // Three actions render (승인 / 거부 / 결재 큐 →); the queue link navigates.
+    const queueLink = Array.from(cue?.querySelectorAll('button') ?? [])
+      .find(button => button.textContent?.includes('결재 큐'))
+    expect(queueLink).not.toBeUndefined()
     await act(async () => {
-      link?.click()
+      queueLink?.click()
     })
     expect(navigate).toHaveBeenCalledWith('approvals')
   })

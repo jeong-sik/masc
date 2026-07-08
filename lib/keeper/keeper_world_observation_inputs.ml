@@ -20,8 +20,15 @@ let backlog_updated_since_last_scheduled_autonomous
 ;;
 
 let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  (* Use [resolve_claim_goal_scope] (backlog-aware, widens filter when no
+     scoped claimable tasks exist) rather than the pure-meta observation
+     variant.  [read_backlog_counts] already reads the backlog, so this
+     does not add a disk read.  Without the widening, a keeper whose active
+     goals carry no live claimable task sees [claimable_task_count = 0]
+     and never wakes for backlog work — the "coordination-role tasks are
+     blocked from re-claim by completion" staleness (task-1869). *)
   let scope =
-    Keeper_runtime_contract.resolve_observation_claim_goal_scope ~config ~meta ()
+    Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
   in
   scope.task_filter
 ;;

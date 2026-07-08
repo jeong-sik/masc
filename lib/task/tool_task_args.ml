@@ -168,4 +168,5 @@ let transition_known_args =
     "completion_contract";
     "evaluator_runtime";
     "handoff_context";
+    "evidence_refs";
   ]

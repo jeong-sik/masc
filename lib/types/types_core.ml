@@ -605,6 +605,19 @@ type task = {
   do_not_reclaim_reason: string option; [@default None]
 } [@@deriving show]
 
+(* RFC-0323 W1 Phase A (implements RFC-0308): completion must route through
+   submit -> approve when the contract opts into strict verification.
+   Contract *presence* is deliberately NOT the trigger: task creation
+   auto-fills an advisory contract for every task
+   (ensure_task_contract_for_verification), so presence is vacuously true
+   fleet-wide and would flip Phase B semantics on unannounced. [strict] is
+   the explicit, persisted opt-in — it already gates release-handoff the
+   same way. Phase B replaces this predicate with a default-on one. *)
+let task_requires_verification (t : task) =
+  match t.contract with
+  | Some contract -> contract.strict
+  | None -> false
+
 type task_reclaim_gate =
   | Reclaim_gate_open
   | Reclaim_gate_blocked_by_policy of string

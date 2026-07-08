@@ -91,6 +91,7 @@ let transition_task_outcome_r
              | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ())
           | Masc_domain.Start
           | Masc_domain.Cancel
+<<<<<<< HEAD
           | Masc_domain.Release -> Ok ()
           | Masc_domain.Done_action
           | Masc_domain.Submit_for_verification ->

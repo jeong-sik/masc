@@ -481,6 +481,42 @@ describe('ApprovalsSurface', () => {
     expect(history?.textContent).not.toContain('appr-approved')
   }, 20000)
 
+  it('makes hidden Always rules explicit when the aside list overflows its cap', async () => {
+    const rules = Array.from({ length: 8 }, (_, i) => ({
+      id: `rule-${i}`,
+      keeper_name: 'keeper-a',
+      tool_name: 'fs_write',
+      max_risk: 'medium',
+      match_count: 1,
+    })) as KeeperApprovalRule[]
+    const { ApprovalsSurface } = await loadSurface([], [], rules)
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    // Only the first 6 rows render, and the remaining 2 are surfaced explicitly
+    // rather than silently dropped (Always rules have no other view).
+    expect(container.querySelectorAll('[data-testid="approval-rule-row"]').length).toBe(6)
+    expect(container.querySelector('[data-testid="approvals-rules-overflow"]')?.textContent)
+      .toContain('외 2건')
+  }, 20000)
+
+  it('omits the rules overflow note when the list fits the cap', async () => {
+    const rules = Array.from({ length: 6 }, (_, i) => ({
+      id: `rule-${i}`,
+      keeper_name: 'k',
+      tool_name: 't',
+      max_risk: 'low',
+      match_count: 1,
+    })) as KeeperApprovalRule[]
+    const { ApprovalsSurface } = await loadSurface([], [], rules)
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="approvals-rules-overflow"]')).toBeNull()
+  }, 20000)
+
   it('shows the empty state when no approvals are pending', async () => {
     const { ApprovalsSurface } = await loadSurface([])
 

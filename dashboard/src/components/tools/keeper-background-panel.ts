@@ -74,7 +74,6 @@ function RecurringRow({ task }: { task: DashboardKeeperRecurringTask }) {
         <div class="sch-bg-title">${task.label}</div>
         <div class="sch-bg-meta">
           <span class="sch-bg-by">${enumLabel(task.action_kind)}</span>
-          <span class="sch-bg-since font-mono">every ${task.interval_sec.toLocaleString()}s</span>
           <span class="sch-bg-since font-mono">runs ${task.run_count.toLocaleString()}</span>
           <span class="sch-bg-since font-mono">fail ${task.failure_count.toLocaleString()}/${task.max_failures.toLocaleString()}</span>
           <span class="sch-bg-since">next ${task.next_run_at_iso ? formatTimeUntil(task.next_run_at_iso) : '-'}</span>

@@ -79,24 +79,8 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
-        let* () =
-          match action with
-          | Masc_domain.Claim ->
-            (match Masc_domain.task_claim_decision task with
-             | Claim_unavailable (Claim_block_reclaim_policy r) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
-             | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ())
-          | Masc_domain.Start
-          | Masc_domain.Done_action
-          | Masc_domain.Cancel
-          | Masc_domain.Release
-          | Masc_domain.Submit_for_verification
-          | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification -> Ok ()
-        in
+        (* RFC-0323 G-10: the typed reclaim claim precheck is retired — the
+           FSM decision below owns claimability by status alone. *)
         let* () =
           (match action, task.task_status with
           | Masc_domain.Claim, Masc_domain.Todo ->

@@ -2278,7 +2278,10 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
-let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
+(* RFC-0323 G-10 (+ #23661): the typed reclaim claim gate is retired. A
+   block_reclaim release persists policy + reason as operator-facing data,
+   but the recycled Todo is claimable again. *)
+let () = test "transition_release_block_reclaim_data_survives_reclaim" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
@@ -2327,8 +2330,13 @@ let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
             ("action", `String "claim");
           ])
     in
-    assert (not (Tool_result.is_success reclaim_result));
-    assert (str_contains (Tool_result.message reclaim_result) "blocked from re-claim"))
+    if not (Tool_result.is_success reclaim_result)
+    then failwith (Tool_result.message reclaim_result);
+    (* Block_reclaim + reason survive the claim as operator context. *)
+    assert ((only_task ctx).reclaim_policy = Some Masc_domain.Block_reclaim);
+    assert
+      ((only_task ctx).do_not_reclaim_reason
+       = Some "upstream PR already completed this scope"))
 )
 
 let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->

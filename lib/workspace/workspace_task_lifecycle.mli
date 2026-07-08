@@ -29,7 +29,9 @@ type claim_resolution =
   | Verifier_claim of Masc_domain.task_status
   | Self_owned
   | Held_by_other of string
-  | Blocked_by_reclaim_policy of string
+  | Held_terminal of Masc_domain.task_status
+      (** Terminal [Done] — never re-claimed (RFC-0323); re-running the work
+          takes a NEW task linked via [predecessor_task_id]. *)
 
 (** [resolve_claim ~same_actor ~agent_name ~now task] is the claim outcome.
     [same_actor name] must report whether [name] is the same logical actor as

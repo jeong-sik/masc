@@ -831,13 +831,14 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
+     continuation_channel:string option ->
      unit)
     ref =
-  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ())
+  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~continuation_channel:_ -> ())
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
-let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision =
+let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision ~continuation_channel =
   try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -904,7 +905,8 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ~base_path
     ~keeper_name:entry.keeper_name
     ~approval_id:entry.id
-    ~decision:(hitl_resolution_decision_of_approval_decision decision);
+    ~decision:(hitl_resolution_decision_of_approval_decision decision)
+    ~continuation_channel:entry.continuation_channel;
   try
     Sse.broadcast
       (`Assoc

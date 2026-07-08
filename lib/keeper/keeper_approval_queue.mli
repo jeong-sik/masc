@@ -83,6 +83,7 @@ type pending_approval =
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
+  ; continuation_channel : string option
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry

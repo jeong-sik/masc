@@ -155,6 +155,7 @@ and hitl_resolution_decision =
 and hitl_resolution = {
   approval_id : string;
   decision : hitl_resolution_decision;
+  continuation_channel : string option;
 }
 (** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
     pending-approval queue entry; [decision] is the resolved label

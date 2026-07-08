@@ -533,6 +533,7 @@ let payload_to_yojson = function
       [ "kind", `String "hitl_resolved"
       ; "approval_id", `String r.approval_id
       ; "decision", `String (hitl_resolution_decision_to_string r.decision)
+      ; "continuation_channel", (match r.continuation_channel with None -> `Null | Some ch -> `String ch)
       ]
   | Goal_verification_failed failure ->
     `Assoc
@@ -621,7 +622,8 @@ let payload_of_yojson json =
     let* approval_id = string_field ~context "approval_id" fields in
     let* decision_s = string_field ~context "decision" fields in
     let* decision = hitl_resolution_decision_of_string decision_s in
-    Ok (Hitl_resolved { approval_id; decision })
+    let* continuation_channel = optional_string_field ~context "continuation_channel" fields in
+    Ok (Hitl_resolved { approval_id; decision; continuation_channel })
   | "goal_verification_failed" ->
     let* goal_id = string_field ~context "goal_id" fields in
     let* request_id = string_field ~context "request_id" fields in

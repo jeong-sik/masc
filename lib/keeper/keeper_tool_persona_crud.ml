@@ -47,6 +47,16 @@ let write_profile persona_name json =
        with exn ->
          Error ("Failed to rename tmp file: " ^ Printexc.to_string exn))
 
+let is_safe_persona_name name =
+  let trimmed = String.trim name in
+  trimmed <> ""
+  && not (String.contains trimmed '/')
+  && not (String.contains trimmed '\\')
+  && not (String.contains trimmed ':')
+  && trimmed <> "."
+  && trimmed <> ".."
+  && not (String.starts_with ~prefix:".." trimmed)
+
 let validate_create_args args =
   let persona_name = get_string_opt ~key:"persona_name" args in
   let display_name = get_string_opt ~key:"display_name" args in
@@ -54,6 +64,7 @@ let validate_create_args args =
   | None, _ -> ["Missing required field: persona_name"]
   | _, None -> ["Missing required field: display_name"]
   | Some pn, _ when String.trim pn = "" -> ["persona_name must not be empty"]
+  | Some pn, _ when not (is_safe_persona_name pn) -> ["persona_name contains unsafe characters (path separators, '..', or ':' not allowed)"]
   | _, Some dn when String.trim dn = "" -> ["display_name must not be empty"]
   | _ -> []
 
@@ -85,7 +96,7 @@ let profile_from_create_args args =
 let merge_update_args_into_profile existing_json args =
   let existing = match existing_json with
     | `Assoc items -> items
-    | _ -> [("persona_name", `String "unknown")]
+    | _ -> []  (* non-object JSON: no existing fields to merge, proceed with only update args *)
   in
   let update_field key to_json =
     match get_string_opt ~key args with
@@ -155,7 +166,9 @@ let handle_persona_update ctx args =
   | None ->
       `Assoc [("status", `String "error"); ("error", `String "Missing required field: persona_name")]
   | Some pn ->
-      if not (persona_exists pn) then
+      if not (is_safe_persona_name pn) then
+        `Assoc [("status", `String "error"); ("error", `String "persona_name contains unsafe characters (path separators, '..', or ':' not allowed)")]
+      else if not (persona_exists pn) then
         `Assoc [("status", `String "error"); ("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))]
       else
         match read_profile pn with

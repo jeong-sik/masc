@@ -365,10 +365,24 @@ let fact_effective_valid_until (fact : fact) =
   | None, _ -> None
 ;;
 
+(* Staleness ceiling (seconds) for facts without an explicit valid_until
+   horizon. Tied to [Keeper_memory_os_policy.max_consensus_staleness] so that
+   read-path ([fact_is_current]) and write-path ([not_stale]) agree on when
+   unbounded facts expire. *)
+let fact_staleness_ceiling = 86400.
+
 let fact_is_current ~now (fact : fact) =
   match fact_effective_valid_until fact with
-  | None -> true
   | Some ts -> ts >= now
+  | None ->
+    (* Mirror [not_stale] in consolidator.ml: use last_verified_at when
+       available (shared facts), fall back to first_seen + ceiling. *)
+    let deadline =
+      match fact.last_verified_at with
+      | Some t -> t +. fact_staleness_ceiling
+      | None -> fact.first_seen +. fact_staleness_ceiling
+    in
+    now <= deadline
 ;;
 
 let librarian_unstructured_fallback_claim_prefix =

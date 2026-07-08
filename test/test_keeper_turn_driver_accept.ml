@@ -2012,6 +2012,64 @@ let test_truncation_classification_only_on_max_tokens () =
     (kind ~stop_reason:None
        ~response_shape:(Some Keeper_internal_error.Accept_response_empty))
 
+let test_truncation_retry_resumes_from_post_tool_checkpoint () =
+  (* RFC-0271 §4.5: a truncation fires on tool-productive turns, so its
+     thinking-off continuation must resume from [checkpoint_after] (which carries
+     this attempt's tool_result messages), never [resume_checkpoint] (the
+     pre-attempt state) — otherwise the retry re-runs, and re-mutates, the tools
+     it claims to continue past. [Read_only_no_progress] uses the same post-tool
+     checkpoint; [Empty]/[Thinking_only] (no tool ran) use the pre-attempt one. *)
+  let cp label =
+    { (checkpoint_with_messages []) with Agent_sdk.Checkpoint.session_id = label }
+  in
+  let selected err =
+    Option.map
+      (fun (c : Agent_sdk.Checkpoint.t) -> c.Agent_sdk.Checkpoint.session_id)
+      (Masc.Keeper_turn_driver_try_runtime.For_testing
+       .checkpoint_for_accept_rejected_retry
+         ~resume_checkpoint:(Some (cp "RESUME"))
+         ~checkpoint_after:(Some (cp "AFTER"))
+         err)
+  in
+  let truncation =
+    accept_rejected_sdk_error
+      ~stop_reason:(Some Agent_sdk.Types.MaxTokens)
+      ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+      ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_mutating)
+      ~any_mutating_tool:true
+      ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_mutating ]
+      ~reason:"truncation checkpoint"
+      ()
+  in
+  let empty =
+    accept_rejected_sdk_error
+      ~stop_reason:None
+      ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+      ~last_tool_effect:None
+      ~reason:"empty checkpoint"
+      ()
+  in
+  let read_only =
+    accept_rejected_sdk_error
+      ~stop_reason:None
+      ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
+      ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_read_only)
+      ~any_mutating_tool:false
+      ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_read_only ]
+      ~reason:"read-only checkpoint"
+      ()
+  in
+  Alcotest.(check (option string))
+    "truncation continuation resumes from post-tool checkpoint (preserves \
+     tool_results, no re-run)"
+    (Some "AFTER") (selected truncation);
+  Alcotest.(check (option string))
+    "empty no-progress (no tool ran) resumes from pre-attempt checkpoint"
+    (Some "RESUME") (selected empty);
+  Alcotest.(check (option string))
+    "read-only no-progress also resumes from post-tool checkpoint"
+    (Some "AFTER") (selected read_only)
+
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -2531,6 +2589,11 @@ let () =
             "truncation classification fires only on MaxTokens (RFC-0271 §4.5)"
             `Quick
             test_truncation_classification_only_on_max_tokens;
+          Alcotest.test_case
+            "truncation continuation resumes from post-tool checkpoint (RFC-0271 \
+             §4.5)"
+            `Quick
+            test_truncation_retry_resumes_from_post_tool_checkpoint;
           Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
             test_blank_text_non_end_turn_response_is_rejected;
           Alcotest.test_case "custom predicate rejection stays distinct" `Quick

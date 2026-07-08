@@ -112,12 +112,21 @@ let accept_rejected_result_should_try_next ~is_last err =
 
 let checkpoint_for_accept_rejected_retry ~resume_checkpoint ~checkpoint_after err =
   match accept_no_progress_retry_kind err with
-  | Some (`Empty_no_progress | `Thinking_only_no_progress | `Truncated_no_progress) ->
-    (* §4.5: regenerate the truncated conclusion on the same checkpoint — the
-       tool results already live in the message history as [tool_result], so
-       this is a continuation, not a blind resume that re-runs tools. *)
+  | Some (`Empty_no_progress | `Thinking_only_no_progress) ->
+    (* These fire only when [tool_effects_seen=[]] (no tool ran this attempt),
+       so the pre-attempt [resume_checkpoint] loses nothing and gives the retry
+       a clean history without the rejected empty/thinking response. *)
     resume_checkpoint
-  | Some `Read_only_no_progress -> checkpoint_after
+  | Some (`Read_only_no_progress | `Truncated_no_progress) ->
+    (* §4.5: a truncation fires on tool-productive turns, so the tool_results
+       this attempt produced live only in [checkpoint_after] (the post-run
+       state), not in [resume_checkpoint] (the pre-attempt state). Resume from
+       [checkpoint_after] so the thinking-off retry regenerates only the
+       truncated conclusion on top of the existing [tool_result] messages — a
+       continuation, not a blind resume that re-runs (and re-mutates) tools.
+       [Read_only_no_progress] uses the same post-run checkpoint for the same
+       reason (its read tools already ran). *)
+    checkpoint_after
   | None -> checkpoint_after
 
 let http_status_of_http_error = function
@@ -443,6 +452,7 @@ let run
 module For_testing = struct
   let accept_no_progress_should_try_next = accept_no_progress_should_try_next
   let should_retry_no_thinking = should_retry_no_thinking
+  let checkpoint_for_accept_rejected_retry = checkpoint_for_accept_rejected_retry
 
   let accept_no_progress_read_only_should_try_next =
     accept_no_progress_read_only_should_try_next

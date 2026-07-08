@@ -690,6 +690,50 @@ let test_rg_unregistered_clone_queues_repository_hitl () =
         (List.length entries)
         raw)
 
+let test_rg_registered_alias_allows_masc_mcp_path () =
+  if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
+  else
+    setup ~keeper_name:"base" ~sandbox:Keeper_types_profile_sandbox.Local
+    @@ fun ~base ~config ~meta ~playground ->
+    let registered =
+      { (sample_repo ~base_path:base "masc") with aliases = [ "masc-mcp" ] }
+    in
+    save_repositories base [ registered ];
+    let repo_root = Filename.concat playground "repos/masc-mcp" in
+    let lib_dir = Filename.concat repo_root "lib" in
+    ensure_dir lib_dir;
+    ignore
+      (Fs_compat.save_file_atomic
+         (Filename.concat lib_dir "foo.ml")
+         "let marker = \"Repository\"\n");
+    let raw =
+      Keeper_tool_command_runtime.handle_tool_search_files
+        ~turn_sandbox_factory:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:
+          (`Assoc
+            [ "op", `String "rg"
+            ; "pattern", `String "Repository"
+            ; "path", `String "repos/masc-mcp/lib"
+            ; "glob", `String "*.ml"
+            ])
+    in
+    let json = Yojson.Safe.from_string raw in
+    Alcotest.(check (option bool))
+      "registered alias search succeeds"
+      (Some true)
+      (Json.member "ok" json |> Json.to_bool_option);
+    Alcotest.(check (option string))
+      "resolved canonical host path"
+      (Some lib_dir)
+      (Json.member "path" json |> Json.to_string_option);
+    Alcotest.(check bool)
+      "no approval pending"
+      true
+      (match Json.member "approval_pending" json with `Null -> true | _ -> false)
+
 let test_read_unregistered_clone_surfaces_repository_hitl () =
   if not (git_available ()) then ()
   else (
@@ -779,6 +823,10 @@ let () =
             "read-only Execute omitted cwd does not create write root"
             `Quick
             test_readonly_execute_omitted_cwd_does_not_create_write_root;
+          Alcotest.test_case
+            "rg registered alias allows masc-mcp path"
+            `Quick
+            test_rg_registered_alias_allows_masc_mcp_path;
           Alcotest.test_case
             "rg unregistered clone queues repository HITL"
             `Quick

@@ -302,6 +302,57 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
       (fun (r : repository) -> String_set.mem r.id mapping_id_set)
       repos
 
+(* Path normalization for prefix comparison. *)
+let normalize_path_for_prefix_check path =
+  let p = String.trim path in
+  if String.ends_with ~suffix:"/" p then
+    String.sub p 0 (String.length p - 1)
+  else p
+
+let basename_of_path path =
+  normalize_path_for_prefix_check path |> Filename.basename
+
+let repository_url_basename url =
+  let stripped = normalize_path_for_prefix_check url in
+  if stripped = "" then ""
+  else
+    let base = Filename.basename stripped in
+    if Filename.check_suffix base ".git" then
+      String.sub base 0 (String.length base - 4)
+    else base
+
+let repository_identity_tokens (repo : repository) =
+  repo.id :: repo.name :: repo.aliases
+  |> List.map String.trim
+  |> List.filter (fun token -> not (String.equal token ""))
+
+(** [token_matches_url_basename ~basename token] is a case-insensitive
+    comparison between a repository identity token and the basename extracted
+    from a URL. Identity drift in the wild (e.g. [masc] vs [Masc]) should not
+    cause a fail-closed rejection. *)
+let token_matches_url_basename ~basename token =
+  String.equal (String.lowercase_ascii basename) (String.lowercase_ascii token)
+
+(** [repository_url_basename_matches_identity repo] returns [true] when the
+    repository's URL basename can be matched against one of the repository's
+    declared identity tokens. An empty basename (missing/empty URL or
+    unparseable URL) is treated as [false]: fail-closed, not "matches by
+    default". *)
+let repository_url_basename_matches_identity repo =
+  let basename = repository_url_basename repo.url in
+  (not (String.equal basename ""))
+  && List.exists (token_matches_url_basename ~basename) (repository_identity_tokens repo)
+
+let repository_matches_token ~base_path token (repo : repository) =
+  String.equal repo.id token
+  || String.equal repo.name token
+  || List.exists (String.equal token) repo.aliases
+  || (repository_url_basename_matches_identity repo
+      && token_matches_url_basename ~basename:(repository_url_basename repo.url) token)
+  || String.equal
+       (basename_of_path (Repo_store.local_path ~base_path repo))
+       token
+
 let repository_registered ~base_path ~repository_id : (bool, string) result =
   match Repo_store.load_all ~base_path with
   | Stdlib.Error msg ->
@@ -313,7 +364,7 @@ let repository_registered ~base_path ~repository_id : (bool, string) result =
   | Stdlib.Ok repos ->
     Stdlib.Ok
       (List.exists
-         (fun (repo : repository) -> String.equal repo.id repository_id)
+         (repository_matches_token ~base_path repository_id)
          repos)
 
 let log_mapping_load_error_if_new ~keeper_id msg =
@@ -485,13 +536,6 @@ let apply_mapping ~keeper_id ~base_path ~repositories =
   | Mapping_found mapping ->
       filter_repos_by_mapping mapping repositories
 
-(* Path normalization for prefix comparison. *)
-let normalize_path_for_prefix_check path =
-  let p = String.trim path in
-  if String.ends_with ~suffix:"/" p then
-    String.sub p 0 (String.length p - 1)
-  else p
-
 let relative_under ~root path =
   let root_norm = normalize_path_for_prefix_check root in
   let path_norm = normalize_path_for_prefix_check path in
@@ -538,40 +582,6 @@ let playground_path_of_path ~base_path ~path =
       | _keeper :: ["repos"] ->
           Some Playground_repos_root
       | _ -> Some Playground_internal)
-
-let basename_of_path path =
-  normalize_path_for_prefix_check path |> Filename.basename
-
-let repository_url_basename url =
-  let stripped = normalize_path_for_prefix_check url in
-  if stripped = "" then ""
-  else
-    let base = Filename.basename stripped in
-    if Filename.check_suffix base ".git" then
-      String.sub base 0 (String.length base - 4)
-    else base
-
-let repository_identity_tokens (repo : repository) =
-  repo.id :: repo.name :: repo.aliases
-  |> List.map String.trim
-  |> List.filter (fun token -> not (String.equal token ""))
-
-(** [token_matches_url_basename ~basename token] is a case-insensitive
-    comparison between a repository identity token and the basename extracted
-    from a URL. Identity drift in the wild (e.g. [masc] vs [Masc]) should not
-    cause a fail-closed rejection. *)
-let token_matches_url_basename ~basename token =
-  String.equal (String.lowercase_ascii basename) (String.lowercase_ascii token)
-
-(** [repository_url_basename_matches_identity repo] returns [true] when the
-    repository's URL basename can be matched against one of the repository's
-    declared identity tokens. An empty basename (missing/empty URL or
-    unparseable URL) is treated as [false]: fail-closed, not "matches by
-    default". *)
-let repository_url_basename_matches_identity repo =
-  let basename = repository_url_basename repo.url in
-  (not (String.equal basename ""))
-  && List.exists (token_matches_url_basename ~basename) (repository_identity_tokens repo)
 
 type repository_identity_mismatch = {
   repository_id : string;
@@ -623,16 +633,6 @@ let repository_identity_mismatch_message
      url_basename=%S url=%S repo_root=%S. Add the URL basename as an explicit \
      alias, or fix repositories.toml before keeper repository access."
     segment repository_id repository_name url_basename repository_url repo_root
-
-let repository_matches_token ~base_path token (repo : repository) =
-  String.equal repo.id token
-  || String.equal repo.name token
-  || List.exists (String.equal token) repo.aliases
-  || (repository_url_basename_matches_identity repo
-      && token_matches_url_basename ~basename:(repository_url_basename repo.url) token)
-  || String.equal
-       (basename_of_path (Repo_store.local_path ~base_path repo))
-       token
 
 type repository_resolution =
   | No_repository

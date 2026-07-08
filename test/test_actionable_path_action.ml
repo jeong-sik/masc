@@ -9,10 +9,26 @@
 
 open Masc.Keeper_tool_shared_runtime
 module CB = Masc.Keeper_failure_circuit_breaker
+module Json = Yojson.Safe.Util
 
 let r = Alcotest.(check string)
 
 let pg = ".masc/playground/test"
+
+let make_meta () =
+  let json =
+    `Assoc
+      [ "name", `String "test"
+      ; "agent_name", `String "keeper-test-agent"
+      ; "trace_id", `String "trace-test"
+      ; "goal", `String "actionable path test"
+      ; "sandbox_profile", `String "local"
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error e -> Alcotest.fail e
+;;
 
 let test_path_not_found () =
   let action =
@@ -93,6 +109,25 @@ let test_empty_raw_path_overrides_class () =
        true
      with Not_found -> false)
 
+let test_actionable_path_error_marks_path_not_found_deterministic () =
+  let raw =
+    actionable_path_error
+      ~op:"rg"
+      ~meta:(make_meta ())
+      ~raw_path:"repos/masc-mcp/lib"
+      ~error:"path_not_found_under_allowed_roots: repos/masc-mcp/lib"
+  in
+  let json = Yojson.Safe.from_string raw in
+  let retry = Json.member "deterministic_retry" json in
+  Alcotest.(check (option string))
+    "retry reason"
+    (Some "path_not_found")
+    (Json.member "reason" retry |> Json.to_string_option);
+  Alcotest.(check (option bool))
+    "same args retry disabled"
+    (Some false)
+    (Json.member "retry_same_args" retry |> Json.to_bool_option)
+
 let () =
   Alcotest.run "actionable_path_action"
     [
@@ -110,5 +145,12 @@ let () =
         [
           Alcotest.test_case "empty raw_path -> Provide a path" `Quick
             test_empty_raw_path_overrides_class;
+        ] );
+      ( "error_json",
+        [
+          Alcotest.test_case
+            "path not found marks deterministic retry boundary"
+            `Quick
+            test_actionable_path_error_marks_path_not_found_deterministic;
         ] );
     ]

@@ -77,6 +77,24 @@ let actionable_path_action_for_class
       Printf.sprintf "Check the path. Your playground: %s" playground)
 ;;
 
+let deterministic_retry_fields_for_path_class
+      (cls : Keeper_failure_circuit_breaker.error_class)
+  =
+  match cls with
+  | Keeper_failure_circuit_breaker.Path_not_found ->
+    Keeper_tool_deterministic_error.deterministic_retry_fields
+      Keeper_tool_deterministic_error.Path_not_found
+  | Keeper_failure_circuit_breaker.Path_not_allowed ->
+    Keeper_tool_deterministic_error.deterministic_retry_fields
+      Keeper_tool_deterministic_error.Path_outside_sandbox
+  | Keeper_failure_circuit_breaker.Cwd_not_directory ->
+    Keeper_tool_deterministic_error.deterministic_retry_fields
+      Keeper_tool_deterministic_error.Cwd_not_directory
+  | Keeper_failure_circuit_breaker.Shell_exit_nonzero
+  | Keeper_failure_circuit_breaker.Other ->
+    []
+;;
+
 (** Actionable error for path resolution failures.
     Follows Samchon harness pattern: field-level diagnostics with
     exact path, expected constraint, and concrete next action.
@@ -104,13 +122,14 @@ let actionable_path_error
   let action = actionable_path_action_for_class ~playground ~raw_path cls in
   Yojson.Safe.to_string
     (`Assoc
-        [ "ok", `Bool false
-        ; "op", `String op
-        ; "error", `String error
-        ; "tried", `String raw_path
-        ; "your_playground", `String playground
-        ; "action", `String action
-        ])
+        ([ "ok", `Bool false
+         ; "op", `String op
+         ; "error", `String error
+         ; "tried", `String raw_path
+         ; "your_playground", `String playground
+         ; "action", `String action
+         ]
+         @ deterministic_retry_fields_for_path_class cls))
 ;;
 
 let file_not_found_prefix = "File not found:"

@@ -278,6 +278,35 @@ let test_validate_access_allowed () =
       | Ok () -> ()
       | Error e -> Alcotest.fail ("expected Ok, got: " ^ e))
 
+let test_validate_access_accepts_registered_alias () =
+  with_temp_base_path (fun base_path ->
+      let repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc.git";
+          aliases = [ "masc-mcp" ];
+        }
+      in
+      (match Repo_store.save_all ~base_path [ repo ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("failed to seed repository alias: " ^ e));
+      write_mapping base_path "keeper-1" [ "masc" ];
+      Alcotest.(check bool)
+        "alias is registered"
+        true
+        (Keeper_repo_mapping.is_allowed
+           ~keeper_id:"keeper-1"
+           ~repository_id:"masc-mcp"
+           ~base_path);
+      match
+        Keeper_repo_mapping.validate_access
+          ~keeper_id:"keeper-1"
+          ~repository_id:"masc-mcp"
+          ~base_path
+      with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail ("expected alias Ok, got: " ^ e))
+
 let test_validate_access_explicit_mapping_does_not_cap_registered_repo () =
   with_temp_base_path (fun base_path ->
       write_repositories base_path [ sample_repo "repo-a"; sample_repo "repo-b" ];
@@ -435,6 +464,38 @@ let test_validate_path_access_playground_repo_uses_registered_name () =
       | Error e ->
           Alcotest.fail
             ("expected playground repo path to resolve by registered name, got: "
+             ^ e))
+
+let test_validate_path_access_playground_repo_uses_registered_alias () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc.git";
+          aliases = [ "masc-mcp" ];
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      (match Repo_store.save_all ~base_path [ root_repo; masc_repo ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("failed to seed repository alias: " ^ e));
+      write_mapping base_path "executor" [ "masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc-mcp/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected playground repo path to resolve by registered alias, got: "
              ^ e))
 
 let test_validate_path_access_playground_repo_uses_url_basename () =
@@ -989,6 +1050,8 @@ let () =
       ( "validate_access",
         [
           Alcotest.test_case "allowed" `Quick test_validate_access_allowed;
+          Alcotest.test_case "registered alias" `Quick
+            test_validate_access_accepts_registered_alias;
           Alcotest.test_case "explicit mapping does not cap registered repo" `Quick
             test_validate_access_explicit_mapping_does_not_cap_registered_repo;
           Alcotest.test_case "no mapping" `Quick test_validate_access_no_mapping;
@@ -1007,6 +1070,8 @@ let () =
             test_validate_path_access_playground_repos_root_ignores_base_repo;
           Alcotest.test_case "playground repo resolves registered name" `Quick
             test_validate_path_access_playground_repo_uses_registered_name;
+          Alcotest.test_case "playground repo resolves registered alias" `Quick
+            test_validate_path_access_playground_repo_uses_registered_alias;
           Alcotest.test_case "playground repo resolves repository URL basename" `Quick
             test_validate_path_access_playground_repo_uses_url_basename;
           Alcotest.test_case "case-only URL basename drift is allowed" `Quick

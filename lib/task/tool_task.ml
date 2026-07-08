@@ -402,7 +402,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~tool_name ~start_time reason
   | None ->
   let review_gate_rejection =
-    if (=) action Masc_domain.Done_action && not force then
+    if (=) action Masc_domain.Done_action then
       if not completion_owned_by_caller then
         None
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
@@ -412,6 +412,7 @@ and handle_transition ~tool_name ~start_time ctx args =
              | Some persisted -> Some persisted
              | None -> completion_contract)
           ~evaluator_runtime
+          ~operator_override:force
           ~ctx
           ~task_opt
           ~task_id

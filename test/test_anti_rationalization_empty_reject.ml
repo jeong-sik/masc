@@ -17,6 +17,7 @@ let make_request () : AR.review_request =
     task_description = "Implement and verify a concrete task.";
     completion_notes = "Implemented the change and verified the focused test.";
     task_id = "test-task-empty-reject";
+    evidence_refs = [];
   }
 
 let with_reviewer reviewer f =

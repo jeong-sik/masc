@@ -1,12 +1,19 @@
-(** Ratchet: [Task.Anti_rationalization.review] treats an empty evaluator
-    response as an invalid verdict and rejects via [Format_reject].
+(** Ratchet: [Task.Anti_rationalization.review] never approves an empty
+    evaluator response.
 
     The runtime log on 2026-06-28 showed repeated
     "evaluator returned empty text (approving by liveness)" entries. That
-    path silently accepted task completion without a reviewer verdict. The
-    parser still preserves the public string error for callers, but
-    production routing uses the typed parse error so the reject branch does
-    not depend on matching an error string. *)
+    path silently accepted task completion without a reviewer verdict
+    (#22573 closed it). The parser still preserves the public string error
+    for callers, but production routing uses the typed parse error so the
+    reject branch does not depend on matching an error string.
+
+    2026-07-09 (24h tool-error audit): the reject stays deterministic, but
+    empty output is now [Evaluator_empty] instead of [Format_reject] and the
+    reason names the evaluator-side failure — the old
+    "review format unrecognized" wording sent keepers into a revise-notes
+    retry loop for a failure their notes did not cause. The must-not-approve
+    invariant is unchanged and re-pinned below. *)
 
 module AR = Masc.Task.Anti_rationalization
 
@@ -79,17 +86,19 @@ let test_review_rejects_empty_evaluator_output () =
         AR.review ~evaluator_runtime:"test-empty-evaluator" (make_request ())
       in
       Alcotest.(check string)
-        "gate" "format_reject" (AR.gate_to_string result.AR.gate);
+        "gate" "evaluator_empty" (AR.gate_to_string result.AR.gate);
       Alcotest.(check (option string))
         "fallback reason"
         (Some "empty review output")
         result.AR.fallback_reason;
       match result.AR.verdict with
       | AR.Reject reason ->
-        Alcotest.(check string)
-          "reject reason"
-          "review format unrecognized: empty review output"
-          reason
+        Alcotest.(check bool)
+          "reject reason attributes the failure to the evaluator, not the notes"
+          true
+          (contains_substring reason "evaluator-side failure"
+           && contains_substring reason "not reviewed"
+           && not (contains_substring reason "review format unrecognized"))
       | AR.Approve ->
         Alcotest.fail
           "empty evaluator output must not approve by liveness")

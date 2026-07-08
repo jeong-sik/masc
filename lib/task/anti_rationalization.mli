@@ -64,6 +64,12 @@ type gate =
   | Structured_tool
   | Llm_text_fallback
   | Format_reject
+  | Evaluator_empty
+      (** Evaluator responded with an empty completion — an evaluator-side
+          failure, distinct from [Format_reject] (a parseable-but-wrong
+          response). Deterministic Reject either way; empty output never
+          approves (#22573 ratchet). Typed apart so evaluator health is
+          observable and the keeper is not told to revise its notes. *)
   | Fallback
 
 val gate_to_string : gate -> string

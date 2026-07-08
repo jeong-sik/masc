@@ -98,6 +98,7 @@ type gate =
   | Structured_tool
   | Llm_text_fallback
   | Format_reject
+  | Evaluator_empty
   | Fallback
 
 let gate_to_string = function
@@ -108,6 +109,7 @@ let gate_to_string = function
   | Structured_tool -> "structured_tool"
   | Llm_text_fallback -> "llm_text_fallback"
   | Format_reject -> "format_reject"
+  | Evaluator_empty -> "evaluator_empty"
   | Fallback -> "fallback"
 ;;
 
@@ -891,17 +893,33 @@ let review
                 task_info "[anti-rationalization] verdict via native JSON response";
                 (match parse_review_verdict_from_response_text text with
                  | Ok v -> v, Llm_text_fallback, None
-                 | Error parse_error ->
+                 | Error Empty_review_output ->
+                   (* Misattribution fix (24h tool-error audit, 2026-07-08): an
+                      empty completion is an evaluator-side failure — the
+                      keeper's notes were never reviewed, so a reason phrased
+                      as "review format unrecognized" sent keepers into a
+                      revise-notes retry loop (305 hits/24h). Still a
+                      deterministic Reject: #22573's ratchet (empty must not
+                      approve by liveness, independent of the fail_mode knob)
+                      holds. Only the attribution and the gate change. *)
+                   task_warn
+                     "[anti-rationalization] evaluator returned empty completion \
+                      (rejecting fail-closed; evaluator-side failure — keeper \
+                      notes were not reviewed)";
+                   ( Reject
+                       "evaluator returned an empty response; the completion \
+                        notes were not reviewed (evaluator-side failure). \
+                        Revising notes will not help — retry later, and if \
+                        this repeats the evaluator runtime needs operator \
+                        attention (structured-output capability or token \
+                        budget)."
+                   , Evaluator_empty
+                   , Some (verdict_parse_error_to_string Empty_review_output) )
+                 | Error (Unrecognized_review_format _ as parse_error) ->
                    let parse_err = verdict_parse_error_to_string parse_error in
-                   (match parse_error with
-                    | Empty_review_output ->
-                      task_warn
-                        "[anti-rationalization] evaluator returned empty text \
-                         (rejecting)"
-                    | Unrecognized_review_format _ ->
-                      task_warn
-                        "[anti-rationalization] verdict parse failed: %s (rejecting)"
-                        parse_err);
+                   task_warn
+                     "[anti-rationalization] verdict parse failed: %s (rejecting)"
+                     parse_err;
                    ( Reject (sprintf "review format unrecognized: %s" parse_err)
                    , Format_reject
                    , Some parse_err ))

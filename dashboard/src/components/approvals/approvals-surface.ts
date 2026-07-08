@@ -65,6 +65,14 @@ const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
 ]
 const DEFAULT_APPROVAL_HISTORY_FILTER = APPROVAL_HISTORY_FILTERS[0]!
 
+// Aside preview caps. The recent list is a preview of recent_resolved — the full
+// set lives in the 이력 (history) tab, so its overflow is expected. The Always
+// Rules list has NO other view, so when it overflows we make the hidden count
+// explicit (auto-approve rules bypass HITL; the operator must know the full set
+// exists even if it is not all shown here).
+const ASIDE_RECENT_LIMIT = 5
+const ASIDE_RULES_LIMIT = 6
+
 function apSev(riskLevel: string | null | undefined): KeeperApprovalRiskVisualBand {
   return keeperApprovalRiskVisualBand(riskLevel)
 }
@@ -470,7 +478,7 @@ function ApAside({
   const enabled = hitl?.enabled ?? null
   const recent = [...resolvedItems]
     .sort((a, b) => resolvedAtMs(b) - resolvedAtMs(a))
-    .slice(0, 5)
+    .slice(0, ASIDE_RECENT_LIMIT)
   // RFC-0319 operator approval mode. Bound to the real backend posture
   // (hitl.approval_mode), NOT to rules.length. The separation-of-duties floor
   // — critical/high/medium never auto-approve — is enforced backend-side; this
@@ -483,6 +491,7 @@ function ApAside({
   // must not race a decision already in flight.
   const toggleDisabled = acting !== null || hitlDisabledByEnv
   const eligibleBands = approvalMode?.auto_eligible_bands ?? []
+  const hiddenRules = Math.max(0, rules.length - ASIDE_RULES_LIMIT)
   return html`
     <aside class="ap-aside" data-testid="approvals-aside">
       <section class="wka-card ap-auto-card">
@@ -535,7 +544,12 @@ function ApAside({
           <span class="mono">${rules.length}</span>
         </div>
         ${rules.length > 0
-          ? html`<ul class="ap-rule-list">${rules.slice(0, 6).map(rule => html`<${ApprovalRuleRow} key=${rule.id} rule=${rule} />`)}</ul>`
+          ? html`
+              <ul class="ap-rule-list">${rules.slice(0, ASIDE_RULES_LIMIT).map(rule => html`<${ApprovalRuleRow} key=${rule.id} rule=${rule} />`)}</ul>
+              ${hiddenRules > 0
+                ? html`<div class="ap-side-empty mono" data-testid="approvals-rules-overflow">외 ${hiddenRules.toLocaleString()}건 더</div>`
+                : null}
+            `
           : html`<div class="ap-side-empty">저장된 Always 규칙 없음</div>`}
       </section>
 

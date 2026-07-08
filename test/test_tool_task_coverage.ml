@@ -548,7 +548,8 @@ let () = test "handle_done_records_calibration_verdict" (fun () ->
   let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
-      ("notes", `String "x")
+      ("notes", `String "x");
+      ("evidence_refs", `List [ `String "commit:abc123" ])
     ]) in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "Completion rejected by anti-rationalization gate");
@@ -578,7 +579,8 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
-      ("notes", `String "Task scope satisfied: Approved calibration task. Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123")
+      ("notes", `String "Task scope satisfied: Approved calibration task. Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123");
+      ("evidence_refs", `List [ `String "commit:abc123" ])
     ]) in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
   let store = Eval_calibration.get_store () in
@@ -588,6 +590,22 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   let verdict = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
   assert (verdict = "approve");
   Eval_calibration.reset_store_for_testing ()
+)
+
+let () = test "handle_done_rejects_empty_evidence_refs" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("title", `String "Empty evidence refs task")]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("task_id", `String "task-001")]) in
+  let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [
+      ("task_id", `String "task-001");
+      ("notes", `String "Task scope satisfied: long enough notes to avoid the length gate, but evidence_refs is empty.");
+      ("evidence_refs", `List [])
+    ]) in
+  assert (not (Tool_result.is_success result));
+  assert (str_contains (Tool_result.message result) "Completion rejected by anti-rationalization gate")
 )
 
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->

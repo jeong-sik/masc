@@ -238,4 +238,43 @@ describe('schedule calendar components', () => {
     render(html`<${Agenda} requests=${[]} nowMs=${NOW_MS} onOpen=${() => {}} />`, container)
     expect(container.querySelector('[data-testid="sch-agenda-empty"]')).not.toBeNull()
   })
+
+  it('surfaces a queue-drain miss on the agenda row (queue not_found + reaction not_found)', () => {
+    render(
+      html`<${Agenda}
+        requests=${[
+          req({
+            schedule_id: 'miss-1',
+            due_at_iso: '2026-07-07T18:00:00Z',
+            keeper_queue_evidence: { projection_status: 'not_found' },
+            keeper_reaction_evidence: { projection_status: 'not_found' },
+          }),
+        ]}
+        nowMs=${NOW_MS}
+        onOpen=${() => {}}
+      />`,
+      container,
+    )
+    const chip = container.querySelector('[data-schedule-id="miss-1"] [data-testid="sch-drain-chip"]')
+    expect(chip?.textContent).toContain('누락')
+  })
+
+  it('does not chip a healthy completion (queue not_found + keeper reaction recorded)', () => {
+    render(
+      html`<${Agenda}
+        requests=${[
+          req({
+            schedule_id: 'done-1',
+            due_at_iso: '2026-07-07T18:00:00Z',
+            keeper_queue_evidence: { projection_status: 'not_found' },
+            keeper_reaction_evidence: { projection_status: 'matched_consumed_ack' },
+          }),
+        ]}
+        nowMs=${NOW_MS}
+        onOpen=${() => {}}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-schedule-id="done-1"] [data-testid="sch-drain-chip"]')).toBeNull()
+  })
 })

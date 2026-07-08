@@ -16,16 +16,20 @@
    letting the busy branch route without string-matching the [channel] lane. *)
 type connector_kind =
   | Discord
+  | Slack
+      (** RFC-0317: the in-process Slack Socket Mode gateway
+          ([Server_slack_in_process_gateway]) builds its dispatch with
+          [~connector_kind:Slack]. Like [Discord] it has an outbound adapter
+          ([Keeper_chat_slack.adapter_loop], drained by the serial chat
+          consumer), so a message arriving mid-turn projects onto the chat queue
+          for deferred delivery rather than the outbound-less async poll store.
+          Added together with that gateway, not before. *)
   | Generic
       (** Every connector that is not a wired in-process inbound gateway with its
           own outbound adapter. Today this is the HTTP gate-route lane
           (imessage-bot, cli-connector) which POSTs and awaits synchronously, so
           a busy message keeps the async [masc_keeper_msg] poll path; see
-          RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). Slack is
-          intentionally absent: there is no in-process Slack inbound gateway that
-          calls [dispatch ~connector_kind:Slack], so adding a [Slack] arm here
-          would be a dead supported-looking branch. Add it together with that
-          gateway, not before. *)
+          RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). *)
 
 (* [route_busy_connector] decides where a connector message goes when the keeper
    is already in flight. Pure and exhaustive over [connector_kind] so a new
@@ -38,6 +42,10 @@ let route_busy_connector (kind : connector_kind) ~channel_id ~user_id :
     [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ] =
   match kind with
   | Discord -> `Enqueue_chat_queue (Keeper_chat_queue.Discord { channel_id; user_id })
+  | Slack ->
+    (* [Keeper_chat_queue.Slack] names the channel field [channel], not
+       [channel_id]; the busy Slack message carries the same conversation id. *)
+    `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel = channel_id; user_id })
   | Generic -> `Async_poll
 
 (* ── Keeper response parsing ─────────────────────────────────── *)
@@ -318,6 +326,20 @@ let discord_channel_id ~channel_workspace_id ~metadata =
 let discord_guild_id metadata =
   metadata_value_any [ "discord.guild_id"; "discord_guild_id" ] metadata
 
+(* Slack surface derivation (RFC-0317). The in-process gateway sets
+   [channel_workspace_id = channel_id] and mirrors it as [slack.channel_id]
+   metadata; prefer the metadata key, fall back to the workspace id. *)
+let slack_channel_id ~channel_workspace_id ~metadata =
+  match metadata_value_any [ "slack.channel_id"; "slack_channel_id" ] metadata with
+  | Some channel_id -> channel_id
+  | None -> String.trim channel_workspace_id
+
+let slack_team_id metadata =
+  metadata_value_any [ "slack.team_id"; "slack_team_id" ] metadata
+
+let slack_thread_ts metadata =
+  metadata_value_any [ "slack.thread_ts"; "slack_thread_ts" ] metadata
+
 let surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
     ~metadata ?conversation_id ?external_message_id () =
   match connector_kind with
@@ -332,6 +354,13 @@ let surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
               metadata;
           thread_id =
             metadata_value_any [ "discord.thread_id"; "discord_thread_id" ] metadata;
+        }
+  | Slack ->
+      Surface_ref.Slack
+        {
+          team_id = slack_team_id metadata;
+          channel_id = slack_channel_id ~channel_workspace_id ~metadata;
+          thread_ts = slack_thread_ts metadata;
         }
   | Generic ->
       let label =
@@ -364,6 +393,14 @@ let conversation_id_for_channel_context ~connector_kind ~channel
                  | None -> "dm"
                in
                Some (Printf.sprintf "discord:%s:channel:%s" guild_label channel_id))
+      | Slack ->
+          (* Same shape as the in-process gateway's [slack_conversation_id] so
+             the inbound-recorded conversation and the busy-deferred delivery
+             reference one id (Slack threads share the parent channel id). *)
+          let channel_id = slack_channel_id ~channel_workspace_id ~metadata in
+          (match non_empty_opt channel_id with
+           | None -> None
+           | Some channel_id -> Some (Printf.sprintf "slack:channel:%s" channel_id))
       | Generic ->
           (match non_empty_opt channel, non_empty_opt channel_workspace_id with
            | Some lane, Some workspace_id ->

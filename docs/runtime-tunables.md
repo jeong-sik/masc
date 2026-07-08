@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 369 unique knobs across 9 modules.
+**Total**: 370 unique knobs across 10 modules.
 
 **Typed getter classification**: 54/225 tagged (`operator`: 54, `algorithm`: 0, `unclassified`: 171).
 
@@ -344,6 +344,12 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_SECCOMP_PROFILE` | typed:string | unclassified | unclassified | 44 |  |
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 30 |  |
 | `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 190 |  |
+
+## Env_config_slack (1 knobs; typed classification 0/0)
+
+| Env var | Kind | Category | Ops class | Line | Doc |
+|---|---|---|---|---|---|
+| `MASC_SLACK_TRIGGER_POLICY` | string_literal | n/a | n/a | 20 |  |
 
 ## Env_config_snapshot (82 knobs; typed classification 0/0)
 

@@ -78,6 +78,7 @@ type pending_approval =
   ; disposition : string option
   ; disposition_reason : string option
   ; phase : pending_phase
+  ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
@@ -207,6 +208,7 @@ val audit_approval_event :
   ?approval_mode:string ->
   ?authorizing_band:string ->
   ?decision:approval_audit_decision ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   unit
 
@@ -282,6 +284,7 @@ val submit_and_await :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   ?critical_escalation_after_s:float ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   Agent_sdk.Hooks.approval_decision
 
@@ -306,6 +309,7 @@ val submit_pending :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   on_resolution:(Agent_sdk.Hooks.approval_decision -> unit) ->
   unit ->
   string
@@ -324,6 +328,7 @@ val set_approval_resolution_wake_hook :
    keeper_name:string ->
    approval_id:string ->
    decision:Keeper_event_queue.hitl_resolution_decision ->
+   continuation_channel:Keeper_continuation_channel.t ->
    unit) ->
   unit
 

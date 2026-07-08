@@ -378,7 +378,15 @@ let keeper_tool_failure_log_details ~tool_name ~agent_name ~duration_ms
       ("error_body_bytes", `Int (String.length error_body));
     ]
 
-let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~arguments =
+let execute_keeper_stream_tool
+      ~sw
+      ~clock
+      ?auth_token:_
+      state
+      ~agent_name
+      ~arguments
+      ~continuation_channel
+  =
   let start_time = Eio.Time.now clock in
   let success, body, failure_class =
     try
@@ -392,7 +400,13 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
           net = state.Mcp_server.net;
         }
       in
-      match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
+      match
+        Keeper_tool_surface.dispatch
+          ~continuation_channel
+          keeper_ctx
+          ~name:"masc_keeper_msg"
+          ~args:arguments
+      with
       | Some result ->
           let success = Tool_result.is_success result in
           let body = Tool_result.message result in
@@ -652,8 +666,17 @@ let keeper_stream_send_event ?on_closed writer mutex closed event =
     Projects the typed keeper result into the local HTTP stream response pair.
     No external timeout — keeper internal limits control duration
     (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
-let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event state
-    ~agent_name ~arguments ~on_text_delta =
+let execute_keeper_stream_tool_streaming
+      ~sw
+      ~clock
+      ?auth_token:_
+      ?on_event
+      state
+      ~agent_name
+      ~arguments
+      ~continuation_channel
+      ~on_text_delta
+  =
   let start_time = Eio.Time.now clock in
   let success, body, failure_class =
     try
@@ -669,7 +692,9 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
       in
       match
         Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event keeper_ctx
-          ~name:"masc_keeper_msg" ~args:arguments
+          ~continuation_channel
+          ~name:"masc_keeper_msg"
+          ~args:arguments
       with
       | Some result ->
           let success = Tool_result.is_success result in
@@ -734,8 +759,17 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
     ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 
-let execute_keeper_stream_tool_streaming_if_free ~sw ~clock ?auth_token:_ ?on_event state
-    ~agent_name ~arguments ~on_text_delta =
+let execute_keeper_stream_tool_streaming_if_free
+      ~sw
+      ~clock
+      ?auth_token:_
+      ?on_event
+      state
+      ~agent_name
+      ~arguments
+      ~continuation_channel
+      ~on_text_delta
+  =
   let start_time = Eio.Time.now clock in
   let outcome =
     try
@@ -750,7 +784,11 @@ let execute_keeper_stream_tool_streaming_if_free ~sw ~clock ?auth_token:_ ?on_ev
         }
       in
       match
-        Keeper_turn.handle_keeper_msg_if_free ~on_text_delta ?on_event keeper_ctx
+        Keeper_turn.handle_keeper_msg_if_free
+          ~on_text_delta
+          ?on_event
+          ~continuation_channel
+          keeper_ctx
           arguments
       with
       | `Busy rejection -> `Busy rejection
@@ -965,7 +1003,7 @@ let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
    optional could not be erased (warning 16). Every caller states explicitly
    whether the gate inbound boundary already owns the user line. *)
 let process_single_turn ~connector_user_line_recorded_upstream
-    ~state ~clock ~sw ~auth_token ~thread_id ~closed
+    ~state ~clock ~sw ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
@@ -1145,6 +1183,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
                 execute_keeper_stream_tool_streaming_if_free ~sw ~clock
                   ?auth_token
                   state ~agent_name ~arguments:args ~on_event
+                  ~continuation_channel
                   ~on_text_delta:(fun _ -> ())
               with
               | `Ran result -> Ok (`Ran result)
@@ -1157,10 +1196,11 @@ let process_single_turn ~connector_user_line_recorded_upstream
             else
               Ok
                 (`Ran
-                   (execute_keeper_stream_tool_streaming ~sw ~clock
-                      ?auth_token
-                      state ~agent_name ~arguments:args ~on_event
-                      ~on_text_delta:(fun _ -> ())))
+	                   (execute_keeper_stream_tool_streaming ~sw ~clock
+	                      ?auth_token
+	                      state ~agent_name ~arguments:args ~on_event
+                         ~continuation_channel
+	                      ~on_text_delta:(fun _ -> ())))
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -1172,9 +1212,10 @@ let process_single_turn ~connector_user_line_recorded_upstream
                 (try
                    Ok
                      (`Ran
-                        (execute_keeper_stream_tool ~sw ~clock
-                           ?auth_token
-                           state ~agent_name ~arguments:args))
+	                        (execute_keeper_stream_tool ~sw ~clock
+	                           ?auth_token
+	                           state ~agent_name ~arguments:args
+                            ~continuation_channel))
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn2 -> Error (Printexc.to_string exn2))
@@ -1515,6 +1556,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   in
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
+  let continuation_channel =
+    Keeper_continuation_channel.Dashboard { thread_id }
+  in
 
   let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed ~on_finished =
     let current_thread_id = ref Ag_ui.default_thread_id in
@@ -1782,12 +1826,12 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            let run_now () =
              (* Dashboard stream route: no gate inbound boundary recorded this
                 user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
-             process_single_turn ~connector_user_line_recorded_upstream:false
-               ~state ~clock ~sw
-               ~auth_token:(auth_token_from_request request)
-               ~thread_id ~closed
-               ~client_disconnects:(Some (stream_sw, client_disconnects))
-               ~payload ~run_id ~message_id ~agent_name ~events;
+	             process_single_turn ~connector_user_line_recorded_upstream:false
+	               ~state ~clock ~sw
+	               ~auth_token:(auth_token_from_request request)
+	               ~thread_id ~continuation_channel ~closed
+	               ~client_disconnects:(Some (stream_sw, client_disconnects))
+	               ~payload ~run_id ~message_id ~agent_name ~events;
              wait_for_adapter_finished ()
            in
            if has_external_speaker payload then run_now ()

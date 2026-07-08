@@ -691,7 +691,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
@@ -699,7 +699,11 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
-  | "masc_keeper_msg" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg ctx args))
+  | "masc_keeper_msg" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (handle_keeper_msg ?continuation_channel ctx args))
   | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
   | "masc_keeper_msg_cancel" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_cancel ctx args))
   | "masc_keeper_msg_queue" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_queue ctx args))
@@ -721,7 +725,15 @@ let dispatch ctx ~name ~args : tool_result option =
 (** Streaming dispatch: only handles keeper_msg with text delta forwarding.
     Returns None for all other tool names.
     Called from server_routes_http_keeper_stream. *)
-let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args : tool_result option =
+let dispatch_stream
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      ~name
+      ~args
+  : tool_result option
+  =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
@@ -729,7 +741,12 @@ let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args : tool_result optio
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (handle_keeper_msg_stream ?on_text_delta ?on_event ctx args))
+           (handle_keeper_msg_stream
+              ?on_text_delta
+              ?on_event
+              ?continuation_channel
+              ctx
+              args))
   | _ -> None
 
 (* ================================================================ *)

@@ -739,11 +739,12 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
-  (* Gate 0: empty evidence_refs — disabled until call site is wired (PR #23666
-     regression). Log and fall through to Gate 1 rather than returning unit. *)
+  (* Gate 0: empty evidence_refs — required for all code task submissions.
+     Reject completions that lack code-level evidence (file paths, commit hashes,
+     trace/turn/receipt refs). *)
   if List.is_empty req.evidence_refs then
-    task_warn "Gate 0 skipped: empty evidence_refs (call site not yet wired)";
-  (* Gate 1: empty or trivially short notes *)
+    Some (Rejection { reason = "no evidence references supplied"; rule_id = "gate_0_missing_evidence_refs"; hint = "Provide at least one evidence_ref: a file path, a commit hash, or a trace/turn/receipt reference." })
+  else
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length
   then

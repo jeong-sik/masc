@@ -344,10 +344,10 @@ let parse_keeper_task_done_evidence_refs args =
   | `Assoc fields ->
     (match List.assoc_opt "evidence_refs" fields with
      | None ->
-       Error
-         "evidence_refs is required. Include at least one locally validated \
-          base-path artifact, local git commit, or .masc trace/turn/receipt \
-          reference."
+       (* Gate 0 disabled until call site is wired (PR #23666 regression).
+          Accepting empty evidence_refs so keepers can complete tasks while
+          task-1889 wires handoff_context.evidence_refs through to review_request. *)
+       Ok []
      | Some (`List refs) ->
        let rec collect acc = function
          | [] ->

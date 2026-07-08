@@ -368,21 +368,86 @@ let test_gh_irreversible_repo_hosting_ops_denied_under_autonomous () =
        to R1 (reversible) — they are no longer Deny; they Ask via the capability
        axis (asserted in [test_gh_durable_remote_asks_under_autonomous]). Only
        the genuinely irreversible ops remain Deny here. *)
-    [ "gh pr merge", [ "pr"; "merge"; "123"; "--squash" ]
-    ; "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
+    [ "gh repo delete", [ "repo"; "delete"; "owner/repo"; "--yes" ]
     ; "gh discussion delete", [ "discussion"; "delete"; "42" ]
     ; "gh api delete", [ "api"; "-X"; "DELETE"; "/repos/owner/repo" ]
     ; "gh graphql deleteDiscussion"
       , [ "api"; "graphql"; "-f"; "query=mutation{deleteDiscussion}" ]
     ]
 
-let test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous () =
+(* Operator decision 2026-07-08: gh pr merge routes to non-blocking approval
+   (Ask), not Deny. R1 (revertable) + durable-remote (base branch) ->
+   Requires_approval, mirroring gh repo create. Holds for a dynamic PR number:
+   the action token "merge" is literal, so the durable-remote gate still fires. *)
+let test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous () =
   let s = simple (bin_ok "gh") ~args:[ lit "pr"; lit "merge"; var "PR_NUMBER" ] in
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
-  | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
-    assert (Exec_program.to_string bin = "gh")
-  | _ -> Alcotest.fail "gh pr merge with dynamic PR number should be denied"
+  | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+  | _ -> Alcotest.fail "gh pr merge with dynamic PR number should ask (durable-remote)"
+
+(* pr merge -> Ask under autonomous: R1 (revertable) + durable-remote base branch
+   -> Requires_approval. The safety-critical assertions are that it is NOT Allow
+   (a keeper must never auto-merge to the base branch) and NOT Deny (the operator
+   chose non-blocking approval over a hard block, 2026-07-08). Covers plain,
+   squash, leading/trailing repo flags, and a value that looks like [--admin] but
+   belongs to another flag. Admin-bypass itself is denied below. *)
+let test_gh_pr_merge_asks_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | Verdict.Allow _ ->
+         Alcotest.failf "%s: gh pr merge must NOT auto-run (keeper self-merge)" label
+       | _ -> Alcotest.failf "%s: gh pr merge must ask, not deny/other" label)
+    [ "gh pr merge 123", [ "pr"; "merge"; "123" ]
+    ; "gh pr merge 123 --squash", [ "pr"; "merge"; "123"; "--squash" ]
+    ; "gh pr merge --repo o/r 123", [ "pr"; "merge"; "--repo"; "o/r"; "123" ]
+    ; "gh --repo o/r pr merge 123", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
+    ; ( "gh pr merge 123 --subject --admin"
+      , [ "pr"; "merge"; "123"; "--subject"; "--admin" ] )
+    ]
+
+let test_gh_pr_merge_admin_denied_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Deny { reason = Policy_deny { rule }; _ } ->
+         if rule <> "gh_pr_merge_admin_bypass" then
+           Alcotest.failf "%s: unexpected deny rule %s" label rule
+       | Verdict.Deny _ ->
+         Alcotest.failf "%s: gh pr merge --admin must deny via Policy_deny" label
+       | Verdict.Allow _ ->
+         Alcotest.failf "%s: gh pr merge --admin must NOT auto-run" label
+       | Verdict.Ask _ ->
+         Alcotest.failf "%s: gh pr merge --admin must deny, not enter HITL" label
+       | Verdict.Suggest_confirm _ ->
+         Alcotest.failf "%s: gh pr merge --admin must deny, not suggest" label)
+    [ "gh pr merge 123 --admin", [ "pr"; "merge"; "123"; "--admin" ]
+    ; "gh pr merge 123 --admin=true", [ "pr"; "merge"; "123"; "--admin=true" ]
+    ; ( "gh --repo o/r pr merge 123 --admin"
+      , [ "--repo"; "o/r"; "pr"; "merge"; "123"; "--admin" ] )
+    ]
+
+let test_gh_pr_merge_with_dynamic_leading_repo_asks_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:[ lit "--repo"; var "REPO"; lit "pr"; lit "merge"; lit "123" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+  | _ -> Alcotest.fail "gh --repo $REPO pr merge 123 should ask"
 
 let test_gh_reversible_repo_hosting_ops_allowed_under_autonomous () =
   let s =
@@ -393,6 +458,93 @@ let test_gh_reversible_repo_hosting_ops_allowed_under_autonomous () =
   match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
   | Verdict.Allow t -> assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
   | _ -> Alcotest.fail "gh pr create should remain allowed under autonomous"
+
+(* RFC-0309 W4/G-9 (deferred [pr ready] case resolved): [gh pr ready] toggles a
+   PR draft<->ready-for-review and is reversible ([--undo]). On the [Pr] family
+   it does not touch a durable remote surface, so the capability axis leaves it
+   [Allowed] and the autonomous overlay runs it — matching [gh pr create]. Covers
+   the plain form and the keeper house-style trailing [--repo] flag. *)
+let test_gh_pr_ready_allowed_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Allow t ->
+         assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+       | _ -> Alcotest.failf "%s: gh pr ready must be allowed under autonomous" label)
+    [ "gh pr ready 123", [ "pr"; "ready"; "123" ]
+    ; "gh pr ready 123 --repo o/r", [ "pr"; "ready"; "123"; "--repo"; "o/r" ]
+    ]
+
+(* RFC-0309 W3 (#23599 fix): the disposition axis now locates the gh subcommand
+   with the flag-robust typed lowering ([Shell_ir_risk.gh_verb_of_simple]), so a
+   leading value-taking global flag no longer shadows the subcommand as the
+   word-list [Gh_verb.classify] did. [gh --repo O/R pr ready] reads as [Pr/ready]
+   -> Allowed, matching the plain and trailing-flag forms. (Before #23599 this
+   asked; before #23597 it was denied.) *)
+let test_gh_pr_ready_leading_flag_allowed_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:(List.map lit [ "--repo"; "o/r"; "pr"; "ready"; "123" ])
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+      ~simple:s
+  with
+  | Verdict.Allow t ->
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+  | _ ->
+    Alcotest.fail
+      "leading-flag gh pr ready must be allowed after the #23599 flag-robust fix"
+
+(* #23599: leading-flag reads must not be over-gated. Before the fix
+   [gh --repo O/R pr view] -> [Gh_verb.Other] -> [Ask]; now it reads as a known
+   read and is Allowed like the plain form. *)
+let test_gh_leading_flag_read_allowed_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Allow t ->
+         assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+       | _ ->
+         Alcotest.failf "%s: leading-flag gh read must be allowed" label)
+    [ "gh --repo o/r pr view 123", [ "--repo"; "o/r"; "pr"; "view"; "123" ]
+    ; "gh --repo o/r pr list", [ "--repo"; "o/r"; "pr"; "list" ]
+    ]
+
+(* #23599 fail-closed preservation: making the disposition flag-robust must NOT
+   weaken the RFC-0208 graphql boundary. A leading-flag literal durable-remote
+   graphql mutation still reaches the capability Ask, because the typed lowering
+   preserves the [Api]/[graphql] identity (subcommand="api", action="graphql")
+   and the durable-remote body scan runs on the argv words. *)
+let test_gh_leading_flag_graphql_durable_remote_asks_under_autonomous () =
+  let s =
+    simple (bin_ok "gh")
+      ~args:
+        (List.map lit
+           [ "--repo"; "o/r"; "api"; "graphql"; "-f"
+           ; "query=mutation{createRepository}"
+           ])
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+      ~simple:s
+  with
+  | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+  | _ ->
+    Alcotest.fail
+      "leading-flag durable-remote graphql must still ask (fail-closed preserved)"
 
 (* Issue #23390 regression: a leading value-taking global flag ([gh --repo o/r
    pr merge]) must not slip the destructive op past the floor. gh (Cobra)
@@ -412,9 +564,12 @@ let test_gh_leading_flag_destructive_floored_under_autonomous () =
          assert (Exec_program.to_string bin = "gh")
        | _ ->
          Alcotest.failf "%s: leading-flag destructive op must be floored" label)
-    [ "gh --repo o/r pr merge", [ "--repo"; "o/r"; "pr"; "merge"; "123" ]
-    ; "gh --repo o/r pr ready", [ "--repo"; "o/r"; "pr"; "ready"; "123" ]
-    ; "gh --repo o/r repo delete"
+    [ (* [pr ready] and [pr merge] both moved off this floor (RFC-0309 W4/G-9 +
+         2026-07-08 operator decision): reversible, so they Ask via the capability
+         axis, not the destructive floor. Covered by
+         [test_gh_pr_ready_leading_flag_allowed_under_autonomous] and
+         [test_gh_pr_merge_asks_under_autonomous]. [repo delete] stays floored. *)
+      "gh --repo o/r repo delete"
       , [ "--repo"; "o/r"; "repo"; "delete"; "o/r"; "--yes" ]
     ]
 
@@ -431,11 +586,11 @@ let test_gh_leading_dynamic_flag_destructive_floored_under_autonomous () =
          assert (Exec_program.to_string bin = "gh")
        | _ ->
          Alcotest.failf "%s: dynamic leading-flag destructive op must be floored" label)
-    [ ( "gh --repo $REPO pr merge"
-      , [ lit "--repo"; var "REPO"; lit "pr"; lit "merge"; lit "5" ] )
-    ; ( "gh --repo o/r pr merge $PR_NUMBER"
-      , [ lit "--repo"; lit "o/r"; lit "pr"; lit "merge"; var "PR_NUMBER" ] )
-    ; ( "gh --hostname $HOST api -X DELETE"
+    [ (* dynamic [pr merge] forms moved off the floor to the capability Ask
+         (RFC-0309 + 2026-07-08 operator decision); see
+         [test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous]. The
+         genuinely destructive [api -X DELETE] stays floored. *)
+      ( "gh --hostname $HOST api -X DELETE"
       , [ lit "--hostname"; var "HOST"; lit "api"; lit "-X"; lit "DELETE"
         ; lit "/repos/owner/repo"
         ] )
@@ -891,8 +1046,15 @@ let () =
   test_destructive_sql_later_flag_denied_under_autonomous ();
   test_read_sql_allowed_under_autonomous ();
   test_gh_irreversible_repo_hosting_ops_denied_under_autonomous ();
-  test_gh_pr_merge_with_dynamic_pr_number_denied_under_autonomous ();
+  test_gh_pr_merge_asks_under_autonomous ();
+  test_gh_pr_merge_admin_denied_under_autonomous ();
+  test_gh_pr_merge_with_dynamic_pr_number_asks_under_autonomous ();
+  test_gh_pr_merge_with_dynamic_leading_repo_asks_under_autonomous ();
   test_gh_reversible_repo_hosting_ops_allowed_under_autonomous ();
+  test_gh_pr_ready_allowed_under_autonomous ();
+  test_gh_pr_ready_leading_flag_allowed_under_autonomous ();
+  test_gh_leading_flag_read_allowed_under_autonomous ();
+  test_gh_leading_flag_graphql_durable_remote_asks_under_autonomous ();
   test_gh_leading_flag_destructive_floored_under_autonomous ();
   test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();

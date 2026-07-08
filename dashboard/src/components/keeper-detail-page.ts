@@ -394,6 +394,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
           onPreserveToggle=${setPreserveSystemPrompt}
           onClearSubmit=${submitClearContext}
           onSocialSweep=${() => { void runSocialSweep() }}
+          onOpenRuntimeConfig=${() => openKeeperConfig()}
         />
       <//>
     </div>

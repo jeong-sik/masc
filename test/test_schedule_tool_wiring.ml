@@ -150,6 +150,28 @@ let check_absent label names tool_name =
   check bool label false (List.mem tool_name names)
 ;;
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+;;
+
+let dispatch_projection_warn_messages_since before_seq =
+  Log.Ring.recent ~limit:50 ~module_filter:"Misc" ~since_seq:before_seq ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    if
+      String_util.contains_substring
+        entry.message
+        "schedule_payload_projection.dispatch_tool_for_request failed"
+    then Some entry.message
+    else None)
+;;
+
+let check_json_null label = function
+  | `Null -> check bool label true true
+  | json -> failf "%s: expected JSON null, got %s" label (Yojson.Safe.to_string json)
+;;
+
 let test_schema_and_descriptor_exposed () =
   let create_name = schedule_tool_name Tool_schemas_schedule.Create_request in
   let approve_name = operator_schedule_tool_name Tool_schemas_schedule.Approve_request in
@@ -329,6 +351,7 @@ let test_dispatch_list_surfaces_payload_support_summary () =
        ; "requested_by_id", `String "operator"
        ; "scheduled_by_id", `String "scheduler-agent"
        ]);
+  let before_list = latest_log_seq () in
   match
     Tool_schedule.dispatch ctx
       ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
@@ -363,12 +386,59 @@ let test_dispatch_list_surfaces_payload_support_summary () =
             String.equal "sched-supported" (row |> member "schedule_id" |> to_string)
             && String.equal "supported" (row |> member "payload_support" |> to_string))
          schedules);
+    let unsupported_row =
+      match
+        List.find_opt
+          (fun row ->
+             String.equal "sched-unsupported" (row |> member "schedule_id" |> to_string))
+          schedules
+      with
+      | Some row -> row
+      | None -> fail "expected unsupported row"
+    in
     check bool "unsupported row present" true
-      (List.exists
-         (fun row ->
-            String.equal "sched-unsupported" (row |> member "schedule_id" |> to_string)
-            && String.equal "unsupported" (row |> member "payload_support" |> to_string))
-         schedules)
+      (String.equal
+         "unsupported"
+         (unsupported_row |> member "payload_support" |> to_string));
+    check_json_null
+      "unsupported list row dispatch tool is null"
+      (unsupported_row |> member "payload_dispatch_tool");
+    check (list string)
+      "list display does not log dispatch projection warnings"
+      []
+      (dispatch_projection_warn_messages_since before_list);
+    let before_dashboard = latest_log_seq () in
+    let dashboard =
+      Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    in
+    let dashboard_rows = dashboard |> member "requests" |> to_list in
+    let dashboard_unsupported_row =
+      match
+        List.find_opt
+          (fun row ->
+             String.equal "sched-unsupported" (row |> member "schedule_id" |> to_string))
+          dashboard_rows
+      with
+      | Some row -> row
+      | None -> fail "expected unsupported dashboard row"
+    in
+    check_json_null
+      "unsupported dashboard row dispatch tool is null"
+      (dashboard_unsupported_row |> member "payload_dispatch_tool");
+    check (list string)
+      "dashboard display does not log dispatch projection warnings"
+      []
+      (dispatch_projection_warn_messages_since before_dashboard);
+    let before_repeat_poll = latest_log_seq () in
+    ignore
+      (Tool_schedule.dispatch ctx
+         ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
+         ~args:(`Assoc [ "limit", `Int 10 ]));
+    ignore (Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config);
+    check (list string)
+      "repeated display poll does not log dispatch projection warnings"
+      []
+      (dispatch_projection_warn_messages_since before_repeat_poll)
 ;;
 
 let test_dispatch_list_reports_schedule_store_read_error () =

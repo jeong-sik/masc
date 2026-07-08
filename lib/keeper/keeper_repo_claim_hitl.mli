@@ -2,15 +2,16 @@
 
     [Keeper_repo_mapping] remains a pure policy/enforcement module and does
     not depend on keeper tool surfaces. This module is the composition layer
-    that turns fail-closed repository denials into tool-facing responses.
+    that turns fail-closed repository denials into tool-facing responses and
+    non-blocking operator registration requests when a sandbox clone provides
+    enough structured evidence.
     Keeper repository mappings are advisory/default-scope metadata and are not
-    claimable access caps. The module name is retained for compatibility with
-    the former repo-claim path; selected-scope misses no longer submit HITL
-    approvals. *)
+    claimable access caps. *)
 
 type access_result =
   | Access_allowed
   | Access_denied of string
+  | Access_denied_hitl_pending of { detail : string; approval_id : string }
 
 val request_repository_access :
   keeper_id:string ->

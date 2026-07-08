@@ -142,6 +142,17 @@ val risk_of_gh_verb : Gh_verb.t -> risk_class
     axis (an unrecognized action's reversibility is genuinely unknown — the
     capability axis, not risk, gates it). Never returns [Destructive_protected]. *)
 
+val gh_verb_of_simple : Shell_ir.simple -> Gh_verb.t option
+(** Flag-robust gh verb identity from the typed lowering ([Shell_ir_typed]),
+    used by the capability axis ([Gh_capability_policy.disposition_of_simple]) so
+    a leading value-taking global flag ([gh --repo O/R pr view]) does not shadow
+    the real subcommand as the word-list [Gh_verb.classify] does. [None] when the
+    command does not lower to a typed [Gh] (the [Generic] escape hatch for
+    non-literal argv); the caller keeps its word-list fallback. Shares the
+    subcommand-location logic the enforcement floor already trusts, and preserves
+    the [Api]/[gh api graphql] identity so the caller's RFC-0208 graphql opacity
+    fail-closed is not weakened. *)
+
 val gh_api_graphql_creates_durable_remote : string list -> bool
 (** True when [words] is a [gh api graphql ...] invocation whose (comment-
     stripped) body contains a durable-remote repository/discussion create/mutate

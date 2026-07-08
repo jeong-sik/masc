@@ -84,6 +84,7 @@ let dummy_pending_approval
   ; disposition = None
   ; disposition_reason = None
   ; phase = Q.Awaiting_operator
+  ; continuation_channel = Keeper_continuation_channel.unrouted "test fixture"
   ; audit_base_path
   ; resolver = None
   ; on_resolution = None

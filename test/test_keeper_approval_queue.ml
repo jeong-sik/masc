@@ -7,6 +7,7 @@
        fires, and the updated phase is reflected in-memory and in JSON. *)
 
 module AQ = Masc.Keeper_approval_queue
+module Chat_queue = Masc.Keeper_chat_queue
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
@@ -121,14 +122,26 @@ let test_resolve_fires_keeper_wake_hook () =
   @@ fun _env ->
   let base_path = temp_dir () in
   let woke = ref None in
-  AQ.set_approval_resolution_wake_hook (fun ~base_path:_ ~keeper_name ~approval_id ~decision ->
-    woke := Some (keeper_name, approval_id, decision));
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_
+      ~keeper_name
+      ~approval_id
+      ~decision
+      ~continuation_channel:_ ->
+      woke := Some (keeper_name, approval_id, decision));
   Fun.protect
     ~finally:(fun () ->
       (* Reset to the default no-op so the recording closure does not leak into
          later tests that share this module-level hook. *)
       AQ.set_approval_resolution_wake_hook
-        (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ());
+        (fun
+          ~base_path:_
+          ~keeper_name:_
+          ~approval_id:_
+          ~decision:_
+          ~continuation_channel:_ ->
+          ());
       cleanup_dir base_path)
     (fun () ->
        Eio.Switch.run
@@ -165,8 +178,105 @@ let test_resolve_fires_keeper_wake_hook () =
             "wake carries the typed decision label"
             true
             (decision = Keeper_event_queue.Hitl_approved)
-        | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
-       yield_until (fun () -> Option.is_some !result))
+	       | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
+	       yield_until (fun () -> Option.is_some !result))
+;;
+
+let test_resolution_wake_carries_originating_continuation_channel () =
+  let base_path = temp_dir () in
+  let captured = ref None in
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_
+      ~keeper_name:_
+      ~approval_id
+      ~decision
+      ~continuation_channel ->
+      captured :=
+        Some
+          Keeper_event_queue.
+            { approval_id; decision; channel = continuation_channel });
+  let reset_hook () =
+    AQ.set_approval_resolution_wake_hook
+      (fun
+        ~base_path:_
+        ~keeper_name:_
+        ~approval_id:_
+        ~decision:_
+        ~continuation_channel:_ ->
+        ())
+  in
+  let submit_resolve_capture ?continuation_channel ~keeper_name () =
+    captured := None;
+    let id =
+      AQ.submit_pending
+        ~keeper_name
+        ~tool_name:"keeper_continue_after_reconcile"
+        ~input:(`Assoc [ "kind", `String "medium_gate" ])
+        ~risk_level:AQ.Medium
+        ~base_path
+        ?continuation_channel
+        ~on_resolution:(fun _decision -> ())
+        ()
+    in
+    (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+    match !captured with
+    | Some resolution -> resolution
+    | None -> Alcotest.fail "resolve did not publish a wake payload"
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      reset_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       let dashboard_channel =
+         Chat_queue.continuation_channel_of_message_source
+           ~dashboard_thread_id:"dashboard-thread-1"
+           Chat_queue.Dashboard
+       in
+       let dashboard_resolution =
+         submit_resolve_capture
+           ~keeper_name:"wake-dashboard-origin-test"
+           ~continuation_channel:dashboard_channel
+           ()
+       in
+       Alcotest.(check bool)
+         "dashboard wake payload keeps the originating route"
+         true
+         (Keeper_continuation_channel.same_route
+            dashboard_channel
+            dashboard_resolution.channel);
+       let discord_channel =
+         Chat_queue.continuation_channel_of_message_source
+           (Chat_queue.Discord
+              { channel_id = "discord-channel-1"; user_id = "discord-user-1" })
+       in
+       let discord_resolution =
+         submit_resolve_capture
+           ~keeper_name:"wake-discord-origin-test"
+           ~continuation_channel:discord_channel
+           ()
+       in
+       Alcotest.(check bool)
+         "discord wake payload keeps the originating route"
+         true
+         (Keeper_continuation_channel.same_route
+            discord_channel
+            discord_resolution.channel);
+       let unrouted_resolution =
+         submit_resolve_capture ~keeper_name:"wake-unrouted-origin-test" ()
+       in
+       match unrouted_resolution.channel with
+       | Keeper_continuation_channel.Unrouted { reason } ->
+         Alcotest.(check string) "missing connector fails closed"
+           "no originating connector"
+           reason
+       | Keeper_continuation_channel.Dashboard _
+       | Keeper_continuation_channel.Discord _
+       | Keeper_continuation_channel.Slack _ ->
+         Alcotest.fail "missing connector must not synthesize a routable channel")
 ;;
 
 let test_critical_entry_phase_becomes_escalated_after_timer () =
@@ -461,12 +571,16 @@ let () =
             `Quick
             test_critical_entry_phase_becomes_escalated_after_timer
         ] )
-    ; ( "wake"
-      , [ Alcotest.test_case
-            "resolve fires the keeper wake hook"
-            `Quick
-            test_resolve_fires_keeper_wake_hook
-        ] )
+	    ; ( "wake"
+	      , [ Alcotest.test_case
+	            "resolve fires the keeper wake hook"
+	            `Quick
+	            test_resolve_fires_keeper_wake_hook
+	        ; Alcotest.test_case
+	            "resolution wake carries originating continuation channel"
+	            `Quick
+	            test_resolution_wake_carries_originating_continuation_channel
+	        ] )
     ; ( "summary"
       , [ Alcotest.test_case
             "context summary survives include_input:true JSON paths"

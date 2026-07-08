@@ -243,11 +243,27 @@ say approval enables the action.
 
 ### 3.5 What #23362 got right and keeps
 
-The genuine irreversibles stay floored exactly as before: `pr merge/ready`,
+The genuine irreversibles stay floored exactly as before:
 `repo delete/archive/transfer/rename`, `release delete`, `secret delete`,
 `gh api -X DELETE`, `delete*` graphql mutations, `discussion delete`. The
-catastrophic floor (`Deny`) remains trust-independent. This RFC widens the
-space *between* Allow and Deny; it does not soften Deny.
+catastrophic floor (`Deny`) remains trust-independent for these. This RFC widens
+the space *between* Allow and Deny; for these ops it does not soften Deny.
+
+> **W4/G-9 follow-up — `pr ready` and `pr merge` reclassified:** both were
+> originally floored here. `pr ready` toggles a PR between draft and
+> ready-for-review and is reversible via `gh pr ready --undo`; `pr merge` writes
+> the base branch but is reversible via `git revert` (the tree is restored,
+> exactly as a created repo can be deleted). Their high-stakes nature —
+> CI/notifications for `ready`, base-branch/deploy effects for `merge` — is a
+> durable-remote *externality* on the capability axis, not a reversibility fact
+> (the same policy-as-risk conflation W4/G-9 closed for repo
+> create/fork/discussion). Both now classify R1 in
+> `repo_hosting_cli_reversible_mutations`. On the capability axis `pr ready` (not
+> a durable-remote surface) stays `Allowed`, while `pr merge` (writes the shared
+> base branch, `creates_durable_remote_surface`) is `Requires_approval` — routed
+> to non-blocking human approval, mirroring `gh repo create` (2026-07-08 operator
+> decision: merge asks, not denies). The baseline corpus, `test_gh_capability_policy`
+> dispositions, and the destructive-floor regression tests were updated to match.
 
 ---
 

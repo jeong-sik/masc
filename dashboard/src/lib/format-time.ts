@@ -30,6 +30,19 @@ export function formatRelativeSec(deltaSec: number): string {
   return rtf.format(-Math.round(safeDeltaSec / SECONDS_PER_DAY), 'day')
 }
 
+/** Compact age label for dense roster rows — bare magnitude, no relative
+ *  marker: "방금", "41분", "2시간", "1일". Matches the v2 mock roster time
+ *  column, which drops the "최근 활동 …" label and the "전" suffix that
+ *  {@link formatRelativeSec} carries so a long name column is not squeezed. */
+export function formatCompactAge(deltaSec: number): string {
+  if (!Number.isFinite(deltaSec)) return NO_TIME_INFO
+  const s = Math.max(0, Math.round(deltaSec))
+  if (s < SECONDS_PER_MINUTE) return '방금'
+  if (s < SECONDS_PER_HOUR) return `${Math.round(s / SECONDS_PER_MINUTE)}분`
+  if (s < SECONDS_PER_DAY) return `${Math.round(s / SECONDS_PER_HOUR)}시간`
+  return `${Math.round(s / SECONDS_PER_DAY)}일`
+}
+
 /** Mirror of {@link formatRelativeSec} for a FUTURE instant: a non-negative
  *  "seconds until" delta formatted with a positive sign — "1시간 후", "3분 후". */
 export function formatRelativeUntilSec(deltaSec: number): string {

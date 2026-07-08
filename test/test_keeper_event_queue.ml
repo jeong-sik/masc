@@ -57,6 +57,27 @@ let write_file path contents =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec scan offset =
+    offset + needle_len <= haystack_len
+    && (String.equal (String.sub haystack offset needle_len) needle || scan (offset + 1))
+  in
+  String.equal needle "" || scan 0
+
+let restored_log_messages_since before_seq =
+  Log.Ring.recent ~limit:20 ~module_filter:"Keeper" ~since_seq:before_seq ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    if contains_substring ~needle:"event_queue_snapshot: restored " entry.message
+    then Some entry.message
+    else None)
+
 let () =
   let open Keeper_event_queue in
   let board_payload () =
@@ -250,10 +271,10 @@ let () =
        (stimulus_to_yojson
           { post_id =
               hitl_resolution_post_id
-                { approval_id = "appr-9"; decision = Hitl_approved }
+                { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
           ; urgency = Immediate
           ; arrived_at = 4.0
-          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved }
+          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
           })
    with
    | Ok s ->
@@ -373,6 +394,71 @@ let () =
       ~old_ids:[ "goal-1" ]
       ~new_ids:[]
     = []);
+
+  (* --- RFC-0310 §3.3: Goal_stagnation --- *)
+  let stagnation =
+    { gs_goal_id = "goal-9"
+    ; gs_stale_since = "2026-07-08T00:00:00Z"
+    ; gs_goal_title = "Harden wake continuity"
+    }
+  in
+  assert (
+    String.equal
+      (goal_stagnation_post_id stagnation)
+      "goal-stagnation:goal-9:2026-07-08T00:00:00Z");
+  assert (
+    String.equal
+      (payload_kind_label (Goal_stagnation stagnation))
+      "goal_stagnation");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = goal_stagnation_post_id stagnation
+          ; urgency = Normal
+          ; arrived_at = 11.0
+          ; payload = Goal_stagnation stagnation
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Goal_stagnation gs ->
+        assert (String.equal gs.gs_goal_id "goal-9");
+        assert (String.equal gs.gs_stale_since "2026-07-08T00:00:00Z");
+        assert (String.equal gs.gs_goal_title "Harden wake continuity")
+      | _ -> Alcotest.fail "Goal_stagnation codec round-trip changed payload shape")
+   | Error msg ->
+     Alcotest.fail ("Goal_stagnation stimulus round-trip failed: " ^ msg));
+  (* Identity strips the display-only title but keeps (goal_id, stale_since):
+     a title edit within the same stale episode dedups... *)
+  let stagnation_stim =
+    { post_id = goal_stagnation_post_id stagnation
+    ; urgency = Normal
+    ; arrived_at = 11.0
+    ; payload = Goal_stagnation stagnation
+    }
+  in
+  let stagnation_retitled =
+    { stagnation_stim with
+      arrived_at = 12.0
+    ; payload =
+        Goal_stagnation { stagnation with gs_goal_title = "Harden wake (v2)" }
+    }
+  in
+  assert (stimulus_identity_equal stagnation_stim stagnation_retitled);
+  (* ...but a goal that was advanced (new updated_at) and went stale again
+     carries a new [gs_stale_since], so it is a DISTINCT episode that fires
+     independently — the edge, not a blind clock. *)
+  let stagnation_next_episode =
+    { stagnation_stim with
+      post_id =
+        goal_stagnation_post_id
+          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
+    ; payload =
+        Goal_stagnation
+          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
+    }
+  in
+  assert (not (stimulus_identity_equal stagnation_stim stagnation_next_episode));
 
   (* --- queue operations preserved --- *)
   let board_stim =
@@ -554,6 +640,35 @@ let () =
       assert (String.equal second.post_id "bootstrap");
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- health snapshot reads stay quiet; live hydration still announces replay. --- *)
+  let base_path = temp_dir "keeper-event-queue-restore-log-gate" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      Log.set_level Log.Info;
+      let keeper_name = "keeper-event-queue-restore-log-gate-test" in
+      let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
+      let before_health_reads = latest_log_seq () in
+      ignore (Keeper_event_queue_persistence.load_snapshot_pair ~base_path ~keeper_name);
+      ignore
+        (Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+           ~base_path
+           ~keeper_name);
+      Alcotest.(check (list string))
+        "health snapshot reads do not emit restore log"
+        []
+        (restored_log_messages_since before_health_reads);
+      let before_live_load = latest_log_seq () in
+      ignore (Keeper_event_queue_persistence.load ~base_path ~keeper_name);
+      Alcotest.(check bool)
+        "live load emits restore log"
+        true
+        (List.exists
+           (contains_substring
+              ~needle:"keeper=keeper-event-queue-restore-log-gate-test")
+           (restored_log_messages_since before_live_load)));
 
   (* --- durable snapshot load collapses legacy duplicates that differ only by
          arrival time. --- *)
@@ -895,5 +1010,46 @@ let () =
         | None -> Alcotest.fail "original second stimulus should remain queued"
       in
       assert (String.equal second.post_id "bootstrap"));
+
+  (* RFC-0320 backward compat: pre-W2 persisted stimuli have no [channel] in
+     their payload and must replay as [Unrouted], not fail — a restart
+     replaying a legacy wake queue must not break. Simulate by serializing a W2
+     stimulus then stripping the [channel] field before parsing back. *)
+  (let strip_channel json =
+     match json with
+     | `Assoc top ->
+       `Assoc
+         (List.map
+            (fun (k, v) ->
+              if String.equal k "payload" then
+                ( k
+                , match v with
+                  | `Assoc p ->
+                    `Assoc
+                      (List.filter (fun (pk, _) -> not (String.equal pk "channel")) p)
+                  | other -> other )
+              else (k, v))
+            top)
+     | other -> other
+   in
+   let hitl_stim =
+     { post_id = "p-legacy"
+     ; urgency = Immediate
+     ; arrived_at = 1.0
+     ; payload =
+         Hitl_resolved
+           { approval_id = "a"
+           ; decision = Hitl_approved
+           ; channel = Keeper_continuation_channel.unrouted "seed"
+           }
+     }
+   in
+   match stimulus_of_yojson (strip_channel (stimulus_to_yojson hitl_stim)) with
+   | Ok s ->
+     (match s.payload with
+      | Hitl_resolved r ->
+        assert (not (Keeper_continuation_channel.is_routable r.channel))
+      | _ -> assert false)
+   | Error _ -> assert false);
 
   print_endline "test_keeper_event_queue: all passed"

@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-07-07T06:15:13Z (HEAD: bce11c4304)
+Generated: 2026-07-07T19:11:12Z (HEAD: 9754784148)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 95 |
-| Manual specs | 95 |
+| Total .tla files | 96 |
+| Manual specs | 96 |
 | TTrace (auto-generated) | 0 |
 | Directories | 18 |
-| Total .cfg files | 197 |
-| Buggy .cfg (bug-model pair) | 101 |
+| Total .cfg files | 199 |
+| Buggy .cfg (bug-model pair) | 102 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -105,7 +105,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | TierRouting.tla | TierRouting | manual | 2 | 1 | clean={inv:Safety} buggy={inv:MissingNeverPass} | ec2a467bf853 |
 | Validation.tla | Validation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:PassRequiresComplete, inv:PassRequiresAllPassed} | c1310b236bcc |
 
-### specs/keeper-state-machine (33 specs)
+### specs/keeper-state-machine (34 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -141,6 +141,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | d6d719d016a0 |
 | KeeperWorkPipeline.tla | KeeperWorkPipeline | manual | 1 | 0 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent, inv:NoForcePush, inv:ReviewBeforeSubmit, prop:EventualCompletion, prop:NoOrphanWorkspace} | d1ad06fa831d |
 | KeeperWorkingStateLifecycle.tla | KeeperWorkingStateLifecycle | manual | 2 | 1 | clean={inv:TypeOK, inv:LifecycleDisjoint, inv:WorkingLoopsHaveSixWAndEvidence, inv:ResolvedOnlyWithResolutionEvidence, inv:ActiveLoopsNoSilentLoss, inv:PromptDigestBounded, inv:PromptDigestCoversActive, inv:CompactionPreservesActive, inv:HandoffCarriesActive} buggy={inv:TypeOK, inv:LifecycleDisjoint, inv:WorkingLoopsHaveSixWAndEvidence, inv:ResolvedOnlyWithResolutionEvidence, inv:ActiveLoopsNoSilentLoss, inv:PromptDigestBounded, inv:PromptDigestCoversActive, inv:CompactionPreservesActive, inv:HandoffCarriesActive} | e7caa37d5578 |
+| OperatorApprovalMode.tla | OperatorApprovalMode | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 5e3a97d153e3 |
 | OperatorPauseBroadcast.tla | OperatorPauseBroadcast | manual | 2 | 1 | clean={inv:TypeOK, inv:EmittedBeforeResolved, prop:PauseLeadsToBroadcast, prop:OperatorPauseEverHandled} buggy={inv:TypeOK, prop:PauseLeadsToBroadcast} | 8c678dba2425 |
 
 ### specs/keeper-switch-hierarchy (3 specs)

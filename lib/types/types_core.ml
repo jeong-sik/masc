@@ -605,6 +605,8 @@ type task_reclaim_gate =
   | Reclaim_gate_blocked_by_policy of string
 
 let task_reclaim_block_reason t =
+  (* DET-OK: typed reclaim policy branch makes this fallback unreachable for deterministic transitions.
+     It is used only as diagnostic text, never as a branching input. *)
   Option.value t.do_not_reclaim_reason ~default:"reclaim blocked by typed policy"
 ;;
 

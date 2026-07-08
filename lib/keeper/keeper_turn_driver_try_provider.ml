@@ -335,6 +335,10 @@ let accept_rejected_error ~last_tool_context ~runtime_id
            Option.map
              Keeper_internal_error.accept_response_shape_of_agent_sdk
              rejection.response_shape;
+         (* RFC-0271 §4.5: preserve the provider's typed stop_reason so the
+            classifier can tell a [MaxTokens] truncation from a clean [EndTurn]
+            no-progress terminal. *)
+         stop_reason = Some response.stop_reason;
          last_tool_effect =
            Option.map
              (fun context -> context.tool_effect)

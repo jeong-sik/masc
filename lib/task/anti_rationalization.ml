@@ -743,7 +743,13 @@ let review
      Reject completions that lack code-level evidence (file paths, commit hashes,
      trace/turn/receipt refs). *)
   if List.is_empty req.evidence_refs then
-    Some (Rejection { reason = "no evidence references supplied"; rule_id = "gate_0_missing_evidence_refs"; hint = "Provide at least one evidence_ref: a file path, a commit hash, or a trace/turn/receipt reference." })
+    emit
+      { verdict = Reject "no evidence references supplied"
+      ; evaluator_runtime
+      ; generator_runtime
+      ; gate = Evidence
+      ; fallback_reason = None
+      }
   else
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length

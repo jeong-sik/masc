@@ -8,6 +8,13 @@ let normalize_path path =
 let playground_root_no_create ~(config : Workspace.config) ~(meta : keeper_meta) =
   Keeper_sandbox.host_root_abs_of_meta ~config meta
 
+let repos_root_of_playground_root playground_root =
+  Filename.concat playground_root "repos" |> normalize_path
+
+let repo_root_of_playground_root ~playground_root ~repo_name =
+  Filename.concat (repos_root_of_playground_root playground_root) repo_name
+  |> normalize_path
+
 let safe_repo_component s =
   s <> ""
   && s <> "."
@@ -25,6 +32,20 @@ let safe_repo_component s =
           || c = '.')
        s
 
+let candidate_repo_roots_no_create ~base_path ~keeper_id ~repository_id =
+  if not (safe_repo_component repository_id)
+  then []
+  else
+    [ Keeper_types_profile_sandbox.Local; Keeper_types_profile_sandbox.Docker ]
+    |> List.map (fun sandbox_profile ->
+      let playground_root =
+        Filename.concat
+          base_path
+          (Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_id)
+      in
+      repo_root_of_playground_root ~playground_root ~repo_name:repository_id)
+    |> List.sort_uniq String.compare
+
 type path_context =
   { path_repo_name : string
   ; path_repo_root : string
@@ -37,7 +58,7 @@ let classify_path ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
     playground_root_no_create ~config ~meta
     |> normalize_path
   in
-  let repos_root = Filename.concat playground "repos" |> normalize_path in
+  let repos_root = repos_root_of_playground_root playground in
   let path = normalize_path path in
   if String.equal path repos_root then None
   else
@@ -49,7 +70,7 @@ let classify_path ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
       in
       match String.split_on_char '/' suffix with
       | repo_name :: _ when safe_repo_component repo_name ->
-        let repo_root = Filename.concat repos_root repo_name |> normalize_path in
+        let repo_root = repo_root_of_playground_root ~playground_root:playground ~repo_name in
         Some
           { path_repo_name = repo_name
           ; path_repo_root = repo_root

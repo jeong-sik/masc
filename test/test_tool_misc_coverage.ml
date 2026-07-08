@@ -671,6 +671,64 @@ let () = test "get_string_missing" (fun () ->
   assert (Tool_args.get_string args "key" "default" = "default")
 )
 
+let test_persona_create_succeeds () =
+  let personas_dir = Filename.temp_dir_name ^ "/masc_test_personas" in
+  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let args =
+    Tool_args.of_json
+      (`Assoc
+         [ ("persona_name", `String "test_persona")
+         ; ("display_name", `String "Test Persona")
+         ; ("role", `String "tester")
+         ; ("instructions", `String "Be helpful.")
+         ])
+  in
+  let result = Keeper_tool_persona_crud.handle_persona_create_json args in
+  Alcotest.(check bool) "create succeeds" true (result = `Assoc [ ("success", `Bool true) ])
+
+let test_persona_create_rejects_path_traversal () =
+  let personas_dir = Filename.temp_dir_name ^ "/masc_test_personas" in
+  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let args =
+    Tool_args.of_json
+      (`Assoc
+         [ ("persona_name", `String "../evil")
+         ; ("display_name", `String "Evil")
+         ])
+  in
+  let result = Keeper_tool_persona_crud.handle_persona_create_json args in
+  Alcotest.(check bool)
+    "rejects path traversal"
+    true
+    (match result with `Assoc [ ("error", _) ] -> true | _ -> false)
+
+let test_persona_update_succeeds () =
+  let personas_dir = Filename.temp_dir_name ^ "/masc_test_personas" in
+  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let create_args =
+    Tool_args.of_json
+      (`Assoc
+         [ ("persona_name", `String "test_persona")
+         ; ("display_name", `String "Test Persona")
+         ; ("instructions", `String "Original.")
+         ])
+  in
+  let _ = Keeper_tool_persona_crud.handle_persona_create_json create_args in
+  let update_args =
+    Tool_args.of_json
+      (`Assoc
+         [ ("persona_name", `String "test_persona")
+         ; ("instructions", `String "Updated.")
+         ])
+  in
+  let result = Keeper_tool_persona_crud.handle_persona_update_json update_args in
+  Alcotest.(check bool) "update succeeds" true (result = `Assoc [ ("success", `Bool true) ])
+
+let () =
+  register "persona create succeeds" test_persona_create_succeeds;
+  register "persona create rejects path traversal" test_persona_create_rejects_path_traversal;
+  register "persona update succeeds" test_persona_update_succeeds
+
 let () =
   Alcotest.run "Tool_misc"
     [

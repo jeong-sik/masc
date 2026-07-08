@@ -8,15 +8,19 @@ import { showSpawnPanel } from './keeper-spawn-state'
 // overrides at creation time are intentionally NOT here — those go through
 // keeper detail (post-create) or masc_keeper_up in the tool executor, keeping
 // this flow to one decision.
+//
+// Spacing below the panel is owned by the parent flex container (gap-4 in
+// AgentsUnified); the root carries no bottom margin so the panel↔roster gap
+// stays a single 16px step instead of stacking margin + gap.
 export function KeeperSpawnPanel() {
   if (!showSpawnPanel.value) {
-    return html`<div class="mb-4 v2-monitoring-surface" data-testid="keeper-spawn-panel">
+    return html`<div class="v2-monitoring-surface" data-testid="keeper-spawn-panel">
       <${ActionButton} variant="primary" size="md" onClick=${() => { showSpawnPanel.value = true }}>+ 키퍼 생성<//>
     </div>`
   }
   return html`
     <div
-      class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 v2-monitoring-panel"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 v2-monitoring-panel"
       data-testid="keeper-spawn-panel"
     >
       <div class="flex items-center justify-between mb-3 v2-monitoring-toolbar">

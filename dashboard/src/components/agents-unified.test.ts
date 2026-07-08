@@ -105,6 +105,8 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="fleet-fsm-matrix"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="composite-fsm-flowchart"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="fsm-hub"]')).not.toBeNull()
+    // FSM view is a structural drill-down, not a fleet roster — no keeper-create entry here.
+    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).toBeNull()
   })
 
   it('marks the FSM hub panel with the v2 monitoring panel class', () => {

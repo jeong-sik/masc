@@ -98,14 +98,14 @@ let reader_should_continue_after_input = function
    ([xapp-...]). Returns [Ok url] on Slack [{ok:true,url:"..."}], [Error
    reason] otherwise. The app token leaves the process only in this one
    Authorization header. *)
-let fetch_wss_url ~app_token =
+let fetch_wss_url ?clock ?(timeout_sec = 10.0) ~app_token () =
   let url = "https://slack.com/api/apps.connections.open" in
   let headers =
     [ ("Authorization", "Bearer " ^ app_token)
     ; ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
     ]
   in
-  match Masc_http_client.post_sync ~url ~headers ~body:"" () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body:"" () with
   | Error e -> Error ("apps.connections.open transport: " ^ e)
   | Ok (200, body) -> (
       match Yojson.Safe.from_string body with
@@ -203,7 +203,7 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event () =
            (hundreds of ms), so run it in its own fiber and feed the result
            back as an input. Keeps the drive loop responsive for acks. *)
         Eio.Fiber.fork ~sw (fun () ->
-            match fetch_wss_url ~app_token with
+            match fetch_wss_url ~clock ~app_token () with
             | Ok url ->
               Eio.Stream.add input_mailbox
                 (Slack_gateway_state.Apps_connections_open_succeeded { url })

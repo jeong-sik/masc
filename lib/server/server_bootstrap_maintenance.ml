@@ -639,7 +639,24 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                Log.Server.info
                  "periodic JSONL prune: pruned %d day-files (retention=%dd)"
                  total
-                 days
+                 days;
+             (* Schedule terminal-row GC on the same 24h cadence: terminal
+                rows (Succeeded/Failed/Rejected/Cancelled/Expired) otherwise
+                accumulate unbounded — the only pruner was the manual
+                dashboard action (Server_dashboard_http_schedule_actions).
+                Same operation as that button, so operator semantics are
+                unchanged; the cadence bounds how long terminal history
+                lingers, mirroring the dated-JSONL retention above. *)
+             (match Schedule_service.prune (Mcp_server.workspace_config state) with
+              | Ok (_, pruned) when pruned > 0 ->
+                Log.Server.info
+                  "periodic schedule prune: removed %d terminal rows"
+                  pruned
+              | Ok (_, _) -> ()
+              | Error err ->
+                Log.Server.warn
+                  "periodic schedule prune failed: %s"
+                  (Schedule_service.service_error_to_string err))
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->

@@ -1409,7 +1409,11 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
 
 
 
-let test_task_claim_next_action_policy_block_is_skip () =
+let test_task_claim_next_action_todo_policy_block_still_claims () =
+  (* task-1869 (#23661): reclaim_policy gates Done -> re-claim only. A Todo
+     task carrying Block_reclaim (e.g. an operator hard-stop release) stays
+     claimable; the block re-arms once the task reaches Done. This pin was
+     inverted before #23661 and sat latent-red while main was compile-red. *)
   let t : Masc_domain.task = {
     id = "task-009";
     title = "Operator stop";
@@ -1427,11 +1431,10 @@ let test_task_claim_next_action_policy_block_is_skip () =
     do_not_reclaim_reason = Some "operator hard stop";
   } in
   match Masc_domain.task_claim_next_action t with
-  | Masc_domain.Skip_claim (Masc_domain.Claim_block_reclaim_policy reason) ->
-    check string "reason" "operator hard stop" reason;
-    check bool "claimable" false (Masc_domain.task_claim_next_action_is_claimable t)
   | Masc_domain.Claim_now ->
-    fail "typed policy block must skip claim"
+    check bool "claimable" true (Masc_domain.task_claim_next_action_is_claimable t)
+  | Masc_domain.Skip_claim (Masc_domain.Claim_block_reclaim_policy _) ->
+    fail "todo task must stay claimable regardless of reclaim_policy (task-1869)"
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"
 
@@ -1687,7 +1690,7 @@ let () =
       test_case "to_yojson" `Quick test_task_to_yojson;
       test_case "of_yojson ok" `Quick test_task_of_yojson_ok;
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
-      test_case "claim next action policy block is skip" `Quick
-        test_task_claim_next_action_policy_block_is_skip;
+      test_case "claim next action: todo stays claimable under policy block" `Quick
+        test_task_claim_next_action_todo_policy_block_still_claims;
     ];
   ]

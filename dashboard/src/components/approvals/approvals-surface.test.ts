@@ -30,6 +30,12 @@ function responseWithQueue(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
   approval_rules: KeeperApprovalRule[] = [],
+  hitl: DashboardGovernanceResponse['hitl'] = {
+    enabled: true,
+    disabled_by_env: false,
+    env_name: 'MASC_DISABLE_HITL',
+    default_enabled: true,
+  },
 ): DashboardGovernanceResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
@@ -41,7 +47,7 @@ function responseWithQueue(
     approval_queue,
     recent_resolved,
     approval_rules,
-    hitl: { enabled: true, disabled_by_env: false, env_name: 'MASC_DISABLE_HITL', default_enabled: true },
+    hitl,
   } as DashboardGovernanceResponse
 }
 
@@ -51,29 +57,30 @@ async function loadSurface(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
   approval_rules: KeeperApprovalRule[] = [],
+  hitl?: DashboardGovernanceResponse['hitl'],
 ) {
   vi.resetModules()
   const resolveGovernanceApproval = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' })
-  vi.doMock('../../api', () => ({
+  const setApprovalMode = vi
+    .fn()
+    .mockResolvedValue({ ok: true, mode: 'auto_low_risk', previous_mode: 'manual', actor: 'op', changed_at: '2026-06-19T00:00:00Z' })
+  const response = hitl
+    ? responseWithQueue(approval_queue, recent_resolved, approval_rules, hitl)
+    : responseWithQueue(approval_queue, recent_resolved, approval_rules)
+  const apiMock = () => ({
     decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue, recent_resolved, approval_rules)),
+    fetchDashboardGovernance: vi.fn().mockResolvedValue(response),
     fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
     resolveGovernanceApproval,
     deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    setApprovalMode,
     submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
     submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
-  }))
-  vi.doMock('../../api/dashboard-governance', () => ({
-    decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue, recent_resolved, approval_rules)),
-    fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
-    resolveGovernanceApproval,
-    deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
-    submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
-    submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
-  }))
+  })
+  vi.doMock('../../api', apiMock)
+  vi.doMock('../../api/dashboard-governance', apiMock)
   vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
   // Preserve the real router (route signal etc.) but capture navigate() so the
   // "open keeper conversation" wiring can be asserted without a real route change.
@@ -83,7 +90,7 @@ async function loadSurface(
     navigate,
   }))
   const mod = await import('./approvals-surface')
-  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGovernanceApproval, navigate }
+  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGovernanceApproval, setApprovalMode, navigate }
 }
 
 describe('ApprovalsSurface', () => {
@@ -147,6 +154,21 @@ describe('ApprovalsSurface', () => {
       .toContain('HITL 상태')
     expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent)
       .toContain('enabled')
+  }, 20000)
+
+  it('formats a multi-hour HITL wait with an hour tier, not a minute-only breakdown', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({ id: 'appr-long', waiting_s: 9000 }), // 2h 30m — previously "150분 0초 대기"
+      queueItem({ id: 'appr-short', waiting_s: 92 }), // 1m 32s
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-approval-id="appr-long"] .ap-age')?.textContent)
+      .toBe('2시간 30분 대기')
+    expect(container.querySelector('[data-approval-id="appr-short"] .ap-age')?.textContent)
+      .toBe('1분 대기')
   }, 20000)
 
   it('renders the HITL context summary (available) inside the pending card', async () => {
@@ -613,6 +635,89 @@ describe('ApprovalsSurface', () => {
 
     expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
   })
+
+  it('binds the RFC-0319 approval-mode toggle to hitl.approval_mode (auto_low_risk → on)', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [], [], {
+      enabled: true,
+      disabled_by_env: false,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'auto_low_risk', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle).not.toBeNull()
+    // A real toggle switch, not the former display-only aria-hidden span.
+    expect(toggle?.getAttribute('role')).toBe('switch')
+    expect(toggle?.getAttribute('aria-checked')).toBe('true')
+    expect(toggle?.className).toContain('on')
+    const aside = container.querySelector('[data-testid="approvals-aside"]')
+    expect(aside?.textContent).toContain('자동 승인 (low-risk)')
+    // the enforced separation-of-duties floor is stated, not decorative
+    expect(aside?.textContent).toContain('비가역·파괴적·high-risk 요청은 항상 수동 결재')
+    expect(aside?.textContent).toContain('자동 승인 대상: low')
+  }, 20000)
+
+  it('defaults the approval-mode toggle to off when hitl.approval_mode is manual', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [], [], {
+      enabled: true,
+      disabled_by_env: false,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle?.getAttribute('aria-checked')).toBe('false')
+    expect(toggle?.className).not.toContain('on')
+    expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent).toContain('수동 결재')
+  }, 20000)
+
+  it('routes the approval-mode toggle through setApprovalMode (manual → auto_low_risk)', async () => {
+    const { ApprovalsSurface, setApprovalMode } = await loadSurface([], [], [], {
+      enabled: true,
+      disabled_by_env: false,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle?.disabled).toBe(false)
+    toggle?.click()
+    await flushUi()
+
+    expect(setApprovalMode).toHaveBeenCalledWith('auto_low_risk')
+  }, 20000)
+
+  it('disables the approval-mode toggle when HITL is disabled by env (nothing gates)', async () => {
+    const { ApprovalsSurface, setApprovalMode } = await loadSurface([], [], [], {
+      enabled: false,
+      disabled_by_env: true,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle?.disabled).toBe(true)
+    toggle?.click()
+    await flushUi()
+
+    expect(setApprovalMode).not.toHaveBeenCalled()
+  }, 20000)
 
   it('surfaces a visible error and re-enables the actions when a decision fails (no silent failure)', async () => {
     const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([

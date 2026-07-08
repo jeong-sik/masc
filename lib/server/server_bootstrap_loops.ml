@@ -1099,7 +1099,7 @@ let start_keeper_loops
                     "keeper_chat_consumer: forking Slack adapter \
                      for keeper=%s"
                     keeper_name;
-                  (match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
+                  (match Env_config_slack.bot_token_opt () with
                    | Some token ->
                        (* Isolate from the shared [sw] like the Discord arm
                           above; a bare fork would cancel sibling fibers if
@@ -1116,7 +1116,7 @@ let start_keeper_loops
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \
-                          MASC_SLACK_BOT_TOKEN not set, \
+                          SLACK_BOT_TOKEN not set, \
                           skipping Slack delivery for keeper=%s"
                          keeper_name));
              (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user

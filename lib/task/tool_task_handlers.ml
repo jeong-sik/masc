@@ -199,7 +199,8 @@ let review_completion_notes
     ~(ctx : context)
     ~(task_opt : Masc_domain.task option)
     ~(task_id : string)
-    ~(notes : string) : string option =
+    ~(notes : string)
+    ~(evidence_refs : string list) : string option =
   match task_opt with
   | None -> None
   | Some task ->
@@ -209,7 +210,7 @@ let review_completion_notes
         completion_notes = notes;
         agent_name = ctx.agent_name;
         task_id = task.id;
-        evidence_refs = [];
+        evidence_refs = evidence_refs;
       } in
       (* task-1664: the persisted contract's evidence obligations must reach
          the LLM prompt too, not only [completion_contract]. Read them from

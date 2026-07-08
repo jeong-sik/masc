@@ -649,6 +649,23 @@ export interface DashboardMemoryResponse {
   sort_by?: string
 }
 
+// RFC-0319 operator approval mode. Closed union mirrors the backend
+// `approval_mode_to_string` (manual | auto_low_risk); any other wire value is
+// normalized to 'manual' (fail-closed) at the api-normalize boundary.
+export type ApprovalMode = 'manual' | 'auto_low_risk'
+
+export interface HitlApprovalModeStatus {
+  mode: ApprovalMode
+  // Bands the backend will auto-approve in auto_low_risk mode (SSOT: ['low']).
+  // critical/high/medium are structurally excluded by the separation-of-duties
+  // floor in Operator_approval.decide_approval_mode, not by this list.
+  auto_eligible_bands: string[]
+  // True when the backend could not read the persisted mode and fell back to
+  // manual — surfaced so the operator knows the toggle reflects a fallback.
+  fail_closed: boolean
+  read_error?: string
+}
+
 export interface DashboardGovernanceResponse {
   generated_at?: string
   note?: string
@@ -678,6 +695,7 @@ export interface DashboardGovernanceResponse {
     disabled_by_env: boolean
     env_name: string
     default_enabled: boolean
+    approval_mode?: HitlApprovalModeStatus
   }
 }
 

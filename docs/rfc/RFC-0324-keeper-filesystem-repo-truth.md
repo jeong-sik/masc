@@ -77,7 +77,7 @@ dune runtest test_exec_policy
 
 ## Migration
 
-- 백업 보관: `~/.masc/config/keepers/` tar(`masc-config-keepers-backup-2026-07-08.tar.gz`).
+- 백업 보관: `<base-path>/.masc/config/keepers/` tar(`masc-config-keepers-backup-2026-07-08.tar.gz`).
 - keeper runtime json 갱신: keeper reload/restart로 toml SSOT 반영.
 
 ## Risks

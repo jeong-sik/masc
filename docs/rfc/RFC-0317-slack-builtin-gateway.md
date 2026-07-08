@@ -19,7 +19,7 @@ One tool out, push in. The mirror of [[RFC-0203]] for Slack.
 > (`slack_rest_client`) + the in-process `Channel_gate_slack_state` rewrite +
 > connector registration + `Keeper_chat_queue.Slack` deferred delivery. PR-3
 > (this batch) wires `Server_slack_in_process_gateway` + bootstrap + env
-> (`MASC_SLACK_APP_TOKEN`, `MASC_SLACK_TRIGGER_POLICY`) + `slack_observability`,
+> (`SLACK_APP_TOKEN`, `MASC_SLACK_TRIGGER_POLICY`) + `slack_observability`,
 > and adds the `connector_kind:Slack` arm together with that gateway (per the
 > "add it together with the gateway, not before" note in `gate_keeper_backend`).
 > PR-4 (pending) deletes the sidecar. Ambient recording + idle-keeper wake on
@@ -113,16 +113,31 @@ turn-starter). `App_mention` always emits (it is, by definition, a mention).
 
 ## Tokens and redaction
 
-- `MASC_SLACK_APP_TOKEN` (`xapp-...`) — used **only** for
+- `SLACK_APP_TOKEN` (`xapp-...`) — used **only** for
   `apps.connections.open` (the URL fetch). It leaves the process only in
-  that one `Authorization: Bearer` header. Read by `slack_socket_client`.
-- `MASC_SLACK_BOT_TOKEN` (`xoxb-...`) — REST outbound (`chat.postMessage` /
-  `chat.update`). Read by `Channel_gate_slack_state` at send time (PR-2),
-  not by the inbound client.
+  that one `Authorization: Bearer` header. Resolved via `Env_config_slack`;
+  the gateway passes it to `slack_socket_client`.
+- `SLACK_BOT_TOKEN` (`xoxb-...`) — REST outbound (`chat.postMessage` /
+  `chat.update`) and `auth.test` (bot identity). Resolved via
+  `Env_config_slack` at send time — one boundary shared with the keeper
+  surface-post tool and the chat-queue consumer — not by the inbound client.
+
+Tokens are **unprefixed** (not `MASC_SLACK_*`): this matches the Slack SDK
+convention, the Python sidecar, the dashboard setup guide, and the Discord
+token precedent (`DISCORD_BOT_TOKEN`), so a single `SLACK_BOT_TOKEN` covers
+both the sidecar (until PR-4) and this in-process gateway. Only the
+non-credential policy override keeps the namespace: `MASC_SLACK_TRIGGER_POLICY`
+(mirroring `MASC_DISCORD_TRIGGER_POLICY`).
 
 Both are redaction prefixes: `observability_redact` already covers `xoxb-`
 and friends; `xapp-` and `ghs_/gho_/ghu_` style prefixes are added where
 Slack-specific. Neither token is logged, nor appears in argv.
+
+Every outbound Slack HTTP call (`apps.connections.open`, `chat.postMessage`,
+`chat.update`, `auth.test`) is bounded by `Slack_rest_client`'s
+`default_http_timeout_sec` (10s) once the gateway threads its `~clock`, so a
+stalled Slack API cannot pin the gateway boot fiber or a reply fiber
+indefinitely.
 
 ## Reconnect and backoff
 
@@ -161,7 +176,7 @@ failure (DNS/TLS/handshake) is fed as `Wss_closed` — there is no separate
    moved to PR-3: `gate_keeper_backend` withholds the arm until the gateway that
    emits `dispatch ~connector_kind:Slack` exists, to avoid a dead branch.)
 3. **PR-3 (this batch)**: `server_slack_in_process_gateway` + bootstrap + env
-   (`MASC_SLACK_APP_TOKEN`, `MASC_SLACK_TRIGGER_POLICY`) + `slack_observability`
+   (`SLACK_APP_TOKEN`, `MASC_SLACK_TRIGGER_POLICY`) + `slack_observability`
    + `slack_rest_client.auth_test` (bot identity) + the `connector_kind:Slack`
    arm (with `route_busy_connector` + the surface/conversation-id arms). Bridges
    triggered `Message_create`/`App_mention` to

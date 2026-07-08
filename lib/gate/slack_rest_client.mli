@@ -21,7 +21,14 @@ val message_text_limit : int
 (** Slack's per-message text limit (40000). Callers that may overflow must
     split themselves; this client does not. *)
 
+val default_http_timeout_sec : float
+(** Default deadline (seconds) for the outbound calls below. Effective only
+    when the caller also threads [~clock] ({!Masc_http_client.post_sync} needs
+    both); clock-less callers stay unbounded. *)
+
 val send_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   token:string ->
   channel_id:string ->
   text:string ->
@@ -30,7 +37,10 @@ val send_message :
   (string, error) result
 (** [chat.postMessage]. Returns the created message [ts] on success.
     [thread_ts] posts the message as a threaded reply. Bot token is resolved
-    by the caller (so a rotation does not require a server restart). *)
+    by the caller (so a rotation does not require a server restart). With
+    [~clock] the request is bounded by [timeout_sec] (default
+    {!default_http_timeout_sec}) so a stalled Slack API cannot pin the reply
+    fiber. *)
 
 val build_post_message_request :
   token:string ->
@@ -49,6 +59,8 @@ val parse_post_response :
     [Http_status]; 2xx Slack [ok=false] is [Slack_api]. *)
 
 val edit_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   token:string ->
   channel_id:string ->
   ts:string ->
@@ -57,7 +69,8 @@ val edit_message :
   (unit, error) result
 (** [chat.update]. Patches a prior message identified by [channel] + [ts].
     Used by the in-process gateway to project keeper streaming snapshots
-    into one edited reply. *)
+    into one edited reply. Bounded by [timeout_sec] (default
+    {!default_http_timeout_sec}) when [~clock] is supplied. *)
 
 val build_update_request :
   token:string ->
@@ -81,10 +94,17 @@ type auth_test_ok = {
   team_id : string option;
 }
 
-val auth_test : token:string -> (auth_test_ok, error) result
+val auth_test :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  unit ->
+  (auth_test_ok, error) result
 (** [auth.test]. Resolves the bot's own [user_id] (for inbound mention
     detection) and [team_id] (for the Slack surface) from the bot token
-    ([xoxb-...]). *)
+    ([xoxb-...]). Called once at gateway start; bounded by [timeout_sec]
+    (default {!default_http_timeout_sec}) when [~clock] is supplied so a
+    stalled auth.test cannot pin the gateway boot fiber. *)
 
 val build_auth_test_request :
   token:string -> string * (string * string) list * string

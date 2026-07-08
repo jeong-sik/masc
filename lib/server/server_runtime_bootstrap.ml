@@ -1050,7 +1050,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          warning and skips, leaving the server otherwise unaffected. *)
       Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
       (* RFC-0317 PR-3: in-process Slack Socket Mode gateway, mirroring the
-         Discord one. Off unless MASC_SLACK_APP_TOKEN is set; the start function
+         Discord one. Off unless SLACK_APP_TOKEN is set; the start function
          logs a warning and skips otherwise, leaving the server unaffected. *)
       Server_slack_in_process_gateway.start ~sw ~env ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path

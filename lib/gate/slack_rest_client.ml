@@ -27,6 +27,14 @@ let pp_error fmt = function
    expose it for callers that do. *)
 let message_text_limit = 40_000
 
+(* Default outbound-request timeout. [Masc_http_client.post_sync] applies a
+   deadline only when a clock {b and} [timeout_sec > 0.0] are both supplied, so
+   this default takes effect once a caller threads [~clock] (the in-process
+   gateway does); clock-less callers keep the prior unbounded behavior. Matches
+   the socket client's [fetch_wss_url] default so all Slack HTTP shares one
+   ceiling. *)
+let default_http_timeout_sec = 10.0
+
 let user_agent = "masc-slack-bot/0.1 (https://github.com/jeong-sik/masc)"
 
 let auth_headers ~token =
@@ -76,11 +84,12 @@ let parse_post_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
   else parse_post_json_response ~body
 
-let send_message ~token ~channel_id ~text ?thread_ts () =
+let send_message ?clock ?(timeout_sec = default_http_timeout_sec) ~token
+    ~channel_id ~text ?thread_ts () =
   let (url, headers, body) =
     build_post_message_request ~token ~channel_id ~text ?thread_ts ()
   in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_post_response ~status ~body
 
@@ -112,11 +121,12 @@ let parse_update_response ~status ~body =
           in
           Error (Slack_api { error = err })
 
-let edit_message ~token ~channel_id ~ts ~text () =
+let edit_message ?clock ?(timeout_sec = default_http_timeout_sec) ~token
+    ~channel_id ~ts ~text () =
   let (url, headers, body) =
     build_update_request ~token ~channel_id ~ts ~text ()
   in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_update_response ~status ~body
 
@@ -165,8 +175,8 @@ let parse_auth_test_response ~status ~body =
            Ok { user_id; team_id }
          | _ -> Error (Other "ok=true but missing 'user_id'"))
 
-let auth_test ~token =
+let auth_test ?clock ?(timeout_sec = default_http_timeout_sec) ~token () =
   let (url, headers, body) = build_auth_test_request ~token in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_auth_test_response ~status ~body

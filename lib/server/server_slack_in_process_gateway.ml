@@ -24,9 +24,9 @@ module Gw = Slack_gateway_state
 
 (* Env reads live at the config boundary ({!Env_config_slack}) so this gateway
    holds no direct process-environment lookups:
-   - [Env_config_slack.app_token_opt] — [MASC_SLACK_APP_TOKEN] ([xapp-...]),
+   - [Env_config_slack.app_token_opt] — [SLACK_APP_TOKEN] ([xapp-...]),
      the Socket Mode credential; absent ⇒ gateway off.
-   - [Env_config_slack.bot_token_opt] — [MASC_SLACK_BOT_TOKEN] ([xoxb-...]),
+   - [Env_config_slack.bot_token_opt] — [SLACK_BOT_TOKEN] ([xoxb-...]),
      read once at start for [auth.test] (the outbound REST path re-reads it at
      send time, so a rotation does not require a restart). *)
 
@@ -136,7 +136,7 @@ let log_stream_error stage state error =
     stage state.channel_id state.reply_to_thread_ts
     (Format.asprintf "%a" State.pp_send_error error)
 
-let publish_slack_stream_snapshot state snapshot =
+let publish_slack_stream_snapshot ~clock state snapshot =
   if not state.disabled then begin
     let content = slack_stream_content snapshot in
     if
@@ -151,7 +151,7 @@ let publish_slack_stream_snapshot state snapshot =
       match state.message_ts with
       | None -> (
         match
-          State.send_message ~channel_id:state.channel_id ~content
+          State.send_message ~clock ~channel_id:state.channel_id ~content
             ~reply_to_message_id:state.reply_to_thread_ts ()
         with
         | Ok ts ->
@@ -165,7 +165,7 @@ let publish_slack_stream_snapshot state snapshot =
         let elapsed = now -. state.last_edit_time in
         if elapsed >= streaming_edit_interval_s then
           match
-            State.edit_message ~channel_id:state.channel_id ~message_id:ts
+            State.edit_message ~clock ~channel_id:state.channel_id ~message_id:ts
               ~content ()
           with
           | Ok () ->
@@ -180,7 +180,7 @@ type stream_finish =
   | Stream_final_edit_failed of State.send_error
   | Stream_overflow_send_failed of State.send_error
 
-let finish_slack_stream_reply state ~final_content =
+let finish_slack_stream_reply ~clock state ~final_content =
   match state.message_ts with
   | None -> Stream_not_started
   | Some ts ->
@@ -192,7 +192,7 @@ let finish_slack_stream_reply state ~final_content =
     let edit_result =
       if String.equal head state.last_edited_text then Ok ()
       else
-        State.edit_message ~channel_id:state.channel_id ~message_id:ts
+        State.edit_message ~clock ~channel_id:state.channel_id ~message_id:ts
           ~content:head ()
     in
     (match edit_result with
@@ -204,7 +204,8 @@ let finish_slack_stream_reply state ~final_content =
        if String.equal overflow "" then Stream_completed
        else
          match
-           State.send_message ~channel_id:state.channel_id ~content:overflow
+           State.send_message ~clock ~channel_id:state.channel_id
+             ~content:overflow
              ~reply_to_message_id:state.reply_to_thread_ts ()
          with
          | Ok _ -> Stream_completed
@@ -216,8 +217,8 @@ let finish_slack_stream_reply state ~final_content =
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
 
-let handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
-    ~ts ~mentions_bot ~is_app_mention =
+let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
+    ~text ~ts ~mentions_bot ~is_app_mention =
   match State.resolve_keeper_for_channel ~channel_id with
   | None ->
     (* No binding for this channel — drop quietly. The bot may sit in channels
@@ -264,7 +265,7 @@ let handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
       }
     in
     let stream_reply = make_slack_stream_reply ~channel_id ~reply_to_thread_ts in
-    let on_text_snapshot = publish_slack_stream_snapshot stream_reply in
+    let on_text_snapshot = publish_slack_stream_snapshot ~clock stream_reply in
     (match
        Channel_gate.handle_inbound_streaming ~dispatch ~on_text_snapshot msg
      with
@@ -273,7 +274,7 @@ let handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
        | Channel_gate.Dispatch_unavailable ->
          let notice = Printf.sprintf "⚠️ `%s` 오프라인" keeper_name in
          (match
-            State.send_message ~channel_id ~content:notice
+            State.send_message ~clock ~channel_id ~content:notice
               ~reply_to_message_id:reply_to_thread_ts ()
           with
           | Ok _ ->
@@ -307,14 +308,17 @@ let handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
          Slack_observability.record_reply Slack_observability.Reply_empty
        end
        else
-         match finish_slack_stream_reply stream_reply ~final_content:out.content with
+         match
+           finish_slack_stream_reply ~clock stream_reply
+             ~final_content:out.content
+         with
          | Stream_completed ->
            Slack_observability.record_inbound_dispatch
              Slack_observability.Reply_sent;
            Slack_observability.record_reply Slack_observability.Reply_send_ok
          | Stream_not_started | Stream_final_edit_failed _ -> (
            match
-             State.send_message ~channel_id ~content:out.content
+             State.send_message ~clock ~channel_id ~content:out.content
                ~reply_to_message_id:reply_to_thread_ts ()
            with
            | Ok _ ->
@@ -335,7 +339,7 @@ let handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
            Slack_observability.record_reply
              Slack_observability.Reply_send_failed)
 
-let on_event ~dispatch (ev : Gw.slack_event) =
+let on_event ~dispatch ~clock (ev : Gw.slack_event) =
   match ev with
   | Gw.Message_create
       { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
@@ -350,13 +354,13 @@ let on_event ~dispatch (ev : Gw.slack_event) =
     | None ->
       Slack_observability.record_gateway_event
         ~route:Slack_observability.Triggered Slack_observability.Message_create;
-      handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
-        ~ts ~mentions_bot ~is_app_mention:false)
+      handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
+        ~text ~ts ~mentions_bot ~is_app_mention:false)
   | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
-    handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name:None
-      ~text ~ts ~mentions_bot:true ~is_app_mention:true
+    handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id
+      ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true
   | Gw.Reaction_added _ ->
     (* Ambient this pass: reactions are not turn-starters (RFC-0317). *)
     Slack_observability.record_gateway_event ~route:Slack_observability.Ambient
@@ -373,9 +377,12 @@ let start ~sw ~env ~state =
   match Env_config_slack.app_token_opt () with
   | None ->
     Log.Server.warn
-      "RFC-0317: MASC_SLACK_APP_TOKEN is unset; in-process Slack gateway not \
+      "RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not \
        started"
   | Some app_token ->
+    (* One clock for the whole gateway: bounds [auth.test] at start and every
+       outbound reply send/edit, and feeds the dispatch adapter. *)
+    let clock = Eio.Stdenv.clock env in
     (* Resolve the bot's own identity for mention detection. Non-fatal: without
        it, [app_mention] events still trigger (a mention by construction); only
        plain-message mention detection on the [message] event degrades. *)
@@ -383,11 +390,11 @@ let start ~sw ~env ~state =
       match Env_config_slack.bot_token_opt () with
       | None ->
         Log.Server.warn
-          "RFC-0317: MASC_SLACK_BOT_TOKEN unset; Slack plain-message mention \
+          "RFC-0317: SLACK_BOT_TOKEN unset; Slack plain-message mention \
            detection disabled (app_mention still triggers)";
         None
       | Some bot_token -> (
-        match Slack_rest_client.auth_test ~token:bot_token with
+        match Slack_rest_client.auth_test ~clock ~token:bot_token () with
         | Ok { user_id; team_id = _ } ->
           State.record_ready ~bot_user_id:user_id;
           Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
@@ -408,8 +415,7 @@ let start ~sw ~env ~state =
          the serial consumer, delivered via [Keeper_chat_slack.adapter_loop])
          rather than the outbound-less async poll store. *)
       Gate_keeper_backend.dispatch_with_text_snapshot
-        ~connector_kind:Gate_keeper_backend.Slack ~sw
-        ~clock:(Eio.Stdenv.clock env)
+        ~connector_kind:Gate_keeper_backend.Slack ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr ~net:state.Mcp_server.net
         ~config:(Mcp_server.workspace_config state)
     in
@@ -420,7 +426,7 @@ let start ~sw ~env ~state =
       try
         Slack_socket_client.run ~sw ~env ~bot_user_id ~app_token
           ~trigger_policy:policy
-          ~on_event:(fun ev -> on_event ~dispatch ev)
+          ~on_event:(fun ev -> on_event ~dispatch ~clock ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

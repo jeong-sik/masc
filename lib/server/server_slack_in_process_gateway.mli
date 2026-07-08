@@ -13,7 +13,7 @@
        redacted text snapshots by posting/editing one threaded reply via
        {!Channel_gate_slack_state.send_message} / [edit_message].
 
-    Off by default: if [MASC_SLACK_APP_TOKEN] is unset the gateway logs a
+    Off by default: if [SLACK_APP_TOKEN] is unset the gateway logs a
     warning and skips startup; the server still boots normally. A message
     arriving while the keeper is in flight is enqueued (connector_kind [Slack])
     for deferred delivery, not dropped.

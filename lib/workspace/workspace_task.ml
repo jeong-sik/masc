@@ -50,6 +50,87 @@ let force_done_task_r config ~agent_name ~task_id ~notes ()
     ()
 ;;
 
+type machine_verify_failure =
+  | Machine_verify_invalid_verifier of string
+  | Machine_verify_verifier_not_distinct of
+      { agent_name : string
+      ; verifier_name : string
+      }
+  | Machine_verify_submit_failed of Masc_domain.masc_error
+  | Machine_verify_approve_failed_compensated of Masc_domain.masc_error
+  | Machine_verify_approve_failed_stranded of
+      { approve_error : Masc_domain.masc_error
+      ; reject_error : Masc_domain.masc_error
+      }
+
+(** RFC-0323 G-2: machine-verified completion through the verification lane.
+
+    Submits as [agent_name] (must be the assignee; the FSM submit arm enforces
+    it), then approves as [verifier_name] — a distinct machine identity, since
+    the FSM self-approval check compares identity keys and never authority.
+    Both preconditions (verifier name shape, verifier distinct from submitter)
+    are checked before any state mutation.
+
+    No verification-store record is created: the store hooks are tool-layer
+    callbacks, so the [AwaitingVerification] window here is bounded by the
+    immediate approve. If the approve fails after a successful submit, one
+    compensating reject (as [verifier_name]) returns the task to
+    [InProgress { assignee }]; if that also fails, the task remains
+    [AwaitingVerification] and the error carries both failures — resolvable by
+    any other identity via approve/reject or the dashboard verdict route. *)
+let submit_and_approve_task_r
+      config
+      ~agent_name
+      ~verifier_name
+      ~task_id
+      ~notes
+      ~approve_notes
+      ()
+  : (string, machine_verify_failure) result
+  =
+  match Validation.Agent_id.validate verifier_name with
+  | Error msg -> Error (Machine_verify_invalid_verifier msg)
+  | Ok _ ->
+    if Workspace_task_classify.same_task_actor config verifier_name agent_name
+    then Error (Machine_verify_verifier_not_distinct { agent_name; verifier_name })
+    else (
+      match
+        transition_task_r
+          config
+          ~agent_name
+          ~task_id
+          ~action:Masc_domain.Submit_for_verification
+          ~notes
+          ()
+      with
+      | Error e -> Error (Machine_verify_submit_failed e)
+      | Ok _submitted ->
+        (match
+           transition_task_r
+             config
+             ~agent_name:verifier_name
+             ~task_id
+             ~action:Masc_domain.Approve_verification
+             ~notes:approve_notes
+             ()
+         with
+         | Ok message -> Ok message
+         | Error approve_error ->
+           (match
+              transition_task_r
+                config
+                ~agent_name:verifier_name
+                ~task_id
+                ~action:Masc_domain.Reject_verification
+                ~reason:"machine verification approve failed; compensating reject"
+                ()
+            with
+            | Ok _ -> Error (Machine_verify_approve_failed_compensated approve_error)
+            | Error reject_error ->
+              Error
+                (Machine_verify_approve_failed_stranded { approve_error; reject_error }))))
+;;
+
 (** Force-cancel a task regardless of assignee. System privilege.
     Used by [Verification_protocol.check_timeouts] to expire
     [AwaitingVerification] tasks whose verifier deadline has passed,

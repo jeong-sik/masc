@@ -647,7 +647,9 @@ let handle_keeper_task_tool
              Workspace.submit_and_approve_task_r config
                ~agent_name:(keeper_agent_sender ~meta)
                ~verifier_name:deterministic_probe_verifier ~task_id ~notes
-               ~approve_notes ()
+               ~approve_notes
+               ~evidence_refs:(List.map Evidence_claim.to_human_string claims)
+               ()
            with
            | Ok _ -> harness_completed := true
            | Error (Workspace.Machine_verify_invalid_verifier msg) ->

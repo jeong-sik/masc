@@ -83,6 +83,11 @@ let accept_empty_no_progress_error scope =
        ; model = Some "runtime"
        ; reason_kind = Some Driver.Accept_no_usable_progress
        ; response_shape = Some Driver.Accept_response_empty
+       (* RFC-0271 §4.5 slice 1 threaded stop_reason into Accept_rejected; this
+          synthetic failover fixture does not exercise stop_reason classification
+          (slices 2-3), so [None] faithfully models "provider stop_reason not
+          specified" for this empty-response case. *)
+       ; stop_reason = None
        ; last_tool_effect = None
        ; any_mutating_tool = None
        ; tool_effects_seen = []

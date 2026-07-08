@@ -53,11 +53,13 @@ type claim_resolution =
           submitted the obligation (own [AwaitingVerification]); claiming is a
           no-op, never a self-verification. *)
   | Held_by_other of string
-      (** Held by another actor, or terminal ([Done]/[Cancelled]); the string
-          names the current holder for the caller's error message. *)
+      (** Held by another actor, or unreclaimable terminal [Cancelled]; the
+          string names the current holder for the caller's error message. *)
+  | Blocked_by_reclaim_policy of string
+      (** Typed reclaim policy closed the claim gate. *)
 
-let resolve_claim ~same_actor ~agent_name ~now (status : Masc_domain.task_status) =
-  match status with
+let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
+  match task.task_status with
   | Masc_domain.Todo ->
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
   | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ->
@@ -69,7 +71,14 @@ let resolve_claim ~same_actor ~agent_name ~now (status : Masc_domain.task_status
            ~verifier:agent_name ~assignee ~submitted_at ~verification_id)
   | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
     if same_actor assignee then Self_owned else Held_by_other assignee
-  | Masc_domain.Done { assignee; _ } -> Held_by_other assignee
+  | Masc_domain.Done { assignee; _ } ->
+    (match Masc_domain.task_claim_decision task with
+     | Masc_domain.Claim_available Masc_domain.Claim_ready ->
+       Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
+     | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_reclaim_policy reason) ->
+       Blocked_by_reclaim_policy reason
+     | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
+       Held_by_other assignee)
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
 ;;
 

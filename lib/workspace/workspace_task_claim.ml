@@ -148,7 +148,7 @@ let claim_task_r config ~agent_name ~task_id ()
                         Workspace_task_classify.same_task_actor config a agent_name)
                       ~agent_name
                       ~now:(now_iso ())
-                      t.task_status
+                      t
                   with
                   | Workspace_task_lifecycle.Worker_claim status ->
                     let t = clear_reclaim_decision t in
@@ -157,7 +157,9 @@ let claim_task_r config ~agent_name ~task_id ()
                     `Claimed_verification, { t with task_status = status } :: acc
                   | Workspace_task_lifecycle.Self_owned -> `Already_mine, t :: acc
                   | Workspace_task_lifecycle.Held_by_other holder ->
-                    `Claimed_by holder, t :: acc)
+                    `Claimed_by holder, t :: acc
+                  | Workspace_task_lifecycle.Blocked_by_reclaim_policy reason ->
+                    `Claim_blocked reason, t :: acc)
                 else state, t :: acc)
              (`Not_found, [])
              backlog.tasks
@@ -165,6 +167,11 @@ let claim_task_r config ~agent_name ~task_id ()
          let new_tasks = List.rev new_tasks in
          match claim_state with
          | `Not_found -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+         | `Claim_blocked reason ->
+           Error
+             (Masc_domain.Task
+                (Masc_domain.Task_error.InvalidState
+                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id reason)))
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Already_mine ->
            Ok

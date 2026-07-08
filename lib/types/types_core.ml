@@ -652,11 +652,11 @@ let task_claim_decision (task : task) =
     (* Coordination-role tasks with Allow_reclaim policy are reclaimable
        after completion. task-1869: 6 TaskError fingerprints show
        coordination-role tasks blocked from re-claim by completion. *)
-    (match task.reclaim_policy with
-     | Some Allow_reclaim | None ->
+    (match task_reclaim_gate task with
+     | Reclaim_gate_open ->
        Claim_available (task_claim_readiness task)
-     | Some Block_reclaim ->
-       Claim_unavailable (Claim_block_not_todo task.task_status))
+     | Reclaim_gate_blocked_by_policy reason ->
+       Claim_unavailable (Claim_block_reclaim_policy reason))
   | Claimed _
   | InProgress _
   | Cancelled _ ->

@@ -20,6 +20,8 @@
 
 open Alcotest
 open Masc
+module Acc = Dashboard_goals_types_accessor
+module B = Dashboard_goals_types_builder
 
 let iso_now () = Masc_domain.now_iso ()
 
@@ -61,13 +63,13 @@ let make_task ~status id : Masc_domain.task =
     do_not_reclaim_reason = None;
   }
 
-let build_single_goal_tree ~task =
+let build_single_goal_tree ~(task : Masc_domain.task) =
   let goal = make_goal "goal-g6" "G-6 read model" in
   let goal_task_index : (string, string list) Hashtbl.t = Hashtbl.create 4 in
-  Hashtbl.replace goal_task_index task.Masc_domain.id [ goal.Goal_store.id ];
+  Hashtbl.replace goal_task_index task.id [ goal.Goal_store.id ];
   let context =
     {
-      Dashboard_goals_types.now_ts = Time_compat.now ();
+      B.now_ts = Time_compat.now ();
       all_tasks = [ task ];
       pending_approvals = [];
       keeper_metas = [];
@@ -76,7 +78,7 @@ let build_single_goal_tree ~task =
       goal_task_index;
     }
   in
-  Dashboard_goals_types.build_tree context [ goal ] goal
+  B.build_tree context [ goal ] goal
 
 let awaiting_status : Masc_domain.task_status =
   Masc_domain.AwaitingVerification
@@ -98,26 +100,26 @@ let test_awaiting_task_never_worse_than_in_progress () =
     build_single_goal_tree ~task:(make_task ~status:awaiting_status "task-av")
   in
   check string "health identical to the in-progress baseline"
-    in_progress.Dashboard_goals_types.health awaiting.Dashboard_goals_types.health;
+    in_progress.Acc.health awaiting.Acc.health;
   check string "blocking_source identical to the in-progress baseline"
-    in_progress.Dashboard_goals_types.blocking_source
-    awaiting.Dashboard_goals_types.blocking_source;
+    in_progress.Acc.blocking_source
+    awaiting.Acc.blocking_source;
   check bool "blocking_source is never task_fsm" false
-    (String.equal awaiting.Dashboard_goals_types.blocking_source "task_fsm");
+    (String.equal awaiting.Acc.blocking_source "task_fsm");
   check bool "verification-pending badge surfaces" true
-    (List.mem "task_verification_pending" awaiting.Dashboard_goals_types.badges);
+    (List.mem "task_verification_pending" awaiting.Acc.badges);
   check bool "no pending badge on the in-progress baseline" false
-    (List.mem "task_verification_pending" in_progress.Dashboard_goals_types.badges)
+    (List.mem "task_verification_pending" in_progress.Acc.badges)
 
 let test_health_axis_verification_pending_is_not_risk () =
   let badges =
-    Dashboard_goals_types.tree_badges ~pending_approvals:0 ~sandbox_risk:false
+    Dashboard_goals_types_health.tree_badges ~pending_approvals:0 ~sandbox_risk:false
       ~runtime_risk:false ~verification_pending:true ~stalled:false
       ~activity_unobserved:false
   in
   check (list string) "pending badge only" [ "task_verification_pending" ] badges;
   let reason =
-    Dashboard_goals_types.goal_health_reason ~goal_phase:Goal_phase.Executing
+    Dashboard_goals_types_health.goal_health_reason ~goal_phase:Goal_phase.Executing
       ~blocked_by_receipt:false ~child_blocked:false ~pending_approvals:0
       ~sandbox_risk:false ~runtime_risk:false ~verification_pending:true
       ~stalled:false ~stagnation_seconds:0 ~child_at_risk:false

@@ -150,7 +150,6 @@ end
 module Verification : sig
   val fsm_enabled : unit -> bool
   val timeout_deadline_seconds : unit -> float
-  val timeout_check_interval_seconds : float
 end
 
 (** {1 Approval janitor} *)

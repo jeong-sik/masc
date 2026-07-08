@@ -42,12 +42,12 @@ let read_profile persona_name =
   if not (Fs_compat.file_exists path) then
     Error ("Persona '" ^ persona_name ^ "' not found at " ^ path)
   else
-    match Fs_compat.read_file path with
-    | Ok content ->
+    match Fs_compat.load_file_opt path with
+    | Some content ->
         (try Ok (Yojson.Safe.from_string content)
          with Yojson.Json_error msg ->
            Error ("Invalid JSON in " ^ path ^ ": " ^ msg))
-    | Error msg -> Error ("Failed to read " ^ path ^ ": " ^ msg)
+    | None -> Error ("Failed to read " ^ path)
 
 let write_profile persona_name json =
   let dir = Filename.concat (personas_dir ()) persona_name in
@@ -55,7 +55,7 @@ let write_profile persona_name json =
   (try Fs_compat.mkdir_p dir with _ -> ());
   let tmp = path ^ ".tmp" in
   let content = Yojson.Safe.to_string ~std:true json in
-  match Fs_compat.write_file tmp content with
+  match Fs_compat.save_file_atomic tmp content with
   | Error msg -> Error ("Failed to write " ^ path ^ ": " ^ msg)
   | Ok () ->
       (try

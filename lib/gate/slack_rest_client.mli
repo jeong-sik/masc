@@ -74,3 +74,26 @@ val parse_update_response :
   (unit, error) result
 (** Classifies a [chat.update] response. Non-2xx HTTP status is
     [Http_status]; 2xx Slack [ok=false] is [Slack_api]. *)
+
+(** Bot identity resolved from [auth.test]. *)
+type auth_test_ok = {
+  user_id : string;       (** The bot's own Slack user id ([U...]). *)
+  team_id : string option;
+}
+
+val auth_test : token:string -> (auth_test_ok, error) result
+(** [auth.test]. Resolves the bot's own [user_id] (for inbound mention
+    detection) and [team_id] (for the Slack surface) from the bot token
+    ([xoxb-...]). *)
+
+val build_auth_test_request :
+  token:string -> string * (string * string) list * string
+(** Pure request builder for [auth.test], exposed for unit tests. *)
+
+val parse_auth_test_response :
+  status:int ->
+  body:string ->
+  (auth_test_ok, error) result
+(** Classifies an [auth.test] response. Non-2xx HTTP status is [Http_status];
+    2xx Slack [ok=false] is [Slack_api]; [ok=true] without [user_id] is
+    [Other]. *)

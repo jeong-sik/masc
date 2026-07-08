@@ -119,3 +119,54 @@ let edit_message ~token ~channel_id ~ts ~text () =
   match Masc_http_client.post_sync ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_update_response ~status ~body
+
+(* auth.test — resolve the bot's own identity. [user_id] gates inbound mention
+   detection ([Slack_gateway_state.parse_envelope ~bot_user_id]) and [team_id]
+   fills the Slack surface. Called once at gateway start with the bot token
+   ([xoxb-...]); a failure is non-fatal (the gateway still triggers on
+   [app_mention] events, which are mentions by construction). *)
+type auth_test_ok = {
+  user_id : string;
+  team_id : string option;
+}
+
+let build_auth_test_request ~token =
+  let url = "https://slack.com/api/auth.test" in
+  let headers =
+    ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+    :: auth_headers ~token
+  in
+  (url, headers, "")
+
+let parse_auth_test_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else
+    match parse_json_safe body with
+    | None -> Error (Other ("response not JSON: " ^ body))
+    | Some json ->
+      let ok =
+        match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
+      in
+      if not ok then
+        let err =
+          match field_opt "error" json with
+          | Some (`String e) -> e
+          | _ -> "auth.test failed"
+        in
+        Error (Slack_api { error = err })
+      else
+        (match field_opt "user_id" json with
+         | Some (`String user_id) ->
+           let team_id =
+             match field_opt "team_id" json with
+             | Some (`String t) -> Some t
+             | _ -> None
+           in
+           Ok { user_id; team_id }
+         | _ -> Error (Other "ok=true but missing 'user_id'"))
+
+let auth_test ~token =
+  let (url, headers, body) = build_auth_test_request ~token in
+  match Masc_http_client.post_sync ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_auth_test_response ~status ~body

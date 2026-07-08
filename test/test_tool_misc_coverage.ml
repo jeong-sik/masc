@@ -672,6 +672,53 @@ let () = test "get_string_missing" (fun () ->
 )
 
 let () =
+  let test_persona_delete_succeeds () =
+  let personas_dir = Filename.temp_dir_name ^ "/masc_test_personas" in
+  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let create_args =
+    Tool_args.of_json
+      (`Assoc
+         [ ("persona_name", `String "test_persona")
+         ; ("display_name", `String "Test Persona")
+         ; ("instructions", `String "Original.")
+         ])
+  in
+  let _ = Keeper_tool_persona_crud.handle_persona_create_json create_args in
+  let delete_args =
+    Tool_args.of_json (`Assoc [ ("persona_name", `String "test_persona") ])
+  in
+  let result = Keeper_tool_persona_crud.handle_persona_delete_json delete_args in
+  Alcotest.(check bool) "delete succeeds" true (result = `Assoc [ ("success", `Bool true) ])
+
+let test_persona_delete_rejects_nonexistent () =
+  let personas_dir = Filename.temp_dir_name ^ "/masc_test_personas" in
+  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let delete_args =
+    Tool_args.of_json (`Assoc [ ("persona_name", `String "nonexistent") ])
+  in
+  let result = Keeper_tool_persona_crud.handle_persona_delete_json delete_args in
+  Alcotest.(check bool)
+    "rejects nonexistent"
+    true
+    (match result with `Assoc [ ("error", _) ] -> true | _ -> false)
+
+let test_persona_delete_rejects_default () =
+  let personas_dir = Filename.temp_dir_name ^ "/masc_test_personas" in
+  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let delete_args =
+    Tool_args.of_json (`Assoc [ ("persona_name", `String "default") ])
+  in
+  let result = Keeper_tool_persona_crud.handle_persona_delete_json delete_args in
+  Alcotest.(check bool)
+    "rejects default"
+    true
+    (match result with `Assoc [ ("error", _) ] -> true | _ -> false)
+
+let () =
+  register "persona delete succeeds" test_persona_delete_succeeds;
+  register "persona delete rejects nonexistent" test_persona_delete_rejects_nonexistent;
+  register "persona delete rejects default" test_persona_delete_rejects_default
+
   Alcotest.run "Tool_misc"
     [
       ( "coverage",

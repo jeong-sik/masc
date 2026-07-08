@@ -1,4 +1,4 @@
-(** Keeper_tool_persona_crud — masc_persona_create and masc_persona_update handlers. *)
+(** Keeper_tool_persona_crud — masc_persona_create, masc_persona_update, and masc_persona_delete handlers. *)
 
 open Tool_args
 open Keeper_types
@@ -207,6 +207,44 @@ let handle_persona_update_json args =
 
 let handle_persona_create _ctx args : tool_result =
   tool_result_of_json (handle_persona_create_json args)
+
+let handle_persona_delete_json args =
+  match get_string_opt args "persona_name" with
+  | None -> error_assoc [("error", `String "Missing required parameter: persona_name")]
+  | Some pn ->
+    (match validate_persona_name pn with
+     | Error msg -> error_assoc [("error", `String msg)]
+     | Ok () ->
+       if not (persona_exists pn) then begin
+         error_assoc [("error", `String ("Persona '" ^ pn ^ "' does not exist."))]
+       end else if pn = "default" then begin
+         error_assoc [("error", `String "The default persona cannot be deleted.")]
+       end else begin
+         let active_persona =
+           match Sys.getenv_opt "MASC_PERSONA" with
+           | Some p -> p
+           | None -> "default"
+         in
+         if pn = active_persona then begin
+           error_assoc [("error", `String ("Persona '" ^ pn ^ "' is currently active and cannot be deleted."))]
+         end else begin
+           let personas_dir = personas_dir () in
+           let deleted_dir = Filename.concat personas_dir ".deleted" in
+           if not (Sys.file_exists deleted_dir) then Unix.mkdir deleted_dir 0o755;
+           let source = Filename.concat personas_dir pn in
+           let target_base = Filename.concat deleted_dir pn in
+           let target =
+             if not (Sys.file_exists target_base) then target_base
+             else Filename.concat deleted_dir (pn ^ "_" ^ string_of_float (Unix.gettimeofday ()))
+           in
+           Sys.rename source target;
+           `Assoc [("success", `Bool true)]
+         end
+       end
+    )
+
+let handle_persona_delete _ctx args : tool_result =
+  tool_result_of_json (handle_persona_delete_json args)
 
 let handle_persona_update _ctx args : tool_result =
   tool_result_of_json (handle_persona_update_json args)

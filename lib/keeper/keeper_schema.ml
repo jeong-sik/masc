@@ -586,6 +586,21 @@ persona does not exist.";
     ];
   };
 
+;
+  {
+    name = "masc_persona_delete";
+    description = "Delete a keeper persona. Fails if the persona does not exist, is the default persona, or is currently active.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("persona_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Persona handle to delete. Must already exist and not be in use.");
+        ]);
+      ]);
+      ("required", `List [`String "persona_name"]);
+    ];
+  } ;
 ]
 
 let schemas : tool_schema list =

@@ -690,12 +690,18 @@ let test_dispatch_create_keeper_wake_payload () =
        (data |> member "payload_target" |> to_string);
      check string "result payload summary" "Scheduled lane wake"
        (data |> member "payload_summary" |> to_string);
-     check bool "result separate grant" true
+     (* keeper_wake is intrinsically reminder_only: the handler clamps the
+        caller-supplied workspace_write down, so a self-wake never needs a
+        human grant (this is what previously deadlocked — the keeper polled a
+        pending_approval it could not self-approve). *)
+     check bool "result separate grant" false
        (data |> member "requires_separate_human_grant" |> to_bool));
   (match Schedule_store.get_schedule config ~schedule_id:"sched-keeper-wake" with
    | None -> fail "schedule missing"
    | Some request ->
-     check string "status" "pending_approval"
+     check string "clamped risk_class" "reminder_only"
+       (Schedule_domain.risk_class_to_string request.risk_class);
+     check string "status" "scheduled"
        (Schedule_domain.schedule_status_to_string request.status);
      let payload = Schedule_domain.payload_to_yojson request.payload in
      let open Yojson.Safe.Util in
@@ -723,6 +729,32 @@ let test_dispatch_create_keeper_wake_payload () =
     (row |> member "payload_target" |> to_string);
   check string "dashboard payload summary" "Scheduled lane wake"
     (row |> member "payload_summary" |> to_string)
+;;
+
+let test_keeper_wake_creation_requires_reminder_only () =
+  (* Projection invariant guarding the tool-handler clamp: a keeper_wake with a
+     side-effecting risk_class is rejected at creation; reminder_only is
+     accepted. This keeps a self-wake out of the human-grant deadlock even for a
+     direct caller that bypasses the handler clamp. *)
+  let payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; "schema_version", `Int 1
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String "schedule-keeper"
+            ; "message", `String "wake"
+            ] )
+      ]
+  in
+  check bool "side-effecting keeper_wake rejected" true
+    (Result.is_error
+       (Schedule_payload_projection.validate_request_payload_for_creation
+          ~payload ~risk_class:Schedule_domain.Workspace_write));
+  check bool "reminder_only keeper_wake accepted" true
+    (Result.is_ok
+       (Schedule_payload_projection.validate_request_payload_for_creation
+          ~payload ~risk_class:Schedule_domain.Reminder_only))
 ;;
 
 let test_dispatch_create_rejects_keeper_wake_invalid_urgency () =
@@ -1700,6 +1732,8 @@ let () =
             test_dispatch_create_board_post_convenience_payload
         ; test_case "dispatch create accepts keeper wake payload" `Quick
             test_dispatch_create_keeper_wake_payload
+        ; test_case "keeper wake creation requires reminder_only" `Quick
+            test_keeper_wake_creation_requires_reminder_only
         ; test_case "dispatch create rejects invalid keeper wake urgency" `Quick
             test_dispatch_create_rejects_keeper_wake_invalid_urgency
         ; test_case "dispatch create rejects invalid keeper wake target name" `Quick

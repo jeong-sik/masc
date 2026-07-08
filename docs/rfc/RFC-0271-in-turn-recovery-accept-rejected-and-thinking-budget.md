@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Status | Draft |
-| Subsystem | `lib/keeper/keeper_turn_driver_try_runtime`, `lib/runtime/runtime_inference`, `lib/worker_oas`, `lib/runtime/runtime_toml` |
-| Related | RFC-0222 / RFC-0262 (accept verdict 소유), RFC-0265 (reroute seam), RFC-0207 Part B / RFC-0260 (provider-failure failover), RFC-0012 (mid-turn watchdog), RFC-0082 (recovery escalation·N-of-M 원칙), RFC-0136 (turn semantics 경계), RFC-0042 (typed closure) |
+| Subsystem | `lib/keeper/keeper_turn_driver_try_runtime`, `lib/runtime/runtime_inference`, `lib/worker_oas`, `lib/runtime/runtime_toml`; **§4.5**: `lib/keeper_runtime/keeper_internal_error`, `lib/keeper_tooling/keeper_tool_response`, `lib/keeper/keeper_error_classify`, `lib/keeper/keeper_unified_turn_failure`, `lib/keeper/keeper_turn_driver_try_provider` |
+| Related | RFC-0222 / RFC-0262 (accept verdict 소유), RFC-0265 (reroute seam), RFC-0207 Part B / RFC-0260 (provider-failure failover), RFC-0012 (mid-turn watchdog), RFC-0082 (recovery escalation·N-of-M 원칙), RFC-0136 (turn semantics 경계), RFC-0042 (typed closure), **RFC-0326 (§4.5 typed stop_reason — typed-vs-string 선례), RFC-0313 W3 (§4.5 auto-pause dead → soft-park 부재)** |
 | Date | 2026-06-20 |
 | Author | vincent (+ Claude Opus 4.8) |
 
@@ -53,6 +53,8 @@ last_tool=Execute last_tool_effect=mutating  (도구 ~29회 후 발생)
 | request 미wiring | `lib/worker_oas.ml:67,180-181` | `enable_thinking`만 설정, `with_thinking_budget` 호출 0. |
 | capability gate 존재 | `lib/runtime/runtime_agent_context.ml:333-334` | `with_thinking_budget`는 `Some`-gated — budget 미지원 runtime은 자동 no-op. |
 | 현 reroute 범위 | `lib/keeper/keeper_turn_driver.ml:128-157` | proactive reroute는 RFC-0265 modality만. text 턴은 명시적으로 untouched. |
+| mutating-empty truncation 미커버 | `lib/keeper_runtime/keeper_internal_error.ml:650-935` | 세 no-progress kind(`Empty`/`Thinking_only`/`Read_only`)가 모두 `tool_effects_seen=[]`(또는 read-only) 요구. **도구 실행 + 빈 마무리**(`any_mutating_tool=Some true`, `response_shape=Empty`, `tool_effects_seen<>[]`)는 어느 kind에도 안 걸려 catch-all `None` → recovery 0. (§9 2026-07-09 refresh.) |
+| `stop_reason` typed 아님 | `lib/keeper_runtime/keeper_internal_error.mli:116-125`, `lib/keeper_tooling/keeper_tool_response.ml:35-44` | `Accept_rejected` 레코드에 `stop_reason` field 없음 — `max_tokens` truncation은 free-text `reason` 문자열에만 존재. accept는 `stop_reason`을 버려 truncation과 clean empty `EndTurn`을 동일 취급. OAS `Response_shape.ended_without_deliverable_content`는 `EndTurn`에 한정해 truncation을 제외하지만 masc는 이 함수를 안 씀. |
 
 ## 4. 설계
 
@@ -104,6 +106,20 @@ recovery 재시도는 새 attempt 시 `record_progress` hook으로 `last_progres
 ### 4.4 budget 회계
 
 recovery 재시도가 `autonomous_max_turns_per_call` budget을 silent 소비하면 budget-exhausted 회귀가 된다. `Retry_no_thinking` 재시도는 별도 회계에 명시 포함하거나 격리한다(RFC-0082 §7 probe-turn 제약과 동형).
+
+### 4.5 truncation-aware continuation (도구-productive 턴, `stop_reason=max_tokens`)
+
+§4.1 rule 1의 `Retry_no_thinking` gate(`should_retry_no_thinking`)는 `Thinking_only_no_progress`에만 발동한다. 세 recovery kind가 모두 `tool_effects_seen=[]`(또는 read-only)를 요구하므로, **도구를 여러 번 실행한 턴이 마무리 응답만 빈** 경우(`any_mutating_tool=Some true`, `response_shape=Empty`, `tool_effects_seen<>[]`)는 catch-all `None`으로 빠져 recovery가 0이다. 그리고 이 empty는 대개 `stop_reason=max_tokens` truncation이다 — 사고가 공유 출력 예산을 소진한 것이며, §4.2 ceiling은 answer 몫을 예약하지 않는다(thinking과 answer가 단일 `max_tokens`를 공유; §9 2026-07-09 refresh, `runtime_inference.ml:18-30`). accept layer가 `stop_reason`을 버려 이 truncation을 clean empty `EndTurn`과 동일 취급해 `No_usable_progress` terminal로 만든다.
+
+설계 (§4.1 corrective 라인의 연장, budget cap 아님):
+
+1. **typed `stop_reason`을 accept-rejection에 스레드한다.** OAS `Types.stop_reason`(이미 typed: `EndTurn | MaxTokens | …`)을 `Keeper_internal_error.Accept_rejected`에 직접 실어, 하류가 substring 매칭 없이 판별한다. free-text `reason`에서 `"max_tokens"`를 찾는 문자열 분류기 추가는 **금지**한다(RFC-0042 / RFC-0326 typed-vs-string 원칙 — 문자열 분류기는 추가가 아니라 제거 대상).
+2. **truncation을 no-progress terminal에서 분리한다.** OAS `Response_shape.ended_without_deliverable_content`가 `stop_reason=EndTurn`에 한정해 truncation을 제외하는 것과 정합하게, `stop_reason=MaxTokens`인 empty/thinking_only 응답은 completion-contract violation이 아니라 **truncation(budget/continuation event)**으로 분류한다. `is_completion_contract_violation`과 `counts_toward_crash`에서 이 케이스를 제외한다 — §9 mad-improver는 이 crash 누적으로 10회 연속 실패 → `Keeper_fiber_crash` → supervisor Dead에 도달했다.
+3. **continuation arm**: `stop_reason=MaxTokens` truncation이고 직전 attempt가 `enable_thinking=true`였으면 → 기존 `Retry_no_thinking` action을 재사용해 **같은 checkpoint(도구 결과 포함)에서 thinking off로 마무리 응답만 재생성**한다. thinking off는 공유 `max_tokens` 예산 전부를 answer에 할당하므로 truncation을 해소한다. 이 arm은 `tool_effects_seen` 조건에 **무관**하게 발동한다(§4.1의 `[]` 제약을 truncation 케이스에서 해제). bounded once/turn(기존 `recovered` guard 재사용).
+4. **도구 재실행 없음**: continuation은 같은 message history 위의 새 provider 호출이라 이미 실행된 도구를 재실행하지 않는다(도구 결과는 history에 `tool_result`로 존재). 모델이 continuation에서 새 도구를 부르면 그건 정상 진전이다. blind resume이 아니라 **truncated 마무리의 재생성**이다.
+5. **exhaustive**: `stop_reason` typed match는 catch-all `_` 없이 구현해, 새 stop_reason variant 추가 시 컴파일러가 recovery 매핑 누락을 강제한다(§4.1 rule 4·RFC-0042와 동형).
+
+**§4.2와의 관계 / 왜 answer-space 예약이 아닌가.** answer 몫을 예약(thinking을 N토큰으로 cap)하는 것은 fleet-wide 사고 제약이고, 정상 턴의 사고를 매번 제약한다 — #23652에서 기각된 budget-as-control이다. §4.5는 **truncation이 실제 발생한 뒤에만** 1회 발동하는 corrective라 정상 턴을 불변으로 둔다("실패는 관측→대응, 사전 cap 금지"). thinking sub-budget 예약은 명시적 non-goal이다. §4.2(preventive ceiling)는 §9에서 flash에 부적합하다고 re-scope됐고, §4.5는 그와 독립적인 corrective arm이다.
 
 ## 5. 인용 RFC 경계
 
@@ -176,3 +192,16 @@ recovery 재시도가 `autonomous_max_turns_per_call` budget을 silent 소비하
   preventive would need a **reasoning-effort cap**, a separate mechanism outside
   §4.2's token-budget scope — a follow-up, not this arm. §4.2 remains valid for
   token-budget runtimes (Anthropic-style).
+
+### 2026-07-09 diagnosis — mad-improver mutating-turn truncation collapse (§4.5의 근거)
+
+6-축 deep-dive(keeper `mad-improver` / `runpod_mtp.qwen36-35b-a3b-mtp`, extended-thinking)로 확인한 인과 사슬. 모두 정적 소스 근거(High); 런타임 재현은 미수행.
+
+- **출력 예산 = 16,384 (thinking·answer 공유, answer 몫 예약 0).** thinking runtime resolved `max_tokens = min(ceiling, 32768) = min(16384, 32768) = 16384` (`lib/runtime/runtime_inference.ml:55-61`). ceiling 16384는 `oas-models.toml`이 `max_output_tokens` 미지정 → base preset `openai_chat`의 `Some 16_384` 상속(`oas capabilities.ml:396-399`, `:961-969`). 주석(`runtime_inference.ml:18-30`): "answer is not carved out of a thinking allotment." context 27%(35.6k/131.1k)는 무관 — 131072는 **input** window, 16384는 별개 **output** cap.
+- **truncation → empty.** 도구-heavy 턴의 fat 마무리 라운드에서 사고가 16384를 소진 → answer ~0 → `stop_reason=max_tokens`, `content_blocks=0`.
+- **오분류 (진짜 결함).** accept가 마무리 응답 블록만 검사(`has_deliverable_content`, `keeper_tool_response.ml:35-44`), `stop_reason` 무시 → `No_usable_progress`. 턴의 mutating 도구 작업(side effect 이미 disk에 적용)은 progress로 인정 안 됨, rollback/ receipt 없음.
+- **recovery 0.** mutating+Empty가 세 retry kind에 모두 불일치(전부 `tool_effects_seen=[]`/read-only 요구) → catch-all `None` (`keeper_internal_error.ml:922-951`). 단일 candidate면 reroute도 없음(`is_last=true`).
+- **crash → Dead.** non-auto-recoverable → `counts_toward_crash=true` → 매 실패 `increment_turn_failures` (`keeper_unified_turn_failure.ml:48-56`); count ≥ `keeper_max_turn_failures`(기본 10) → `raise Keeper_registry.Keeper_fiber_crash` → supervisor restart(backoff) → `restart_count ≥ max_restarts` → **Dead + task 반환** (`keeper_supervisor.ml:291-294`). production `Pacing_enforce`라 RFC-0313 W3 auto-pause는 dead code = soft-park 안전망 없음. `keeper_failure_circuit_breaker`는 이 경로와 무관(per-tool-call 전용, trip해도 실행 불정지).
+- **결론.** 방아쇠는 예산(16384 공유·미예약)이지만 **진짜 결함은 truncation을 no-progress terminal로 둔갑시키는 accept/classification 계층**이다. §4.5가 이를 corrective로 닫는다 — budget을 건드리지 않고, 도구 작업을 인정하고, crash-loop를 끊는다. tool volume은 count 무제한(`max_turns=0` 센티넬)이나 이는 enabler이지 root가 아니다.
+
+**미확인 (재확인 필요):** `thinking_support=Some true`는 증상에서 역추론 — 배포 `runtime.toml` 바인딩이 tree에 없어 config로 미확인. thinking OFF면 예산이 fallback `8192`로 바뀐다. `keeper_max_turn_failures`(10)/`pacing_mode`(enforce)/`supervisor_max_restarts` 기본값의 배포 override 여부 미확인.

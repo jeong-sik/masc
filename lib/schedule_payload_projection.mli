@@ -49,6 +49,15 @@ val support_summary_yojson : support_summary -> Yojson.Safe.t
 val support_summary_to_yojson : Schedule_domain.schedule_request list -> Yojson.Safe.t
 val kind_of_json_result : Yojson.Safe.t -> (string, string) result
 
+(** [intrinsic_risk_class_of_payload payload] is the risk_class the payload's
+    kind mandates, when the kind (not the caller) determines it. [masc.keeper_wake]
+    is always [Reminder_only]; other/unknown kinds return [None] (caller-specified).
+    Used at the creation boundary to clamp a caller-supplied risk_class that would
+    otherwise force a self-wake into a human-grant deadlock. *)
+val intrinsic_risk_class_of_payload
+  :  Yojson.Safe.t
+  -> Schedule_domain.risk_class option
+
 val validate_request_payload_for_creation_detailed
   :  payload:Yojson.Safe.t
   -> risk_class:Schedule_domain.risk_class

@@ -1061,24 +1061,72 @@ let handle_tool_execute_typed
           Retired_env_warnings.report_shell_ir_path_jail_if_set
             ~source:"execute"
             ();
+          let shell_ir_approval_config_for_agent _agent_id =
+            let open Masc_exec.Approval_config in
+            let parse_trust_override raw ~band =
+              match raw with
+              | None -> None
+              | Some raw ->
+                (match trust_level_of_string raw with
+                 | Some value -> Some value
+                 | None ->
+                   (Log.Keeper.warn
+                      "invalid shell IR %s trust override %s=%S (allowed: observe, suggest, auto_safe, enforced); fallback to profile value"
+                      band
+                      (String.concat "" [ "MASC_SHELL_IR_APPROVAL_"; String.uppercase_ascii band; "_TRUST" ])
+                      raw);
+                   None))
+            in
+            let profile_overlay =
+              match Env_config_runtime.Shell_ir_approval_gate.profile () with
+              | None -> autonomous
+              | Some raw ->
+                (match agent_overlay_of_profile raw with
+                 | Some overlay -> overlay
+                 | None ->
+                   (Log.Keeper.warn
+                      "invalid %s=%S for shell IR approval profile, fallback=autonomous"
+                      "MASC_SHELL_IR_APPROVAL_PROFILE"
+                      raw);
+                   autonomous)
+            in
+            let safe_override =
+              parse_trust_override
+                ~band:"safe"
+                (Env_config_runtime.Shell_ir_approval_gate.safe_trust ())
+            in
+            let audited_override =
+              parse_trust_override
+                ~band:"audited"
+                (Env_config_runtime.Shell_ir_approval_gate.audited_trust ())
+            in
+            let privileged_override =
+              parse_trust_override
+                ~band:"privileged"
+                (Env_config_runtime.Shell_ir_approval_gate.privileged_trust ())
+            in
+            {
+              defaults =
+                {
+                  safe_trust = Option.value safe_override ~default:profile_overlay.safe_trust;
+                  audited_trust = Option.value audited_override ~default:profile_overlay.audited_trust;
+                  privileged_trust = Option.value privileged_override ~default:profile_overlay.privileged_trust;
+                };
+              per_agent = [];
+            }
+          in
           let dispatch_result =
             if Env_config_runtime.Shell_ir_approval_gate.enabled ()
             then (
               let agent_id = Masc_exec.Agent_id.of_string meta.name in
-              (* RFC-0254 §5.2/§5.5: the keeper lane is autonomous — no human or
-                 resolver can answer an [Ask], so the overlay is [autonomous]
-                 (all [Observe] => non-catastrophic [Allow] + telemetry).  This
-                 unblocks the toolchain (defect §2.2.2) while the
-                 trust-independent catastrophic floor in [Approval_policy.decide]
-                 (destructive git, redirect write-escape, [mkfs]) still denies.
-                 The floor is applied identically on Host and inside Docker
-                 (RFC §13 Q2: defense-in-depth — a destructive git push reaches
-                 the real remote even from a container), so no sandbox-conditional
-                 branch is needed: both profiles use the same overlay. *)
+              (* RFC-0254 §5.2/§5.5: base approval profile and per-band
+                 overrides are now env-configurable via
+                 MASC_SHELL_IR_APPROVAL_PROFILE,
+                 MASC_SHELL_IR_APPROVAL_{SAFE,AUDITED,PRIVILEGED}_TRUST.
+                 Keepers remain non-interactive in autonomous execution, so the
+                 catastrophic floor stays trust-independent and non-overridable. *)
               let approval_config =
-                { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.autonomous
-                ; per_agent = []
-                }
+                shell_ir_approval_config_for_agent agent_id
               in
               Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
                 ~agent_id

@@ -343,4 +343,33 @@ module Shell_ir_approval_gate : sig
       gate so safe commands can be auto-allowed while audited/privileged
       operations require explicit approval. Default: [true] (the autonomous
       policy is a strict safety improvement over the no-gate path). *)
+
+  val profile : unit -> string option
+  (** Optional base profile for Shell IR approval from
+      [MASC_SHELL_IR_APPROVAL_PROFILE]. Accepts profile presets such as:
+      observe/autonomous, enforced/all_enforced, permissive, suggest, auto_safe.
+      Empty/unknown values are ignored and fallback is used. *)
+
+  val safe_trust : unit -> string option
+  (** Optional override for safe-band trust from
+      [MASC_SHELL_IR_APPROVAL_SAFE_TRUST]. Empty / malformed values are ignored.
+
+      Accepted values: observe, suggest, auto_safe, enforced.
+   *)
+
+  val audited_trust : unit -> string option
+  (** Optional override for audited-band trust from
+      [MASC_SHELL_IR_APPROVAL_AUDITED_TRUST]. Empty / malformed values are
+      ignored.
+
+      Accepted values: observe, suggest, auto_safe, enforced.
+   *)
+
+  val privileged_trust : unit -> string option
+  (** Optional override for privileged-band trust from
+      [MASC_SHELL_IR_APPROVAL_PRIVILEGED_TRUST]. Empty / malformed values are
+      ignored.
+
+      Accepted values: observe, suggest, auto_safe, enforced.
+   *)
 end

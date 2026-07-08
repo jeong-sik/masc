@@ -6,12 +6,6 @@ type trust_level =
   | Auto_safe    (* Auto-allow for the given risk class *)
   | Enforced     (* Strict ask/deny — fail-closed default *)
 
-let trust_level_to_string = function
-  | Observe -> "observe"
-  | Suggest -> "suggest"
-  | Auto_safe -> "auto_safe"
-  | Enforced -> "enforced"
-
 type agent_overlay = {
   safe_trust : trust_level;
   audited_trust : trust_level;
@@ -22,6 +16,83 @@ type t = {
   defaults : agent_overlay;
   per_agent : (Agent_id.t * agent_overlay) list;
 }
+
+let trust_level_to_string = function
+  | Observe -> "observe"
+  | Suggest -> "suggest"
+  | Auto_safe -> "auto_safe"
+  | Enforced -> "enforced"
+
+let normalize_level_token (raw : string) : string =
+  String.lowercase_ascii (String.trim raw)
+
+let trust_level_of_string (raw : string) : trust_level option =
+  match normalize_level_token raw with
+  | "observe"
+  | "obs" ->
+    Some Observe
+  | "suggest"
+  | "s" ->
+    Some Suggest
+  | "auto_safe"
+  | "auto-safe"
+  | "autosafe"
+  | "allow" ->
+    Some Auto_safe
+  | "enforced"
+  | "ask"
+  | "strict"
+  | "deny" ->
+    Some Enforced
+  | _ -> None
+
+let agent_overlay_of_profile (raw : string) : agent_overlay option =
+  match normalize_level_token raw with
+  | "autonomous"
+  | "observe" ->
+    Some
+      {
+        safe_trust = Observe;
+        audited_trust = Observe;
+        privileged_trust = Observe;
+      }
+  | "enforced"
+  | "enforced_all"
+  | "strict"
+  | "deny_all"
+  | "all_enforced" ->
+    Some
+      {
+        safe_trust = Enforced;
+        audited_trust = Enforced;
+        privileged_trust = Enforced;
+      }
+  | "permissive"
+  | "permissive_default"
+  | "perm" ->
+    Some
+      {
+        safe_trust = Auto_safe;
+        audited_trust = Enforced;
+        privileged_trust = Enforced;
+      }
+  | "suggest" ->
+    Some
+      {
+        safe_trust = Suggest;
+        audited_trust = Suggest;
+        privileged_trust = Suggest;
+      }
+  | "auto_safe"
+  | "auto-safe"
+  | "autosafe" ->
+    Some
+      {
+        safe_trust = Auto_safe;
+        audited_trust = Auto_safe;
+        privileged_trust = Auto_safe;
+      }
+  | _ -> None
 
 let enforced_all : agent_overlay =
   {

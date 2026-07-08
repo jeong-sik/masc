@@ -144,6 +144,21 @@ let test_review_rejects_non_object_json_evaluator_response () =
     ~text:{|[{"verdict":"APPROVE"}]|}
     ~reason_substring:"review verdict"
 
+let test_operator_override_skips_llm_and_approves () =
+  let result = AR.review ~operator_override:true (make_request ()) in
+  Alcotest.(check string)
+    "gate"
+    "fallback"
+    (AR.gate_to_string result.AR.gate);
+  Alcotest.(check (option string))
+    "fallback reason"
+    (Some "operator override: shared-account self-approval deadlock")
+    result.AR.fallback_reason;
+  match result.AR.verdict with
+  | AR.Approve -> ()
+  | AR.Reject reason ->
+    Alcotest.failf "operator_override should approve, got reject: %s" reason
+
 let () =
   Alcotest.run
     "anti_rationalization_empty_reject"
@@ -185,5 +200,12 @@ let () =
             "non-object JSON evaluator response rejects"
             `Quick
             test_review_rejects_non_object_json_evaluator_response;
+        ] );
+      ( "operator override policy",
+        [
+          Alcotest.test_case
+            "operator override skips LLM and approves"
+            `Quick
+            test_operator_override_skips_llm_and_approves;
         ] );
     ]

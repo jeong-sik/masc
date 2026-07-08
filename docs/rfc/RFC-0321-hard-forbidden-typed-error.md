@@ -25,11 +25,13 @@ masc keeper governance guard가 파괴적/금지 도구를 거부할 때 `Agent_
 
 이 중 3곳(831/902/958)은 의미상 unconditional hard block이지만 soft nudge 3곳(636/692/755)과 동일하게 `is_error=false`로 위장된다.
 
-### 1.1 관측 가능한 영향 (분석 단계 산출, file:line은 agent가 읽음 — 구현 PR에서 재검증)
+### 1.1 관측 가능한 영향 (분석 단계 산출)
+
+- `keeper_librarian.ml:42`은 직접 확인됨 (`is_error`가 episode 기록에 반영되는 지점)
+- `keeper_context_core.ml:225,266,300,434`는 분석 산출 기반이며 구현 PR에서 재검증 필요
 
 - `keeper_librarian.ml:42` — `is_error=%b`가 episode 메모리에 영구 기록 → 거부가 success로 학습
-- `keeper_context_core.ml:225,266,300,434` — checkpoint stub/truncate에 `is_error=false` 전파 → 거부가 비-에러로 보존
-- `keeper_tool_dispatch_runtime.ml:251-255` — `classify_tool_result_payload`가 Override payload `[tool_skipped] ...`를 `Plain_text`로 분류 → `inferred_outcome=Success` → circuit breaker 미작동
+- `keeper_tool_dispatch_runtime.ml:251-255` — `classify_tool_result_payload`가 Override payload `[tool_skipped] ...`를 기존엔 `Plain_text` 경로로 다뤄 `inferred_outcome=Success`가 발생하는 것으로 확인
 - `[tool_skipped] code=hard_forbidden` 문자열은 keeper system prompt(`keeper_prompt.ml`, `keeper_run_prompt.ml`, `keeper_state_block_prompt.ml`, `prompts/` 전수 grep 0건) 어디에서도 LLM에게 설명되지 않음 → LLM이 자유 텍스트 해석에 의존 (RFC-0042급 string 분류기 암시)
 
 ## 2. 원칙 — typed policy rejection
@@ -253,10 +255,10 @@ compiler가 누락을 build error로 보고하므로 silent bug는 아님. 단 m
 
 | | before | after |
 |---|---|---|
-| keeper_deny / destructive / hard_forbidden 결과 | `is_error=false` (정상 위장) | `is_error=true`, Non_retryable, Deterministic |
+| keeper_deny / destructive / hard_forbidden 결과 | `is_error=false` (정상 위장) | `is_error=true`, Non_retryable, Deterministic *(일반적으로 failure 분류 경로로 전환되어 circuit breaker에 반영됨)* |
 | LLM 인식 | 거부를 success로 학습 | 거부를 error로 인식 |
 | librarian episode 기록 | success로 영구 기록 | error로 기록 |
-| circuit breaker | 미작동(Plain_text→Success) | 작동(is_error 기반) |
+| circuit breaker | 기존 경로에서는 Plain_text 기반 `inferred_outcome=Success`가 관찰됨 | `is_error=true`를 반환해 failure 경로로 관측이 이동 *(단 경로별 추가 검증 필요)* |
 | `[tool_skipped]` content | LLM 자유 해석 | Block reason이 그대로 content (여전히 문자열이나 is_error=true가 의미 보장) |
 | soft nudge 3곳 | Override 유지 | 동일 (변경 없음) |
 

@@ -149,12 +149,16 @@ let submit_and_approve_task_r
                  (fun (t : Masc_domain.task) -> String.equal t.id task_id)
                  backlog.tasks
              with
-             | Some
-                 { task_status =
-                     Masc_domain.AwaitingVerification { verification_id; _ }
-                 ; _
-                 } -> Some verification_id
-             | Some _ | None -> None)
+             | None -> None
+             | Some t ->
+               (match t.task_status with
+                | Masc_domain.AwaitingVerification { verification_id; _ } ->
+                  Some verification_id
+                | Masc_domain.Todo
+                | Masc_domain.Claimed _
+                | Masc_domain.InProgress _
+                | Masc_domain.Done _
+                | Masc_domain.Cancelled _ -> None))
         in
         let record_verdict decision =
           match verification_id with

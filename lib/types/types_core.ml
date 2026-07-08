@@ -648,9 +648,17 @@ let task_claim_decision (task : task) =
        cross-agent check (self-verification block) happens in claim_task_r.
        Issue #19314. verification_id is a non-empty string — always claimable. *)
     Claim_available (task_claim_readiness task)
+  | Done _ ->
+    (* Coordination-role tasks with Allow_reclaim policy are reclaimable
+       after completion. task-1869: 6 TaskError fingerprints show
+       coordination-role tasks blocked from re-claim by completion. *)
+    (match task.reclaim_policy with
+     | Some Allow_reclaim | None ->
+       Claim_available (task_claim_readiness task)
+     | Some Block_reclaim ->
+       Claim_unavailable (Claim_block_not_todo task.task_status))
   | Claimed _
   | InProgress _
-  | Done _
   | Cancelled _ ->
     Claim_unavailable (Claim_block_not_todo task.task_status)
 ;;

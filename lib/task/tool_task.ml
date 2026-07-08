@@ -408,7 +408,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time reason
   | None ->
-  let evidence_refs =
+let evidence_refs =
         match handoff_context with
         | Some h -> h.evidence_refs
         | None -> []
@@ -424,6 +424,7 @@ and handle_transition ~tool_name ~start_time ctx args =
              | Some persisted -> Some persisted
              | None -> completion_contract)
           ~evaluator_runtime
+          ~operator_override:force
           ~ctx
           ~task_opt
           ~task_id

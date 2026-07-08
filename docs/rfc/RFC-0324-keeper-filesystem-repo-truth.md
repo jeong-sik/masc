@@ -1,4 +1,4 @@
-# RFC-0323: keeper repo 경로를 filesystem 진실로 (catalog 거짓 주입 제거)
+# RFC-0324: keeper repo 경로를 filesystem 진실로 (catalog 거짓 주입 제거)
 
 ## Status
 Draft

@@ -248,3 +248,34 @@
 .sch-ev-need { font-size: var(--fs-10); color: var(--status-warn); }
 .sch-ev [data-status-chip] { flex: none; align-self: flex-start; }
 .sch-poll-top [data-status-chip] { flex: none; }
+
+/* ── Keeper 자율 백그라운드 (폴링 · 비동기 도구) — per-keeper recurring group view ── */
+.sch-bg { margin-top: 26px; border-top: 1px solid var(--border-soft); padding-top: 18px; }
+.sch-bg-h { margin-bottom: 14px; }
+.sch-bg-h h3 { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-bright); margin: 0 0 4px; }
+.sch-bg-sub { font-size: var(--fs-11); color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 10px; }
+.sch-bg-grps { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.sch-bg-grp { min-width: 0; }
+.sch-bg-grp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
+.sch-bg-grp-n { font-size: 12.5px; color: var(--text-bright); font-family: var(--font-ui); }
+.sch-bg-grp-ctx { font-size: var(--fs-10); color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 7px; width: 100%; }
+.sch-bg-grp-dead { color: var(--status-warn); }
+.sch-bg-list { display: flex; flex-direction: column; gap: 7px; }
+.sch-bg-empty { font-size: var(--fs-11); color: var(--text-dim); padding: 4px 0; }
+.sch-bg-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; border: 1px solid var(--border-main); border-left: 3px solid var(--tone, var(--border-main)); border-radius: var(--radius-sm); background: var(--bg-card); transition: 0.14s; --tone: var(--border-highlight); }
+.sch-bg-row.st-ok { --tone: var(--status-ok); }
+.sch-bg-row.st-warn { --tone: var(--status-warn); }
+.sch-bg-row.st-dim { --tone: var(--border-highlight); }
+.sch-bg-row:hover { border-color: var(--border-highlight); border-left-color: var(--tone); background: var(--bg-card-hover); }
+.sch-bg-when { flex: none; width: 62px; font-size: var(--fs-11); color: var(--text-mid); padding-top: 1px; }
+.sch-bg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sch-bg-title { font-size: var(--fs-12); line-height: 1.4; color: var(--text-primary); text-wrap: pretty; }
+.sch-bg-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.sch-bg-by { font-size: var(--fs-11); color: var(--text-mid); }
+.sch-bg-since { font-size: var(--fs-10); color: var(--text-dim); }
+.sch-bg-row [data-status-chip] { flex: none; align-self: flex-start; }
+.sch-bg-grp-h [data-status-chip] { flex: none; }
+
+@media (max-width: 900px) {
+  .sch-bg-grps { grid-template-columns: 1fr; }
+}

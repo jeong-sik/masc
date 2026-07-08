@@ -964,7 +964,7 @@ function FusionRegistryRow({ record, active }: { record: FusionRunRecord; active
           ? html`<span class="fus-dec-badge run">심의 중</span>`
           : record.status === 'failed'
             ? html`<span class="fus-dec-badge bad">실패</span>`
-            : html`<span class="fus-dec-badge">registry</span>`}
+            : html`<span class="fus-dec-badge">레지스트리</span>`}
       </span>
     </button>
   `
@@ -1288,9 +1288,8 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
       </div>
 
       <div class="fus-block">
-        <div class="fus-block-lbl">
+        <div class="fus-block-lbl" title="GET /api/v1/dashboard/fusion-runs">
           레지스트리 관측
-          <span class="fus-sub-note">GET /api/v1/dashboard/fusion-runs</span>
         </div>
         <div class="fus-judge-wait">
           ${record.status === 'running'
@@ -1355,21 +1354,20 @@ export function FusionSurface() {
         : null}
 
       <section class="fus-kpis" aria-label="Fusion overview">
-        <${FusionMetric} label="board runs" value=${runs.length} tone=${runs.length ? 'ok' : undefined} />
+        <${FusionMetric} label="보드 런" value=${runs.length} tone=${runs.length ? 'ok' : undefined} />
         <${FusionMetric}
-          label="registry"
+          label="레지스트리"
           value=${registryRuns.length}
           tone=${registryRunning ? 'warn' : registryRuns.length ? 'ok' : undefined}
         />
-        <${FusionMetric} label="running" value=${registryRunning} tone=${registryRunning ? 'warn' : undefined} />
-        <${FusionMetric} label="failed" value=${registryFailed} tone=${registryFailed ? 'bad' : undefined} />
+        <${FusionMetric} label="실행 중" value=${registryRunning} tone=${registryRunning ? 'warn' : undefined} />
+        <${FusionMetric} label="실패" value=${registryFailed} tone=${registryFailed ? 'bad' : undefined} />
       </section>
 
       <div class="fus-body">
         <aside class="fus-list" aria-label="Fusion runs">
           <div class="fus-list-h">
             <h4>심의 런</h4>
-            <span class="fus-list-sub">RFC-0252 · 패널+심판</span>
             ${registryRunning > 0
               ? html`<span class="fus-list-live"><span class="fus-rdot run"></span>${registryRunning} 진행</span>`
               : null}
@@ -1399,7 +1397,7 @@ export function FusionSurface() {
                 <div class="fus-block">
                   <div class="fus-block-lbl">${boardError ? '보드 sink 확인 실패' : '보드 sink 대기'}</div>
                   <div class="fus-judge-wait">
-                    ${boardError ? 'Board-sink fusion posts are unverified.' : 'No board-sink fusion posts yet.'}
+                    ${boardError ? '보드 심의 기록을 확인하지 못했습니다.' : '아직 기록된 보드 심의가 없습니다.'}
                   </div>
                   <p class="fus-rec-rationale">
                     ${boardError

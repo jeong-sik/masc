@@ -30,19 +30,21 @@ val decide :
        - any [Destructive] git op → [Deny Destructive_git];
        - a redirect [Write_path] whose scope is [Outside_workspace] or
          [Absolute_unknown] → [Deny Path_escape];
-       - an irreversible repository-hosting CLI operation ([gh pr merge],
-         [gh repo delete], [gh api -X DELETE]) → [Deny
+       - an irreversible repository-hosting CLI operation ([gh repo delete],
+         [gh api -X DELETE]) → [Deny
          Destructive_repo_hosting_cli];
        - a catastrophic-by-identity binary (filesystem-format [mkfs], or
          system-power [shutdown]/[reboot]/[halt]/[poweroff]) → [Deny
          Catastrophic_program];
        - a destructive SQL statement ([DROP]/[TRUNCATE]/[DELETE]) handed to a
          database CLI ([psql -c], [mysql -e]) → [Deny Destructive_db].
-    2. Otherwise, a [gh repo create] request that lacks the G-10 contract
-       ([OWNER/NAME] plus exactly one visibility flag) → [Deny
-       (Policy_deny ...)]. Invalid repo-create requests must be corrected before
-       HITL; the approval queue only receives explicit ownership/visibility
-       metadata.
+    2. Otherwise, a [gh] capability policy denial → [Deny (Policy_deny ...)].
+       This covers a [gh repo create] request that lacks the G-10 contract
+       ([OWNER/NAME] plus exactly one visibility flag), and [gh pr merge
+       --admin], which bypasses merge requirements rather than requesting
+       ordinary merge approval. Invalid requests must be corrected before HITL;
+       the approval queue only receives explicit ownership/visibility metadata
+       and non-bypass merge requests.
     3. Otherwise, a [gh] verb whose capability disposition is
        [Requires_approval] → [Ask], independent of the risk overlay. This is
        how reversible durable-remote mutations such as [gh repo create] and
@@ -62,8 +64,8 @@ val decide :
 val catastrophic_floor : Capability.t list -> Verdict.deny_reason option
 (** Stage 1 of [decide] on its own: [Some reason] for a [Destructive] git op, a
     redirect [Write_path] escaping the workspace, an irreversible
-    repository-hosting CLI operation ([gh pr merge], [gh repo delete],
-    [gh api -X DELETE]), a catastrophic-by-identity binary
+    repository-hosting CLI operation ([gh repo delete], [gh api -X DELETE]), a
+    catastrophic-by-identity binary
     (filesystem-format [mkfs] or system-power [shutdown]/[reboot]/[halt]/
     [poweroff]), or a destructive SQL statement on a database CLI
     ([psql -c "drop …"]); [None] otherwise.

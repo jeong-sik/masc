@@ -108,6 +108,15 @@ let parse_bool_field raw field =
 
 let assert_sandbox_local_search_response ~raw =
   let json = Yojson.Safe.from_string raw in
+  let deterministic_retry_reason =
+    match Json.member "deterministic_retry" json with
+    | `Null -> None
+    | `Assoc _ as retry -> Json.member "reason" retry |> Json.to_string_option
+    | other ->
+      Alcotest.failf
+        "unexpected deterministic_retry shape: %s"
+        (Yojson.Safe.to_string other)
+  in
   Alcotest.(check (option bool)) "sandbox-local search succeeds" (Some true)
     (Json.member "ok" json |> Json.to_bool_option);
   Alcotest.(check (option string)) "no policy error" None
@@ -117,8 +126,7 @@ let assert_sandbox_local_search_response ~raw =
   Alcotest.(check (option bool)) "no operator action" None
     (Json.member "operator_action_required" json |> Json.to_bool_option);
   Alcotest.(check (option string)) "no deterministic policy retry" None
-    (Json.member "deterministic_retry" json |> Json.member "reason"
-     |> Json.to_string_option)
+    deterministic_retry_reason
 
 let assert_no_repository_registration_pending ~keeper_name =
   let pending =

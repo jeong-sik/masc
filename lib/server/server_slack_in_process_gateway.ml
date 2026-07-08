@@ -151,6 +151,10 @@ let publish_slack_stream_snapshot state snapshot =
         (String.equal content ""
         || String.equal content state.last_edited_text)
     then
+      (* Wall-clock, read once per snapshot to throttle the streaming edit
+         cadence (a minimum interval between chat.update calls); it gates I/O
+         frequency only and never branches deterministic policy. NDT-OK. *)
+      let now = Unix.gettimeofday () in
       match state.message_ts with
       | None -> (
         match
@@ -159,20 +163,20 @@ let publish_slack_stream_snapshot state snapshot =
         with
         | Ok ts ->
           state.message_ts <- Some ts;
-          state.last_edit_time <- Unix.gettimeofday ();
+          state.last_edit_time <- now;
           state.last_edited_text <- content
         | Error error ->
           state.disabled <- true;
           log_stream_error "initial send" state error)
       | Some ts ->
-        let elapsed = Unix.gettimeofday () -. state.last_edit_time in
+        let elapsed = now -. state.last_edit_time in
         if elapsed >= streaming_edit_interval_s then
           match
             State.edit_message ~channel_id:state.channel_id ~message_id:ts
               ~content ()
           with
           | Ok () ->
-            state.last_edit_time <- Unix.gettimeofday ();
+            state.last_edit_time <- now;
             state.last_edited_text <- content
           | Error error -> log_stream_error "edit" state error
   end
@@ -229,8 +233,10 @@ let handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
       Slack_observability.Dropped_unbound
   | Some resolution ->
     let keeper_name = resolution.State.keeper_name in
-    (* Reply into the triggering message's thread: existing thread when the
-       trigger already sits in one, else a fresh thread rooted at the message. *)
+    (* Reply into the triggering message's thread. [thread_ts]=None is a
+       top-level message (a known state, not a parse failure); rooting the reply
+       thread at the message's own ts is the intended Slack behavior, so the
+       default is total, not permissive. sound-partial: allow *)
     let reply_to_thread_ts = Option.value thread_ts ~default:ts in
     let metadata =
       [ ("conversation_id", slack_conversation_id ~channel_id)
@@ -251,6 +257,9 @@ let handle_inbound ~dispatch ~channel_id ~thread_ts ~user_id ~user_name ~text
     let msg : Channel_gate.inbound_message =
       { channel = State.channel
       ; channel_user_id = user_id
+        (* The gate contract requires a non-empty display name; [user_id] is a
+           valid fallback when Slack omits [user_name] (a known case, mirroring
+           the Discord gateway's id fallback). sound-partial: allow *)
       ; channel_user_name = Option.value user_name ~default:user_id
       ; channel_workspace_id = channel_id
       ; keeper_name

@@ -36,7 +36,7 @@ import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
 import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
-import type { ComponentChildren } from 'preact'
+import { h, type ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import {
@@ -74,6 +74,7 @@ const SET_SECTIONS: [SectionId, string, string][] = [
   ['paths', 'Paths', '경로 · Path'],
   ['mcp', 'MCP', 'MCP 서버'],
   ['repositories', 'Repositories', '저장소'],
+  ['personas', 'Personas', 'Personas'],
   ['notify', 'Notify', '알림'],
   ['prompts', 'Prompts', '기본 프롬프트'],
   ['fusion', 'Fusion', '패널·심판 심의'],
@@ -86,7 +87,7 @@ const SET_SECTIONS: [SectionId, string, string][] = [
 // 디자인이 nav에서 뺀 mcp/display는 live-backed 동작 섹션이라 유지한다
 // (docs/design/keeper-v2-design-delta-audit-2026-07-03.md).
 const SET_GROUPS: [string, SectionId[]][] = [
-  ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion']],
+  ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion', 'personas']],
   ['인프라 · 실행', ['runtimes', 'paths']],
   ['연결 · 통합', ['mcp', 'repositories']],
   ['관측 · 알림', ['logs', 'notify', 'display']],
@@ -1596,6 +1597,10 @@ export function SettingsSurface() {
               <${SettingsRepositoriesSection} />
             `}
 
+            ${sec === 'personas' && html`
+              <${SettingsPersonasSection} />
+            `}
+
             ${sec === 'logs' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 시스템 로그는 <span class="mono">/api/v1/dashboard/logs</span> ring에서 직접 읽습니다. 필터는 화면 표시만 바꾸며 서버 설정을 쓰지 않습니다.
@@ -1686,4 +1691,255 @@ export function SettingsSurface() {
       </div>
     </main>
   `
+}
+
+// Persona management (create / edit) UI for dashboard settings
+type Persona = {
+  persona_name: string
+  display_name: string
+  role?: string
+  trait?: string
+  goal?: string
+  instructions?: string
+  mention_targets?: string[]
+  tool_denylist?: string[]
+  proactive_enabled?: boolean
+  auto_handoff?: boolean
+}
+
+type PersonaForm = {
+  persona_name: string
+  display_name: string
+ : string
+  trait: string
+  goal: string
+  instructions string
+  mention_targets: string
+  tool_denylist: string
+  proactive_enabled: boolean
+  auto_handoff: boolean
+}
+
+const PERSONA_EMPTY_FORM: PersonaForm = {
+  persona_name: '',
+  display_name: '',
+  role: '',
+  trait: '',
+  goal: '',
+  instructions: '',
+  mention_targets: '',
+  tool_denylist: '',
+  proactive_enabled: false,
+  auto_handoff: false,
+}
+
+function personaParseCsv(value: string): string[] {
+  return value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+function PersonaTextField(props: {
+  label: string
+  value: string
+  onInput: (value: string) => void
+  required?: boolean
+  disabled?: boolean
+  textarea?: boolean
+}) {
+  const input = props.textarea
+    ? h('textarea', {
+        value: props.value,
+        onInput: (e: Event) => props.onInput((e.target as HTMLTextAreaElement).value),
+        rows: 5,
+      })
+    : h('input', {
+        type: 'text',
+        value: props.value,
+        onInput: (e: Event) => props.onInput((e.target as HTMLInputElement).value),
+        required: props.required,
+        disabled: props.disabled,
+      })
+  return h('label', null, props.label, input)
+}
+
+function PersonaCheckboxField(props: {
+  label: string
+  checked: boolean
+  onInput: (checked: boolean) => void
+}) {
+  return h('label', null, h('input', {
+    type: 'checkbox',
+    checked: props.checked,
+    onInput: (e: Event) => props.onInput((e.target as HTMLInputElement).checked),
+  }), props.label)
+}
+
+export function SettingsPersonasSection() {
+  const [personas, setPersonas] = useState<Persona[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [form, setForm] = useState<PersonaForm>(PERSONA_EMPTY_FORM)
+  const [isEditing, setIsEditing] = useState(false)
+
+  const loadPersonas = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await callMcpTool('masc_persona_list', {})
+      setPersonas((result as { personas?: Persona[] }).personas ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadPersonas()
+  }, [loadPersonas])
+
+  const updateForm = useCallback(
+    (field: keyof PersonaForm, value: string | boolean) => {
+      setForm(prev => ({ ...prev, [field]: value }))
+    },
+    []
+  )
+
+  const resetForm = useCallback(() => {
+    setForm(PERSONA_EMPTY_FORM)
+    setIsEditing(false)
+  }, [])
+
+  const editPersona = useCallback((persona: Persona) => {
+    setForm({
+      persona_name: persona.persona_name,
+      display_name: persona.display_name,
+      role: persona.role ?? '',
+      trait: persona.trait ?? '',
+      goal: persona.goal ?? '',
+      instructions: persona.instructions ?? '',
+      mention_targets: persona.mention_targets?.join(', ') ?? '',
+      tool_denylist: persona.tool_denylist?.join(', ') ?? '',
+      proactive_enabled: persona.proactive_enabled ?? false,
+      auto_handoff: persona.auto_handoff ?? false,
+    })
+    setIsEditing(true)
+  }, [])
+
+  const savePersona = useCallback(
+    async (evt: Event) => {
+      evt.preventDefault()
+      setError(null)
+      const payload = {
+        persona_name: form.persona_name,
+        display_name: form.display_name,
+        role: form.role || undefined,
+        trait: form.trait || undefined,
+        goal: form.goal || undefined,
+        instructions: form.instructions || undefined,
+        mention_targets: personaParseCsv(form.mention_targets),
+        tool_denylist: personaParseCsv(form.tool_denylist),
+        proactive_enabled: form.proactive_enabled,
+        auto_handoff: form.auto_handoff,
+      }
+      try {
+        if (isEditing) {
+          await callMcpTool('masc_persona_update', payload)
+        } else {
+          await callMcpTool('masc_persona_create', payload)
+        }
+        await loadPersonas()
+        resetForm()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [form, isEditing, loadPersonas, resetForm]
+  )
+
+  const title = isEditing ? 'Edit persona' : 'Create persona'
+  const submitLabel = isEditing ? 'Update persona' : 'Create persona'
+
+  return h('div', null,
+    h('div', { class: 'set-hint', style: { marginBottom: '12px' } },
+      'Create or edit personas. Personas are reusable keeper profiles stored on the server.'
+    ),
+    error ? h('div', { class: 'set-error', style: { marginBottom: '12px' } }, error) : null,
+    h('form', { onSubmit: savePersona },
+      h('div', { class: 'set-sub-h' }, title),
+      h(PersonaTextField, {
+        label: 'Persona name',
+        value: form.persona_name,
+        onInput: (value: string) => updateForm('persona_name', value),
+        disabled: isEditing,
+        required: true,
+      }),
+      h(PersonaTextField, {
+        label: 'Display name',
+        value: form.display_name,
+        onInput: (value: string) => updateForm('display_name', value),
+        required: true,
+      }),
+      h(PersonaTextField, {
+        label: 'Role',
+        value: form.role,
+        onInput: (value: string) => updateForm('role', value),
+      }),
+      h(PersonaTextField, {
+        label: 'Trait',
+        value: form.trait,
+        onInput: (value: string) => updateForm('trait', value),
+      }),
+      h(PersonaTextField, {
+        label: 'Goal',
+        value: form.goal,
+        onInput: (value: string) => updateForm('goal', value),
+        textarea: true,
+      }),
+      h(PersonaTextField, {
+        label: 'Instructions',
+        value: form.instructions,
+        onInput: (value: string) => updateForm('instructions', value),
+        textarea: true,
+      }),
+      h(PersonaTextField, {
+        label: 'Mention targets (comma-separated)',
+        value: form.mention_targets,
+        onInput: (value: string) => updateForm('mention_targets', value),
+      }),
+      h(PersonaTextField, {
+        label: 'Tool denylist (comma-separated)',
+        value: form.tool_denylist,
+        onInput: (value: string) => updateForm('tool_denylist', value),
+      }),
+      h(PersonaCheckboxField, {
+        label: 'Proactive enabled',
+        checked: form.proactive_enabled,
+        onInput: (checked: boolean) => updateForm('proactive_enabled', checked),
+      }),
+      h(PersonaCheckboxField, {
+        label: 'Auto handoff',
+        checked: form.auto_handoff,
+        onInput: (checked: boolean) => updateForm('auto_handoff', checked),
+      }),
+      h('div', { style: { marginTop: '12px' } },
+        h('button', { type: 'submit' }, submitLabel),
+        isEditing ? h('button', { type: 'button', onClick: resetForm }, 'Cancel') : null
+      )
+    ),
+    h('div', { class: 'set-sub-h', style: { marginTop: '24px' } }, 'Existing personas'),
+    loading
+      ? h('div', null, 'Loading personas...')
+      : personas.length === 0
+        ? h('div', { class: 'set-hint' }, 'No personas configured.')
+        : h('ul', null, personas.map(persona =>
+          h('li', { key: persona.persona_name, style: { marginBottom: '8px' } },
+            h('strong', null, persona.display_name),
+            ' (' + persona.persona_name + ') ',
+            h('button', { type: 'button', onClick: () => editPersona(persona) }, 'Edit')
+          )
+        ))
+  )
 }

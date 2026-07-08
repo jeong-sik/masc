@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { fireEvent, waitFor } from '@testing-library/preact'
+import { fireEvent, screen, waitFor } from '@testing-library/preact'
 import {
   SettingsSurface,
   mcpExposedToolNames,
@@ -10,6 +10,7 @@ import {
   logRowStatus,
   normalizeSettingsSection,
   settingsControlInventory,
+  SettingsPersonasSection,
 } from './settings-surface'
 import type {
   ConfigEntry,
@@ -1625,5 +1626,146 @@ describe('settings read-surface helpers', () => {
   it('logEntryToSysRow falls back to module then (root) for identity', () => {
     expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: 'Server' }))[2]).toBe('Server')
     expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: '' }))[2]).toBe('(root)')
+  })
+})
+
+describe('SettingsPersonasSection', () => {
+  beforeEach(() => {
+    mcpMock.callMcpTool.mockReset()
+  })
+
+  it('loads and renders existing personas', async () => {
+    mcpMock.callMcpTool.mockResolvedValueOnce({
+      personas: [
+        {
+          persona_name: 'reviewer',
+          display_name: 'Reviewer',
+          role: 'reviewer',
+          trait: 'concise',
+          goal: 'review',
+          instructions: 'review code',
+          mention_targets: ['@channel'],
+          tool_denylist: ['danger'],
+          proactive_enabled: true,
+          auto_handoff: false,
+        },
+      ],
+    })
+    render(html`<${SettingsPersonasSection} />`)
+    await waitFor(() => {
+      expect(screen.getByText('Existing personas')).toBeTruthy()
+      expect(screen.getByText('Reviewer')).toBeTruthy()
+      expect(screen.getByText(' (reviewer) ')).toBeTruthy()
+    })
+    expect(mcpMock.callMcpTool).toHaveBeenCalledWith('masc_persona_list', {})
+  })
+
+  it('creates a persona when form is submitted', async () => {
+    mcpMock.callMcpTool.mockResolvedValueOnce({ personas: [] })
+    mcpMock.callMcpTool.mockResolvedValueOnce('created')
+    mcpMock.callMcpTool.mockResolvedValueOnce({ personas: [] })
+    render(html`<${SettingsPersonasSection} />`)
+    await waitFor(() => expect(screen.getByText('No personas configured.')).toBeTruthy())
+
+    fireEvent.input(screen.getByLabelText('Persona name'), { target: { value: 'planner' } })
+    fireEvent.input(screen.getByLabelText('Display name'), { target: { value: 'Planner' } })
+    fireEvent.input(screen.getByLabelText('Role'), { target: { value: 'planner' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create persona' }))
+
+    await waitFor(() => {
+      expect(mcpMock.callMcpTool).toHaveBeenCalledWith(
+        'masc_persona_create',
+        expect.objectContaining({
+          persona_name: 'planner',
+          display_name: 'Planner',
+          role: 'planner',
+        })
+      )
+    })
+  })
+
+  it('switches to edit mode when Edit is clicked', async () => {
+    mcpMock.callMcpTool.mockResolvedValueOnce({
+      personas: [
+        {
+          persona_name: 'reviewer',
+          display_name: 'Reviewer',
+          role: 'reviewer',
+          trait: 'concise',
+          goal: 'review',
+          instructions: 'review code',
+          mention_targets: ['@channel'],
+          tool_denylist: ['danger'],
+          proactive_enabled: true,
+          auto_handoff: false,
+        },
+      ],
+    })
+    render(html`<${SettingsPersonasSection} />`)
+    await waitFor(() => expect(screen.getByText('Reviewer')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Update persona' })).toBeTruthy()
+      expect((screen.getByLabelText('Persona name') as HTMLInputElement).value).toBe('reviewer')
+    })
+  })
+
+  it('updates a persona when update form is submitted', async () => {
+    mcpMock.callMcpTool.mockResolvedValueOnce({
+      personas: [
+        {
+          persona_name: 'reviewer',
+          display_name: 'Reviewer',
+          role: 'reviewer',
+          trait: 'concise',
+          goal: 'review',
+          instructions: 'review code',
+          mention_targets: ['@channel'],
+          tool_denylist: ['danger'],
+          proactive_enabled: true,
+          auto_handoff: false,
+        },
+      ],
+    })
+    mcpMock.callMcpTool.mockResolvedValueOnce('updated')
+    mcpMock.callMcpTool.mockResolvedValueOnce({
+      personas: [
+        {
+          persona_name: 'reviewer',
+          display_name: 'Reviewer',
+          role: 'reviewer',
+          trait: 'concise',
+          goal: 'review',
+          instructions: 'review code',
+          mention_targets: ['@channel'],
+          tool_denylist: ['danger'],
+          proactive_enabled: true,
+          auto_handoff: false,
+        },
+      ],
+    })
+    render(html`<${SettingsPersonasSection} />`)
+    await waitFor(() => expect(screen.getByText('Reviewer')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Update persona' })).toBeTruthy())
+
+    fireEvent.input(screen.getByLabelText('Role'), { target: { value: 'senior reviewer' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update persona' }))
+
+    await waitFor(() => {
+      expect(mcpMock.callMcpTool).toHaveBeenCalledWith(
+        'masc_persona_update',
+        expect.objectContaining({
+          persona_name: 'reviewer',
+          role: 'senior reviewer',
+        })
+      )
+    })
   })
 })

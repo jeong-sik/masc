@@ -8,6 +8,7 @@ export const SETTINGS_ROUTE_SECTION_IDS = [
   'paths',
   'mcp',
   'repositories',
+  'personas',
   'notify',
   'prompts',
   'fusion',

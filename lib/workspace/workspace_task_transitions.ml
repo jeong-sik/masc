@@ -127,6 +127,7 @@ let transition_task_outcome_r
           match
             Workspace_task_lifecycle.decide
               ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
+              ~requires_verification:(Masc_domain.task_requires_verification task)
               ~verification_timeout_seconds:
                 (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)

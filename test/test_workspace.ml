@@ -1509,6 +1509,69 @@ let test_force_done_still_credits_forcing_actor () =
         "force done still credits the forcing actor" [ admin_keeper_agent ]
         !recorded))
 
+(* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
+
+let strict_contract : Masc_domain.task_contract =
+  { strict = true
+  ; completion_contract = [ "deliverable verified by a second agent" ]
+  ; required_evidence = []
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  ; evidence_claims = []
+  ; stale_claim_timeout_sec = 0
+  ; links = { operation_id = None; session_id = None }
+  }
+
+let test_strict_task_done_routes_to_submit () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task config ~contract:strict_contract ~title:"Strict Task"
+        ~priority:1 ~description:""
+    in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    (* Direct done is blocked with the RFC-0308 remediation, even for the owner. *)
+    let direct =
+      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+        ~action:Masc_domain.Done_action ~notes:"done" ()
+    in
+    (match direct with
+     | Error e ->
+       Alcotest.(check bool) "error routes to submit_for_verification" true
+         (str_contains (Masc_domain.masc_error_to_string e) "submit_for_verification")
+     | Ok _ -> Alcotest.fail "strict task completed via direct done");
+    (* The verification lane still completes it. *)
+    let submitted =
+      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+        ~action:Masc_domain.Submit_for_verification ~notes:"evidence attached" ()
+    in
+    Alcotest.(check bool) "submit ok" true
+      (match submitted with Ok _ -> true | Error _ -> false);
+    let approved =
+      Workspace.transition_task_r config ~agent_name:admin_keeper_agent
+        ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
+    in
+    Alcotest.(check bool) "approve ok" true
+      (match approved with Ok _ -> true | Error _ -> false);
+    Alcotest.(check bool) "task done via verification" true
+      (match find_task config "task-001" with
+       | Some { task_status = Masc_domain.Done _; _ } -> true
+       | Some _ | None -> false))
+
+let test_default_task_done_unchanged () =
+  with_test_env (fun config ->
+    (* Phase A boundary: the auto-filled advisory contract (strict=false)
+       does NOT trip the guard — direct done keeps working fleet-wide. *)
+    let _ = Workspace.add_task config ~title:"Default Task" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let direct =
+      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+        ~action:Masc_domain.Done_action ~notes:"done" ()
+    in
+    Alcotest.(check bool) "default task direct done ok" true
+      (match direct with Ok _ -> true | Error _ -> false))
+
 let test_audit_orphan_tasks () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
@@ -2242,6 +2305,14 @@ let () =
         test_approve_completion_credits_assignee;
       Alcotest.test_case "force done still credits forcing actor" `Quick
         test_force_done_still_credits_forcing_actor;
+    ];
+
+    (* === RFC-0323 G-1: verification-required done guard === *)
+    "verification_guard", [
+      Alcotest.test_case "strict task done routes to submit" `Quick
+        test_strict_task_done_routes_to_submit;
+      Alcotest.test_case "default task done unchanged" `Quick
+        test_default_task_done_unchanged;
     ];
 
     (* === Board Admin Tests === *)

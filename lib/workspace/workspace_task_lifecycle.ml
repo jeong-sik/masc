@@ -108,6 +108,7 @@ let owner_authorized ~authority ~same_agent assignee =
 
 let decide
       ~verification_enabled
+      ~requires_verification
       ~verification_timeout_seconds
       ~new_verification_id
       ~same_agent
@@ -120,6 +121,14 @@ let decide
       ~notes
       ~reason
   =
+  (* RFC-0323 W1 / RFC-0308: a verification-required task cannot reach Done
+     through Done_action — submit -> approve is the completion lane. Gated on
+     [verification_enabled] so a disabled verification FSM cannot deadlock
+     completion (submit would error Verification_disabled). Authority-blind
+     by design: the approve arm never reads authority either, and the only
+     production force_done caller (the RFC-0199 probe) already moved to the
+     verification lane in G-2. *)
+  let done_blocked_by_verification = requires_verification && verification_enabled in
   match action, task_status with
   (* ── Claim ────────────────────────────────────── *)
   | Masc_domain.Claim, Masc_domain.Todo ->
@@ -164,13 +173,17 @@ let decide
     -> Error Invalid_transition
   (* ── Done ─────────────────────────────────────── *)
   | Masc_domain.Done_action, Masc_domain.Claimed { assignee; _ } ->
-    if owner_authorized ~authority ~same_agent assignee
-    then ok ~drift:Claimed_to_done_skip (done_status ~agent_name ~now ~notes)
-    else Error Invalid_transition
+    if not (owner_authorized ~authority ~same_agent assignee)
+    then Error Invalid_transition
+    else if done_blocked_by_verification
+    then Error Verification_required_use_submit
+    else ok ~drift:Claimed_to_done_skip (done_status ~agent_name ~now ~notes)
   | Masc_domain.Done_action, Masc_domain.InProgress { assignee; _ } ->
-    if owner_authorized ~authority ~same_agent assignee
-    then ok (done_status ~agent_name ~now ~notes)
-    else Error Invalid_transition
+    if not (owner_authorized ~authority ~same_agent assignee)
+    then Error Invalid_transition
+    else if done_blocked_by_verification
+    then Error Verification_required_use_submit
+    else ok (done_status ~agent_name ~now ~notes)
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
     , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) )
@@ -276,6 +289,7 @@ let decide
    [Submit_for_verification]). *)
 let valid_next_actions
       ~verification_enabled
+      ~requires_verification
       ~same_agent
       ~authority
       ~task_status
@@ -285,6 +299,7 @@ let valid_next_actions
     match
       decide
         ~verification_enabled
+        ~requires_verification
         ~verification_timeout_seconds:0.0
         ~new_verification_id:(fun () -> "")
         ~same_agent:same_agent_pred

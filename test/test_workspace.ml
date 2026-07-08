@@ -6,6 +6,10 @@ open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+(* RFC-0323 G-2: wires the verification-store hooks (among others) so the
+   machine_verify tests can assert the store record lifecycle. *)
+let () = Workspace_metric_hooks.install ()
+
 (* UTF-8 emoji helpers: ✅ is E2 9C 85, ⚠ is E2 9A A0, 🔒 is F0 9F 94 92, 🔓 is F0 9F 94 93 *)
 
 (* Helper for substring check - define early *)
@@ -1349,6 +1353,106 @@ let test_force_done_bypasses_assignee () =
     Alcotest.(check bool) "task is done" true (str_contains tasks "Done" || str_contains tasks "done")
   )
 
+(* === RFC-0323 G-2: submit_and_approve_task_r (machine-verified completion) === *)
+
+let find_task config task_id =
+  Workspace.get_tasks_raw config
+  |> List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+
+let test_submit_and_approve_completes_via_verification () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    (* Uses the exported probe identity so this test also pins that the
+       constant passes Agent_id validation and is distinct from a plain
+       agent identity, end-to-end through the real FSM. *)
+    let result =
+      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
+        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
+        ~task_id:"task-001"
+        ~notes:"deterministic evidence satisfied" ~approve_notes:"machine-verified" ()
+    in
+    Alcotest.(check bool) "submit+approve ok" true
+      (match result with Ok _ -> true | Error _ -> false);
+    (* Verification-store lifecycle (hooks installed above): the submit
+       created a record and the machine verdict resolved it — nothing
+       actionable remains to wake verifiers or linger in the dashboard
+       panel. *)
+    let requests = Verification.list_requests config.Workspace.base_path in
+    Alcotest.(check bool) "store record created" true
+      (List.length requests >= 1);
+    Alcotest.(check int) "no actionable record remains" 0
+      (List.length (List.filter Verification.request_is_actionable requests));
+    match find_task config "task-001" with
+    | Some { task_status = Masc_domain.Done { assignee; notes; _ }; _ } ->
+      Alcotest.(check string) "assignee preserved" test_agent_a assignee;
+      Alcotest.(check bool) "approved-by verifier recorded" true
+        (match notes with
+         | Some n ->
+           str_contains n Keeper_tool_task_runtime.deterministic_probe_verifier
+         | None -> false)
+    | Some _ -> Alcotest.fail "task not Done after submit+approve"
+    | None -> Alcotest.fail "task-001 missing")
+
+let test_submit_and_approve_rejects_same_identity () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let result =
+      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
+        ~verifier_name:test_agent_a ~task_id:"task-001"
+        ~notes:"n" ~approve_notes:"a" ()
+    in
+    Alcotest.(check bool) "rejected as not distinct" true
+      (match result with
+       | Error (Workspace.Machine_verify_verifier_not_distinct _) -> true
+       | Ok _ | Error _ -> false);
+    (* Rejected before any mutation: task must still be Claimed. *)
+    Alcotest.(check bool) "task still claimed" true
+      (match find_task config "task-001" with
+       | Some { task_status = Masc_domain.Claimed _; _ } -> true
+       | Some _ | None -> false))
+
+let test_submit_and_approve_rejects_invalid_verifier () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let result =
+      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
+        ~verifier_name:"probe:bad:double" ~task_id:"task-001"
+        ~notes:"n" ~approve_notes:"a" ()
+    in
+    Alcotest.(check bool) "rejected as invalid verifier" true
+      (match result with
+       | Error (Workspace.Machine_verify_invalid_verifier _) -> true
+       | Ok _ | Error _ -> false);
+    Alcotest.(check bool) "task still claimed" true
+      (match find_task config "task-001" with
+       | Some { task_status = Masc_domain.Claimed _; _ } -> true
+       | Some _ | None -> false))
+
+let test_submit_and_approve_non_assignee_submit_fails () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let result =
+      Workspace.submit_and_approve_task_r config ~agent_name:admin_keeper_agent
+        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
+        ~task_id:"task-001" ~notes:"n" ~approve_notes:"a" ()
+    in
+    Alcotest.(check bool) "submit failed typed" true
+      (match result with
+       | Error (Workspace.Machine_verify_submit_failed _) -> true
+       | Ok _ | Error _ -> false);
+    Alcotest.(check bool) "task still claimed" true
+      (match find_task config "task-001" with
+       | Some { task_status = Masc_domain.Claimed _; _ } -> true
+       | Some _ | None -> false))
+
 let test_audit_orphan_tasks () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
@@ -2062,6 +2166,18 @@ let () =
       Alcotest.test_case "xss in message" `Quick test_xss_in_message;
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
       Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
+    ];
+
+    (* === RFC-0323 G-2: machine-verified completion === *)
+    "machine_verify", [
+      Alcotest.test_case "submit+approve completes via verification" `Quick
+        test_submit_and_approve_completes_via_verification;
+      Alcotest.test_case "same identity rejected before mutation" `Quick
+        test_submit_and_approve_rejects_same_identity;
+      Alcotest.test_case "invalid verifier rejected before mutation" `Quick
+        test_submit_and_approve_rejects_invalid_verifier;
+      Alcotest.test_case "non-assignee submit fails typed" `Quick
+        test_submit_and_approve_non_assignee_submit_fails;
     ];
 
     (* === Board Admin Tests === *)

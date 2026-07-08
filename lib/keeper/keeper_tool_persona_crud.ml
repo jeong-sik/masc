@@ -10,7 +10,7 @@ let personas_dir () =
   | None ->
       let base = match Sys.getenv_opt "MASC_BASE" with
         | Some b -> b
-        | None -> Fs_compat.default_masc_base ()
+        | None -> Config_dir_resolver.base_path_or_cwd ()
       in
       Filename.concat base "personas"
 

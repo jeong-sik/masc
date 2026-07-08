@@ -147,7 +147,7 @@ let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   | Tool_search | Tools_list | Voice_agent | Voice_listen
   | Voice_session_end | Voice_session_start | Voice_sessions | Voice_speak -> Low
   | Board_sub_board_create | Board_sub_board_update | Task_claim | Task_create | Task_done
-  | Surface_post | Person_note_set
+  | Surface_post | Person_note_set | Persona_create | Persona_update
     -> Medium
   | Fs_edit | Fs_write | Fs_read | Ide_annotate -> High
   | Board_sub_board_delete -> Critical

@@ -26,17 +26,11 @@ import type {
 import {
   SECONDS_PER_HOUR,
   SECONDS_PER_MINUTE,
-  formatDateTimeKo,
   formatTimeAgo,
   formatTimeUntil,
 } from '../../lib/format-time'
 import { StatusChip, keeperStateTone } from '../common/status-chip'
 import { enumLabel } from './keeper-waiting-inventory-panel'
-
-function timeLabel(iso: string | null | undefined): string {
-  if (!iso) return '-'
-  return formatDateTimeKo(iso)
-}
 
 // Compact fire cadence for the fixed-width `when` column. Interval is always
 // present (unlike next-run, which is null while paused/never-run), so this
@@ -61,11 +55,11 @@ function LoopContext({ loop }: { loop: DashboardKeeperBackgroundLoop }) {
     <div class="sch-bg-grp-ctx">
       <span class="font-mono">restarts ${loop.restart_count.toLocaleString()}</span>
       <span aria-hidden="true">·</span>
-      <span class="font-mono">since ${timeLabel(loop.started_at_iso)}</span>
+      <span class="font-mono">since ${loop.started_at_iso ? formatTimeAgo(loop.started_at_iso) : '-'}</span>
       ${loop.dead_since_iso
         ? html`
             <span aria-hidden="true">·</span>
-            <span class="font-mono sch-bg-grp-dead">dead since ${timeLabel(loop.dead_since_iso)}</span>
+            <span class="font-mono sch-bg-grp-dead">dead since ${formatTimeAgo(loop.dead_since_iso)}</span>
           `
         : null}
     </div>

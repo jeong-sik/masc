@@ -53,12 +53,19 @@ let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id ~
 
 let rec handle_done ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
+  let evidence_refs = get_string_list args "evidence_refs" in
   handle_transition ~tool_name ~start_time ctx
     (`Assoc
        [
          ("task_id", Json_util.assoc_member_opt "task_id" args |> Option.value ~default:`Null);
          ("action", `String "done");
          ("notes", `String notes);
+         ("handoff_context",
+          `Assoc
+            [
+              ("summary", `String notes);
+              ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
+            ]);
        ])
 
 and handle_cancel_task ~tool_name ~start_time ctx args =
@@ -401,8 +408,13 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time reason
   | None ->
-  let review_gate_rejection =
-    if (=) action Masc_domain.Done_action then
+let evidence_refs =
+        match handoff_context with
+        | Some h -> h.evidence_refs
+        | None -> []
+      in
+      let review_gate_rejection =
+    if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
@@ -417,6 +429,7 @@ and handle_transition ~tool_name ~start_time ctx args =
           ~task_opt
           ~task_id
           ~notes
+          ~evidence_refs
       else
         None
     else

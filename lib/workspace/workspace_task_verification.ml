@@ -26,6 +26,27 @@ let is_placeholder_verification_evidence value =
   in
   List.mem value placeholders
 
+(* Declared refs only — contract metadata plus the typed handoff channel.
+   Free-text summary/notes are excluded on purpose: they are observability,
+   and an evidence gate that counted arbitrary prose would be vacuous. *)
+let declared_verification_evidence_refs (task : Masc_domain.task) handoff_context =
+  let contract_refs =
+    match task.contract with
+    | Some c -> c.verify_gate_evidence @ c.required_evidence
+    | None -> []
+  in
+  let handoff_refs =
+    match
+      (match handoff_context with
+       | Some _ -> handoff_context
+       | None -> task.handoff_context)
+    with
+    | Some (hc : Masc_domain.task_handoff_context) -> hc.evidence_refs
+    | None -> []
+  in
+  Workspace_state.normalized_string_list (contract_refs @ handoff_refs)
+  |> List.filter (fun s -> not (is_placeholder_verification_evidence s))
+
 let verification_submission_evidence_refs task ~notes handoff_context =
   let contract_refs =
     match task.contract with

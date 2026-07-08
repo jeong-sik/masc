@@ -122,14 +122,15 @@ describe('ConnectorConfigToggle', () => {
   })
 
   it('flips aria-expanded to true when clicked', async () => {
-    mockedGet.mockResolvedValue({ ok: true, id: 'slack', schema: { properties: {}, required: [] } })
-    render(html`<${ConnectorConfigToggle} connectorId="slack" />`, container)
+    // Uses telegram (a sidecar connector) — slack is now in-process (no schema fetch).
+    mockedGet.mockResolvedValue({ ok: true, id: 'telegram', schema: { properties: {}, required: [] } })
+    render(html`<${ConnectorConfigToggle} connectorId="telegram" />`, container)
     const btn = container.querySelector('button')!
     btn.click()
     await flushUi()
     expect(btn.getAttribute('aria-expanded')).toBe('true')
     expect(mockedGet).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/sidecar/schema?name=slack'),
+      expect.stringContaining('/api/v1/sidecar/schema?name=telegram'),
     )
   })
 })
@@ -175,20 +176,21 @@ describe('ConnectorConfigForm', () => {
   })
 
   it('Save button stays disabled while a required field is empty', async () => {
+    // telegram (sidecar) stands in for a schema-driven connector; slack is in-process.
     mockedGet.mockResolvedValue({
       ok: true,
-      id: 'slack',
+      id: 'telegram',
       schema: {
         properties: {
-          SLACK_BOT_TOKEN: { type: 'string' },
+          TELEGRAM_BOT_TOKEN: { type: 'string' },
         },
-        required: ['SLACK_BOT_TOKEN'],
+        required: ['TELEGRAM_BOT_TOKEN'],
       },
     })
     render(html`
       <div>
-        <${ConnectorConfigToggle} connectorId="slack" />
-        <${ConnectorConfigForm} connectorId="slack" />
+        <${ConnectorConfigToggle} connectorId="telegram" />
+        <${ConnectorConfigForm} connectorId="telegram" />
       </div>
     `, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
@@ -200,7 +202,7 @@ describe('ConnectorConfigForm', () => {
     expect(saveBtn).toBeTruthy()
     expect(saveBtn?.disabled).toBe(true)
     // Required field surfaces in the form (label) so operator can see what's missing.
-    expect(container.textContent).toContain('SLACK_BOT_TOKEN')
+    expect(container.textContent).toContain('TELEGRAM_BOT_TOKEN')
   })
 
   it('Save button POSTs to /api/v1/sidecar/config when required field is filled', async () => {
@@ -208,7 +210,7 @@ describe('ConnectorConfigForm', () => {
       // 1) schema GET
       .mockResolvedValueOnce({
         ok: true,
-        id: 'slack',
+        id: 'telegram',
         schema: {
           properties: {
             GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
@@ -219,12 +221,12 @@ describe('ConnectorConfigForm', () => {
       // 2) current-values GET (no file yet)
       .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
     // 3) save POST
-    mockedPost.mockResolvedValueOnce({ ok: true, id: 'slack', written_fields: 1 })
+    mockedPost.mockResolvedValueOnce({ ok: true, id: 'telegram', written_fields: 1 })
 
     render(html`
       <div>
-        <${ConnectorConfigToggle} connectorId="slack" />
-        <${ConnectorConfigForm} connectorId="slack" />
+        <${ConnectorConfigToggle} connectorId="telegram" />
+        <${ConnectorConfigForm} connectorId="telegram" />
       </div>
     `, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
@@ -241,7 +243,7 @@ describe('ConnectorConfigForm', () => {
     expect(mockedGet).toHaveBeenCalledTimes(2)
     expect(mockedPost).toHaveBeenCalledTimes(1)
     const saveCall = mockedPost.mock.calls[0]
-    expect(saveCall?.[0]).toContain('/api/v1/sidecar/config?name=slack')
+    expect(saveCall?.[0]).toContain('/api/v1/sidecar/config?name=telegram')
     expect(JSON.stringify(saveCall?.[1])).toContain('GATE_BASE_URL')
   })
 
@@ -250,7 +252,7 @@ describe('ConnectorConfigForm', () => {
       // 1) schema GET
       .mockResolvedValueOnce({
         ok: true,
-        id: 'slack',
+        id: 'telegram',
         schema: {
           properties: { GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' } },
           required: [],
@@ -268,8 +270,8 @@ describe('ConnectorConfigForm', () => {
 
     render(html`
       <div>
-        <${ConnectorConfigToggle} connectorId="slack" />
-        <${ConnectorConfigForm} connectorId="slack" />
+        <${ConnectorConfigToggle} connectorId="telegram" />
+        <${ConnectorConfigForm} connectorId="telegram" />
       </div>
     `, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
@@ -292,22 +294,13 @@ describe('ConnectorConfigForm', () => {
 
     expect(mockedGet).toHaveBeenCalledTimes(2)
     expect(mockedPost).toHaveBeenCalledTimes(3)
-    expect(mockedPost.mock.calls[1]?.[0]).toContain('/api/v1/sidecar/stop?name=slack')
-    expect(mockedPost.mock.calls[2]?.[0]).toContain('/api/v1/sidecar/start?name=slack')
+    expect(mockedPost.mock.calls[1]?.[0]).toContain('/api/v1/sidecar/stop?name=telegram')
+    expect(mockedPost.mock.calls[2]?.[0]).toContain('/api/v1/sidecar/start?name=telegram')
   })
 
-  it('renders where-to-find hint block for SLACK_BOT_TOKEN when schema contains it', async () => {
-    mockedGet.mockResolvedValue({
-      ok: true,
-      id: 'slack',
-      schema: {
-        properties: {
-          SLACK_BOT_TOKEN: { type: 'string' },
-          GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
-        },
-        required: ['SLACK_BOT_TOKEN'],
-      },
-    })
+  it('renders in-process Slack config guidance (both tokens) without sidecar API calls', async () => {
+    // Slack is an in-process connector (RFC-0317): the config panel shows the
+    // Socket Mode app token + outbound bot token and calls no sidecar API.
     render(html`
       <div>
         <${ConnectorConfigToggle} connectorId="slack" />
@@ -316,12 +309,20 @@ describe('ConnectorConfigForm', () => {
     `, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
     await flushUi()
-    await flushUi()
 
-    const hint = container.querySelector('[data-field-hint="SLACK_BOT_TOKEN"]')
-    expect(hint).toBeTruthy()
-    expect(hint?.textContent).toContain('Slack App')
-    // Unknown fields stay clean — hint must not leak to GATE_BASE_URL.
+    expect(mockedGet).not.toHaveBeenCalled()
+    expect(mockedPost).not.toHaveBeenCalled()
+    const panel = container.querySelector('[data-in-process-config-panel]')
+    expect(panel).toBeTruthy()
+    expect(panel?.textContent).toContain('server in-process')
+    expect(panel?.textContent).toContain('SLACK_APP_TOKEN')
+    expect(panel?.textContent).toContain('SLACK_BOT_TOKEN')
+    expect(panel?.textContent).not.toContain('Save')
+    // Both credentials get a where-to-find hint card; unknown fields stay clean.
+    const appHint = container.querySelector('[data-field-hint="SLACK_APP_TOKEN"]')
+    expect(appHint).toBeTruthy()
+    expect(appHint?.textContent).toContain('Slack App')
+    expect(container.querySelector('[data-field-hint="SLACK_BOT_TOKEN"]')).toBeTruthy()
     expect(container.querySelector('[data-field-hint="GATE_BASE_URL"]')).toBeNull()
   })
 
@@ -330,7 +331,7 @@ describe('ConnectorConfigForm', () => {
     mockedGet
       .mockResolvedValueOnce({
         ok: true,
-        id: 'slack',
+        id: 'telegram',
         schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
       })
       .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
@@ -338,8 +339,8 @@ describe('ConnectorConfigForm', () => {
 
     render(html`
       <div>
-        <${ConnectorConfigToggle} connectorId="slack" />
-        <${ConnectorConfigForm} connectorId="slack" />
+        <${ConnectorConfigToggle} connectorId="telegram" />
+        <${ConnectorConfigForm} connectorId="telegram" />
       </div>
     `, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
@@ -365,7 +366,7 @@ describe('ConnectorConfigForm', () => {
     mockedGet
       .mockResolvedValueOnce({
         ok: true,
-        id: 'slack',
+        id: 'telegram',
         schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
       })
       .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
@@ -376,8 +377,8 @@ describe('ConnectorConfigForm', () => {
 
     render(html`
       <div>
-        <${ConnectorConfigToggle} connectorId="slack" />
-        <${ConnectorConfigForm} connectorId="slack" />
+        <${ConnectorConfigToggle} connectorId="telegram" />
+        <${ConnectorConfigForm} connectorId="telegram" />
       </div>
     `, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
@@ -397,16 +398,16 @@ describe('ConnectorConfigForm', () => {
 
     expect(mockedGet).toHaveBeenCalledTimes(2)
     expect(mockedPost).toHaveBeenCalledTimes(3)
-    expect(mockedPost.mock.calls[0]?.[0]).toContain('/api/v1/sidecar/config?name=slack')
-    expect(mockedPost.mock.calls[1]?.[0]).toContain('/api/v1/sidecar/stop?name=slack')
-    expect(mockedPost.mock.calls[2]?.[0]).toContain('/api/v1/sidecar/start?name=slack')
+    expect(mockedPost.mock.calls[0]?.[0]).toContain('/api/v1/sidecar/config?name=telegram')
+    expect(mockedPost.mock.calls[1]?.[0]).toContain('/api/v1/sidecar/stop?name=telegram')
+    expect(mockedPost.mock.calls[2]?.[0]).toContain('/api/v1/sidecar/start?name=telegram')
   })
 
   it('auto-restart soft-stop: if stop rejects, start still fires', async () => {
     mockedGet
       .mockResolvedValueOnce({
         ok: true,
-        id: 'slack',
+        id: 'telegram',
         schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
       })
       .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
@@ -417,8 +418,8 @@ describe('ConnectorConfigForm', () => {
 
     render(html`
       <div>
-        <${ConnectorConfigToggle} connectorId="slack" />
-        <${ConnectorConfigForm} connectorId="slack" />
+        <${ConnectorConfigToggle} connectorId="telegram" />
+        <${ConnectorConfigForm} connectorId="telegram" />
       </div>
     `, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
@@ -442,20 +443,20 @@ describe('ConnectorConfigForm', () => {
   it('after toggle + fetch, renders required field marker and password input for token', async () => {
     mockedGet.mockResolvedValue({
       ok: true,
-      id: 'slack',
+      id: 'telegram',
       schema: {
         properties: {
-          SLACK_BOT_TOKEN: { type: 'string', title: 'Slack Bot Token' },
+          TELEGRAM_BOT_TOKEN: { type: 'string', title: 'Telegram Bot Token' },
           GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
         },
-        required: ['SLACK_BOT_TOKEN'],
+        required: ['TELEGRAM_BOT_TOKEN'],
       },
     })
 
     render(html`
       <div>
-        <${ConnectorConfigToggle} connectorId="slack" />
-        <${ConnectorConfigForm} connectorId="slack" />
+        <${ConnectorConfigToggle} connectorId="telegram" />
+        <${ConnectorConfigForm} connectorId="telegram" />
       </div>
     `, container)
     const toggle = container.querySelector('button[aria-expanded]') as HTMLButtonElement
@@ -463,7 +464,7 @@ describe('ConnectorConfigForm', () => {
     await flushUi()
     await flushUi()
 
-    expect(container.textContent).toContain('SLACK_BOT_TOKEN')
+    expect(container.textContent).toContain('TELEGRAM_BOT_TOKEN')
     expect(container.textContent).toContain('GATE_BASE_URL')
     expect(container.textContent).toContain('1 required')
     const tokenInput = container.querySelector('input[type="password"]')

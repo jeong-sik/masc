@@ -542,6 +542,7 @@ let test_backlog_to_yojson_with_tasks () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
+    predecessor_task_id = None;
     contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
@@ -1327,6 +1328,7 @@ let test_task_to_yojson () =
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
+    predecessor_task_id = None;
     contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson t in
@@ -1370,6 +1372,7 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
+    predecessor_task_id = None;
     contract = None;
     handoff_context = None;
     cycle_count = 9;
@@ -1391,6 +1394,7 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
+    predecessor_task_id = None;
     contract = None;
     handoff_context = None;
     cycle_count = 0;
@@ -1415,6 +1419,7 @@ let test_task_claim_next_action_policy_block_is_skip () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
+    predecessor_task_id = None;
     contract = None;
     handoff_context = None;
     cycle_count = 0;

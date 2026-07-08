@@ -593,6 +593,11 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   created_by: string option; [@default None]
+  (* RFC-0323 W2: write-once lineage pointer to the terminal task this one
+     re-runs. Set only at creation (masc_add_task); every transition carries
+     it through unchanged. Distinct from RFC-0267 goal linkage (many-to-many
+     side registry). *)
+  predecessor_task_id: string option; [@default None]
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
@@ -706,10 +711,15 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  let with_contract = match t.contract with
+  (* Omitted when None (created_by pattern): old readers never see the key. *)
+  let with_predecessor = match t.predecessor_task_id with
     | None -> with_created_by
+    | Some p -> with_created_by @ [("predecessor_task_id", `String p)]
+  in
+  let with_contract = match t.contract with
+    | None -> with_predecessor
     | Some contract ->
-        with_created_by @ [ ("contract", task_contract_to_yojson contract) ]
+        with_predecessor @ [ ("contract", task_contract_to_yojson contract) ]
   in
   let with_handoff_context = match t.handoff_context with
     | None -> with_contract
@@ -752,6 +762,9 @@ let task_of_yojson json =
     let files = Json_util.get_string_list json "files" in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
+    (* Absent or non-string value degrades to None — a decode Error here would
+       make backlog_of_yojson silently drop the whole task. *)
+    let predecessor_task_id = opt "predecessor_task_id" in
     let contract = match m "contract" with
       | `Null -> None
       | contract_json ->
@@ -788,6 +801,7 @@ let task_of_yojson json =
             files;
             created_at;
             created_by;
+            predecessor_task_id;
             contract;
             handoff_context;
             cycle_count;

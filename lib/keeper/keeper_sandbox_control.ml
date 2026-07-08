@@ -326,9 +326,8 @@ let playground_policy_reason = function
   | Policy_allowed -> None
   | Policy_unregistered_repository ->
       Some
-        "repository is visible in the keeper playground but is not registered \
-         in the repository catalog; read access is governed by sandbox \
-         containment"
+        "repository is not registered in the repository catalog; access is \
+         denied fail-closed"
   | Policy_mapping_load_error ->
       Some
         "keeper repository mapping could not be loaded; advisory mapping is \
@@ -341,9 +340,9 @@ let playground_policy_reason = function
       Some
         "repository catalog could not be loaded; access is denied fail-closed"
 
-(* Which config file actually decided this status. The repository catalog
-   (repositories.toml) owns metadata/alias identity, while the sandbox
-   containment layer owns read authorization for visible playground clones. Per
+(* Which config file actually decided this status. The binding allow/deny gate
+   is the repository catalog (repositories.toml): a repo is usable iff it is
+   registered there, and [access_decision] never denies on the mapping — per
    RFC-0312 the keeper_repo_mappings.toml scope is advisory. So every
    catalog-sourced verdict (allowed / unregistered / identity mismatch / store
    load error) is labelled with the catalog basename; only the
@@ -444,7 +443,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
          field Policy_repository_store_error false ~repository_id ~error:msg ()
        | Ok true ->
          field Policy_allowed true ~repository_id ?mapping_error ~default_scope ()
-       | Ok false -> field Policy_unregistered_repository true ~repository_id ())
+       | Ok false -> field Policy_unregistered_repository false ~repository_id ())
   in
   match policy with
   | Keeper_repo_mapping.Mapping_load_error msg ->
@@ -466,7 +465,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
          (match repository_id_in_catalog repository_id with
           | Error (`Store_error msg) ->
             field Policy_repository_store_error false ~repository_id ~error:msg ()
-          | Ok false -> field Policy_unregistered_repository true ~repository_id ()
+          | Ok false -> field Policy_unregistered_repository false ~repository_id ()
           | Ok true ->
             let default_scope =
               Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id

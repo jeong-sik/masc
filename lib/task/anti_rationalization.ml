@@ -711,6 +711,7 @@ let review
       ?(completion_contract : string list option)
       ?(required_evidence = [])
       ?(verify_gate_evidence = [])
+      ?(requires_evidence = true)
       ?(on_verdict : (review_result -> unit) option)
       ?(few_shot_block = "")
       ?sw
@@ -739,10 +740,17 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
-  (* Gate 0: empty evidence_refs — required for all code task submissions.
-     Reject completions that lack code-level evidence (file paths, commit hashes,
-     trace/turn/receipt refs). *)
-  if List.is_empty req.evidence_refs then
+  (* Gate 0: empty evidence_refs — required only for verification-required
+     tasks (strict contract), mirroring the RFC-0323 G-2 workspace gate
+     (workspace_task_transitions.ml: [if not (task_requires_verification task)
+     then Ok ()]). [requires_evidence] carries [Masc_domain.task_requires_verification]
+     from the caller (the single SSOT predicate) so this gate and the workspace
+     gate never diverge. Analysis-only / advisory-contract tasks (no strict
+     contract) complete without evidence — empty evidence is valid for them, so
+     rejecting them here is an over-reach that #23738 reintroduced by pre-empting
+     the scoped workspace gate at the tool boundary (regression vs #23740).
+     Default [true] keeps every non-scoped caller fail-closed. *)
+  if requires_evidence && List.is_empty req.evidence_refs then
     emit
       { verdict = Reject "no evidence references supplied"
       ; evaluator_runtime

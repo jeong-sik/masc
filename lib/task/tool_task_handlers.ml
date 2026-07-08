@@ -237,12 +237,20 @@ let review_completion_notes
               (Stdlib.Printexc.to_string exn))
       in
       let few_shot_block = (Atomic.get get_few_shot_block_fn) () in
+      (* RFC-0323 G-2 / #23738 regression repair: scope Gate 0's empty-evidence
+         reject to verification-required (strict-contract) tasks, sharing the
+         single SSOT predicate with the workspace transition gate
+         (workspace_task_transitions.ml). Analysis-only / advisory-contract tasks
+         complete without evidence; #23738 made Gate 0 unconditional and, running
+         first at this tool boundary, pre-empted the scoped workspace gate. *)
+      let requires_evidence = Masc_domain.task_requires_verification task in
       match (Anti_rationalization.review
          ?sw:ctx.sw
          ?evaluator_runtime
          ?completion_contract
          ~required_evidence
          ~verify_gate_evidence
+         ~requires_evidence
          ~on_verdict ~few_shot_block ar_req).verdict with
       | Anti_rationalization.Reject reason -> Some reason
       | Anti_rationalization.Approve -> None

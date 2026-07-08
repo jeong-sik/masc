@@ -94,6 +94,7 @@ val review :
   ?completion_contract:string list ->
   ?required_evidence:string list ->
   ?verify_gate_evidence:string list ->
+  ?requires_evidence:bool ->
   ?on_verdict:(review_result -> unit) ->
   ?few_shot_block:string ->
   ?sw:Eio.Switch.t ->

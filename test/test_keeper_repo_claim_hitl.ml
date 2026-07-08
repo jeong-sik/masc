@@ -446,6 +446,27 @@ let test_unregistered_repository_id_clone_matching_existing_remote_requests_alia
     Alcotest.(check string) "alias" "masc-mcp" (string_field "alias" pending.input))
 ;;
 
+let test_unregistered_repository_id_empty_clone_reports_verification_failure () =
+  with_temp_base_path @@ fun base_path ->
+  let keeper_id = "keeper-repo-direct-empty-clone" in
+  let repository_id = "masc-empty" in
+  let repo_root = playground_repo_root ~base_path ~keeper_id ~repository_id in
+  ensure_dir repo_root;
+  match Claim.request_repository_access ~keeper_id ~base_path ~repository_id with
+  | Claim.Access_allowed -> Alcotest.fail "expected explicit verification denial"
+  | Claim.Access_denied_hitl_pending _ ->
+    Alcotest.fail "empty clone directory must not queue HITL"
+  | Claim.Access_denied detail ->
+    Alcotest.(check bool)
+      "denial names clone verification"
+      true
+      (contains_substring detail "playground clone candidate could not be verified");
+    Alcotest.(check bool)
+      "denial keeps git probe reason"
+      true
+      (contains_substring detail repo_root)
+;;
+
 let test_nested_git_root_queues_manual_review_without_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
@@ -568,6 +589,10 @@ let () =
             "repository id clone name mismatch queues alias HITL"
             `Quick
             test_unregistered_repository_id_clone_matching_existing_remote_requests_alias
+        ; Alcotest.test_case
+            "repository id empty clone reports verification failure"
+            `Quick
+            test_unregistered_repository_id_empty_clone_reports_verification_failure
         ; Alcotest.test_case
             "nested git root queues manual review without alias"
             `Quick

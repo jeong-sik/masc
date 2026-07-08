@@ -376,9 +376,25 @@ let registration_candidate_of_path ~repository_id ~expected_repo_root ~path =
         Ok { repository_id; repo_root; expected_repo_root; origin_url; default_branch }))
 ;;
 
-let safe_path_exists path =
-  try Sys.file_exists path with
-  | Sys_error _ -> false
+type candidate_path_state =
+  | Candidate_path_absent
+  | Candidate_path_directory
+  | Candidate_path_invalid of string
+
+let candidate_path_state path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Candidate_path_absent
+  | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> Candidate_path_absent
+  | exception Unix.Unix_error (err, fn, arg) ->
+    Candidate_path_invalid
+      (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+  | _ -> (
+    match Sys.is_directory path with
+    | true -> Candidate_path_directory
+    | false -> Candidate_path_invalid "candidate path exists but is not a directory"
+    | exception Sys_error reason ->
+      Candidate_path_invalid
+        (Printf.sprintf "candidate path could not be inspected as directory: %s" reason))
 ;;
 
 type repository_id_clone_probe =
@@ -404,9 +420,10 @@ let registration_candidate_of_repository_id ~keeper_id ~base_path ~repository_id
             |> List.map (fun (path, reason) -> Printf.sprintf "%s: %s" path reason)
             |> String.concat "; "))
     | repo_root :: rest ->
-      if not (safe_path_exists repo_root)
-      then loop invalid rest
-      else (
+      (match candidate_path_state repo_root with
+       | Candidate_path_absent -> loop invalid rest
+       | Candidate_path_invalid reason -> loop ((repo_root, reason) :: invalid) rest
+       | Candidate_path_directory -> (
         match
           registration_candidate_of_path
             ~repository_id
@@ -414,7 +431,7 @@ let registration_candidate_of_repository_id ~keeper_id ~base_path ~repository_id
             ~path:repo_root
         with
         | Ok candidate -> Clone_candidate candidate
-        | Error reason -> loop ((repo_root, reason) :: invalid) rest)
+        | Error reason -> loop ((repo_root, reason) :: invalid) rest))
   in
   loop [] candidate_roots
 ;;

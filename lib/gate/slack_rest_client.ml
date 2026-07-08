@@ -27,6 +27,14 @@ let pp_error fmt = function
    expose it for callers that do. *)
 let message_text_limit = 40_000
 
+(* Default outbound-request timeout. [Masc_http_client.post_sync] applies a
+   deadline only when a clock {b and} [timeout_sec > 0.0] are both supplied, so
+   this default takes effect once a caller threads [~clock] (the in-process
+   gateway does); clock-less callers keep the prior unbounded behavior. Matches
+   the socket client's [fetch_wss_url] default so all Slack HTTP shares one
+   ceiling. *)
+let default_http_timeout_sec = 10.0
+
 let user_agent = "masc-slack-bot/0.1 (https://github.com/jeong-sik/masc)"
 
 let auth_headers ~token =
@@ -76,11 +84,12 @@ let parse_post_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
   else parse_post_json_response ~body
 
-let send_message ~token ~channel_id ~text ?thread_ts () =
+let send_message ?clock ?(timeout_sec = default_http_timeout_sec) ~token
+    ~channel_id ~text ?thread_ts () =
   let (url, headers, body) =
     build_post_message_request ~token ~channel_id ~text ?thread_ts ()
   in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_post_response ~status ~body
 
@@ -112,10 +121,62 @@ let parse_update_response ~status ~body =
           in
           Error (Slack_api { error = err })
 
-let edit_message ~token ~channel_id ~ts ~text () =
+let edit_message ?clock ?(timeout_sec = default_http_timeout_sec) ~token
+    ~channel_id ~ts ~text () =
   let (url, headers, body) =
     build_update_request ~token ~channel_id ~ts ~text ()
   in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_update_response ~status ~body
+
+(* auth.test — resolve the bot's own identity. [user_id] gates inbound mention
+   detection ([Slack_gateway_state.parse_envelope ~bot_user_id]) and [team_id]
+   fills the Slack surface. Called once at gateway start with the bot token
+   ([xoxb-...]); a failure is non-fatal (the gateway still triggers on
+   [app_mention] events, which are mentions by construction). *)
+type auth_test_ok = {
+  user_id : string;
+  team_id : string option;
+}
+
+let build_auth_test_request ~token =
+  let url = "https://slack.com/api/auth.test" in
+  let headers =
+    ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+    :: auth_headers ~token
+  in
+  (url, headers, "")
+
+let parse_auth_test_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else
+    match parse_json_safe body with
+    | None -> Error (Other ("response not JSON: " ^ body))
+    | Some json ->
+      let ok =
+        match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
+      in
+      if not ok then
+        let err =
+          match field_opt "error" json with
+          | Some (`String e) -> e
+          | _ -> "auth.test failed"
+        in
+        Error (Slack_api { error = err })
+      else
+        (match field_opt "user_id" json with
+         | Some (`String user_id) ->
+           let team_id =
+             match field_opt "team_id" json with
+             | Some (`String t) -> Some t
+             | _ -> None
+           in
+           Ok { user_id; team_id }
+         | _ -> Error (Other "ok=true but missing 'user_id'"))
+
+let auth_test ?clock ?(timeout_sec = default_http_timeout_sec) ~token () =
+  let (url, headers, body) = build_auth_test_request ~token in
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_auth_test_response ~status ~body

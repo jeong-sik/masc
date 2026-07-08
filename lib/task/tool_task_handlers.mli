@@ -71,6 +71,7 @@ val review_completion_notes :
   task_opt:Masc_domain.task option ->
   task_id:string ->
   notes:string ->
+  evidence_refs:string list ->
   string option
 
 val persisted_contract_rejection :

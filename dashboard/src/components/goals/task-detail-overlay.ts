@@ -35,7 +35,7 @@ import {
   type TaskDetailTab,
 } from './task-detail-state'
 import { TaskActivityList } from './task-activity-list'
-import { goalById, priorityLabel } from './goal-helpers'
+import { effectiveTaskPriority, goalById, priorityLabel } from './goal-helpers'
 import type { Task, TaskGateEvaluation } from '../../types'
 
 const CARD_BOX = 'v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-3'
@@ -479,7 +479,7 @@ export function TaskDetailOverlay() {
 
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `task-detail-title-${task.id}`
-  const p = task.priority ?? 4
+  const p = effectiveTaskPriority(task)
   const keeper = findKeeper(task.assignee)
   const goalIds = assigneeGoalIds(task)
   const assigneeKind = task.assignee_kind ?? (keeper ? 'keeper' : null)

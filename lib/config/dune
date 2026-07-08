@@ -15,6 +15,7 @@
   env_config_oas_bridge
   env_config_runtime
   env_config_sandbox
+  env_config_slack
   env_config_snapshot
   env_config_snapshot_core
   feature_flag_registry

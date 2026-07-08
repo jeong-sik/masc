@@ -24,6 +24,14 @@ librarian = "ollama_cloud_native.minimax-m3-native-structured"
 # dashboard operator/governance judges fail at config load on typo/unsupported
 # routing instead of discovering the mismatch in the daemon loop.
 structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
+# HITL approval context summary (advisory operator display). Unset previously,
+# so it inherited [runtime].structured_judge = minimax-m3, a *reasoning* model:
+# extended thinking consumed the whole keeper.hitl_summary.max_tokens=512 budget,
+# leaving an empty answer that failed structured parse and always fell back to the
+# deterministic summary. Pin a *non-reasoning* structured runtime so the full token
+# budget produces the answer. devstral-2-123b (thinking-support=false,
+# supports-structured-output=true) is the same runtime the Fusion judge uses.
+hitl_summary = "ollama_cloud.ollama-cloud-devstral-2-123b"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.

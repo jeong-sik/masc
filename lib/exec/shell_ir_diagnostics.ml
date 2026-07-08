@@ -45,7 +45,12 @@ let directory_and_pattern_of_glob_token token =
     , String.sub token (idx + 1) (String.length token - idx - 1) )
 ;;
 
-let should_emit_glob_failure ~status ~stderr =
+(* A nonzero exit whose stderr carries an OS-level "not found" signature.
+   Shared by the glob-literal and duplicate-argv0 diagnostics: both explain a
+   suspect argv SHAPE that only becomes a problem when the command could not
+   find its target.  This is an OS error signature, not a domain classifier —
+   it narrows advisory hints to the failure mode they describe. *)
+let is_path_not_found_failure ~status ~stderr =
   match status with
   | Unix.WEXITED 0 -> false
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
@@ -65,7 +70,7 @@ let matching_glob_stage ir =
 
 let glob_literal_failure_fields ~ir ~status ~stderr =
   let stderr = String.trim stderr in
-  if not (should_emit_glob_failure ~status ~stderr)
+  if not (is_path_not_found_failure ~status ~stderr)
   then []
   else
     match matching_glob_stage ir with
@@ -94,5 +99,58 @@ let glob_literal_failure_fields ~ir ~status ~stderr =
       ; "typed_glob_not_expanded", `Bool true
       ; "literal_glob_token", `String token
       ; "alternatives", `List [ `String find_alt; `String rg_alt ]
+      ]
+;;
+
+(* Typed Execute accepts a leading argv token equal to the executable because it
+   CAN be an intentional literal argument (e.g. searching for the string "grep"),
+   so the gate does not reject it — see the [duplicate_executable_argv0] case in
+   test_keeper_tool_execute_typed_input.  But when such a command fails with a
+   path-not-found error it is almost always the execve-style mistake of repeating
+   the program name: [{executable="wc"; argv=["wc"]}] runs as [wc wc], and wc
+   then tries to open a file literally named "wc".  This diagnoses that failure
+   with a self-correction hint WITHOUT rejecting — the intentional-payload design
+   is preserved; only the not-found failure signature is narrowed and explained.
+
+   Detection is structural: the first stage whose argv[0] equals its executable.
+   The path-not-found gate (shared with the glob diagnostic) avoids hinting on
+   intentional same-name commands that simply produced no match. *)
+let duplicate_argv0_stage ir =
+  Shell_ir_command_shape.effective_stages ir
+  |> List.find_map (fun { Shell_ir_command_shape.bin; args } ->
+    match args with
+    | first :: rest
+      when String.trim first = String.trim bin && String.trim bin <> "" ->
+      Some (String.trim bin, rest)
+    | _ -> None)
+;;
+
+let duplicate_argv0_failure_fields ~ir ~status ~stderr =
+  let stderr = String.trim stderr in
+  if not (is_path_not_found_failure ~status ~stderr)
+  then []
+  else
+    match duplicate_argv0_stage ir with
+    | None -> []
+    | Some (executable, remainder) ->
+      let hint =
+        Printf.sprintf
+          "argv[0]=%S is identical to the executable, so it ran as a literal \
+           argument (typed Execute passes argv verbatim, execve-style; the \
+           program name is NOT prepended). If the duplicate was unintended, \
+           retry with argv[0] removed."
+          executable
+      in
+      let rewrite =
+        Printf.sprintf
+          "Rewrite: executable=%S argv=[%s]."
+          executable
+          (String.concat "; " (List.map (Printf.sprintf "%S") remainder))
+      in
+      [ "execution_hint", `String hint
+      ; "shell_ir_hint", `String hint
+      ; "argv0_duplicates_executable", `Bool true
+      ; "duplicated_executable", `String executable
+      ; "rewrite_suggestion", `String rewrite
       ]
 ;;

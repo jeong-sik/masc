@@ -26,6 +26,8 @@ type stimulus_kind =
       (** RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
   | Goal_assigned
       (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
+  | Goal_stagnation
+      (** RFC-0310 §3.3: a live goal went stale — stagnation edge wake. *)
 
 type reaction_kind =
   | Turn_started

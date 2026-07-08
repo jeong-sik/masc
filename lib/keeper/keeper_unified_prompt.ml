@@ -249,6 +249,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Goal_verification_failed -> "goal_verification_failed"
   | Keeper_world_observation.Failure_judgment -> "failure_judgment"
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
+  | Keeper_world_observation.Goal_stagnation -> "goal_stagnation"
 ;;
 
 let quote_prompt_field value =
@@ -280,15 +281,23 @@ let board_reaction_note (reaction : Keeper_world_observation.board_reaction_even
 let board_event_note = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_note reaction
+  | Keeper_world_observation.External_attention ->
+    (* RFC-0320 W3(a): steer a woken keeper to answer back into the connector
+       conversation this attention came from (via keeper_surface_post), instead
+       of only proceeding on its own state. The routing target is deterministic
+       — it is the conversation surface already on this observation; the LLM
+       decides only what to say. *)
+    " [continuation: someone is waiting in this conversation — reply to them \
+     with keeper_surface_post, do not only proceed on your own state]"
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
-  | Keeper_world_observation.External_attention
   | Keeper_world_observation.Goal_verification_failed
   | Keeper_world_observation.Failure_judgment
-  | Keeper_world_observation.Goal_assigned -> ""
+  | Keeper_world_observation.Goal_assigned
+  | Keeper_world_observation.Goal_stagnation -> ""
 ;;
 
 let format_board_event_text

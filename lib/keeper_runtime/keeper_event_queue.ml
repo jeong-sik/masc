@@ -89,6 +89,17 @@ type stimulus_payload =
          discovered only if some unrelated stimulus happened to fire.
          Follows the [Goal_verification_failed] precedent: no dedicated
          turn_reason; the injected pending observation drives the turn. *)
+  | Goal_stagnation of goal_stagnation
+      (* RFC-0310 §3.3: a live (non-terminal) goal has not been touched for
+         longer than the stagnation threshold. Wakes the responsible keeper
+         ONCE per stale episode so it can resume the goal or hand off a
+         progress note. This is an EDGE, not a blind clock: the episode key
+         is (goal_id, stale_since=goal.updated_at), so a goal that is
+         advanced (updated_at bumps) starts a fresh episode, and one that
+         stays stale never re-wakes within the same episode (the producer
+         gates on the reaction ledger having already delivered it). Follows
+         the [Goal_assigned] precedent: no dedicated turn_reason; the
+         injected pending observation drives the turn. *)
 
 and fusion_completion = {
   run_id : string;
@@ -120,19 +131,26 @@ and hitl_resolution = {
   approval_id : string;
   (* the resolved pending-approval id; correlates to the queue entry. *)
   decision : hitl_resolution_decision;
-  (* resolved decision label carried for observability, not control flow — the
-     keeper re-evaluates from its own state once the approval is gone from the
-     queue. *)
+  (* resolved decision label carried for observability. *)
+  channel : Keeper_continuation_channel.t;
+  (* RFC-0320: the connector the resolved conversation started on, captured at
+     approval-submission time and carried through so a woken keeper can reply
+     into it. [Unrouted] when no originating connector was captured. *)
 }
 
 and bg_job_outcome =
   | Bg_ok of string  (* result payload *)
   | Bg_failed of string  (* failure label *)
 
-and connector_attention = { event_id : string }
+and connector_attention = {
+  event_id : string;
       (* RFC-connector-ambient-attention-wake: pointer into
          [Keeper_external_attention] for the ambient message; content/surface
          read from that store on the turn path. *)
+  channel : Keeper_continuation_channel.t;
+      (* RFC-0320: the connector that raised this attention, so a woken keeper
+         replies into the same channel. [Unrouted] when unknown. *)
+}
 
 and scheduled_wake = {
   schedule_id : string;
@@ -173,6 +191,18 @@ and goal_assignment = {
      repeat assignments of the same goal dedup regardless of actor. *)
 }
 
+and goal_stagnation = {
+  gs_goal_id : string;
+  gs_stale_since : string;
+  (* goal.updated_at at detection: the episode key. Part of queue identity
+     so each stale episode is distinct — advancing the goal bumps updated_at
+     and starts a new episode; a goal that stays stale keeps the same key so
+     the identity dedup and the reaction-ledger gate fire it only once. *)
+  gs_goal_title : string;
+  (* display-only title resolved from Goal_store at detection time. Stripped
+     from queue identity so the label does not affect episode dedup. *)
+}
+
 let fusion_completion_post_id (fc : fusion_completion) =
   if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
   else fc.board_post_id
@@ -198,6 +228,12 @@ let goal_assignment_post_id (ga : goal_assignment) =
   (* Stable per goal: re-assigning the same goal before the keeper consumes
      the first wake collapses under queue identity dedup. *)
   "goal-assigned:" ^ ga.ga_goal_id
+
+let goal_stagnation_post_id (gs : goal_stagnation) =
+  (* Stable per (goal, stale episode): repeated scans of the same untouched
+     goal collapse under queue identity dedup; a goal advanced then gone
+     stale again carries a new [gs_stale_since] and so a new post_id. *)
+  "goal-stagnation:" ^ gs.gs_goal_id ^ ":" ^ gs.gs_stale_since
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -249,6 +285,7 @@ let identity_payload = function
   | Failure_judgment fj -> Failure_judgment { fj with fj_detail = "" }
   | Goal_assigned ga ->
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
+  | Goal_stagnation gs -> Goal_stagnation { gs with gs_goal_title = "" }
   | ( Board_signal _ | Bootstrap | No_progress_recovery | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Goal_verification_failed _ ) as payload ->
@@ -344,12 +381,14 @@ let payload_kind_label = function
   | Goal_verification_failed _ -> "goal_verification_failed"
   | Failure_judgment _ -> "failure_judgment"
   | Goal_assigned _ -> "goal_assigned"
+  | Goal_stagnation _ -> "goal_stagnation"
 
 let is_board_signal = function
   | Board_signal _ -> true
   | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Goal_verification_failed _ | Failure_judgment _ | Goal_assigned _ ->
+  | Goal_verification_failed _ | Failure_judgment _ | Goal_assigned _
+  | Goal_stagnation _ ->
     false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
@@ -527,12 +566,14 @@ let payload_to_yojson = function
     `Assoc
       [ "kind", `String "connector_attention"
       ; "event_id", `String ca.event_id
+      ; "channel", Keeper_continuation_channel.to_yojson ca.channel
       ]
   | Hitl_resolved r ->
     `Assoc
       [ "kind", `String "hitl_resolved"
       ; "approval_id", `String r.approval_id
       ; "decision", `String (hitl_resolution_decision_to_string r.decision)
+      ; "channel", Keeper_continuation_channel.to_yojson r.channel
       ]
   | Goal_verification_failed failure ->
     `Assoc
@@ -562,6 +603,21 @@ let payload_to_yojson = function
       ; "goal_title", `String ga.ga_goal_title
       ; "assigned_by", `String ga.ga_assigned_by
       ]
+  | Goal_stagnation gs ->
+    `Assoc
+      [ "kind", `String "goal_stagnation"
+      ; "goal_id", `String gs.gs_goal_id
+      ; "stale_since", `String gs.gs_stale_since
+      ; "goal_title", `String gs.gs_goal_title
+      ]
+
+let continuation_channel_field fields =
+  match List.assoc_opt "channel" fields with
+  | None ->
+    (* Backward compat: pre-RFC-0320 persisted stimuli carry no channel; a
+       replayed legacy wake is [Unrouted] rather than a parse failure. *)
+    Ok (Keeper_continuation_channel.unrouted "legacy: channel not captured")
+  | Some json -> Keeper_continuation_channel.of_yojson json
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -616,12 +672,14 @@ let payload_of_yojson json =
     Ok (Schedule_due { schedule_id; due_at; payload_digest; title; message })
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
-    Ok (Connector_attention { event_id })
+    let* channel = continuation_channel_field fields in
+    Ok (Connector_attention { event_id; channel })
   | "hitl_resolved" ->
     let* approval_id = string_field ~context "approval_id" fields in
     let* decision_s = string_field ~context "decision" fields in
     let* decision = hitl_resolution_decision_of_string decision_s in
-    Ok (Hitl_resolved { approval_id; decision })
+    let* channel = continuation_channel_field fields in
+    Ok (Hitl_resolved { approval_id; decision; channel })
   | "goal_verification_failed" ->
     let* goal_id = string_field ~context "goal_id" fields in
     let* request_id = string_field ~context "request_id" fields in
@@ -666,6 +724,16 @@ let payload_of_yojson json =
          { ga_goal_id = goal_id
          ; ga_goal_title = goal_title
          ; ga_assigned_by = assigned_by
+         })
+  | "goal_stagnation" ->
+    let* goal_id = string_field ~context "goal_id" fields in
+    let* stale_since = string_field ~context "stale_since" fields in
+    let* goal_title = string_field ~context "goal_title" fields in
+    Ok
+      (Goal_stagnation
+         { gs_goal_id = goal_id
+         ; gs_stale_since = stale_since
+         ; gs_goal_title = goal_title
          })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 

@@ -639,4 +639,19 @@ describe('logs vendored stylesheet', () => {
     expect(css).toContain('grid-template-areas')
     expect(css).toContain('.lg-colhd { display: none; }')
   })
+
+  it('pins the column header while the event stream scrolls', () => {
+    // Sticky column header stays visible over a multi-thousand-row stream. This
+    // only works while .v2-logs-panel does not clip: an overflow:hidden there
+    // pins the sticky element to a non-scrolling ancestor and it scrolls away.
+    const css = readFileSync(resolve(__dirname, '../styles/v2-logs.css'), 'utf8')
+    const headerRule = css.match(/\.v2-logs-table-header\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(headerRule).toContain('position: sticky')
+    expect(headerRule).toContain('top: 0')
+    const panelRule = css.match(/\.v2-logs-panel\s*\{([^}]*)\}/)?.[1] ?? ''
+    // overflow: visible (not hidden) keeps the sticky header pinned to the page
+    // scroller. Match the declaration, not the rationale comment above it.
+    expect(panelRule).toMatch(/overflow:\s*visible\s*;/)
+    expect(panelRule).not.toMatch(/overflow:\s*hidden\s*;/)
+  })
 })

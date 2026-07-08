@@ -42,6 +42,17 @@ val get_origin_url : local_path:string -> (string, string) result
 (** [get_origin_url ~local_path] returns the configured [origin] remote URL
     for the repository at [local_path]. *)
 
+val worktree_root : local_path:string -> (string, string) result
+(** [worktree_root ~local_path] returns Git's [--show-toplevel] path for
+    [local_path]. It is read-only and bounded; callers use it to avoid treating
+    an arbitrary file's dirname as a repository root. *)
+
+val origin_head_branch : local_path:string -> (string, string) result
+(** [origin_head_branch ~local_path] returns the branch named by
+    [refs/remotes/origin/HEAD]. It does not fall back to guessed branch names;
+    callers that need an auditable repository-registration candidate should
+    surface [Error _] to the operator instead of inventing a default branch. *)
+
 val current_branch : repository:repository -> (string, string) result
 (** [current_branch ~repository] returns the short name of the checked-out
     branch via [git rev-parse --abbrev-ref HEAD]. A detached HEAD returns

@@ -180,11 +180,7 @@ let audit_approval_event
       ?rule_match
       ?source_approval_id
       ?auto_approved
-      ?actor
-      ?approval_mode
-      ?authorizing_band
       ?decision
-      ?continuation_channel
       ()
   =
   let decision, decision_kind, decision_reason =
@@ -239,19 +235,6 @@ let audit_approval_event
             | None -> [])
          @ (match decision_reason with
             | Some reason -> [ "decision_reason", `String reason ]
-            | None -> [])
-         @ (match actor with
-            | Some value -> [ "actor", `String value ]
-            | None -> [])
-         @ (match approval_mode with
-            | Some value -> [ "approval_mode", `String value ]
-            | None -> [])
-         @ (match authorizing_band with
-            | Some value -> [ "authorizing_band", `String value ]
-            | None -> [])
-         @ (match continuation_channel with
-            | Some channel ->
-              [ "continuation_channel", Keeper_continuation_channel.to_yojson channel ]
             | None -> [])
          @
          match auto_approved with
@@ -390,11 +373,6 @@ let resolved_approval_json_of_audit_event json =
     ; "disposition", json_member_or_null "disposition" json
     ; "disposition_reason", json_member_or_null "disposition_reason" json
     ; "rule_match", json_member_or_null "rule_match" json
-    ; "actor", json_member_or_null "actor" json
-    ; "approval_mode", json_member_or_null "approval_mode" json
-    ; "authorizing_band", json_member_or_null "authorizing_band" json
-    ; "auto_approved", json_member_or_null "auto_approved" json
-    ; "continuation_channel", json_member_or_null "continuation_channel" json
     ]
 ;;
 
@@ -501,8 +479,6 @@ let create_entry
       ?selected_model
       ?disposition
       ?disposition_reason
-      ?(continuation_channel =
-        Keeper_continuation_channel.unrouted "no originating connector")
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -539,12 +515,12 @@ let create_entry
   ; disposition
   ; disposition_reason
   ; phase = Awaiting_operator
-  ; continuation_channel
   ; audit_base_path
   ; resolver
   ; on_resolution
   ; context_summary = None
   ; summary_status = Summary_not_requested
+  ; channel = None
   }
 ;;
 
@@ -593,7 +569,6 @@ let pending_entry_json_fields
   ; "selected_model", `Null
   ; "disposition", Json_util.string_opt_to_json entry.disposition
   ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason
-  ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
   ]
   @ (if include_requested_at_iso
      then
@@ -681,7 +656,6 @@ let record_pending (entry : pending_approval) =
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
     ?disposition_reason:entry.disposition_reason
-    ~continuation_channel:entry.continuation_channel
     ();
   broadcast_pending entry
 ;;
@@ -774,10 +748,11 @@ let record_summary_failure ~id ~reason ~retryable =
 let provider_config_for_summary ~keeper_name =
   (* The HITL evaluator is a dedicated judge (mirroring the memory-os librarian's
      dedicated runtime), not the requesting keeper's own model. Route to
-     [runtime].hitl_summary when set; otherwise keep the legacy
-     [runtime].structured_judge routing chain so existing configs retain their
-     behavior. Fall back to the keeper's own runtime only when the selected judge
-     runtime cannot be resolved. *)
+     [runtime].structured_judge so the evaluation is consistent and can target a
+     structured-output-capable model regardless of which keeper — e.g. a raw
+     OpenAI-compatible endpoint such as mimo, which OAS cannot wire native
+     structured output for — asked for approval. Fall back to the keeper's own
+     runtime only when the judge runtime cannot be resolved. *)
   let resolve id =
     Option.map (fun rt -> rt.Runtime.provider_config) (Runtime.get_runtime_by_id id)
   in
@@ -786,7 +761,7 @@ let provider_config_for_summary ~keeper_name =
     | Some id when String.trim id <> "" -> id
     | Some _ | None -> Keeper_config.default_runtime_id ()
   in
-  match resolve (Runtime.runtime_id_for_hitl_summary ()) with
+  match resolve (Runtime.runtime_id_for_structured_judge ()) with
   | Some _ as cfg -> cfg
   | None -> resolve (keeper_runtime_id ())
 ;;
@@ -837,15 +812,15 @@ let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =
        record_summary_failure ~id:entry.id ~reason ~retryable:false)
 ;;
 
-(* Wake the keeper for non-blocking approvals. A [submit_and_await] entry has an
-   in-process resolver promise; resolving that promise resumes the suspended
-   tool call directly, so an additional [Hitl_resolved] stimulus would open a
-   second turn with only a soft prompt guard against duplicate replies.
-
-   A [submit_pending] entry has no resolver promise. Its [on_resolution]
-   callback handles side effects, and the keeper still needs a durable
-   [Hitl_resolved] wake so its lane re-evaluates instead of stalling until an
-   unrelated stimulus, no-progress recovery, or the 30-minute approval janitor.
+(* Wake the keeper that was waiting on this approval. A keeper that enqueued an
+   approval and is now skipping cycles via [has_pending_for_keeper -> Skip
+   Approval_pending] (keeper_world_observation) has no in-process fiber blocked
+   on the resolver promise, so resolving the promise does not resume it. The
+   composition root registers a hook that enqueues a [Hitl_resolved] wake
+   stimulus — the same async-completion-wake mechanism [Fusion_completed]
+   (RFC-0266) and [Bg_completed] (RFC-0290) use — so the keeper re-evaluates
+   immediately instead of stalling until an unrelated stimulus, no-progress
+   recovery, or the 30-minute approval janitor.
 
    Injected as a hook rather than a direct call to break a dependency cycle:
    this module sits below [Keeper_keepalive_signal], which depends on
@@ -858,30 +833,15 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
-     continuation_channel:Keeper_continuation_channel.t ->
+     ?channel:string option ->
      unit)
     ref =
-  ref
-    (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~continuation_channel:_ ->
-       ())
+  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ?channel:_ -> ())
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
-let wake_keeper_on_approval_resolution
-      ~base_path
-      ~keeper_name
-      ~approval_id
-      ~decision
-      ~continuation_channel
-  =
-  try
-    !approval_resolution_wake_hook
-      ~base_path
-      ~keeper_name
-      ~approval_id
-      ~decision
-      ~continuation_channel
-  with
+let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision ?channel =
+  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision ?channel with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn
@@ -922,7 +882,6 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ?disposition:entry.disposition
     ?disposition_reason:entry.disposition_reason
     ~decision:(Approval_resolved decision)
-    ~continuation_channel:entry.continuation_channel
     ();
   (match entry.resolver with
    | Some resolver -> Eio.Promise.resolve resolver decision
@@ -944,15 +903,12 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
            (Printexc.to_string exn))
        (fun () -> f decision)
    | None -> ());
-  (match entry.resolver with
-   | Some _ -> ()
-   | None ->
-     wake_keeper_on_approval_resolution
-       ~base_path
-       ~keeper_name:entry.keeper_name
-       ~approval_id:entry.id
-       ~decision:(hitl_resolution_decision_of_approval_decision decision)
-       ~continuation_channel:entry.continuation_channel);
+  wake_keeper_on_approval_resolution
+    ~base_path
+    ~keeper_name:entry.keeper_name
+    ~approval_id:entry.id
+    ~decision:(hitl_resolution_decision_of_approval_decision decision)
+    ?channel:entry.channel;
   try
     Sse.broadcast
       (`Assoc
@@ -1073,7 +1029,6 @@ let submit_and_await
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
       ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
-      ?continuation_channel
       ()
   : Agent_sdk.Hooks.approval_decision
   =
@@ -1097,7 +1052,6 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
-      ?continuation_channel
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
       ~on_resolution:None
@@ -1146,7 +1100,6 @@ let submit_and_await
            ?runtime_contract
            ?selected_model
            ~decision:(Approval_expired reason)
-           ~continuation_channel:entry.continuation_channel
            ();
          (* Mirror expire_stale's teardown, but preserve any concurrent
             operator decision that wins the promise resolution race. *)
@@ -1177,7 +1130,6 @@ let submit_and_await
            ?runtime_contract
            ?selected_model
            ~audit_disposition:(Approval_escalated reason)
-           ~continuation_channel:entry.continuation_channel
            ();
          (match update_pending_phase ~id Escalated with
           | Some escalated_entry -> broadcast_pending escalated_entry
@@ -1186,46 +1138,31 @@ let submit_and_await
          Eio.Promise.await promise)
     | None, _ -> Eio.Promise.await promise
   in
-  let cleanup_cancelled_await () =
-    if SMap.mem id (Atomic.get pending)
-    then (
+  Eio_guard.protect await_with_timeout ~finally:(fun () ->
+    Safe_ops.protect ~default:() (fun () ->
       (match Eio.Promise.peek promise with
        | Some _ -> ()
        | None ->
          let reason = "approval await cancelled before operator decision" in
-         (try
-            audit_approval_event
-              ~base_path:entry.audit_base_path
-              ~event_type:"cancelled"
-              ~id
-              ~keeper_name
-              ~tool_name
-              ~risk_level
-              ?turn_id
-              ?task_id
-              ?goal_id
-              ~goal_ids
-              ~sandbox_target:entry.sandbox_target
-              ?runtime_contract
-              ?selected_model
-              ?disposition
-              ?disposition_reason
-              ~decision:(Approval_expired reason)
-              ~continuation_channel:entry.continuation_channel
-              ()
-          with
-          | Eio.Cancel.Cancelled _ -> ()
-          | exn ->
-            Log.Keeper.warn
-              "approval_queue: cancellation audit failed id=%s err=%s"
-              id
-              (Printexc.to_string exn)));
-      atomic_update pending (fun map -> SMap.remove id map))
-  in
-  try Fun.protect ~finally:cleanup_cancelled_await await_with_timeout with
-  | Eio.Cancel.Cancelled _ as e ->
-    cleanup_cancelled_await ();
-    raise e
+         audit_approval_event
+           ~base_path:entry.audit_base_path
+           ~event_type:"cancelled"
+           ~id
+           ~keeper_name
+           ~tool_name
+           ~risk_level
+           ?turn_id
+           ?task_id
+           ?goal_id
+           ~goal_ids
+           ~sandbox_target:entry.sandbox_target
+           ?runtime_contract
+           ?selected_model
+           ?disposition
+           ?disposition_reason
+           ~decision:(Approval_expired reason)
+           ());
+      atomic_update pending (fun map -> SMap.remove id map)))
 ;;
 
 let submit_pending
@@ -1245,7 +1182,6 @@ let submit_pending
       ?selected_model
       ?disposition
       ?disposition_reason
-      ?continuation_channel
       ~on_resolution
       ()
   : string
@@ -1291,7 +1227,6 @@ let submit_pending
           ?selected_model
           ?disposition
           ?disposition_reason
-          ?continuation_channel
           ~audit_base_path:base_path
           ~resolver:None
           ~on_resolution:(Some on_resolution)
@@ -1554,30 +1489,25 @@ let expire_stale ~max_wait_s =
          ?disposition:entry.disposition
          ?disposition_reason:entry.disposition_reason
          ~decision:(Approval_expired reason)
-         ~continuation_channel:entry.continuation_channel
          ();
-      (* Expiry clears the [Approval_pending] skip just like a resolution, so
-         the keeper needs the same wake or it stays stalled until an unrelated
-         stimulus. The keeper's suspended tool call (if any) receives
-         [Reject reason]. *)
-      (match entry.resolver with
-       | Some resolver ->
-         (* Blocking entries already resume through the live resolver; keep this
-            path single-rail and skip synthetic wake. *)
-         Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
-       | None ->
-         wake_keeper_on_approval_resolution
-           ~base_path:entry.audit_base_path
-           ~keeper_name:entry.keeper_name
-           ~approval_id:id
-           ~decision:Keeper_event_queue.Hitl_rejected
-           ~continuation_channel:entry.continuation_channel);
-      (match entry.resolver, entry.on_resolution with
-       | None, Some f ->
+       (* Expiry clears the [Approval_pending] skip just like a resolution, so
+          the keeper needs the same wake or it stays stalled until an unrelated
+          stimulus. The keeper's suspended tool call (if any) receives
+          [Reject reason]. *)
+       wake_keeper_on_approval_resolution
+         ~base_path:entry.audit_base_path
+         ~keeper_name:entry.keeper_name
+         ~approval_id:id
+         ~decision:Keeper_event_queue.Hitl_rejected
+         ?channel:entry.channel;
+       (match entry.resolver with
+        | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
+        | None -> ());
+       match entry.on_resolution with
+       | Some f ->
          Cancel_safe.observe
            ~on_exn:(fun exn ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string LifecycleCallbackFailures)
+             Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_approval_expire") ]
                ();
              Otel_metric_store.inc_counter
@@ -1589,7 +1519,6 @@ let expire_stale ~max_wait_s =
                id
                (Printexc.to_string exn))
            (fun () -> f (Agent_sdk.Hooks.Reject reason))
-       | Some _, _ | None, None -> ());
-  )
-  stale
+       | None -> ())
+    stale
 ;;

@@ -1,10 +1,10 @@
-# RFC-0325 — Keeper perseveration: grounding-gated memory promotion, active residue purge, health-driven failover, and semantic-stagnation recovery
+# RFC-0328 — Keeper perseveration: grounding-gated memory promotion, active residue purge, health-driven failover, and semantic-stagnation recovery
 
 - Status: Draft
 - Date: 2026-07-08
 - Type: Incident RFC (owns the perseveration-engine fixes: memory Gap C, failover/stagnation Gap D)
 - Scope: `lib/keeper/keeper_memory_bank.ml`, keeper runtime routing (`config/runtime.toml [runtime.assignments]`), provider health, stagnation detection.
-- Companion: RFC-0327 owns the operative-gate fixes (Gap A payload-blind Execute governance, Gap B hardcoded-false shell exemption). This RFC and RFC-0327 come from the same incident; each is independently landable.
+- Companion: RFC-0329 owns the operative-gate fixes (Gap A payload-blind Execute governance, Gap B hardcoded-false shell exemption). This RFC and RFC-0329 come from the same incident; each is independently landable.
 - Relates to / activates: RFC-0207 Part B (Draft, deferred), RFC-0260 (Draft, unimplemented), RFC-keeper-memory-consolidation (Draft, unimplemented).
 - Cross-references: RFC-0082, RFC-0126, RFC-0207, RFC-0211, RFC-0216, RFC-0239, RFC-0246, RFC-0257, RFC-0259, RFC-0260, RFC-0271, RFC-0285, RFC-0302, RFC-0312, RFC-0315, RFC-0326.
 
@@ -23,14 +23,14 @@ The keeper produced no tool-side progress (48h agent-timeline: `tool_calls=0`, `
 ### 1.2 Verified timeline
 
 - T-~26h: provider `runpod_mtp.qwen36-35b-a3b-mtp` begins returning empty completions (`reason_kind=no_usable_progress`; `shape=empty`; `stop_reason=max_tokens/end_turn`; `text_chars=0`; `content_blocks=0`; `tool_use_count=0`). Also `Capacity backpressure ... cooldown_cause=terminal_failure; retry_after≈3599s`. The keeper is starved of usable output. The provider endpoint was serving a Jupyter Server (HTTP 403).
-- Governance layer (independent of provider): any shell Execute attempt is classified `risk=Critical` unconditionally and blocked before HITL (`Block`, "unconditional block regardless of HITL mode"). Confirmed `mad-improver.json` `last_blocker` was later `capacity_backpressure`, and at the time of the confabulation `last_blocker: null`, so the block was pure `risk=Critical`. The mechanism of this block is the subject of RFC-0327.
+- Governance layer (independent of provider): any shell Execute attempt is classified `risk=Critical` unconditionally and blocked before HITL (`Block`, "unconditional block regardless of HITL mode"). Confirmed `mad-improver.json` `last_blocker` was later `capacity_backpressure`, and at the time of the confabulation `last_blocker: null`, so the block was pure `risk=Critical`. The mechanism of this block is the subject of RFC-0329.
 - The keeper reports the mechanism-true fact "Execute is blocked" but confabulates the cause and the fix.
 - Memory poison closes the loop: `~/me/.masc/keepers/mad-improver.memory.jsonl` (60 rows) had 47 rows repeating the false causal claim, `source=progress_consolidation`, `priority≈90`, tagged `[consolidated:N]`. Each turn: read poisoned memory → re-derive false conclusion → broadcast → re-consolidate.
 - On 2026-07-02 an operator manually rerouted `issue_king` off `runpod_mtp` to a working endpoint (`runtime.toml:504` `"issue_king" = "runpod_rtxa6000.gemma4-coder-fable5-q4km"`) but left `mad-improver` on the dead endpoint one line below (`runtime.toml:505`). `mad-improver` is the keeper the hand-edit missed.
 
 ### 1.3 Keeper error taxonomy (kept verbatim for the record)
 
-- RIGHT: "Execute is blocked" — mechanism-true (see RFC-0327 §2).
+- RIGHT: "Execute is blocked" — mechanism-true (see RFC-0329 §2).
 - WRONG CAUSE: attributes the block to the repo mapping. Design-false: the `hard_forbidden` formula has no repo-mapping term (`rg -ni "repo_mapping|repositories" lib/governance_pipeline*.ml` = 0 hits).
 - WRONG FIX: "edit `keeper_repo_mappings.toml` execute=true". No such field exists; the parser reads only the `repositories` key, so the write is silently ignored — a provable no-op. `mad-improver` already has a normal mapping identical to `executor`/`garnet`/`verifier`.
 - OVER-GENERALIZED: "all tools hard_forbidden". False — only Critical ops block. `board_comment`/`tasks_list`/`read_file`/`search`/`keeper_memory_write` are Low and worked fine (the 70+ broadcasts and per-turn memory writes are the evidence).
@@ -48,12 +48,12 @@ Neither is the advisory `keeper_repo_mappings.toml`. RFC-0312 (Accepted, §2) st
 
 ## 2. Root-cause taxonomy — four gaps, split across two RFCs
 
-The incident is one symptom over four distinct systemic gaps. Two form the *operative gate* (why shell Execute is blocked at all) — owned by **RFC-0327**. Two form the *perseveration engine* (why the keeper stayed stuck instead of recovering) — owned by **this RFC**.
+The incident is one symptom over four distinct systemic gaps. Two form the *operative gate* (why shell Execute is blocked at all) — owned by **RFC-0329**. Two form the *perseveration engine* (why the keeper stayed stuck instead of recovering) — owned by **this RFC**.
 
 | Gap | One-line | Layer | Owner |
 |-----|----------|-------|-------|
-| A | Governance Execute risk is payload-blind and pre-empts the typed Shell-IR read-only classifier | governance PreToolUse | RFC-0327 |
-| B | `per_keeper_code_exemption` is a hardcoded `false` placeholder — no keeper can run shell Execute at all | keeper guard | RFC-0327 |
+| A | Governance Execute risk is payload-blind and pre-empts the typed Shell-IR read-only classifier | governance PreToolUse | RFC-0329 |
+| B | `per_keeper_code_exemption` is a hardcoded `false` placeholder — no keeper can run shell Execute at all | keeper guard | RFC-0329 |
 | **C** | Durable memory promotion is gated by repetition frequency, not grounding — a repeated false claim becomes priority-90 durable memory, and there is no active purge of already-consolidated residue | memory_bank | **this RFC** |
 | **D** | No persisted health-driven per-keeper failover, and no semantic-stagnation detector — a keeper on a dead provider with zero-effect "successful" turns is invisible to every existing loop-break | runtime routing + stagnation | **this RFC** |
 
@@ -190,7 +190,7 @@ Replay the incident shape: keeper pinned to a `Down` provider producing empty co
 
 | RFC | Status (as found) | Relation |
 |-----|-------------------|----------|
-| RFC-0327 (companion) | Draft (this incident) | Owns Gaps A/B (the operative gate). This RFC stops the loop; RFC-0327 removes the payload-blind gate structure. |
+| RFC-0329 (companion) | Draft (this incident) | Owns Gaps A/B (the operative gate). This RFC stops the loop; RFC-0329 removes the payload-blind gate structure. |
 | RFC-keeper-memory-consolidation | Draft, unimplemented | Names the memory_bank subsystem and its missing anti-thrash guards, cites `mad-improver`, and plans to collapse the bank into Memory OS. Gap C supplies the grounding gate + purge it scopes out (§2) and scopes that RFC to *activation*. |
 | RFC-0239 semantic-identity-guards-for-keeper-memory-and-anti-thrash | Draft | Its R1–R5 guards target the Memory OS fact store, not `keeper_memory_bank.ml`, and compare parsed structure, not claim meaning. Supplies the fail-closed principle Gap C adopts. (Numbering collision with `RFC-0239-concurrency-ownership-model` should be resolved.) |
 | RFC-0259 memory-os-volatile-claim-grounding-retraction-decay | Draft (P7 landed) | Its producer-tag-keyed `valid_until` is the typed-decay pattern Gap C reuses; memory_bank never received it. |
@@ -229,4 +229,4 @@ The following was applied manually on 2026-07-08 to stop the live loop; it is th
 3. Did not edit `keeper_repo_mappings.toml` (a provable no-op that would validate the false model).
 4. Cleared the stale `last_blocker` (`capacity_backpressure` on the dead provider) and reset the noop counters; restarted the keeper (`masc_keeper_down`/`keeper_up`) so it reloaded clean memory.
 
-Re-pin + purge stop the perseveration loop, but the keeper still cannot run shell Execute until RFC-0327 (Gaps A/B) lands — that is expected fail-closed behavior, not a regression. Until the next server restart, `mad-improver` remains routed to the dead provider and stays quiet (erroring, not broadcasting) because its memory is now clean.
+Re-pin + purge stop the perseveration loop, but the keeper still cannot run shell Execute until RFC-0329 (Gaps A/B) lands — that is expected fail-closed behavior, not a regression. Until the next server restart, `mad-improver` remains routed to the dead provider and stays quiet (erroring, not broadcasting) because its memory is now clean.

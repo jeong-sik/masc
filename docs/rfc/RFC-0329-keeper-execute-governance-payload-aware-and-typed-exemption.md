@@ -1,10 +1,10 @@
-# RFC-0327 — Excise the payload-blind Execute governance gate: typed Shell-IR risk with a fail-closed de-escalation, and a config-driven code exemption
+# RFC-0329 — Excise the payload-blind Execute governance gate: typed Shell-IR risk with a fail-closed de-escalation, and a config-driven code exemption
 
 - Status: Draft
 - Date: 2026-07-08
 - Type: Governance structural change (security-sensitive; isolated from the incident fix on purpose)
 - Scope: `lib/governance_pipeline_risk.ml`, `lib/governance_pipeline.ml`, `lib/keeper/keeper_guards.ml`, `lib/tool/tool_catalog.ml`, and the `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` flag path.
-- Companion: RFC-0325 owns the perseveration-engine fixes (memory grounding + purge, failover + stagnation) and is the incident fix. This RFC removes the operative gate structure. It is deliberately NOT bundled with RFC-0325: it loosens a safety wall and must land behind its own adversarial review and fail-closed default. It is not required to stop the `mad-improver` loop (the keeper never ran shell; `tool_calls=0`).
+- Companion: RFC-0328 owns the perseveration-engine fixes (memory grounding + purge, failover + stagnation) and is the incident fix. This RFC removes the operative gate structure. It is deliberately NOT bundled with RFC-0328: it loosens a safety wall and must land behind its own adversarial review and fail-closed default. It is not required to stop the `mad-improver` loop (the keeper never ran shell; `tool_calls=0`).
 - Cross-references: RFC-0091, RFC-0126, RFC-0131, RFC-0160, RFC-0208, RFC-0254, RFC-0255, RFC-0304, RFC-0309, RFC-0312, RFC-0321, RFC-0001.
 
 ---
@@ -17,7 +17,7 @@ A keeper is granted the `tool_execute` tool in its `tool_access`. The governance
 2. `keeper_guards.governance_approval_guard` (`keeper_guards.ml:944-963`) computes `hard_forbidden = auto_approval_hard_forbidden ~risk = (risk = Critical || runtime_auto_approval_blocked)` (`governance_pipeline.ml:104-105`). For Critical this is true, and the guard returns `Agent_sdk.Hooks.Block` with reason "hard_forbidden: unconditional block regardless of HITL mode" (`:958`) — before the tool handler runs.
 3. The only escape, `per_keeper_code_exemption` (`keeper_guards.ml:917-922`), is a hardcoded `false` placeholder, and it is checked only in the later `else if needs_approval` branch (`:964`), which is unreachable once `hard_forbidden` is true. So it cannot lift a Critical Execute block for anyone.
 
-Net: no keeper can run any shell command — `git status` and `rm -rf /` alike — and no HITL approval can change that. A capability that is always blocked is not a capability. This is the "weird structure" the incident (RFC-0325) exposed; `mad-improver` correctly observed "Execute is blocked" and then confabulated a repo-mapping cause because the true structure is invisible to the keeper.
+Net: no keeper can run any shell command — `git status` and `rm -rf /` alike — and no HITL approval can change that. A capability that is always blocked is not a capability. This is the "weird structure" the incident (RFC-0328) exposed; `mad-improver` correctly observed "Execute is blocked" and then confabulated a repo-mapping cause because the true structure is invisible to the keeper.
 
 The already-built typed classifier that *can* tell `git status` from `rm -rf /` — `Masc_exec.Shell_ir_risk` (closed sum `R0_Read | R1_Reversible_mutation | R2_Irreversible | Destructive_protected`, `shell_ir_risk.mli:10-14`) plus the handler-level `Approval_policy`/`catastrophic_floor` (RFC-0254, Active) — lives *inside* the handler and is categorically unreachable for the governance decision (`rg 'Shell_ir|Approval_policy|R0_Read' lib/governance_pipeline*.ml` = 0 hits). The cruder gate runs first and shadows the typed one.
 
@@ -29,7 +29,7 @@ The already-built typed classifier that *can* tell `git status` from `rm -rf /` 
 2. **No hidden hardcoding.** No read-only command string/prefix list, no per-binary exemption ladder, no hardcoded keeper allowlist. The read-only decision is derived from the parsed typed Shell-IR AST; the code-capable-keeper decision is read from typed configuration.
 3. **Parse, don't validate.** The risk is decided over the parsed `Shell_ir.t`, never over substrings of the command string.
 4. **Fail closed on Unknown.** Any command that does not parse to a fully typed, provably-read-only AST is Critical. De-escalation is the exception that must prove itself, not the default.
-5. **Do not weaken the deterministic gate to accommodate a non-deterministic model.** The keeper being a weak model (RFC-0325's provider outage) is not a reason to relax governance; the relaxation is justified only by the payload being provably read-only (RFC-0001 det/non-det boundary intact).
+5. **Do not weaken the deterministic gate to accommodate a non-deterministic model.** The keeper being a weak model (RFC-0328's provider outage) is not a reason to relax governance; the relaxation is justified only by the payload being provably read-only (RFC-0001 det/non-det boundary intact).
 
 ---
 
@@ -150,7 +150,7 @@ A test/assertion that with `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` off (if reachab
 
 | RFC | Status | Relation |
 |-----|--------|----------|
-| RFC-0325 (companion) | Draft | The incident fix (memory + failover + stagnation). This RFC is the isolated governance-structure change; RFC-0325 does not depend on it. |
+| RFC-0328 (companion) | Draft | The incident fix (memory + failover + stagnation). This RFC is the isolated governance-structure change; RFC-0328 does not depend on it. |
 | RFC-0160 shell-ir-first-class | Implemented | Established Shell-IR as the single decision substrate in the exec runtime; Gap A completes that for the governance layer. |
 | RFC-0208 shell-ir-compositional-risk-ast | Draft | Owns the compositional risk AST with `R0_Read`; Gap A consumes it. |
 | RFC-0091 execute-typed-argv | Implemented | Provides the typed argv → `Shell_ir` lowering Gap A reuses; each argv token is literal by construction, which is why a typed classifier (not substring) is the correct basis and why non-literal argv must fail closed. |

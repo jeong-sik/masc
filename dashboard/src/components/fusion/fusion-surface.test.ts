@@ -670,7 +670,7 @@ describe('FusionSurface', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('No board-sink fusion posts yet')
+    expect(container.textContent).toContain('아직 기록된 보드 심의가 없습니다')
     expect(container.textContent).toContain('/api/v1/dashboard/fusion-runs')
   })
 
@@ -687,9 +687,9 @@ describe('FusionSurface', () => {
     expect(error?.textContent).toContain('Board sink load failed')
     expect(error?.textContent).toContain('HTTP 502 board sink unavailable')
     const empty = container.querySelector('[data-testid="fusion-empty"]')
-    expect(empty?.textContent).toContain('Board-sink fusion posts are unverified')
+    expect(empty?.textContent).toContain('보드 심의 기록을 확인하지 못했습니다')
     expect(empty?.textContent).toContain('/api/v1/dashboard/board?sort_by=recent&limit=500')
-    expect(empty?.textContent).not.toContain('No board-sink fusion posts yet')
+    expect(empty?.textContent).not.toContain('아직 기록된 보드 심의가 없습니다')
   })
 
   it('keeps cached board-sink detail visible while showing a refresh failure', () => {
@@ -739,8 +739,8 @@ describe('FusionSurface', () => {
     // registry run is selected by default and shows its own detail.
     expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
     expect(container.querySelector('[data-testid="fusion-registry-detail"]')?.textContent).toContain('fus-running')
-    expect(container.textContent).toContain('board runs')
-    expect(container.textContent).toContain('registry')
+    expect(container.textContent).toContain('보드 런')
+    expect(container.textContent).toContain('레지스트리')
     // The running count now surfaces as the sidebar live badge, not the removed panel.
     expect(container.textContent).toContain('1 진행')
   })

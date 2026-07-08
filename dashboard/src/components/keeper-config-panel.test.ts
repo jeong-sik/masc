@@ -1148,6 +1148,11 @@ describe('KeeperConfigPanel', () => {
     // prompt tab: editable prompt controls.
     selectKcfTab(container, '프롬프트')
     await flush()
+    // The global system-prompt blocks (world/capabilities) are read-only here;
+    // a deep-link routes their editing to the canonical Settings › Prompts.
+    const globalEditLink = container.querySelector('[data-testid="kcf-prompt-global-edit-link"]')
+    expect(globalEditLink).not.toBeNull()
+    expect(globalEditLink?.textContent).toContain('설정 › 프롬프트')
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),
     )

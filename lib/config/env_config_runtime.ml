@@ -884,4 +884,19 @@ module Shell_ir_approval_gate = struct
     Feature_flag_registry.get_bool "MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
 end
 
+(** {1 Shell IR approval policy config (RFC-0254)} *)
+
+module Shell_ir_approval = struct
+  (** Single env spec that controls the approval overlay for keeper lanes.
+      Examples:
+
+      - [autonomous]
+      - [permissive]
+      - [safe=observe,audited=enforced,privileged=auto_safe]
+      - [profile=autonomous,safe=observe]
+
+      The parser is implemented in {!Masc_exec.Approval_config}. *)
+  let raw_overlay () = Sys.getenv_opt "MASC_SHELL_IR_APPROVAL" |> trim_opt
+end
+
 (** {1 Internal Safety Configuration} *)

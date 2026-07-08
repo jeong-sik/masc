@@ -432,6 +432,16 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     expect(mobileRuleDecls('.kw-kp-menu')['max-width']).toContain('env(safe-area-inset-right, 0px)')
   })
 
+  it('hides the roster ⋮ action until hover/focus on desktop, keeps it for touch', () => {
+    // v2 mock (.kp-more) is opacity:0 at rest and reveals on row hover/focus, so
+    // the card reads as identity + status. The 860px block restores it for touch
+    // where hover is unavailable.
+    expect(baseRuleDecls('.kw-kp-more').opacity).toBe('0')
+    expect(baseRuleDecls('.kw-kp-row:hover .kw-kp-more').opacity).toBe('1')
+    expect(baseRuleDecls('.kw-kp-row:focus-within .kw-kp-more').opacity).toBe('1')
+    expect(mobileRuleDecls('.kw-kp-more').opacity).toBe('1')
+  })
+
   it('keeps the mobile context drawer close to the v2 rail without prototype-local state', () => {
     expect(keeperWorkspaceRailSource).toContain('keeper.context_ratio')
     expect(keeperWorkspaceRailSource).toContain('tasks.value.filter')

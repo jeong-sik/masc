@@ -456,7 +456,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   justify-content: center;
   padding: 0;
   transform: translateY(-50%);
-  opacity: 0.72;
+  /* v2 mock (.kp-more) keeps the ⋮ hidden until the row is hovered/focused so
+     the roster reads as identity + status; the row:hover / :focus-within rule
+     below reveals it. The 860px block keeps it always visible for touch. */
+  opacity: 0;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-panel-alt);

@@ -120,10 +120,17 @@ type machine_verify_failure =
     Verification-store lifecycle mirrors the tool layer (RFC-0221 hooks):
     record created with the submit, machine verdict recorded on approve or on
     the compensating reject; board/SSE notify hooks are not invoked (machine
-    completions do not announce). Hook defaults are no-ops. *)
+    completions do not announce). Hook defaults are no-ops.
+
+    [evidence_refs] is carried as the submit's [handoff_context.evidence_refs]
+    (summary = [notes]) and persisted through approve onto the Done record, so
+    the #23719 strict-contract evidence gate and audit consumers see the
+    machine-verified evidence. Pass the satisfied claim descriptions (probe:
+    [Evidence_claim.to_human_string]); [[]] is only valid for tasks without a
+    strict contract. *)
 val submit_and_approve_task_r :
   config -> agent_name:string -> verifier_name:string -> task_id:string ->
-  notes:string -> approve_notes:string -> unit ->
+  notes:string -> approve_notes:string -> evidence_refs:string list -> unit ->
   (string, machine_verify_failure) result
 
 (** {1 Task cancellation} *)

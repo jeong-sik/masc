@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  formatElapsed, formatDuration, formatDurationMs,
+  formatElapsed, formatDuration, formatDurationCompound, formatDurationMs,
   formatElapsedCompact, formatDelta, formatCompactAge,
   formatRelativeSec, formatRelativeUntilSec, formatTimeAgo,
 } from './format-time'
@@ -22,6 +22,15 @@ describe('formatDuration', () => {
   it('returns 확인 필요 for null', () => { expect(formatDuration(null)).toBe('확인 필요') })
   it('returns 확인 필요 for negative', () => { expect(formatDuration(-1)).toBe('확인 필요') })
   it('returns 확인 필요 for NaN', () => { expect(formatDuration(NaN)).toBe('확인 필요') })
+})
+
+describe('formatDurationCompound', () => {
+  it('formats sub-minute as seconds', () => { expect(formatDurationCompound(45)).toBe('45초') })
+  it('formats sub-hour as whole minutes (no seconds)', () => { expect(formatDurationCompound(92)).toBe('1분') })
+  it('formats hours with remainder minutes', () => { expect(formatDurationCompound(9000)).toBe('2시간 30분') })
+  it('keeps a zero-minute remainder explicit', () => { expect(formatDurationCompound(7200)).toBe('2시간 0분') })
+  it('returns 확인 필요 for negative', () => { expect(formatDurationCompound(-1)).toBe('확인 필요') })
+  it('returns 확인 필요 for NaN', () => { expect(formatDurationCompound(NaN)).toBe('확인 필요') })
 })
 
 describe('formatDurationMs', () => {

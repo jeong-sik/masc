@@ -2228,6 +2228,8 @@
 
 (include stanzas/test_server_discord_trigger_policy.inc)
 
+(include stanzas/test_server_slack_trigger_policy.inc)
+
 (include stanzas/test_shell_parse_site_ratchet.inc)
 
 (include stanzas/test_smart_heartbeat_keepalive.inc)

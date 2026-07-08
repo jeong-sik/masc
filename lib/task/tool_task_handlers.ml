@@ -195,6 +195,7 @@ let owner_transition_action_denylist (ctx : context) =
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_runtime : string option)
+    ~(operator_override : bool = false)
     ~(ctx : context)
     ~(task_opt : Masc_domain.task option)
     ~(task_id : string)
@@ -243,7 +244,7 @@ let review_completion_notes
          ?completion_contract
          ~required_evidence
          ~verify_gate_evidence
-         ~on_verdict ~few_shot_block ar_req).verdict with
+         ~on_verdict ~few_shot_block ~operator_override ar_req).verdict with
       | Anti_rationalization.Reject reason -> Some reason
       | Anti_rationalization.Approve -> None
 

@@ -108,6 +108,7 @@ let decide
       ~authority
       ~notes
       ~reason
+      ?(system_gate_exempt = false)
   =
   (* RFC-0323 W1 / RFC-0308: a verification-required task cannot reach Done
      through Done_action — submit -> approve is the completion lane. Gated on
@@ -227,7 +228,7 @@ let decide
   (* ── Approve verification ─────────────────────── *)
   | ( Masc_domain.Approve_verification
     , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->
-    if same_agent assignee
+    if same_agent assignee && not system_gate_exempt
     then Error Self_approval
     else if verification_enabled
     then
@@ -253,7 +254,7 @@ let decide
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
   (* ── Reject verification ──────────────────────── *)
   | Masc_domain.Reject_verification, Masc_domain.AwaitingVerification { assignee; _ } ->
-    if same_agent assignee
+    if same_agent assignee && not system_gate_exempt
     then Error Self_rejection
     else if verification_enabled
     then ok (Masc_domain.InProgress { assignee; started_at = now })

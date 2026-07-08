@@ -209,6 +209,11 @@ val governance_level : unit -> string
 val disable_hitl_env_key : string
 val disable_hitl : unit -> bool
 
+(** {1 Keeper Code-Execution Exemptions} *)
+
+val code_exempt_keepers_env_key : string
+val code_exempt_keeper : keeper_name:string -> bool
+
 (** {1 Build identity / pubsub} *)
 
 val build_git_commit_opt : unit -> string option

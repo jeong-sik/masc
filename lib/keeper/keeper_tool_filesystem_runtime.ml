@@ -165,28 +165,28 @@ let resolve_read_file_target
       in
       let resolve_shared candidate =
         Result.map_error
-          (fun e ->
-             (* RFC-0330: render the typed carrier to its message; the
-                existing prefix check is preserved verbatim (behavior
-                unchanged — a typed [Not_found_relative] match is a
-                follow-up, RFC-0330 §5.3). *)
-             let e = read_path_error_message e in
-             if String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
-             then Missing_file { target = candidate; error = e }
-             else Read_path_error e)
+          (function
+             (* RFC-0330: typed match replaces the
+                "path_not_found_under_allowed_roots:" string classifier —
+                Missing_file iff the rejection is [Not_found_relative]
+                (the only variant whose message carries that prefix). *)
+             | Rejected (Keeper_alerting_path.Not_found_relative _) as e ->
+               Missing_file
+                 { target = candidate; error = read_path_error_message e }
+             | e -> Read_path_error (read_path_error_message e))
           (resolve_keeper_read_path ~config ~meta ~raw_path:candidate)
       in
       let resolve_projected candidate =
         Result.map_error
-          (fun e ->
-             (* RFC-0330: render the typed carrier to its message; the
-                existing prefix check is preserved verbatim (behavior
-                unchanged — a typed [Not_found_relative] match is a
-                follow-up, RFC-0330 §5.3). *)
-             let e = read_path_error_message e in
-             if String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
-             then Missing_file { target = candidate; error = e }
-             else Read_path_error e)
+          (function
+             (* RFC-0330: typed match replaces the
+                "path_not_found_under_allowed_roots:" string classifier —
+                Missing_file iff the rejection is [Not_found_relative]
+                (the only variant whose message carries that prefix). *)
+             | Rejected (Keeper_alerting_path.Not_found_relative _) as e ->
+               Missing_file
+                 { target = candidate; error = read_path_error_message e }
+             | e -> Read_path_error (read_path_error_message e))
           (resolve_projected_keeper_read_path
              ~config
              ~meta

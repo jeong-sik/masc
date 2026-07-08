@@ -268,6 +268,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_operator_confirm", actor_broadcast_tool);
     ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
+    ("masc_persona_create", broadcast_tool);
+    ("masc_persona_update", broadcast_tool);
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);
     ("masc_cleanup_zombies", broadcast_tool);

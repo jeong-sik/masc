@@ -45,6 +45,8 @@ type t =
   | Time_now
   | Tool_search
   | Tools_list
+  | Persona_create
+  | Persona_update
   | Voice_agent
   | Voice_listen
   | Voice_session_end

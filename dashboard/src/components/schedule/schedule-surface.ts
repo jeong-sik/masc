@@ -97,6 +97,11 @@ export function ScheduleSurface() {
   // Detail-overlay selection is lifted here so the calendar view, the list
   // panel, and the operations aside all drive the same overlay.
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+  // Keeper-lane wake evidence + background are large operator diagnostics
+  // (a card per keeper, dozens of lane rows). Collapsed AND unmounted by default
+  // so the schedule stays the light, primary content; the panels only mount when
+  // the operator opens them.
+  const [diagOpen, setDiagOpen] = useState(false)
 
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) {
@@ -220,16 +225,6 @@ export function ScheduleSurface() {
           <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
         </div>
 
-        <section class="ov-card mt-4" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
-          <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
-          <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
-        </section>
-
-        <section class="ov-card mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
-          <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
-          <${KeeperBackgroundPanel} background=${keeperBackground} />
-        </section>
-
         ${loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
           : view === 'calendar'
@@ -246,6 +241,35 @@ export function ScheduleSurface() {
                 selectedScheduleId=${selectedScheduleId}
                 onSelectSchedule=${setSelectedScheduleId}
               />`}
+
+        ${'' /* Secondary diagnostics live BELOW the schedule and are unmounted
+              until opened: the actual schedule (calendar/list) is the primary,
+              above-the-fold content. The keeper-lane wake evidence + background
+              panels are large operator diagnostics (a card per keeper, dozens of
+              lane rows) that previously buried the schedule and rendered on every
+              tick. Lazy-mounting them keeps the default surface light. */}
+        <section class="ov-card mt-4 sch-diag" data-testid="schedule-diagnostics">
+          <button
+            type="button"
+            class="sch-diag-summary"
+            aria-expanded=${diagOpen ? 'true' : 'false'}
+            data-testid="schedule-diagnostics-toggle"
+            onClick=${() => setDiagOpen(open => !open)}
+          >Keeper 진단 · wake evidence · background ${diagOpen ? '▴' : '▾'}</button>
+          ${diagOpen
+            ? html`
+                <section class="mt-3" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
+                  <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
+                  <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
+                </section>
+
+                <section class="mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
+                  <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
+                  <${KeeperBackgroundPanel} background=${keeperBackground} />
+                </section>
+              `
+            : null}
+        </section>
       </div>
       ${automation
         ? html`<${ScheduleAside}

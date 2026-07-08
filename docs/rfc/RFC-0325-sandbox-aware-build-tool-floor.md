@@ -76,15 +76,23 @@ source of truth.
 
 ## 4. Decision
 
-### 4.1 Classify `dune` in the typed registry (SSOT)
+### 4.1 Classify `dune` in the typed registry (SSOT) — identity only, not risk downgrade
 
-Add `Dune` to `Exec_program.known` with `risk = `Audited; kind = `Build_tool`
-(new kind, or reuse `Other_audited` if a dedicated redirect is not wanted).
-`make`/`cmake` are already `Audited`; `dune` joins them. This makes the typed
-Shell IR path recognise `dune` by variant, not by absence. `direct_dune_seen` /
-`command_runs_dune` become derivable from the typed program identity; the string
-matcher is retired (or reduced to the `env`/`opam exec` unwrap that resolves to
-the typed program, not a bare `String.equal`).
+Add `Dune` to `Exec_program.known` so the typed Shell IR path recognises `dune`
+by **variant**, not by absence. `direct_dune_seen` / `command_runs_dune`
+(`shell_command_gate.ml:249` `String.equal bin "dune"`) become derivable from
+the typed program identity; the string matcher is retired (or reduced to the
+`env`/`opam exec` unwrap that resolves to the typed program, not a bare
+`String.equal`).
+
+**Risk class stays `Privileged` (NOT `Audited`).** This is load-bearing:
+under the autonomous overlay `Audited → Allow` (RFC-0254 §5), so classifying
+`dune` as `Audited` would let bare `dune` bypass the floor and run on **Host**
+too — destroying the host build-lock invariant §4.2 preserves. The `Dune`
+variant exists only to give the floor a typed handle; the allow/deny decision is
+made by the §4.2 floor rule, not by `risk_class`. (Contrast `make`/`cmake`,
+which are `Audited` because they have no shared-`_build`/host-fd hazard requiring
+serialization through a lock wrapper.)
 
 ### 4.2 Floor decision keys on the resolved `Sandbox_target`
 
@@ -122,7 +130,8 @@ wrapper), consistent with RFC-0254's "no `Ask` in the autonomous lane".
   `lib/exec`/`lib/exec_policy`/`lib/keeper` boundary has stale-cmx risk — full
   build, not `@check`).
 - **Tests (typed, no string round-trip):**
-  - `Exec_program.of_string "dune"` → `known = Some Dune`, `risk = `Audited`.
+  - `Exec_program.of_string "dune"` → `known = Some Dune`, `risk = `Privileged`
+    (identity added; risk deliberately NOT downgraded — see §4.1).
   - Floor with `~sandbox:(Docker …)` + bare `dune` → `Allow` (executes).
   - Floor with `~sandbox:Host` + bare `dune` → typed rejection whose rewrite is
     `scripts/dune-local.sh build …` (assert the rewrite string comes from the

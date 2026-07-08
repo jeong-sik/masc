@@ -63,12 +63,20 @@ let eligible fact =
   | Some Self_observation | Some External_state | Some Diagnostic -> false
 
 (* Pick the representative fact for a claim group by a structural total order:
-   earliest first_seen, then lexically smallest claim, then keeper id — so
-   selection is deterministic regardless of input order. The prior tie-breaker on
-   highest confidence was removed with the score. *)
+   most-recently-verified first (RFC-0244 staleness is anchored on
+   [last_verified_at] / truth-recency, not [first_seen]), then lexically
+   smallest claim, then keeper id — so selection is deterministic regardless
+   of input order. The prior tie-breaker on highest confidence was removed
+   with the score. TASK-1890: change primary key from earliest [first_seen]
+   to latest [last_verified_at] (falling back to [first_seen] when the fact
+   has never been verified) so the shared tier does not promote stale facts
+   that pre-date a newer verification by a contributing keeper. *)
 let representative contribs =
+  let verified_at c =
+    Option.value c.fact.last_verified_at ~default:c.fact.first_seen
+  in
   let better a b =
-    match Float.compare a.fact.first_seen b.fact.first_seen with
+    match Float.compare (verified_at b) (verified_at a) with
     | c when c < 0 -> true
     | c when c > 0 -> false
     | _ ->

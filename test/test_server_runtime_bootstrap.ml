@@ -1254,6 +1254,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
     files = [];
     created_at = "2026-06-26T00:00:00Z";
     created_by = Some "test";
+    predecessor_task_id = None;
     contract = None;
     handoff_context = None;
     cycle_count = 0;

@@ -55,6 +55,7 @@ let make_done_task id : MD.task =
     files = [];
     created_at = iso_now ();
     created_by = None;
+    predecessor_task_id = None;
     contract = None;
     handoff_context = None;
     cycle_count = 0;

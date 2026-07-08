@@ -118,6 +118,7 @@ let task ?handoff_context ~id ~title ~status () : Masc_domain.task =
   ; files = []
   ; created_at = "2026-07-02T00:00:00Z"
   ; created_by = Some "digest-test"
+  ; predecessor_task_id = None
   ; contract = None
   ; handoff_context
   ; cycle_count = 0

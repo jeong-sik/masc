@@ -123,6 +123,7 @@ let make_task ~id ~status : Masc_domain.task = {
   files = [];
   created_at = "2024-01-01T00:00:00Z";
   created_by = None;
+  predecessor_task_id = None;
   contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
 }
 
@@ -159,6 +160,7 @@ let make_task_with_priority ~id ~priority : Masc_domain.task = {
   files = [];
   created_at = "2024-01-01T00:00:00Z";
   created_by = None;
+  predecessor_task_id = None;
   contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
 }
 

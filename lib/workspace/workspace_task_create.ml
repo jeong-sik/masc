@@ -61,6 +61,8 @@ type add_task_error =
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
   | Unexpected_error of string
+  | Unknown_predecessor of string
+  | Predecessor_not_terminal of { predecessor_task_id : string; status : string }
 
 type batch_add_tasks_success =
   { task_ids : string list
@@ -86,6 +88,17 @@ let add_task_error_to_string = function
     Printf.sprintf "Error linking task to goal: %s" msg
   | Backlog_write_failed msg -> Printf.sprintf "Error writing backlog: %s" msg
   | Unexpected_error msg -> Printf.sprintf "Error: %s" msg
+  | Unknown_predecessor id ->
+    Printf.sprintf
+      "Unknown predecessor_task_id '%s': not in the backlog (terminal tasks \
+       past the archive cutoff are not linkable)"
+      id
+  | Predecessor_not_terminal { predecessor_task_id; status } ->
+    Printf.sprintf
+      "predecessor_task_id '%s' is %s — a re-run link requires a terminal \
+       (done/cancelled) predecessor"
+      predecessor_task_id
+      status
 ;;
 
 let batch_add_tasks_error_to_string = function
@@ -131,6 +144,7 @@ let add_task_with_result
       ?contract
       ?goal_id
       ?created_by
+      ?predecessor_task_id
       ?reject_if
       config
       ~title
@@ -141,6 +155,7 @@ let add_task_with_result
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
   let goal_id = Workspace_task_classify.trim_opt goal_id in
+  let predecessor_task_id = Workspace_task_classify.trim_opt predecessor_task_id in
   try
     with_file_lock config backlog_path (fun () ->
       match read_backlog_r config with
@@ -152,6 +167,29 @@ let add_task_with_result
         |> (function
           | Some msg -> Error (Rejected msg)
           | None ->
+        (* RFC-0323 W2: a re-run link must point at an existing, terminal task.
+           Validated inside the lock against the same backlog snapshot the new
+           task is appended to, so the check cannot race a concurrent write. *)
+        (match
+           match predecessor_task_id with
+           | None -> Ok ()
+           | Some pid ->
+             (match
+                List.find_opt (fun (t : task) -> String.equal t.id pid) backlog.tasks
+              with
+              | None -> Error (Unknown_predecessor pid)
+              | Some p ->
+                if task_status_is_terminal p.task_status
+                then Ok ()
+                else
+                  Error
+                    (Predecessor_not_terminal
+                       { predecessor_task_id = pid
+                       ; status = task_status_to_string p.task_status
+                       }))
+         with
+         | Error e -> Error e
+         | Ok () ->
         (* Dedup guard: reject if an active task with the same normalized title exists *)
         (match find_duplicate_task backlog ~title with
          | Some existing_id ->
@@ -175,6 +213,7 @@ let add_task_with_result
              ; files = []
              ; created_at = now_iso ()
              ; created_by
+             ; predecessor_task_id
              ; contract
              ; handoff_context = None
              ; cycle_count = 0
@@ -227,6 +266,8 @@ let add_task_with_result
                           ; "goal_id", Json_util.string_opt_to_json goal_id
                           ; "priority", `Int priority
                           ; "created_by", created_by_json
+                          ; ( "predecessor_task_id"
+                            , Json_util.string_opt_to_json predecessor_task_id )
                           ; ( "strict_contract"
                             , `Bool
                                 (match contract with
@@ -241,7 +282,7 @@ let add_task_with_result
                       ~content:(Printf.sprintf "New quest: %s" title)
                   in
                   let summary = Printf.sprintf "Added %s: %s" task_id title in
-                  Ok { task_id; summary; title; priority; description; goal_id })))))
+                  Ok { task_id; summary; title; priority; description; goal_id }))))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
@@ -297,6 +338,9 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                   ; files = []
                   ; created_at = now_iso ()
                   ; created_by
+                  (* batch add does not carry re-run links (RFC-0323 W2 scopes
+                     the arg to masc_add_task) *)
+                  ; predecessor_task_id = None
                   ; contract
                   ; handoff_context = None
                   ; cycle_count = 0

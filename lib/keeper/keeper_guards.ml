@@ -915,7 +915,8 @@ let destructive_guard
    PM accepted policy risk (albini, p-6e2a0927be). Replace with a proper
    Env_config_core mechanism once one exists. *)
 let per_keeper_code_exemption _keeper_name =
-  (* task-1807: operator-controlled exemption via MASC_CODE_EXEMPT_KEEPERS env var.
+  (* task-1807: operator-controlled exemption via MASC_CODE_EXEMPT_KEEPERS env var
+     as specified in RFC-0329 §4 (config-driven code exemption).
      Replaces hardcoded per-keeper allowlist. *)
   Env_config_core.code_exempt_keeper ~keeper_name
 

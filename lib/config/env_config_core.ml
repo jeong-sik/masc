@@ -572,6 +572,8 @@ let disable_hitl () =
 
 (** {1 Keeper Code-Execution Exemptions} *)
 
+module String_set = Set.Make(String)
+
 (** Environment variable for space-separated keeper names exempt from
     code-execution governance gates (per task-1807).
     @category Security

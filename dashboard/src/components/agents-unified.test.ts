@@ -27,6 +27,10 @@ vi.mock('./agent-roster', () => ({
   AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h('div', { 'data-testid': 'agent-roster', 'data-filter': keeperFilter }, 'AgentRoster'),
 }))
 
+vi.mock('./keeper-spawn/keeper-spawn-panel', () => ({
+  KeeperSpawnPanel: () => h('div', { 'data-testid': 'keeper-spawn-panel' }, 'KeeperSpawnPanel'),
+}))
+
 vi.mock('../router', () => ({
   route: mockRoute,
 }))
@@ -69,7 +73,8 @@ describe('AgentsUnified', () => {
     expect(roster).not.toBeNull()
     expect(roster!.getAttribute('data-filter')).toBe('all')
     expect(container.querySelector('[data-testid="filter-chips"]')).toBeNull()
-    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).toBeNull()
+    // Keeper creation lives at the top of the fleet roster (all / keepers views).
+    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="keeper-multi-select"]')).toBeNull()
     expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
   })
@@ -80,12 +85,14 @@ describe('AgentsUnified', () => {
     const roster = container.querySelector('[data-testid="agent-roster"]')
     expect(roster!.getAttribute('data-filter')).toBe('agent-only')
     expect(container.querySelector('[data-testid="filter-chips"]')).toBeNull()
+    // Agents view lists workspace agents, not keepers — no keeper-create entry here.
+    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).toBeNull()
   })
 
   it('renders keepers view as a narrowed roster without multi-select stats', () => {
     mockRoute.value = { tab: 'monitoring', params: { view: 'keepers' }, postId: null }
     render(h(AgentsUnified, null), container)
-    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="keeper-multi-select"]')).toBeNull()
     expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
     const roster = container.querySelector('[data-testid="agent-roster"]')

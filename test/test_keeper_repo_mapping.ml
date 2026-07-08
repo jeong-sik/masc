@@ -90,6 +90,9 @@ let write_mapping base_path keeper_id repo_ids =
 
 let write_repositories base_path repos =
   let path = Filename.concat base_path ".masc/config/repositories.toml" in
+  let quoted_list values =
+    String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") values)
+  in
   let repo_block (r : repository) =
     let local_path_str =
       if Filename.is_relative r.local_path then
@@ -99,14 +102,15 @@ let write_repositories base_path repos =
     in
     Printf.sprintf
       "[repository.%s]\nname = \"%s\"\nurl = \"%s\"\nlocal_path = \"%s\"\n\
-       default_branch = \"%s\"\nkeepers = [%s]\n\
+       default_branch = \"%s\"\naliases = [%s]\nkeepers = [%s]\n\
        status = \"%s\"\nauto_sync = %s\nsync_interval = %s\n"
       r.id
       r.name
       r.url
       local_path_str
       r.default_branch
-      (String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") r.keepers))
+      (quoted_list r.aliases)
+      (quoted_list r.keepers)
       (match r.status with Active -> "Active" | Paused -> "Paused" | Cloning -> "Cloning" | Error _ -> "Error")
       (string_of_bool r.auto_sync)
       (string_of_int r.sync_interval)

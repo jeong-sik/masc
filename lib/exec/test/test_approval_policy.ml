@@ -953,7 +953,88 @@ let test_worktree_remove_floored_under_autonomous () =
   | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Worktree_remove); _ } -> ()
   | _ -> assert false
 
+(* RFC-0309 #23451 form 1: a method flag placed BEFORE the [api] subcommand
+   ([gh -XDELETE api /repos/o/r]) is accepted by gh's Cobra parser as a leading
+   flag, so the literal DELETE executes. Before the fix the method token sat in
+   the command slot, the api branch was skipped, and the DELETE never reached the
+   catastrophic floor — an autonomous auto-run DELETE. The floor now locates the
+   api subcommand past the leading flag and Denies. *)
+let test_gh_api_leading_method_flag_delete_floored_under_autonomous () =
+  let s = simple (bin_ok "gh") ~args:(List.map lit [ "-XDELETE"; "api"; "/repos/o/r" ]) in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+      ~simple:s
+  with
+  | Verdict.Deny { reason = Destructive_repo_hosting_cli bin; _ } ->
+    assert (Exec_program.to_string bin = "gh")
+  | _ ->
+    Alcotest.failf "leading attached -XDELETE before api must be floored (Deny)"
+
+(* The spaced leading form ([gh -X DELETE api ...]) is already gated (not a
+   silent Allow); pin that it stays gated so a future parser change cannot
+   regress it to Allow. *)
+let test_gh_api_spaced_leading_method_delete_not_allowed_under_autonomous () =
+  let s =
+    simple (bin_ok "gh") ~args:(List.map lit [ "-X"; "DELETE"; "api"; "/repos/o/r" ])
+  in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+      ~simple:s
+  with
+  | Verdict.Allow _ ->
+    Alcotest.failf "spaced leading -X DELETE api must not auto-run (Allow)"
+  | Verdict.Ask _ | Verdict.Deny _ | Verdict.Suggest_confirm _ -> ()
+
+(* RFC-0309 #23451 form 2: an opaque method value ([gh api -X $METHOD /path])
+   defeats the literal method classifier, which defaults to GET/R0 and would
+   silently Allow a runtime DELETE/POST. The capability axis fails closed to Ask
+   on method opacity, mirroring the graphql body-opacity gate. Covers separate,
+   long-flag, and attached forms. *)
+let test_gh_api_opaque_method_asks_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Ask { bin; _ } -> assert (Exec_program.to_string bin = "gh")
+       | _ -> Alcotest.failf "%s: opaque gh api method must Ask under autonomous" label)
+    [ ( "gh api -X $METHOD /path"
+      , [ lit "api"; lit "-X"; var "METHOD"; lit "/repos/o/r" ] )
+    ; ( "gh api --method $METHOD /path"
+      , [ lit "api"; lit "--method"; var "METHOD"; lit "/repos/o/r" ] )
+    ; ( "gh api -X$METHOD /path (attached)"
+      , [ lit "api"; concat [ lit "-X"; var "METHOD" ]; lit "/repos/o/r" ] )
+    ]
+
+(* Control: a literal read ([gh api /path] default GET, [gh api -X GET /path])
+   must NOT be over-blocked by the method-opacity gate — only opaque or
+   destructive methods escalate. *)
+let test_gh_api_literal_read_not_over_blocked_under_autonomous () =
+  List.iter
+    (fun (label, args) ->
+       let s = simple (bin_ok "gh") ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+           ~caps ~simple:s
+       with
+       | Verdict.Allow t ->
+         assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "gh")
+       | _ -> Alcotest.failf "%s: literal gh api read must stay Allow" label)
+    [ "gh api /repos/o/r (default GET)", [ "api"; "/repos/o/r" ]
+    ; "gh api -X GET /repos/o/r", [ "api"; "-X"; "GET"; "/repos/o/r" ]
+    ]
+
 let () =
+  test_gh_api_leading_method_flag_delete_floored_under_autonomous ();
+  test_gh_api_spaced_leading_method_delete_not_allowed_under_autonomous ();
+  test_gh_api_opaque_method_asks_under_autonomous ();
+  test_gh_api_literal_read_not_over_blocked_under_autonomous ();
   test_safe_bin_strict_asks ();
   test_safe_bin_allowed_with_overlay ();
   test_privileged_bin_asks ();

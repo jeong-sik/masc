@@ -593,7 +593,17 @@ let classify_repo_hosting_cli (words : string list) : risk_class =
     if in_table repo_hosting_cli_irreversible_ops command sub
        || positional_dangerous_hit
     then R2_Irreversible
-    else if command = "api" then
+      (* [command = "api"] locates the subcommand at [words[1]]; [sub = "api"]
+         additionally catches a method flag placed BEFORE the subcommand
+         ([gh -XDELETE api /repos/o/r]), which gh's Cobra parser accepts as a
+         leading flag. Without [sub], the method token sits in the command slot
+         ([command = "-xdelete"]), the api branch is skipped, and the literal
+         DELETE (extracted from the full word list below) never fires the floor
+         — an autonomous DELETE bypass (#23451 form 1). Same leading-flag
+         positional class as #23390 (global flags). A spurious [sub = "api"]
+         without a real method stays [R0_Read] (no [-X] -> GET), so reads are
+         not over-blocked. *)
+    else if command = "api" || sub = "api" then
       let method_ =
         match extract_method_from_parts words with
         | Some m -> m

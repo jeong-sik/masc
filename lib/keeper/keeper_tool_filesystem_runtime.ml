@@ -91,7 +91,13 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
   match cwd with
   | None -> Ok (keeper_default_read_root ~config ~meta)
   | Some raw_cwd ->
-    let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
+    (* RFC-0330: this path only needs the message string, not the typed
+       classification — render the carrier here so the signature stays
+       string-typed (no cascade). *)
+    let* cwd =
+      Result.map_error read_path_error_message
+        (resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd)
+    in
     if safe_is_dir cwd
     then Ok cwd
     else if safe_file_exists cwd
@@ -160,6 +166,11 @@ let resolve_read_file_target
       let resolve_shared candidate =
         Result.map_error
           (fun e ->
+             (* RFC-0330: render the typed carrier to its message; the
+                existing prefix check is preserved verbatim (behavior
+                unchanged — a typed [Not_found_relative] match is a
+                follow-up, RFC-0330 §5.3). *)
+             let e = read_path_error_message e in
              if String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
              then Missing_file { target = candidate; error = e }
              else Read_path_error e)
@@ -168,6 +179,11 @@ let resolve_read_file_target
       let resolve_projected candidate =
         Result.map_error
           (fun e ->
+             (* RFC-0330: render the typed carrier to its message; the
+                existing prefix check is preserved verbatim (behavior
+                unchanged — a typed [Not_found_relative] match is a
+                follow-up, RFC-0330 §5.3). *)
+             let e = read_path_error_message e in
              if String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
              then Missing_file { target = candidate; error = e }
              else Read_path_error e)

@@ -26,14 +26,33 @@ val actionable_path_action_for_class
   -> Keeper_failure_circuit_breaker.error_class
   -> string
 
+(** RFC-0330 typed error carrier for the read-path resolver chain.
+    [Rejected] keeps a typed path rejection so classification uses
+    [Keeper_failure_circuit_breaker.classify_typed_path_rejection] directly;
+    [Opaque] wraps a genuinely non-typed error string (containment, missing
+    rg, cwd stat) and falls back to the string classifier unchanged. *)
+type read_path_error =
+  | Rejected of Keeper_alerting_path.keeper_path_rejection
+  | Opaque of string
+
+(** User-facing message of a [read_path_error]. *)
+val read_path_error_message : read_path_error -> string
+
+(** Classify a [read_path_error]: a typed rejection via the typed matcher,
+    an [Opaque] string via the string classifier (behavior-preserving over
+    all rejection variants — RFC-0330 §6). *)
+val read_path_error_class
+  :  read_path_error
+  -> Keeper_failure_circuit_breaker.error_class
+
 (** Render the canonical path-rejection JSON envelope: classifies
-    [error] via [Keeper_failure_circuit_breaker.classify_error]
-    and routes to [actionable_path_action_for_class]. *)
+    [error] via [read_path_error_class] and routes to
+    [actionable_path_action_for_class]. *)
 val actionable_path_error
   :  op:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
-  -> error:string
+  -> error:read_path_error
   -> string
 
 val file_not_found_prefix : string
@@ -155,7 +174,7 @@ val resolve_keeper_read_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
-  -> (string, string) result
+  -> (string, read_path_error) result
 
 (** Resolve an already projected host path that came from a
     Keeper-visible [cwd] + relative [file_path] composition. [raw_for_error]
@@ -165,7 +184,7 @@ val resolve_projected_keeper_read_path
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_for_error:string
   -> projected_path:string
-  -> (string, string) result
+  -> (string, read_path_error) result
 
 val keeper_agent_sender : meta:Keeper_meta_contract.keeper_meta -> string
 

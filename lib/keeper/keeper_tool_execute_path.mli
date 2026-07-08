@@ -4,7 +4,7 @@ val resolve_tool_read_cwd :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
-  (string, string) result
+  (string, Keeper_tool_shared_runtime.read_path_error) result
 
 val resolve_tool_execute_cwd :
   config:Workspace.config ->
@@ -28,7 +28,7 @@ val resolve_tool_read_path :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
-  (string, string) result
+  (string, Keeper_tool_shared_runtime.read_path_error) result
 (** Resolve the [path] arg against the keeper's read root, with
     {!auto_correct_path} as a fallback when the initial resolution
     fails.  Guards against playground-prefix doubling when both

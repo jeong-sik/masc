@@ -141,7 +141,10 @@ let test_visible_mind_read_resolves_to_private_storage () =
       ~raw_path:"mind/README.md"
   with
   | Ok path -> Alcotest.(check string) "resolved path" target path
-  | Error e -> Alcotest.fail ("visible mind path should resolve: " ^ e)
+  | Error e ->
+    Alcotest.fail
+      ("visible mind path should resolve: "
+       ^ Keeper_tool_shared_runtime.read_path_error_message e)
 ;;
 
 let test_direct_private_storage_read_stays_blocked () =
@@ -161,7 +164,8 @@ let test_direct_private_storage_read_stays_blocked () =
     Alcotest.(check bool)
       "task state/private path blocked"
       true
-      (String.starts_with ~prefix:"task_state_file_path_blocked:" e)
+      (String.starts_with ~prefix:"task_state_file_path_blocked:"
+         (Keeper_tool_shared_runtime.read_path_error_message e))
 ;;
 
 let test_read_with_visible_repo_cwd_and_relative_file_path () =

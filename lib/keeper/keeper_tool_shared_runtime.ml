@@ -43,6 +43,26 @@ let tool_result_or_error (tr : Tool_result.result) =
   if ok then msg else tool_result_error_json tr
 ;;
 
+(* RFC-0330: typed error carrier for the read-path resolver chain. A
+   rejection keeps its typed form so classification reaches
+   [Keeper_failure_circuit_breaker.classify_typed_path_rejection] without a
+   string reparse; genuinely non-typed errors (containment, missing rg, cwd
+   stat) stay [Opaque] and fall back to the string classifier unchanged — no
+   behavior change (RFC-0330 §5.1/§6). *)
+type read_path_error =
+  | Rejected of Keeper_alerting_path.keeper_path_rejection
+  | Opaque of string
+
+let read_path_error_message = function
+  | Rejected rej -> Keeper_alerting_path.rejection_to_user_message rej
+  | Opaque s -> s
+;;
+
+let read_path_error_class = function
+  | Rejected rej -> Keeper_failure_circuit_breaker.classify_typed_path_rejection rej
+  | Opaque s -> Keeper_failure_circuit_breaker.classify_error s
+;;
+
 (** Phase B PR-5 precursor (2026-04-28): the action mapping itself,
     parameterised by the typed [Keeper_failure_circuit_breaker.error_class].
     Callers that already hold a typed class (sandbox / shell typed
@@ -97,16 +117,19 @@ let actionable_path_error
       ~(op : string)
       ~(meta : keeper_meta)
       ~(raw_path : string)
-      ~(error : string)
+      ~(error : read_path_error)
   =
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-  let cls = Keeper_failure_circuit_breaker.classify_error error in
+  (* RFC-0330: a [Rejected] carrier classifies from its typed variant via
+     [classify_typed_path_rejection]; [Opaque] falls back to the string
+     classifier — no string reparse of a value that was already typed. *)
+  let cls = read_path_error_class error in
   let action = actionable_path_action_for_class ~playground ~raw_path cls in
   Yojson.Safe.to_string
     (`Assoc
         [ "ok", `Bool false
         ; "op", `String op
-        ; "error", `String error
+        ; "error", `String (read_path_error_message error)
         ; "tried", `String raw_path
         ; "your_playground", `String playground
         ; "action", `String action
@@ -560,7 +583,7 @@ type projected_allowed_path =
 
 let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
   Keeper_alerting_path.rejection_to_telemetry rej;
-  Error (Keeper_alerting_path.rejection_to_user_message rej)
+  Error (Rejected rej)
 ;;
 
 let resolve_projected_allowed_path
@@ -568,7 +591,7 @@ let resolve_projected_allowed_path
       ~(allowed_paths : string list)
       ~(raw_for_error : string)
       ~(projected_path : string)
-  : (projected_allowed_path, string) result
+  : (projected_allowed_path, read_path_error) result
   =
   let root = Keeper_alerting_path.project_root_of_config config in
   let candidate =
@@ -619,7 +642,7 @@ let resolve_projected_read_path
       ~(allowed_paths : string list)
       ~(raw_for_error : string)
       ~(projected_path : string)
-  : (string, string) result
+  : (string, read_path_error) result
   =
   match
     resolve_projected_allowed_path
@@ -663,7 +686,9 @@ let resolve_projected_write_path
       ~raw_for_error
       ~projected_path
   with
-  | Error _ as err -> err
+  (* Write path stays string-typed (RFC-0330 read-path slice only); render
+     the typed carrier back to its message here. *)
+  | Error e -> Error (read_path_error_message e)
   | Ok { candidate; _ } -> Ok candidate
 ;;
 
@@ -709,7 +734,7 @@ let resolve_keeper_read_path
       ~(raw_path : string)
   =
   match playground_relative_projection_unless_allowed_root ~config ~meta raw_path with
-  | Error e -> Error e
+  | Error e -> Error (Opaque e)
   | Ok { projected_path; projected_from_visible = true } ->
     resolve_projected_read_path
       ~config
@@ -722,7 +747,7 @@ let resolve_keeper_read_path
       ~allowed_paths:(keeper_effective_allowed_paths ~meta)
       ~raw_path:projected_path
     with
-    | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)
+    | Error rej -> Error (Rejected rej)
     | Ok p -> Ok p
 ;;
 

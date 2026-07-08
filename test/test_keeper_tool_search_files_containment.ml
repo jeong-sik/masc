@@ -507,7 +507,9 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
       (normalize_realpath repos)
       (normalize_realpath path)
   | Error e ->
-    Alcotest.fail ("bare repos should stay inside playground: " ^ e)
+    Alcotest.fail
+      ("bare repos should stay inside playground: "
+       ^ Masc.Keeper_tool_shared_runtime.read_path_error_message e)
 
 let test_docker_relative_repos_cwd_resolves_inside_playground () =
   setup ~keeper_name:"glm-coding" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -522,7 +524,9 @@ let test_docker_relative_repos_cwd_resolves_inside_playground () =
       (normalize_realpath repo)
       (normalize_realpath cwd)
   | Error e ->
-    Alcotest.fail ("relative repos cwd should stay inside playground: " ^ e)
+    Alcotest.fail
+      ("relative repos cwd should stay inside playground: "
+       ^ Masc.Keeper_tool_shared_runtime.read_path_error_message e)
 
 let test_docker_container_cwd_maps_to_host_worktree () =
   setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -542,7 +546,10 @@ let test_docker_container_cwd_maps_to_host_worktree () =
    | Ok cwd ->
      Alcotest.(check string) "read cwd maps to host" expect
        (normalize_realpath cwd)
-  | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
+  | Error e ->
+    Alcotest.fail
+      ("read cwd should map container path: "
+       ^ Masc.Keeper_tool_shared_runtime.read_path_error_message e));
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~config
@@ -601,7 +608,10 @@ let test_docker_container_file_path_maps_to_host_worktree () =
   | Ok path ->
     Alcotest.(check string) "file path maps to host"
       (normalize_realpath host_file) (normalize_realpath path)
-  | Error e -> Alcotest.fail ("file path should map container path: " ^ e)
+  | Error e ->
+    Alcotest.fail
+      ("file path should map container path: "
+       ^ Masc.Keeper_tool_shared_runtime.read_path_error_message e)
 
 let test_docker_other_container_root_stays_blocked () =
   setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -616,7 +626,9 @@ let test_docker_other_container_root_stays_blocked () =
   | Ok cwd -> Alcotest.fail ("other keeper container cwd should be blocked: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "outside project root" true
-      (String_util.contains_substring e "path_outside_project_root")
+      (String_util.contains_substring
+         (Masc.Keeper_tool_shared_runtime.read_path_error_message e)
+         "path_outside_project_root")
 
 let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
   setup ~keeper_name:"readonly-exec" ~sandbox:Keeper_types_profile_sandbox.Local

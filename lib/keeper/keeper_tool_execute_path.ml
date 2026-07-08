@@ -21,9 +21,13 @@ let resolve_tool_read_cwd
   | Error _ as err -> err
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd ->
-    if not (Fs_compat.file_exists cwd) then resolve_missing_cwd cwd
-    else
-      Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+    (* RFC-0330: cwd stat failures carry no typed rejection — wrap [Opaque]
+       so classification stays via the string classifier ("cwd_not_directory:"
+       still maps to Cwd_not_directory, unchanged). *)
+    (if not (Fs_compat.file_exists cwd) then resolve_missing_cwd cwd
+     else
+       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd))
+    |> Result.map_error (fun s -> Opaque s)
 
 let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in

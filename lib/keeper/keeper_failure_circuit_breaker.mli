@@ -21,6 +21,17 @@ type error_class =
 (** Classify an error message string into an error class. *)
 val classify_error : string -> error_class
 
+(** Classify a typed path rejection directly, without the string
+    round-trip through [classify_error]/[parse_rejection_prefix]. Yields the
+    same [error_class] as
+    [classify_error (Keeper_path_rejection.rejection_to_user_message rej)]
+    for every variant (see RFC-0330 §6). Re-exported from
+    [Keeper_failure_circuit_breaker_types] so typed callers on the read path
+    reach the matcher without a string reparse. *)
+val classify_typed_path_rejection
+  :  Keeper_path_rejection.keeper_path_rejection
+  -> error_class
+
 (** Record a successful tool call (resets consecutive counter). *)
 val record_success : keeper_name:string -> unit
 

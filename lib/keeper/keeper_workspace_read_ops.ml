@@ -38,7 +38,7 @@ let validate_rg_inputs ~pattern:_ ~file_type =
 
 type read_target_result =
   | Read_target of string
-  | Read_target_error of string
+  | Read_target_error of read_path_error
   | Read_target_policy_response of string
 
 let try_handle
@@ -71,7 +71,9 @@ let try_handle
     | Error e -> Read_target_error e
     | Ok target ->
       (match containment_check target with
-       | Error msg -> Read_target_error msg
+       (* RFC-0330: containment has no typed rejection — Opaque keeps the
+          string classifier path unchanged. *)
+       | Error msg -> Read_target_error (Opaque msg)
        | Ok () -> repo_check target)
   in
   let path_error e =
@@ -183,7 +185,7 @@ let try_handle
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
-               path_error "rg executable not found; Grep requires rg"
+               path_error (Opaque "rg executable not found; Grep requires rg")
              else
                let argv =
                  [ "-n"; "-m"; string_of_int limit ]

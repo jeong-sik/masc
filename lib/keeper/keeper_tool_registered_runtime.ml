@@ -35,7 +35,10 @@ let masc_path_blocked
     in
     let resolve raw =
       if is_read_only
-      then resolve_keeper_read_path ~config ~meta ~raw_path:raw
+      then
+        (* RFC-0330: this find-first-error path only needs the message. *)
+        Result.map_error read_path_error_message
+          (resolve_keeper_read_path ~config ~meta ~raw_path:raw)
       else resolve_keeper_path ~config ~meta ~raw_path:raw
     in
     List.find_map

@@ -184,6 +184,7 @@ let audit_approval_event
       ?approval_mode
       ?authorizing_band
       ?decision
+      ?continuation_channel
       ()
   =
   let decision, decision_kind, decision_reason =
@@ -247,6 +248,10 @@ let audit_approval_event
             | None -> [])
          @ (match authorizing_band with
             | Some value -> [ "authorizing_band", `String value ]
+            | None -> [])
+         @ (match continuation_channel with
+            | Some channel ->
+              [ "continuation_channel", Keeper_continuation_channel.to_yojson channel ]
             | None -> [])
          @
          match auto_approved with
@@ -389,6 +394,7 @@ let resolved_approval_json_of_audit_event json =
     ; "approval_mode", json_member_or_null "approval_mode" json
     ; "authorizing_band", json_member_or_null "authorizing_band" json
     ; "auto_approved", json_member_or_null "auto_approved" json
+    ; "continuation_channel", json_member_or_null "continuation_channel" json
     ]
 ;;
 
@@ -495,6 +501,8 @@ let create_entry
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?(continuation_channel =
+        Keeper_continuation_channel.unrouted "no originating connector")
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -531,6 +539,7 @@ let create_entry
   ; disposition
   ; disposition_reason
   ; phase = Awaiting_operator
+  ; continuation_channel
   ; audit_base_path
   ; resolver
   ; on_resolution
@@ -584,6 +593,7 @@ let pending_entry_json_fields
   ; "selected_model", `Null
   ; "disposition", Json_util.string_opt_to_json entry.disposition
   ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason
+  ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
   ]
   @ (if include_requested_at_iso
      then
@@ -671,6 +681,7 @@ let record_pending (entry : pending_approval) =
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
     ?disposition_reason:entry.disposition_reason
+    ~continuation_channel:entry.continuation_channel
     ();
   broadcast_pending entry
 ;;
@@ -847,14 +858,30 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
+     continuation_channel:Keeper_continuation_channel.t ->
      unit)
     ref =
-  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ())
+  ref
+    (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~continuation_channel:_ ->
+       ())
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
-let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision =
-  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision with
+let wake_keeper_on_approval_resolution
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~decision
+      ~continuation_channel
+  =
+  try
+    !approval_resolution_wake_hook
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~decision
+      ~continuation_channel
+  with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn
@@ -895,6 +922,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ?disposition:entry.disposition
     ?disposition_reason:entry.disposition_reason
     ~decision:(Approval_resolved decision)
+    ~continuation_channel:entry.continuation_channel
     ();
   (match entry.resolver with
    | Some resolver -> Eio.Promise.resolve resolver decision
@@ -920,7 +948,8 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ~base_path
     ~keeper_name:entry.keeper_name
     ~approval_id:entry.id
-    ~decision:(hitl_resolution_decision_of_approval_decision decision);
+    ~decision:(hitl_resolution_decision_of_approval_decision decision)
+    ~continuation_channel:entry.continuation_channel;
   try
     Sse.broadcast
       (`Assoc
@@ -1041,6 +1070,7 @@ let submit_and_await
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
       ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
+      ?continuation_channel
       ()
   : Agent_sdk.Hooks.approval_decision
   =
@@ -1064,6 +1094,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
       ~on_resolution:None
@@ -1112,6 +1143,7 @@ let submit_and_await
            ?runtime_contract
            ?selected_model
            ~decision:(Approval_expired reason)
+           ~continuation_channel:entry.continuation_channel
            ();
          (* Mirror expire_stale's teardown, but preserve any concurrent
             operator decision that wins the promise resolution race. *)
@@ -1142,6 +1174,7 @@ let submit_and_await
            ?runtime_contract
            ?selected_model
            ~audit_disposition:(Approval_escalated reason)
+           ~continuation_channel:entry.continuation_channel
            ();
          (match update_pending_phase ~id Escalated with
           | Some escalated_entry -> broadcast_pending escalated_entry
@@ -1175,6 +1208,7 @@ let submit_and_await
               ?disposition
               ?disposition_reason
               ~decision:(Approval_expired reason)
+              ~continuation_channel:entry.continuation_channel
               ()
           with
           | Eio.Cancel.Cancelled _ -> ()
@@ -1208,6 +1242,7 @@ let submit_pending
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ~on_resolution
       ()
   : string
@@ -1253,6 +1288,7 @@ let submit_pending
           ?selected_model
           ?disposition
           ?disposition_reason
+          ?continuation_channel
           ~audit_base_path:base_path
           ~resolver:None
           ~on_resolution:(Some on_resolution)
@@ -1515,6 +1551,7 @@ let expire_stale ~max_wait_s =
          ?disposition:entry.disposition
          ?disposition_reason:entry.disposition_reason
          ~decision:(Approval_expired reason)
+         ~continuation_channel:entry.continuation_channel
          ();
        (* Expiry clears the [Approval_pending] skip just like a resolution, so
           the keeper needs the same wake or it stays stalled until an unrelated
@@ -1524,7 +1561,8 @@ let expire_stale ~max_wait_s =
          ~base_path:entry.audit_base_path
          ~keeper_name:entry.keeper_name
          ~approval_id:id
-         ~decision:Keeper_event_queue.Hitl_rejected;
+         ~decision:Keeper_event_queue.Hitl_rejected
+         ~continuation_channel:entry.continuation_channel;
        (match entry.resolver with
         | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
         | None -> ());

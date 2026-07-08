@@ -376,7 +376,14 @@ let reject_hard_forbidden ~config ~keeper_name ~tool_name ~input ~risk ~meta () 
   decision
 ;;
 
-let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock ()
+let to_oas_approval_callback
+      ~config
+      ~governance_level
+      ~keeper_name
+      ?meta
+      ?clock
+      ?continuation_channel
+      ()
   : Agent_sdk.Hooks.approval_callback
   =
   fun ~tool_name ~input ->
@@ -559,6 +566,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
                   (Operator_approval.approval_mode_queue_reason_to_string reason)
                 ~risk_level
                 ?clock
+                ?continuation_channel
                 ()
             in
             (match Operator_approval.decide_approval_mode ~mode ~band with

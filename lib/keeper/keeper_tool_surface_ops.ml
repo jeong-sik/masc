@@ -694,7 +694,7 @@ let keeper_msg_body
   | Error err -> tool_result_error err
 ;;
 
-let handle_keeper_msg ctx args : tool_result =
+let handle_keeper_msg ?continuation_channel ctx args : tool_result =
   match
     let* name = resolve_keeper_name ctx args in
     let resolved_args = with_keeper_name args name in
@@ -711,7 +711,9 @@ let handle_keeper_msg ctx args : tool_result =
         ~base_path:ctx.config.base_path
         ~keeper_name:name
         ~f:(fun ?event_bus () ->
-          let result = Turn.handle_keeper_msg ?event_bus ctx resolved_args in
+          let result =
+            Turn.handle_keeper_msg ?event_bus ?continuation_channel ctx resolved_args
+          in
           if tool_result_success result
           then begin
             append_direct_chat_pair_if_reply
@@ -802,7 +804,14 @@ let keeper_msg_queue_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_msg_queue ctx args : tool_result =
   keeper_msg_queue_body ~config:ctx.config args
 
-let handle_keeper_msg_stream ?on_text_delta ?on_event ctx args : tool_result =
+let handle_keeper_msg_stream
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      args
+  : tool_result
+  =
   match
     let* name = resolve_keeper_name ctx args in
     let resolved_args = with_keeper_name args name in
@@ -811,7 +820,13 @@ let handle_keeper_msg_stream ?on_text_delta ?on_event ctx args : tool_result =
        fallback lookup in the turn body. *)
     let event_bus = Keeper_event_bus.get () in
     let result =
-      Turn.handle_keeper_msg ?on_text_delta ?on_event ?event_bus ctx resolved_args
+      Turn.handle_keeper_msg
+        ?on_text_delta
+        ?on_event
+        ?event_bus
+        ?continuation_channel
+        ctx
+        resolved_args
     in
     if not (tool_result_success result) then
       Ok result

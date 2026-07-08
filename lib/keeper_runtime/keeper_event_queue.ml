@@ -131,19 +131,26 @@ and hitl_resolution = {
   approval_id : string;
   (* the resolved pending-approval id; correlates to the queue entry. *)
   decision : hitl_resolution_decision;
-  (* resolved decision label carried for observability, not control flow — the
-     keeper re-evaluates from its own state once the approval is gone from the
-     queue. *)
+  (* resolved decision label carried for observability. *)
+  channel : Keeper_continuation_channel.t;
+  (* RFC-0320: the connector the resolved conversation started on, captured at
+     approval-submission time and carried through so a woken keeper can reply
+     into it. [Unrouted] when no originating connector was captured. *)
 }
 
 and bg_job_outcome =
   | Bg_ok of string  (* result payload *)
   | Bg_failed of string  (* failure label *)
 
-and connector_attention = { event_id : string }
+and connector_attention = {
+  event_id : string;
       (* RFC-connector-ambient-attention-wake: pointer into
          [Keeper_external_attention] for the ambient message; content/surface
          read from that store on the turn path. *)
+  channel : Keeper_continuation_channel.t;
+      (* RFC-0320: the connector that raised this attention, so a woken keeper
+         replies into the same channel. [Unrouted] when unknown. *)
+}
 
 and scheduled_wake = {
   schedule_id : string;
@@ -559,12 +566,14 @@ let payload_to_yojson = function
     `Assoc
       [ "kind", `String "connector_attention"
       ; "event_id", `String ca.event_id
+      ; "channel", Keeper_continuation_channel.to_yojson ca.channel
       ]
   | Hitl_resolved r ->
     `Assoc
       [ "kind", `String "hitl_resolved"
       ; "approval_id", `String r.approval_id
       ; "decision", `String (hitl_resolution_decision_to_string r.decision)
+      ; "channel", Keeper_continuation_channel.to_yojson r.channel
       ]
   | Goal_verification_failed failure ->
     `Assoc
@@ -601,6 +610,14 @@ let payload_to_yojson = function
       ; "stale_since", `String gs.gs_stale_since
       ; "goal_title", `String gs.gs_goal_title
       ]
+
+let continuation_channel_field fields =
+  match List.assoc_opt "channel" fields with
+  | None ->
+    (* Backward compat: pre-RFC-0320 persisted stimuli carry no channel; a
+       replayed legacy wake is [Unrouted] rather than a parse failure. *)
+    Ok (Keeper_continuation_channel.unrouted "legacy: channel not captured")
+  | Some json -> Keeper_continuation_channel.of_yojson json
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -655,12 +672,14 @@ let payload_of_yojson json =
     Ok (Schedule_due { schedule_id; due_at; payload_digest; title; message })
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
-    Ok (Connector_attention { event_id })
+    let* channel = continuation_channel_field fields in
+    Ok (Connector_attention { event_id; channel })
   | "hitl_resolved" ->
     let* approval_id = string_field ~context "approval_id" fields in
     let* decision_s = string_field ~context "decision" fields in
     let* decision = hitl_resolution_decision_of_string decision_s in
-    Ok (Hitl_resolved { approval_id; decision })
+    let* channel = continuation_channel_field fields in
+    Ok (Hitl_resolved { approval_id; decision; channel })
   | "goal_verification_failed" ->
     let* goal_id = string_field ~context "goal_id" fields in
     let* request_id = string_field ~context "request_id" fields in

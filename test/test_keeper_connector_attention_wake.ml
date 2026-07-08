@@ -166,14 +166,35 @@ let test_connector_attention_codec_roundtrips () =
     { Q.post_id = "evt-77"
     ; urgency = Q.Normal
     ; arrived_at = 1.0
-    ; payload = Q.Connector_attention { event_id = "evt-77" }
+    ; payload =
+        Q.Connector_attention
+          { event_id = "evt-77"
+          ; channel =
+              Keeper_continuation_channel.Discord
+                { guild_id = Some "guild-77"
+                ; channel_id = "chan-77"
+                ; parent_channel_id = Some "parent-77"
+                ; thread_id = Some "thread-77"
+                ; user_id = "user-77"
+                }
+          }
     }
   in
   match Q.stimulus_of_yojson (Q.stimulus_to_yojson s) with
   | Ok s' -> (
     match s'.Q.payload with
-    | Q.Connector_attention { event_id } ->
-      check string "event_id survives the JSON round-trip" "evt-77" event_id
+    | Q.Connector_attention { event_id; channel } ->
+      check string "event_id survives the JSON round-trip" "evt-77" event_id;
+      check bool "connector coordinates survive the JSON round-trip" true
+        (Keeper_continuation_channel.same_route
+           channel
+           (Keeper_continuation_channel.Discord
+              { guild_id = Some "guild-77"
+              ; channel_id = "chan-77"
+              ; parent_channel_id = Some "parent-77"
+              ; thread_id = Some "thread-77"
+              ; user_id = "user-77"
+              }))
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
 

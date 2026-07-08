@@ -35,6 +35,12 @@ let validate_rg_inputs ~pattern:_ ~file_type =
   | Error _ as e -> e
   | Ok () -> Ok ()
 ;;
+
+type read_target_result =
+  | Read_target of string
+  | Read_target_error of string
+  | Read_target_policy_response of string
+
 let try_handle
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -48,19 +54,25 @@ let try_handle
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
   let repo_check target =
-    Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
-      ~base_path:root ~path:target
+    match
+      Keeper_repo_claim_hitl.request_path_access
+        ~keeper_id:meta.name
+        ~base_path:root
+        ~path:target
+    with
+    | Keeper_repo_claim_hitl.Access_allowed -> Read_target target
+    | access_result ->
+      Read_target_policy_response
+        (Yojson.Safe.to_string
+           (Keeper_repo_claim_hitl.tool_response_json ~path:target access_result))
   in
   let read_target () =
     match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
-    | Error _ as e -> e
+    | Error e -> Read_target_error e
     | Ok target ->
       (match containment_check target with
-       | Error msg -> Error msg
-       | Ok () ->
-         match repo_check target with
-         | Error msg -> Error msg
-         | Ok () -> Ok target)
+       | Error msg -> Read_target_error msg
+       | Ok () -> repo_check target)
   in
   let path_error e =
     actionable_path_error ~op ~meta ~raw_path ~error:e
@@ -138,8 +150,9 @@ let try_handle
          | Error msg -> error_json ~fields:[ "op", `String op ] msg
          | Ok () -> (
            match read_target () with
-           | Error e -> path_error e
-           | Ok target ->
+           | Read_target_error e -> path_error e
+           | Read_target_policy_response response -> response
+           | Read_target target ->
              let limit = shell_readonly_limit args in
              let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
              if Keeper_sandbox_read_runner.should_route_read ~meta then

@@ -297,7 +297,7 @@ module Transport = struct
 end
 
 module Verification = struct
-  (** Enable AwaitingVerification state and cross-agent approval. Default: false. *)
+  (** Enable AwaitingVerification state and cross-agent approval. Default: true (SSOT: [Feature_flag_registry.all_flags]). *)
   let fsm_enabled () =
     Feature_flag_registry.get_bool "MASC_VERIFICATION_FSM_ENABLED"
 

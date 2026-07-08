@@ -39,7 +39,9 @@ let test_add_task_in_jsonl_mode () =
           Alcotest.(check bool) "returns success message" true
             (String.length message > 0))
 
-let test_update_status_and_delete_use_locked_jsonl_path () =
+(* update_status coverage was retired with the function (RFC-0323 G-7);
+   delete_task keeps its locked-path pin. *)
+let test_delete_uses_locked_jsonl_path () =
   with_temp_config (fun config ->
       ignore (Workspace.init config ~agent_name:(Some "tester"));
       Task.Dispatch.reset_for_test ();
@@ -58,31 +60,11 @@ let test_update_status_and_delete_use_locked_jsonl_path () =
                  Alcotest.failf "expected exactly one task, got %d"
                    (List.length tasks))
       in
-      let status =
-        Masc_domain.Claimed
-          { assignee = "tester"; claimed_at = Masc_domain.now_iso () }
-      in
-      (match Task.Dispatch.update_status config ~task_id ~status with
-       | Ok () -> ()
-       | Error e -> Alcotest.fail (Masc_domain.show_masc_error e));
-      let updated = Workspace.read_backlog config in
-      Alcotest.(check int) "version bumped by update" 3 updated.version;
-      (match updated.tasks with
-       | [ task ] ->
-           Alcotest.(check bool)
-             "task claimed"
-             true
-             (match task.Masc_domain.task_status with
-              | Masc_domain.Claimed { assignee; _ } -> String.equal assignee "tester"
-              | _ -> false)
-       | tasks ->
-           Alcotest.failf "expected exactly one task after update, got %d"
-             (List.length tasks));
       (match Task.Dispatch.delete_task config ~task_id with
        | Ok () -> ()
        | Error e -> Alcotest.fail (Masc_domain.show_masc_error e));
       let deleted = Workspace.read_backlog config in
-      Alcotest.(check int) "version bumped by delete" 4 deleted.version;
+      Alcotest.(check int) "version bumped by delete" 3 deleted.version;
       Alcotest.(check int) "task deleted" 0 (List.length deleted.tasks))
 
 let write_string path content =
@@ -91,7 +73,7 @@ let write_string path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let test_update_status_and_delete_return_error_when_backlog_unreadable () =
+let test_delete_returns_error_when_backlog_unreadable () =
   with_temp_config (fun config ->
       ignore (Workspace.init config ~agent_name:(Some "tester"));
       Task.Dispatch.reset_for_test ();
@@ -99,10 +81,6 @@ let test_update_status_and_delete_return_error_when_backlog_unreadable () =
       let backlog_path = Filename.concat (Workspace.tasks_dir config) "backlog.json" in
       write_string backlog_path "{not-json";
       write_string (backlog_path ^ ".last-good") "{not-json";
-      let status =
-        Masc_domain.Claimed
-          { assignee = "tester"; claimed_at = Masc_domain.now_iso () }
-      in
       let expect_io_error label = function
         | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> ()
         | Ok () -> Alcotest.failf "%s unexpectedly succeeded" label
@@ -110,8 +88,6 @@ let test_update_status_and_delete_return_error_when_backlog_unreadable () =
             Alcotest.failf "%s returned unexpected error: %s" label
               (Masc_domain.show_masc_error e)
       in
-      expect_io_error "update_status"
-        (Task.Dispatch.update_status config ~task_id:"missing" ~status);
       expect_io_error "delete_task"
         (Task.Dispatch.delete_task config ~task_id:"missing");
       let ic = open_in backlog_path in
@@ -177,10 +153,10 @@ let () =
       ( "jsonl",
         [
           Alcotest.test_case "add task" `Quick test_add_task_in_jsonl_mode;
-          Alcotest.test_case "update/delete use locked path" `Quick
-            test_update_status_and_delete_use_locked_jsonl_path;
-          Alcotest.test_case "update/delete fail on unreadable backlog" `Quick
-            test_update_status_and_delete_return_error_when_backlog_unreadable;
+          Alcotest.test_case "delete uses locked path" `Quick
+            test_delete_uses_locked_jsonl_path;
+          Alcotest.test_case "delete fails on unreadable backlog" `Quick
+            test_delete_returns_error_when_backlog_unreadable;
           Alcotest.test_case "source pins backlog lock" `Quick
             test_task_dispatch_source_pins_backlog_lock;
         ] );

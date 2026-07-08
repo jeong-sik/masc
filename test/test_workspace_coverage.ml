@@ -590,7 +590,7 @@ let test_claim_next_r_preserved_task_field () =
     | _ -> Alcotest.fail "second claim should succeed")
 ;;
 
-let test_release_hard_stop_blocks_future_claim_next () =
+let test_release_hard_stop_todo_stays_claimable () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
@@ -639,13 +639,20 @@ let test_release_hard_stop_blocks_future_claim_next () =
       "typed hard-stop persisted"
       (Some "block_reclaim")
       (Option.map Masc_domain.task_reclaim_policy_to_string task_001.reclaim_policy);
+    (* task-1869 (#23661): reclaim_policy gates Done -> re-claim only, so the
+       released Todo task stays claimable and claim_next picks it back up by
+       priority. The pre-#23661 pin expected task-002 here and sat latent-red
+       while main was compile-red. The persisted policy/reason above re-arm
+       once the task reaches Done. *)
     match Workspace.claim_next_r config ~agent_name:claude () with
     | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "claim_next skips blocked todo" "task-002" task_id
-    | _ -> Alcotest.fail "expected claim_next_r to skip blocked task-001")
+      Alcotest.(check string)
+        "claim_next re-claims released todo despite block policy"
+        "task-001" task_id
+    | _ -> Alcotest.fail "expected claim_next_r to claim the released task-001")
 ;;
 
-let test_release_hard_stop_blocks_direct_reclaim () =
+let test_release_hard_stop_allows_direct_todo_reclaim () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
@@ -671,16 +678,26 @@ let test_release_hard_stop_blocks_direct_reclaim () =
      with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
-    match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
-      Alcotest.(check bool)
-        "direct claim blocked by typed reclaim_policy"
-        true
-        (str_contains message "blocked from re-claim")
-    | Error e ->
-      Alcotest.fail
-        ("expected TaskInvalidState, got " ^ Masc_domain.masc_error_to_string e)
-    | Ok _ -> Alcotest.fail "direct claim should be blocked after hard-stop release")
+    (* task-1869 (#23661): a Todo task is always claimable — Block_reclaim
+       re-arms only at Done -> re-claim. Direct re-claim of the released
+       task therefore succeeds; the typed policy stays persisted on the task. *)
+    (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error e ->
+       Alcotest.fail
+         ("direct todo re-claim should succeed under task-1869: "
+          ^ Masc_domain.masc_error_to_string e));
+    match
+      List.find_opt
+        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
+        (Workspace.get_tasks_raw config)
+    with
+    | Some task ->
+      Alcotest.(check (option string))
+        "typed hard-stop policy survives the re-claim"
+        (Some "block_reclaim")
+        (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
+    | None -> Alcotest.fail "task-001 not found after re-claim")
 ;;
 
 let write_tasks config tasks =
@@ -2446,13 +2463,29 @@ let test_predecessor_non_terminal_rejected () =
 
 let test_predecessor_terminal_accepted_and_persisted () =
   with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
     let _ =
       Workspace.add_task config ~title:"Original" ~priority:2 ~description:""
     in
+    (* Todo -> Done is not a legal transition even under System authority;
+       walk the task to InProgress first (this test was added by #23668
+       during a compile-red main, so the invalid setup never ran). *)
+    let _ = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    (match
+       Workspace.transition_task_r
+         config
+         ~agent_name:claude
+         ~task_id:"task-001"
+         ~action:Masc_domain.Start
+         ()
+     with
+     | Ok _ -> ()
+     | Error e ->
+       Alcotest.fail ("start failed: " ^ Masc_domain.masc_error_to_string e));
     let forced =
       Workspace.force_done_task_r
         config
-        ~agent_name:"claude"
+        ~agent_name:claude
         ~task_id:"task-001"
         ~notes:"done"
         ()
@@ -2595,13 +2628,13 @@ let () =
             `Quick
             test_claim_next_r_preserved_task_field
         ; Alcotest.test_case
-            "release hard-stop blocks future claim_next"
+            "release hard-stop persists policy, todo stays claimable"
             `Quick
-            test_release_hard_stop_blocks_future_claim_next
+            test_release_hard_stop_todo_stays_claimable
         ; Alcotest.test_case
-            "release hard-stop blocks direct reclaim"
+            "release hard-stop allows direct todo re-claim (task-1869)"
             `Quick
-            test_release_hard_stop_blocks_direct_reclaim
+            test_release_hard_stop_allows_direct_todo_reclaim
         ; Alcotest.test_case
             "completed allow-reclaim task is scheduled"
             `Quick

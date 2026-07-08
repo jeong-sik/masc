@@ -882,6 +882,25 @@ module Shell_ir_approval_gate = struct
       to disable the gate (kill-switch) without recompilation. *)
   let enabled () =
     Feature_flag_registry.get_bool "MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
+
+  (** Optional base profile preset for Shell IR approval.
+      Supported values are parsed as profile presets such as:
+      observe/autonomous, enforced/all_enforced, permissive, suggest, auto_safe. *)
+  let profile () = raw_value_opt "MASC_SHELL_IR_APPROVAL_PROFILE" |> trim_opt
+
+  (** Optional per-risk overrides (override the selected profile).
+      Values are parsed as trust levels such as:
+      observe/obs, suggest/s, auto_safe/auto-safe/autosafe, enforced/ask/strict/deny.
+      Empty / malformed values are ignored. *)
+  let safe_trust () = raw_value_opt "MASC_SHELL_IR_APPROVAL_SAFE_TRUST" |> trim_opt
+
+  (** See {!safe_trust}. *)
+  let audited_trust () =
+    raw_value_opt "MASC_SHELL_IR_APPROVAL_AUDITED_TRUST" |> trim_opt
+
+  (** See {!safe_trust}. *)
+  let privileged_trust () =
+    raw_value_opt "MASC_SHELL_IR_APPROVAL_PRIVILEGED_TRUST" |> trim_opt
 end
 
 (** {1 Internal Safety Configuration} *)

@@ -32,8 +32,10 @@ val create :
   guild_id_field:guild_id_field ->
   t
 
+val read_json_file_result : string -> (Yojson.Safe.t option, string) result
 val read_json_file_opt : string -> Yojson.Safe.t option
 val normalize_bindings_json : Yojson.Safe.t -> binding list
+val read_bindings_result : t -> (binding list, string) result
 val read_bindings : t -> binding list
 val binding_json : binding -> Yojson.Safe.t
 val save_bindings : t -> binding list -> unit

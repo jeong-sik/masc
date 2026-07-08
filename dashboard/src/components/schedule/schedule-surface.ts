@@ -71,7 +71,7 @@ function countByStatus(
 }
 
 export function ScheduleSurface() {
-  const [demoMode, setDemoMode] = useState<boolean>(true)
+  const [demoMode, setDemoMode] = useState<boolean>(false)
   const data = toolsData.value
   const automation = data?.scheduled_automation ?? null
   const waitingInventory = data?.keeper_waiting_inventory ?? null
@@ -239,10 +239,14 @@ export function ScheduleSurface() {
           <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
         </div>
 
-        <section class="ov-card mt-4" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
-          <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
-          <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
-        </section>
+        ${view === 'list'
+          ? html`
+              <section class="ov-card mt-4" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
+                <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
+                <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
+              </section>
+            `
+          : null}
 
         ${loading && !automation && !demoMode
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`

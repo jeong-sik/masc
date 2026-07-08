@@ -14,7 +14,7 @@
 
 ### 1.1 Symptom
 
-Keeper `mad-improver` (repo `~/me/workspace/yousleepwhen/masc`, runtime state `~/me/.masc`) ran for approximately 26 hours / 70+ turns broadcasting a single message:
+Keeper `mad-improver` (repo `~/me/workspace/yousleepwhen/masc`, runtime state `<base-path>/.masc`) ran for approximately 26 hours / 70+ turns broadcasting a single message:
 
 > "Execute hard_forbidden — operator must add execute=true to keeper_repo_mappings.toml to grant Execute permission."
 
@@ -25,7 +25,7 @@ The keeper produced no tool-side progress (48h agent-timeline: `tool_calls=0`, `
 - T-~26h: provider `runpod_mtp.qwen36-35b-a3b-mtp` begins returning empty completions (`reason_kind=no_usable_progress`; `shape=empty`; `stop_reason=max_tokens/end_turn`; `text_chars=0`; `content_blocks=0`; `tool_use_count=0`). Also `Capacity backpressure ... cooldown_cause=terminal_failure; retry_after≈3599s`. The keeper is starved of usable output. The provider endpoint was serving a Jupyter Server (HTTP 403).
 - Governance layer (independent of provider): any shell Execute attempt is classified `risk=Critical` unconditionally and blocked before HITL (`Block`, "unconditional block regardless of HITL mode"). Confirmed `mad-improver.json` `last_blocker` was later `capacity_backpressure`, and at the time of the confabulation `last_blocker: null`, so the block was pure `risk=Critical`. The mechanism of this block is the subject of RFC-0329.
 - The keeper reports the mechanism-true fact "Execute is blocked" but confabulates the cause and the fix.
-- Memory poison closes the loop: `~/me/.masc/keepers/mad-improver.memory.jsonl` (60 rows) had 47 rows repeating the false causal claim, `source=progress_consolidation`, `priority≈90`, tagged `[consolidated:N]`. Each turn: read poisoned memory → re-derive false conclusion → broadcast → re-consolidate.
+- Memory poison closes the loop: `<base-path>/.masc/keepers/mad-improver.memory.jsonl` (60 rows) had 47 rows repeating the false causal claim, `source=progress_consolidation`, `priority≈90`, tagged `[consolidated:N]`. Each turn: read poisoned memory → re-derive false conclusion → broadcast → re-consolidate.
 - On 2026-07-02 an operator manually rerouted `issue_king` off `runpod_mtp` to a working endpoint (`runtime.toml:504` `"issue_king" = "runpod_rtxa6000.gemma4-coder-fable5-q4km"`) but left `mad-improver` on the dead endpoint one line below (`runtime.toml:505`). `mad-improver` is the keeper the hand-edit missed.
 
 ### 1.3 Keeper error taxonomy (kept verbatim for the record)

@@ -319,7 +319,7 @@ let test_claim_next_all_claimed () =
     Alcotest.(check bool) "no unclaimed tasks" true (str_contains result "No unclaimed"))
 ;;
 
-let test_claim_next_reclaims_done_and_skips_cancelled () =
+let test_claim_next_skips_done_and_cancelled () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
@@ -339,9 +339,9 @@ let test_claim_next_reclaims_done_and_skips_cancelled () =
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
     let result = Workspace.claim_next config ~agent_name:"claude" in
     Alcotest.(check bool)
-      "reclaims the completed task first"
+      "claims the remaining todo task"
       true
-      (str_contains result "task-001");
+      (str_contains result "task-003");
     let tasks = Workspace.get_tasks_raw config in
     let status_of task_id =
       match
@@ -350,19 +350,24 @@ let test_claim_next_reclaims_done_and_skips_cancelled () =
       | Some task -> Masc_domain.task_status_to_string task.task_status
       | None -> Alcotest.failf "missing task %s" task_id
     in
-    Alcotest.(check string) "done task reclaimed" "claimed" (status_of "task-001");
+    Alcotest.(check string) "done task preserved" "done" (status_of "task-001");
     Alcotest.(check string) "cancelled task preserved" "cancelled" (status_of "task-002");
-    Alcotest.(check string) "lower-priority todo stays open" "todo" (status_of "task-003"))
+    Alcotest.(check string) "todo task claimed" "claimed" (status_of "task-003"))
 ;;
 
-let test_claim_next_cancelled_only_backlog () =
+let test_claim_next_terminal_only_backlog () =
   with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Cancelled Task" ~priority:1 ~description:"" in
+    let _ = Workspace.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
+    let _ = Workspace.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
+    let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ =
+      transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done"
+    in
     (match
        Workspace.cancel_task_r
          config
          ~agent_name:"alice"
-         ~task_id:"task-001"
+         ~task_id:"task-002"
          ~reason:"cancelled"
      with
      | Ok _ -> ()
@@ -1896,13 +1901,33 @@ let test_claim_task_r_success () =
     | Error _ -> Alcotest.fail "Expected Ok")
 ;;
 
-let test_claim_task_r_reclaims_done_default_policy () =
+let test_claim_task_r_blocks_done_default_policy () =
   with_test_env (fun config ->
     let _ =
       Workspace.add_task config ~title:"Completed default-policy task" ~priority:1 ~description:""
     in
     update_task config "task-001" (fun (t : Masc_domain.task) ->
       { t with task_status = done_status "prior-agent"; reclaim_policy = None });
+    match Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () with
+    | Error _ ->
+      let task = task_by_id config "task-001" in
+      Alcotest.(check string)
+        "default completed task stays terminal"
+        "done"
+        (Masc_domain.task_status_to_string task.task_status)
+    | Ok _ -> Alcotest.fail "completed default-policy task must not be claimable")
+;;
+
+let test_claim_task_r_reclaims_done_allow_reclaim () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task config ~title:"Completed allow-reclaim task" ~priority:1 ~description:""
+    in
+    update_task config "task-001" (fun (t : Masc_domain.task) ->
+      { t with
+        task_status = done_status "prior-agent"
+      ; reclaim_policy = Some Masc_domain.Allow_reclaim
+      });
     match Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () with
     | Ok outcome ->
       Alcotest.(check bool)
@@ -1912,12 +1937,12 @@ let test_claim_task_r_reclaims_done_default_policy () =
       assert_claimed_by config "task-001" "claude";
       let task = task_by_id config "task-001" in
       Alcotest.(check (option string))
-        "default reclaim policy remains clear"
+        "allow_reclaim policy cleared"
         None
         (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
     | Error e ->
       Alcotest.fail
-        ("completed default-policy task should be claimable: "
+        ("completed allow-reclaim task should be claimable: "
          ^ Masc_domain.masc_error_to_string e))
 ;;
 
@@ -2282,13 +2307,13 @@ let () =
         ; Alcotest.test_case "empty backlog" `Quick test_claim_next_empty_backlog
         ; Alcotest.test_case "all claimed" `Quick test_claim_next_all_claimed
         ; Alcotest.test_case
-            "reclaims done and skips cancelled"
+            "skips done/cancelled"
             `Quick
-            test_claim_next_reclaims_done_and_skips_cancelled
+            test_claim_next_skips_done_and_cancelled
         ; Alcotest.test_case
-            "cancelled-only backlog"
+            "terminal-only backlog"
             `Quick
-            test_claim_next_cancelled_only_backlog
+            test_claim_next_terminal_only_backlog
         ; Alcotest.test_case "consecutive" `Quick test_claim_next_consecutive
         ; Alcotest.test_case
             "reconciles stale current_task"
@@ -2447,9 +2472,13 @@ let () =
             test_transition_done_r_not_found
         ; Alcotest.test_case "claim_task_r success" `Quick test_claim_task_r_success
         ; Alcotest.test_case
-            "claim_task_r reclaims completed task"
+            "claim_task_r blocks default completed task"
             `Quick
-            test_claim_task_r_reclaims_done_default_policy
+            test_claim_task_r_blocks_done_default_policy
+        ; Alcotest.test_case
+            "claim_task_r reclaims allow-reclaim completed task"
+            `Quick
+            test_claim_task_r_reclaims_done_allow_reclaim
         ; Alcotest.test_case
             "claim_task_r already claimed"
             `Quick

@@ -604,13 +604,13 @@ type task_reclaim_gate =
   | Reclaim_gate_open
   | Reclaim_gate_blocked_by_policy of string
 
+let task_reclaim_block_reason t =
+  Option.value t.do_not_reclaim_reason ~default:"reclaim blocked by typed policy"
+;;
+
 let task_reclaim_gate (t : task) =
   match t.reclaim_policy with
-  | Some Block_reclaim ->
-    Reclaim_gate_blocked_by_policy
-      (Option.value
-         t.do_not_reclaim_reason
-         ~default:"reclaim blocked by typed policy")
+  | Some Block_reclaim -> Reclaim_gate_blocked_by_policy (task_reclaim_block_reason t)
   | Some Allow_reclaim | None -> Reclaim_gate_open
 ;;
 
@@ -651,12 +651,16 @@ let task_claim_decision (task : task) =
   | Done _ ->
     (* Coordination-role tasks with Allow_reclaim policy are reclaimable
        after completion. task-1869: 6 TaskError fingerprints show
-       coordination-role tasks blocked from re-claim by completion. *)
-    (match task_reclaim_gate task with
-     | Reclaim_gate_open ->
+       coordination-role tasks blocked from re-claim by completion. The
+       opt-in must be explicit: [None] is the historical default for ordinary
+       terminal tasks and stays terminal. *)
+    (match task.reclaim_policy with
+     | Some Allow_reclaim ->
        Claim_available (task_claim_readiness task)
-     | Reclaim_gate_blocked_by_policy reason ->
-       Claim_unavailable (Claim_block_reclaim_policy reason))
+     | Some Block_reclaim ->
+       Claim_unavailable (Claim_block_reclaim_policy (task_reclaim_block_reason task))
+     | None ->
+       Claim_unavailable (Claim_block_not_todo task.task_status))
   | Claimed _
   | InProgress _
   | Cancelled _ ->

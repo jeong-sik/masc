@@ -429,8 +429,8 @@ let test_resolve_claim_outcomes () =
      L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
        (mk_task (mk_done other))
    with
-   | L.Worker_claim (D.Claimed { assignee = "w"; _ }) -> ()
-   | _ -> fail "Done without Block_reclaim should resolve to Worker_claim Claimed");
+   | L.Held_by_other h when String.equal h other -> ()
+   | _ -> fail "Done without explicit Allow_reclaim should stay held/terminal");
   (match
      L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
        (mk_task ~reclaim_policy:D.Allow_reclaim (mk_done other))

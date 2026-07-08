@@ -339,7 +339,9 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
   let notes = str_field "notes" in
   let evidence_refs =
     Yojson.Safe.Util.(
-      args |> member "handoff_context" |> member "evidence_refs" |> to_list_option
+      match args |> member "handoff_context" |> member "evidence_refs" with
+      | `List lst -> Some lst
+      | _ -> None
     )
     |> Option.value ~default:[]
     |> List.filter_map (fun j ->

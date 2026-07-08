@@ -915,11 +915,9 @@ let destructive_guard
    PM accepted policy risk (albini, p-6e2a0927be). Replace with a proper
    Env_config_core mechanism once one exists. *)
 let per_keeper_code_exemption _keeper_name =
-  (* task-1806: operator-controlled allowlist needed.
-     Current list: only rondo (self-consented). Garnet and base explicitly
-     declined [p-d1e25cb4c77b]. Sangsu not consulted.
-     TODO: Replace with Env_config_core mechanism per task-1807. *)
-  false  (* placeholder — no keepers exempt until operator config exists *)
+  (* task-1807: operator-controlled exemption via MASC_CODE_EXEMPT_KEEPERS env var.
+     Replaces hardcoded per-keeper allowlist. *)
+  Env_config_core.code_exempt_keeper ~keeper_name
 
 let governance_approval_guard
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)

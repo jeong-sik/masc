@@ -175,15 +175,19 @@ let behavior_prompt_block name =
         name
 
 
-type registered_repositories =
-  | Registered_repository_ids of string list
-  | Registered_repositories_unavailable of string
+(* RFC-0324 B-1: the [registered_repositories] variant and its catalog-fed
+   prompt block are removed. The prompt used to assert that every id in
+   repositories.toml "resolves under repos/<name>/" — but the catalog and a
+   keeper's sandbox checkouts have no invariant linking them, so keepers that
+   trusted the prompt referenced un-cloned repos (path_not_found, 379/24h in
+   the 2026-07-08 tool-error audit). The filesystem is the repo truth; the
+   constant [repositories_block] below instructs self-discovery instead of
+   injecting a stale fact snapshot. *)
 
 let build_keeper_system_prompt
     ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(home_ground = "") ?(active_goals = [])
-    ?(registered_repositories = Registered_repository_ids []) () =
+    ?(home_ground = "") ?(active_goals = []) () =
   let goal = normalize_goal_text goal in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
@@ -240,41 +244,22 @@ let build_keeper_system_prompt
          </home_ground>\n"
         (String_util.escape_xml home_ground)
   in
-  let registered_repositories_block =
-    (* Enumerate the globally registered repository ids from [repositories.toml]
-       so the keeper has the closed set of valid
-       [repos/<name>] segments rather than guessing (org-prefixed, renamed,
-       or invented names are rejected as unregistered). Empty catalog renders
-       nothing. Catalog read failure renders a fail-closed block so the keeper
-       does not silently fall back to guessing. *)
-    match registered_repositories with
-    | Registered_repository_ids [] -> ""
-    | Registered_repositories_unavailable reason ->
-        Printf.sprintf
-          "\n\
-           <registered_repositories>\n\
-           Repository catalog unavailable: %s\n\
-           Do not guess repos/<name> segments while the catalog is unavailable. \
-           Refresh repositories.toml or ask the operator for the correct \
-           registered repository id before using repository-scoped tools.\n\
-           </registered_repositories>\n"
-          (String_util.escape_xml reason)
-    | Registered_repository_ids repos ->
-        let lines =
-          List.map
-            (fun id -> Printf.sprintf "- repos/%s" (String_util.escape_xml id))
-            repos
-        in
-        Printf.sprintf
-          "\n\
-           <registered_repositories>\n\
-           Only these globally registered repository names resolve under \
-           repos/<name>/. Any other \
-           name (org-prefixed, renamed, or invented) is rejected as \
-           unregistered.\n\
-           %s\n\
-           </registered_repositories>\n"
-          (String.concat "\n" lines)
+  let repositories_block =
+    (* RFC-0324 B-1: constant self-discovery instruction. The filesystem is
+       the source of truth for a keeper's repositories — the global catalog
+       may register repositories that were never cloned into this sandbox,
+       and clone directory names may differ from catalog ids. A constant
+       block is also shared across all keepers (KV-cache friendly), unlike
+       the per-keeper catalog listing it replaces. *)
+    "\n\
+     <repositories>\n\
+     The filesystem is the source of truth for your repositories: only \
+     checkouts that actually exist under repos/ resolve. Before referencing \
+     a repository, list repos/ (for example: Execute ls repos) and use the \
+     directory names you find. Do not assume a repository exists because it \
+     is registered in a catalog — registration does not imply a checkout in \
+     your sandbox.\n\
+     </repositories>\n"
   in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
@@ -327,7 +312,7 @@ let build_keeper_system_prompt
       (* ── Home ground (CWD anchor) ───────────────────────────── *)
       home_ground_block;
       (* ── Registered repositories (valid repos/<name> segments) ─ *)
-      registered_repositories_block;
+      repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\

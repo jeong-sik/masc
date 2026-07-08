@@ -12,11 +12,13 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 # Check OCaml source files for OPERATOR_TODO markers
-# Exclude the marker definition itself and test files
+# Exclude the marker definition itself, test files, and error message strings
+# that reference the marker (they are not placeholders, they are diagnostics)
 hits=$(rg -n --fixed-strings "$marker" "$root" \
   --glob '**/*.ml' --glob '**/*.mli' \
-  --glob '!**/test_*.ml' --glob '!**/*_test.ml' \
-  --glob '!**/keeper_types_profile_persona.ml' 2>/dev/null || true)
+  --glob '!test/**' --glob '!**/test_*.ml' --glob '!**/*_test.ml' \
+  --glob '!**/keeper_types_profile_persona.ml' \
+  --glob '!**/keeper_tool_persona_runtime.ml' 2>/dev/null || true)
 
 if [ -n "$hits" ]; then
   echo "::error::OPERATOR_TODO placeholder marker '$marker' must not be present in source code"

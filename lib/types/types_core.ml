@@ -639,11 +639,11 @@ let task_claim_readiness (_task : task) = Claim_ready
 let task_claim_decision (task : task) =
   match task.task_status with
   | Todo ->
-    (match task_reclaim_gate task with
-     | Reclaim_gate_open ->
-       Claim_available (task_claim_readiness task)
-     | Reclaim_gate_blocked_by_policy reason ->
-       Claim_unavailable (Claim_block_reclaim_policy reason))
+    (* Todo tasks are always claimable regardless of reclaim_policy.
+       reclaim_policy only gates Done -> re-claim, not Todo -> first claim.
+       task-1869: 6 TaskError fingerprints show coordination-role tasks
+       with Block_reclaim policy were blocked from claiming. *)
+    Claim_available (task_claim_readiness task)
   | AwaitingVerification { verification_id; _ } ->
     (* Verification tasks with a valid verification_id can be claimed by
        other agents for cross-agent verification dispatch. The actual

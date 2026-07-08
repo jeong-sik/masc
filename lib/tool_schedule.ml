@@ -383,7 +383,17 @@ let request_result ~tool_name ~start_time = function
 let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
-    let* risk_class = risk_class_of_arg args in
+    let* requested_risk_class = risk_class_of_arg args in
+    (* Clamp the caller-supplied risk_class to the payload kind's intrinsic risk
+       when the kind mandates one. A keeper_wake is intrinsically reminder_only;
+       without this a keeper can request a side-effecting risk_class, forcing its
+       own wake into Pending_approval and then deadlocking as it polls a status
+       no self-waking keeper can advance. *)
+    let risk_class =
+      match Schedule_payload_projection.intrinsic_risk_class_of_payload payload with
+      | Some intrinsic -> intrinsic
+      | None -> requested_risk_class
+    in
     let* () = validate_known_payload_request ~payload ~risk_class in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in

@@ -29,6 +29,7 @@ import {
 } from '../tools/scheduled-automation-panel'
 import type { Cadence } from '../v2/schedule-constants'
 import { CadenceSummary, ScheduleCalendar, cadenceCounts, cadenceOfRequest } from './schedule-agenda'
+import { countQueueDrainMisses } from './queue-drain-status'
 import {
   loadTools,
   toolsData,
@@ -86,6 +87,9 @@ export function ScheduleSurface() {
   const requests = automation?.requests ?? []
   const totalCount = requests.length
   const cadCounts = cadenceCounts(requests)
+  // Scheduled keeper wakes that were dispatched but are in neither queue AND
+  // never recorded as reacted — the drain-miss the calendar surfaces per row.
+  const queueMisses = countQueueDrainMisses(requests)
 
   const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
@@ -93,6 +97,11 @@ export function ScheduleSurface() {
   // Detail-overlay selection is lifted here so the calendar view, the list
   // panel, and the operations aside all drive the same overlay.
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+  // Keeper-lane wake evidence + background are large operator diagnostics
+  // (a card per keeper, dozens of lane rows). Collapsed AND unmounted by default
+  // so the schedule stays the light, primary content; the panels only mount when
+  // the operator opens them.
+  const [diagOpen, setDiagOpen] = useState(false)
 
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) {
@@ -168,7 +177,7 @@ export function ScheduleSurface() {
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
 
-        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }} aria-label="예약 요약">
+        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }} aria-label="예약 요약">
           <div class="ov-kpi">
             <div class="ov-kpi-k">승인 대기</div>
             <div class=${`ov-kpi-v ${pendingCount > 0 ? 'warn' : 'ok'}`}>${countLabel(pendingCount)}</div>
@@ -184,6 +193,13 @@ export function ScheduleSurface() {
           <div class="ov-kpi">
             <div class="ov-kpi-k">총 예약</div>
             <div class="ov-kpi-v volt">${countLabel(totalCount)}</div>
+          </div>
+          <div class="ov-kpi" data-testid="schedule-kpi-queue-miss">
+            <div class="ov-kpi-k">큐 누락</div>
+            <div
+              class=${`ov-kpi-v ${queueMisses > 0 ? 'warn' : 'ok'}`}
+              title="dispatch됐으나 큐(pending·inflight)에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락"
+            >${countLabel(queueMisses)}</div>
           </div>
         </section>
 
@@ -209,16 +225,6 @@ export function ScheduleSurface() {
           <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
         </div>
 
-        <section class="ov-card mt-4" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
-          <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
-          <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
-        </section>
-
-        <section class="ov-card mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
-          <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
-          <${KeeperBackgroundPanel} background=${keeperBackground} />
-        </section>
-
         ${loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
           : view === 'calendar'
@@ -235,6 +241,35 @@ export function ScheduleSurface() {
                 selectedScheduleId=${selectedScheduleId}
                 onSelectSchedule=${setSelectedScheduleId}
               />`}
+
+        ${'' /* Secondary diagnostics live BELOW the schedule and are unmounted
+              until opened: the actual schedule (calendar/list) is the primary,
+              above-the-fold content. The keeper-lane wake evidence + background
+              panels are large operator diagnostics (a card per keeper, dozens of
+              lane rows) that previously buried the schedule and rendered on every
+              tick. Lazy-mounting them keeps the default surface light. */}
+        <section class="ov-card mt-4 sch-diag" data-testid="schedule-diagnostics">
+          <button
+            type="button"
+            class="sch-diag-summary"
+            aria-expanded=${diagOpen ? 'true' : 'false'}
+            data-testid="schedule-diagnostics-toggle"
+            onClick=${() => setDiagOpen(open => !open)}
+          >Keeper 진단 · wake evidence · background ${diagOpen ? '▴' : '▾'}</button>
+          ${diagOpen
+            ? html`
+                <section class="mt-3" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
+                  <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
+                  <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
+                </section>
+
+                <section class="mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
+                  <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
+                  <${KeeperBackgroundPanel} background=${keeperBackground} />
+                </section>
+              `
+            : null}
+        </section>
       </div>
       ${automation
         ? html`<${ScheduleAside}

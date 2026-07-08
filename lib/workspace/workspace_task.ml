@@ -96,6 +96,7 @@ let submit_and_approve_task_r
       ~task_id
       ~notes
       ~approve_notes
+      ~evidence_refs
       ()
   : (string, machine_verify_failure) result
   =
@@ -105,6 +106,22 @@ let submit_and_approve_task_r
     if Workspace_task_classify.same_task_actor config verifier_name agent_name
     then Error (Machine_verify_verifier_not_distinct { agent_name; verifier_name })
     else (
+      (* The machine-verified evidence rides the same typed handoff channel as
+         operator submissions: the submit persists it onto the task (so the
+         strict-contract approve gate reads it) and the approve re-supplies it
+         (the executor persists the incoming argument on every action, so an
+         approve without it would wipe the Done record's evidence). *)
+      let machine_handoff : Masc_domain.task_handoff_context =
+        { summary = notes
+        ; reason = None
+        ; next_step = None
+        ; failure_mode = None
+        ; reclaim_policy = None
+        ; evidence_refs
+        ; updated_at = None
+        ; updated_by = None
+        }
+      in
       let prepare_verification_request ~task ~assignee ~verification_id ~evidence_refs =
         (Atomic.get Workspace_hooks.verification_submit_request_fn)
           config
@@ -134,6 +151,7 @@ let submit_and_approve_task_r
           ~task_id
           ~action:Masc_domain.Submit_for_verification
           ~notes
+          ~handoff_context:machine_handoff
           ~prepare_verification_request
           ~compensate_verification_request
           ()
@@ -191,6 +209,7 @@ let submit_and_approve_task_r
              ~task_id
              ~action:Masc_domain.Approve_verification
              ~notes:approve_notes
+             ~handoff_context:machine_handoff
              ()
          with
          | Ok message ->
@@ -204,6 +223,7 @@ let submit_and_approve_task_r
                 ~task_id
                 ~action:Masc_domain.Reject_verification
                 ~reason:machine_verify_compensation_reason
+                ~handoff_context:machine_handoff
                 ()
             with
             | Ok _ ->

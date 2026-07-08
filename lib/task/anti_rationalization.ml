@@ -925,12 +925,22 @@ let review
                    , Some (verdict_parse_error_to_string Empty_review_output) )
                  | Error (Unrecognized_review_format _ as parse_error) ->
                    let parse_err = verdict_parse_error_to_string parse_error in
-                   task_warn
-                     "[anti-rationalization] verdict parse failed: %s (rejecting)"
-                     parse_err;
-                   ( Reject (sprintf "review format unrecognized: %s" parse_err)
-                   , Format_reject
-                   , Some parse_err ))
+(match parse_error with
+                    | Empty_review_output ->
+                      task_warn
+                        "[anti-rationalization] evaluator returned empty text — \
+                         no avoidance evidence; approving by liveness (#9794)";
+                      ( Approve, Fallback
+                      , Some
+                          "evaluator returned empty text — no avoidance evidence; \
+                           approving by liveness (#9794)" )
+                    | Unrecognized_review_format _ ->
+                      task_warn
+                        "[anti-rationalization] verdict parse failed: %s (rejecting)"
+                        parse_err;
+                      ( Reject (sprintf "review format unrecognized: %s" parse_err)
+                      , Format_reject
+                      , Some parse_err ))
             in
             (match v with
              | Reject reason ->

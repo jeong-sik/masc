@@ -1017,6 +1017,23 @@ let test_update_priority_negative () =
 (* Cancel Task Tests                                             *)
 (* ============================================================ *)
 
+let seed_block_reclaim config ~task_id =
+  let backlog = Workspace.read_backlog config in
+  let tasks =
+    List.map
+      (fun (t : Masc_domain.task) ->
+         if String.equal t.id task_id
+         then
+           { t with
+             reclaim_policy = Some Masc_domain.Block_reclaim
+           ; do_not_reclaim_reason = Some "operator hard stop"
+           }
+         else t)
+      backlog.tasks
+  in
+  write_tasks config tasks
+;;
+
 let test_cancel_task_todo () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
@@ -1030,6 +1047,40 @@ let test_cancel_task_todo () =
     match result with
     | Ok msg -> Alcotest.(check bool) "cancel success" true (str_contains msg "cancelled")
     | Error _ -> Alcotest.fail "Expected Ok")
+;;
+
+let test_cancel_task_clears_reclaim_policy () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task config ~title:"Blocked stale task" ~priority:1 ~description:""
+    in
+    seed_block_reclaim config ~task_id:"task-001";
+    let seeded = task_by_id config "task-001" in
+    Alcotest.(check (option string))
+      "seeded reclaim policy"
+      (Some "block_reclaim")
+      (Option.map Masc_domain.task_reclaim_policy_to_string seeded.reclaim_policy);
+    (match
+       Workspace.cancel_task_r
+         config
+         ~agent_name:"claude"
+         ~task_id:"task-001"
+         ~reason:"operator cancel"
+     with
+     | Ok _ -> ()
+     | Error e ->
+       Alcotest.failf
+         "cancel_task_r failed: %s"
+         (Masc_domain.masc_error_to_string e));
+    let cancelled = task_by_id config "task-001" in
+    Alcotest.(check (option string))
+      "reclaim policy cleared"
+      None
+      (Option.map Masc_domain.task_reclaim_policy_to_string cancelled.reclaim_policy);
+    Alcotest.(check (option string))
+      "do not reclaim reason cleared"
+      None
+      cancelled.do_not_reclaim_reason)
 ;;
 
 let test_cancel_task_claimed_by_self () =
@@ -1349,6 +1400,45 @@ let test_transition_cancel_idempotent () =
       Alcotest.failf
         "Expected Ok (no-op), got error: %s"
         (Masc_domain.masc_error_to_string e))
+;;
+
+let test_transition_cancel_clears_reclaim_policy () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task config ~title:"Blocked stale task" ~priority:1 ~description:""
+    in
+    seed_block_reclaim config ~task_id:"task-001";
+    let seeded = task_by_id config "task-001" in
+    Alcotest.(check (option string))
+      "seeded reclaim policy"
+      (Some "block_reclaim")
+      (Option.map Masc_domain.task_reclaim_policy_to_string seeded.reclaim_policy);
+    (match
+       Workspace.transition_task_r
+         config
+         ~agent_name:"claude"
+         ~task_id:"task-001"
+         ~action:Masc_domain.Cancel
+         ()
+     with
+     | Ok _ -> ()
+     | Error e ->
+       Alcotest.failf
+         "transition_task_r cancel failed: %s"
+         (Masc_domain.masc_error_to_string e));
+    let cancelled = task_by_id config "task-001" in
+    Alcotest.(check string)
+      "task cancelled"
+      "cancelled"
+      (Masc_domain.task_status_to_string cancelled.task_status);
+    Alcotest.(check (option string))
+      "reclaim policy cleared"
+      None
+      (Option.map Masc_domain.task_reclaim_policy_to_string cancelled.reclaim_policy);
+    Alcotest.(check (option string))
+      "do not reclaim reason cleared"
+      None
+      cancelled.do_not_reclaim_reason)
 ;;
 
 (* ============================================================ *)
@@ -2405,6 +2495,10 @@ let () =
     ; (* === Cancel Task === *)
       ( "cancel"
       , [ Alcotest.test_case "todo task" `Quick test_cancel_task_todo
+        ; Alcotest.test_case
+            "clears reclaim policy"
+            `Quick
+            test_cancel_task_clears_reclaim_policy
         ; Alcotest.test_case "claimed by self" `Quick test_cancel_task_claimed_by_self
         ; Alcotest.test_case "claimed by other" `Quick test_cancel_task_claimed_by_other
         ; Alcotest.test_case "nonexistent" `Quick test_cancel_task_nonexistent
@@ -2436,6 +2530,10 @@ let () =
             `Quick
             test_transition_done_awards_task_reward_once
         ; Alcotest.test_case "cancel idempotent" `Quick test_transition_cancel_idempotent
+        ; Alcotest.test_case
+            "cancel clears reclaim policy"
+            `Quick
+            test_transition_cancel_clears_reclaim_policy
         ] )
     ; (* === Observability === *)
       ( "observability"

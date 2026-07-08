@@ -108,14 +108,12 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                       if t.id = task_id
                       then (
                         let new_cycle = t.cycle_count + 1 in
-                        (* Cancellation is terminal by status. Free-text cancel
-                           reasons must not synthesize reclaim hard-stops. *)
-                        let reclaim_policy, do_not_reclaim_reason =
-                          match t.reclaim_policy with
-                          | Some Masc_domain.Block_reclaim ->
-                            Some Masc_domain.Block_reclaim, t.do_not_reclaim_reason
-                          | Some Masc_domain.Allow_reclaim | None -> None, None
-                        in
+                        (* Cancellation is terminal by status. Clear reclaim
+                           policy so that re-opened tasks remain claimable.
+                           Previously Block_reclaim was preserved here (RFC-0288
+                           constraint turn=24), causing permanently unclaimable
+                           tasks after Cancelled→Todo re-open. *)
+                        let reclaim_policy, do_not_reclaim_reason = None, None in
                         { t with
                           task_status =
                             Masc_domain.Cancelled

@@ -501,8 +501,7 @@ let create_entry
       ?selected_model
       ?disposition
       ?disposition_reason
-      ?(continuation_channel =
-        Keeper_continuation_channel.unrouted "no originating connector")
+      ~(continuation_channel : Keeper_continuation_channel.t)
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -1245,7 +1244,7 @@ let submit_pending
       ?selected_model
       ?disposition
       ?disposition_reason
-      ?continuation_channel
+      ?(continuation_channel = Keeper_continuation_channel.unrouted "no originating connector")
       ~on_resolution
       ()
   : string
@@ -1283,6 +1282,7 @@ let submit_pending
           ?turn_id
           ?task_id
           ?goal_id
+          ~continuation_channel
           ~goal_ids
           ~sandbox_target
           ?sandbox_profile

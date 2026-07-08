@@ -47,5 +47,10 @@ val lane_label : t -> string
 val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
+val to_continuation_channel : t -> Keeper_continuation_channel.t
+(** [to_continuation_channel surface] maps a chat surface reference to a
+    continuation channel suitable for HITL approval wake routing.
+    Chat surfaces (dashboard, discord, slack) preserve their coordinates;
+    other surfaces are mapped to [Unrouted] with a descriptive reason. *)
 (** Total decode: unknown [kind] labels are an [Error], never a
     default. *)

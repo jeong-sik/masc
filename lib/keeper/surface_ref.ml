@@ -157,3 +157,24 @@ let of_json json =
       let* address = address in
       Ok (Gate { label; address })
   | other -> Error (Printf.sprintf "unknown surface kind %s" other)
+
+let to_continuation_channel = function
+  | Dashboard { session_id } ->
+    Keeper_continuation_channel.Dashboard { thread_id = Option.value ~default:"" session_id }
+  | Discord { guild_id; channel_id; parent_channel_id; thread_id } ->
+    Keeper_continuation_channel.Discord
+      { guild_id; channel_id; parent_channel_id; thread_id; user_id = "" }
+  | Slack { team_id; channel_id; thread_ts } ->
+    Keeper_continuation_channel.Slack { team_id; channel_id; thread_ts; user_id = "" }
+  | Github { repo = _; notification_id = _ } ->
+    Keeper_continuation_channel.Unrouted
+      { reason = "GitHub notifications do not support continuation wake" }
+  | Webhook { source; event_id = _ } ->
+    Keeper_continuation_channel.Unrouted
+      { reason = Printf.sprintf "webhook source %s does not support continuation wake" source }
+  | Agent ->
+    Keeper_continuation_channel.Unrouted
+      { reason = "agent-initiated lane has no external surface" }
+  | Gate { label; address = _ } ->
+    Keeper_continuation_channel.Unrouted
+      { reason = Printf.sprintf "gate channel %s does not support continuation wake" label }

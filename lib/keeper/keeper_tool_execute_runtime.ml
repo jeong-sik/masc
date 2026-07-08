@@ -2,6 +2,7 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
+open Surface_ref
 
 let elapsed_duration_ms ~start_time ~end_time =
   let elapsed_ms = (end_time -. start_time) *. 1000. in
@@ -504,6 +505,7 @@ let submit_shell_ir_approval_pending
       ~risk_class
       ~typed_hit
       ?repo_create_contract
+      ?continuation_channel
       ()
   =
   let input =
@@ -547,6 +549,7 @@ let submit_shell_ir_approval_pending
       ~disposition:"requires_approval"
       ~disposition_reason:summary
       ~on_resolution
+      ?continuation_channel
       ()
   in
   record_gated_gh_lifecycle ~keeper_name ~event:"requested" ~risk_class ~typed_hit;
@@ -1156,6 +1159,7 @@ let handle_tool_execute_typed
                    ~risk_class
                    ~typed_hit
                    ?repo_create_contract
+                   ~continuation_channel:(to_continuation_channel envelope)
                    ()
                in
                typed_error_json

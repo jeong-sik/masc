@@ -22,20 +22,13 @@ module Gw = Slack_gateway_state
 (* Env-driven config                                                *)
 (* ---------------------------------------------------------------- *)
 
-let trimmed_env name =
-  match Sys.getenv_opt name with
-  | None -> None
-  | Some raw ->
-    let t = String.trim raw in
-    if String.equal t "" then None else Some t
-
-(* App-level token ([xapp-...]) — the Socket Mode credential used by
-   [Slack_socket_client] for [apps.connections.open]. Absent ⇒ gateway off. *)
-let app_token_opt () = trimmed_env "MASC_SLACK_APP_TOKEN"
-
-(* Bot token ([xoxb-...]) — used once at start for [auth.test] (bot identity).
-   The outbound REST path reads it again at send time (rotation-safe). *)
-let bot_token_opt () = trimmed_env "MASC_SLACK_BOT_TOKEN"
+(* Env reads live at the config boundary ({!Env_config_slack}) so this gateway
+   holds no direct process-environment lookups:
+   - [Env_config_slack.app_token_opt] — [MASC_SLACK_APP_TOKEN] ([xapp-...]),
+     the Socket Mode credential; absent ⇒ gateway off.
+   - [Env_config_slack.bot_token_opt] — [MASC_SLACK_BOT_TOKEN] ([xoxb-...]),
+     read once at start for [auth.test] (the outbound REST path re-reads it at
+     send time, so a rotation does not require a restart). *)
 
 (* Default trigger policy when none is configured: the quiet,
    mention-triggered baseline, same stance as the Discord gateway. *)
@@ -76,7 +69,7 @@ let resolved_trigger_policy () =
   match from_toml () with
   | Some raw -> parse_trigger_policy raw
   | None ->
-    (match trimmed_env "MASC_SLACK_TRIGGER_POLICY" with
+    (match Env_config_slack.trigger_policy_opt () with
      | None -> default_trigger_policy
      | Some raw -> parse_trigger_policy raw)
 
@@ -377,7 +370,7 @@ let on_event ~dispatch (ev : Gw.slack_event) =
 (* ---------------------------------------------------------------- *)
 
 let start ~sw ~env ~state =
-  match app_token_opt () with
+  match Env_config_slack.app_token_opt () with
   | None ->
     Log.Server.warn
       "RFC-0317: MASC_SLACK_APP_TOKEN is unset; in-process Slack gateway not \
@@ -387,7 +380,7 @@ let start ~sw ~env ~state =
        it, [app_mention] events still trigger (a mention by construction); only
        plain-message mention detection on the [message] event degrades. *)
     let bot_user_id =
-      match bot_token_opt () with
+      match Env_config_slack.bot_token_opt () with
       | None ->
         Log.Server.warn
           "RFC-0317: MASC_SLACK_BOT_TOKEN unset; Slack plain-message mention \

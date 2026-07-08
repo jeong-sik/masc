@@ -99,39 +99,37 @@ let transition_task_outcome_r
                enforcement regressed the G-2 deterministic probe and broke the
                invariant documented below (empty evidence is valid for
                analysis-only / advisory-contract tasks) — an unannounced
-               Phase B, exactly what the G-1 predicate decision avoided. *)
+               Phase B, exactly what the G-1 predicate decision avoided.
+               "Declared evidence" mirrors the verifier-request projection
+               (contract refs + typed handoff refs, prose excluded): a
+               contract that names its evidence up front satisfies the
+               gate without re-supplying refs at submit time. *)
             if not (Masc_domain.task_requires_verification task)
             then Ok ()
-            else
-              (match handoff_context with
-               | None ->
-                 Error
-                   (Masc_domain.Task
-                      (Masc_domain.Task_error.InvalidState
-                         "Strict-contract task completion requires handoff_context with evidence_refs (submit_for_verification carries the evidence a verifier approves)"))
-               | Some ctx when ctx.evidence_refs = [] ->
-                 Error
-                   (Masc_domain.Task
-                      (Masc_domain.Task_error.InvalidState
-                         "Strict-contract task completion requires at least one evidence_ref in handoff_context"))
-               | Some _ -> Ok ())
+            else if
+              Workspace_task_verification.declared_verification_evidence_refs
+                task handoff_context
+              = []
+            then
+              Error
+                (Masc_domain.Task
+                   (Masc_domain.Task_error.InvalidState
+                      "Strict-contract task completion requires declared evidence: contract required_evidence/verify_gate_evidence or handoff_context.evidence_refs (a verifier needs something to approve)"))
+            else Ok ()
           | Masc_domain.Approve_verification
           | Masc_domain.Reject_verification ->
             if not (Masc_domain.task_requires_verification task)
             then Ok ()
-            else
-              (match task.handoff_context with
-               | None ->
-                 Error
-                   (Masc_domain.Task
-                      (Masc_domain.Task_error.InvalidState
-                         "Approve/reject on a strict-contract task requires it to carry handoff_context with evidence_refs"))
-               | Some ctx when ctx.evidence_refs = [] ->
-                 Error
-                   (Masc_domain.Task
-                      (Masc_domain.Task_error.InvalidState
-                         "Approve/reject on a strict-contract task requires at least one evidence_ref"))
-               | Some _ -> Ok ())
+            else if
+              Workspace_task_verification.declared_verification_evidence_refs
+                task None
+              = []
+            then
+              Error
+                (Masc_domain.Task
+                   (Masc_domain.Task_error.InvalidState
+                      "Approve/reject on a strict-contract task requires declared evidence: contract required_evidence/verify_gate_evidence or persisted handoff_context.evidence_refs"))
+            else Ok ()
         in
         let* () =
           (match action, task.task_status with

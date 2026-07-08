@@ -554,7 +554,11 @@ let test_submit_uses_required_evidence_when_verify_refs_empty () =
         ~task_id
         ~action:Masc_domain.Submit_for_verification
         ~notes:"implementation complete"
-        ~handoff_context:submit_handoff
+        (* Deliberately no handoff: this test pins the fallback where the
+           contract's required_evidence alone reaches the verifier refs.
+           The strict gate accepts it because the contract declares the
+           evidence (declared_verification_evidence_refs includes
+           contract refs). *)
         ~prepare_verification_request:
           (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs ->
              captured_refs := Some evidence_refs;

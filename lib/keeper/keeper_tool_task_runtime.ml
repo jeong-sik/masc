@@ -676,8 +676,10 @@ let handle_keeper_task_tool
                   { approve_error; reject_error }) ->
              Log.Keeper.error ~keeper_name:meta.name
                "deterministic probe stranded %s in awaiting_verification \
-                (approve: %s; compensating reject: %s); resolvable by \
-                another identity via approve/reject"
+                (approve: %s; compensating reject: %s); its pending \
+                verification record keeps it inside the verifier wake signal \
+                and the dashboard panel — any other identity can \
+                approve/reject"
                task_id
                (Masc_domain.masc_error_to_string approve_error)
                (Masc_domain.masc_error_to_string reject_error))

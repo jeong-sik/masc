@@ -6,6 +6,10 @@ open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+(* RFC-0323 G-2: wires the verification-store hooks (among others) so the
+   machine_verify tests can assert the store record lifecycle. *)
+let () = Workspace_metric_hooks.install ()
+
 (* UTF-8 emoji helpers: ✅ is E2 9C 85, ⚠ is E2 9A A0, 🔒 is F0 9F 94 92, 🔓 is F0 9F 94 93 *)
 
 (* Helper for substring check - define early *)
@@ -1371,6 +1375,15 @@ let test_submit_and_approve_completes_via_verification () =
     in
     Alcotest.(check bool) "submit+approve ok" true
       (match result with Ok _ -> true | Error _ -> false);
+    (* Verification-store lifecycle (hooks installed above): the submit
+       created a record and the machine verdict resolved it — nothing
+       actionable remains to wake verifiers or linger in the dashboard
+       panel. *)
+    let requests = Verification.list_requests config.Workspace.base_path in
+    Alcotest.(check bool) "store record created" true
+      (List.length requests >= 1);
+    Alcotest.(check int) "no actionable record remains" 0
+      (List.length (List.filter Verification.request_is_actionable requests));
     match find_task config "task-001" with
     | Some { task_status = Masc_domain.Done { assignee; notes; _ }; _ } ->
       Alcotest.(check string) "assignee preserved" test_agent_a assignee;

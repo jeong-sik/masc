@@ -63,6 +63,10 @@ type machine_verify_failure =
       ; reject_error : Masc_domain.masc_error
       }
 
+let machine_verify_compensation_reason =
+  "machine verification approve failed; compensating reject"
+;;
+
 (** RFC-0323 G-2: machine-verified completion through the verification lane.
 
     Submits as [agent_name] (must be the assignee; the FSM submit arm enforces
@@ -71,13 +75,20 @@ type machine_verify_failure =
     Both preconditions (verifier name shape, verifier distinct from submitter)
     are checked before any state mutation.
 
-    No verification-store record is created: the store hooks are tool-layer
-    callbacks, so the [AwaitingVerification] window here is bounded by the
-    immediate approve. If the approve fails after a successful submit, one
-    compensating reject (as [verifier_name]) returns the task to
-    [InProgress { assignee }]; if that also fails, the task remains
-    [AwaitingVerification] and the error carries both failures — resolvable by
-    any other identity via approve/reject or the dashboard verdict route. *)
+    Verification-store lifecycle mirrors the tool layer (RFC-0221): the
+    request record is created before the submit commit and deleted if that
+    commit fails; a successful approve (or compensating reject) records the
+    machine verdict, resolving the record. Board/SSE notify hooks are
+    deliberately not invoked — machine completions do not announce; the store
+    record is the audit trail. Hook defaults are no-ops, so contexts without
+    the verification store stay store-free.
+
+    If the approve fails after a successful submit, one compensating reject
+    (as [verifier_name]) returns the task to [InProgress { assignee }]. If
+    that also fails, the task stays [AwaitingVerification] and the Pending
+    store record is deliberately left in place: the task remains inside the
+    pending-verification wake signal and the dashboard verification panel, so
+    any other identity can approve/reject it through the normal lane. *)
 let submit_and_approve_task_r
       config
       ~agent_name
@@ -94,6 +105,28 @@ let submit_and_approve_task_r
     if Workspace_task_classify.same_task_actor config verifier_name agent_name
     then Error (Machine_verify_verifier_not_distinct { agent_name; verifier_name })
     else (
+      let prepare_verification_request ~task ~assignee ~verification_id ~evidence_refs =
+        (Atomic.get Workspace_hooks.verification_submit_request_fn)
+          config
+          ~task
+          ~assignee
+          ~verification_id
+          ~evidence_refs
+      in
+      let compensate_verification_request ~verification_id =
+        match
+          (Atomic.get Workspace_hooks.verification_delete_request_fn)
+            config
+            ~verification_id
+        with
+        | Ok () -> ()
+        | Error e ->
+          Log.Workspace.warn
+            "machine-verify submit compensation failed (task=%s vrf=%s): %s"
+            task_id
+            verification_id
+            e
+      in
       match
         transition_task_r
           config
@@ -101,10 +134,52 @@ let submit_and_approve_task_r
           ~task_id
           ~action:Masc_domain.Submit_for_verification
           ~notes
+          ~prepare_verification_request
+          ~compensate_verification_request
           ()
       with
       | Error e -> Error (Machine_verify_submit_failed e)
       | Ok _submitted ->
+        let verification_id =
+          match read_backlog_r config with
+          | Error _ -> None
+          | Ok backlog ->
+            (match
+               List.find_opt
+                 (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+                 backlog.tasks
+             with
+             | Some
+                 { task_status =
+                     Masc_domain.AwaitingVerification { verification_id; _ }
+                 ; _
+                 } -> Some verification_id
+             | Some _ | None -> None)
+        in
+        let record_verdict decision =
+          match verification_id with
+          | None ->
+            Log.Workspace.warn
+              "machine-verify: verification id unreadable after submit \
+               (task=%s); a store record may remain pending"
+              task_id
+          | Some verification_id ->
+            (match
+               (Atomic.get Workspace_hooks.verification_record_verdict_fn)
+                 config
+                 ~task_id
+                 ~verifier:verifier_name
+                 ~verification_id
+                 ~decision
+             with
+             | Ok () -> ()
+             | Error e ->
+               Log.Workspace.warn
+                 "machine-verify verdict record failed (task=%s vrf=%s): %s"
+                 task_id
+                 verification_id
+                 e)
+        in
         (match
            transition_task_r
              config
@@ -114,7 +189,9 @@ let submit_and_approve_task_r
              ~notes:approve_notes
              ()
          with
-         | Ok message -> Ok message
+         | Ok message ->
+           record_verdict (`Approve approve_notes);
+           Ok message
          | Error approve_error ->
            (match
               transition_task_r
@@ -122,11 +199,16 @@ let submit_and_approve_task_r
                 ~agent_name:verifier_name
                 ~task_id
                 ~action:Masc_domain.Reject_verification
-                ~reason:"machine verification approve failed; compensating reject"
+                ~reason:machine_verify_compensation_reason
                 ()
             with
-            | Ok _ -> Error (Machine_verify_approve_failed_compensated approve_error)
+            | Ok _ ->
+              record_verdict (`Reject machine_verify_compensation_reason);
+              Error (Machine_verify_approve_failed_compensated approve_error)
             | Error reject_error ->
+              (* Deliberately no record cleanup: the Pending record keeps the
+                 stranded task actionable for the pending-verification wake
+                 signal and the dashboard verification panel. *)
               Error
                 (Machine_verify_approve_failed_stranded { approve_error; reject_error }))))
 ;;

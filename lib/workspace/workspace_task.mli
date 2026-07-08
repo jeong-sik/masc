@@ -106,13 +106,21 @@ type machine_verify_failure =
       { approve_error : Masc_domain.masc_error
       ; reject_error : Masc_domain.masc_error
       }
-      (** approve and the compensating reject both failed — task remains
-          [AwaitingVerification]; another identity can approve/reject it *)
+      (** approve and the compensating reject both failed — the task remains
+          [AwaitingVerification] and its Pending verification-store record is
+          deliberately left actionable, so the stranded task surfaces through
+          the pending-verification wake signal and the dashboard verification
+          panel; any other identity can approve/reject it *)
 
 (** RFC-0323 G-2: complete a task through the verification lane — submit as
     [agent_name] (the assignee), approve as the distinct machine identity
     [verifier_name]. Replaces direct [force_done_task_r] completion for
-    deterministic harnesses (RFC-0199 probe). *)
+    deterministic harnesses (RFC-0199 probe).
+
+    Verification-store lifecycle mirrors the tool layer (RFC-0221 hooks):
+    record created with the submit, machine verdict recorded on approve or on
+    the compensating reject; board/SSE notify hooks are not invoked (machine
+    completions do not announce). Hook defaults are no-ops. *)
 val submit_and_approve_task_r :
   config -> agent_name:string -> verifier_name:string -> task_id:string ->
   notes:string -> approve_notes:string -> unit ->

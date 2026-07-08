@@ -51,7 +51,6 @@ let title_category title =
 
 type scope = {
   repo : string;
-  keeper_id : string option;
   goal_id : string option;
   category : category;
 }
@@ -145,12 +144,6 @@ let same_goal a b =
 
 let same_category a b =
   String.equal (category_to_string a) (category_to_string b)
-
-let same_keeper a b =
-  match a, b with
-  | Some a, Some b -> same_string a b
-  | None, None -> true
-  | _ -> false
 
 let count_matching predicate active =
   active |> List.filter predicate |> List.length

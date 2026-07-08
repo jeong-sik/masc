@@ -286,6 +286,30 @@ let test_playground_repos_policy_uses_registered_repository_id () =
   check string "policy repository id" "repo-masc"
     (json_string "policy_repository_id" json)
 
+let test_playground_repos_mark_unknown_clone_sandbox_local_allowed () =
+  let base_path = temp_dir "masc-playground-repo-policy" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:(Filename.concat base_path ".masc/repos/masc")
+    ];
+  write_mapping base_path meta.name [ "masc" ];
+  create_playground_repo_marker ~config ~meta "masc-mcp";
+  let json = playground_repo_entry ~config ~meta ~repo_name:"masc-mcp" in
+  check bool "policy allows sandbox-local clone" true
+    (json_bool "policy_allowed" json);
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
+    (json_string "policy_status" json);
+  check string "policy scope" "sandbox_local"
+    (json_string "policy_scope" json);
+  check bool "policy repository id is not fabricated" true
+    (Option.is_none (json_string_opt "policy_repository_id" json))
+
 let test_playground_repos_mark_repository_identity_mismatch_denied () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
@@ -731,6 +755,9 @@ let () =
           `Quick test_playground_repos_mark_wildcard_mapping_allowed;
         test_case "filesystem repo policy uses registered repository id"
           `Quick test_playground_repos_policy_uses_registered_repository_id;
+        test_case "unknown filesystem repo is marked sandbox-local allowed"
+          `Quick
+          test_playground_repos_mark_unknown_clone_sandbox_local_allowed;
         test_case "repository identity mismatch is marked denied" `Quick
           test_playground_repos_mark_repository_identity_mismatch_denied;
         test_case "repository store error is marked denied" `Quick

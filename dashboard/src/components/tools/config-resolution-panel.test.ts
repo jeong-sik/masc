@@ -239,6 +239,19 @@ function runtimeResolutionPayload() {
     source_mismatch: false,
     server_workspace_mismatch: false,
     diagnostics: [],
+    shell_ir_approval: {
+      schema: 'masc.shell_ir_approval.v1',
+      enabled: true,
+      env_key: 'MASC_SHELL_IR_APPROVAL',
+      raw_overlay: null,
+      trust: {
+        safe: 'safe',
+        audited: 'audited',
+        privileged: 'privileged',
+      },
+      source: 'default_autonomous',
+      reason: 'using fallback overlay: Masc_exec.Approval_config.autonomous',
+    },
     build: {
       release_version: 'dev',
       commit: 'deadbee',
@@ -324,6 +337,19 @@ describe('ConfigResolutionPanel', () => {
               message: 'Received SIGTERM, shutting down server.',
             },
           ],
+          shell_ir_approval: {
+            schema: 'masc.shell_ir_approval.v1',
+            enabled: false,
+            env_key: 'MASC_SHELL_IR_APPROVAL',
+            raw_overlay: null,
+            trust: {
+              safe: 'safe',
+              audited: 'audited',
+              privileged: 'privileged',
+            },
+            source: 'runtime projection',
+            reason: 'using fallback overlay: Masc_exec.Approval_config.autonomous',
+          },
           build: {
             release_version: 'dev',
             commit: 'deadbee',
@@ -362,6 +388,9 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('/tmp/masc')
     expect(container.textContent).toContain('server repo head')
     expect(container.textContent).toContain('feedbee')
+    expect(container.textContent).toContain('Shell IR approval')
+    expect(container.textContent).toContain('disabled')
+    expect(container.textContent).toContain('safe/audited/privileged')
     expect(container.textContent).toContain('source mismatch')
     expect(container.textContent).toContain('server/workspace mismatch')
     expect(container.textContent).toContain('SIGTERM')

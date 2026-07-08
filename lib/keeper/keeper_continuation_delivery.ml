@@ -24,15 +24,23 @@ let slack_token_opt () =
       let trimmed = String.trim raw in
       if String.equal trimmed "" then None else Some trimmed
 
-let deliver_dashboard ~config ~keeper_name ~content =
+(* The originating surface identity captured by W2b (thread/session/parent
+   coordinates) is preserved end-to-end so the reply lands in — and is audited
+   against — the same conversation thread, not a fresh top-level post. *)
+
+let deliver_dashboard ~config ~keeper_name ~thread_id ~content =
   Keeper_chat_store.append_assistant_message
     ~base_dir:config.Workspace.base_path ~keeper_name ~content
-    ~surface:(Surface_ref.Dashboard { session_id = None }) ();
+    ~surface:(Surface_ref.Dashboard { session_id = Some thread_id }) ();
   Keeper_chat_broadcast.chat_appended ~keeper_name ~source:"dashboard" ~content ();
   Delivered { kind = "dashboard" }
 
-let deliver_discord ~config ~keeper_name ~channel_id ~content =
-  match Channel_gate_discord_state.send_message ~channel_id ~content () with
+let deliver_discord ~config ~keeper_name ~guild_id ~channel_id
+    ~parent_channel_id ~thread_id ~content =
+  (* Discord threads are channels: post to the thread id when the conversation
+     was in a thread, else the channel id. *)
+  let send_channel_id = Option.value thread_id ~default:channel_id in
+  match Channel_gate_discord_state.send_message ~channel_id:send_channel_id ~content () with
   | Error send_error ->
       Failed
         {
@@ -46,18 +54,13 @@ let deliver_discord ~config ~keeper_name ~channel_id ~content =
         ~base_dir:config.Workspace.base_path ~keeper_name ~content
         ~surface:
           (Surface_ref.Discord
-             {
-               guild_id = None;
-               channel_id;
-               parent_channel_id = None;
-               thread_id = None;
-             })
+             { guild_id; channel_id; parent_channel_id; thread_id })
         ();
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:"discord"
         ~content ();
       Delivered { kind = "discord" }
 
-let deliver_slack ~config ~keeper_name ~channel_id ~content =
+let deliver_slack ~config ~keeper_name ~team_id ~channel_id ~thread_ts ~content =
   match slack_token_opt () with
   | None ->
       Failed { kind = "slack"; error = "MASC_SLACK_BOT_TOKEN is unset or empty" }
@@ -76,9 +79,7 @@ let deliver_slack ~config ~keeper_name ~channel_id ~content =
       | Ok () ->
           Keeper_chat_store.append_assistant_message
             ~base_dir:config.Workspace.base_path ~keeper_name ~content
-            ~surface:
-              (Surface_ref.Slack
-                 { team_id = None; channel_id; thread_ts = None })
+            ~surface:(Surface_ref.Slack { team_id; channel_id; thread_ts })
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name ~source:"slack"
             ~content ();
@@ -104,12 +105,16 @@ let maybe_deliver ~config ~keeper_name ~channel ~already_replied ~content =
   | Skip outcome -> outcome
   | Deliver -> (
       match (channel : Keeper_continuation_channel.t) with
-      | Keeper_continuation_channel.Dashboard { thread_id = _ } ->
-          deliver_dashboard ~config ~keeper_name ~content
-      | Keeper_continuation_channel.Discord { channel_id; _ } ->
-          deliver_discord ~config ~keeper_name ~channel_id ~content
-      | Keeper_continuation_channel.Slack { channel_id; _ } ->
-          deliver_slack ~config ~keeper_name ~channel_id ~content
+      | Keeper_continuation_channel.Dashboard { thread_id } ->
+          deliver_dashboard ~config ~keeper_name ~thread_id ~content
+      | Keeper_continuation_channel.Discord
+          { guild_id; channel_id; parent_channel_id; thread_id; user_id = _ } ->
+          deliver_discord ~config ~keeper_name ~guild_id ~channel_id
+            ~parent_channel_id ~thread_id ~content
+      | Keeper_continuation_channel.Slack
+          { team_id; channel_id; thread_ts; user_id = _ } ->
+          deliver_slack ~config ~keeper_name ~team_id ~channel_id ~thread_ts
+            ~content
       (* [gate_decision] returns [Skip] for [Unrouted]; this arm keeps the
          match exhaustive and is unreachable via [Deliver]. *)
       | Keeper_continuation_channel.Unrouted _ -> Skipped_unrouted)

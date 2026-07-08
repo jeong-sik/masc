@@ -21,6 +21,9 @@
 #   --provider ID      Pre-select a provider for the wizard (e.g. deepseek)
 #   --api-key KEY      Provider API key (use with --provider; visible in ps)
 #   --api-key-stdin    Read provider API key from stdin (use with --provider)
+#   --team PRESET      Seed a keeper team preset (e.g. classic) into the config
+#                      root so the named keepers autoboot on the default model.
+#                      Requires a release/branch that ships presets/<PRESET>/.
 #
 # Env:
 #   MASC_VERSION   Same as --version
@@ -57,6 +60,7 @@ WIZARD_PROVIDER=""
 WIZARD_API_KEY=""
 WIZARD_API_KEY_STDIN=0
 WIZARD_GENERIC_API_KEY="${MASC_API_KEY:-}"
+TEAM="${MASC_TEAM_PRESET:-}"
 
 # Installer network budgets are script-local SSOTs. Keep them explicit instead
 # of scattering bare curl numbers across release lookup, config seeding, and
@@ -600,6 +604,7 @@ while [ $# -gt 0 ]; do
     --provider)    require_flag_value "$1" "${2-}"; WIZARD_PROVIDER="$2"; shift 2 ;;
     --api-key)     require_flag_value "$1" "${2-}"; WIZARD_API_KEY="$2"; shift 2 ;;
     --api-key-stdin) WIZARD_API_KEY_STDIN=1; shift ;;
+    --team)        require_flag_value "$1" "${2-}"; TEAM="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown flag: $1 (try --help)" ;;
   esac
@@ -903,6 +908,65 @@ fi
 
 # --- 4b. first-run wizard ------------------------------------------------------
 maybe_run_wizard "$BASE_PATH"
+
+# --- 4c. keeper team preset ----------------------------------------------------
+# Seeds presets/<preset>/{keepers,personas} into the config root (verified via
+# the release SHA256SUMS, like the config seed). The keepers inherit
+# [runtime].default, so no catalog is edited. Runs after config seed so
+# runtime.toml exists first.
+seed_team() {
+  local preset="$1"
+  local cfg="$BASE_PATH/.masc/config"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would seed team preset '$preset' into $cfg (presets/$preset/ at $VERSION)"
+    return 0
+  fi
+
+  log "seeding keeper team preset '$preset' into $cfg"
+  mkdir -p "$cfg"
+  local manifest_url="https://raw.githubusercontent.com/$REPO/$VERSION/presets/$preset/manifest.txt"
+  local manifest_tmp
+  manifest_tmp="$(mktemp)"
+  PARTIAL_FILES+=("$manifest_tmp")
+  curl -fsSL \
+    --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" \
+    -o "$manifest_tmp" "$manifest_url" \
+    || die "team preset '$preset' manifest fetch failed ($manifest_url)"
+
+  local rel dest tmp raw
+  while IFS= read -r rel || [ -n "$rel" ]; do
+    case "$rel" in ''|'#'*) continue ;; esac
+    dest="$cfg/$rel"
+    if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then
+      log "team file present: $rel, skipping"
+      continue
+    fi
+    raw="https://raw.githubusercontent.com/$REPO/$VERSION/presets/$preset/$rel"
+    tmp="$dest.partial"
+    mkdir -p "$(dirname "$dest")"
+    PARTIAL_FILES+=("$tmp")
+    curl -fsSL \
+      --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \
+      --retry "$MASC_INSTALL_CURL_RETRIES" \
+      -o "$tmp" "$raw" \
+      || die "team preset file fetch failed ($raw)"
+    verify_checksum "$tmp" "presets/$preset/$rel"
+    mv "$tmp" "$dest"
+    log "seeded team file: $rel"
+  done < "$manifest_tmp"
+  rm -f "$manifest_tmp"
+  log "team preset '$preset' seeded; its keepers autoboot on next server start"
+}
+
+if [ -n "$TEAM" ]; then
+  if [ "$SEED_CONFIG" -eq 1 ]; then
+    seed_team "$TEAM"
+  else
+    warn "--team '$TEAM' ignored because config seeding is disabled (--no-seed)"
+  fi
+fi
 
 # --- 5. smoke check -----------------------------------------------------------
 if [ "$DRY_RUN" -eq 0 ]; then

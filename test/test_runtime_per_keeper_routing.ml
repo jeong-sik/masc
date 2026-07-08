@@ -999,6 +999,7 @@ max-context = 128000
 tools-support = true
 thinking-support = true
 preserve-thinking = true
+max-thinking-budget = 4096
 streaming = true
 
 [models.nothink]
@@ -1185,6 +1186,26 @@ let test_thinking_support_false_forces_off () =
       "non-thinking model emits Some false (capability gate forces thinking off)"
       (Some false)
       seed.Runtime_inference.thinking_enabled)
+;;
+
+(* RFC-0271 §4.2: [max-thinking-budget] flows through [for_runtime] into the
+   reasoning seed budget, from which the SDK derives a bounded reasoning effort
+   ([Reasoning_effort.of_budget]). A runtime without the config key preserves
+   [None] (byte-identical prior wire). *)
+let test_max_thinking_budget_wired_into_seed () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.think" in
+    Alcotest.(check (option int))
+      "max-thinking-budget flows into the reasoning seed"
+      (Some 4096)
+      seed.Runtime_inference.thinking_budget;
+    let seed_default =
+      Runtime_inference.for_runtime ~name:"ollama_cloud.thinkdefault"
+    in
+    Alcotest.(check (option int))
+      "runtime with no max-thinking-budget preserves None"
+      None
+      seed_default.Runtime_inference.thinking_budget)
 ;;
 
 let test_runtime_inventory_surfaces_parameter_policy () =
@@ -1945,6 +1966,10 @@ let () =
             "thinking-support=false forces thinking off (Some false)"
             `Quick
             test_thinking_support_false_forces_off
+        ; Alcotest.test_case
+            "max-thinking-budget wires into reasoning seed (RFC-0271 §4.2)"
+            `Quick
+            test_max_thinking_budget_wired_into_seed
         ; Alcotest.test_case
             "runtime inventory surfaces OAS parameter policy"
             `Quick

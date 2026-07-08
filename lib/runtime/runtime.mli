@@ -296,6 +296,12 @@ val max_output_tokens_of_runtime_id : string -> int option
     reasoning turn from the model's own output ceiling rather than the flat
     fallback. *)
 
+val max_thinking_budget_of_runtime_id : string -> int option
+(** Per-model [max-thinking-budget] ceiling from runtime.toml, or [None] when the
+    id is not configured or the model declares no ceiling. RFC-0271 §4.2 wires it
+    through {!Runtime_inference.for_runtime} so the SDK derives a bounded reasoning
+    effort ([Reasoning_effort.of_budget]). *)
+
 val thinking_support_of_runtime_id : string -> bool option
 (** [thinking-support] capability of the model bound to runtime [id], or [None]
     when the id is not configured (e.g. before {!init_default}).  Consumed by

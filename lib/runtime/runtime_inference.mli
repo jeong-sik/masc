@@ -15,11 +15,14 @@ type seed = {
 
 val seed_of_thinking_support
   :  ?preserve_thinking:bool option
+  -> ?thinking_budget:int option
   -> bool option
   -> seed
 (** Pure: map a model's [thinking-support] capability to the keeper thinking
     seed.  [Some false] is a force-thinking-off signal;
-    [Some true] actively enables thinking for that model binding. *)
+    [Some true] actively enables thinking for that model binding.
+    [thinking_budget] carries the per-model [max-thinking-budget] ceiling
+    (RFC-0271 §4.2); [None] preserves the prior wire. *)
 
 val for_runtime : name:string -> seed
 (** Per-model thinking seed for runtime [name], resolved from the runtime.toml

@@ -1145,6 +1145,17 @@ let thinking_support_of_runtime_id (id : string) : bool option =
   | None -> None
 ;;
 
+(* Per-model thinking ceiling from runtime.toml ([max-thinking-budget]). RFC-0271
+   §4.2 wires it as the reasoning seed budget so the SDK derives a bounded
+   reasoning effort ([Reasoning_effort.of_budget]) instead of the unbounded
+   provider default. [None] (the current state for every runtime) preserves the
+   prior wire exactly. *)
+let max_thinking_budget_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.max_thinking_budget
+  | None -> None
+;;
+
 (* The per-model [temperature] override declared in runtime.toml
    ([models.<id>.temperature]), or [None] when the runtime is unknown or the
    model leaves it unset. Projects the runtime.toml [model] record (per-binding

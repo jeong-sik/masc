@@ -121,6 +121,13 @@ max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
+# RFC-0271 §4.2: bound the fleet-default's reasoning effort. Without a budget the
+# SDK sends Medium effort, under which live turns emit 43k-86k chars of reasoning
+# and sometimes terminate thinking-only. 2048 maps to Low via
+# Reasoning_effort.of_budget (<=2048). The corrective Retry_no_thinking arm
+# backstops any under-thinking. Tune against the live over-thinking rate; the
+# effort effect on this provider is not yet measured.
+max-thinking-budget = 2048
 
 [models.deepseek-v4-flash.capabilities]
 max-output-tokens = 384000

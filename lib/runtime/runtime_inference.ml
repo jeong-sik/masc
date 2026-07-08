@@ -81,18 +81,27 @@ type seed = {
     id, or before [Runtime.init_default]): no per-model signal, leave the
     caller policy unchanged.
 
-    [thinking_budget] stays [None] here: the per-model [max_thinking_budget] is
-    a ceiling, not an active budget, so wiring it as the active budget would be
-    a category error — the keeper's adaptive budget owns the active value. *)
-let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : bool option)
+    [thinking_budget] carries the per-model [max-thinking-budget] ceiling
+    (RFC-0271 §4.2). It is not a bypass of the keeper's adaptive budget: the
+    adaptive step ([Keeper_agent_prompt_metrics.adaptive_thinking_budget]) seeds
+    from this value and may lower it (e.g. to 1500 on a tool-error retry), so the
+    ceiling is the adaptive UPPER bound. The SDK converts the resulting budget to
+    a bounded reasoning effort ([Reasoning_effort.of_budget]) for
+    reasoning-effort/thinking-object models. [None] — every runtime today, since
+    no [max-thinking-budget] is configured — preserves the prior wire exactly. *)
+let seed_of_thinking_support
+      ?(preserve_thinking = None)
+      ?(thinking_budget = None)
+      (thinking_support : bool option)
   : seed
   =
-  { thinking_budget = None; thinking_enabled = thinking_support; preserve_thinking }
+  { thinking_budget; thinking_enabled = thinking_support; preserve_thinking }
 ;;
 
 let for_runtime ~name =
   seed_of_thinking_support
     ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
+    ~thinking_budget:(Runtime.max_thinking_budget_of_runtime_id name)
     (Runtime.thinking_support_of_runtime_id name)
 ;;
 

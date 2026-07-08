@@ -396,9 +396,15 @@ let test_claim_next_reconciles_stale_agent_current_task () =
       | [ agent ] -> agent.Masc_domain.name
       | _ -> Alcotest.fail "expected exactly one bound agent"
     in
-    let _ = Workspace.add_task config ~title:"Done already" ~priority:1 ~description:"" in
+    let _ = Workspace.add_task config ~title:"Cancelled already" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
-    (match transition_done_r config ~agent_name ~task_id:"task-001" ~notes:"done" with
+    (match
+       Workspace.cancel_task_r
+         config
+         ~agent_name
+         ~task_id:"task-001"
+         ~reason:"terminal stale-cache fixture"
+     with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
     let agent_file =

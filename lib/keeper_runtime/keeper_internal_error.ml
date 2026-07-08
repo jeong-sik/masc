@@ -280,6 +280,14 @@ type masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] on an empty/thinking_only shape marks a truncation (the
+         shared output budget was exhausted, most often by thinking) and must be
+         distinguished from a clean [EndTurn] no-progress terminal — OAS gates
+         its own [ended_without_deliverable_content] on [EndTurn] for exactly
+         this reason. Groundwork only in this slice: threaded and serialized,
+         not yet consumed by classification (§4.5 slices 2-3). *)
+      stop_reason : Agent_sdk.Types.stop_reason option;
       last_tool_effect : tool_progress_effect option;
       any_mutating_tool : bool option;
       tool_effects_seen : tool_progress_effect list;
@@ -509,6 +517,7 @@ let masc_internal_error_to_json = function
         model;
         reason_kind;
         response_shape;
+        stop_reason;
         last_tool_effect;
         any_mutating_tool;
         tool_effects_seen;
@@ -525,6 +534,9 @@ let masc_internal_error_to_json = function
         ( "response_shape",
           Json_util.string_opt_to_json
             (Option.map accept_response_shape_to_string response_shape) );
+        ( "stop_reason",
+          Json_util.string_opt_to_json
+            (Option.map Agent_sdk.Types.stop_reason_to_string stop_reason) );
         ( "last_tool_effect",
           Json_util.string_opt_to_json
             (Option.map tool_progress_effect_to_string last_tool_effect) );
@@ -1056,6 +1068,10 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      Option.bind
                        (string_opt_of_assoc "response_shape" json)
                        accept_response_shape_of_string;
+                   stop_reason =
+                     Option.map
+                       Agent_sdk.Types.stop_reason_of_string
+                       (string_opt_of_assoc "stop_reason" json);
                    last_tool_effect =
                      Option.bind
                        (string_opt_of_assoc "last_tool_effect" json)

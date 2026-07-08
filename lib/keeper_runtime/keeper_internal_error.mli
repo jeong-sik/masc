@@ -118,6 +118,11 @@ type masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] on an empty/thinking_only shape marks a truncation, distinct
+         from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
+         and serialized, not yet consumed by classification. *)
+      stop_reason : Agent_sdk.Types.stop_reason option;
       last_tool_effect : tool_progress_effect option;
       any_mutating_tool : bool option;
       tool_effects_seen : tool_progress_effect list;

@@ -150,6 +150,28 @@ let check_absent label names tool_name =
   check bool label false (List.mem tool_name names)
 ;;
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+;;
+
+let dispatch_projection_warn_messages_since before_seq =
+  Log.Ring.recent ~limit:50 ~module_filter:"Misc" ~since_seq:before_seq ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    if
+      String_util.contains_substring
+        entry.message
+        "schedule_payload_projection.dispatch_tool_for_request failed"
+    then Some entry.message
+    else None)
+;;
+
+let check_json_null label = function
+  | `Null -> check bool label true true
+  | json -> failf "%s: expected JSON null, got %s" label (Yojson.Safe.to_string json)
+;;
+
 let test_schema_and_descriptor_exposed () =
   let create_name = schedule_tool_name Tool_schemas_schedule.Create_request in
   let approve_name = operator_schedule_tool_name Tool_schemas_schedule.Approve_request in
@@ -329,6 +351,7 @@ let test_dispatch_list_surfaces_payload_support_summary () =
        ; "requested_by_id", `String "operator"
        ; "scheduled_by_id", `String "scheduler-agent"
        ]);
+  let before_list = latest_log_seq () in
   match
     Tool_schedule.dispatch ctx
       ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
@@ -363,12 +386,59 @@ let test_dispatch_list_surfaces_payload_support_summary () =
             String.equal "sched-supported" (row |> member "schedule_id" |> to_string)
             && String.equal "supported" (row |> member "payload_support" |> to_string))
          schedules);
+    let unsupported_row =
+      match
+        List.find_opt
+          (fun row ->
+             String.equal "sched-unsupported" (row |> member "schedule_id" |> to_string))
+          schedules
+      with
+      | Some row -> row
+      | None -> fail "expected unsupported row"
+    in
     check bool "unsupported row present" true
-      (List.exists
-         (fun row ->
-            String.equal "sched-unsupported" (row |> member "schedule_id" |> to_string)
-            && String.equal "unsupported" (row |> member "payload_support" |> to_string))
-         schedules)
+      (String.equal
+         "unsupported"
+         (unsupported_row |> member "payload_support" |> to_string));
+    check_json_null
+      "unsupported list row dispatch tool is null"
+      (unsupported_row |> member "payload_dispatch_tool");
+    check (list string)
+      "list display does not log dispatch projection warnings"
+      []
+      (dispatch_projection_warn_messages_since before_list);
+    let before_dashboard = latest_log_seq () in
+    let dashboard =
+      Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    in
+    let dashboard_rows = dashboard |> member "requests" |> to_list in
+    let dashboard_unsupported_row =
+      match
+        List.find_opt
+          (fun row ->
+             String.equal "sched-unsupported" (row |> member "schedule_id" |> to_string))
+          dashboard_rows
+      with
+      | Some row -> row
+      | None -> fail "expected unsupported dashboard row"
+    in
+    check_json_null
+      "unsupported dashboard row dispatch tool is null"
+      (dashboard_unsupported_row |> member "payload_dispatch_tool");
+    check (list string)
+      "dashboard display does not log dispatch projection warnings"
+      []
+      (dispatch_projection_warn_messages_since before_dashboard);
+    let before_repeat_poll = latest_log_seq () in
+    ignore
+      (Tool_schedule.dispatch ctx
+         ~name:(schedule_tool_name Tool_schemas_schedule.List_requests)
+         ~args:(`Assoc [ "limit", `Int 10 ]));
+    ignore (Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config);
+    check (list string)
+      "repeated display poll does not log dispatch projection warnings"
+      []
+      (dispatch_projection_warn_messages_since before_repeat_poll)
 ;;
 
 let test_dispatch_list_reports_schedule_store_read_error () =
@@ -620,12 +690,18 @@ let test_dispatch_create_keeper_wake_payload () =
        (data |> member "payload_target" |> to_string);
      check string "result payload summary" "Scheduled lane wake"
        (data |> member "payload_summary" |> to_string);
-     check bool "result separate grant" true
+     (* keeper_wake is intrinsically reminder_only: the handler clamps the
+        caller-supplied workspace_write down, so a self-wake never needs a
+        human grant (this is what previously deadlocked — the keeper polled a
+        pending_approval it could not self-approve). *)
+     check bool "result separate grant" false
        (data |> member "requires_separate_human_grant" |> to_bool));
   (match Schedule_store.get_schedule config ~schedule_id:"sched-keeper-wake" with
    | None -> fail "schedule missing"
    | Some request ->
-     check string "status" "pending_approval"
+     check string "clamped risk_class" "reminder_only"
+       (Schedule_domain.risk_class_to_string request.risk_class);
+     check string "status" "scheduled"
        (Schedule_domain.schedule_status_to_string request.status);
      let payload = Schedule_domain.payload_to_yojson request.payload in
      let open Yojson.Safe.Util in
@@ -653,6 +729,32 @@ let test_dispatch_create_keeper_wake_payload () =
     (row |> member "payload_target" |> to_string);
   check string "dashboard payload summary" "Scheduled lane wake"
     (row |> member "payload_summary" |> to_string)
+;;
+
+let test_keeper_wake_creation_requires_reminder_only () =
+  (* Projection invariant guarding the tool-handler clamp: a keeper_wake with a
+     side-effecting risk_class is rejected at creation; reminder_only is
+     accepted. This keeps a self-wake out of the human-grant deadlock even for a
+     direct caller that bypasses the handler clamp. *)
+  let payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; "schema_version", `Int 1
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String "schedule-keeper"
+            ; "message", `String "wake"
+            ] )
+      ]
+  in
+  check bool "side-effecting keeper_wake rejected" true
+    (Result.is_error
+       (Schedule_payload_projection.validate_request_payload_for_creation
+          ~payload ~risk_class:Schedule_domain.Workspace_write));
+  check bool "reminder_only keeper_wake accepted" true
+    (Result.is_ok
+       (Schedule_payload_projection.validate_request_payload_for_creation
+          ~payload ~risk_class:Schedule_domain.Reminder_only))
 ;;
 
 let test_dispatch_create_rejects_keeper_wake_invalid_urgency () =
@@ -1630,6 +1732,8 @@ let () =
             test_dispatch_create_board_post_convenience_payload
         ; test_case "dispatch create accepts keeper wake payload" `Quick
             test_dispatch_create_keeper_wake_payload
+        ; test_case "keeper wake creation requires reminder_only" `Quick
+            test_keeper_wake_creation_requires_reminder_only
         ; test_case "dispatch create rejects invalid keeper wake urgency" `Quick
             test_dispatch_create_rejects_keeper_wake_invalid_urgency
         ; test_case "dispatch create rejects invalid keeper wake target name" `Quick

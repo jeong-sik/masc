@@ -166,6 +166,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
        | Some Tool_dispatch.Mod_schedule
        | Some Tool_dispatch.Mod_misc
        | Some Tool_dispatch.Mod_library
+       | Some Tool_dispatch.Mod_recurring
        | Some Tool_dispatch.Mod_external
        | Some Tool_dispatch.Mod_shard
        | Some Tool_dispatch.Mod_keeper_task ->

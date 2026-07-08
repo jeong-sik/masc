@@ -29,8 +29,9 @@ type claim_resolution =
   | Verifier_claim of Masc_domain.task_status
   | Self_owned
   | Held_by_other of string
+  | Blocked_by_reclaim_policy of string
 
-(** [resolve_claim ~same_actor ~agent_name ~now status] is the claim outcome.
+(** [resolve_claim ~same_actor ~agent_name ~now task] is the claim outcome.
     [same_actor name] must report whether [name] is the same logical actor as
     the claiming agent (callers pass
     [Workspace_task_classify.same_task_actor config _ agent_name]). *)
@@ -38,11 +39,12 @@ val resolve_claim
   :  same_actor:(string -> bool)
   -> agent_name:string
   -> now:string
-  -> Masc_domain.task_status
+  -> Masc_domain.task
   -> claim_resolution
 
 val decide
   :  verification_enabled:bool
+  -> requires_verification:bool
   -> verification_timeout_seconds:float
   -> new_verification_id:(unit -> string)
   -> same_agent:(string -> bool)
@@ -63,6 +65,7 @@ val decide
     [Task.Transition_state] module header). *)
 val valid_next_actions
   :  verification_enabled:bool
+  -> requires_verification:bool
   -> same_agent:bool
   -> authority:Masc_domain.completion_authority
   -> task_status:Masc_domain.task_status

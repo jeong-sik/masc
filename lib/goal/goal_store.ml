@@ -112,10 +112,6 @@ and state_of_yojson = function
 and goal_of_yojson = function
   | `Assoc _ as json ->
       begin
-        (* RFC-0294: a legacy [horizon] key may still be present on disk; it is
-           intentionally not read here. Goal_to_yojson no longer emits it, so it
-           evaporates on the next write (standard schema evolution, not a drop
-           that needs logging). *)
         match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "title" json with
         | Some (`String id), Some (`String title) ->
             let legacy_status =
@@ -186,7 +182,8 @@ and goal_of_yojson = function
               | _, _, _, _, Error msg ->
                   Error msg
             end
-        | _ -> Error "goal_of_yojson: invalid goal"
+        | _ ->
+            Error "goal_of_yojson: invalid goal"
       end
   | json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string json)

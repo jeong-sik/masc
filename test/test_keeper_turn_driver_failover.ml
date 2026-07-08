@@ -83,6 +83,7 @@ let accept_empty_no_progress_error scope =
        ; model = Some "runtime"
        ; reason_kind = Some Driver.Accept_no_usable_progress
        ; response_shape = Some Driver.Accept_response_empty
+       ; stop_reason = None
        ; last_tool_effect = None
        ; any_mutating_tool = None
        ; tool_effects_seen = []

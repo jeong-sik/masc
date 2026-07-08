@@ -50,6 +50,173 @@ let force_done_task_r config ~agent_name ~task_id ~notes ()
     ()
 ;;
 
+type machine_verify_failure =
+  | Machine_verify_invalid_verifier of string
+  | Machine_verify_verifier_not_distinct of
+      { agent_name : string
+      ; verifier_name : string
+      }
+  | Machine_verify_submit_failed of Masc_domain.masc_error
+  | Machine_verify_approve_failed_compensated of Masc_domain.masc_error
+  | Machine_verify_approve_failed_stranded of
+      { approve_error : Masc_domain.masc_error
+      ; reject_error : Masc_domain.masc_error
+      }
+
+let machine_verify_compensation_reason =
+  "machine verification approve failed; compensating reject"
+;;
+
+(** RFC-0323 G-2: machine-verified completion through the verification lane.
+
+    Submits as [agent_name] (must be the assignee; the FSM submit arm enforces
+    it), then approves as [verifier_name] — a distinct machine identity, since
+    the FSM self-approval check compares identity keys and never authority.
+    Both preconditions (verifier name shape, verifier distinct from submitter)
+    are checked before any state mutation.
+
+    Verification-store lifecycle mirrors the tool layer (RFC-0221): the
+    request record is created before the submit commit and deleted if that
+    commit fails; a successful approve (or compensating reject) records the
+    machine verdict, resolving the record. Board/SSE notify hooks are
+    deliberately not invoked — machine completions do not announce; the store
+    record is the audit trail. Hook defaults are no-ops, so contexts without
+    the verification store stay store-free.
+
+    If the approve fails after a successful submit, one compensating reject
+    (as [verifier_name]) returns the task to [InProgress { assignee }]. If
+    that also fails, the task stays [AwaitingVerification] and the Pending
+    store record is deliberately left in place: the task remains inside the
+    pending-verification wake signal and the dashboard verification panel, so
+    any other identity can approve/reject it through the normal lane. *)
+let submit_and_approve_task_r
+      config
+      ~agent_name
+      ~verifier_name
+      ~task_id
+      ~notes
+      ~approve_notes
+      ()
+  : (string, machine_verify_failure) result
+  =
+  match Validation.Agent_id.validate verifier_name with
+  | Error msg -> Error (Machine_verify_invalid_verifier msg)
+  | Ok _ ->
+    if Workspace_task_classify.same_task_actor config verifier_name agent_name
+    then Error (Machine_verify_verifier_not_distinct { agent_name; verifier_name })
+    else (
+      let prepare_verification_request ~task ~assignee ~verification_id ~evidence_refs =
+        (Atomic.get Workspace_hooks.verification_submit_request_fn)
+          config
+          ~task
+          ~assignee
+          ~verification_id
+          ~evidence_refs
+      in
+      let compensate_verification_request ~verification_id =
+        match
+          (Atomic.get Workspace_hooks.verification_delete_request_fn)
+            config
+            ~verification_id
+        with
+        | Ok () -> ()
+        | Error e ->
+          Log.Workspace.warn
+            "machine-verify submit compensation failed (task=%s vrf=%s): %s"
+            task_id
+            verification_id
+            e
+      in
+      match
+        transition_task_r
+          config
+          ~agent_name
+          ~task_id
+          ~action:Masc_domain.Submit_for_verification
+          ~notes
+          ~prepare_verification_request
+          ~compensate_verification_request
+          ()
+      with
+      | Error e -> Error (Machine_verify_submit_failed e)
+      | Ok _submitted ->
+        let verification_id =
+          match read_backlog_r config with
+          | Error _ -> None
+          | Ok backlog ->
+            (match
+               List.find_opt
+                 (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+                 backlog.tasks
+             with
+             | None -> None
+             | Some t ->
+               (match t.task_status with
+                | Masc_domain.AwaitingVerification { verification_id; _ } ->
+                  Some verification_id
+                | Masc_domain.Todo
+                | Masc_domain.Claimed _
+                | Masc_domain.InProgress _
+                | Masc_domain.Done _
+                | Masc_domain.Cancelled _ -> None))
+        in
+        let record_verdict decision =
+          match verification_id with
+          | None ->
+            Log.Workspace.warn
+              "machine-verify: verification id unreadable after submit \
+               (task=%s); a store record may remain pending"
+              task_id
+          | Some verification_id ->
+            (match
+               (Atomic.get Workspace_hooks.verification_record_verdict_fn)
+                 config
+                 ~task_id
+                 ~verifier:verifier_name
+                 ~verification_id
+                 ~decision
+             with
+             | Ok () -> ()
+             | Error e ->
+               Log.Workspace.warn
+                 "machine-verify verdict record failed (task=%s vrf=%s): %s"
+                 task_id
+                 verification_id
+                 e)
+        in
+        (match
+           transition_task_r
+             config
+             ~agent_name:verifier_name
+             ~task_id
+             ~action:Masc_domain.Approve_verification
+             ~notes:approve_notes
+             ()
+         with
+         | Ok message ->
+           record_verdict (`Approve approve_notes);
+           Ok message
+         | Error approve_error ->
+           (match
+              transition_task_r
+                config
+                ~agent_name:verifier_name
+                ~task_id
+                ~action:Masc_domain.Reject_verification
+                ~reason:machine_verify_compensation_reason
+                ()
+            with
+            | Ok _ ->
+              record_verdict (`Reject machine_verify_compensation_reason);
+              Error (Machine_verify_approve_failed_compensated approve_error)
+            | Error reject_error ->
+              (* Deliberately no record cleanup: the Pending record keeps the
+                 stranded task actionable for the pending-verification wake
+                 signal and the dashboard verification panel. *)
+              Error
+                (Machine_verify_approve_failed_stranded { approve_error; reject_error }))))
+;;
+
 (** Force-cancel a task regardless of assignee. System privilege.
     Used by [Verification_protocol.check_timeouts] to expire
     [AwaitingVerification] tasks whose verifier deadline has passed,
@@ -108,14 +275,12 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                       if t.id = task_id
                       then (
                         let new_cycle = t.cycle_count + 1 in
-                        (* Cancellation is terminal by status. Free-text cancel
-                           reasons must not synthesize reclaim hard-stops. *)
-                        let reclaim_policy, do_not_reclaim_reason =
-                          match t.reclaim_policy with
-                          | Some Masc_domain.Block_reclaim ->
-                            Some Masc_domain.Block_reclaim, t.do_not_reclaim_reason
-                          | Some Masc_domain.Allow_reclaim | None -> None, None
-                        in
+                        (* Cancellation is terminal by status. Clear reclaim
+                           policy so that re-opened tasks remain claimable.
+                           Previously Block_reclaim was preserved here (RFC-0288
+                           constraint turn=24), causing permanently unclaimable
+                           tasks after Cancelled→Todo re-open. *)
+                        let reclaim_policy, do_not_reclaim_reason = None, None in
                         { t with
                           task_status =
                             Masc_domain.Cancelled

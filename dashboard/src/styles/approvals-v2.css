@@ -100,6 +100,16 @@
 .ap-act.deny:hover:not(:disabled) { background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
 .ap-act.ghost:hover:not(:disabled) { color: var(--volt-strong); }
 
+/* The shared .ov-scroll wrapper is declared overflow-y:auto, but on the
+   approvals surface it grows to its full content height and never scrolls (the
+   page scrolls at .dashboard-main-scroll). That non-scrolling overflow still
+   formed a sticky containing block, pinning .ap-detail-panel-rail's
+   `position: sticky` to the static wrapper so the detail panel scrolled away
+   with the queue. Restoring overflow:visible here (approvals only) lets the
+   rail stick against the page scroller. Scoped to .ap-surface so the other
+   .ov-scroll surfaces are untouched. */
+.ap-surface > .ov-scroll { overflow: visible; }
+
 /* Request-detail rail / inline dossier (live surface). */
 .ap-detail-panel { position: sticky; top: 14px; background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 14px; min-width: 0; }
 .ap-detail-panel-inline { display: none; }

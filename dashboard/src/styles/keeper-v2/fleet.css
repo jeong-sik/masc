@@ -17,8 +17,11 @@
     var(--bg-deep);
   color: var(--text-primary);
   font-family: var(--font-ui);
-  /* shared roster column track — header + rows + group dividers align to this */
-  --fl-cols: minmax(196px, 1.3fr) 184px 140px minmax(108px, 1fr) 128px;
+  /* shared roster column track — header + rows + group dividers align to this.
+     Last track = action cell (멈춤/깨움/종료): the 3 text buttons render ~156px,
+     so the track must be wide enough or the button group overflows left into the
+     context value (fl-ctx-val) on a selected/hovered row. */
+  --fl-cols: minmax(196px, 1.3fr) 184px 140px minmax(108px, 1fr) 160px;
   --fl-gap: 14px;
 }
 
@@ -253,7 +256,7 @@
 /* ── responsive: progressively shed columns instead of letting strings collide ── */
 /* mid width — aside still present, but main is tight: drop 최근 도구 first */
 @media (max-width: 1320px) and (min-width: 1101px) {
-  .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 120px; }
+  .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 160px; }
   .fl-rhead span:nth-child(4), .fl-row .fl-tool { display: none; }
 }
 

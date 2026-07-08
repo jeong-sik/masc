@@ -39,6 +39,7 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import { refreshKeeperRuntimeStatus } from '../store'
+import { navigate } from '../router'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
@@ -1952,7 +1953,18 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${SectionHeader} size="xs" class="mt-2 mb-0.5">지시사항</${SectionHeader}>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
-    <${SectionHeader} size="xs" class="mt-3 mb-0.5">시스템 프롬프트</${SectionHeader}>
+    <${SectionHeader} size="xs" class="mt-3 mb-0.5" right=${html`
+      <button
+        type="button"
+        class="text-2xs text-accent-fg hover:underline v2-monitoring-action"
+        data-testid="kcf-prompt-global-edit-link"
+        title="세계관·능력 등 전역 프롬프트 블록은 설정 › 프롬프트에서 관리합니다"
+        onClick=${() => { navigate('settings', { section: 'prompts' }) }}
+      >설정 › 프롬프트 열기 →</button>
+    `}>시스템 프롬프트</${SectionHeader}>
+    <div class="text-3xs text-text-dim mb-2">
+      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 목표·지시사항만 이 keeper 고유값입니다.
+    </div>
     <div class="flex gap-2 mb-2 v2-monitoring-toolbar">
       <button
         type="button"

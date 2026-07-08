@@ -90,12 +90,36 @@ let transition_task_outcome_r
                     (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
              | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ())
           | Masc_domain.Start
-          | Masc_domain.Done_action
           | Masc_domain.Cancel
-          | Masc_domain.Release
-          | Masc_domain.Submit_for_verification
+          | Masc_domain.Release -> Ok ()
+          | Masc_domain.Done_action
+          | Masc_domain.Submit_for_verification ->
+            (match handoff_context with
+             | None ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Code task submission requires handoff_context with evidence_refs"))
+             | Some ctx when ctx.evidence_refs = [] ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Code task submission requires at least one evidence_ref in handoff_context"))
+             | Some _ -> Ok ())
           | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification -> Ok ()
+          | Masc_domain.Reject_verification ->
+            (match task.handoff_context with
+             | None ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Approve/reject requires task to carry handoff_context with evidence_refs"))
+             | Some ctx when ctx.evidence_refs = [] ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Approve/reject requires task to carry at least one evidence_ref"))
+             | Some _ -> Ok ())
         in
         let* () =
           (match action, task.task_status with
@@ -127,6 +151,7 @@ let transition_task_outcome_r
           match
             Workspace_task_lifecycle.decide
               ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
+              ~requires_verification:(Masc_domain.task_requires_verification task)
               ~verification_timeout_seconds:
                 (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
@@ -219,11 +244,6 @@ let transition_task_outcome_r
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
-              | _, Masc_domain.Submit_for_verification
-                when String.length (String.trim notes) = 0 ->
-                " Remediation: submit_for_verification requires non-empty notes \
-                 describing the deliverable. Provide a summary of what was done \
-                 and evidence references."
               | _ -> ""
             in
             Error
@@ -241,7 +261,25 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
-(* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
+        let* () =
+          match action with
+          | Masc_domain.Submit_for_verification
+            when String.length (String.trim notes) = 0 ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "submit_for_verification requires non-empty notes describing the \
+                     deliverable and evidence references"))
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel
+          | Masc_domain.Release
+          | Masc_domain.Submit_for_verification
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification -> Ok ()
+        in
+        (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
           (match action, task.task_status, new_status, prepare_verification_request with
           | ( Masc_domain.Submit_for_verification
@@ -594,12 +632,26 @@ let transition_task_outcome_r
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
                ~payload
            | Masc_domain.Approve_verification ->
+             (* RFC-0323 G-3: the event actor is the verifier; carry the
+                assignee so graph reducers can close the assignee's
+                works_on edge. *)
+             let payload =
+               match new_status with
+               | Masc_domain.Done { assignee; _ } ->
+                 `Assoc
+                   [ "task_id", `String task_id; "assignee", `String assignee ]
+               | Masc_domain.Todo
+               | Masc_domain.Claimed _
+               | Masc_domain.InProgress _
+               | Masc_domain.AwaitingVerification _
+               | Masc_domain.Cancelled _ -> `Assoc [ "task_id", `String task_id ]
+             in
              emit_task_activity
                config
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Approved)
-               ~payload:(`Assoc [ "task_id", `String task_id ])
+               ~payload
            | Masc_domain.Reject_verification ->
              emit_task_activity
                config
@@ -607,15 +659,32 @@ let transition_task_outcome_r
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
                ~payload:(`Assoc [ "task_id", `String task_id ]));
-          let duration_ms = match action with
-            | Masc_domain.Done_action | Masc_domain.Cancel ->
-              Some (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
-            | Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Release
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification -> None
+          (* RFC-0323 G-3: completion side effects key off the RESULT (Done),
+             not the action — otherwise Approve_verification completions
+             record no duration. The value measures the last status phase
+             (started_at for in_progress, submitted_at for
+             awaiting_verification). *)
+          let completes_task =
+            Masc_domain.task_status_is_done new_status
+            && not (Masc_domain.task_status_is_done task.task_status)
+          in
+          let phase_duration_ms () =
+            Some
+              (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
+          in
+          let duration_ms =
+            if completes_task
+            then phase_duration_ms ()
+            else (
+              match action with
+              | Masc_domain.Cancel -> phase_duration_ms ()
+              | Masc_domain.Done_action
+              | Masc_domain.Claim
+              | Masc_domain.Start
+              | Masc_domain.Release
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Approve_verification
+              | Masc_domain.Reject_verification -> None)
           in
           observe_task_transition
             config
@@ -631,12 +700,28 @@ let transition_task_outcome_r
                  ?duration_ms
                  ~forced:forced
                  ());
+          (* RFC-0323 G-3: done hooks (economy earn, relation/hebbian) fire for
+             every transition that PRODUCES Done — Done via
+             Approve_verification included. The completer is the Done record's
+             assignee: on approve the acting [agent_name] is the verifier. *)
+          (match new_status with
+           | Masc_domain.Done { assignee; _ } ->
+             if completes_task
+             then
+               Workspace_task_cleanup.run_done_hooks
+                 config
+                 ~agent_name:assignee
+                 ~task_id
+           | Masc_domain.Todo
+           | Masc_domain.Claimed _
+           | Masc_domain.InProgress _
+           | Masc_domain.AwaitingVerification _
+           | Masc_domain.Cancelled _ -> ());
           (match action with
-           | Masc_domain.Done_action ->
-             Workspace_task_cleanup.run_done_hooks config ~agent_name ~task_id
            | Masc_domain.Cancel ->
              Workspace_task_cleanup.run_cancel_hooks config ~agent_name
-           | Masc_domain.Release -> ()
+           | Masc_domain.Done_action
+           | Masc_domain.Release
            | Masc_domain.Claim
            | Masc_domain.Start
            | Masc_domain.Submit_for_verification

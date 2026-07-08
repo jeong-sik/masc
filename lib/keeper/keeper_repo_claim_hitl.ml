@@ -376,6 +376,66 @@ let registration_candidate_of_path ~repository_id ~expected_repo_root ~path =
         Ok { repository_id; repo_root; expected_repo_root; origin_url; default_branch }))
 ;;
 
+type candidate_path_state =
+  | Candidate_path_absent
+  | Candidate_path_directory
+  | Candidate_path_invalid of string
+
+let candidate_path_state path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Candidate_path_absent
+  | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> Candidate_path_absent
+  | exception Unix.Unix_error (err, fn, arg) ->
+    Candidate_path_invalid
+      (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+  | _ -> (
+    match Sys.is_directory path with
+    | true -> Candidate_path_directory
+    | false -> Candidate_path_invalid "candidate path exists but is not a directory"
+    | exception Sys_error reason ->
+      Candidate_path_invalid
+        (Printf.sprintf "candidate path could not be inspected as directory: %s" reason))
+;;
+
+type repository_id_clone_probe =
+  | No_clone_candidate
+  | Clone_candidate of registration_candidate
+  | Invalid_clone_candidate of string
+
+let registration_candidate_of_repository_id ~keeper_id ~base_path ~repository_id =
+  let candidate_roots =
+    Keeper_sandbox_repo_path.candidate_repo_roots_no_create
+      ~base_path
+      ~keeper_id
+      ~repository_id
+  in
+  let rec loop invalid = function
+    | [] ->
+      (match invalid with
+       | [] -> No_clone_candidate
+       | errors ->
+         Invalid_clone_candidate
+           (errors
+            |> List.rev
+            |> List.map (fun (path, reason) -> Printf.sprintf "%s: %s" path reason)
+            |> String.concat "; "))
+    | repo_root :: rest ->
+      (match candidate_path_state repo_root with
+       | Candidate_path_absent -> loop invalid rest
+       | Candidate_path_invalid reason -> loop ((repo_root, reason) :: invalid) rest
+       | Candidate_path_directory -> (
+        match
+          registration_candidate_of_path
+            ~repository_id
+            ~expected_repo_root:(Some repo_root)
+            ~path:repo_root
+        with
+        | Ok candidate -> Clone_candidate candidate
+        | Error reason -> loop ((repo_root, reason) :: invalid) rest))
+  in
+  loop [] candidate_roots
+;;
+
 let pending_operator_action_message detail =
   Printf.sprintf
     "%s; operator approval pending for %s"
@@ -409,7 +469,25 @@ let request_repository_access ~keeper_id ~base_path ~repository_id =
   match Keeper_repo_mapping.access_decision ~keeper_id ~repository_id ~base_path with
   | Keeper_repo_mapping.Access_allowed -> Access_allowed
   | Keeper_repo_mapping.Access_denied denial ->
-    Access_denied (Keeper_repo_mapping.access_denial_to_string denial)
+    let detail = Keeper_repo_mapping.access_denial_to_string denial in
+    (match denial with
+     | Keeper_repo_mapping.Access_denied_unregistered_repository repository_id ->
+       (match
+          registration_candidate_of_repository_id ~keeper_id ~base_path ~repository_id
+        with
+        | Clone_candidate candidate ->
+          let operation = registration_operation ~keeper_id ~base_path candidate in
+          let approval_id = submit_registration_hitl ~keeper_id ~base_path operation in
+          Access_denied_hitl_pending { detail; approval_id }
+        | No_clone_candidate -> Access_denied detail
+        | Invalid_clone_candidate reason ->
+          Access_denied
+            (Printf.sprintf
+               "%s; playground clone candidate could not be verified: %s"
+               detail
+               reason))
+     | Access_denied_load_error _ | Access_denied_repository_store_error _ ->
+       Access_denied detail)
 ;;
 
 let request_path_access ~keeper_id ~base_path ~path =

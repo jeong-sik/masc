@@ -92,15 +92,16 @@ let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
    (scope-version tokens) is a separate, unimplemented direction; this is the
    stopgap, reinstated by operator decision, not that design.
 
-   Reads the backlog ([get_tasks_safe], a disk read) to test for a claimable
-   scoped task. Kept on the claim path only — NOT the per-turn observation path
-   ([resolve_observation_claim_goal_scope]), which stays pure-meta to avoid
-   adding a per-keeper, per-cycle backlog read. *)
-let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
+   [resolve_claim_goal_scope] reads the backlog ([get_tasks_safe], a disk read)
+   to test for a claimable scoped task. Call
+   [resolve_claim_goal_scope_for_tasks] when the caller already loaded the
+   backlog. Kept off the pure signal-only observation resolver
+   ([resolve_observation_claim_goal_scope]). *)
+let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
+    ~(meta : keeper_meta) ~(tasks : Masc_domain.task list) () =
   match meta.active_goal_ids with
   | [] -> meta_only_claim_goal_scope meta
   | goal_ids ->
-    let tasks = Workspace.get_tasks_safe config in
     let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let scoped_claimable_exists =
       List.exists (fun task ->
@@ -120,6 +121,10 @@ let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) 
         effective_goal_ids = goal_ids;
         fallback_reason = Some "no_scoped_claimable_tasks";
       }
+
+let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let tasks = Workspace.get_tasks_safe config in
+  resolve_claim_goal_scope_for_tasks ~config ~meta ~tasks ()
 
 let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =

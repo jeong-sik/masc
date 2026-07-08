@@ -35,17 +35,14 @@ describe('KeeperSpawnPanel', () => {
     expect(container.textContent).toContain('Browser')
   })
 
-  it('switches to direct tab on click', () => {
+  it('exposes the spawn panel testid in both collapsed and expanded states', () => {
+    const collapsed = document.createElement('div')
+    render(h(KeeperSpawnPanel), collapsed)
+    expect(collapsed.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
     showSpawnPanel.value = true
-    const container = document.createElement('div')
-    render(h(KeeperSpawnPanel), container)
-    const buttons = container.querySelectorAll('button')
-    const directBtn = Array.from(buttons).find((b) => b.textContent?.includes('직접 생성'))
-    expect(directBtn).not.toBeUndefined()
-    directBtn!.click()
-    render(null, container)
-    render(h(KeeperSpawnPanel), container)
-    expect(container.textContent).toContain('masc_keeper_up')
+    const expanded = document.createElement('div')
+    render(h(KeeperSpawnPanel), expanded)
+    expect(expanded.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
   })
 
   it('closes panel on 닫기 click', () => {

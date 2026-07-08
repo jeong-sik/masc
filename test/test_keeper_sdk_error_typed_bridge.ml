@@ -252,6 +252,7 @@ let test_user_message_of_masc_accept_rejected () =
          ; model = None
          ; reason_kind = Some KTD.Accept_no_usable_progress
          ; response_shape = Some KTD.Accept_response_empty
+         ; stop_reason = None
          ; last_tool_effect = None
          ; any_mutating_tool = None
          ; tool_effects_seen = []
@@ -368,8 +369,152 @@ let test_soft_rate_limit_classifies_as_rate_limit () =
            "%s expected rate_limit, got %s"
            label
            (EC.degraded_retry_reason_to_string reason)
-       | None -> Alcotest.failf "%s expected rate_limit recoverable reason" label)
+      | None -> Alcotest.failf "%s expected rate_limit recoverable reason" label)
     [ "api", api_err; "provider", provider_err ]
+;;
+
+let classification_to_string = function
+  | EC.Transient_network -> "transient_network"
+  | EC.Transient_internal_runner -> "transient_internal_runner"
+  | EC.Transient_oas_timeout -> "transient_oas_timeout"
+  | EC.Transient_rate_limit -> "transient_rate_limit"
+  | EC.Transient_capacity -> "transient_capacity"
+  | EC.Non_transient -> "non_transient"
+  | EC.Unclassified -> "unclassified"
+;;
+
+let check_classification label expected err =
+  Alcotest.(check string)
+    label
+    (classification_to_string expected)
+    (classification_to_string (EC.classify_error err))
+;;
+
+let runtime_runner_tls_error () =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Internal_unhandled_exception
+       { site = KTD.runtime_runner_execute_site
+       ; exn_repr = "TLS alert from peer: handshake failure"
+       ; transport_error_kind = Some Http.Tls_error
+       })
+;;
+
+let runtime_runner_legacy_tls_text_error () =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Internal_unhandled_exception
+       { site = KTD.runtime_runner_execute_site
+       ; exn_repr = "TLS alert from peer: handshake failure"
+       ; transport_error_kind = None
+       })
+;;
+
+let test_static_error_classification_preserves_retry_semantics () =
+  let structural_timeout =
+    "Turn wall-clock budget exhausted during runtime attempt (budget=554.9s)"
+  in
+  check_classification
+    "api network"
+    EC.Transient_network
+    (SdkE.Api
+       (Retry.NetworkError
+          { message = "connection refused"; kind = Http.Connection_refused }));
+  check_classification
+    "api structural timeout"
+    EC.Transient_oas_timeout
+    (SdkE.Api (Retry.Timeout { message = structural_timeout; phase = None }));
+  check_classification
+    "api transport timeout"
+    EC.Transient_network
+    (SdkE.Api (Retry.Timeout { message = "read timed out"; phase = None }));
+  check_classification
+    "internal runner tls"
+    EC.Transient_internal_runner
+    (runtime_runner_tls_error ());
+  check_classification
+    "legacy internal runner tls text is not parsed"
+    EC.Unclassified
+    (runtime_runner_legacy_tls_text_error ());
+  check_classification
+    "api overloaded"
+    EC.Transient_capacity
+    (SdkE.Api (Retry.Overloaded { message = "capacity exhausted" }));
+  check_classification
+    "api server 503"
+    EC.Transient_network
+    (SdkE.Api (Retry.ServerError { status = 503; message = "unavailable" }));
+  check_classification
+    "api server 522"
+    EC.Transient_network
+    (SdkE.Api (Retry.ServerError { status = 522; message = "origin timeout" }));
+  check_classification
+    "api server 500"
+    EC.Non_transient
+    (SdkE.Api (Retry.ServerError { status = 500; message = "server error" }));
+  check_classification
+    "provider tls"
+    EC.Non_transient
+    (SdkE.Provider
+       (Llm_provider.Error.NetworkError
+          { provider = "p"
+          ; kind = Http.Tls_error
+          ; timeout_phase = None
+          ; detail = "tls failed"
+          }));
+  check_classification
+    "provider timeout structural"
+    EC.Transient_oas_timeout
+    (SdkE.Provider
+       (Llm_provider.Error.Timeout
+          { provider = "p"; timeout_phase = None; detail = structural_timeout }));
+  check_classification
+    "provider server 524"
+    EC.Transient_network
+    (SdkE.Provider
+       (Llm_provider.Error.ServerError
+          { provider = "p"; code = 524; transient = false; detail = "timeout" }));
+  check_classification
+    "provider server transient"
+    EC.Transient_network
+    (SdkE.Provider
+       (Llm_provider.Error.ServerError
+          { provider = "p"; code = 500; transient = true; detail = "retryable" }));
+  check_classification
+    "provider server terminal"
+    EC.Non_transient
+    (SdkE.Provider
+       (Llm_provider.Error.ServerError
+          { provider = "p"; code = 500; transient = false; detail = "terminal" }));
+  check_classification
+    "api rate limit"
+    EC.Transient_rate_limit
+    (SdkE.Api (Retry.RateLimited { retry_after = Some 30.0; message = "slow down" }));
+  check_classification
+    "provider rate limit"
+    EC.Transient_rate_limit
+    (SdkE.Provider
+       (Llm_provider.Error.RateLimit
+          { provider = "p"; retry_after = Some 30.0; detail = "slow down" }));
+  check_classification
+    "provider capacity"
+    EC.Transient_capacity
+    (SdkE.Provider
+       (Llm_provider.Error.CapacityExhausted
+          { scope = Llm_provider.Error.CapacityModel
+          ; affected = [ "p:m" ]
+          ; retry_after = Some 10.0
+          ; detail = "capacity"
+          }));
+  check_classification
+    "provider hard quota"
+    EC.Non_transient
+    (SdkE.Provider
+       (Llm_provider.Error.HardQuota
+          { provider = "p"; retry_after = None; detail = "billing required" }));
+  check_classification
+    "unknown variant"
+    EC.Unclassified
+    (SdkE.Provider
+       (Llm_provider.Error.UnknownVariant { type_name = "provider"; value = "new" }))
 ;;
 
 let rate_limit_pool_of_runtime_id = function
@@ -490,6 +635,7 @@ let read_only_no_progress_err ~scope =
        ; model = None
        ; reason_kind = Some KTD.Accept_no_usable_progress
        ; response_shape = Some KTD.Accept_response_thinking_only
+       ; stop_reason = None
        ; last_tool_effect = Some KTD.Tool_effect_read_only
        ; any_mutating_tool = Some false
        ; tool_effects_seen = [ KTD.Tool_effect_read_only ]
@@ -506,6 +652,7 @@ let generic_accept_rejected_err ~scope =
        ; model = None
        ; reason_kind = Some KTD.Accept_predicate_rejected
        ; response_shape = Some KTD.Accept_response_mixed_without_deliverable_content
+       ; stop_reason = None
        ; last_tool_effect = None
        ; any_mutating_tool = Some false
        ; tool_effects_seen = []
@@ -1068,6 +1215,10 @@ let () =
             "soft rate limits remain rate_limit reasons"
             `Quick
             test_soft_rate_limit_classifies_as_rate_limit
+        ; Alcotest.test_case
+            "static error classification preserves retry semantics"
+            `Quick
+            test_static_error_classification_preserves_retry_semantics
         ; Alcotest.test_case
             "payment required is classified as hard quota"
             `Quick

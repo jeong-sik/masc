@@ -165,6 +165,8 @@ let status_string config task_id =
   | None -> "not_found"
   | Some t -> Masc_domain.string_of_task_status t.task_status
 
+let submit_notes = "verification evidence captured for FSM transition test"
+
 let verification_id_of_task config task_id =
   match get_task config task_id with
   | None -> Alcotest.fail "task not found"
@@ -221,7 +223,8 @@ let test_submit_for_verification_moves_to_awaiting () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     match Workspace.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Masc_domain.Submit_for_verification () with
+            ~task_id ~action:Masc_domain.Submit_for_verification
+            ~notes:submit_notes () with
     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
     | Ok _ ->
       Alcotest.(check string) "status" "awaiting_verification"
@@ -234,7 +237,8 @@ let test_submit_for_verification_from_claimed_moves_to_awaiting () =
       (Workspace.transition_task_r config ~agent_name:"worker"
          ~task_id ~action:Masc_domain.Claim ());
     match Workspace.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Masc_domain.Submit_for_verification () with
+            ~task_id ~action:Masc_domain.Submit_for_verification
+            ~notes:submit_notes () with
     | Error e -> Alcotest.fail ("submit from claimed failed: " ^ Masc_domain.show_masc_error e)
     | Ok _ ->
       Alcotest.(check string) "status" "awaiting_verification"
@@ -248,6 +252,7 @@ let test_submit_prepare_failure_keeps_task_in_progress () =
     let result =
       Workspace.transition_task_r config ~agent_name:"worker"
         ~task_id ~action:Masc_domain.Submit_for_verification
+        ~notes:submit_notes
         ~prepare_verification_request:
           (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
              prepare_called := true;
@@ -275,8 +280,8 @@ let test_submit_prepare_failure_keeps_task_in_progress () =
 let test_submit_phase_e_no_substring_reject_at_transition () =
   (* RFC-0109 Phase E (2026-05-27): the transition layer no longer
      applies a substring classifier to reject submissions with
-     "placeholder-only" notes. Gating for contracted tasks lives in
-     [Task_completion_gate.decide] (see test/test_task_completion_gate.ml).
+      "placeholder-only" notes. Gating for contracted tasks lives in
+      [Task_completion_gate.decide] (see test/test_task_completion_gate.ml).
      transition_task_r called directly forwards typed evidence refs as
      observability metadata and lets the verifier protocol observe what
      the keeper actually wrote. *)
@@ -336,6 +341,7 @@ let test_submit_retry_records_request_created_backlog_orphan_policy () =
          ~agent_name:"worker"
          ~task_id
          ~action:Masc_domain.Submit_for_verification
+         ~notes:submit_notes
          ~prepare_verification_request:
            (fun ~task:_ ~assignee ~verification_id ~evidence_refs ->
              retry_request_id := Some verification_id;
@@ -601,7 +607,8 @@ let test_approve_by_other_agent_moves_to_done () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Workspace.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Masc_domain.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification
+      ~notes:submit_notes () in
     match Workspace.transition_task_r config ~agent_name:"verifier"
             ~task_id ~action:Masc_domain.Approve_verification () with
     | Error e -> Alcotest.fail ("approve failed: " ^ Masc_domain.show_masc_error e)
@@ -614,7 +621,8 @@ let test_reject_by_other_agent_moves_to_in_progress () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Workspace.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Masc_domain.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification
+      ~notes:submit_notes () in
     match Workspace.transition_task_r config ~agent_name:"verifier"
             ~task_id ~action:Masc_domain.Reject_verification ~reason:"test reject" () with
     | Error e -> Alcotest.fail ("reject failed: " ^ Masc_domain.show_masc_error e)
@@ -639,6 +647,7 @@ let test_approve_verdict_failure_still_completes () =
          ~agent_name:"worker"
          ~task_id
          ~action:Masc_domain.Submit_for_verification
+         ~notes:submit_notes
          ()
      with
      | Ok _ -> ()
@@ -695,6 +704,7 @@ let test_reject_verdict_failure_still_transitions () =
          ~agent_name:"worker"
          ~task_id
          ~action:Masc_domain.Submit_for_verification
+         ~notes:submit_notes
          ()
      with
      | Ok _ -> ()
@@ -747,6 +757,7 @@ let test_approve_retry_recovers_completed_verdict_orphan () =
          ~agent_name:"worker"
          ~task_id
          ~action:Masc_domain.Submit_for_verification
+         ~notes:submit_notes
          ()
      with
      | Ok _ -> ()
@@ -817,6 +828,7 @@ let test_reject_retry_recovers_completed_verdict_orphan () =
          ~agent_name:"worker"
          ~task_id
          ~action:Masc_domain.Submit_for_verification
+         ~notes:submit_notes
          ()
      with
      | Ok _ -> ()
@@ -884,7 +896,8 @@ let test_claim_next_preserves_rejected_verification_owner_task () =
     let task_2 = add_strict_task config in
     claim_and_start config "worker" task_1;
     (match Workspace.transition_task_r config ~agent_name:"worker"
-             ~task_id:task_1 ~action:Masc_domain.Submit_for_verification () with
+             ~task_id:task_1 ~action:Masc_domain.Submit_for_verification
+             ~notes:submit_notes () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
     let req =
@@ -911,7 +924,8 @@ let test_self_approval_blocked () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Workspace.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Masc_domain.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification
+      ~notes:submit_notes () in
     match Workspace.transition_task_r config ~agent_name:"worker"
             ~task_id ~action:Masc_domain.Approve_verification () with
     | Ok _ -> Alcotest.fail "self-approval should be blocked"
@@ -925,7 +939,8 @@ let test_self_rejection_blocked () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Workspace.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Masc_domain.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification
+      ~notes:submit_notes () in
     match Workspace.transition_task_r config ~agent_name:"worker"
             ~task_id ~action:Masc_domain.Reject_verification () with
     | Ok _ -> Alcotest.fail "self-rejection should be blocked"

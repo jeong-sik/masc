@@ -828,7 +828,7 @@ let deny_guard
           ~reason_code:"keeper_deny" ~reason_text
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
-        Agent_sdk.Hooks.Override
+        Agent_sdk.Hooks.Block
           (render_inline_skip_reason_with_source
              ~source_path ~source_line
              ~tool_name ~reason_code:"keeper_deny" ~reason_text)
@@ -899,7 +899,7 @@ let destructive_guard
              ~reason_code:"destructive_guard" ~reason_text
              ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
              ~stage_latency_ms:latency_ms;
-           Agent_sdk.Hooks.Override
+           Agent_sdk.Hooks.Block
              (render_inline_skip_reason_with_source
                 ~source_path ~source_line
                 ~tool_name ~reason_code:"destructive_guard"
@@ -955,7 +955,7 @@ let governance_approval_guard
           ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode"
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
-        Agent_sdk.Hooks.Override
+        Agent_sdk.Hooks.Block
           (render_inline_skip_reason_with_source
              ~source_path ~source_line
              ~tool_name ~reason_code:"hard_forbidden"

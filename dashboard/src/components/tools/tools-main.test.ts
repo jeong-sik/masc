@@ -17,6 +17,7 @@ type MockToolsResponse = {
 
 const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
+  navigate: vi.fn(),
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
@@ -46,8 +47,8 @@ vi.mock('./tool-full-inventory', () => ({
   FullInventoryView: () => html`<div>FullInventoryView</div>`,
 }))
 
-vi.mock('./prompt-registry-panel', () => ({
-  PromptRegistryPanel: () => html`<div>PromptRegistryPanel</div>`,
+vi.mock('../../router', () => ({
+  navigate: mocks.navigate,
 }))
 
 vi.mock('./config-resolution-panel', () => ({
@@ -126,7 +127,14 @@ describe('Tools', () => {
     expect(container.textContent).toContain('FullInventoryView')
     expect(container.textContent).toContain('도구 사용 현황')
     expect(container.textContent).toContain('ToolMetrics')
-    expect(container.textContent).toContain('PromptRegistryPanel')
+    // Prompt editing was consolidated into Settings › Prompts; Lab now only
+    // shows a read-only pointer, not the editable PromptRegistryPanel.
+    expect(container.textContent).not.toContain('PromptRegistryPanel')
+    expect(container.textContent).toContain('프롬프트 레지스트리')
+    const promptCta = container.querySelector('.v2-lab-prompt-cta') as HTMLElement | null
+    expect(promptCta).not.toBeNull()
+    promptCta!.click()
+    expect(mocks.navigate).toHaveBeenCalledWith('settings', { section: 'prompts' })
   })
 
   it('renders scheduled automation FSM projection', async () => {

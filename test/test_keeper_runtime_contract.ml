@@ -111,6 +111,26 @@ let test_no_scoped_match_falls_back_to_all_tasks () =
         failf "expected fallback claim, got error: %s" msg)
 ;;
 
+let test_preloaded_tasks_fall_back_to_all_tasks () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      add_task ~goal_id:"goal-b" config ~title:"goal b task";
+      let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
+      let tasks = Workspace.get_tasks_raw config in
+      let scope =
+        Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config
+          ~meta ~tasks ()
+      in
+      check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
+        scope.mode;
+      check (option string) "fallback reason recorded"
+        (Some "no_scoped_claimable_tasks") scope.fallback_reason;
+      check (list string) "effective goal ids preserved" [ "goal-a" ]
+        scope.effective_goal_ids)
+;;
+
 let test_scoped_match_present_keeps_isolation () =
   let config = make_config () in
   Fun.protect
@@ -146,6 +166,8 @@ let () =
             test_scoped_match_present_keeps_isolation
         ; test_case "falls back to all_tasks when no scoped match" `Quick
             test_no_scoped_match_falls_back_to_all_tasks
+        ; test_case "preloaded tasks fall back to all_tasks" `Quick
+            test_preloaded_tasks_fall_back_to_all_tasks
         ] )
     ]
 ;;

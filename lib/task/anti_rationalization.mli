@@ -23,6 +23,7 @@ type review_request = {
   completion_notes : string;
   agent_name : string;
   task_id : string;
+  evidence_refs : string list;
 }
 
 (** Gate verdict. *)
@@ -56,6 +57,7 @@ val valid_verdict_strings : string list
 (** Which gate produced the verdict. Variant type prevents typos that
     would silently compile with a stringly-typed field. *)
 type gate =
+  | Evidence
   | Length
   | Excuse
   | Contract

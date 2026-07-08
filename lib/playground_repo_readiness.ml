@@ -337,9 +337,9 @@ let inspect
 
 (* ── Sandbox repo auto-repair ─────────────────────────────────── *)
 
-(** Look up the repository URL from [repositories.toml] by repo name. *)
+(** Look up the repository URL from [repositories.toml] by repo id/name/alias. *)
 let find_repo_url ~(config : Workspace.config) ~repo_name =
-  Repo_store.find_url_by_id ~base_path:config.Workspace.base_path repo_name
+  Repo_store.find_url_by_identity ~base_path:config.Workspace.base_path repo_name
 
 (** Clone a sandbox repo using non-interactive repo-manager git.
     Constructs a minimal [repository] record and delegates to [Repo_git.clone]. *)

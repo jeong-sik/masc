@@ -343,6 +343,7 @@ let () =
            ~agent_name:actual_name
            ~task_id:"task-001"
            ~action:Masc_domain.Submit_for_verification
+           ~notes:"verification status setup notes"
            ()
        with
        | Ok _ -> ()

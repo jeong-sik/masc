@@ -47,6 +47,8 @@ type t =
   | Time_now
   | Tool_search
   | Tools_list
+  | Persona_create
+  | Persona_update
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -94,6 +96,8 @@ let all : t list =
   ; Time_now
   ; Tool_search
   ; Tools_list
+  ; Persona_create
+  ; Persona_update
   ; Voice_agent
   ; Voice_listen
   ; Voice_session_end
@@ -143,6 +147,8 @@ let to_string = function
   | Time_now -> "keeper_time_now"
   | Tool_search -> "keeper_tool_search"
   | Tools_list -> "keeper_tools_list"
+  | Persona_create -> "masc_persona_create"
+  | Persona_update -> "masc_persona_update"
   | Voice_agent -> "keeper_voice_agent"
   | Voice_listen -> "keeper_voice_listen"
   | Voice_session_end -> "keeper_voice_session_end"
@@ -256,6 +262,8 @@ let is_keeper_board_tool = function
   | Time_now
   | Tool_search
   | Tools_list
+  | Persona_create
+  | Persona_update
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -304,6 +312,8 @@ let masc_board_name_of_keeper_tool = function
   | Time_now
   | Tool_search
   | Tools_list
+  | Persona_create
+  | Persona_update
   | Voice_agent
   | Voice_listen
   | Voice_session_end

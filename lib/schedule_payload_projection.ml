@@ -86,6 +86,15 @@ let classify_kind = function
   | _ -> None
 ;;
 
+(* The intrinsic risk of a payload kind, when the kind itself determines it
+   rather than the caller. [Keeper_wake] is always [Reminder_only] (an internal
+   self-wake, never a human-grant action); [Board_post] is caller-specified
+   (it may write to the board and require approval), so it returns [None]. *)
+let intrinsic_risk_class_of_kind = function
+  | Keeper_wake -> Some Schedule_domain.Reminder_only
+  | Board_post -> None
+;;
+
 let assoc_string key fields =
   match List.assoc_opt key fields with
   | Some (`String value) -> trim_nonempty value
@@ -150,6 +159,16 @@ let payload_view (request : Schedule_domain.schedule_request) =
 let kind_of_json_result payload =
   let* view = payload_view_of_json payload in
   Ok view.raw_kind
+;;
+
+(* Resolve the intrinsic risk_class a payload's kind mandates, if any, so the
+   creation boundary can clamp a caller-supplied risk_class that would otherwise
+   deadlock (e.g. a keeper_wake escalated to a human-grant it cannot satisfy).
+   Returns [None] when the kind is unknown or caller-specified. *)
+let intrinsic_risk_class_of_payload payload =
+  match kind_of_json_result payload with
+  | Ok raw -> Option.bind (classify_kind raw) intrinsic_risk_class_of_kind
+  | Error _ -> None
 ;;
 
 let board_schema_version_error ~creation schema_version =
@@ -223,21 +242,34 @@ let validate_keeper_wake_body body =
        |> Result.map (fun _ -> ()))
 ;;
 
+(* A keeper_wake enqueues an internal keeper wake signal; it has no
+   external/destructive effect, so it must NOT be side-effecting. A
+   side-effecting risk_class would force [Pending_approval] and require a
+   separate human grant that a self-waking keeper cannot supply — the keeper
+   then polls [masc_schedule_get] on a status that never changes until the
+   idle guard kills the turn. Requiring a non-side-effecting risk_class keeps
+   a wake in [Scheduled] so it fires automatically. board_post is the opposite
+   (it writes to the shared board and legitimately requires approval). *)
 let validate_keeper_wake_for_creation ~risk_class view =
   let* () = keeper_wake_schema_version_error ~creation:true view.schema_version in
-  if not (Schedule_domain.is_side_effecting risk_class)
+  if Schedule_domain.is_side_effecting risk_class
   then
     Error
       (keeper_wake_kind
-       ^ " requires a side-effecting risk_class such as workspace_write")
+       ^ " requires a non-side-effecting risk_class such as reminder_only")
   else validate_keeper_wake_body view.body
 ;;
 
-let validate_keeper_wake_for_dispatch (request : Schedule_domain.schedule_request) view =
+(* Dispatch validates only payload well-formedness. risk_class gating is a
+   creation-time concern (it decides Pending_approval vs Scheduled); a schedule
+   that reaches dispatch already cleared that gate. Re-checking risk here is
+   redundant, and re-checking a *direction* would reject legacy keeper_wake rows
+   persisted under the old (side-effecting) rule. Enqueuing a keeper wake is
+   harmless regardless of the stored risk label. *)
+let validate_keeper_wake_for_dispatch
+    (_request : Schedule_domain.schedule_request) view =
   let* () = keeper_wake_schema_version_error ~creation:false view.schema_version in
-  if not (Schedule_domain.is_side_effecting request.Schedule_domain.risk_class)
-  then Error (keeper_wake_kind ^ " requires a side-effecting risk_class")
-  else validate_keeper_wake_body view.body
+  validate_keeper_wake_body view.body
 ;;
 
 let validate_request_payload_for_creation_detailed ~payload ~risk_class =

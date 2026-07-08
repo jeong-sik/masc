@@ -60,7 +60,8 @@ function LoopContext({ loop }: { loop: DashboardKeeperBackgroundLoop }) {
 }
 
 function RecurringRow({ task }: { task: DashboardKeeperRecurringTask }) {
-  const failed = task.failure_count > 0
+  const failClass =
+    task.failure_count > 0 ? 'font-mono text-[var(--color-status-warn)]' : 'font-mono'
   return html`
     <div class="grid gap-1 border-t border-[var(--color-border-subtle)] py-2 first:border-t-0">
       <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -71,9 +72,7 @@ function RecurringRow({ task }: { task: DashboardKeeperRecurringTask }) {
       <div class="grid gap-1 text-2xs text-[var(--color-fg-muted)] sm:grid-cols-5">
         <span class="font-mono">every ${task.interval_sec.toLocaleString()}s</span>
         <span class="font-mono">runs ${task.run_count.toLocaleString()}</span>
-        <span class=${failed ? 'font-mono text-[var(--color-status-warn)]' : 'font-mono'}
-          >fail ${task.failure_count.toLocaleString()}/${task.max_failures.toLocaleString()}</span
-        >
+        <span class=${failClass}>fail ${task.failure_count.toLocaleString()}/${task.max_failures.toLocaleString()}</span>
         <span>next ${timeLabel(task.next_run_at_iso)}</span>
         <span>last ${timeLabel(task.last_run_at_iso)}</span>
       </div>

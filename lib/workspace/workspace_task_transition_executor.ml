@@ -51,10 +51,10 @@ let release_counters ~action task handoff_context =
     ( min (task.cycle_count + 1) max_cycle_count
     , Workspace_task_claim.derive_release_reclaim_policy task handoff_context
     , Workspace_task_claim.derive_release_do_not_reclaim_reason task handoff_context )
+  | Masc_domain.Cancel -> task.cycle_count, None, None
   | Masc_domain.Claim
   | Masc_domain.Start
   | Masc_domain.Done_action
-  | Masc_domain.Cancel
   | Masc_domain.Submit_for_verification
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->

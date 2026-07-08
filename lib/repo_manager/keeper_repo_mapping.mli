@@ -168,5 +168,6 @@ val validate_path_access :
 (** [validate_path_access ~keeper_id ~base_path ~path] returns [Ok ()] if
     [path] resolves outside registered repositories or to a registered
     repository. Per-keeper mappings do not cap access. Returns [Error msg] for
-    unregistered playground repositories, identity mismatches, and
-    repository-store load failures. *)
+    registered-repository identity mismatches and repository-store load
+    failures. A visible playground clone that is absent from the catalog is
+    treated as sandbox-local and remains governed by path containment. *)

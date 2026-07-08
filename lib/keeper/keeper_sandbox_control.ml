@@ -364,11 +364,7 @@ let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
     r
   | r -> r
 
-type playground_repo_policy_resolution =
-  | Registered_repository_id of Repo_manager_types.repository_id
-  | Sandbox_local_clone
-
-let playground_repo_policy_resolution ~base_path ~repo_catalog ~repo_name
+let playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
     ~repo_path =
   match repo_catalog with
   | Error msg -> Error (`Store_error msg)
@@ -378,8 +374,8 @@ let playground_repo_policy_resolution ~base_path ~repo_catalog ~repo_name
       ~path:repo_path repos
   with
   | Keeper_repo_mapping.Repository { repository_id; _ } ->
-    Ok (Registered_repository_id repository_id)
-  | Keeper_repo_mapping.No_repository -> Ok Sandbox_local_clone
+    Ok repository_id
+  | Keeper_repo_mapping.No_repository -> Ok repo_name
   | Keeper_repo_mapping.Repository_identity_mismatch _ ->
     Error
       (`Identity_mismatch
@@ -389,7 +385,7 @@ let playground_repo_policy_resolution ~base_path ~repo_catalog ~repo_name
 let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       ~repo_name ~repo_path =
   let field status allowed ?repository_id ?error ?mapping_error
-        ?policy_scope ?(default_scope = false) () =
+        ?(default_scope = false) () =
     let status_text = playground_policy_status_to_string status in
     let reason_fields =
       match playground_policy_reason status with
@@ -414,16 +410,11 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
     let default_scope_fields =
       if default_scope then [ ("policy_default_scope", `Bool true) ] else []
     in
-    let scope_fields =
-      match policy_scope with
-      | None -> []
-      | Some scope -> [ ("policy_scope", `String scope) ]
-    in
     ( "policy_source"
     , `String (policy_source_basename_of_status status) )
     :: ("policy_status", `String status_text)
     :: ("policy_allowed", `Bool allowed)
-    :: (scope_fields @ default_scope_fields @ repository_id_fields @ reason_fields
+    :: (default_scope_fields @ repository_id_fields @ reason_fields
         @ error_fields @ mapping_error_fields)
   in
   let repository_id_in_catalog repository_id =
@@ -438,7 +429,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
   in
   let field_resolved_registered ?mapping_error ~default_scope () =
     match
-      playground_repo_policy_resolution ~base_path ~repo_catalog ~repo_name
+      playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
         ~repo_path
     with
     | Error (`Identity_mismatch msg) ->
@@ -447,10 +438,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
     | Error (`Store_error msg) ->
       field Policy_repository_store_error false ~repository_id:repo_name
         ~error:msg ()
-    | Ok Sandbox_local_clone ->
-      field Policy_allowed true ?mapping_error ~default_scope
-        ~policy_scope:"sandbox_local" ()
-    | Ok (Registered_repository_id repository_id) ->
+    | Ok repository_id ->
       (match repository_id_in_catalog repository_id with
        | Error (`Store_error msg) ->
          field Policy_repository_store_error false ~repository_id ~error:msg ()
@@ -465,7 +453,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       field_resolved_registered ~default_scope:true ()
   | Keeper_repo_mapping.Mapping_found mapping ->
       (match
-       playground_repo_policy_resolution ~base_path ~repo_catalog ~repo_name
+       playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
          ~repo_path
        with
        | Error (`Identity_mismatch msg) ->
@@ -474,9 +462,7 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
        | Error (`Store_error msg) ->
          field Policy_repository_store_error false ~repository_id:repo_name
            ~error:msg ()
-       | Ok Sandbox_local_clone ->
-         field Policy_allowed true ~policy_scope:"sandbox_local" ()
-       | Ok (Registered_repository_id repository_id) ->
+       | Ok repository_id ->
          (match repository_id_in_catalog repository_id with
           | Error (`Store_error msg) ->
             field Policy_repository_store_error false ~repository_id ~error:msg ()

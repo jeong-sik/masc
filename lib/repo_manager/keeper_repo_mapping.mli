@@ -170,4 +170,5 @@ val validate_path_access :
     repository. Per-keeper mappings do not cap access. Returns [Error msg] for
     registered-repository identity mismatches and repository-store load
     failures. A visible playground clone that is absent from the catalog is
-    treated as sandbox-local and remains governed by path containment. *)
+    treated as a synthetic repository id so access remains fail-closed through
+    repository registration policy instead of sandbox containment alone. *)

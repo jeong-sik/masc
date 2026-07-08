@@ -106,27 +106,49 @@ let parse_field raw field =
 let parse_bool_field raw field =
   Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
 
-let assert_sandbox_local_search_response ~raw =
+let unregistered_masc_mcp_policy_error =
+  "Repository masc-mcp is not registered; access not allowed"
+
+let assert_repository_registration_policy_response ~raw =
   let json = Yojson.Safe.from_string raw in
-  Alcotest.(check (option bool)) "sandbox-local search succeeds" (Some true)
+  Alcotest.(check (option bool)) "policy response denies access" (Some false)
     (Json.member "ok" json |> Json.to_bool_option);
-  Alcotest.(check (option string)) "no policy error" None
+  Alcotest.(check (option string)) "policy error keeps original denial"
+    (Some unregistered_masc_mcp_policy_error)
     (Json.member "policy_error" json |> Json.to_string_option);
-  Alcotest.(check (option string)) "no visible error" None
-    (Json.member "error" json |> Json.to_string_option);
-  Alcotest.(check (option bool)) "no operator action" None
+  Alcotest.(check bool) "visible error changes from bare denial" true
+    (not
+       (String.equal
+          (Json.member "error" json |> Json.to_string_option
+           |> Option.value ~default:"")
+          unregistered_masc_mcp_policy_error));
+  Alcotest.(check (option bool)) "operator action required" (Some true)
     (Json.member "operator_action_required" json |> Json.to_bool_option);
-  Alcotest.(check (option string)) "no deterministic policy retry" None
+  Alcotest.(check (option string)) "operator action kind"
+    (Some "repository_registration")
+    (Json.member "operator_action_kind" json |> Json.to_string_option);
+  Alcotest.(check (option string)) "operator action reason"
+    (Some "repository_unregistered")
+    (Json.member "operator_action_reason" json |> Json.to_string_option);
+  Alcotest.(check (option string)) "next action"
+    (Some "wait_for_operator_approval")
+    (Json.member "next_action" json |> Json.to_string_option);
+  Alcotest.(check (option string)) "approval kind"
+    (Some "repository_registration")
+    (Json.member "approval_pending" json |> Json.member "kind"
+     |> Json.to_string_option);
+  Alcotest.(check (option string)) "approval reason"
+    (Some "repository_unregistered")
+    (Json.member "approval_pending" json |> Json.member "reason"
+     |> Json.to_string_option);
+  Alcotest.(check (option bool)) "approval is non-blocking"
+    (Some true)
+    (Json.member "approval_pending" json |> Json.member "non_blocking"
+     |> Json.to_bool_option);
+  Alcotest.(check (option string)) "deterministic retry reason"
+    (Some "policy_blocked")
     (Json.member "deterministic_retry" json |> Json.member "reason"
      |> Json.to_string_option)
-
-let assert_no_repository_registration_pending ~keeper_name =
-  let pending =
-    AQ.list_pending_entries ()
-    |> List.filter (fun (entry : AQ.pending_approval) ->
-      String.equal entry.keeper_name keeper_name)
-  in
-  Alcotest.(check int) "no repository registration pending" 0 (List.length pending)
 
 let write_executable path content =
   ignore (Fs_compat.save_file_atomic path content);
@@ -620,7 +642,7 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
       false
       (Sys.file_exists playground)
 
-let test_rg_unknown_playground_clone_is_sandbox_local () =
+let test_rg_unregistered_clone_queues_repository_hitl () =
   if not (git_available ()) then ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -644,8 +666,30 @@ let test_rg_unknown_playground_clone_is_sandbox_local () =
             ; "path", `String "repos/masc-mcp"
             ])
     in
-    assert_sandbox_local_search_response ~raw;
-    assert_no_repository_registration_pending ~keeper_name:meta.name)
+    assert_repository_registration_policy_response ~raw;
+    match
+      AQ.list_pending_entries ()
+      |> List.filter (fun (entry : AQ.pending_approval) ->
+        String.equal entry.keeper_name meta.name)
+    with
+    | [ pending ] ->
+      Alcotest.(check string)
+        "requested alias action"
+        "add_repository_alias"
+        (Json.member "requested_action" pending.input |> Json.to_string);
+      Alcotest.(check string)
+        "alias target"
+        "masc"
+        (Json.member "target_repository_id" pending.input |> Json.to_string);
+      Alcotest.(check string)
+        "alias"
+        "masc-mcp"
+        (Json.member "alias" pending.input |> Json.to_string)
+    | entries ->
+      Alcotest.failf
+        "expected one pending repository registration approval, got %d; raw=%s"
+        (List.length entries)
+        raw)
 
 let test_rg_registered_alias_allows_masc_mcp_path () =
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
@@ -691,7 +735,7 @@ let test_rg_registered_alias_allows_masc_mcp_path () =
       true
       (match Json.member "approval_pending" json with `Null -> true | _ -> false)
 
-let test_read_unknown_playground_clone_is_sandbox_local () =
+let test_read_unregistered_clone_surfaces_repository_hitl () =
   if not (git_available ()) then ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -713,15 +757,30 @@ let test_read_unknown_playground_clone_is_sandbox_local () =
           (`Assoc
             [ "path", `String "repos/masc-mcp/README.md"; "max_bytes", `Int 4096 ])
     in
-    let json = Yojson.Safe.from_string raw in
-    Alcotest.(check (option bool)) "sandbox-local read succeeds" (Some true)
-      (Json.member "ok" json |> Json.to_bool_option);
-    Alcotest.(check (option string)) "read content"
-      (Some "Repository\n")
-      (Json.member "content" json |> Json.to_string_option);
-    Alcotest.(check (option string)) "no policy error" None
-      (Json.member "policy_error" json |> Json.to_string_option);
-    assert_no_repository_registration_pending ~keeper_name:meta.name)
+    assert_repository_registration_policy_response ~raw;
+    match
+      AQ.list_pending_entries ()
+      |> List.filter (fun (entry : AQ.pending_approval) ->
+        String.equal entry.keeper_name meta.name)
+    with
+    | [ pending ] ->
+      Alcotest.(check string)
+        "requested alias action"
+        "add_repository_alias"
+        (Json.member "requested_action" pending.input |> Json.to_string);
+      Alcotest.(check string)
+        "alias target"
+        "masc"
+        (Json.member "target_repository_id" pending.input |> Json.to_string);
+      Alcotest.(check string)
+        "alias"
+        "masc-mcp"
+        (Json.member "alias" pending.input |> Json.to_string)
+    | entries ->
+      Alcotest.failf
+        "expected one pending repository registration approval, got %d; raw=%s"
+        (List.length entries)
+        raw)
 
 
 let () =
@@ -770,12 +829,12 @@ let () =
             `Quick
             test_rg_registered_alias_allows_masc_mcp_path;
           Alcotest.test_case
-            "rg unknown playground clone is sandbox-local"
+            "rg unregistered clone queues repository HITL"
             `Quick
-            test_rg_unknown_playground_clone_is_sandbox_local;
+            test_rg_unregistered_clone_queues_repository_hitl;
           Alcotest.test_case
-            "Read unknown playground clone is sandbox-local"
+            "Read unregistered clone surfaces repository HITL"
             `Quick
-            test_read_unknown_playground_clone_is_sandbox_local;
+            test_read_unregistered_clone_surfaces_repository_hitl;
         ] );
     ]

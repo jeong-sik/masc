@@ -93,6 +93,15 @@ let expect_path_access_ok ~label ~keeper_id ~base_path ~path =
   | Ok () -> ()
   | Error msg -> Alcotest.fail (label ^ ", got: " ^ msg)
 
+let expect_path_access_denied_as_unregistered ~label ~keeper_id ~base_path ~path =
+  match Keeper_repo_mapping.validate_path_access ~keeper_id ~base_path ~path with
+  | Ok () -> Alcotest.fail label
+  | Error msg ->
+    Alcotest.(check bool)
+      "mentions not registered"
+      true
+      (contains_substring msg "not registered")
+
 let write_repositories base_path repos =
   let path = Filename.concat base_path ".masc/config/repositories.toml" in
   let repo_block (r : repository) =
@@ -694,7 +703,7 @@ let test_validate_path_access_rejects_empty_url_basename () =
             "mentions identity mismatch" true
             (contains_substring msg "Repository identity mismatch"))
 
-let test_validate_path_access_playground_allows_git_remote_only_clone () =
+let test_validate_path_access_playground_rejects_git_remote_only_identity () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -715,13 +724,13 @@ let test_validate_path_access_playground_allows_git_remote_only_clone () =
       let path = Filename.concat repo_root "docs/proof.md" in
       ensure_dir (Filename.dirname path);
       write_git_origin repo_root "https://github.com/jeong-sik/masc.git";
-      expect_path_access_ok
-        ~label:"expected git remote-only sandbox clone to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:"expected git remote-only playground clone to require registration"
         ~keeper_id:"executor"
         ~base_path
         ~path)
 
-let test_validate_path_access_playground_allows_exact_remote_url_clone () =
+let test_validate_path_access_playground_rejects_exact_remote_url_identity () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -742,13 +751,13 @@ let test_validate_path_access_playground_allows_exact_remote_url_clone () =
       let path = Filename.concat repo_root "docs/proof.md" in
       ensure_dir (Filename.dirname path);
       write_git_origin repo_root "https://github.com/jeong-sik/masc-mcp";
-      expect_path_access_ok
-        ~label:"expected exact-remote sandbox clone to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:"expected exact-remote playground clone to require registration"
         ~keeper_id:"executor"
         ~base_path
         ~path)
 
-let test_validate_path_access_playground_allows_secondary_remote_url_clone ()
+let test_validate_path_access_playground_rejects_secondary_remote_url_spoof ()
   =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -773,13 +782,13 @@ let test_validate_path_access_playground_allows_secondary_remote_url_clone ()
           ("origin", Filename.concat base_path "workspace/yousleepwhen/masc-mcp");
           ("github", "https://github.com/jeong-sik/masc.git");
         ];
-      expect_path_access_ok
-        ~label:"expected secondary-remote sandbox clone to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:"expected secondary-remote playground clone to require registration"
         ~keeper_id:"executor"
         ~base_path
         ~path)
 
-let test_validate_path_access_playground_allows_gitdir_remote_clone () =
+let test_validate_path_access_playground_rejects_gitdir_remote_identity () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -804,13 +813,13 @@ let test_validate_path_access_playground_allows_gitdir_remote_clone () =
         ~gitdir_ref:"../linked-worktree-gitdir"
         ~gitdir_path
         ~url:"https://github.com/jeong-sik/masc.git";
-      expect_path_access_ok
-        ~label:"expected gitdir sandbox clone to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:"expected gitdir playground clone to require registration"
         ~keeper_id:"executor"
         ~base_path
         ~path)
 
-let test_validate_path_access_playground_large_git_config_allowed () =
+let test_validate_path_access_playground_large_git_config_denied () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -834,13 +843,13 @@ let test_validate_path_access_playground_large_git_config_allowed () =
       write_file (Filename.concat repo_root ".git/config")
         (String.make (70 * 1024) 'x'
          ^ "\n[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc.git\n");
-      expect_path_access_ok
-        ~label:"expected oversized-git-config sandbox clone to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:"expected oversized-git-config playground clone to require registration"
         ~keeper_id:"executor"
         ~base_path
         ~path)
 
-let test_validate_path_access_playground_unknown_repo_allowed () =
+let test_validate_path_access_playground_unknown_repo_denied () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -862,13 +871,13 @@ let test_validate_path_access_playground_unknown_repo_allowed () =
           ".masc/playground/docker/nick0cave/repos/unknown/lib"
       in
       ensure_dir path;
-      expect_path_access_ok
-        ~label:"expected unknown sandbox repo to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:"expected unknown playground repo to be denied as unregistered"
         ~keeper_id:"nick0cave"
         ~base_path
         ~path)
 
-let test_validate_path_access_playground_unknown_repo_wildcard_allowed () =
+let test_validate_path_access_playground_unknown_repo_wildcard_denied () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -890,13 +899,14 @@ let test_validate_path_access_playground_unknown_repo_wildcard_allowed () =
           ".masc/playground/docker/nick0cave/repos/unknown/lib"
       in
       ensure_dir path;
-      expect_path_access_ok
-        ~label:"expected unknown sandbox repo under wildcard to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:
+          "expected unknown playground repo under wildcard to be denied as unregistered"
         ~keeper_id:"nick0cave"
         ~base_path
         ~path)
 
-let test_validate_path_access_playground_unknown_repo_no_mapping_allowed () =
+let test_validate_path_access_playground_unknown_repo_no_mapping_denied () =
   with_temp_base_path (fun base_path ->
       let root_repo =
         { (sample_repo "me") with name = "me"; local_path = base_path }
@@ -917,8 +927,9 @@ let test_validate_path_access_playground_unknown_repo_no_mapping_allowed () =
           ".masc/playground/docker/nick0cave/repos/unknown/lib"
       in
       ensure_dir path;
-      expect_path_access_ok
-        ~label:"expected unknown sandbox repo without mapping to be allowed"
+      expect_path_access_denied_as_unregistered
+        ~label:
+          "expected unknown playground repo without mapping to be denied as unregistered"
         ~keeper_id:"nick0cave"
         ~base_path
         ~path)
@@ -1053,22 +1064,22 @@ let () =
             test_validate_path_access_wildcard_rejects_mismatched_url_basename;
           Alcotest.test_case "empty URL basename is identity mismatch" `Quick
             test_validate_path_access_rejects_empty_url_basename;
-          Alcotest.test_case "playground allows git remote-only clone" `Quick
-            test_validate_path_access_playground_allows_git_remote_only_clone;
-          Alcotest.test_case "playground allows exact remote URL clone" `Quick
-            test_validate_path_access_playground_allows_exact_remote_url_clone;
-          Alcotest.test_case "playground allows secondary remote URL clone" `Quick
-            test_validate_path_access_playground_allows_secondary_remote_url_clone;
-          Alcotest.test_case "playground allows gitdir remote clone" `Quick
-            test_validate_path_access_playground_allows_gitdir_remote_clone;
-          Alcotest.test_case "playground large git config is allowed" `Quick
-            test_validate_path_access_playground_large_git_config_allowed;
-          Alcotest.test_case "playground unknown repo allowed" `Quick
-            test_validate_path_access_playground_unknown_repo_allowed;
-          Alcotest.test_case "playground unknown repo under wildcard allowed" `Quick
-            test_validate_path_access_playground_unknown_repo_wildcard_allowed;
-          Alcotest.test_case "playground unknown repo no mapping allowed" `Quick
-            test_validate_path_access_playground_unknown_repo_no_mapping_allowed;
+          Alcotest.test_case "playground rejects git remote-only identity" `Quick
+            test_validate_path_access_playground_rejects_git_remote_only_identity;
+          Alcotest.test_case "playground rejects exact remote URL identity" `Quick
+            test_validate_path_access_playground_rejects_exact_remote_url_identity;
+          Alcotest.test_case "playground rejects secondary remote URL spoof" `Quick
+            test_validate_path_access_playground_rejects_secondary_remote_url_spoof;
+          Alcotest.test_case "playground rejects gitdir remote identity" `Quick
+            test_validate_path_access_playground_rejects_gitdir_remote_identity;
+          Alcotest.test_case "playground large git config is denied" `Quick
+            test_validate_path_access_playground_large_git_config_denied;
+          Alcotest.test_case "playground unknown repo denied as unregistered" `Quick
+            test_validate_path_access_playground_unknown_repo_denied;
+          Alcotest.test_case "playground unknown repo under wildcard denied as unregistered" `Quick
+            test_validate_path_access_playground_unknown_repo_wildcard_denied;
+          Alcotest.test_case "playground unknown repo no mapping denied" `Quick
+            test_validate_path_access_playground_unknown_repo_no_mapping_denied;
         ] );
       ( "apply_mapping",
         [

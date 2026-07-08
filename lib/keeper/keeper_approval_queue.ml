@@ -495,6 +495,9 @@ let create_entry
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?(channel =
+        Keeper_continuation_channel.unrouted
+          "no connector captured at approval submission")
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -536,6 +539,7 @@ let create_entry
   ; on_resolution
   ; context_summary = None
   ; summary_status = Summary_not_requested
+  ; channel
   }
 ;;
 
@@ -847,14 +851,15 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
+     channel:Keeper_continuation_channel.t ->
      unit)
     ref =
-  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ())
+  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ -> ())
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
-let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision =
-  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision with
+let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision ~channel =
+  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision ~channel with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn
@@ -920,7 +925,8 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ~base_path
     ~keeper_name:entry.keeper_name
     ~approval_id:entry.id
-    ~decision:(hitl_resolution_decision_of_approval_decision decision);
+    ~decision:(hitl_resolution_decision_of_approval_decision decision)
+    ~channel:entry.channel;
   try
     Sse.broadcast
       (`Assoc
@@ -1038,6 +1044,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?channel
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
       ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
@@ -1064,6 +1071,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?channel
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
       ~on_resolution:None
@@ -1524,7 +1532,8 @@ let expire_stale ~max_wait_s =
          ~base_path:entry.audit_base_path
          ~keeper_name:entry.keeper_name
          ~approval_id:id
-         ~decision:Keeper_event_queue.Hitl_rejected;
+         ~decision:Keeper_event_queue.Hitl_rejected
+         ~channel:entry.channel;
        (match entry.resolver with
         | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
         | None -> ());

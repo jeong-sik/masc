@@ -121,14 +121,20 @@ let test_resolve_fires_keeper_wake_hook () =
   @@ fun _env ->
   let base_path = temp_dir () in
   let woke = ref None in
-  AQ.set_approval_resolution_wake_hook (fun ~base_path:_ ~keeper_name ~approval_id ~decision ->
-    woke := Some (keeper_name, approval_id, decision));
+  (* RFC-0320 W2b: the connector submitted with the approval must survive to
+     the wake hook so a resolved HITL routes back to the originating chat. *)
+  let expected_channel =
+    Keeper_continuation_channel.Dashboard { thread_id = "resolve-wake-thread" }
+  in
+  AQ.set_approval_resolution_wake_hook
+    (fun ~base_path:_ ~keeper_name ~approval_id ~decision ~channel ->
+      woke := Some (keeper_name, approval_id, decision, channel));
   Fun.protect
     ~finally:(fun () ->
       (* Reset to the default no-op so the recording closure does not leak into
          later tests that share this module-level hook. *)
       AQ.set_approval_resolution_wake_hook
-        (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ());
+        (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ -> ());
       cleanup_dir base_path)
     (fun () ->
        Eio.Switch.run
@@ -143,6 +149,7 @@ let test_resolve_fires_keeper_wake_hook () =
              ~input:(`Assoc [ "kind", `String "critical_gate" ])
              ~risk_level:AQ.Critical
              ~base_path
+             ~channel:expected_channel
              ()
          in
          result := Some decision);
@@ -158,13 +165,19 @@ let test_resolve_fires_keeper_wake_hook () =
           Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
        (* resolve_entry fires the hook synchronously before returning. *)
        (match !woke with
-        | Some (kn, aid, decision) ->
+        | Some (kn, aid, decision, channel) ->
           Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
           Alcotest.(check string) "wake carries the resolved approval id" id aid;
           Alcotest.(check bool)
             "wake carries the typed decision label"
             true
-            (decision = Keeper_event_queue.Hitl_approved)
+            (decision = Keeper_event_queue.Hitl_approved);
+          Alcotest.(check bool)
+            "wake carries the submitted continuation channel (RFC-0320 W2b)"
+            true
+            (Yojson.Safe.equal
+               (Keeper_continuation_channel.to_yojson channel)
+               (Keeper_continuation_channel.to_yojson expected_channel))
         | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
        yield_until (fun () -> Option.is_some !result))
 ;;

@@ -496,6 +496,7 @@ let test_keeper_stream_args_preserve_user_blocks () =
             data = "abc123";
           };
         ];
+      continuation_channel = Keeper_continuation_channel.unrouted "test";
     }
   in
   match Server_routes_http_keeper_stream.For_testing.args_of_request payload with
@@ -2318,7 +2319,8 @@ let test_chat_surface_of_request_labels_copilot_gate () =
       channel_user_id = "";
       channel_user_name = "";
       channel_workspace_id = "session-7";
-      attachments = [] }
+      attachments = [];
+      continuation_channel = Keeper_continuation_channel.unrouted "test" }
   in
   let surface = Server_routes_http_keeper_stream.For_testing.chat_surface_of_request payload in
   check string "copilot surface label" "copilot" (Surface_ref.lane_label surface);
@@ -2342,7 +2344,8 @@ let test_chat_speaker_of_request_copilot_is_owner () =
       channel_user_id = "";
       channel_user_name = "";
       channel_workspace_id = "session-7";
-      attachments = [] }
+      attachments = [];
+      continuation_channel = Keeper_continuation_channel.unrouted "test" }
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
   check (option string) "copilot speaker id" None speaker.speaker_id;
@@ -2362,7 +2365,8 @@ let test_chat_speaker_of_request_connector_is_external () =
       channel_user_id = "user-42";
       channel_user_name = "Alice";
       channel_workspace_id = "workspace-9";
-      attachments = [] }
+      attachments = [];
+      continuation_channel = Keeper_continuation_channel.unrouted "test" }
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
   check (option string) "connector speaker id" (Some "user-42") speaker.speaker_id;

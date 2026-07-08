@@ -83,6 +83,8 @@ type pending_approval =
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
+  (* RFC-0320 W2b: originating connector captured at submission time. *)
+  ; channel : Keeper_continuation_channel.t
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry
@@ -279,6 +281,7 @@ val submit_and_await :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
+  ?channel:Keeper_continuation_channel.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   ?critical_escalation_after_s:float ->
@@ -324,6 +327,7 @@ val set_approval_resolution_wake_hook :
    keeper_name:string ->
    approval_id:string ->
    decision:Keeper_event_queue.hitl_resolution_decision ->
+   channel:Keeper_continuation_channel.t ->
    unit) ->
   unit
 

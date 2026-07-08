@@ -153,6 +153,9 @@ val run_turn
   -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
+       (* RFC-0320 W2b: originating connector forwarded to the approval
+          callback so a HITL submitted during this turn captures provenance. *)
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?trace_link:string * string
   -> ?yield_to_chat_waiting:(unit -> bool)

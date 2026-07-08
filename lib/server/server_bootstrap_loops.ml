@@ -512,20 +512,17 @@ let start_keeper_loops
      Keeper_world_observation -> Keeper_approval_queue dependency cycle. Mirrors
      the Fusion_completed/Bg_completed async-completion wakes. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
-    (fun ~base_path ~keeper_name ~approval_id ~decision ->
+    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
+       (* RFC-0320 W2b: [channel] is the originating connector captured on the
+          approval entry at submission time and threaded through resolve, so a
+          resolved HITL wakes the keeper back on the conversation it started
+          instead of proceeding on its own state. [Unrouted] when no connector
+          was captured (fail-closed). *)
        let resolution =
          Keeper_event_queue.
            { approval_id
            ; decision
-           (* WORKAROUND (RFC-0320 W2): the approval-submission connector is not
-              yet captured on the queue entry, so a HITL resolution cannot route
-              back to the originating chat thread and is [Unrouted]. 근본 해결:
-              W2b threads a continuation_channel through
-              [Keeper_approval_queue.create_entry] and the resolution wake hook
-              so this becomes [entry.channel] instead. *)
-           ; channel =
-               Keeper_continuation_channel.unrouted
-                 "hitl provenance capture pending (RFC-0320 W2b)"
+           ; channel
            }
        in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
@@ -1045,6 +1042,15 @@ let start_keeper_loops
                  (int_of_float ((now +. 0.001) *. 1000.0))
              in
              let projection = queued_chat_projection queued_message in
+             (* RFC-0320 W2b: capture the typed originating connector from the
+                queued message so a HITL submitted during this turn routes its
+                resolution back here. The projection is the exhaustive SSOT in
+                Keeper_chat_queue (a new connector is a compile error there). *)
+             let continuation_channel =
+               Keeper_chat_queue.continuation_channel_of_source
+                 ~dashboard_thread_id:("keeper-consumer:" ^ keeper_name)
+                 queued_message.source
+             in
              let payload =
                {
                  name = keeper_name;
@@ -1058,6 +1064,7 @@ let start_keeper_loops
                  channel_workspace_id = projection.payload_channel_workspace_id;
                  user_blocks = queued_message.user_blocks;
                  attachments = queued_message.attachments;
+                 continuation_channel;
                }
              in
              let agent_name = projection.agent_name in

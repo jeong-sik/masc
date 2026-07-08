@@ -617,6 +617,20 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
     let channel = get_string args "channel" "" in
+    (* RFC-0320 W2b: recover the typed continuation channel serialized into the
+       tool args at dispatch (Keeper_continuation_channel codec). A missing or
+       unparseable value is fail-closed to [None] (downstream [Unrouted]); the
+       flat [channel] string above cannot be reconstructed into the typed
+       variant without a lossy string classifier, so provenance rides its own
+       lossless field instead. *)
+    let continuation_channel =
+      match Json_util.assoc_member_opt "continuation_channel" args with
+      | Some json ->
+        (match Keeper_continuation_channel.of_yojson json with
+         | Ok c -> Some c
+         | Error _ -> None)
+      | None -> None
+    in
     (match keeper_msg_timeout_override args with
     | Error e -> tool_result_error e
     | Ok keeper_msg_oas_timeout_s ->
@@ -1156,6 +1170,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                ~runtime_id
 		                                ~world_observation
 		                                ~turn_affordances
+		                                ?continuation_channel
 		                                (* A kmsg turn is user-triggered, i.e.
 		                                   reactive: it must use the reactive
 		                                   idle budget so the graduated idle hook

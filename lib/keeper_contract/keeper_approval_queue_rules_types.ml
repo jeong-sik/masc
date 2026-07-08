@@ -64,6 +64,11 @@ type pending_approval =
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
+  (* RFC-0320 W2b: the connector/channel the originating conversation
+     started on, captured at approval submission so a resolution wake can
+     route back instead of proceeding on the keeper's own state.
+     [Unrouted] is the fail-closed value when no connector was captured. *)
+  ; channel : Keeper_continuation_channel.t
   }
 
 type decision = Agent_sdk.Hooks.approval_decision

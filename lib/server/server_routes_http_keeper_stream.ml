@@ -55,6 +55,12 @@ type keeper_chat_stream_request = {
   channel_user_name : string;
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
+  (* RFC-0320 W2b: typed originating connector for the turn. Unlike the flat
+     [channel]/[channel_*] strings above (a lossy projection), this rides
+     losslessly to the approval queue so a HITL resolution can route back.
+     [Unrouted] when the request carries no typed channel (e.g. the HTTP path,
+     whose flat fields cannot be reconstructed without a string classifier). *)
+  continuation_channel : Keeper_continuation_channel.t;
 }
 
 let keeper_chat_stream_error_json message =
@@ -164,7 +170,16 @@ let args_of_request payload : Yojson.Safe.t =
        [ ("channel_user_name", `String payload.channel_user_name) ]
      else [])
   in
-  let fields = base_fields @ connector_fields in
+  (* RFC-0320 W2b: carry the typed continuation channel losslessly when it is
+     routable; an [Unrouted] channel is omitted so the reader fail-closes to
+     [None] rather than round-tripping a diagnostic placeholder. *)
+  let continuation_channel_fields =
+    if Keeper_continuation_channel.is_routable payload.continuation_channel then
+      [ ( "continuation_channel",
+          Keeper_continuation_channel.to_yojson payload.continuation_channel ) ]
+    else []
+  in
+  let fields = base_fields @ connector_fields @ continuation_channel_fields in
   let fields =
     if payload.user_blocks = [] then fields
     else
@@ -558,6 +573,23 @@ let parse_keeper_chat_stream_request body_str =
                   channel_user_name;
                   channel_workspace_id;
                   attachments;
+                  (* RFC-0320 W2b: this HTTP parse path is fail-closed to
+                     [Unrouted]. External-connector requests carry only flat
+                     strings that cannot be reconstructed into the typed variant
+                     without a forbidden content classifier. Dashboard-origin
+                     requests on the idle/direct run_now branch COULD derive a
+                     typed Dashboard channel from the structural [not
+                     has_external_speaker] predicate, but the dashboard
+                     re-engagement thread-id convention is not yet pinned (the
+                     busy path stamps ["keeper-consumer:" ^ name], the SSE stream
+                     ["keeper:" ^ name], and no consumer validates either).
+                     Capturing it here now would add a third unvalidated
+                     placeholder, so idle-path Dashboard capture is deferred to
+                     W3, where the routing target is defined. Known asymmetry
+                     with the busy chat-queue path, not an oversight. *)
+                  continuation_channel =
+                    Keeper_continuation_channel.unrouted
+                      "http chat request: typed connector deferred to RFC-0320 W3";
                 }
           )
   with Yojson.Json_error e ->

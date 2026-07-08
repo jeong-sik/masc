@@ -216,6 +216,10 @@ let run_turn
       ?(runtime_rotation_attempts = [])
       ?(is_retry = false)
       ?shared_context
+      (* RFC-0320 W2b: the connector the originating conversation started on,
+         forwarded to the approval callback so a HITL submitted during this
+         turn captures its provenance. [None] for autonomous turns. *)
+      ?continuation_channel
       ?event_bus
       ?trace_link
       ?yield_to_chat_waiting
@@ -771,6 +775,7 @@ let run_turn
                          ~governance_level:(Env_config_core.governance_level ())
                          ~keeper_name:meta.name
                          ~meta
+                         ?continuation_channel
                          ?clock:(Eio_context.get_clock_opt ())
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())

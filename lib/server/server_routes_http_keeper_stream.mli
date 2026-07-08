@@ -82,6 +82,9 @@ type keeper_chat_stream_request = {
   channel_user_name : string;
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
+  (* RFC-0320 W2b: typed originating connector, carried losslessly to the
+     approval queue; [Unrouted] when the request has no typed channel. *)
+  continuation_channel : Keeper_continuation_channel.t;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper

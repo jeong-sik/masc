@@ -57,6 +57,15 @@ val dequeue : keeper_name:string -> queued_message option
     reply routing. *)
 val same_source : message_source -> message_source -> bool
 
+(** [continuation_channel_of_source ~dashboard_thread_id source] projects a
+    queued message's typed reply surface to the RFC-0320 continuation channel
+    captured on a HITL approval. Exhaustive over [message_source]; a new
+    connector is a compile error rather than a silent fallback.
+    [dashboard_thread_id] is a consumer-side convention supplied by the
+    caller (the queued source does not carry it). *)
+val continuation_channel_of_source :
+  dashboard_thread_id:string -> message_source -> Keeper_continuation_channel.t
+
 (** [dequeue_batch keeper_name] removes and returns the head run of
     messages sharing the same source ([same_source]), preserving FIFO
     order. Stops at the first message with a different source so each

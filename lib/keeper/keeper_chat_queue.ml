@@ -93,6 +93,29 @@ let source_of_yojson json =
   | Some kind -> Error (Printf.sprintf "unsupported chat queue source kind: %s" kind)
   | None -> Error "chat queue source requires kind"
 
+(* RFC-0320 W2b: project a chat message's typed reply surface to the typed
+   continuation channel captured on a HITL approval. Exhaustive over
+   [message_source] so a new connector forces a compile error here rather than
+   silently falling back. [dashboard_thread_id] is supplied by the caller
+   because the dashboard reply thread is a consumer-side convention, not part
+   of the queued source. *)
+let continuation_channel_of_source ~dashboard_thread_id (source : message_source)
+  : Keeper_continuation_channel.t
+  =
+  match source with
+  | Dashboard -> Keeper_continuation_channel.Dashboard { thread_id = dashboard_thread_id }
+  | Discord { channel_id; user_id } ->
+    Keeper_continuation_channel.Discord
+      { guild_id = None
+      ; channel_id
+      ; parent_channel_id = None
+      ; thread_id = None
+      ; user_id
+      }
+  | Slack { channel; user_id } ->
+    Keeper_continuation_channel.Slack
+      { team_id = None; channel_id = channel; thread_ts = None; user_id }
+
 let queued_message_to_yojson (msg : queued_message) =
   `Assoc
     [ ("content", `String msg.content)

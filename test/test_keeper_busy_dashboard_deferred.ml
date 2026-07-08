@@ -32,6 +32,7 @@ let payload ?(name = keeper_name) ?(content = "are you there?") ()
   ; channel_user_name = ""
   ; channel_workspace_id = ""
   ; attachments = []
+  ; continuation_channel = Keeper_continuation_channel.unrouted "test"
   }
 ;;
 

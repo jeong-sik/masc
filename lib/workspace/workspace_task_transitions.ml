@@ -185,7 +185,7 @@ let transition_task_outcome_r
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Task is verifier-required (completion_contract or goal verifier_policy set); use submit_for_verification instead of done (RFC-0308)"))
+                    "Task has a strict verification contract (contract.strict=true); use submit_for_verification — a verifier (not the assignee) then approves it to done (RFC-0323 G-1, implements RFC-0308)"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -211,7 +211,9 @@ let transition_task_outcome_r
                  action=claim first, then action=release once you own it."
               | Masc_domain.Todo, (Masc_domain.Done_action | Masc_domain.Cancel) ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim then action=start before trying to finish or cancel it."
+                 action=claim then action=start; complete via \
+                 submit_for_verification → approve (action=done only for \
+                 non-strict tasks)."
               | Masc_domain.Todo, Masc_domain.Start ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim first — start needs ownership."
@@ -237,10 +239,13 @@ let transition_task_outcome_r
                  keeper_task_claim for unclaimed work."
               | Masc_domain.InProgress _, Masc_domain.Start ->
                 " Remediation: task is already in_progress. Valid actions from \
-                 in_progress: done, submit_for_verification, release, cancel."
+                 in_progress: submit_for_verification (→ verifier approve), done \
+                 (non-strict tasks only), release, cancel."
               | Masc_domain.Done _, _ ->
-                " Remediation: task is already in a terminal state (done). Use \
-                 masc_add_task for new work or masc_tasks to find claimable items."
+                " Remediation: task is already in a terminal state (done). To \
+                 re-run this work, create a new task with predecessor_task_id \
+                 via masc_add_task (RFC-0323); use masc_tasks to find claimable \
+                 items."
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."

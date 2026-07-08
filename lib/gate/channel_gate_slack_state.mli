@@ -48,6 +48,8 @@ type send_error =
 val pp_send_error : Format.formatter -> send_error -> unit
 
 val send_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   channel_id:string ->
   content:string ->
   ?reply_to_message_id:string ->
@@ -55,14 +57,18 @@ val send_message :
   (string, send_error) result
 (** Post a single message to a Slack channel via [chat.postMessage]. Returns
     the created message [ts]. [reply_to_message_id] (a Slack [ts]) posts a
-    threaded reply. Bot token resolved from [MASC_SLACK_BOT_TOKEN] at call
-    time so a rotation does not require a server restart. *)
+    threaded reply. Bot token resolved from [SLACK_BOT_TOKEN] at call time so a
+    rotation does not require a server restart. [~clock] bounds the request by
+    [timeout_sec] (default {!Slack_rest_client.default_http_timeout_sec}). *)
 
 val edit_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
   channel_id:string ->
   message_id:string ->
   content:string ->
   unit ->
   (unit, send_error) result
 (** Patch a prior message via [chat.update]. Used by the in-process gateway to
-    project keeper streaming snapshots into one edited reply. *)
+    project keeper streaming snapshots into one edited reply. [~clock] bounds
+    the request by [timeout_sec]. *)

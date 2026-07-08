@@ -23,16 +23,20 @@ export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
 // Subset of {@link KNOWN_CONNECTOR_IDS} that run inside the server process. For
 // these the sidecar Start/Stop/tail affordances are suppressed (no sidecar
 // process — the operator sets an env var and restarts). RFC-0203 §Phase 3.
-export const IN_PROCESS_CONNECTOR_IDS = ['discord'] as const
+export const IN_PROCESS_CONNECTOR_IDS = ['discord', 'slack'] as const
 export type InProcessConnectorId = (typeof IN_PROCESS_CONNECTOR_IDS)[number]
 
 export function isInProcessConnector(connectorId: string): boolean {
   return (IN_PROCESS_CONNECTOR_IDS as readonly string[]).includes(connectorId)
 }
 
-// The env var the operator must set to activate an in-process connector.
+// The env var the operator must set to activate an in-process connector. For
+// Slack this is the app-level token (Socket Mode credential): absent, the
+// in-process gateway does not start. The bot token (SLACK_BOT_TOKEN) is a
+// second, outbound-only credential surfaced by the config form / setup guide.
 export const IN_PROCESS_CONNECTOR_ENV: Record<InProcessConnectorId, string> = {
   discord: 'DISCORD_BOT_TOKEN',
+  slack: 'SLACK_APP_TOKEN',
 }
 
 export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {

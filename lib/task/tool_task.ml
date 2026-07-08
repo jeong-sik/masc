@@ -408,7 +408,11 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time reason
   | None ->
-  let evidence_refs = handoff_context.evidence_refs in
+  let evidence_refs =
+        match handoff_context with
+        | Some h -> h.evidence_refs
+        | None -> []
+      in
       let review_gate_rejection =
     if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then

@@ -29,6 +29,7 @@ let run_keeper_cycle
       ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
       ?shared_context
       ?event_bus
+      ?hitl_delivery_channel
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
   =
@@ -510,6 +511,7 @@ let run_keeper_cycle
                            ; base_dir
                            ; build_turn_prompt
                            ; channel
+                           ; hitl_delivery_channel
                            ; cleanup
                            ; committed_mutating_tools_snapshot
                            ; config

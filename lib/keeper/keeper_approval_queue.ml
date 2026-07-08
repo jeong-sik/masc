@@ -837,15 +837,15 @@ let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =
        record_summary_failure ~id:entry.id ~reason ~retryable:false)
 ;;
 
-(* Wake the keeper that was waiting on this approval. A keeper that enqueued an
-   approval and is now skipping cycles via [has_pending_for_keeper -> Skip
-   Approval_pending] (keeper_world_observation) has no in-process fiber blocked
-   on the resolver promise, so resolving the promise does not resume it. The
-   composition root registers a hook that enqueues a [Hitl_resolved] wake
-   stimulus — the same async-completion-wake mechanism [Fusion_completed]
-   (RFC-0266) and [Bg_completed] (RFC-0290) use — so the keeper re-evaluates
-   immediately instead of stalling until an unrelated stimulus, no-progress
-   recovery, or the 30-minute approval janitor.
+(* Wake the keeper for non-blocking approvals. A [submit_and_await] entry has an
+   in-process resolver promise; resolving that promise resumes the suspended
+   tool call directly, so an additional [Hitl_resolved] stimulus would open a
+   second turn with only a soft prompt guard against duplicate replies.
+
+   A [submit_pending] entry has no resolver promise. Its [on_resolution]
+   callback handles side effects, and the keeper still needs a durable
+   [Hitl_resolved] wake so its lane re-evaluates instead of stalling until an
+   unrelated stimulus, no-progress recovery, or the 30-minute approval janitor.
 
    Injected as a hook rather than a direct call to break a dependency cycle:
    this module sits below [Keeper_keepalive_signal], which depends on
@@ -944,12 +944,15 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
            (Printexc.to_string exn))
        (fun () -> f decision)
    | None -> ());
-  wake_keeper_on_approval_resolution
-    ~base_path
-    ~keeper_name:entry.keeper_name
-    ~approval_id:entry.id
-    ~decision:(hitl_resolution_decision_of_approval_decision decision)
-    ~continuation_channel:entry.continuation_channel;
+  (match entry.resolver with
+   | Some _ -> ()
+   | None ->
+     wake_keeper_on_approval_resolution
+       ~base_path
+       ~keeper_name:entry.keeper_name
+       ~approval_id:entry.id
+       ~decision:(hitl_resolution_decision_of_approval_decision decision)
+       ~continuation_channel:entry.continuation_channel);
   try
     Sse.broadcast
       (`Assoc
@@ -1553,24 +1556,28 @@ let expire_stale ~max_wait_s =
          ~decision:(Approval_expired reason)
          ~continuation_channel:entry.continuation_channel
          ();
-       (* Expiry clears the [Approval_pending] skip just like a resolution, so
-          the keeper needs the same wake or it stays stalled until an unrelated
-          stimulus. The keeper's suspended tool call (if any) receives
-          [Reject reason]. *)
-       wake_keeper_on_approval_resolution
-         ~base_path:entry.audit_base_path
-         ~keeper_name:entry.keeper_name
-         ~approval_id:id
-         ~decision:Keeper_event_queue.Hitl_rejected
-         ~continuation_channel:entry.continuation_channel;
-       (match entry.resolver with
-        | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
-        | None -> ());
-       match entry.on_resolution with
-       | Some f ->
+      (* Expiry clears the [Approval_pending] skip just like a resolution, so
+         the keeper needs the same wake or it stays stalled until an unrelated
+         stimulus. The keeper's suspended tool call (if any) receives
+         [Reject reason]. *)
+      (match entry.resolver with
+       | Some resolver ->
+         (* Blocking entries already resume through the live resolver; keep this
+            path single-rail and skip synthetic wake. *)
+         Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
+       | None ->
+         wake_keeper_on_approval_resolution
+           ~base_path:entry.audit_base_path
+           ~keeper_name:entry.keeper_name
+           ~approval_id:id
+           ~decision:Keeper_event_queue.Hitl_rejected
+           ~continuation_channel:entry.continuation_channel);
+      (match entry.resolver, entry.on_resolution with
+       | None, Some f ->
          Cancel_safe.observe
            ~on_exn:(fun exn ->
-             Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_approval_expire") ]
                ();
              Otel_metric_store.inc_counter
@@ -1582,6 +1589,7 @@ let expire_stale ~max_wait_s =
                id
                (Printexc.to_string exn))
            (fun () -> f (Agent_sdk.Hooks.Reject reason))
-       | None -> ())
-    stale
+       | Some _, _ | None, None -> ());
+  )
+  stale
 ;;

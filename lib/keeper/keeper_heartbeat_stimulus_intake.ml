@@ -101,18 +101,23 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
     Some Keeper_world_observation.Connector_attention_stimulus
+  | Keeper_event_queue.Hitl_resolved _ ->
+    (* RFC-0320 W3b: give the HITL-resolution wake a dedicated turn_reason so
+       the prompt can steer the keeper back to the originating conversation
+       instead of silently proceeding on its own state. The [Approval_pending]
+       skip is already gone (the approval left the queue); this changes only
+       how the resumed turn is described, not whether it runs. *)
+    Some Keeper_world_observation.Hitl_resolved_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
-  | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Goal_verification_failed _
   | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_stagnation _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
-       stimulus itself forces the keeper to re-run its cycle. Once the resolved
-       approval has left the queue the keeper no longer skips on
-       [Approval_pending] and proceeds on its own state. *)
+       stimulus itself forces the keeper to re-run its cycle and proceed on its
+       own state. *)
     None
 ;;
 

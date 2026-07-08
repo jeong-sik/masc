@@ -129,6 +129,7 @@ type event_queue_trigger =
   | No_progress_recovery_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
+  | Hitl_resolved_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -137,6 +138,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
+  | Hitl_resolved_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of

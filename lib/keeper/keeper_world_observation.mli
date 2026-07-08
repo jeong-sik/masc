@@ -186,6 +186,7 @@ type event_queue_trigger =
   | No_progress_recovery_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
+  | Hitl_resolved_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -196,6 +197,7 @@ type turn_reason =
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
+  | Hitl_resolved_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }

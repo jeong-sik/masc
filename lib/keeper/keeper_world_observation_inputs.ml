@@ -19,16 +19,13 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  (* Use [resolve_claim_goal_scope] (backlog-aware, widens filter when no
-     scoped claimable tasks exist) rather than the pure-meta observation
-     variant.  [read_backlog_counts] already reads the backlog, so this
-     does not add a disk read.  Without the widening, a keeper whose active
-     goals carry no live claimable task sees [claimable_task_count = 0]
-     and never wakes for backlog work — the "coordination-role tasks are
-     blocked from re-claim by completion" staleness (task-1869). *)
+let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~(tasks : Masc_domain.task list) () =
+  (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
+     empty-scope fallback as the claim path without a second backlog read. *)
   let scope =
-    Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config ~meta
+      ~tasks ()
   in
   scope.task_filter
 ;;
@@ -63,7 +60,9 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter = claim_goal_scope_filter ~config ~meta () in
+    let claim_scope_filter =
+      claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
+    in
     let claimable =
       List.length
         (List.filter

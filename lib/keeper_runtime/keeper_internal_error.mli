@@ -194,7 +194,18 @@ val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
 val accept_no_progress_retry_kind :
   masc_internal_error ->
-  [ `Empty_no_progress | `Read_only_no_progress | `Thinking_only_no_progress ] option
+  [ `Empty_no_progress
+  | `Read_only_no_progress
+  | `Thinking_only_no_progress
+  | `Truncated_no_progress
+  ]
+  option
+(** [`Truncated_no_progress] (RFC-0271 §4.5): an empty/thinking-only conclusion
+    with [stop_reason = MaxTokens] — the shared output budget was exhausted
+    (usually by thinking).  Unlike the other kinds this is emitted regardless of
+    [tool_effects_seen], so a tool-productive turn whose final message truncated
+    is recovered by the thinking-off continuation rather than counted as a
+    completion-contract violation. *)
 
 val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 

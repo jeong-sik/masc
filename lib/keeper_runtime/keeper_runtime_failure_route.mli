@@ -56,8 +56,12 @@ type rotate_class =
   | No_progress_empty
   | No_progress_read_only
   | No_progress_thinking_only
+  | No_progress_truncated
       (** accept-rejections carrying an explicit no-progress recovery hint:
-          a different model may make progress *)
+          a different model may make progress. [No_progress_truncated]
+          (RFC-0271 §4.5) is a [MaxTokens] truncation whose in-turn thinking-off
+          continuation did not resolve it — a recovery hint, not a
+          [Contract_violation]. *)
 
 (** Deterministic-failure classes escalated for an LLM-boundary verdict. *)
 type judgment_class =

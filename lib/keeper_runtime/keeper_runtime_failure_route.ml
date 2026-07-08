@@ -19,6 +19,7 @@ type rotate_class =
   | No_progress_empty
   | No_progress_read_only
   | No_progress_thinking_only
+  | No_progress_truncated
 
 type judgment_class =
   | Deterministic_request
@@ -94,6 +95,10 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Some `Empty_no_progress -> rotate No_progress_empty
      | Some `Read_only_no_progress -> rotate No_progress_read_only
      | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
+     (* §4.5: a MaxTokens truncation is a recovery hint (thinking-off
+        continuation), not a contract violation — route it as no-progress
+        rotation, never [Escalate_judgment Contract_violation]. *)
+     | Some `Truncated_no_progress -> rotate No_progress_truncated
      | None -> judge ~err Contract_violation)
   | Keeper_internal_error.Max_tokens_ceiling_violation _ -> judge ~err Contract_violation
   | Keeper_internal_error.Internal_contract_rejected _ -> judge ~err Contract_violation
@@ -199,6 +204,7 @@ let rotate_class_label = function
   | No_progress_empty -> "no_progress_empty"
   | No_progress_read_only -> "no_progress_read_only"
   | No_progress_thinking_only -> "no_progress_thinking_only"
+  | No_progress_truncated -> "no_progress_truncated"
 
 let judgment_class_label = function
   | Deterministic_request -> "deterministic_request"

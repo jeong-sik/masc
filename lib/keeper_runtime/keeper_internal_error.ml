@@ -695,6 +695,20 @@ let accept_rejection_is_read_only_no_progress
   && any_mutating_tool = Some false
   && tool_effects_seen <> []
 
+(* RFC-0271 §4.5: a [MaxTokens] stop_reason on an empty/thinking-only
+   conclusion is a truncation (thinking exhausted the shared output budget),
+   not a completion-contract violation.  Unlike the three no-progress guards
+   above, this fires regardless of [tool_effects_seen]/[any_mutating_tool]:
+   a tool-productive turn whose concluding message was truncated is the exact
+   gap that fell through to [None] and drove the mad-improver crash loop.
+   The typed [stop_reason] (threaded in slice 1) keeps this a variant match,
+   not a substring classifier (RFC-0042 / RFC-0326). *)
+let accept_rejection_is_truncation_continuation ~reason_kind ~response_shape ~stop_reason =
+  reason_kind = Some Accept_no_usable_progress
+  && (response_shape = Some Accept_response_empty
+      || response_shape = Some Accept_response_thinking_only)
+  && stop_reason = Some Agent_sdk.Types.MaxTokens
+
 let summary_of_masc_internal_error = function
   | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
       let retry_after_suffix =
@@ -883,6 +897,12 @@ let runtime_id_of_masc_internal_error = function
   | Internal_contract_rejected _ -> "unknown"
 
 let accept_no_progress_retry_kind = function
+  | Accept_rejected { reason_kind; response_shape; stop_reason; _ }
+    when accept_rejection_is_truncation_continuation
+           ~reason_kind
+           ~response_shape
+           ~stop_reason ->
+    Some `Truncated_no_progress
   | Accept_rejected
       {
         reason_kind;
@@ -949,7 +969,7 @@ let accept_no_progress_retry_kind = function
 let accept_rejection_has_read_only_no_progress_retry_hint err =
   match accept_no_progress_retry_kind err with
   | Some `Read_only_no_progress -> true
-  | Some (`Empty_no_progress | `Thinking_only_no_progress)
+  | Some (`Empty_no_progress | `Thinking_only_no_progress | `Truncated_no_progress)
   | None ->
     false
 
@@ -958,7 +978,8 @@ let accept_rejection_has_no_progress_retry_hint err =
   | Some
       ( `Empty_no_progress
       | `Read_only_no_progress
-      | `Thinking_only_no_progress ) ->
+      | `Thinking_only_no_progress
+      | `Truncated_no_progress ) ->
     true
   | None -> false
 

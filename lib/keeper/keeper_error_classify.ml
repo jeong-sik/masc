@@ -361,6 +361,7 @@ type degraded_retry_reason =
   | Read_only_no_progress
   | Empty_no_progress
   | Thinking_only_no_progress
+  | Truncated_no_progress
 
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
@@ -377,6 +378,7 @@ let degraded_retry_reason_to_string = function
   | Read_only_no_progress -> "read_only_no_progress"
   | Empty_no_progress -> "empty_no_progress"
   | Thinking_only_no_progress -> "thinking_only_no_progress"
+  | Truncated_no_progress -> "truncated_no_progress"
 
 let accept_rejection_degraded_retry_reason err =
   match Keeper_turn_driver.classify_masc_internal_error err with
@@ -385,6 +387,7 @@ let accept_rejection_degraded_retry_reason err =
      | Some `Empty_no_progress -> Some Empty_no_progress
      | Some `Read_only_no_progress -> Some Read_only_no_progress
      | Some `Thinking_only_no_progress -> Some Thinking_only_no_progress
+     | Some `Truncated_no_progress -> Some Truncated_no_progress
      | None -> None)
   | None -> None
 
@@ -394,7 +397,8 @@ let is_recoverable_no_progress_accept_rejection
   | Some
       ( Empty_no_progress
       | Read_only_no_progress
-      | Thinking_only_no_progress ) ->
+      | Thinking_only_no_progress
+      | Truncated_no_progress ) ->
     true
   | Some _ | None -> false
 
@@ -661,7 +665,11 @@ let default_degraded_rotation_candidates
     dedupe_keep_order (default_candidates @ catalog_runtimes)
   in
   match fallback_reason with
-  | Some (Read_only_no_progress | Empty_no_progress | Thinking_only_no_progress) ->
+  | Some
+      ( Read_only_no_progress
+      | Empty_no_progress
+      | Thinking_only_no_progress
+      | Truncated_no_progress ) ->
     let tool_capable =
       Runtime.get_runtimes ()
       |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)
@@ -782,7 +790,11 @@ let degraded_reason_allows_candidate_cycle = function
   | Capacity_backpressure
   | Read_only_no_progress
   | Empty_no_progress
-  | Thinking_only_no_progress -> false
+  | Thinking_only_no_progress
+  (* §4.5: a truncation recovers via the in-turn thinking-off continuation, not
+     by cycling to another candidate — the next runtime would truncate the same
+     way. Cap rotation like the other no-progress reasons. *)
+  | Truncated_no_progress -> false
   | Resumable_cli_session
   | Admission_queue_timeout
   | Provider_timeout
@@ -830,6 +842,7 @@ let degraded_rotation_after_recoverable_error
         | Read_only_no_progress
         | Empty_no_progress
         | Thinking_only_no_progress
+        | Truncated_no_progress
         | Resumable_cli_session
         | Admission_queue_timeout
         | Provider_timeout

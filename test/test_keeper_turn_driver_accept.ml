@@ -75,7 +75,8 @@ let accept_no_progress_retry_kind_string err =
     (function
       | `Empty_no_progress -> "empty_no_progress"
       | `Read_only_no_progress -> "read_only_no_progress"
-      | `Thinking_only_no_progress -> "thinking_only_no_progress")
+      | `Thinking_only_no_progress -> "thinking_only_no_progress"
+      | `Truncated_no_progress -> "truncated_no_progress")
     kind
 
 let direct_no_progress_retry_reason_string err =
@@ -1725,7 +1726,26 @@ let test_should_retry_no_thinking_gate () =
     (gate ~recovered:false ~enable_thinking:(Some true)
        ~retry_kind:(Some `Read_only_no_progress));
   check "no retry kind -> no retry" false
-    (gate ~recovered:false ~enable_thinking:(Some true) ~retry_kind:None)
+    (gate ~recovered:false ~enable_thinking:(Some true) ~retry_kind:None);
+  (* RFC-0271 §4.5: a truncation fires the same thinking-off continuation as a
+     thinking-only stall (freeing the shared budget for the answer), and unlike
+     the thinking-only case it is emitted regardless of whether tools ran — the
+     retry kind already encodes that. *)
+  check "truncated + thinking on + fresh turn -> retry" true
+    (gate ~recovered:false ~enable_thinking:(Some true)
+       ~retry_kind:(Some `Truncated_no_progress));
+  check "truncated + thinking default(None=on) -> retry" true
+    (gate ~recovered:false ~enable_thinking:None
+       ~retry_kind:(Some `Truncated_no_progress));
+  check "truncated + already recovered -> no second retry (bounded once/turn)" false
+    (gate ~recovered:true ~enable_thinking:(Some true)
+       ~retry_kind:(Some `Truncated_no_progress));
+  check
+    "truncated + thinking already off -> nothing to re-shape (falls to crash \
+     safety net)"
+    false
+    (gate ~recovered:false ~enable_thinking:(Some false)
+       ~retry_kind:(Some `Truncated_no_progress))
 
 let test_thinking_only_no_tool_can_try_next_candidate () =
   let result =
@@ -1916,6 +1936,81 @@ let test_empty_after_workspace_mutation_stays_terminal () =
     "direct keeper_msg does not rotate after mutation"
     None
     (direct_no_progress_retry_reason_string err)
+
+let test_truncation_after_mutation_is_recoverable_continuation () =
+  (* RFC-0271 §4.5: the mad-improver shape — mutating tools ran, the concluding
+     message is empty, stop_reason=MaxTokens (thinking exhausted the shared
+     output budget). Before slice 2 this matched no no-progress guard and fell
+     through to [None] (zero recovery), so each such turn counted toward the
+     crash threshold until the supervisor marked the keeper Dead. It is now a
+     recoverable truncation routed to the thinking-off continuation, not a
+     completion-contract violation. *)
+  let err =
+    accept_rejected_sdk_error
+      ~stop_reason:(Some Agent_sdk.Types.MaxTokens)
+      ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+      ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_mutating)
+      ~any_mutating_tool:true
+      ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_mutating ]
+      ~reason:
+        "response rejected by accept (runtime=x): shape=empty; \
+         last_tool_effect=mutating; stop=max_tokens"
+      ()
+  in
+  Alcotest.(check (option string))
+    "MaxTokens empty-after-mutation classifies as truncated_no_progress"
+    (Some "truncated_no_progress")
+    (accept_no_progress_retry_kind_string err);
+  Alcotest.(check bool)
+    "truncation is NOT a completion-contract violation"
+    false
+    (Masc.Keeper_error_classify.is_completion_contract_violation err);
+  Alcotest.(check (option string))
+    "truncation is runtime-recoverable no-progress"
+    (Some "truncated_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
+  Alcotest.(check string)
+    "truncation routes as no-progress rotation, not contract-violation judgment"
+    "no_progress_truncated"
+    (Keeper_runtime_failure_route.route_class_label
+       (Keeper_runtime_failure_route.route_of_error err));
+  Alcotest.(check (option string))
+    "truncation recovers via thinking-off continuation, not cross-runtime direct \
+     retry"
+    None
+    (direct_no_progress_retry_reason_string err)
+
+let test_truncation_classification_only_on_max_tokens () =
+  (* Truth table: only [stop_reason = MaxTokens] on an empty/thinking-only
+     conclusion is a truncation. A clean EndTurn (or an unknown stop_reason)
+     empty-after-mutation stays a terminal no-progress ([None]) — the safety
+     boundary that keeps genuinely-stuck turns surfacing via the crash path. *)
+  let kind ~stop_reason ~response_shape =
+    accept_no_progress_retry_kind_string
+      (accept_rejected_sdk_error
+         ~stop_reason
+         ~response_shape
+         ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_mutating)
+         ~any_mutating_tool:true
+         ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_mutating ]
+         ~reason:"truncation truth-table"
+         ())
+  in
+  let c = Alcotest.(check (option string)) in
+  c "MaxTokens + empty -> truncated" (Some "truncated_no_progress")
+    (kind ~stop_reason:(Some Agent_sdk.Types.MaxTokens)
+       ~response_shape:(Some Keeper_internal_error.Accept_response_empty));
+  c "MaxTokens + thinking_only -> truncated" (Some "truncated_no_progress")
+    (kind ~stop_reason:(Some Agent_sdk.Types.MaxTokens)
+       ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only));
+  c "EndTurn + empty after mutation -> terminal (None), not truncation" None
+    (kind ~stop_reason:(Some Agent_sdk.Types.EndTurn)
+       ~response_shape:(Some Keeper_internal_error.Accept_response_empty));
+  c "unknown stop_reason + empty after mutation -> terminal (None)" None
+    (kind ~stop_reason:None
+       ~response_shape:(Some Keeper_internal_error.Accept_response_empty))
 
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
@@ -2427,6 +2522,15 @@ let () =
             "empty response after workspace mutation stays terminal"
             `Quick
             test_empty_after_workspace_mutation_stays_terminal;
+          Alcotest.test_case
+            "MaxTokens truncation after mutation is a recoverable continuation \
+             (RFC-0271 §4.5)"
+            `Quick
+            test_truncation_after_mutation_is_recoverable_continuation;
+          Alcotest.test_case
+            "truncation classification fires only on MaxTokens (RFC-0271 §4.5)"
+            `Quick
+            test_truncation_classification_only_on_max_tokens;
           Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
             test_blank_text_non_end_turn_response_is_rejected;
           Alcotest.test_case "custom predicate rejection stays distinct" `Quick

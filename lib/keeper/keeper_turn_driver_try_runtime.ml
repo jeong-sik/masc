@@ -84,30 +84,39 @@ let accept_no_progress_retry_kind err =
   | Some err -> Keeper_internal_error.accept_no_progress_retry_kind err
   | None -> None
 
-(* RFC-0271 §4.1 [Retry_no_thinking] gate: a [Thinking_only_no_progress]
-   rejection is retried once on the SAME candidate with thinking forced off,
-   provided the rejected attempt had thinking enabled and this turn has not
-   already spent its single re-shape. [Empty]/[Read_only] rejections and
-   thinking-already-off attempts are not re-shaped (nothing to change). *)
+(* RFC-0271 §4.1/§4.5 [Retry_no_thinking] gate: a [Thinking_only_no_progress]
+   or [Truncated_no_progress] rejection is retried once on the SAME candidate
+   with thinking forced off, provided the rejected attempt had thinking enabled
+   and this turn has not already spent its single re-shape. Forcing thinking off
+   hands the whole shared [max_tokens] budget to the answer, which resolves both
+   a thinking-only stall and a [MaxTokens] truncation. [Empty]/[Read_only]
+   rejections and thinking-already-off attempts are not re-shaped (nothing to
+   change). §4.5: unlike the thinking-only case, [Truncated_no_progress] fires
+   regardless of whether the turn ran tools — the classifier already encodes
+   that in the retry kind. *)
 let should_retry_no_thinking ~recovered ~enable_thinking ~retry_kind =
   let thinking_was_enabled =
     match enable_thinking with
     | Some false -> false
     | Some true | None -> true
   in
-  let is_thinking_only =
+  let wants_thinking_off_retry =
     match retry_kind with
-    | Some `Thinking_only_no_progress -> true
+    | Some (`Thinking_only_no_progress | `Truncated_no_progress) -> true
     | Some (`Empty_no_progress | `Read_only_no_progress) | None -> false
   in
-  (not recovered) && is_thinking_only && thinking_was_enabled
+  (not recovered) && wants_thinking_off_retry && thinking_was_enabled
 
 let accept_rejected_result_should_try_next ~is_last err =
   (not is_last) && accept_no_progress_should_try_next err
 
 let checkpoint_for_accept_rejected_retry ~resume_checkpoint ~checkpoint_after err =
   match accept_no_progress_retry_kind err with
-  | Some (`Empty_no_progress | `Thinking_only_no_progress) -> resume_checkpoint
+  | Some (`Empty_no_progress | `Thinking_only_no_progress | `Truncated_no_progress) ->
+    (* §4.5: regenerate the truncated conclusion on the same checkpoint — the
+       tool results already live in the message history as [tool_result], so
+       this is a continuation, not a blind resume that re-runs tools. *)
+    resume_checkpoint
   | Some `Read_only_no_progress -> checkpoint_after
   | None -> checkpoint_after
 

@@ -50,7 +50,7 @@ One goal = one PR. Radius = files actually modified; Boundary = adjacent-and-exp
 | G-7 | hygiene | Latent bypass + stale docs | delete `Task_dispatch.update_status` (`task_dispatch.ml:115-152`, zero production callers, writes any status incl. Done with no decide/gates) or wire through decide; fix stale "Default: false" comment `env_config_runtime.ml:300` | `Task_dispatch.delete_task` (has callers) | — | no status-write path outside `decide` remains reachable |
 | G-8 | W2 | `predecessor_task_id` core | `types_core.ml{,i}` record `:587-601` + codec `:695,:743` (omit-when-None per `created_by` pattern `:705-707`; malformed value degrades to `None` — decode `Error` would silently DROP the task via `backlog_of_yojson` `:922-924`), `workspace_task_create.ml{,i}` (arg, two literals `:169-184,:291-306`, existence + terminal validation via `task_status_is_terminal` `:370-372`), `tool_task_handlers.ml` (`valid_keys` `:266` — mandatory or arg is rejected; Unknown_goal pattern `:302-316`), `tool_task_schemas.ml:69-72`, tests (codec round-trip, unknown-id, non-terminal predecessor) + 17 test files with full task literals (compiler-forced) | batch add (positional 5-tuple — widen later if needed), `keeper_task_create` (None default correct), goal registry (RFC-0267: many-to-many mutable side registry ≠ write-once lineage pointer) | — | round-trip with/without field; old backlog decodes; unknown/non-terminal predecessor → typed error |
 | G-9 | W2 | Predecessor surfacing (display) | `server_dashboard_http_core_entities.ml:29-50` (hand-rolled 7-field subset), `dashboard/src/types/core.ts:52`, task-detail lineage (`task-detail-state.ts:65-126` scaffolding exists) | rich `task_json` (`dashboard_execution.ml:555-579` auto-inherits from codec) | G-8 | task detail shows predecessor link |
-| G-10 | W3 | Retire Done-reclaim (hunk-verdict table below) | `types_core.ml:653-666` REVERT; `workspace_task_lifecycle.ml{,i}` `Blocked_by_reclaim_policy` variant `:57-58` + Done arm + interim guard `:74-92` REVERT; `workspace_task_claim.ml:161-174` REVERT plumbing but **REPLACE** error with terminal + successor-task hint; tests per table | `workspace_task_schedule.ml:430-445` **KEEP** (RFC-0220 §3.5 fix); `:607-611` helper KEEP; Todo-reclaim ecosystem (below) | G-8 | `Done` never claimable for any (policy, actor); `Todo + Block_reclaim` hard-stop still blocks; claim-on-Done error names the successor path |
+| G-10 | W3 | Retire Done-reclaim (hunk-verdict table below) | `types_core.ml:653-666` REVERT; `workspace_task_lifecycle.ml{,i}` `Blocked_by_reclaim_policy` variant `:57-58` + Done arm + interim guard `:74-92` REVERT; `workspace_task_claim.ml:161-174` REVERT plumbing but **REPLACE** error with terminal + successor-task hint; tests per table | `workspace_task_schedule.ml:430-445` **KEEP** (RFC-0220 §3.5 fix); reclaim-field data plumbing (below) | G-8 | `Done` never claimable for any (policy, actor); claim-on-Done error names the successor path; `reclaim_policy` enforcement-retirement decision recorded (post-#23661 it has zero `task_claim_decision` readers once the Done arm reverts) |
 
 ### G-1 layering note
 
@@ -80,10 +80,10 @@ Also: replace the silent `Error _ -> ()` swallow (`keeper_tool_task_runtime.ml:6
 | file:line (main) | Hunk | Verdict |
 |---|---|---|
 | `types_core.ml:653-666` | Done reclaim arm | REVERT → unconditional `Claim_unavailable (Claim_block_not_todo …)` |
-| `types_core.ml:607-611` | block-reason helper | KEEP (Todo arm still uses it) |
+| `types_core.ml:607-611` | block-reason helper | DELETE — dead since #23661 (`27e2f4230c`) removed the Todo gate; its last remaining reader is the Done arm this table reverts |
 | `workspace_task_lifecycle.ml:57-58,:74-92` + mli | `Blocked_by_reclaim_policy` variant + Done arm + same-actor guard | REVERT → `Done { assignee; _ } -> Held_by_other assignee` |
 | `workspace_task_claim.ml:151,:161-174` | task-typed call + Blocked plumbing | REVERT; **REPLACE** the resulting `AlreadyClaimed` UX with a terminal-status error naming the `predecessor_task_id` successor path |
-| `workspace_task_schedule.ml:302-313,:354,:485` | blocked_reclaim scan + Blocked arms | arms REVERT with variant; scan KEEP (degenerates safely to Todo-only) |
+| `workspace_task_schedule.ml:302-313,:354,:485` | blocked_reclaim scan + Blocked arms | arms REVERT with variant; scan: after #23661 no Todo producer remains and G-10 removes the Done producer → `Claim_block_reclaim_policy` becomes unproducible; simplify or remove the scan in G-10 |
 | `workspace_task_schedule.ml:430-445` | eligible-match restructure | **KEEP — not superseded** (fixes AwaitingVerification-only-backlog verifier claim, RFC-0220 §3.5) |
 | `test_workspace_task_lifecycle.ml:428-454` | Done-arm cases | `:428-433` KEEP; `:434-439,:449-454` REPLACE with "Done is terminal" pins; `:440-448` (self-livelock) DELETE |
 | `test_workspace_coverage.ml:732,:759,:1945` | reclaim-success/blocked-count tests | REPLACE (not claimable / Error / blocked_count 1→0) |
@@ -101,7 +101,7 @@ Also: replace the silent `Error _ -> ()` swallow (`keeper_tool_task_runtime.ml:6
 | RFC-0267 goal registry | UNTOUCHED | goal→tasks many-to-many mutable side registry (`workspace_goal_index.mli:17-29`) ≠ task→task write-once lineage pointer |
 | RFC-0220 neutered timeout | UNTOUCHED | deliberate (`verification_protocol.ml:380-394`); backstop is structural (G-5 gate 2) |
 | Event/SSE kinds | UNTOUCHED | `task.submit_for_verification/approved/rejected` already exist and are emitted (`event_kind.ml:15-24`, `transitions.ml:607-621`); G-3 teaches the reducer instead of adding kinds |
-| Todo-reclaim ecosystem | UNTOUCHED (G-10 boundary) | supervisor pause `Allow_reclaim` handoff (`keeper_supervisor_pause_policy.ml:52,75`), release derive (`workspace_task_claim.ml:330-363`), cancel preserve (`workspace_task.ml:113-117`), `clear_reclaim_decision` (`:16-21`), telemetry classifier (`task_transition_state.ml:260-261`), release schema enum (`tool_task_schemas.ml:291-295`) |
+| Reclaim-field data plumbing | UNTOUCHED (G-10 boundary) | supervisor pause `Allow_reclaim` handoff (`keeper_supervisor_pause_policy.ml:52,75`), release derive (`workspace_task_claim.ml:330-363`), cancel preserve (`workspace_task.ml:113-117`), `clear_reclaim_decision` (`:16-21`), telemetry classifier (`task_transition_state.ml:260-261`), release schema enum (`tool_task_schemas.ml:291-295`). NOTE: since #23661 removed the Todo claim gate, these writers feed fields with **no remaining `task_claim_decision` enforcement** once G-10 reverts the Done arm — the fields become inert data. Full retirement of `reclaim_policy` (and the RFC-0034 anti-oscillation question its release hard-stop used to answer) is a recorded follow-up decision, not silently expanded G-10 scope |
 | Claimable filters | UNTOUCHED | dashboard (`work.ts:214-216`) and keeper observation (`keeper_world_observation_inputs.ml:53-67`) are Todo-first — Done-reclaim was invisible to both in *both* directions |
 | Benchmark harness | UNTOUCHED | zero task-status reads (`keeper_benchmark_canary.ml`, `repo_synthesis_benchmark.ml`) |
 | RFC-0304 keeper HITL queue / RFC-0321/0322 / board claim gate | UNTOUCHED | different domains, no shared files |
@@ -111,13 +111,13 @@ Also: replace the silent `Error _ -> ()` swallow (`keeper_tool_task_runtime.ml:6
 
 | PR | Files | Collides with | Action |
 |---|---|---|---|
-| #23661 (`albini/task-1869-clean`) | `types_core.ml` only | G-8/G-10 (same file, same mechanism) | redirect to this RFC; the reclaim mechanism it iterates on is being retired |
+| #23661 (`albini/task-1869-clean`) | `types_core.ml` only | G-8/G-10 (same file, same mechanism) | **MERGED (`27e2f4230c`) post-redirect** — removed the Todo `Block_reclaim` gate entirely. Its in-code comment asserts "reclaim_policy only gates Done → re-claim", which inverts the census finding (the Todo release hard-stop was the only production-reachable use; Done-reclaim is the dead mechanism G-10 retires). Consequence: post-G-10 `reclaim_policy` has zero decision readers — see Radius Map note |
 | #23641 (`garnet/task-1869`) | `workspace_task.ml`, `transition_executor.ml` | G-10 | redirect — reclaim_policy semantics under retirement |
 | #23640 (`nick0cave/task-1869-claimable-staleness`) | `keeper_runtime_contract.*` | G-6/G-10 (MEDIUM) | review against matrix |
 | #23626 (`rondo/task-1862-add-recurring`) | tool schemas/dispatch/registry | G-8 (MEDIUM, file-level) | merge-order coordination |
 | #23589 (evidence-gate retire) | gate routing + shared tests | G-1/G-2 (MEDIUM) | merge-order coordination |
 
-Three parallel task-1869 PRs are iterating on exactly the mechanism G-10 retires — they should pause pending this RFC's review.
+Three parallel task-1869 PRs were iterating on exactly the mechanism G-10 retires; #23640 and #23661 have since merged (2026-07-08). #23661's semantics inversion is absorbed above rather than relitigated — G-10 implements against current main.
 
 ## Invariants (end state)
 

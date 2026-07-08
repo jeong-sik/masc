@@ -27,6 +27,8 @@ import {
   SECONDS_PER_HOUR,
   SECONDS_PER_MINUTE,
   formatDateTimeKo,
+  formatTimeAgo,
+  formatTimeUntil,
 } from '../../lib/format-time'
 import { StatusChip, keeperStateTone } from '../common/status-chip'
 import { enumLabel } from './keeper-waiting-inventory-panel'
@@ -81,8 +83,8 @@ function RecurringRow({ task }: { task: DashboardKeeperRecurringTask }) {
           <span class="sch-bg-since font-mono">every ${task.interval_sec.toLocaleString()}s</span>
           <span class="sch-bg-since font-mono">runs ${task.run_count.toLocaleString()}</span>
           <span class="sch-bg-since font-mono">fail ${task.failure_count.toLocaleString()}/${task.max_failures.toLocaleString()}</span>
-          <span class="sch-bg-since">next ${timeLabel(task.next_run_at_iso)}</span>
-          <span class="sch-bg-since">last ${timeLabel(task.last_run_at_iso)}</span>
+          <span class="sch-bg-since">next ${task.next_run_at_iso ? formatTimeUntil(task.next_run_at_iso) : '-'}</span>
+          <span class="sch-bg-since">last ${task.last_run_at_iso ? formatTimeAgo(task.last_run_at_iso) : '-'}</span>
         </div>
       </div>
       <${StatusChip} tone=${task.enabled ? 'ok' : 'paused'} uppercase=${false}>${task.enabled ? 'enabled' : 'disabled'}<//>

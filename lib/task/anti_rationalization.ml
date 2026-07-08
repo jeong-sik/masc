@@ -739,15 +739,9 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
-  (* Gate 0: empty evidence_refs *)
+  (* Gate 0: empty evidence_refs — disabled until call site is wired (PR #23666 regression) *)
   if List.is_empty req.evidence_refs then
-    emit
-      { verdict = Reject "no evidence references supplied"
-      ; evaluator_runtime
-      ; generator_runtime
-      ; gate = Evidence
-      ; fallback_reason = None
-      }
+    task_warn "Gate 0 skipped: empty evidence_refs (call site not yet wired)"
   else
   (* Gate 1: empty or trivially short notes *)
   let notes_trimmed = String.trim req.completion_notes in

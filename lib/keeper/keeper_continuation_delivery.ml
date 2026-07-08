@@ -17,13 +17,6 @@ let describe_outcome = function
   | Skipped_empty -> "skipped:empty"
   | Failed { kind; error } -> Printf.sprintf "failed:%s:%s" kind error
 
-let slack_token_opt () =
-  match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
-  | None -> None
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some trimmed
-
 (* The originating surface identity captured by W2b (thread/session/parent
    coordinates) is preserved end-to-end so the reply lands in — and is audited
    against — the same conversation thread, not a fresh top-level post. *)
@@ -61,29 +54,31 @@ let deliver_discord ~config ~keeper_name ~guild_id ~channel_id
       Delivered { kind = "discord" }
 
 let deliver_slack ~config ~keeper_name ~team_id ~channel_id ~thread_ts ~content =
-  match slack_token_opt () with
-  | None ->
-      Failed { kind = "slack"; error = "MASC_SLACK_BOT_TOKEN is unset or empty" }
-  | Some token -> (
-      let blocks = Keeper_chat_slack.content_blocks_of_text content in
-      match
-        Keeper_chat_slack.send_message_with_blocks ~token ~channel:channel_id
-          ~content ~blocks
-      with
-      | Error err ->
-          Failed
-            {
-              kind = "slack";
-              error = Format.asprintf "%a" Keeper_chat_slack.pp_error err;
-            }
-      | Ok () ->
-          Keeper_chat_store.append_assistant_message
-            ~base_dir:config.Workspace.base_path ~keeper_name ~content
-            ~surface:(Surface_ref.Slack { team_id; channel_id; thread_ts })
-            ();
-          Keeper_chat_broadcast.chat_appended ~keeper_name ~source:"slack"
-            ~content ();
-          Delivered { kind = "slack" })
+  (* [Channel_gate_slack_state.send_message] threads the reply via
+     [reply_to_message_id] (a Slack [ts]) and resolves the bot token internally,
+     so a continuation lands in the originating thread rather than a fresh
+     top-level message. Plain content (no Block Kit) is the accepted trade-off
+     for thread continuity. *)
+  match
+    Channel_gate_slack_state.send_message ~channel_id ~content
+      ?reply_to_message_id:thread_ts ()
+  with
+  | Error send_error ->
+      Failed
+        {
+          kind = "slack";
+          error =
+            Format.asprintf "%a" Channel_gate_slack_state.pp_send_error
+              send_error;
+        }
+  | Ok _ts ->
+      Keeper_chat_store.append_assistant_message
+        ~base_dir:config.Workspace.base_path ~keeper_name ~content
+        ~surface:(Surface_ref.Slack { team_id; channel_id; thread_ts })
+        ();
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:"slack"
+        ~content ();
+      Delivered { kind = "slack" }
 
 type gate =
   | Deliver

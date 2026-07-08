@@ -215,6 +215,19 @@ let test_external_attention_projects_to_prompt_event () =
      | WO.Unknown -> true
      | _ -> false)
 
+let test_external_attention_prompt_steers_continuation () =
+  (* RFC-0320 W3(a): the rendered prompt line for an external-attention wake must
+     steer the keeper to answer back into the originating conversation via
+     keeper_surface_post, instead of only proceeding on its own state. *)
+  let meta = make_meta "conn-keeper" in
+  let item = external_attention_item () in
+  let ev = WO.pending_board_event_of_external_attention ~meta item in
+  let line = Masc.Keeper_unified_prompt.format_board_event_text ev in
+  check bool "prompt line steers a keeper_surface_post reply" true
+    (contains ~needle:"keeper_surface_post" line);
+  check bool "prompt line marks a waiting continuation" true
+    (contains ~needle:"continuation" line)
+
 let () =
   init_runtime_default_for_tests ();
   run "connector_attention_wake"
@@ -231,5 +244,7 @@ let () =
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick
             test_external_attention_projects_to_prompt_event
+        ; test_case "external attention prompt steers continuation reply" `Quick
+            test_external_attention_prompt_steers_continuation
         ] )
     ]

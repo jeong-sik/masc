@@ -1556,24 +1556,28 @@ let expire_stale ~max_wait_s =
          ~decision:(Approval_expired reason)
          ~continuation_channel:entry.continuation_channel
          ();
-       (* Expiry clears the [Approval_pending] skip just like a resolution, so
-          the keeper needs the same wake or it stays stalled until an unrelated
-          stimulus. The keeper's suspended tool call (if any) receives
-          [Reject reason]. *)
-       wake_keeper_on_approval_resolution
-         ~base_path:entry.audit_base_path
-         ~keeper_name:entry.keeper_name
-         ~approval_id:id
-         ~decision:Keeper_event_queue.Hitl_rejected
-         ~continuation_channel:entry.continuation_channel;
-       (match entry.resolver with
-        | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
-        | None -> ());
-       match entry.on_resolution with
-       | Some f ->
+      (* Expiry clears the [Approval_pending] skip just like a resolution, so
+         the keeper needs the same wake or it stays stalled until an unrelated
+         stimulus. The keeper's suspended tool call (if any) receives
+         [Reject reason]. *)
+      (match entry.resolver with
+       | Some resolver ->
+         (* Blocking entries already resume through the live resolver; keep this
+            path single-rail and skip synthetic wake. *)
+         Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
+       | None ->
+         wake_keeper_on_approval_resolution
+           ~base_path:entry.audit_base_path
+           ~keeper_name:entry.keeper_name
+           ~approval_id:id
+           ~decision:Keeper_event_queue.Hitl_rejected
+           ~continuation_channel:entry.continuation_channel);
+      (match entry.resolver, entry.on_resolution with
+       | None, Some f ->
          Cancel_safe.observe
            ~on_exn:(fun exn ->
-             Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_approval_expire") ]
                ();
              Otel_metric_store.inc_counter
@@ -1585,6 +1589,7 @@ let expire_stale ~max_wait_s =
                id
                (Printexc.to_string exn))
            (fun () -> f (Agent_sdk.Hooks.Reject reason))
-       | None -> ())
-    stale
+       | Some _, _ | None, None -> ());
+  )
+  stale
 ;;

@@ -210,12 +210,17 @@ let init_git_repo dir url =
         ; "refs/remotes/origin/main"
        |])
 
-let sample_repo ~base_path id =
+let sample_repo ?base_path ?(aliases = []) id =
+  let local_path =
+    match base_path with
+    | None -> Filename.concat ".masc/repos" id
+    | Some base_path -> Filename.concat base_path (Filename.concat ".masc/repos" id)
+  in
   { id
   ; name = id
   ; url = "https://github.com/jeong-sik/" ^ id ^ ".git"
-  ; local_path = Filename.concat base_path (Filename.concat ".masc/repos" id)
-  ; aliases = []
+  ; local_path
+  ; aliases
   ; default_branch = "main"
   ; keepers = []
   ; status = Active
@@ -502,7 +507,7 @@ let test_grep_registered_alias_repo_path_is_allowed () =
   then ()
   else (
     save_repositories
-      ~base
+      base
       [ sample_repo ~aliases:[ "masc-mcp" ] "masc"; sample_repo "oas" ];
     let repo_root = Filename.concat playground "repos/masc-mcp" in
     ensure_dir (Filename.concat repo_root ".git");

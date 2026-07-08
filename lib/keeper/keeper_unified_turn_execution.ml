@@ -36,6 +36,10 @@ type ctx =
       base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
       Keeper_agent_run.turn_prompt
   ; channel : Keeper_world_observation.keeper_cycle_channel
+  ; hitl_delivery_channel : Keeper_continuation_channel.t option
+      (* RFC-0320 W3c: the originating channel to deterministically deliver this
+         turn's reply to when the turn was opened by a Hitl_resolved wake; [None]
+         on every other lane (fail-closed: no delivery). *)
   ; cleanup : unit -> unit
   ; committed_mutating_tools_snapshot : unit -> string list
   ; config : Workspace.config
@@ -78,6 +82,7 @@ let run (ctx : ctx)
       ; keeper_turn_id
       ; turn_id
       ; channel
+      ; hitl_delivery_channel
       ; shared_context
       ; base_dir
       ; build_turn_prompt
@@ -154,6 +159,7 @@ let run (ctx : ctx)
                Keeper_agent_run.run_turn
                  ~config
                  ~meta:run_meta
+                 ?hitl_delivery_channel
                  ~turn_ctx_cell
                  ~base_dir
                  ~max_context:execution.max_context
@@ -317,10 +323,6 @@ let run (ctx : ctx)
         meta.name;
       Ok result, turn_state
     | Error err ->
-      (* RFC-XXXX: reclassify_provider_timeout_for_attempt removed.
-         The per-attempt wall-clock watchdog no longer fires, so the
-         structural OAS timeout path is dead. Provider errors pass
-         through unchanged for the downstream typed error classifier. *)
       let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
       let err =
         match event_bus_integrity_error_snapshot () with

@@ -213,7 +213,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   ignore (config, state, sw, clock, start_time);
   let arguments =
     match name with
-    | "masc_board_post" ->
+    | "masc_board_post" | "masc_board_post_update" ->
         enforce_caller_identity ~tool:name ~field:"author" ~agent_name
           arguments
     | "masc_board_comment" ->
@@ -227,9 +227,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           arguments
     | "masc_board_sub_board_create" ->
         enforce_caller_identity ~tool:name ~field:"owner" ~agent_name
-          arguments
-    | "masc_board_post_update" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
           arguments
     | "masc_board_delete" ->
         enforce_caller_identity ~tool:name ~field:"author" ~agent_name

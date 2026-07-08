@@ -84,6 +84,24 @@ let accept_no_progress_retry_kind err =
   | Some err -> Keeper_internal_error.accept_no_progress_retry_kind err
   | None -> None
 
+(* RFC-0271 §4.1 [Retry_no_thinking] gate: a [Thinking_only_no_progress]
+   rejection is retried once on the SAME candidate with thinking forced off,
+   provided the rejected attempt had thinking enabled and this turn has not
+   already spent its single re-shape. [Empty]/[Read_only] rejections and
+   thinking-already-off attempts are not re-shaped (nothing to change). *)
+let should_retry_no_thinking ~recovered ~enable_thinking ~retry_kind =
+  let thinking_was_enabled =
+    match enable_thinking with
+    | Some false -> false
+    | Some true | None -> true
+  in
+  let is_thinking_only =
+    match retry_kind with
+    | Some `Thinking_only_no_progress -> true
+    | Some (`Empty_no_progress | `Read_only_no_progress) | None -> false
+  in
+  (not recovered) && is_thinking_only && thinking_was_enabled
+
 let accept_rejected_result_should_try_next ~is_last err =
   (not is_last) && accept_no_progress_should_try_next err
 
@@ -270,10 +288,19 @@ let run
     , ctx.wait_timeout_sec
     , ctx.turn_deadline )
   in
-  let rec loop resume_checkpoint last_err = function
+  let rec loop resume_checkpoint last_err recovered_no_thinking = function
     | [] -> Error (sdk_error_of_exhausted ~runtime_id:ctx.error_runtime_id last_err)
     | candidate :: rest ->
       let is_last = rest = [] in
+      let record_attempt_success ~latency_ms run_result =
+        Keeper_turn_driver_provider_attempt.record_candidate_health_success
+          ~keeper_name:ctx.keeper_name
+          candidate
+          ~latency_ms;
+        ctx.record_provider_health_result candidate ~success:true ~http_status:None;
+        on_success ~provider_key:(Runtime_candidate.health_key candidate);
+        Ok run_result
+      in
       maybe_mark_provider_attempt_started ctx;
       emit_attempt_started ctx candidate ~is_last ~per_provider_timeout_s;
       let started_at = Mtime_clock.now () in
@@ -289,13 +316,7 @@ let run
       in
       (match result with
        | Ok run_result when ctx.accept run_result.Runtime_agent.response ->
-         Keeper_turn_driver_provider_attempt.record_candidate_health_success
-           ~keeper_name:ctx.keeper_name
-           candidate
-           ~latency_ms;
-         ctx.record_provider_health_result candidate ~success:true ~http_status:None;
-         on_success ~provider_key:(Runtime_candidate.health_key candidate);
-         Ok run_result
+         record_attempt_success ~latency_ms run_result
        | Ok run_result ->
          let last_tool_context =
            Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
@@ -317,21 +338,68 @@ let run
            ~keeper_name:ctx.keeper_name
            candidate
            ~reason;
-         if accept_rejected_result_should_try_next ~is_last err
-         then
-           let checkpoint_for_retry =
+         let try_next_or_error err ~recovered =
+           if accept_rejected_result_should_try_next ~is_last err
+           then
+             let checkpoint_for_retry =
+               checkpoint_for_accept_rejected_retry
+                 ~resume_checkpoint
+                 ~checkpoint_after
+                 err
+             in
+             let next_last_err =
+               match sdk_error_to_http_error err with
+               | Some http_err -> Some http_err
+               | None -> last_err
+             in
+             loop checkpoint_for_retry next_last_err recovered rest
+           else Error err
+         in
+         (* RFC-0271 §4.1 [Retry_no_thinking]: a [Thinking_only_no_progress]
+            rejection on a thinking-enabled attempt gets ONE same-candidate retry
+            with thinking forced off, before the (existing) reroute to the next
+            candidate. This is the cheap deterministic re-shape that avoids a full
+            reroute to a more expensive lane when the model merely over-thought.
+            Bounded to once per turn via [recovered_no_thinking]. *)
+         if
+           should_retry_no_thinking
+             ~recovered:recovered_no_thinking
+             ~enable_thinking:ctx.try_provider_ctx.enable_thinking
+             ~retry_kind:(accept_no_progress_retry_kind err)
+         then begin
+           (* Mark progress so the RFC-0012 mid-turn watchdog does not kill the
+              recovery attempt as no-progress (RFC-0271 §4.3). *)
+           maybe_mark_provider_attempt_started ctx;
+           emit_attempt_started ctx candidate ~is_last ~per_provider_timeout_s;
+           let retry_started_at = Mtime_clock.now () in
+           let retry_resume =
              checkpoint_for_accept_rejected_retry
                ~resume_checkpoint
                ~checkpoint_after
                err
            in
-           let next_last_err =
-             match sdk_error_to_http_error err with
-             | Some http_err -> Some http_err
-             | None -> last_err
+           let retry_result, retry_checkpoint_after, _retry_sample =
+             Keeper_turn_driver_try_provider.run_try_provider
+               ctx.try_provider_ctx
+               ~enable_thinking_override:false
+               ?resume_checkpoint:retry_resume
+               ?per_provider_timeout_s
+               candidate
            in
-           loop checkpoint_for_retry next_last_err rest
-         else Error err
+           let retry_latency =
+             emit_attempt_finished
+               ctx
+               candidate
+               ~started_at:retry_started_at
+               retry_result
+               retry_checkpoint_after
+           in
+           (match retry_result with
+            | Ok retry_run when ctx.accept retry_run.Runtime_agent.response ->
+              record_attempt_success ~latency_ms:retry_latency retry_run
+            | Ok _ | Error _ -> try_next_or_error err ~recovered:true)
+         end
+         else try_next_or_error err ~recovered:recovered_no_thinking
        | Error err ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_error
            ~keeper_name:ctx.keeper_name
@@ -349,7 +417,7 @@ let run
                 && (Runtime_attempt_fsm.should_try_next http_err
                     || accept_no_progress_should_try_next original_error)
            ->
-           loop checkpoint_after (Some http_err) rest
+           loop checkpoint_after (Some http_err) recovered_no_thinking rest
          | Some http_err ->
            Error
              (sdk_error_of_nonretryable_attempt_error
@@ -357,12 +425,15 @@ let run
                 ~original_error
                 http_err)
          | None ->
-           if is_last then Error err else loop checkpoint_after last_err rest)
+           if is_last
+           then Error err
+           else loop checkpoint_after last_err recovered_no_thinking rest)
   in
-  loop resume_checkpoint last_err candidates
+  loop resume_checkpoint last_err false candidates
 
 module For_testing = struct
   let accept_no_progress_should_try_next = accept_no_progress_should_try_next
+  let should_retry_no_thinking = should_retry_no_thinking
 
   let accept_no_progress_read_only_should_try_next =
     accept_no_progress_read_only_should_try_next

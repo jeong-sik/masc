@@ -1658,6 +1658,33 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
     true
     (contains ~needle:"stop_reason=stop_sequence" reason)
 
+(* RFC-0271 §4.1 [Retry_no_thinking] gate truth table: only a thinking-only
+   rejection on a thinking-enabled attempt, once per turn, triggers the cheap
+   thinking-off re-shape before reroute. *)
+let test_should_retry_no_thinking_gate () =
+  let gate = Masc.Keeper_turn_driver_try_runtime.For_testing.should_retry_no_thinking in
+  let check label expected actual = Alcotest.(check bool) label expected actual in
+  check "thinking_only + thinking on + fresh turn -> retry" true
+    (gate ~recovered:false ~enable_thinking:(Some true)
+       ~retry_kind:(Some `Thinking_only_no_progress));
+  check "thinking_only + thinking default(None=on) -> retry" true
+    (gate ~recovered:false ~enable_thinking:None
+       ~retry_kind:(Some `Thinking_only_no_progress));
+  check "thinking_only + already recovered -> no second retry (bounded)" false
+    (gate ~recovered:true ~enable_thinking:(Some true)
+       ~retry_kind:(Some `Thinking_only_no_progress));
+  check "thinking_only + thinking already off -> nothing to re-shape" false
+    (gate ~recovered:false ~enable_thinking:(Some false)
+       ~retry_kind:(Some `Thinking_only_no_progress));
+  check "empty_no_progress -> no retry" false
+    (gate ~recovered:false ~enable_thinking:(Some true)
+       ~retry_kind:(Some `Empty_no_progress));
+  check "read_only_no_progress -> no retry" false
+    (gate ~recovered:false ~enable_thinking:(Some true)
+       ~retry_kind:(Some `Read_only_no_progress));
+  check "no retry kind -> no retry" false
+    (gate ~recovered:false ~enable_thinking:(Some true) ~retry_kind:None)
+
 let test_thinking_only_no_tool_can_try_next_candidate () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -2340,6 +2367,10 @@ let () =
             "thinking-only no-tool response rotates typed no-progress"
             `Quick
             test_thinking_only_no_tool_can_try_next_candidate;
+          Alcotest.test_case
+            "Retry_no_thinking gate is bounded and thinking-only-scoped (RFC-0271)"
+            `Quick
+            test_should_retry_no_thinking_gate;
           Alcotest.test_case "empty non-end-turn response is rejected" `Quick
             test_empty_non_end_turn_response_is_rejected;
           Alcotest.test_case

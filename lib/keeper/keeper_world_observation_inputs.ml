@@ -19,9 +19,13 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta) () =
+let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~(tasks : Masc_domain.task list) () =
+  (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
+     empty-scope fallback as the claim path without a second backlog read. *)
   let scope =
-    Keeper_runtime_contract.resolve_observation_claim_goal_scope ~config ~meta ()
+    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config ~meta
+      ~tasks ()
   in
   scope.task_filter
 ;;
@@ -56,7 +60,9 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter = claim_goal_scope_filter ~config ~meta () in
+    let claim_scope_filter =
+      claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
+    in
     let claimable =
       List.length
         (List.filter

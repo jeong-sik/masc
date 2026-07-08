@@ -186,6 +186,9 @@ type task =
   ; files : string list [@default []]
   ; created_at : string
   ; created_by : string option [@default None]
+  ; predecessor_task_id : string option [@default None]
+        (** RFC-0323 W2: write-once lineage pointer to the terminal task this
+            one re-runs. Set only at creation; transitions carry it through. *)
   ; contract : task_contract option [@default None]
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]

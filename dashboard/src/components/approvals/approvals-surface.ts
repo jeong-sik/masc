@@ -569,7 +569,7 @@ export function ApprovalsSurface() {
   }, [items])
 
   return html`
-    <main class="ov ov-2col ss-surface bg-surface-page text-text-primary" data-screen-label="승인 큐" data-testid="approvals-surface">
+    <main class="ov ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="승인 큐" data-testid="approvals-surface">
       <div class="ov-scroll">
         <header class="ov-head">
           <div>

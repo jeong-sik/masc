@@ -507,14 +507,11 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
       if include_tool_calls then tool_call_events config ~agent_name ~limit:200
       else []
     in
-    let cdal_evts =
-      keeper_cdal_events config ~agent_name ~limit:200
-    in
     let turn_evts =
       turn_completed_events config ~agent_name ~limit:200
     in
     let chat_evts = chat_events (load_chat ~agent_name) in
-    agent_evts @ task_evts @ msg_evts @ tool_evts @ cdal_evts @ turn_evts
+    agent_evts @ task_evts @ msg_evts @ tool_evts @ turn_evts
     @ chat_evts
   in
   (* Filter by time cutoff and sort chronologically. [stable_sort] (not

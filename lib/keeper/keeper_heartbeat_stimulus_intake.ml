@@ -101,18 +101,23 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
     Some Keeper_world_observation.Connector_attention_stimulus
+  | Keeper_event_queue.Hitl_resolved _ ->
+    (* RFC-0320 W3b: give the HITL-resolution wake a dedicated turn_reason so
+       the prompt can steer the keeper back to the originating conversation
+       instead of silently proceeding on its own state. The [Approval_pending]
+       skip is already gone (the approval left the queue); this changes only
+       how the resumed turn is described, not whether it runs. *)
+    Some Keeper_world_observation.Hitl_resolved_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
-  | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Goal_verification_failed _
   | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_stagnation _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
-       stimulus itself forces the keeper to re-run its cycle. Once the resolved
-       approval has left the queue the keeper no longer skips on
-       [Approval_pending] and proceeds on its own state. *)
+       stimulus itself forces the keeper to re-run its cycle and proceed on its
+       own state. *)
     None
 ;;
 
@@ -196,6 +201,20 @@ let consume_single_heartbeat_stimulus
       gs.gs_goal_id
       gs.gs_stale_since
       meta_after_triage.name;
+    (* Arm [Keeper_goal_stagnation_wake]'s fire-once-per-episode gate. The
+       producer skips re-enqueue only when [turn_started_seen] is true for the
+       episode stimulus id; that flag is set solely from a [Turn_started]
+       reaction row. Without recording it here the gate stays inert, so once
+       [ack_consumed] drops the stimulus the next scan re-detects the same
+       stale episode ((goal_id, updated_at) unchanged) and re-wakes every tick
+       — the blind cadence RFC-0303 forbids and RFC-0310 §3.3 exists to avoid.
+       [stim] carries the episode-pinned [arrived_at], so this row stamps the
+       exact stimulus id the producer recomputes next scan. Mirrors the
+       No_progress_recovery arm below. *)
+    record_event_queue_stimulus_turn_started
+      ~ctx
+      ~keeper_name:meta_after_triage.name
+      stim;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Failure_judgment fj ->
     (* RFC-0313 W2: a deterministic turn failure awaits an LLM-boundary

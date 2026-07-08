@@ -219,11 +219,6 @@ let transition_task_outcome_r
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
-              | _, Masc_domain.Submit_for_verification
-                when String.length (String.trim notes) = 0 ->
-                " Remediation: submit_for_verification requires non-empty notes \
-                 describing the deliverable. Provide a summary of what was done \
-                 and evidence references."
               | _ -> ""
             in
             Error
@@ -241,7 +236,25 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
-(* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
+        let* () =
+          match action with
+          | Masc_domain.Submit_for_verification
+            when String.length (String.trim notes) = 0 ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "submit_for_verification requires non-empty notes describing the \
+                     deliverable and evidence references"))
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel
+          | Masc_domain.Release
+          | Masc_domain.Submit_for_verification
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification -> Ok ()
+        in
+        (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
           (match action, task.task_status, new_status, prepare_verification_request with
           | ( Masc_domain.Submit_for_verification

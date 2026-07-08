@@ -725,6 +725,60 @@ let graphql_query_body_is_opaque (args : Shell_ir.arg list) : bool =
   scan args
 ;;
 
+let is_rest_api (v : Gh_verb.t) : bool =
+  match v.Gh_verb.family with
+  | Gh_verb.Api -> not (is_graphql_api v)
+  | Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+  | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
+  | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
+  | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Other _ -> false
+;;
+
+let is_method_flag = function
+  | "-X" | "--method" -> true
+  | _ -> false
+;;
+
+(* Leading literal of an attached/opaque method arg: [-X$M] ([Concat [Lit "-X";
+   Var _]] -> "-X"), [-XDELETE...$M], or [--method=$M]. Distinguishes a method
+   flag from other gh flags (none of which share the [-X] short form). *)
+let attached_method_prefix prefix =
+  let lower = String.lowercase_ascii prefix in
+  String.starts_with ~prefix:"-x" lower
+  || String.starts_with ~prefix:"--method" lower
+;;
+
+(* [gh api] REST HTTP method opacity (#23451). The method ([-X]/[--method])
+   decides read (GET) vs durable/destructive write (POST/PUT/PATCH/DELETE). When
+   the method VALUE is opaque (Shell IR Var/Concat), the literal method
+   classifier ([Shell_ir_risk]'s floor) cannot see it, defaults to GET/R0, and a
+   [$METHOD]-carried DELETE/POST silently downgrades to [Allow] under the
+   autonomous overlay. Mirror the graphql body-opacity fail-closed: an opaque
+   method on a REST [gh api] routes to [Requires_approval]. Literal methods are
+   unaffected — the floor classifies them precisely (DELETE -> R2 Deny,
+   POST/PUT/PATCH -> R1, GET -> R0 Allow). The value/file is never read (no
+   TOCTOU); opacity alone gates. *)
+let gh_api_method_is_opaque (args : Shell_ir.arg list) : bool =
+  let rec scan = function
+    | [] -> false
+    | arg :: rest ->
+      (match arg_literal arg with
+       | Some tok when is_method_flag tok ->
+         (* separate value form: [-X <VALUE>] / [--method <VALUE>] *)
+         (match rest with
+          | value :: tail -> Option.is_none (arg_literal value) || scan tail
+          | [] -> false)
+       | Some _ -> scan rest
+       | None ->
+         (* opaque arg (has a Var): attached method flag with opaque value, e.g.
+            [-X$M] or [--method=$M]. Its leading literal chunk names the flag. *)
+         (match arg_leading_literal arg with
+          | Some prefix when attached_method_prefix prefix -> true
+          | Some _ | None -> scan rest))
+  in
+  scan args
+;;
+
 let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
   match Exec_program.known simple.Shell_ir.bin with
   | Some Exec_program.Gh ->
@@ -748,6 +802,8 @@ let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
       | None -> Gh_verb.classify words
     in
     if is_graphql_api verb && graphql_query_body_is_opaque simple.Shell_ir.args
+    then Some Requires_approval
+    else if is_rest_api verb && gh_api_method_is_opaque simple.Shell_ir.args
     then Some Requires_approval
     else Some (disposition_of_words words verb))
   | Some _ | None -> None

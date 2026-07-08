@@ -2,16 +2,16 @@
     ({!Masc.Keeper_sandbox_control.policy_source_basename_of_status}).
 
     The field previously hardcoded the advisory mapping basename
-    (keeper_repo_mappings.toml) for every verdict, so a catalog-sourced denial
-    (repo not registered in repositories.toml) reported the wrong config file
-    as its source. Keepers then recorded that false cause as durable knowledge
-    and stopped touching the registered repo entirely (task-1865 / task-1866).
+    (keeper_repo_mappings.toml) for every verdict, so catalog-sourced
+    repository metadata states reported the wrong config file as their source.
+    Keepers then recorded that false cause as durable knowledge and stopped
+    touching the registered repo entirely (task-1865 / task-1866).
 
-    The binding allow/deny gate is the catalog (RFC-0312 makes the mapping
-    advisory), so every catalog verdict must be sourced from repositories.toml;
-    only the mapping-file load failure is sourced from the mapping. Assertions
-    compare against the SSOT basenames, not literals, so a rename of either
-    config file cannot silently pass a stale expectation. *)
+    The repository catalog owns metadata/alias identity and RFC-0312 makes the
+    mapping advisory, so every catalog verdict must be sourced from
+    repositories.toml; only the mapping-file load failure is sourced from the
+    mapping. Assertions compare against the SSOT basenames, not literals, so a
+    rename of either config file cannot silently pass a stale expectation. *)
 
 open Alcotest
 module Ksc = Masc.Keeper_sandbox_control
@@ -22,8 +22,8 @@ let mapping = Keeper_repo_mapping.mappings_toml_basename
 let source_of s = Ksc.policy_source_basename_of_status s
 
 let test_catalog_sourced () =
-  (* Allow and every deny that the catalog decides are sourced from the
-     catalog file, not the advisory mapping. *)
+  (* Allow and every metadata/identity state that the catalog decides are
+     sourced from the catalog file, not the advisory mapping. *)
   check string "allowed -> catalog" catalog (source_of Ksc.Policy_allowed);
   check string "unregistered -> catalog" catalog
     (source_of Ksc.Policy_unregistered_repository);

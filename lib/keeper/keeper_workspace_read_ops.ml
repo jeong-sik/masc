@@ -53,6 +53,10 @@ let try_handle
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
+  let path_error ?deterministic_reason e =
+    actionable_path_error ~deterministic_reason ~op ~config ~meta ~raw_path
+      ~error:e
+  in
   let repo_check target =
     match
       Keeper_repo_claim_hitl.request_path_access
@@ -61,6 +65,11 @@ let try_handle
         ~path:target
     with
     | Keeper_repo_claim_hitl.Access_allowed -> Read_target target
+    | Keeper_repo_claim_hitl.Access_denied detail ->
+      Read_target_policy_response
+        (path_error
+           ~deterministic_reason:Keeper_tool_deterministic_error.Policy_blocked
+           detail)
     | access_result ->
       Read_target_policy_response
         (Yojson.Safe.to_string
@@ -73,9 +82,6 @@ let try_handle
       (match containment_check target with
        | Error msg -> Read_target_error msg
        | Ok () -> repo_check target)
-  in
-  let path_error e =
-    actionable_path_error ~op ~meta ~raw_path ~error:e
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)

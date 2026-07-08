@@ -531,6 +531,7 @@ let with_two_absolute_repos f =
       { (sample_repo "masc") with
         url = "https://github.com/jeong-sik/masc"
       ; local_path = masc_path
+      ; aliases = [ "masc-mcp" ]
       }
     in
     let oas =
@@ -559,6 +560,46 @@ let test_find_url_by_id_unknown () =
     match Repo_store.find_url_by_id ~base_path "nonexistent" with
     | None -> ()
     | Some s -> Alcotest.fail ("expected None for unknown, got: " ^ s))
+
+let test_find_url_by_identity_alias () =
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+    match Repo_store.find_url_by_identity ~base_path "masc-mcp" with
+    | Some url ->
+      Alcotest.(check string)
+        "masc alias url"
+        "https://github.com/jeong-sik/masc"
+        url
+    | None -> Alcotest.fail "expected Some url for masc-mcp alias")
+
+let test_find_url_by_identity_ambiguous_alias () =
+  with_temp_base_path (fun base_path ->
+    init_empty_store base_path;
+    let workspace = Filename.concat base_path "workspace" in
+    Unix.mkdir workspace 0o755;
+    let left_path = Filename.concat workspace "left" in
+    let right_path = Filename.concat workspace "right" in
+    Unix.mkdir left_path 0o755;
+    Unix.mkdir right_path 0o755;
+    let left =
+      { (sample_repo "left") with
+        url = "https://github.com/example/left"
+      ; local_path = left_path
+      ; aliases = [ "shared" ]
+      }
+    in
+    let right =
+      { (sample_repo "right") with
+        url = "https://github.com/example/right"
+      ; local_path = right_path
+      ; aliases = [ "shared" ]
+      }
+    in
+    (match Repo_store.save_all ~base_path [ left; right ] with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("save_all: " ^ e));
+    match Repo_store.find_url_by_identity ~base_path "shared" with
+    | None -> ()
+    | Some url -> Alcotest.fail ("ambiguous alias must not pick url: " ^ url))
 
 let test_find_repo_by_path_prefix_match () =
   with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
@@ -698,6 +739,10 @@ let () =
         [
           Alcotest.test_case "find_url_by_id known" `Quick test_find_url_by_id_known;
           Alcotest.test_case "find_url_by_id unknown" `Quick test_find_url_by_id_unknown;
+          Alcotest.test_case "find_url_by_identity alias" `Quick
+            test_find_url_by_identity_alias;
+          Alcotest.test_case "find_url_by_identity ambiguous alias" `Quick
+            test_find_url_by_identity_ambiguous_alias;
           Alcotest.test_case "path_prefix match" `Quick test_find_repo_by_path_prefix_match;
           Alcotest.test_case "path_prefix outside" `Quick test_find_repo_by_path_prefix_outside;
           Alcotest.test_case "path_prefix sibling-safe" `Quick

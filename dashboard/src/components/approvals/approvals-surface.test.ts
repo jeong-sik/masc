@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import * as Vitest from 'vitest'
@@ -113,7 +115,11 @@ describe('ApprovalsSurface', () => {
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    expect(container.querySelector('[data-testid="approvals-surface"]')).not.toBeNull()
+    const surface = container.querySelector('[data-testid="approvals-surface"]')
+    expect(surface).not.toBeNull()
+    // ap-surface scopes the .ov-scroll overflow override that lets the sticky
+    // detail rail work; without the class the CSS rule below never matches.
+    expect(surface?.className).toContain('ap-surface')
     const cards = container.querySelectorAll('[data-testid="approval-card"]')
     expect(cards.length).toBe(4)
     expect(container.textContent).toContain('masc-improver')
@@ -674,5 +680,15 @@ describe('ApprovalsSurface', () => {
       expect(el.tagName).toBe('BUTTON')
       expect(el.textContent).not.toContain('sandbox')
     }
+  })
+
+  it('keeps the sticky detail rail working by un-clipping the approvals .ov-scroll', () => {
+    // The rail is position: sticky, but the shared .ov-scroll wrapper's
+    // overflow formed a non-scrolling sticky containing block. approvals-v2.css
+    // must restore overflow:visible on the approvals-scoped wrapper only.
+    const css = readFileSync(resolve(__dirname, '../../styles/approvals-v2.css'), 'utf8')
+    expect(css).toMatch(/\.ap-surface\s*>\s*\.ov-scroll\s*\{[^}]*overflow:\s*visible/)
+    const railRule = css.match(/\.ap-detail-panel\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(railRule).toContain('position: sticky')
   })
 })

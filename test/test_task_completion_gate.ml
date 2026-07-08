@@ -28,6 +28,7 @@ let make_task
   ; files = []
   ; created_at = "2026-05-26T00:00:00Z"
   ; created_by = None
+  ; predecessor_task_id = None
   ; contract
   ; handoff_context
   ; cycle_count = 0

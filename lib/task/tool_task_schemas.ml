@@ -71,6 +71,10 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
           ("type", `String "string");
           ("description", `String "Optional structured goal link for rollups. If omitted, the task is created unscoped (goalless); pass goal_id explicitly to link it to a goal.");
         ]);
+        ("predecessor_task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional re-run provenance link (RFC-0323): the terminal (done/cancelled) task this one re-runs. Rejected if the id is unknown or the predecessor is not terminal. To re-run completed work, create a new task with this link instead of re-claiming the old one.");
+        ]);
         ("contract", `Assoc [
           ("type", `String "object");
           ("description", `String "Optional persisted task contract for strict deterministic completion gating.");

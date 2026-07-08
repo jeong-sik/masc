@@ -18,7 +18,7 @@ type case = {
 let cases : case list = [
   { label = "baseline-pr-list";          input = "pr list --state open";          expected = E_R0 };
   { label = "baseline-pr-create";        input = "pr create --title T";            expected = E_R1 };
-  { label = "baseline-pr-merge";         input = "pr merge 123";                   expected = E_R2 };
+  { label = "baseline-pr-merge";         input = "pr merge 123";                   expected = E_R1 };  (* reversible (git revert); capability axis gates to Requires_approval *)
   { label = "baseline-repo-create";      input = "repo create owner/new-repo";      expected = E_R1 };  (* W4/G-9: reversible; capability axis gates *)
   { label = "baseline-repo-fork";        input = "repo fork owner/repo";            expected = E_R1 };  (* W4/G-9 *)
   { label = "baseline-repo-delete";      input = "repo delete o/r --yes";          expected = E_R2 };
@@ -38,7 +38,7 @@ let cases : case list = [
   { label = "graphql-createRepository";  input = "api graphql -f query=mutation{createRepository}";  expected = E_R1 };  (* W4/G-9: reversible *)
   { label = "graphql-createDiscussion";  input = "api graphql -f query=mutation{createDiscussion}";  expected = E_R1 };  (* W4/G-9: reversible *)
 
-  { label = "double-spaces-merge";       input = "pr  merge  123";                 expected = E_R2 };
+  { label = "double-spaces-merge";       input = "pr  merge  123";                 expected = E_R1 };  (* reversible; capability axis gates *)
   { label = "case-upper-cmd";            input = "PR LIST";                        expected = E_R0 };
 
   { label = "ssh-key-delete";            input = "ssh-key delete 12345";           expected = E_R2 };

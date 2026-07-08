@@ -250,10 +250,10 @@ let () =
        (stimulus_to_yojson
           { post_id =
               hitl_resolution_post_id
-                { approval_id = "appr-9"; decision = Hitl_approved }
+                { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
           ; urgency = Immediate
           ; arrived_at = 4.0
-          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved }
+          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
           })
    with
    | Ok s ->
@@ -960,5 +960,46 @@ let () =
         | None -> Alcotest.fail "original second stimulus should remain queued"
       in
       assert (String.equal second.post_id "bootstrap"));
+
+  (* RFC-0320 backward compat: pre-W2 persisted stimuli have no [channel] in
+     their payload and must replay as [Unrouted], not fail — a restart
+     replaying a legacy wake queue must not break. Simulate by serializing a W2
+     stimulus then stripping the [channel] field before parsing back. *)
+  (let strip_channel json =
+     match json with
+     | `Assoc top ->
+       `Assoc
+         (List.map
+            (fun (k, v) ->
+              if String.equal k "payload" then
+                ( k
+                , match v with
+                  | `Assoc p ->
+                    `Assoc
+                      (List.filter (fun (pk, _) -> not (String.equal pk "channel")) p)
+                  | other -> other )
+              else (k, v))
+            top)
+     | other -> other
+   in
+   let hitl_stim =
+     { post_id = "p-legacy"
+     ; urgency = Immediate
+     ; arrived_at = 1.0
+     ; payload =
+         Hitl_resolved
+           { approval_id = "a"
+           ; decision = Hitl_approved
+           ; channel = Keeper_continuation_channel.unrouted "seed"
+           }
+     }
+   in
+   match stimulus_of_yojson (strip_channel (stimulus_to_yojson hitl_stim)) with
+   | Ok s ->
+     (match s.payload with
+      | Hitl_resolved r ->
+        assert (not (Keeper_continuation_channel.is_routable r.channel))
+      | _ -> assert false)
+   | Error _ -> assert false);
 
   print_endline "test_keeper_event_queue: all passed"

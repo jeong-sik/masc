@@ -147,8 +147,13 @@ describe('KeeperWorkspaceRoster', () => {
     const rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
     const recent = rows.find(row => row.textContent?.includes('recent-turn')) as HTMLElement
     const createdOnly = rows.find(row => row.textContent?.includes('created-only')) as HTMLElement
-    expect(recent.textContent).toContain('마지막 턴')
-    expect(recent.textContent).toContain('3분 전')
+    // Visible time chip is the compact mock form ("3분", no label/전); the full
+    // "마지막 턴 3분 전" description moves to the hover title so the name column
+    // keeps its width.
+    const recentTime = recent.querySelector('.kw-kp-time') as HTMLElement
+    expect(recentTime.textContent).toBe('3분')
+    expect(recentTime.getAttribute('title')).toContain('마지막 턴')
+    expect(recentTime.getAttribute('title')).toContain('3분 전')
     expect(createdOnly.textContent).not.toContain('생성')
   })
 

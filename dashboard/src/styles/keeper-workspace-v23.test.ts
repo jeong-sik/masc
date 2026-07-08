@@ -36,12 +36,16 @@ describe('keeper-workspace v2.3 fleet surface CSS', () => {
     expect(rightRail['align-items']).toBe('flex-end')
   })
 
-  it('keeps roster rows to one always discoverable command target', () => {
+  it('keeps roster rows to one hover/focus command target', () => {
     const menuButton = baseDeclarationsForSelector('.kw-kp-more')
+    const hoverButton = baseDeclarationsForSelector('.kw-kp-row:hover .kw-kp-more')
+    const focusButton = baseDeclarationsForSelector('.kw-kp-row:focus-within .kw-kp-more')
 
     expect(menuButton.position).toBe('absolute')
-    expect(menuButton.opacity).toBe('0.72')
+    expect(menuButton.opacity).toBe('0')
     expect(menuButton.width).toBe('26px')
+    expect(hoverButton.opacity).toBe('1')
+    expect(focusButton.opacity).toBe('1')
     expect(css).not.toContain('.kw-kp-chat')
     expect(css).not.toContain('.kw-kp-inline-actions')
     expect(css).not.toContain('.kw-kp-inline-action')

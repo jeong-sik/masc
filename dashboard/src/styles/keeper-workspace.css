@@ -327,10 +327,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-row {
   display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: start;
   width: 100%; text-align: left;
-  /* B5: tighter vertical rhythm (standalone roster density) — row padding 11→8
-     so more keepers fit on screen while the live context/tool signals still
-     have room to wrap cleanly. */
-  padding: 8px 10px; border-radius: var(--r-2); cursor: pointer;
+  /* v2 mock roster card = identity + status only (context/tool moved to the
+     runtime panel), so the 11px rhythm from the design is restored. The earlier
+     8px "B5" compression existed only to fit the per-row context/tool signals. */
+  padding: 11px 10px; border-radius: var(--r-2); cursor: pointer;
   border: 1px solid transparent; background: transparent;
   transition: background .14s, border-color .14s;
   position: relative;
@@ -368,65 +368,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--color-fg-secondary); margin-top: 3px; min-width: 0; }
 .kw-kp-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.kw-kp-context {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-  margin-top: 5px;
-}
-.kw-kp-context-bar {
-  flex: 1;
-  height: 5px;
-  overflow: hidden;
-  border: 1px solid var(--color-border-divider);
-  border-radius: 9999px;
-  background: var(--color-bg-page);
-}
-.kw-kp-context-bar > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg));
-}
-.kw-kp-context-bar > span.hot {
-  background: linear-gradient(90deg, var(--color-status-warn), var(--color-status-err));
-}
-.kw-kp-context-val {
-  width: 34px;
-  flex: none;
-  color: var(--color-fg-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  text-align: right;
-}
-.kw-kp-context-val.hot {
-  color: var(--color-status-err);
-}
-.kw-kp-tool {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  margin-top: 5px;
-}
-.kw-kp-tool-k {
-  flex: none;
-  color: var(--color-fg-muted);
-  font-size: var(--fs-10);
-  font-weight: var(--fw-bold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.kw-kp-tool-v {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-fg-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; padding-right: 34px; }
 .kw-kp-time {
   max-width: 96px;
@@ -456,7 +397,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   justify-content: center;
   padding: 0;
   transform: translateY(-50%);
-  opacity: 0.72;
+  /* v2 mock (.kp-more) keeps the ⋮ hidden until the row is hovered/focused so
+     the roster reads as identity + status; the row:hover / :focus-within rule
+     below reveals it. The 860px block keeps it always visible for touch. */
+  opacity: 0;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-panel-alt);
@@ -1953,8 +1897,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-sub,
 .kw-kp-work,
 .kw-kp-gloss,
-.kw-kp-tool,
-.kw-kp-tool-v,
 .kw-kp-handle {
   min-width: 0;
 }

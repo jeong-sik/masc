@@ -312,8 +312,10 @@ val submit_pending :
 
 (** {1 Resolve (operator action)} *)
 
-(** Install the hook that wakes a keeper when one of its pending approvals is
-    resolved or expires. Injected (rather than a direct
+(** Install the hook that wakes a keeper when a non-blocking pending approval
+    is resolved or expires. Blocking [submit_and_await] entries resume through
+    their resolver promise and must not also enqueue a [Hitl_resolved] wake.
+    Injected (rather than a direct
     [Keeper_keepalive_signal] call) to break a dependency cycle: this module
     sits below [Keeper_keepalive_signal], which depends on
     [Keeper_world_observation], which depends back here for

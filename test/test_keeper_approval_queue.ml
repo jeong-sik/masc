@@ -112,11 +112,12 @@ let test_fresh_critical_entry_phase_is_awaiting_operator () =
        | None -> Alcotest.fail "Critical approval did not resume after resolve")
 ;;
 
-(* A keeper skipping cycles on [Approval_pending] is not blocked in-process, so
-   resolving must fire the wake hook that enqueues a [Hitl_resolved] stimulus.
-   Without it the keeper only resumes on an unrelated stimulus / no-progress
-   recovery / the 30-minute janitor (the reported "HITL 됐는데 핑을 못 받음"). *)
-let test_resolve_fires_keeper_wake_hook () =
+(* Blocking approvals resume through their live resolver. Non-blocking
+   approvals have no suspended fiber, so resolving them must fire the wake hook
+   that enqueues a [Hitl_resolved] stimulus. Without that wake the keeper only
+   resumes on an unrelated stimulus / no-progress recovery / the 30-minute
+   janitor (the reported "HITL 됐는데 핑을 못 받음"). *)
+let test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook () =
   Eio_main.run
   @@ fun _env ->
   let base_path = temp_dir () in
@@ -156,7 +157,45 @@ let test_resolve_fires_keeper_wake_hook () =
         | Ok () -> ()
         | Error err ->
           Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-       (* resolve_entry fires the hook synchronously before returning. *)
+       (match !woke with
+        | Some _ -> Alcotest.fail "live resolver must resume directly without wake hook"
+        | None -> ());
+       yield_until (fun () -> Option.is_some !result))
+;;
+
+let test_submit_pending_resolve_fires_keeper_wake_hook () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_path = temp_dir () in
+  let woke = ref None in
+  AQ.set_approval_resolution_wake_hook (fun ~base_path:_ ~keeper_name ~approval_id ~decision ->
+    woke := Some (keeper_name, approval_id, decision));
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.set_approval_resolution_wake_hook
+        (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ());
+      cleanup_dir base_path)
+    (fun () ->
+       let keeper_name = "pending-resolve-wake-test" in
+       let callback_decision = ref None in
+       let id =
+         AQ.submit_pending
+           ~keeper_name
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "critical_gate" ])
+           ~risk_level:AQ.Critical
+           ~base_path
+           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ()
+       in
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       Alcotest.(check bool)
+         "on_resolution callback ran"
+         true
+         (Option.is_some !callback_decision);
        (match !woke with
         | Some (kn, aid, decision) ->
           Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
@@ -165,8 +204,7 @@ let test_resolve_fires_keeper_wake_hook () =
             "wake carries the typed decision label"
             true
             (decision = Keeper_event_queue.Hitl_approved)
-        | None -> Alcotest.fail "resolve did not fire the keeper wake hook");
-       yield_until (fun () -> Option.is_some !result))
+        | None -> Alcotest.fail "non-blocking resolve did not fire the keeper wake hook"))
 ;;
 
 let test_critical_entry_phase_becomes_escalated_after_timer () =
@@ -463,9 +501,13 @@ let () =
         ] )
     ; ( "wake"
       , [ Alcotest.test_case
-            "resolve fires the keeper wake hook"
+            "submit_and_await resolve resumes directly without wake hook"
             `Quick
-            test_resolve_fires_keeper_wake_hook
+            test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook
+        ; Alcotest.test_case
+            "submit_pending resolve fires the keeper wake hook"
+            `Quick
+            test_submit_pending_resolve_fires_keeper_wake_hook
         ] )
     ; ( "summary"
       , [ Alcotest.test_case

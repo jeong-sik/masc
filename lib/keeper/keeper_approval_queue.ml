@@ -826,15 +826,15 @@ let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =
        record_summary_failure ~id:entry.id ~reason ~retryable:false)
 ;;
 
-(* Wake the keeper that was waiting on this approval. A keeper that enqueued an
-   approval and is now skipping cycles via [has_pending_for_keeper -> Skip
-   Approval_pending] (keeper_world_observation) has no in-process fiber blocked
-   on the resolver promise, so resolving the promise does not resume it. The
-   composition root registers a hook that enqueues a [Hitl_resolved] wake
-   stimulus — the same async-completion-wake mechanism [Fusion_completed]
-   (RFC-0266) and [Bg_completed] (RFC-0290) use — so the keeper re-evaluates
-   immediately instead of stalling until an unrelated stimulus, no-progress
-   recovery, or the 30-minute approval janitor.
+(* Wake the keeper for non-blocking approvals. A [submit_and_await] entry has an
+   in-process resolver promise; resolving that promise resumes the suspended
+   tool call directly, so an additional [Hitl_resolved] stimulus would open a
+   second turn with only a soft prompt guard against duplicate replies.
+
+   A [submit_pending] entry has no resolver promise. Its [on_resolution]
+   callback handles side effects, and the keeper still needs a durable
+   [Hitl_resolved] wake so its lane re-evaluates instead of stalling until an
+   unrelated stimulus, no-progress recovery, or the 30-minute approval janitor.
 
    Injected as a hook rather than a direct call to break a dependency cycle:
    this module sits below [Keeper_keepalive_signal], which depends on
@@ -916,11 +916,14 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
            (Printexc.to_string exn))
        (fun () -> f decision)
    | None -> ());
-  wake_keeper_on_approval_resolution
-    ~base_path
-    ~keeper_name:entry.keeper_name
-    ~approval_id:entry.id
-    ~decision:(hitl_resolution_decision_of_approval_decision decision);
+  (match entry.resolver with
+   | Some _ -> ()
+   | None ->
+     wake_keeper_on_approval_resolution
+       ~base_path
+       ~keeper_name:entry.keeper_name
+       ~approval_id:entry.id
+       ~decision:(hitl_resolution_decision_of_approval_decision decision));
   try
     Sse.broadcast
       (`Assoc

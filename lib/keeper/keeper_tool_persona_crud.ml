@@ -154,7 +154,21 @@ let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) 
         (Printf.sprintf "Corrupt persona profile: expected a JSON object, got %s"
            (Json_util.kind_name other))
 
-let handle_persona_create ctx args =
+(* The [*_json] handlers below build a Yojson result; [tool_result_of_json]
+   projects that into the keeper [tool_result] the tool surface expects. A
+   result carrying an ["error"]/["errors"] field is an error verdict, otherwise
+   success — mirroring the ok_assoc/error_assoc shapes these handlers emit. *)
+let tool_result_of_json (json : Yojson.Safe.t) : tool_result =
+  let is_error =
+    match json with
+    | `Assoc fields ->
+        List.exists (fun (k, _) -> k = "error" || k = "errors") fields
+    | _ -> false
+  in
+  let body = Yojson.Safe.to_string ~std:true json in
+  if is_error then tool_result_error body else tool_result_ok body
+
+let handle_persona_create_json args =
   let errors = validate_create_args args in
   if errors <> [] then
     error_assoc [("errors", `List (List.map (fun e -> `String e) errors))]
@@ -169,7 +183,7 @@ let handle_persona_create ctx args =
       | Ok result -> result
       | Error msg -> error_assoc [("error", `String msg)]
 
-let handle_persona_update ctx args =
+let handle_persona_update_json args =
   let persona_name = get_string_opt args "persona_name" in
   match persona_name with
   | None -> error_assoc [("error", `String "Missing required field: persona_name")]
@@ -190,3 +204,9 @@ let handle_persona_update ctx args =
                        (match write_profile pn updated with
                         | Ok result -> result
                         | Error msg -> error_assoc [("error", `String msg)]))))
+
+let handle_persona_create _ctx args : tool_result =
+  tool_result_of_json (handle_persona_create_json args)
+
+let handle_persona_update _ctx args : tool_result =
+  tool_result_of_json (handle_persona_update_json args)

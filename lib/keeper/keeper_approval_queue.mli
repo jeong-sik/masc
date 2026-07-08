@@ -203,6 +203,9 @@ val audit_approval_event :
   ?rule_match:rule_match ->
   ?source_approval_id:string ->
   ?auto_approved:bool ->
+  ?actor:string ->
+  ?approval_mode:string ->
+  ?authorizing_band:string ->
   ?decision:approval_audit_decision ->
   unit ->
   unit

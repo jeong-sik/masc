@@ -145,16 +145,17 @@ let test_api_left_to_floor () =
 ;;
 
 (* The gating rationale surfaced on operator approval prompts (RFC-0309
-   visibility): each verb class maps to a distinct human-readable label, and a
-   real irreversible command (pr merge) yields the mutation label. *)
+   visibility): each verb class maps to a distinct human-readable label, and
+   [pr merge] now yields the reversible mutation label; the capability axis, not
+   this risk label, routes ordinary merges to approval. *)
 let test_verb_class_to_string () =
   let label words =
     Shell_ir_risk.gh_verb_class_to_string
       (Shell_ir_risk.classify_gh_verb (Gh_verb.classify words))
   in
   Alcotest.(check string)
-    "pr merge is an irreversible mutation"
-    "irreversible mutation"
+    "pr merge is a reversible mutation"
+    "reversible mutation"
     (label [ "gh"; "pr"; "merge" ]);
   Alcotest.(check string)
     "pr view is a read"

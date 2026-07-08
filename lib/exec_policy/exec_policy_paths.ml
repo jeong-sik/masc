@@ -99,7 +99,7 @@ let keeper_registered_repo_path_allowed ?keeper_id ?base_path path =
       | Keeper_repo_mapping.Repository_identity_mismatch _
       | Keeper_repo_mapping.Repository_store_error _ ->
           false
-      | Keeper_repo_mapping.Repository repository_id -> (
+      | Keeper_repo_mapping.Repository { repository_id; _ } -> (
           match
             Keeper_repo_mapping.validate_access ~keeper_id ~repository_id
               ~base_path

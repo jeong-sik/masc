@@ -117,6 +117,51 @@ let test_parse_update_response_non2xx_is_http_status () =
   | Error err ->
       failf "expected Http_status, got %s" (Format.asprintf "%a" R.pp_error err)
 
+let test_build_auth_test_request_url_and_headers () =
+  let url, headers, body = R.build_auth_test_request ~token:"xoxb-secret" in
+  check string "url" "https://slack.com/api/auth.test" url;
+  check string "Authorization" "Bearer xoxb-secret"
+    (header_value headers "Authorization");
+  check string "empty body" "" body
+
+let test_parse_auth_test_response_ok_returns_identity () =
+  match
+    R.parse_auth_test_response ~status:200
+      ~body:{|{"ok":true,"user_id":"U123","team_id":"T999"}|}
+  with
+  | Ok { R.user_id; team_id } ->
+      check string "user_id" "U123" user_id;
+      check (option string) "team_id" (Some "T999") team_id
+  | Error err ->
+      failf "expected Ok identity, got %s" (Format.asprintf "%a" R.pp_error err)
+
+let test_parse_auth_test_response_ok_without_team () =
+  match
+    R.parse_auth_test_response ~status:200 ~body:{|{"ok":true,"user_id":"U123"}|}
+  with
+  | Ok { R.user_id; team_id } ->
+      check string "user_id" "U123" user_id;
+      check (option string) "team_id absent" None team_id
+  | Error err ->
+      failf "unexpected error: %s" (Format.asprintf "%a" R.pp_error err)
+
+let test_parse_auth_test_response_slack_error () =
+  match
+    R.parse_auth_test_response ~status:200
+      ~body:{|{"ok":false,"error":"invalid_auth"}|}
+  with
+  | Error (R.Slack_api { error = "invalid_auth" }) -> ()
+  | Ok _ -> fail "expected Slack_api error"
+  | Error err ->
+      failf "expected invalid_auth, got %s" (Format.asprintf "%a" R.pp_error err)
+
+let test_parse_auth_test_response_ok_missing_user_id_is_other () =
+  match R.parse_auth_test_response ~status:200 ~body:{|{"ok":true}|} with
+  | Error (R.Other _) -> ()
+  | Ok ok -> failf "expected Other, got Ok user_id=%s" ok.R.user_id
+  | Error err ->
+      failf "expected Other, got %s" (Format.asprintf "%a" R.pp_error err)
+
 let () =
   run "Slack_rest_client"
     [
@@ -147,5 +192,18 @@ let () =
             test_parse_update_response_slack_error;
           test_case "non-2xx is Http_status" `Quick
             test_parse_update_response_non2xx_is_http_status;
+        ] );
+      ( "auth_test",
+        [
+          test_case "request url and headers" `Quick
+            test_build_auth_test_request_url_and_headers;
+          test_case "ok returns identity" `Quick
+            test_parse_auth_test_response_ok_returns_identity;
+          test_case "ok without team_id" `Quick
+            test_parse_auth_test_response_ok_without_team;
+          test_case "ok=false is Slack_api" `Quick
+            test_parse_auth_test_response_slack_error;
+          test_case "ok missing user_id is Other" `Quick
+            test_parse_auth_test_response_ok_missing_user_id_is_other;
         ] );
     ]

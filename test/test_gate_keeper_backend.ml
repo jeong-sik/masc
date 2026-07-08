@@ -2620,6 +2620,18 @@ let test_route_busy_discord_enqueues () =
   | `Async_poll -> fail "Discord has an outbound adapter; must enqueue, not poll"
 
 
+let test_route_busy_slack_enqueues () =
+  match
+    Gate_keeper_backend.route_busy_connector Gate_keeper_backend.Slack
+      ~channel_id:"C0SLACK" ~user_id:"U-99"
+  with
+  | `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel; user_id }) ->
+      check string "slack channel threaded" "C0SLACK" channel;
+      check string "slack user_id threaded" "U-99" user_id
+  | `Enqueue_chat_queue _ ->
+      fail "Slack must map to a Slack message_source, not another variant"
+  | `Async_poll -> fail "Slack has an outbound adapter; must enqueue, not poll"
+
 let test_route_busy_generic_falls_back () =
   match
     Gate_keeper_backend.route_busy_connector Gate_keeper_backend.Generic
@@ -2636,6 +2648,8 @@ let () =
         [
           test_case "Discord enqueues with channel_id/user_id" `Quick
             test_route_busy_discord_enqueues;
+          test_case "Slack enqueues with channel/user_id" `Quick
+            test_route_busy_slack_enqueues;
           test_case "Generic falls back to async poll" `Quick
             test_route_busy_generic_falls_back;
         ] );

@@ -8,6 +8,9 @@ import {
   phaseFilterLabel,
   matchesGoalPhaseFilter,
   sortByPriority,
+  effectiveTaskPriority,
+  DEFAULT_TASK_PRIORITY,
+  HIGH_TASK_PRIORITY_MAX,
   sortByTimeDesc,
   filterTasksByQuery,
   resetTaskSearch,
@@ -154,6 +157,26 @@ describe('sortByPriority', () => {
     const a = makeTask(2)
     const b = makeTask(2)
     expect(sortByPriority(a, b)).toBe(0)
+  })
+})
+
+// ================================================================
+// effectiveTaskPriority
+// ================================================================
+
+describe('effectiveTaskPriority', () => {
+  it('returns the task priority when set', () => {
+    expect(effectiveTaskPriority({ priority: 2 })).toBe(2)
+  })
+
+  it('falls back to DEFAULT_TASK_PRIORITY when unset or null', () => {
+    expect(effectiveTaskPriority({})).toBe(DEFAULT_TASK_PRIORITY)
+    expect(effectiveTaskPriority({ priority: null })).toBe(DEFAULT_TASK_PRIORITY)
+  })
+
+  it('pins the shared priority literals (default 4, high-priority cutoff 2)', () => {
+    expect(DEFAULT_TASK_PRIORITY).toBe(4)
+    expect(HIGH_TASK_PRIORITY_MAX).toBe(2)
   })
 })
 

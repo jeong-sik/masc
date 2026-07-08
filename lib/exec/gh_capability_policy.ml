@@ -48,6 +48,15 @@ let creates_durable_remote_surface (v : Gh_verb.t) : bool =
   | (Gh_verb.Repo | Gh_verb.Discussion), Some action ->
     not (local_or_read_repo_action action)
   | (Gh_verb.Repo | Gh_verb.Discussion), None -> false
+  (* [pr merge] writes the base branch — a durable remote surface whose
+     post-merge state (deploys, release history, protected-branch history) is
+     not modeled in keeper tool contracts. It is the ONE Pr action that mutates a
+     shared durable surface; every other Pr action acts within the PR. Risk says
+     it is reversible (R1, [git revert]); the capability axis gates it to
+     Requires_approval, mirroring [gh repo create]. "merge" is the literal gh
+     subcommand, matched the same way [local_or_read_repo_action] matches gh
+     action tokens. *)
+  | Gh_verb.Pr, Some "merge" -> true
   | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Release | Gh_verb.Secret
       | Gh_verb.Ssh_key | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist
       | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache
@@ -523,6 +532,59 @@ let repo_create_contract_rule_of_simple simple =
   | Some (Ok _) | None -> None
 ;;
 
+let pr_merge_tail words =
+  match next_gh_positional words with
+  | Some (family, after_family) when String.equal (String.lowercase_ascii family) "pr" ->
+    (match next_gh_positional after_family with
+     | Some (action, after_action)
+       when String.equal (String.lowercase_ascii action) "merge" -> Some after_action
+     | Some _ | None -> None)
+  | Some _ | None -> None
+;;
+
+let pr_merge_value_flags =
+  [ "--author-email"; "-A"; "--body"; "-b"; "--body-file"; "-F"
+  ; "--match-head-commit"; "--subject"; "-t" ]
+;;
+
+let pr_merge_value_flag_keys = gh_global_value_flags @ pr_merge_value_flags
+
+let pr_merge_admin_flag tok =
+  String.equal tok "--admin"
+  ||
+  match split_eq tok with
+  | Some (key, _) -> String.equal key "--admin"
+  | None -> false
+;;
+
+let rec pr_merge_tail_has_admin_flag = function
+  | [] -> false
+  | "--" :: _ -> false
+  | tok :: rest when List.mem tok pr_merge_value_flag_keys ->
+    (match rest with
+     | _ :: tail -> pr_merge_tail_has_admin_flag tail
+     | [] -> false)
+  | tok :: rest
+    when (match split_eq tok with
+          | Some (key, _) -> List.mem key pr_merge_value_flag_keys
+          | None -> false) ->
+    pr_merge_tail_has_admin_flag rest
+  | tok :: rest -> pr_merge_admin_flag tok || pr_merge_tail_has_admin_flag rest
+;;
+
+let pr_merge_admin_rule_of_simple simple =
+  match pr_merge_tail (List.map arg_word simple.Shell_ir.args) with
+  | Some tail when pr_merge_tail_has_admin_flag tail ->
+    Some "gh_pr_merge_admin_bypass"
+  | Some _ | None -> None
+;;
+
+let policy_deny_rule_of_simple simple =
+  match repo_create_contract_rule_of_simple simple with
+  | Some _ as rule -> rule
+  | None -> pr_merge_admin_rule_of_simple simple
+;;
+
 let is_graphql_api (v : Gh_verb.t) : bool =
   match v.Gh_verb.family, v.Gh_verb.action with
   | Gh_verb.Api, Some action -> String.equal (String.lowercase_ascii action) "graphql"
@@ -666,7 +728,7 @@ let graphql_query_body_is_opaque (args : Shell_ir.arg list) : bool =
 let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
   match Exec_program.known simple.Shell_ir.bin with
   | Some Exec_program.Gh ->
-    (match repo_create_contract_rule_of_simple simple with
+    (match policy_deny_rule_of_simple simple with
      | Some _ -> Some Denied
      | None ->
     let words =

@@ -108,13 +108,17 @@ let anomaly_profiles_json ~base_path =
       Log.Governance.warn "anomaly_profiles_json: %s" (Printexc.to_string exn);
       `List []
 
-let hitl_status_json () =
+let hitl_status_json ~base_path =
   let disabled_by_env = Env_config_core.disable_hitl () in
+  let approval_mode = Operator_approval.approval_mode_status_json ~base_path in
   `Assoc
     [ ("enabled", `Bool (not disabled_by_env))
     ; ("disabled_by_env", `Bool disabled_by_env)
     ; ("env_name", `String Env_config_core.disable_hitl_env_key)
     ; ("default_enabled", `Bool true)
+    ; ("approval_mode", approval_mode)
+    ; ( "auto_eligible_bands"
+      , Operator_approval.auto_eligible_bands_json () )
     ]
 
 let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
@@ -142,7 +146,8 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
       ("approval_queue", approval_queue);
       ("recent_resolved", `List recent_resolved);
       ("approval_rules", approval_rules);
-      ("hitl", hitl_status_json ());
+      ("approval_mode", Operator_approval.approval_mode_status_json ~base_path);
+      ("hitl", hitl_status_json ~base_path);
       ("cases", `List []);
       ("anomaly_profiles", anomaly_profiles_json ~base_path);
     ]

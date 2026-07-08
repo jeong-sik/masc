@@ -17,7 +17,7 @@ import { keepers } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
-import { formatRelativeSec } from '../../lib/format-time'
+import { formatCompactAge, formatRelativeSec } from '../../lib/format-time'
 import { persistentSignal } from '../../lib/persistent-signal'
 import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
@@ -99,7 +99,10 @@ type RosterItem =
  *  weight matters. Below this we keep the identical grouped DOM structure and
  *  rely on content-visibility:auto for cheap off-screen skipping. */
 const WINDOW_AT = 60
-const ROSTER_ROW_ESTIMATED_HEIGHT = 92
+// Identity + status + compact time card measures 69px row-to-row (device-scale
+// 1). The earlier 92px estimate covered the taller card that also carried the
+// per-row context/tool rows, now moved to the runtime panel.
+const ROSTER_ROW_ESTIMATED_HEIGHT = 69
 
 /** Blocked tasks + explicit attention flag → the roster attention badge. */
 function attentionCount(keeper: Keeper): number {
@@ -200,32 +203,6 @@ function shortBasepath(value: string): string {
   return parts.length <= 2 ? value : `…/${parts.slice(-2).join('/')}`
 }
 
-function cleanToolNames(names: readonly string[] | null | undefined): string[] {
-  return (names ?? []).map(name => name.trim()).filter(Boolean)
-}
-
-/** Recent-tool signal for v2 fleet parity.
- *  Prefer the dashboard summary's latest_tool_names, then the older
- *  recent_tool_names field. Do not fetch row-local tool-call logs here: the
- *  roster is a fleet-wide surface and must stay backed by the already-loaded
- *  keeper snapshot instead of N per-row network requests or prototype seeds. */
-function keeperRecentTool(keeper: Keeper): { label: string; title: string } | null {
-  const latest = cleanToolNames(keeper.latest_tool_names)
-  const recent = latest.length > 0 ? latest : cleanToolNames(keeper.recent_tool_names)
-  const count = keeper.latest_tool_call_count
-  const hasCount = typeof count === 'number' && Number.isFinite(count) && count > 0
-  if (recent.length === 0 && !hasCount) return null
-  // "+N" makes the hidden tail visible even when CSS end-ellipsis clips the
-  // first name; the full comma-joined list stays in the hover title.
-  const overflow = recent.length > 1 ? ` +${recent.length - 1}` : ''
-  const label = recent[0] != null ? `${recent[0]}${overflow}` : `${count} tool calls`
-  const countSuffix = hasCount ? ` · ${count} calls` : ''
-  return {
-    label,
-    title: `${recent.join(', ') || label}${countSuffix}`,
-  }
-}
-
 function matchesQuery(keeper: Keeper, q: string): boolean {
   if (!q) return true
   const hay = `${keeper.name} ${keeper.koreanName ?? ''} ${keeperScope(keeper) ?? ''} ${keeperBasepath(keeper)}`.toLowerCase()
@@ -253,15 +230,8 @@ function RosterRow({
   // when a keeper has no sandbox target yet so the row never loses its sub-label.
   const handle = basepath ? shortBasepath(basepath) : scope
   const handleTitle = basepath || scope || ''
-  const contextRatio =
-    typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)
-      ? Math.min(1, Math.max(0, keeper.context_ratio))
-      : null
-  const contextPct = contextRatio === null ? null : Math.round(contextRatio * 100)
-  const contextHot = contextRatio !== null && contextRatio >= 0.8
   const activity = keeperActivityDisplay(keeper, undefined, { includeCreated: false })
   const activityText = rosterActivityText(activity)
-  const recentTool = keeperRecentTool(keeper)
   const phaseLabel = keeperPhaseLabel(keeper)
   const beat = phasePulse(keeper.lifecycle_phase)
   const select = () => onSelect(keeper.name)
@@ -288,36 +258,9 @@ function RosterRow({
           <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${beat} />${phaseLabel}</span>
           ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
-        ${contextPct !== null
-          ? html`
-              <div
-                class="kw-kp-context"
-                role="meter"
-                aria-label=${`컨텍스트 사용률 ${contextPct}%`}
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-valuenow=${contextPct}
-                title=${`컨텍스트 사용률 ${contextPct}%`}
-              >
-                <span class="kw-kp-tool-k" aria-hidden="true">ctx</span>
-                <div class="kw-kp-context-bar" aria-hidden="true">
-                  <span class=${contextHot ? 'hot' : ''} style=${{ width: `${contextPct}%` }}></span>
-                </div>
-                <span class=${`kw-kp-context-val${contextHot ? ' hot' : ''}`} aria-hidden="true">${contextPct}%</span>
-              </div>
-            `
-          : null}
-        ${recentTool
-          ? html`
-              <div class="kw-kp-tool" title=${recentTool.title}>
-                <span class="kw-kp-tool-k">tool</span>
-                <span class="kw-kp-tool-v">${recentTool.label}</span>
-              </div>
-            `
-          : null}
       </div>
       <div class="kw-kp-right">
-        ${activityText ? html`<span class="kw-kp-time" title=${activity.timestamp ?? activityText}>${activityText}</span>` : null}
+        ${activityText ? html`<span class="kw-kp-time" title=${rosterActivityTitle(activity)}>${activityText}</span>` : null}
         ${att > 0
           ? html`<span class="kw-kp-att kp-att" title=${`주의 신호 ${att}건 · 메시지 수가 아니라 blocked/attention 상태입니다`}>주의 ${att}</span>`
           : null}
@@ -384,9 +327,19 @@ async function runRosterKeeperAction(name: string, action: KeeperActionKey): Pro
 
 function rosterActivityText(activity: KeeperActivityDisplay): string | null {
   if (activity.source === 'none' || activity.ageSeconds === null) return null
+  // v2 mock roster time column is a bare magnitude ("41분", "방금") in the
+  // top-right corner — no "최근 활동" label, no "전", no tool detail. Keeping the
+  // longer phrase here squeezed the name column into an ellipsis; the label and
+  // any tool detail move to the hover title (rosterActivityTitle).
+  return formatCompactAge(activity.ageSeconds)
+}
+
+/** Descriptive hover title for the compact time cell — restores the label
+ *  ("마지막 턴"), the "전" relative marker, and any server-identified activity
+ *  detail that {@link rosterActivityText} drops from the visible chip. */
+function rosterActivityTitle(activity: KeeperActivityDisplay): string | undefined {
+  if (activity.source === 'none' || activity.ageSeconds === null) return activity.timestamp ?? undefined
   const base = `${activity.label} ${formatRelativeSec(activity.ageSeconds)}`
-  // Name the activity when the server identified it (live_activity.tool):
-  // "도구 활동 13초 전 · masc_status" instead of a bare category + clock.
   return activity.detail ? `${base} · ${activity.detail}` : base
 }
 

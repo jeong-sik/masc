@@ -65,8 +65,8 @@ let write_profile persona_name json =
          Error ("Failed to rename tmp file: " ^ Printexc.to_string exn))
 
 let validate_create_args args =
-  let persona_name = get_string_opt ~key:"persona_name" args in
-  let display_name = get_string_opt ~key:"display_name" args in
+  let persona_name = get_string_opt args "persona_name" in
+  let display_name = get_string_opt args "display_name" in
   match persona_name, display_name with
   | None, _ -> ["Missing required field: persona_name"]
   | _, None -> ["Missing required field: display_name"]
@@ -76,16 +76,16 @@ let validate_create_args args =
        | Ok () -> if String.trim dn = "" then ["display_name must not be empty"] else [])
 
 let profile_from_create_args args =
-  let persona_name = get_string ~key:"persona_name" args in
-  let display_name = get_string ~key:"display_name" args in
-  let role = get_string_opt ~key:"role" args in
-  let trait = get_string_opt ~key:"trait" args in
-  let goal = get_string_opt ~key:"goal" args in
-  let instructions = get_string_opt ~key:"instructions" args in
-  let mention_targets = get_string_list_opt ~key:"mention_targets" args in
-  let tool_denylist = get_string_list_opt ~key:"tool_denylist" args in
-  let proactive_enabled = get_bool_opt ~key:"proactive_enabled" args in
-  let auto_handoff = get_bool_opt ~key:"auto_handoff" args in
+  let persona_name = get_string args "persona_name" "" in
+  let display_name = get_string args "display_name" "" in
+  let role = get_string_opt args "role" in
+  let trait = get_string_opt args "trait" in
+  let goal = get_string_opt args "goal" in
+  let instructions = get_string_opt args "instructions" in
+  let mention_targets = get_string_list args "mention_targets" in
+  let tool_denylist = get_string_list args "tool_denylist" in
+  let proactive_enabled = get_bool_opt args "proactive_enabled" in
+  let auto_handoff = get_bool_opt args "auto_handoff" in
   `Assoc ([
     ("persona_name", `String persona_name);
     ("display_name", `String display_name);
@@ -95,8 +95,8 @@ let profile_from_create_args args =
   @ (match trait with Some v -> [("trait", `String v)] | None -> [])
   @ (match goal with Some v -> [("goal", `String v)] | None -> [])
   @ (match instructions with Some v -> [("instructions", `String v)] | None -> [])
-  @ (match mention_targets with Some v -> [("mention_targets", `List (List.map (fun s -> `String s) v))] | None -> [])
-  @ (match tool_denylist with Some v -> [("tool_denylist", `List (List.map (fun s -> `String s) v))] | None -> [])
+  @ (if mention_targets = [] then [] else [("mention_targets", `List (List.map (fun s -> `String s) mention_targets))])
+  @ (if tool_denylist = [] then [] else [("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist))])
   @ (match proactive_enabled with Some v -> [("proactive_enabled", `Bool v)] | None -> [])
   @ (match auto_handoff with Some v -> [("auto_handoff", `Bool v)] | None -> []))
 
@@ -111,19 +111,18 @@ let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) 
   match existing_json with
   | `Assoc existing ->
       let update_field key to_json =
-        match get_string_opt ~key args with
+        match get_string_opt args key with
         | Some v -> Some (key, to_json v)
         | None -> None
       in
       let update_bool_field key =
-        match get_bool_opt ~key args with
+        match get_bool_opt args key with
         | Some v -> Some (key, `Bool v)
         | None -> None
       in
       let update_list_field key =
-        match get_string_list_opt ~key args with
-        | Some v -> Some (key, `List (List.map (fun s -> `String s) v))
-        | None -> None
+        let v = get_string_list args key in
+        if v = [] then None else Some (key, `List (List.map (fun s -> `String s) v))
       in
       let updates =
         List.filter_map (fun x -> x) [
@@ -160,7 +159,7 @@ let handle_persona_create ctx args =
   if errors <> [] then
     error_assoc [("errors", `List (List.map (fun e -> `String e) errors))]
   else
-    let persona_name = get_string ~key:"persona_name" args in
+    let persona_name = get_string args "persona_name" "" in
     if persona_exists persona_name then
       error_assoc
         [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))]
@@ -171,7 +170,7 @@ let handle_persona_create ctx args =
       | Error msg -> error_assoc [("error", `String msg)]
 
 let handle_persona_update ctx args =
-  let persona_name = get_string_opt ~key:"persona_name" args in
+  let persona_name = get_string_opt args "persona_name" in
   match persona_name with
   | None -> error_assoc [("error", `String "Missing required field: persona_name")]
   | Some pn ->

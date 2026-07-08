@@ -345,6 +345,7 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
       completion_notes = notes;
       agent_name = eval_agent_name;
       task_id;
+      evidence_refs = [];
     }
   in
   let on_verdict (result : AR.review_result) =

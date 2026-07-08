@@ -186,6 +186,9 @@ type task =
   ; files : string list [@default []]
   ; created_at : string
   ; created_by : string option [@default None]
+  ; predecessor_task_id : string option [@default None]
+        (** RFC-0323 W2: write-once lineage pointer to the terminal task this
+            one re-runs. Set only at creation; transitions carry it through. *)
   ; contract : task_contract option [@default None]
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
@@ -196,6 +199,13 @@ type task =
 
 val task_to_yojson : task -> Yojson.Safe.t
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
+
+val task_requires_verification : task -> bool
+(** RFC-0323 W1 Phase A (implements RFC-0308): true when the task's contract
+    opts into strict verification — completion must route through
+    submit -> approve instead of a direct done. Contract presence is not the
+    trigger (creation auto-fills an advisory contract for every task);
+    [strict] is the explicit persisted opt-in. *)
 
 type task_reclaim_gate =
   | Reclaim_gate_open

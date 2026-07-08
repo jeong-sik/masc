@@ -208,6 +208,7 @@ let review_completion_notes
         completion_notes = notes;
         agent_name = ctx.agent_name;
         task_id = task.id;
+        evidence_refs = [];
       } in
       (* task-1664: the persisted contract's evidence obligations must reach
          the LLM prompt too, not only [completion_contract]. Read them from
@@ -263,7 +264,9 @@ let persisted_contract_rejection ~(ctx : context)
 (* Handlers *)
 
 let handle_add_task ~tool_name ~start_time ctx args =
-  let valid_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
+  let valid_keys =
+    [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id" ]
+  in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
     (* RFC-0189: schema rejection — operator passed unknown
@@ -281,6 +284,14 @@ let handle_add_task ~tool_name ~start_time ctx args =
   let description = get_string args "description" "" in
   let goal_id =
     match Safe_ops.json_string_opt "goal_id" args with
+    | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
+    | _ -> None
+  in
+  (* RFC-0323 W2: existence + terminal validation happens in
+     [Workspace.add_task_with_result] inside the backlog lock (typed
+     [Unknown_predecessor] / [Predecessor_not_terminal] errors). *)
+  let predecessor_task_id =
+    match Safe_ops.json_string_opt "predecessor_task_id" args with
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
@@ -324,6 +335,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
         let add_result =
           Workspace.add_task_with_result ?contract
             ?goal_id
+            ?predecessor_task_id
             ~reject_if:
               (Workspace_task_capacity.rejection_for_add_task_for_config
                  ctx.config
@@ -345,6 +357,8 @@ let handle_add_task ~tool_name ~start_time ctx args =
                   ; "priority", `Int priority
                   ; "description", `String description
                   ; "goal_id", Json_util.string_opt_to_json goal_id
+                  ; ( "predecessor_task_id"
+                    , Json_util.string_opt_to_json predecessor_task_id )
                   ])
              ()
          | Error err ->

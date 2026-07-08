@@ -3,6 +3,14 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
+(* RFC-0323 G-2: distinct machine identity under which the RFC-0199
+   deterministic probe approves its own submission. The FSM self-approval
+   check compares identity keys (never authority), so the probe cannot
+   approve under the keeper identity it submits with. Single-colon
+   namespacing per [Validation.Agent_id]; follows the [operator:<actor>]
+   precedent of the dashboard verdict route. *)
+let deterministic_probe_verifier = "probe:deterministic"
+
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
   match result with
   | Ok msg ->
@@ -595,14 +603,17 @@ let handle_keeper_task_tool
          auto_started_ok := Tool_result.is_success start_result
        end else
          auto_started_ok := true;
-       (* RFC-0199 Phase B: deterministic evidence harness. When the claimed
-          task declares typed [evidence_claims] and all are satisfied by a file
-          probe, complete it immediately — no LLM turn. Uses [force_done_task_r]
-          so a deterministic check does not route through the non-deterministic
-          anti-rationalization gate (force_done is the existing keeper-Done
-          path; Done_action is exempt from the legacy substring gate). Guarded to
-          Claimed/InProgress so it never hits the AwaitingVerification
-          Invalid_transition; idempotent if another agent reached Done first. *)
+       (* RFC-0199 Phase B / RFC-0323 G-2: deterministic evidence harness.
+          When the claimed task declares typed [evidence_claims] and all are
+          satisfied by a file probe, complete it without an LLM turn — through
+          the verification lane: submit as the keeper (assignee), approve
+          under the distinct machine identity [deterministic_probe_verifier].
+          Replaces the former [force_done_task_r] bypass so Done stays
+          reachable only via approve; the typed evidence_claims probe remains
+          the real evidence. Guarded to Claimed/InProgress so it never hits
+          the AwaitingVerification Invalid_transition; idempotent if another
+          agent reached Done first. Failures are logged per branch, never
+          swallowed. *)
        (match
           Workspace.get_tasks_raw config
           |> List.find_opt (fun (t : Masc_domain.task) ->
@@ -626,12 +637,52 @@ let handle_keeper_task_tool
                [%s]"
               (List.length claims) summary
           in
+          let approve_notes =
+            Printf.sprintf
+              "RFC-0199 deterministic probe: %d typed evidence claim(s) \
+               machine-verified"
+              (List.length claims)
+          in
           (match
-             Workspace.force_done_task_r config
-               ~agent_name:(keeper_agent_sender ~meta) ~task_id ~notes ()
+             Workspace.submit_and_approve_task_r config
+               ~agent_name:(keeper_agent_sender ~meta)
+               ~verifier_name:deterministic_probe_verifier ~task_id ~notes
+               ~approve_notes ()
            with
            | Ok _ -> harness_completed := true
-           | Error _ -> ())
+           | Error (Workspace.Machine_verify_invalid_verifier msg) ->
+             Log.Keeper.error ~keeper_name:meta.name
+               "deterministic probe verifier identity rejected for %s: %s"
+               task_id msg
+           | Error (Workspace.Machine_verify_verifier_not_distinct _) ->
+             Log.Keeper.error ~keeper_name:meta.name
+               "deterministic probe verifier collides with keeper identity \
+                for %s; probe completion skipped"
+               task_id
+           | Error (Workspace.Machine_verify_submit_failed e) ->
+             Log.Keeper.warn ~keeper_name:meta.name
+               "deterministic probe submit failed for %s (falling back to \
+                LLM turn): %s"
+               task_id
+               (Masc_domain.masc_error_to_string e)
+           | Error (Workspace.Machine_verify_approve_failed_compensated e) ->
+             Log.Keeper.warn ~keeper_name:meta.name
+               "deterministic probe approve failed for %s; compensating \
+                reject returned it to in_progress: %s"
+               task_id
+               (Masc_domain.masc_error_to_string e)
+           | Error
+               (Workspace.Machine_verify_approve_failed_stranded
+                  { approve_error; reject_error }) ->
+             Log.Keeper.error ~keeper_name:meta.name
+               "deterministic probe stranded %s in awaiting_verification \
+                (approve: %s; compensating reject: %s); its pending \
+                verification record keeps it inside the verifier wake signal \
+                and the dashboard panel — any other identity can \
+                approve/reject"
+               task_id
+               (Masc_domain.masc_error_to_string approve_error)
+               (Masc_domain.masc_error_to_string reject_error))
         | _ -> ())
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _

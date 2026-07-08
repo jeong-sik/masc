@@ -642,6 +642,8 @@ let span_start_kind = function
     compile time (Parse, don't validate). *)
 let span_end_classification = function
   | "task.done"                 -> Some ("task",      Span_completed)
+  (* RFC-0323 G-3: approve-produced Done completes the task span too. *)
+  | "task.approved"             -> Some ("task",      Span_completed)
   | "task.released"             -> Some ("task",      Span_released)
   | "task.cancelled"            -> Some ("task",      Span_cancelled)
   | "agent.left"                -> Some ("presence",  Span_left)

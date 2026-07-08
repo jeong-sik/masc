@@ -725,6 +725,37 @@ let test_pending_phase_conversions () =
     (Option.is_none (AQ.pending_phase_of_string "unknown"))
 ;;
 
+(* RFC-0320 W3c: the delivery gate is fail-closed and dedups with the W3b
+   prompt steer. [gate_decision] is pure, so we assert the decision matrix
+   without a live connector. *)
+let test_w3c_continuation_delivery_gate () =
+  let module D = Masc.Keeper_continuation_delivery in
+  let dashboard =
+    Keeper_continuation_channel.Dashboard { thread_id = "thread-1" }
+  in
+  let unrouted = Keeper_continuation_channel.unrouted "no originating connector" in
+  let is_skip_empty = function D.Skip D.Skipped_empty -> true | _ -> false in
+  let is_skip_replied =
+    function D.Skip D.Skipped_already_replied -> true | _ -> false
+  in
+  let is_skip_unrouted =
+    function D.Skip D.Skipped_unrouted -> true | _ -> false
+  in
+  let is_deliver = function D.Deliver -> true | _ -> false in
+  Alcotest.(check bool) "empty content is skipped" true
+    (is_skip_empty
+       (D.gate_decision ~channel:dashboard ~already_replied:false ~content:"   "));
+  Alcotest.(check bool) "already-replied turn is skipped (dedup with W3b)" true
+    (is_skip_replied
+       (D.gate_decision ~channel:dashboard ~already_replied:true ~content:"hi"));
+  Alcotest.(check bool) "unrouted channel is skipped (fail-closed)" true
+    (is_skip_unrouted
+       (D.gate_decision ~channel:unrouted ~already_replied:false ~content:"hi"));
+  Alcotest.(check bool) "routable + fresh + non-empty delivers" true
+    (is_deliver
+       (D.gate_decision ~channel:dashboard ~already_replied:false ~content:"hi"))
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -759,6 +790,10 @@ let () =
             "resolution wake carries originating continuation channel"
             `Quick
             test_resolution_wake_carries_originating_continuation_channel
+        ; Alcotest.test_case
+            "W3c continuation delivery gate is fail-closed"
+            `Quick
+            test_w3c_continuation_delivery_gate
         ] )
     ; ( "summary"
       , [ Alcotest.test_case

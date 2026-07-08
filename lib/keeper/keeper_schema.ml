@@ -517,6 +517,75 @@ Requires a reason for the audit trail.";
     ];
   };
 
+  {
+    name = "masc_persona_create";
+    description = "Create a new persona profile at MASC_PERSONAS_DIR/<name>/profile.json. \
+Persona profiles serve as templates for keeper creation via masc_keeper_create_from_persona. \
+Required fields: persona_name, display_name. Optional fields: role, trait, goal, instructions, \
+mention_targets, tool_denylist, proactive_enabled, auto_handoff.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("persona_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Unique persona handle. Used as the directory name under MASC_PERSONAS_DIR.");
+        ]);
+        ("display_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Human-readable display name for the persona.");
+        ]);
+        ("role", `Assoc [("type", `String "string")]);
+        ("trait", `Assoc [("type", `String "string")]);
+        ("goal", `Assoc [("type", `String "string")]);
+        ("instructions", `Assoc [("type", `String "string")]);
+        ("mention_targets", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("tool_denylist", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("proactive_enabled", `Assoc [("type", `String "boolean")]);
+        ("auto_handoff", `Assoc [("type", `String "boolean")]);
+      ]);
+      ("required", `List [`String "persona_name"; `String "display_name"]);
+    ];
+  };
+
+  {
+    name = "masc_persona_update";
+    description = "Update an existing persona profile. Uses partial merge semantics — \
+only the fields present in the request are merged into the existing profile.json. \
+persona_name is immutable (delete and recreate to rename). Returns error if the \
+persona does not exist.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("persona_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Persona handle to update. Must already exist.");
+        ]);
+        ("display_name", `Assoc [("type", `String "string")]);
+        ("role", `Assoc [("type", `String "string")]);
+        ("trait", `Assoc [("type", `String "string")]);
+        ("goal", `Assoc [("type", `String "string")]);
+        ("instructions", `Assoc [("type", `String "string")]);
+        ("mention_targets", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("tool_denylist", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("proactive_enabled", `Assoc [("type", `String "boolean")]);
+        ("auto_handoff", `Assoc [("type", `String "boolean")]);
+      ]);
+      ("required", `List [`String "persona_name"]);
+    ];
+  };
+
 ]
 
 let schemas : tool_schema list =

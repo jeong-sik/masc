@@ -25,6 +25,7 @@ type module_tag =
   | Mod_schedule
   | Mod_misc
   | Mod_library
+  | Mod_recurring
   | Mod_external
   | Mod_inline
   | Mod_shard

@@ -717,7 +717,7 @@ describe('FusionSurface', () => {
     expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
   })
 
-  it('keeps registry-only running rows visible without claiming no fusion runs exist', () => {
+  it('merges a registry-only running run into the master list instead of a separate top panel', () => {
     fusionRuns.value = [
       {
         runId: 'fus-running',
@@ -730,12 +730,19 @@ describe('FusionSurface', () => {
 
     render(html`<${FusionSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="fusion-run-status-card"]')?.textContent).toContain('fus-running')
-    expect(container.querySelector('[data-testid="fusion-empty"]')?.textContent).toContain('No board-sink fusion posts yet')
+    // Registry-only run now lives in the sidebar master list (2-pane layout),
+    // not the removed top "Run status" panel.
+    expect(container.querySelector('[data-testid="fusion-run-status-card"]')).toBeNull()
+    const row = container.querySelector('[data-testid="fusion-registry-row"]')
+    expect(row?.textContent).toContain('fus-running')
+    // A real run exists, so there is no board-sink empty placeholder — the
+    // registry run is selected by default and shows its own detail.
+    expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="fusion-registry-detail"]')?.textContent).toContain('fus-running')
     expect(container.textContent).toContain('board runs')
     expect(container.textContent).toContain('registry')
-    expect(container.textContent).toContain('1 running')
-    expect(container.textContent).not.toContain('No fusion runs found')
+    // The running count now surfaces as the sidebar live badge, not the removed panel.
+    expect(container.textContent).toContain('1 진행')
   })
 
   it('renders preset from registry when board meta does not carry it', () => {

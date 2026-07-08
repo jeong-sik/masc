@@ -44,6 +44,7 @@ val resolve_claim
 
 val decide
   :  verification_enabled:bool
+  -> requires_verification:bool
   -> verification_timeout_seconds:float
   -> new_verification_id:(unit -> string)
   -> same_agent:(string -> bool)
@@ -64,6 +65,7 @@ val decide
     [Task.Transition_state] module header). *)
 val valid_next_actions
   :  verification_enabled:bool
+  -> requires_verification:bool
   -> same_agent:bool
   -> authority:Masc_domain.completion_authority
   -> task_status:Masc_domain.task_status

@@ -753,9 +753,10 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
    here changes every title of that level at once.
    ══════════════════════════════════════════════════════════════ */
 
-/* T1 — surface / subject title (개요 · 커넥터 · Command Map · keeper 이름) */
+/* T1 — surface / subject title (개요 · 커넥터 · Command Map · keeper 이름 · generic SurfaceHeader) */
 .ov-head h1,
 .surf-head h1,
+.v2-surface-header h1,
 .chat-id h2 {
   font-family: var(--font-display);
   font-weight: var(--fw-t1);

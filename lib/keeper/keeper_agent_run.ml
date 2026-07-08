@@ -219,6 +219,7 @@ let run_turn
       ?event_bus
       ?trace_link
       ?continuation_channel
+      ?hitl_delivery_channel
       ?yield_to_chat_waiting
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
@@ -897,6 +898,7 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
+                          ?hitl_delivery_channel
                           ~capture_replay_response:
                             (fun ~response_text ->
                               (* Phase O observability: capture the exact

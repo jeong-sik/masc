@@ -24,6 +24,7 @@ type review_request =
   ; completion_notes : string
   ; agent_name : string
   ; task_id : string
+  ; evidence_refs : string list
   }
 
 type verdict =
@@ -90,6 +91,7 @@ let verdict_constructor_name = function
 let valid_verdict_strings = [ "APPROVE"; "REJECT" ]
 
 type gate =
+  | Evidence
   | Length
   | Excuse
   | Contract
@@ -99,6 +101,7 @@ type gate =
   | Fallback
 
 let gate_to_string = function
+  | Evidence -> "evidence"
   | Length -> "length"
   | Excuse -> "excuse"
   | Contract -> "contract"
@@ -445,6 +448,7 @@ let build_prompt ?(few_shot_block = "") ?excuse_advisory ?completion_contract
     ; "completion_notes", notes_truncated
     ; "verification_contract_section", verification_contract_section
     ; "evidence_section", required_evidence_section
+    ; "evidence_refs", String.concat ", " req.evidence_refs
     ; "advisory_section", advisory_section
     ; "calibration_section", calibration_section
     ]
@@ -735,6 +739,16 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
+  (* Gate 0: empty evidence_refs *)
+  if List.is_empty req.evidence_refs then
+    emit
+      { verdict = Reject "no evidence references supplied"
+      ; evaluator_runtime
+      ; generator_runtime
+      ; gate = Evidence
+      ; fallback_reason = None
+      }
+  else
   (* Gate 1: empty or trivially short notes *)
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length

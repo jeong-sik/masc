@@ -179,6 +179,9 @@ let audit_approval_event
       ?disposition_reason
       ?rule_match
       ?source_approval_id
+      ?actor
+      ?approval_mode
+      ?authorizing_band
       ?auto_approved
       ?decision
       ()
@@ -218,6 +221,9 @@ let audit_approval_event
          ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
          ; "selected_model", `Null
          ; "sandbox_target", Json_util.string_opt_to_json sandbox_target
+         ; "actor", Json_util.string_opt_to_json actor
+         ; "approval_mode", Json_util.string_opt_to_json approval_mode
+         ; "authorizing_band", Json_util.string_opt_to_json authorizing_band
          ; "disposition", Json_util.string_opt_to_json disposition
          ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
          ]
@@ -372,6 +378,10 @@ let resolved_approval_json_of_audit_event json =
     ; "sandbox_target", json_member_or_null "sandbox_target" json
     ; "disposition", json_member_or_null "disposition" json
     ; "disposition_reason", json_member_or_null "disposition_reason" json
+    ; "actor", json_member_or_null "actor" json
+    ; "approval_mode", json_member_or_null "approval_mode" json
+    ; "authorizing_band", json_member_or_null "authorizing_band" json
+    ; "auto_approved", json_member_or_null "auto_approved" json
     ; "rule_match", json_member_or_null "rule_match" json
     ]
 ;;

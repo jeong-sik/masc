@@ -198,6 +198,9 @@ val audit_approval_event :
   ?sandbox_target:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
+  ?actor:string option ->
+  ?approval_mode:string option ->
+  ?authorizing_band:string option ->
   ?audit_disposition:approval_audit_disposition ->
   ?disposition:string ->
   ?disposition_reason:string ->

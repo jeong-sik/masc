@@ -132,8 +132,7 @@ let test_git_reset_hard_is_r2 () =
 
 let test_classify_repo_hosting_cli_r2 () =
   let cmds =
-    [ simple_ir "gh" [ "pr"; "merge"; "123" ];
-      simple_ir "gh" [ "repo"; "delete"; "owner/repo" ];
+    [ simple_ir "gh" [ "repo"; "delete"; "owner/repo" ];
       simple_ir "gh" [ "release"; "delete"; "v1.0" ];
       simple_ir "gh" [ "secret"; "delete"; "KEY" ] ]
   in
@@ -151,6 +150,9 @@ let test_classify_repo_hosting_cli_r2 () =
 let test_classify_repo_hosting_cli_r1 () =
   let cmds =
     [ simple_ir "gh" [ "pr"; "create"; "--title"; "t" ];
+      (* pr merge is revertable, so risk stays R1. The capability axis routes it
+         to approval because it mutates the durable remote base branch. *)
+      simple_ir "gh" [ "pr"; "merge"; "123" ];
       simple_ir "gh" [ "issue"; "close"; "123" ];
       simple_ir "gh" [ "label"; "create"; "bug" ];
       simple_ir "gh" [ "run"; "cancel"; "456" ] ]

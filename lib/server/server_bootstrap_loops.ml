@@ -513,7 +513,21 @@ let start_keeper_loops
      the Fusion_completed/Bg_completed async-completion wakes. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
     (fun ~base_path ~keeper_name ~approval_id ~decision ->
-       let resolution = Keeper_event_queue.{ approval_id; decision } in
+       let resolution =
+         Keeper_event_queue.
+           { approval_id
+           ; decision
+           (* WORKAROUND (RFC-0320 W2): the approval-submission connector is not
+              yet captured on the queue entry, so a HITL resolution cannot route
+              back to the originating chat thread and is [Unrouted]. 근본 해결:
+              W2b threads a continuation_channel through
+              [Keeper_approval_queue.create_entry] and the resolution wake hook
+              so this becomes [entry.channel] instead. *)
+           ; channel =
+               Keeper_continuation_channel.unrouted
+                 "hitl provenance capture pending (RFC-0320 W2b)"
+           }
+       in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
        let stimulus : Keeper_event_queue.stimulus =
          { Keeper_event_queue.post_id = Keeper_event_queue.hitl_resolution_post_id resolution

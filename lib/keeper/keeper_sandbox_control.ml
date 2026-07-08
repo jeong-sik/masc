@@ -373,7 +373,7 @@ let playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
     Keeper_repo_mapping.repository_resolution_of_path_from_catalog ~base_path
       ~path:repo_path repos
   with
-  | Keeper_repo_mapping.Repository repository_id -> Ok repository_id
+  | Keeper_repo_mapping.Repository { repository_id; _ } -> Ok repository_id
   | Keeper_repo_mapping.No_repository -> Ok repo_name
   | Keeper_repo_mapping.Repository_identity_mismatch _ ->
     Error

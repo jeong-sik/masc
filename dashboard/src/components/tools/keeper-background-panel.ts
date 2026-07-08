@@ -6,10 +6,16 @@
 // running autonomous recurring work — the loop row is the "is it alive" context
 // for that work, not a standalone liveness board (fleet already carries that).
 //
+// Presentation follows the keeper-v2 schedule skin (`.sch-bg-*` in
+// styles/keeper-v2/schedule.css): a two-column grid where each grid cell is one
+// keeper group (grp header + recurring-task rows), matching the sibling
+// `.sch-ev` row convention (left tone stripe, body, meta, status chip).
+//
 // Honesty contract (matches the projection's own rule): every field shown comes
 // straight from the projection. `next`/`last` run times are `-` when the
 // projection reports null (paused or never-run) — no ETA is fabricated, no
-// bg-task is relabelled as a tool call.
+// bg-task is relabelled as a tool call. The loop's restart/dead-since context is
+// kept visible even though the mockup's group header was cosmetic-only.
 import { html } from 'htm/preact'
 import type {
   DashboardKeeperBackground,
@@ -17,7 +23,11 @@ import type {
   DashboardKeeperBackgroundLoop,
   DashboardKeeperRecurringTask,
 } from '../../api'
-import { formatDateTimeKo } from '../../lib/format-time'
+import {
+  SECONDS_PER_HOUR,
+  SECONDS_PER_MINUTE,
+  formatDateTimeKo,
+} from '../../lib/format-time'
 import { StatusChip, keeperStateTone } from '../common/status-chip'
 import { enumLabel } from './keeper-waiting-inventory-panel'
 
@@ -26,33 +36,34 @@ function timeLabel(iso: string | null | undefined): string {
   return formatDateTimeKo(iso)
 }
 
-function CountPill({
-  label,
-  value,
-}: {
-  label: string
-  value: number | string | null | undefined
-}) {
-  const displayValue =
-    typeof value === 'number' ? value.toLocaleString() : value ?? 'unknown'
-  return html`
-    <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)]">
-      <span>${label}</span>
-      <span class="font-mono text-[var(--color-fg-primary)]">${displayValue}</span>
-    </span>
-  `
+// Compact fire cadence for the fixed-width `when` column. Interval is always
+// present (unlike next-run, which is null while paused/never-run), so this
+// column never renders a fabricated or empty time.
+function cadenceLabel(intervalSec: number): string {
+  if (intervalSec < SECONDS_PER_MINUTE) return `${intervalSec}s`
+  if (intervalSec < SECONDS_PER_HOUR)
+    return `${Math.round(intervalSec / SECONDS_PER_MINUTE)}m`
+  return `${Math.round(intervalSec / SECONDS_PER_HOUR)}h`
+}
+
+// Row tone stripe (st-ok/st-warn/st-dim) derived from numeric/boolean state, not
+// a string classifier: disabled → dim, any consecutive failures → warn, else ok.
+function rowToneClass(task: DashboardKeeperRecurringTask): string {
+  if (!task.enabled) return 'st-dim'
+  if (task.failure_count > 0) return 'st-warn'
+  return 'st-ok'
 }
 
 function LoopContext({ loop }: { loop: DashboardKeeperBackgroundLoop }) {
   return html`
-    <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-[var(--color-fg-muted)]">
+    <div class="sch-bg-grp-ctx">
       <span class="font-mono">restarts ${loop.restart_count.toLocaleString()}</span>
       <span aria-hidden="true">·</span>
       <span class="font-mono">since ${timeLabel(loop.started_at_iso)}</span>
       ${loop.dead_since_iso
         ? html`
             <span aria-hidden="true">·</span>
-            <span class="font-mono text-[var(--color-status-warn)]">dead since ${timeLabel(loop.dead_since_iso)}</span>
+            <span class="font-mono sch-bg-grp-dead">dead since ${timeLabel(loop.dead_since_iso)}</span>
           `
         : null}
     </div>
@@ -60,52 +71,45 @@ function LoopContext({ loop }: { loop: DashboardKeeperBackgroundLoop }) {
 }
 
 function RecurringRow({ task }: { task: DashboardKeeperRecurringTask }) {
-  const failClass =
-    task.failure_count > 0 ? 'font-mono text-[var(--color-status-warn)]' : 'font-mono'
   return html`
-    <div class="grid gap-1 border-t border-[var(--color-border-subtle)] py-2 first:border-t-0">
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <${StatusChip} tone=${task.enabled ? 'ok' : 'paused'} uppercase=${false}>${task.enabled ? 'enabled' : 'disabled'}<//>
-        <span class="min-w-0 truncate font-mono text-xs text-[var(--color-fg-primary)]">${task.label}</span>
-        <span class="text-2xs text-[var(--color-fg-muted)]">${enumLabel(task.action_kind)}</span>
+    <div class="sch-bg-row ${rowToneClass(task)}">
+      <div class="sch-bg-when">${cadenceLabel(task.interval_sec)}</div>
+      <div class="sch-bg-body">
+        <div class="sch-bg-title">${task.label}</div>
+        <div class="sch-bg-meta">
+          <span class="sch-bg-by">${enumLabel(task.action_kind)}</span>
+          <span class="sch-bg-since font-mono">every ${task.interval_sec.toLocaleString()}s</span>
+          <span class="sch-bg-since font-mono">runs ${task.run_count.toLocaleString()}</span>
+          <span class="sch-bg-since font-mono">fail ${task.failure_count.toLocaleString()}/${task.max_failures.toLocaleString()}</span>
+          <span class="sch-bg-since">next ${timeLabel(task.next_run_at_iso)}</span>
+          <span class="sch-bg-since">last ${timeLabel(task.last_run_at_iso)}</span>
+        </div>
       </div>
-      <div class="grid gap-1 text-2xs text-[var(--color-fg-muted)] sm:grid-cols-5">
-        <span class="font-mono">every ${task.interval_sec.toLocaleString()}s</span>
-        <span class="font-mono">runs ${task.run_count.toLocaleString()}</span>
-        <span class=${failClass}>fail ${task.failure_count.toLocaleString()}/${task.max_failures.toLocaleString()}</span>
-        <span>next ${timeLabel(task.next_run_at_iso)}</span>
-        <span>last ${timeLabel(task.last_run_at_iso)}</span>
-      </div>
+      <${StatusChip} tone=${task.enabled ? 'ok' : 'paused'} uppercase=${false}>${task.enabled ? 'enabled' : 'disabled'}<//>
     </div>
   `
 }
 
-function KeeperBackgroundCard({ keeper }: { keeper: DashboardKeeperBackgroundKeeper }) {
+function KeeperBackgroundGroup({ keeper }: { keeper: DashboardKeeperBackgroundKeeper }) {
   const tasks = keeper.recurring ?? []
   return html`
-    <article
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+    <div
+      class="sch-bg-grp"
       data-testid="keeper-background-card"
       data-keeper-background=${keeper.keeper_name}
     >
-      <div class="flex min-w-0 flex-wrap items-start justify-between gap-2">
-        <div class="min-w-0">
-          <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <span class="min-w-0 truncate font-mono text-sm font-semibold text-[var(--color-fg-primary)]">${keeper.keeper_name}</span>
-            <${StatusChip} tone=${keeperStateTone(keeper.loop.phase)} uppercase=${false}>${enumLabel(keeper.loop.phase)}<//>
-          </div>
-          <${LoopContext} loop=${keeper.loop} />
-        </div>
-        <span class="text-2xs text-[var(--color-fg-muted)]">
-          <span class="font-mono text-[var(--color-fg-primary)]">${keeper.recurring_count.toLocaleString()}</span> recurring
-        </span>
+      <div class="sch-bg-grp-h">
+        <span class="sch-bg-grp-n font-mono">${keeper.keeper_name}</span>
+        <${StatusChip} tone=${keeperStateTone(keeper.loop.phase)} uppercase=${false}>${enumLabel(keeper.loop.phase)}<//>
+        <span class="sch-bg-since font-mono">${keeper.recurring_count.toLocaleString()} recurring</span>
+        <${LoopContext} loop=${keeper.loop} />
       </div>
-      <div class="mt-2">
+      <div class="sch-bg-list">
         ${tasks.length > 0
           ? tasks.map(task => html`<${RecurringRow} key=${task.id} task=${task} />`)
-          : html`<div class="border-t border-[var(--color-border-subtle)] pt-2 text-xs text-[var(--color-fg-muted)]">no recurring tasks</div>`}
+          : html`<div class="sch-bg-empty">no recurring tasks</div>`}
       </div>
-    </article>
+    </div>
   `
 }
 
@@ -115,19 +119,22 @@ export function KeeperBackgroundPanel({
   background: DashboardKeeperBackground | null | undefined
 }) {
   if (!background) {
-    return html`<div class="text-xs text-[var(--color-fg-muted)]">keeper background unavailable</div>`
+    return html`<div class="sch-bg-empty">keeper background unavailable</div>`
   }
   const keepers = background.keepers ?? []
   return html`
-    <div class="grid gap-3" data-testid="keeper-background-inventory">
-      <div class="flex flex-wrap gap-1.5">
-        <${CountPill} label="keepers" value=${background.keeper_count} />
-        <${CountPill} label="recurring keepers" value=${background.recurring_keeper_count} />
-        <${CountPill} label="recurring tasks" value=${background.recurring_count} />
+    <section class="sch-bg" data-testid="keeper-background-inventory">
+      <div class="sch-bg-h">
+        <h3>Keeper 자율 백그라운드</h3>
+        <div class="sch-bg-sub">
+          <span class="font-mono">keepers ${background.keeper_count.toLocaleString()}</span>
+          <span class="font-mono">recurring keepers ${background.recurring_keeper_count.toLocaleString()}</span>
+          <span class="font-mono">recurring tasks ${background.recurring_count.toLocaleString()}</span>
+        </div>
       </div>
       ${keepers.length > 0
-        ? html`<div class="grid gap-2 lg:grid-cols-2">${keepers.map(keeper => html`<${KeeperBackgroundCard} key=${keeper.keeper_name} keeper=${keeper} />`)}</div>`
-        : html`<div class="text-xs text-[var(--color-fg-muted)]">no keeper background loops in projection</div>`}
-    </div>
+        ? html`<div class="sch-bg-grps">${keepers.map(keeper => html`<${KeeperBackgroundGroup} key=${keeper.keeper_name} keeper=${keeper} />`)}</div>`
+        : html`<div class="sch-bg-empty">no keeper background loops in projection</div>`}
+    </section>
   `
 }

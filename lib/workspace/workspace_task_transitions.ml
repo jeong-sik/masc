@@ -94,16 +94,6 @@ let transition_task_outcome_r
           | Masc_domain.Release -> Ok ()
           | Masc_domain.Done_action
           | Masc_domain.Submit_for_verification ->
-            (* #23719 evidence gate, scoped to the RFC-0323 Phase A predicate
-               (contract.strict, same as the G-1 done guard). Unconditional
-               enforcement regressed the G-2 deterministic probe and broke the
-               invariant documented below (empty evidence is valid for
-               analysis-only / advisory-contract tasks) — an unannounced
-               Phase B, exactly what the G-1 predicate decision avoided.
-               "Declared evidence" mirrors the verifier-request projection
-               (contract refs + typed handoff refs, prose excluded): a
-               contract that names its evidence up front satisfies the
-               gate without re-supplying refs at submit time. *)
             if not (Masc_domain.task_requires_verification task)
             then Ok ()
             else if

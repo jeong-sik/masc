@@ -315,6 +315,40 @@ describe('ScheduleSurface', () => {
     expect(pendingKpi?.textContent).toContain('2')
   })
 
+  it('counts genuine queue-drain misses in the KPI (not_found queue AND not_found reaction)', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      // Healthy completion: not in queue but the keeper reacted → not a miss.
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-drained',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'matched_turn_started' },
+      },
+      // Genuine miss: dispatched, in no queue, no keeper reaction recorded.
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-miss',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'not_found' },
+      },
+    ]
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const missKpi = container.querySelector('[data-testid="schedule-kpi-queue-miss"]')
+    expect(missKpi?.textContent).toContain('큐 누락')
+    expect(missKpi?.textContent).toContain('1')
+    expect(missKpi?.querySelector('.ov-kpi-v')?.className).toContain('warn')
+  })
+
   it('surfaces projection load errors without hiding stale schedule data', async () => {
     mocks.toolsError.value = 'dashboard tools unavailable'
     mocks.toolsData.value = {

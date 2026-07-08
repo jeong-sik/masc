@@ -29,6 +29,7 @@ import {
 } from '../tools/scheduled-automation-panel'
 import type { Cadence } from '../v2/schedule-constants'
 import { CadenceSummary, ScheduleCalendar, cadenceCounts, cadenceOfRequest } from './schedule-agenda'
+import { countQueueDrainMisses } from './queue-drain-status'
 import {
   loadTools,
   toolsData,
@@ -86,6 +87,9 @@ export function ScheduleSurface() {
   const requests = automation?.requests ?? []
   const totalCount = requests.length
   const cadCounts = cadenceCounts(requests)
+  // Scheduled keeper wakes that were dispatched but are in neither queue AND
+  // never recorded as reacted — the drain-miss the calendar surfaces per row.
+  const queueMisses = countQueueDrainMisses(requests)
 
   const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
@@ -168,7 +172,7 @@ export function ScheduleSurface() {
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
 
-        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }} aria-label="예약 요약">
+        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }} aria-label="예약 요약">
           <div class="ov-kpi">
             <div class="ov-kpi-k">승인 대기</div>
             <div class=${`ov-kpi-v ${pendingCount > 0 ? 'warn' : 'ok'}`}>${countLabel(pendingCount)}</div>
@@ -184,6 +188,13 @@ export function ScheduleSurface() {
           <div class="ov-kpi">
             <div class="ov-kpi-k">총 예약</div>
             <div class="ov-kpi-v volt">${countLabel(totalCount)}</div>
+          </div>
+          <div class="ov-kpi" data-testid="schedule-kpi-queue-miss">
+            <div class="ov-kpi-k">큐 누락</div>
+            <div
+              class=${`ov-kpi-v ${queueMisses > 0 ? 'warn' : 'ok'}`}
+              title="dispatch됐으나 큐(pending·inflight)에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락"
+            >${countLabel(queueMisses)}</div>
           </div>
         </section>
 

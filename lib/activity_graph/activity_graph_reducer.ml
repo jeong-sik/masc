@@ -41,7 +41,7 @@ let is_generic_status = function
 (* Semantic weight multiplier by event kind.
    Completion events score high; routine lifecycle events score low. *)
 let semantic_multiplier = function
-  | "task.done" | "decision.resolved" | "operation.finalized" -> 5.0
+  | "task.done" | "task.approved" | "decision.resolved" | "operation.finalized" -> 5.0
   | "task.created" | "task.claimed" | "decision.opened" -> 3.0
   | "agent.handoff" | "agent.spawned" -> 3.0
   | "board.posted" | "board.voted" -> 2.0
@@ -212,6 +212,28 @@ let reduce_event ~nodes ~edges (value : event) =
   | "task.done" ->
       set_subject_status Done;
       (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | "task.approved" ->
+      (* RFC-0323 G-3: approve-produced Done completes the task like
+         task.done. The event actor is the VERIFIER; the assignee rides the
+         payload (emitted since G-3), and its works_on edge is the one to
+         close. Events from before G-3 lack the field — fall back to the
+         actor so the subject status still flips for historical replays. *)
+      set_subject_status Done;
+      let completer_id =
+        match payload_string "assignee" value.payload with
+        | Some name ->
+            Some
+              (ensure_entity_node nodes
+                 { kind = "agent"; id = name }
+                 ~fallback_status:Active ~ts_iso:value.ts_iso
+                 ~meta:value.payload ~sw_delta:sw)
+        | None -> actor_id
+      in
+      (match (completer_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload

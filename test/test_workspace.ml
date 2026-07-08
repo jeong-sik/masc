@@ -1453,6 +1453,62 @@ let test_submit_and_approve_non_assignee_submit_fails () =
        | Some { task_status = Masc_domain.Claimed _; _ } -> true
        | Some _ | None -> false))
 
+(* === RFC-0323 G-3: completion side effects are state-keyed === *)
+
+(* Records economy-earn calls while [f] runs, restoring the previous hook. *)
+let with_economy_recorder f =
+  let recorded = ref [] in
+  let prev =
+    Atomic.exchange Workspace_hooks.agent_economy_earn_fn
+      (fun ~base_path:_ ~agent_name ~reason:_ ->
+        recorded := agent_name :: !recorded)
+  in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.agent_economy_earn_fn prev)
+    (fun () -> f recorded)
+
+let test_approve_completion_credits_assignee () =
+  with_test_env (fun config ->
+    with_economy_recorder (fun recorded ->
+      let _ = Workspace.add_task config ~title:"Parity Task" ~priority:1 ~description:"" in
+      let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+      let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+      let submitted =
+        Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+          ~action:Masc_domain.Submit_for_verification ~notes:"evidence attached" ()
+      in
+      Alcotest.(check bool) "submit ok" true
+        (match submitted with Ok _ -> true | Error _ -> false);
+      Alcotest.(check (list string)) "no earn before approve" [] !recorded;
+      let approved =
+        Workspace.transition_task_r config ~agent_name:admin_keeper_agent
+          ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
+      in
+      Alcotest.(check bool) "approve ok" true
+        (match approved with Ok _ -> true | Error _ -> false);
+      (* The acting agent is the verifier; the earn must credit the assignee. *)
+      Alcotest.(check (list string))
+        "approve completion credits assignee" [ test_agent_a ] !recorded))
+
+let test_force_done_still_credits_forcing_actor () =
+  with_test_env (fun config ->
+    with_economy_recorder (fun recorded ->
+      let _ = Workspace.add_task config ~title:"Parity Force" ~priority:1 ~description:"" in
+      let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+      let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+      let forced =
+        Workspace.force_done_task_r config ~agent_name:admin_keeper_agent
+          ~task_id:"task-001" ~notes:"forced by admin" ()
+      in
+      Alcotest.(check bool) "force done ok" true
+        (match forced with Ok _ -> true | Error _ -> false);
+      (* Regression pin: G-3 keys the earn off the resulting Done record's
+         assignee. [done_status] sets that to the acting agent, so a forced
+         done still credits the forcing actor — unchanged behavior. *)
+      Alcotest.(check (list string))
+        "force done still credits the forcing actor" [ admin_keeper_agent ]
+        !recorded))
+
 let test_audit_orphan_tasks () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
@@ -2178,6 +2234,14 @@ let () =
         test_submit_and_approve_rejects_invalid_verifier;
       Alcotest.test_case "non-assignee submit fails typed" `Quick
         test_submit_and_approve_non_assignee_submit_fails;
+    ];
+
+    (* === RFC-0323 G-3: state-keyed completion side effects === *)
+    "done_side_effects", [
+      Alcotest.test_case "approve completion credits assignee" `Quick
+        test_approve_completion_credits_assignee;
+      Alcotest.test_case "force done still credits forcing actor" `Quick
+        test_force_done_still_credits_forcing_actor;
     ];
 
     (* === Board Admin Tests === *)

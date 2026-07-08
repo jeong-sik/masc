@@ -252,8 +252,8 @@
 /* ── Keeper 자율 백그라운드 (폴링 · 비동기 도구) — per-keeper recurring group view ── */
 .sch-bg { margin-top: 26px; border-top: 1px solid var(--border-soft); padding-top: 18px; }
 .sch-bg-h { margin-bottom: 14px; }
-.sch-bg-h h3 { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-bright); margin: 0 0 4px; }
-.sch-bg-sub { font-size: 11px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 10px; }
+.sch-bg-h h3 { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-bright); margin: 0 0 4px; }
+.sch-bg-sub { font-size: var(--fs-11); color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 10px; }
 .sch-bg-grps { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .sch-bg-grp { min-width: 0; }
 .sch-bg-grp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
@@ -267,12 +267,12 @@
 .sch-bg-row.st-warn { --tone: var(--status-warn); }
 .sch-bg-row.st-dim { --tone: var(--border-highlight); }
 .sch-bg-row:hover { border-color: var(--border-highlight); border-left-color: var(--tone); background: var(--bg-card-hover); }
-.sch-bg-when { flex: none; width: 62px; font-size: 11px; color: var(--text-mid); padding-top: 1px; }
+.sch-bg-when { flex: none; width: 62px; font-size: var(--fs-11); color: var(--text-mid); padding-top: 1px; }
 .sch-bg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.sch-bg-title { font-size: 12px; line-height: 1.4; color: var(--text-primary); text-wrap: pretty; }
+.sch-bg-title { font-size: var(--fs-12); line-height: 1.4; color: var(--text-primary); text-wrap: pretty; }
 .sch-bg-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.sch-bg-by { font-size: 11px; color: var(--text-mid); }
-.sch-bg-since { font-size: 10px; color: var(--text-dim); }
+.sch-bg-by { font-size: var(--fs-11); color: var(--text-mid); }
+.sch-bg-since { font-size: var(--fs-10); color: var(--text-dim); }
 .sch-bg-row [data-status-chip] { flex: none; align-self: flex-start; }
 .sch-bg-grp-h [data-status-chip] { flex: none; }
 

@@ -2650,7 +2650,7 @@ let make_review_request () : Task.Anti_rationalization.review_request =
     task_description = "desc";
     completion_notes = "notes";
     agent_name = "alice";
-    task_id = "test-task-1" }
+    task_id = "test-task-1"; evidence_refs = [] }
 
 let make_review_result
     ?(verdict = Task.Anti_rationalization.Approve)

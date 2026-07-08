@@ -334,6 +334,7 @@ let accept_no_progress_error ?last_tool_effect ?any_mutating_tool
        ; model = Some "runtime"
        ; reason_kind = Some Masc.Keeper_turn_driver.Accept_no_usable_progress
        ; response_shape = Some Masc.Keeper_turn_driver.Accept_response_thinking_only
+       ; stop_reason = None
        ; last_tool_effect
        ; any_mutating_tool
        ; tool_effects_seen

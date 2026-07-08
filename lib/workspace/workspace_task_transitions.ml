@@ -80,7 +80,43 @@ let transition_task_outcome_r
           | Some task -> Ok task
         in
         (* RFC-0323 G-10: the typed reclaim claim precheck is retired — the
-           FSM decision below owns claimability by status alone. *)
+           FSM decision below owns claimability by status alone. The evidence
+           requirements for submission/approval (#23719) stay. *)
+        let* () =
+          match action with
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Cancel
+          | Masc_domain.Release -> Ok ()
+          | Masc_domain.Done_action
+          | Masc_domain.Submit_for_verification ->
+            (match handoff_context with
+             | None ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Code task submission requires handoff_context with evidence_refs"))
+             | Some ctx when ctx.evidence_refs = [] ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Code task submission requires at least one evidence_ref in handoff_context"))
+             | Some _ -> Ok ())
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification ->
+            (match task.handoff_context with
+             | None ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Approve/reject requires task to carry handoff_context with evidence_refs"))
+             | Some ctx when ctx.evidence_refs = [] ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Approve/reject requires task to carry at least one evidence_ref"))
+             | Some _ -> Ok ())
+        in
         let* () =
           (match action, task.task_status with
           | Masc_domain.Claim, Masc_domain.Todo ->

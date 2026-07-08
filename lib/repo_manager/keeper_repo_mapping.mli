@@ -126,9 +126,9 @@ val repository_identity_mismatch_message : repository_identity_mismatch -> strin
 
 val repository_url_basename_matches_identity : repository -> bool
 (** [repository_url_basename_matches_identity repo] is the catalog identity
-    SSOT used before trusting a catalog entry for a playground repository path.
-    Registration flows reuse it so operator-approved catalog additions do not
-    grow a second URL/name matching rule. *)
+    SSOT used before authorizing a playground repository path. Registration
+    flows reuse it so operator-approved catalog additions do not grow a second
+    URL/name matching rule. *)
 
 type repository_match =
   { repository_id : repository_id
@@ -145,10 +145,7 @@ val repository_resolution_of_path :
   base_path:string -> path:string -> repository_resolution
 (** [repository_resolution_of_path ~base_path ~path] returns the repository
     resolution for [path]. Use this for access decisions so identity mismatches
-    and repository-store load failures stay explicit and fail closed. A visible
-    playground clone that is absent from the catalog resolves as
-    [No_repository], because sandbox containment is the read boundary and the
-    catalog is metadata/alias state. *)
+    and repository-store load failures stay explicit and fail closed. *)
 
 val repository_resolution_of_path_from_catalog :
   base_path:string -> path:string -> repository list -> repository_resolution
@@ -170,6 +167,6 @@ val validate_path_access :
   keeper_id:string -> base_path:string -> path:string -> (unit, string) result
 (** [validate_path_access ~keeper_id ~base_path ~path] returns [Ok ()] if
     [path] resolves outside registered repositories or to a registered
-    repository. Per-keeper mappings do not cap access, and unregistered visible
-    playground clones are allowed by this repository-policy layer. Returns
-    [Error msg] for identity mismatches and repository-store load failures. *)
+    repository. Per-keeper mappings do not cap access. Returns [Error msg] for
+    unregistered playground repositories, identity mismatches, and
+    repository-store load failures. *)

@@ -237,19 +237,24 @@ export function ScheduleSurface() {
                 onSelectSchedule=${setSelectedScheduleId}
               />`}
 
-        ${'' /* Secondary diagnostics live BELOW the schedule: the actual schedule
-              (calendar/list) is the primary, above-the-fold content. The keeper-lane
-              wake evidence + background panels are large operator diagnostics that
-              previously buried the schedule at the bottom of the page. */}
-        <section class="ov-card mt-4" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
-          <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
-          <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
-        </section>
+        ${'' /* Secondary diagnostics live BELOW the schedule AND collapsed by
+              default: the actual schedule (calendar/list) is the primary,
+              above-the-fold content. The keeper-lane wake evidence + background
+              panels are large operator diagnostics (a card per keeper, up to 64
+              lane rows) that previously buried the schedule. They stay one click
+              away via <details>; content remains in the DOM when collapsed. */}
+        <details class="ov-card mt-4 sch-diag" data-testid="schedule-diagnostics">
+          <summary class="sch-diag-summary">Keeper 진단 · wake evidence · background</summary>
+          <section class="mt-3" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
+            <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
+            <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
+          </section>
 
-        <section class="ov-card mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
-          <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
-          <${KeeperBackgroundPanel} background=${keeperBackground} />
-        </section>
+          <section class="mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
+            <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
+            <${KeeperBackgroundPanel} background=${keeperBackground} />
+          </section>
+        </details>
       </div>
       ${automation
         ? html`<${ScheduleAside}

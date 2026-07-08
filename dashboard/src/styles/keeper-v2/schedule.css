@@ -279,3 +279,18 @@
 @media (max-width: 900px) {
   .sch-bg-grps { grid-template-columns: 1fr; }
 }
+
+/* Collapsible operator-diagnostics group: the schedule stays primary, the large
+   keeper-lane wake-evidence + background panels are one click away (collapsed by
+   default). Summary reads as a section header (mono caps, dim). */
+.sch-diag > .sch-diag-summary {
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.sch-diag > .sch-diag-summary:hover { color: var(--text-mid); }
+.sch-diag[open] > .sch-diag-summary { margin-bottom: 10px; color: var(--text-mid); }

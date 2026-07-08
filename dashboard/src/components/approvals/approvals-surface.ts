@@ -24,7 +24,7 @@ import type {
 } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
-import { formatDateTimeKo } from '../../lib/format-time'
+import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import {
   keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
@@ -86,12 +86,14 @@ function apSevGlyph(band: KeeperApprovalRiskVisualBand): string {
   }
 }
 
-// seconds-waited → "N분 N초 대기" (prototype apAge).
+// seconds-waited → compound elapsed + "대기" suffix ("2시간 5분 대기").
+// Delegates to the shared formatDurationCompound so long HITL waits render with
+// an hour tier; the prior bespoke minute-only formatter broke down at scale
+// ("150분 0초 대기" for 2.5h). Non-finite / negative input clamps to 0 so the
+// queue never surfaces an "확인 필요" label in the age slot.
 function apAge(sec: number | null | undefined): string {
-  const s = Math.max(0, Math.round(sec ?? 0))
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return m ? `${m}분 ${r}초 대기` : `${r}초 대기`
+  const s = typeof sec === 'number' && Number.isFinite(sec) ? Math.max(0, Math.round(sec)) : 0
+  return `${formatDurationCompound(s)} 대기`
 }
 
 function compactText(value: string | null | undefined): string | null {

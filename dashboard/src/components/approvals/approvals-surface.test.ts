@@ -149,6 +149,21 @@ describe('ApprovalsSurface', () => {
       .toContain('enabled')
   }, 20000)
 
+  it('formats a multi-hour HITL wait with an hour tier, not a minute-only breakdown', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({ id: 'appr-long', waiting_s: 9000 }), // 2h 30m — previously "150분 0초 대기"
+      queueItem({ id: 'appr-short', waiting_s: 92 }), // 1m 32s
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-approval-id="appr-long"] .ap-age')?.textContent)
+      .toBe('2시간 30분 대기')
+    expect(container.querySelector('[data-approval-id="appr-short"] .ap-age')?.textContent)
+      .toBe('1분 대기')
+  }, 20000)
+
   it('renders the HITL context summary (available) inside the pending card', async () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({

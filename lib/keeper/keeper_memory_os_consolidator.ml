@@ -118,7 +118,7 @@ let distinct_keepers contribs =
 
 let consolidate_into_shared ~now ~min_keepers contribs =
   let current_contribs =
-    (* Use not_stale (not fact_is_current) so None-TTL facts are bounded by
+(* Use not_stale (not fact_is_current) so None-TTL facts are bounded by
        max_consensus_staleness, consistent with eligible's pre-filter. *)
     List.filter (fun c -> not_stale ~now c.fact) contribs
   in

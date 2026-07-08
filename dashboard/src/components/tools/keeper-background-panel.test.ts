@@ -112,7 +112,9 @@ describe('KeeperBackgroundPanel', () => {
     // Recurring task rows (labels, interval, run/fail counts, enabled state)
     expect(container.textContent).toContain('heartbeat-check')
     expect(container.textContent).toContain('stale-sweep')
-    expect(container.textContent).toContain('every 30s')
+    // Fire cadence is shown once, in the fixed-width `when` gutter (30s / 10m),
+    // not duplicated as an "every Ns" meta chip.
+    expect(container.querySelector('.sch-bg-when')?.textContent).toContain('30s')
     expect(container.textContent).toContain('runs 12')
     expect(container.textContent).toContain('fail 2/2')
     expect(container.textContent).toContain('enabled')

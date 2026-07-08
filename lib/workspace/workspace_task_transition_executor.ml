@@ -15,14 +15,14 @@ type transition_backlog_update =
 let action_persists_handoff_context = function
   | Masc_domain.Release
   | Masc_domain.Done_action
-  | Masc_domain.Submit_for_verification ->
-    true
-  | Masc_domain.Claim
-  | Masc_domain.Start
-  | Masc_domain.Cancel
+  | Masc_domain.Submit_for_verification
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->
     true
+  | Masc_domain.Claim
+  | Masc_domain.Start
+  | Masc_domain.Cancel ->
+    false
 ;;
 
 let normalize_task_before_status ~action task =

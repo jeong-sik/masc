@@ -18,9 +18,9 @@
     SSE noise).
 
     Internal: \[submit_request_spec\] (type + builder),
-    \[first_line\] (text helper), \[deliverable_claims_completion\],
     \[warn_contract_gap\], \[on_approve_verification\],
-    \[on_reject_verification\] (no external callers). *)
+    \[on_reject_verification\] (no external callers). Completion-claim
+    detection is delegated to {!Task_completion_claim}. *)
 
 (** {1 Submit phase} *)
 

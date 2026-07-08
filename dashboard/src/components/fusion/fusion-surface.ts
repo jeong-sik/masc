@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
+import type { FusionRunRecord, FusionRunStatusLabel } from '../../api/dashboard'
 import { navigate, replaceRoute, route } from '../../router'
 import { ConnectionStatus } from '../dashboard-shell'
 import {
@@ -16,7 +17,7 @@ import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { RichContent } from '../common/rich-content'
 import { AgentAvatar } from '../overview/agent-avatar'
-import { FusionRunsPanel } from './fusion-runs-panel'
+import { fusionRunStatusText, fusionRunStatusTone } from './fusion-runs-panel'
 import { asRecord, asString, asStringArray } from '../common/normalize'
 import { StatusChip } from '../common/status-chip'
 import { fusionDecisionSpec, type FusionDecisionSpec } from '../v2/fusion-constants'
@@ -392,6 +393,54 @@ function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
       return run ? [run] : []
     })
     .sort((a, b) => timeValue(b.updatedAt) - timeValue(a.updatedAt))
+}
+
+// Registry status ('completed') aligned to the board run status enum ('complete')
+// so the shared status glyph / row styling apply to registry-only rows unchanged.
+function registryToRunStatus(status: FusionRunStatusLabel): FusionRunStatus {
+  return status === 'completed' ? 'complete' : status
+}
+
+// A sidebar run is either a board-sink run (full panel/judge detail) or a
+// registry-only run — an in-progress or just-finished deliberation the registry
+// tracks before a board post exists. They are merged into ONE master list so the
+// surface matches the prototype's 2-pane master/detail instead of stacking a
+// separate registry panel above it.
+type MergedRun =
+  | { kind: 'board'; runId: string; sortTime: number; running: boolean; view: FusionRunView }
+  | { kind: 'registry'; runId: string; sortTime: number; running: boolean; record: FusionRunRecord }
+
+// Dedup key is runId: once a deliberation lands a board post the board entry wins
+// (it carries the detail), so the registry duplicate is dropped. Running rows pin
+// to the top (the live work), then recency — registry startedAt is unix seconds,
+// board updatedAt is an ISO string, so both are normalized to ms before sorting.
+function buildMergedRuns(
+  boardRuns: readonly FusionRunView[],
+  registryRuns: readonly FusionRunRecord[],
+): MergedRun[] {
+  const boardIds = new Set(boardRuns.map(run => run.runId))
+  const merged: MergedRun[] = [
+    ...boardRuns.map((view): MergedRun => ({
+      kind: 'board',
+      runId: view.runId,
+      sortTime: timeValue(view.updatedAt),
+      running: view.status === 'running',
+      view,
+    })),
+    ...registryRuns
+      .filter(record => !boardIds.has(record.runId))
+      .map((record): MergedRun => ({
+        kind: 'registry',
+        runId: record.runId,
+        sortTime: record.startedAt * 1000,
+        running: record.status === 'running',
+        record,
+      })),
+  ]
+  return merged.sort((a, b) => {
+    if (a.running !== b.running) return a.running ? -1 : 1
+    return b.sortTime - a.sortTime
+  })
 }
 
 function formatCost(value: number | null): string {
@@ -886,6 +935,41 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
   `
 }
 
+// Sidebar row for a registry-only run (no board post yet). Reuses the board
+// row's `.fus-row` shell but carries no prompt/decision — the registry record
+// only knows runId, keeper, preset, status, startedAt.
+function FusionRegistryRow({ record, active }: { record: FusionRunRecord; active: boolean }) {
+  const status = registryToRunStatus(record.status)
+  const keeper = record.keeper || 'system'
+  return html`
+    <button
+      type="button"
+      class=${`fus-run-row fus-row registry-only ${active ? 'active sel' : ''} st-${status} ${ringFocusClasses()}`}
+      aria-current=${active ? 'true' : undefined}
+      data-testid="fusion-registry-row"
+      onClick=${() => replaceRoute('fusion', { run_id: record.runId })}
+    >
+      <span class="fus-row-h">
+        <${FusionStatusGlyph} status=${status} />
+        <span class="fus-run-id mono">${record.runId}</span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${record.startedAt} /></span>
+      </span>
+      <span class="fus-row-f">
+        <span class="fus-who static" title=${keeper}>
+          <${AgentAvatar} name=${keeper} size="sm" />
+          <span class="nm">${keeper}</span>
+        </span>
+        <span class="spacer"></span>
+        ${record.status === 'running'
+          ? html`<span class="fus-dec-badge run">심의 중</span>`
+          : record.status === 'failed'
+            ? html`<span class="fus-dec-badge bad">실패</span>`
+            : html`<span class="fus-dec-badge">registry</span>`}
+      </span>
+    </button>
+  `
+}
+
 function findPreset(runId: string): string | null {
   return fusionRuns.value.find(run => run.runId === runId)?.preset ?? null
 }
@@ -1179,13 +1263,55 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   `
 }
 
+// Detail placeholder for a registry-only run: the deliberation is tracked by the
+// registry but has not landed a board post, so there is no panel/judge evidence
+// to render yet. Shows identity + live/failed status instead of fabricating detail.
+function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
+  const status = registryToRunStatus(record.status)
+  const tone = fusionRunStatusTone(record.status)
+  const keeper = record.keeper || 'system'
+  return html`
+    <div class="fus-run-scroll" data-testid="fusion-registry-detail">
+      <div class="fus-run-head">
+        <div class="fus-run-id-row">
+          <${FusionStatusGlyph} status=${status} />
+          <h1 class="mono">${record.runId}</h1>
+          ${record.preset
+            ? html`<span class="fus-preset" title="runtime.toml [fusion.presets.*]">preset · ${record.preset}</span>`
+            : null}
+          <span class=${`fus-status tone-${tone}`}>${fusionRunStatusText(record.status)}</span>
+        </div>
+        <div class="fus-run-by">
+          <${FusionKeeperLink} keeper=${keeper} size="md" />
+          <span class="fus-run-meta"><${TimeAgo} timestamp=${record.startedAt} mode="both" /></span>
+        </div>
+      </div>
+
+      <div class="fus-block">
+        <div class="fus-block-lbl">
+          레지스트리 관측
+          <span class="fus-sub-note">GET /api/v1/dashboard/fusion-runs</span>
+        </div>
+        <div class="fus-judge-wait">
+          ${record.status === 'running'
+            ? html`<span class="fus-rdot run"></span>심의 진행 중 — 패널·심판 상세는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 이 자리에 나타납니다.`
+            : record.status === 'failed'
+              ? html`실패로 종료됨.${record.failureCode ? html` <span class="mono">${record.failureCode}</span>` : null}${record.error ? html` · ${record.error}` : null}`
+              : '완료됨 — 보드 sink 기록을 기다리는 중입니다.'}
+        </div>
+      </div>
+    </div>
+  `
+}
+
 export function FusionSurface() {
   const posts = fusionBoardPosts.value
   const runs = useMemo(() => buildFusionRuns(posts), [posts])
-  const boardError = fusionBoardError.value
   const registryRuns = fusionRuns.value
+  const merged = useMemo(() => buildMergedRuns(runs, registryRuns), [runs, registryRuns])
+  const boardError = fusionBoardError.value
   const selectedRunId = route.value.params.run_id ?? route.value.params.run
-  const selected = runs.find(run => run.runId === selectedRunId) ?? runs[0] ?? null
+  const selected = merged.find(run => run.runId === selectedRunId) ?? merged[0] ?? null
   const registryRunning = registryRuns.filter(run => run.status === 'running').length
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
 
@@ -1213,8 +1339,6 @@ export function FusionSurface() {
           >${fusionBoardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
         </div>
       </header>
-
-      <${FusionRunsPanel} />
 
       ${boardError
         ? html`<div
@@ -1250,22 +1374,26 @@ export function FusionSurface() {
               ? html`<span class="fus-list-live"><span class="fus-rdot run"></span>${registryRunning} 진행</span>`
               : null}
           </div>
-          ${runs.length === 0
-            ? html`<div class="fus-list-scroll"><div class="ov-empty">보드 sink 심의 런이 없습니다</div></div>`
+          ${merged.length === 0
+            ? html`<div class="fus-list-scroll"><div class="ov-empty">심의 런이 없습니다</div></div>`
             : html`
                 <div class="fus-list-scroll">
-                  ${runs.map(run => html`
-                    <${FusionRunRow}
-                      key=${run.runId}
-                      run=${run}
-                      active=${selected?.runId === run.runId}
-                    />
-                  `)}
+                  ${merged.map(run => run.kind === 'board'
+                    ? html`<${FusionRunRow}
+                        key=${run.runId}
+                        run=${run.view}
+                        active=${selected?.runId === run.runId}
+                      />`
+                    : html`<${FusionRegistryRow}
+                        key=${run.runId}
+                        record=${run.record}
+                        active=${selected?.runId === run.runId}
+                      />`)}
                 </div>
               `}
         </aside>
 
-        ${runs.length === 0
+        ${merged.length === 0
           ? html`
               <div class="fus-run-scroll" data-testid="fusion-empty">
                 <div class="fus-block">
@@ -1275,15 +1403,17 @@ export function FusionSurface() {
                   </div>
                   <p class="fus-rec-rationale">
                     ${boardError
-                      ? html`보드 sink read path(<code>${'/api/v1/dashboard/board?sort_by=recent&limit=500'}</code>)가 실패했습니다. 위 레지스트리 패널은 독립 소스이며, 캐시된 보드 sink 행만 상세 리뷰에 표시됩니다.`
-                      : html`레지스트리 상태는 위 패널(<code>/api/v1/dashboard/fusion-runs</code>)에 표시됩니다.
+                      ? html`보드 sink read path(<code>${'/api/v1/dashboard/board?sort_by=recent&limit=500'}</code>)가 실패했습니다. registry 관측(<code>/api/v1/dashboard/fusion-runs</code>)은 독립 소스이며, 캐시된 보드 sink 행만 상세 리뷰에 표시됩니다.`
+                      : html`레지스트리 관측(<code>/api/v1/dashboard/fusion-runs</code>)은 상단 KPI에 집계되고, 진행 중 런은 왼쪽 목록에 표시됩니다.
                         상세한 패널·심판 리뷰는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 나타납니다.`}
                   </p>
                 </div>
               </div>
             `
           : selected
-            ? html`<${FusionRunDetail} run=${selected} />`
+            ? (selected.kind === 'board'
+                ? html`<${FusionRunDetail} run=${selected.view} />`
+                : html`<${FusionRegistryDetail} record=${selected.record} />`)
             : null}
       </div>
     </main>

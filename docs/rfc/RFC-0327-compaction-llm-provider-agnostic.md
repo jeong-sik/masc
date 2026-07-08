@@ -1,4 +1,4 @@
-# RFC-0325: compaction LLM — provider-무관 structured output + 활성화/계측/가시화
+# RFC-0327: compaction LLM — provider-무관 structured output + 활성화/계측/가시화
 
 ## Status
 Draft

@@ -536,7 +536,16 @@ let summary_of_response ~generated_at ~mode (response : Agent_sdk.Types.api_resp
      with
      | Ok json -> parse_json json
      | Error detail ->
-       Error (Printf.sprintf "HITL summary structured response parse failed: %s" detail))
+       (* Dual-path recovery before failing: some native-schema runtimes served
+          over the OpenAI-compatible /v1 transport return the JSON as visible
+          text (optionally fenced) instead of an enforced structured payload.
+          Reuse the [Plain_json_text] extractor on the visible text so those
+          responses parse instead of degrading to the deterministic fallback.
+          Only genuinely empty/non-JSON output falls through to [Error]. *)
+       (match extract_json_object (Agent_sdk_response.text_of_response response) with
+        | Ok json -> parse_json json
+        | Error _ ->
+          Error (Printf.sprintf "HITL summary structured response parse failed: %s" detail)))
   | Plain_json_text ->
     (match extract_json_object (Agent_sdk_response.text_of_response response) with
      | Ok json -> parse_json json

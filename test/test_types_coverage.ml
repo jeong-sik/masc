@@ -1362,14 +1362,34 @@ let test_task_of_yojson_error () =
   | Error _ -> ()
   | Ok _ -> fail "expected Error (missing title)"
 
-(* RFC-0323 G-10 (+ #23661): the typed reclaim claim gate is retired — status
-   alone decides claimability. reclaim_policy / do_not_reclaim_reason survive
-   as operator-facing data only. *)
-let reclaim_pin_task ~id ~task_status ~reclaim_policy : Masc_domain.task = {
-    id;
-    title = "Reclaim pin";
+let test_task_reclaim_gate_ignores_free_text_without_policy () =
+  let t : Masc_domain.task = {
+    id = "task-004";
+    title = "Retryable task";
     description = "";
-    task_status;
+    task_status = Masc_domain.Todo;
+    priority = 1;
+    files = [];
+    created_at = "2024-01-15T12:00:00Z";
+    created_by = None;
+    predecessor_task_id = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 9;
+    reclaim_policy = None;
+    do_not_reclaim_reason = Some "worktree path not found";
+  } in
+  match Masc_domain.task_reclaim_gate t with
+  | Masc_domain.Reclaim_gate_open -> ()
+  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
+    fail ("free text must not block reclaim: " ^ reason)
+
+let test_task_reclaim_gate_blocks_only_typed_policy () =
+  let t : Masc_domain.task = {
+    id = "task-005";
+    title = "Terminal task";
+    description = "";
+    task_status = Masc_domain.Todo;
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
@@ -1378,46 +1398,45 @@ let reclaim_pin_task ~id ~task_status ~reclaim_policy : Masc_domain.task = {
     contract = None;
     handoff_context = None;
     cycle_count = 0;
-    reclaim_policy;
+    reclaim_policy = Some Masc_domain.Block_reclaim;
     do_not_reclaim_reason = Some "operator hard stop";
-  }
+  } in
+  match Masc_domain.task_reclaim_gate t with
+  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
+    check string "reason" "operator hard stop" reason
+  | Masc_domain.Reclaim_gate_open -> fail "typed block policy must close reclaim gate"
 
-let test_task_claim_decision_ignores_reclaim_policy () =
-  (* Todo is claimable even under Block_reclaim... *)
-  (match
-     Masc_domain.task_claim_decision
-       (reclaim_pin_task ~id:"task-004" ~task_status:Masc_domain.Todo
-          ~reclaim_policy:(Some Masc_domain.Block_reclaim))
-   with
-   | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
-   | Masc_domain.Claim_unavailable _ ->
-     fail "Todo must be claimable regardless of reclaim_policy");
-  (* ...and Done is terminal even under Allow_reclaim. *)
-  let done_status =
-    Masc_domain.Done
-      { assignee = "prior"; completed_at = "2024-01-15T12:00:00Z"; notes = None }
-  in
-  match
-    Masc_domain.task_claim_decision
-      (reclaim_pin_task ~id:"task-005" ~task_status:done_status
-         ~reclaim_policy:(Some Masc_domain.Allow_reclaim))
-  with
-  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo (Masc_domain.Done _)) -> ()
-  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
-    fail "Done block must carry the Done status"
-  | Masc_domain.Claim_available _ ->
-    fail "Done must be terminal regardless of reclaim_policy"
 
-let test_task_claim_next_action_ignores_reclaim_policy () =
-  let t =
-    reclaim_pin_task ~id:"task-009" ~task_status:Masc_domain.Todo
-      ~reclaim_policy:(Some Masc_domain.Block_reclaim)
-  in
+
+
+let test_task_claim_next_action_todo_policy_block_still_claims () =
+  (* task-1869 (#23661): reclaim_policy gates Done -> re-claim only. A Todo
+     task carrying Block_reclaim (e.g. an operator hard-stop release) stays
+     claimable; the block re-arms once the task reaches Done. This pin was
+     inverted before #23661 and sat latent-red while main was compile-red. *)
+  let t : Masc_domain.task = {
+    id = "task-009";
+    title = "Operator stop";
+    description = "";
+    task_status = Masc_domain.Todo;
+    priority = 1;
+    files = [];
+    created_at = "2024-01-15T12:00:00Z";
+    created_by = None;
+    predecessor_task_id = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = Some Masc_domain.Block_reclaim;
+    do_not_reclaim_reason = Some "operator hard stop";
+  } in
   match Masc_domain.task_claim_next_action t with
   | Masc_domain.Claim_now ->
     check bool "claimable" true (Masc_domain.task_claim_next_action_is_claimable t)
+  | Masc_domain.Skip_claim (Masc_domain.Claim_block_reclaim_policy _) ->
+    fail "todo task must stay claimable regardless of reclaim_policy (task-1869)"
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
-    fail "Todo must be Claim_now regardless of reclaim_policy"
+    fail "todo task should not be classified as not-todo"
 
 (* ============================================================
    Test Runners
@@ -1671,9 +1690,7 @@ let () =
       test_case "to_yojson" `Quick test_task_to_yojson;
       test_case "of_yojson ok" `Quick test_task_of_yojson_ok;
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
-      test_case "claim decision ignores reclaim policy" `Quick
-        test_task_claim_decision_ignores_reclaim_policy;
-      test_case "claim next action ignores reclaim policy" `Quick
-        test_task_claim_next_action_ignores_reclaim_policy;
+      test_case "claim next action: todo stays claimable under policy block" `Quick
+        test_task_claim_next_action_todo_policy_block_still_claims;
     ];
   ]

@@ -31,17 +31,19 @@ describe('connector vocabulary constants', () => {
 })
 
 describe('isInProcessConnector', () => {
-  it('discord is in-process, external sidecars are not', () => {
+  it('discord and slack are in-process, external sidecars are not', () => {
     expect(isInProcessConnector('discord')).toBe(true)
-    expect(isInProcessConnector('slack')).toBe(false)
+    expect(isInProcessConnector('slack')).toBe(true)
+    expect(isInProcessConnector('telegram')).toBe(false)
+    expect(isInProcessConnector('imessage')).toBe(false)
     expect(isInProcessConnector('unknown')).toBe(false)
   })
 })
 
 describe('sidecarCommands', () => {
   it('uses the known sidecar dir for external connectors', () => {
-    expect(sidecarCommands('slack').start).toBe('cd sidecars/slack-bot && ./run.sh')
-    expect(sidecarCommands('slack').stop).toBe('cd sidecars/slack-bot && ./run.sh stop')
+    expect(sidecarCommands('telegram').start).toBe('cd sidecars/telegram-bot && ./run.sh')
+    expect(sidecarCommands('telegram').stop).toBe('cd sidecars/telegram-bot && ./run.sh stop')
   })
   it('falls back to a derived dir for unknown connectors', () => {
     expect(sidecarCommands('whatsapp').start).toBe('cd sidecars/whatsapp-bot && ./run.sh')

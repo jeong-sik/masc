@@ -15,6 +15,7 @@ import { computed } from '@preact/signals'
 import { tasks } from '../../store'
 import { navigate } from '../../router'
 import type { Task } from '../../types'
+import { sortByPriority } from './goal-helpers'
 
 interface KeeperColumn {
   keeper: string
@@ -50,7 +51,7 @@ const wallColumns = computed<KeeperColumn[]>(() => {
     bucket.push(t)
   }
   for (const list of grouped.values()) {
-    list.sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4))
+    list.sort(sortByPriority)
   }
   const cols: KeeperColumn[] = []
   for (const [keeper, list] of grouped.entries()) {

@@ -1,3 +1,17 @@
+(** {1 Static ADT Classification}
+    RFC-0314 / task-1854: Replace heuristic string-matching predicates with
+    a static ADT that the compiler can exhaustively match. *)
+type error_classification =
+  | Transient_network
+  | Transient_internal_runner
+  | Transient_oas_timeout
+  | Transient_rate_limit
+  | Transient_capacity
+  | Non_transient
+  | Unclassified
+
+val classify_error : Agent_sdk.Error.sdk_error -> error_classification
+
 (** Keeper_error_classify — Error classification, side-effect safety,
     and retry constants for the unified keeper cycle.
 
@@ -10,7 +24,9 @@
 val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when a typed internal runner exception preserves a transient
-    transport failure that was raised inside [runtime_runner.execute]. *)
+    transport failure raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
+    Legacy internal exception envelopes without [transport_error_kind] are
+    diagnostic-only and are not parsed heuristically. *)
 val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when an OAS timeout message describes an execution budget expiry,

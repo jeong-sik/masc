@@ -11,6 +11,11 @@ val state_block_instruction_text : string
 (** Generic STATE formatting instruction for normal keeper turns. Turn-level
     output guards can override this when continuity is runtime-managed. *)
 
+val format_board_event_text : Keeper_world_observation.pending_board_event -> string
+(** Render a single pending board event as its prompt line. Exposed for tests:
+    RFC-0320 W3(a) verifies that an [External_attention] event steers the woken
+    keeper to reply into the originating conversation via keeper_surface_post. *)
+
 (** Build unified system prompt and user message from keeper state.
 
     Returns [(system_prompt, user_message)] where:

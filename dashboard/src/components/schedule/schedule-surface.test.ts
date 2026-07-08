@@ -239,6 +239,11 @@ describe('ScheduleSurface', () => {
     container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
     await flush()
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    // The keeper-lane / background diagnostics are collapsed AND lazy-mounted by
+    // default; open them before asserting their content.
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')).toBeNull()
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-diagnostics-toggle"]')?.click()
+    await flush()
     expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
       .toContain('Keeper Lanes · wake evidence')
     expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)

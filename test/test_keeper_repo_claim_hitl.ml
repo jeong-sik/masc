@@ -73,11 +73,6 @@ let run_git_quiet argv =
 
 let git_available () = run_git_quiet [| "git"; "--version" |] = 0
 
-let canonical_path path =
-  try Unix.realpath path with
-  | Unix.Unix_error _ | Sys_error _ -> path
-;;
-
 let init_git_repo dir url =
   ensure_dir dir;
   Alcotest.(check int) "git init" 0 (run_git_quiet [| "git"; "init"; "-q"; dir |]);
@@ -206,31 +201,7 @@ let test_unregistered_repository_does_not_request_hitl () =
   Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ())
 ;;
 
-let require_one_pending ~keeper_id =
-  match
-    AQ.list_pending_entries ()
-    |> List.filter (fun (entry : AQ.pending_approval) ->
-      String.equal entry.keeper_name keeper_id)
-  with
-  | [ entry ] -> entry
-  | entries ->
-    Alcotest.failf
-      "expected one pending approval for %s, got %d"
-      keeper_id
-      (List.length entries)
-;;
-
-let string_field key json =
-  match Yojson.Safe.Util.member key json with
-  | `String value -> value
-  | other ->
-    Alcotest.failf
-      "expected string field %s, got %s"
-      key
-      (Yojson.Safe.to_string other)
-;;
-
-let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
+let test_unregistered_clone_path_is_sandbox_local_allowed () =
   if not (git_available ()) then Alcotest.skip ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -249,39 +220,18 @@ let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
     let pending_before = AQ.pending_count () in
     let result = Claim.request_path_access ~keeper_id ~base_path ~path:target in
     (match result with
-     | Claim.Access_denied_hitl_pending { detail; approval_id } ->
-       Alcotest.(check bool)
-         "denial mentions unregistered repository"
-         true
-         (contains_substring detail "not-registered");
-       Alcotest.(check bool) "approval id nonempty" true (String.trim approval_id <> "")
-     | Claim.Access_allowed -> Alcotest.fail "expected unregistered denial"
+     | Claim.Access_allowed -> ()
      | Claim.Access_denied detail ->
-       Alcotest.fail ("expected HITL pending denial, got: " ^ detail));
-    Alcotest.(check int) "pending count increments" (pending_before + 1) (AQ.pending_count ());
-    let pending = require_one_pending ~keeper_id in
-    Alcotest.(check string)
-      "requested action"
-      "register_repository"
-      (string_field "requested_action" pending.input);
-    Alcotest.(check string)
-      "policy source"
-      Config_dir_resolver.repositories_toml_basename
-      (string_field "policy_source" pending.input);
-    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
-     | Ok () -> ()
-     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.fail ("sandbox-local clone path denied: " ^ detail)
+     | Claim.Access_denied_hitl_pending _ ->
+       Alcotest.fail "sandbox-local clone path must not create HITL");
+    Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ());
     match Repo_store.find ~base_path "not-registered" with
-    | Error detail -> Alcotest.fail ("approved registration did not persist: " ^ detail)
-    | Ok repo ->
-      Alcotest.(check string) "registered url" "https://github.com/test/not-registered.git" repo.url;
-      Alcotest.(check string)
-        "registered local path"
-        (canonical_path repo_root)
-        repo.local_path)
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "sandbox-local access must not mutate repositories.toml")
 ;;
 
-let test_registration_approval_rechecks_clone_origin () =
+let test_unregistered_clone_origin_change_stays_sandbox_local () =
   if not (git_available ()) then Alcotest.skip ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -297,22 +247,21 @@ let test_registration_approval_rechecks_clone_origin () =
     let target = Filename.concat repo_root "README.md" in
     init_git_repo repo_root "https://github.com/test/not-registered.git";
     write_file target "hello\n";
+    let pending_before = AQ.pending_count () in
     (match Claim.request_path_access ~keeper_id ~base_path ~path:target with
-     | Claim.Access_denied_hitl_pending _ -> ()
-     | Claim.Access_allowed -> Alcotest.fail "expected registration HITL denial"
+     | Claim.Access_allowed -> ()
      | Claim.Access_denied detail ->
-       Alcotest.fail ("expected registration HITL pending denial, got: " ^ detail));
-    let pending = require_one_pending ~keeper_id in
+       Alcotest.fail ("sandbox-local clone path denied: " ^ detail)
+     | Claim.Access_denied_hitl_pending _ ->
+       Alcotest.fail "sandbox-local clone path must not create HITL");
     set_git_origin_url repo_root "https://github.com/test/renamed.git";
-    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
-     | Ok () -> ()
-     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ());
     match Repo_store.find ~base_path "not-registered" with
     | Error _ -> ()
-    | Ok _ -> Alcotest.fail "stale approved registration must not persist")
+    | Ok _ -> Alcotest.fail "sandbox-local access must not mutate repositories.toml")
 ;;
 
-let test_unregistered_clone_matching_existing_remote_requests_alias () =
+let test_unknown_clone_matching_existing_remote_is_sandbox_local () =
   if not (git_available ()) then Alcotest.skip ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -332,35 +281,25 @@ let test_unregistered_clone_matching_existing_remote_requests_alias () =
     let target = Filename.concat repo_root "README.md" in
     init_git_repo repo_root registered.url;
     write_file target "hello\n";
+    let pending_before = AQ.pending_count () in
     let result = Claim.request_path_access ~keeper_id ~base_path ~path:target in
     (match result with
-     | Claim.Access_denied_hitl_pending _ -> ()
-     | Claim.Access_allowed -> Alcotest.fail "expected alias HITL denial"
+     | Claim.Access_allowed -> ()
      | Claim.Access_denied detail ->
-       Alcotest.fail ("expected alias HITL pending denial, got: " ^ detail));
-    let pending = require_one_pending ~keeper_id in
-    Alcotest.(check string)
-      "requested action"
-      "add_repository_alias"
-      (string_field "requested_action" pending.input);
-    Alcotest.(check string)
-      "target repository"
-      "masc"
-      (string_field "target_repository_id" pending.input);
-    Alcotest.(check string) "alias" "masc-mcp" (string_field "alias" pending.input);
-    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
-     | Ok () -> ()
-     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.fail ("sandbox-local clone path denied: " ^ detail)
+     | Claim.Access_denied_hitl_pending _ ->
+       Alcotest.fail "sandbox-local clone path must not create HITL");
+    Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ());
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
 	      Alcotest.(check bool)
-	        "alias persisted"
-	        true
+	        "alias not persisted"
+	        false
 	        (List.exists (String.equal "masc-mcp") repo.aliases))
 	;;
 
-let test_nested_git_root_queues_manual_review_without_alias () =
+let test_nested_git_root_stays_sandbox_local_without_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -381,27 +320,14 @@ let test_nested_git_root_queues_manual_review_without_alias () =
     let target = Filename.concat nested_root "README.md" in
     init_git_repo nested_root registered.url;
     write_file target "nested\n";
+    let pending_before = AQ.pending_count () in
     (match Claim.request_path_access ~keeper_id ~base_path ~path:target with
-     | Claim.Access_denied_hitl_pending _ -> ()
-     | Claim.Access_allowed -> Alcotest.fail "expected manual review HITL denial"
+     | Claim.Access_allowed -> ()
      | Claim.Access_denied detail ->
-       Alcotest.fail ("expected manual review HITL pending denial, got: " ^ detail));
-    let pending = require_one_pending ~keeper_id in
-    Alcotest.(check string)
-      "requested action"
-      "review_repository_catalog"
-      (string_field "requested_action" pending.input);
-    Alcotest.(check string)
-      "expected repo root"
-      expected_repo_root
-      (string_field "expected_repo_root" pending.input);
-    Alcotest.(check string)
-      "git root"
-      (canonical_path nested_root)
-      (string_field "repo_root" pending.input);
-    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
-     | Ok () -> ()
-     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.fail ("sandbox-local nested git root denied: " ^ detail)
+     | Claim.Access_denied_hitl_pending _ ->
+       Alcotest.fail "sandbox-local nested git root must not create HITL");
+    Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ());
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
@@ -411,7 +337,7 @@ let test_nested_git_root_queues_manual_review_without_alias () =
         (List.exists (String.equal "masc-mcp") repo.aliases))
 ;;
 
-let test_alias_approval_rechecks_clone_origin () =
+let test_unknown_clone_origin_change_does_not_persist_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
     AQ.For_testing.reset_audit_store ();
@@ -431,16 +357,15 @@ let test_alias_approval_rechecks_clone_origin () =
     let target = Filename.concat repo_root "README.md" in
     init_git_repo repo_root registered.url;
     write_file target "hello\n";
+    let pending_before = AQ.pending_count () in
     (match Claim.request_path_access ~keeper_id ~base_path ~path:target with
-     | Claim.Access_denied_hitl_pending _ -> ()
-     | Claim.Access_allowed -> Alcotest.fail "expected alias HITL denial"
+     | Claim.Access_allowed -> ()
      | Claim.Access_denied detail ->
-       Alcotest.fail ("expected alias HITL pending denial, got: " ^ detail));
-    let pending = require_one_pending ~keeper_id in
+       Alcotest.fail ("sandbox-local clone path denied: " ^ detail)
+     | Claim.Access_denied_hitl_pending _ ->
+       Alcotest.fail "sandbox-local clone path must not create HITL");
     set_git_origin_url repo_root "https://github.com/jeong-sik/not-masc.git";
-    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
-     | Ok () -> ()
-     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ());
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
@@ -463,24 +388,24 @@ let () =
             `Quick
             test_unregistered_repository_does_not_request_hitl
         ; Alcotest.test_case
-            "unregistered sandbox clone queues registration HITL"
+            "unregistered sandbox clone path is sandbox-local allowed"
             `Quick
-            test_unregistered_clone_requests_hitl_and_approval_registers_repo
+            test_unregistered_clone_path_is_sandbox_local_allowed
         ; Alcotest.test_case
-            "registration approval rechecks clone origin"
+            "unregistered clone origin changes stay sandbox-local"
             `Quick
-            test_registration_approval_rechecks_clone_origin
+            test_unregistered_clone_origin_change_stays_sandbox_local
 	        ; Alcotest.test_case
-	            "clone name mismatch queues alias HITL"
+	            "clone name mismatch stays sandbox-local"
 	            `Quick
-	            test_unregistered_clone_matching_existing_remote_requests_alias
+	            test_unknown_clone_matching_existing_remote_is_sandbox_local
         ; Alcotest.test_case
-            "nested git root queues manual review without alias"
+            "nested git root stays sandbox-local without alias"
             `Quick
-            test_nested_git_root_queues_manual_review_without_alias
+            test_nested_git_root_stays_sandbox_local_without_alias
 	        ; Alcotest.test_case
-	            "alias approval rechecks clone origin"
+	            "origin change does not persist alias"
 	            `Quick
-            test_alias_approval_rechecks_clone_origin
+            test_unknown_clone_origin_change_does_not_persist_alias
         ] )
     ]

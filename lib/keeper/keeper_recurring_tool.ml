@@ -12,42 +12,49 @@ let dispatch ~agent_name ~name ~args =
   let start_time = Time_compat.now () in
   let ok data = Some (make_ok ~tool_name:name ~start_time ~data ()) in
   let err msg = Some (make_err ~tool_name:name ~class_:Workflow_rejection ~start_time msg) in
-  let keeper_name_of_fields fields =
-    match List.assoc_opt "keeper_name" fields with
-    | Some (`String s) -> s
-    | _ -> agent_name
-  in
   let label_exists ~keeper_name ~label =
     list ~keeper_name
     |> List.exists (fun (task : Keeper_recurring.recurring_task) ->
       String.equal task.label label)
   in
+  let reject_keeper_name_field fields =
+    match List.assoc_opt "keeper_name" fields with
+    | Some _ -> Some "masc_recurring tools are caller-bound and do not accept keeper_name"
+    | None -> None
+  in
   match name with
   | "masc_recurring_list" ->
     (match args with
      | `Assoc fields ->
-       let keeper_name = keeper_name_of_fields fields in
-       let tasks = list ~keeper_name in
-       ok (`Assoc [ "tasks", `List (List.map task_to_json tasks) ])
+       (match reject_keeper_name_field fields with
+        | Some msg -> err msg
+        | None ->
+          let tasks = list ~keeper_name:agent_name in
+          ok (`Assoc [ "tasks", `List (List.map task_to_json tasks) ]))
      | _ -> err "masc_recurring_list requires an object argument")
   | "masc_recurring_add" ->
     (match args with
      | `Assoc fields ->
-       let keeper_name = keeper_name_of_fields fields in
-       (match List.assoc_opt "label" fields, List.assoc_opt "interval_sec" fields with
-        | Some (`String label), Some (`Int interval_sec) ->
-          if interval_sec <= 0
-          then err "masc_recurring_add requires interval_sec to be greater than zero"
-          else if label_exists ~keeper_name ~label
-          then err ("Recurring task with label '" ^ label ^ "' already exists for " ^ keeper_name)
-          else (
-            let action = Broadcast label in
-            let task = add ~keeper_name ~label ~interval_sec action in
-            ok (task_to_json task))
-        | None, _ -> err "masc_recurring_add requires a string 'label' field"
-        | _, None -> err "masc_recurring_add requires an int 'interval_sec' field"
-        | Some (`String _), Some _ -> err "interval_sec must be an integer"
-        | _ -> err "masc_recurring_add: invalid field types")
+       (match reject_keeper_name_field fields with
+        | Some msg -> err msg
+        | None ->
+          (match List.assoc_opt "label" fields, List.assoc_opt "interval_sec" fields with
+           | Some (`String label), Some (`Int interval_sec) ->
+             if interval_sec <= 0
+             then err "masc_recurring_add requires interval_sec to be greater than zero"
+             else if label_exists ~keeper_name:agent_name ~label
+             then
+               err
+                 ("Recurring task with label '" ^ label ^ "' already exists for "
+                  ^ agent_name)
+             else (
+               let action = Broadcast label in
+               let task = add ~keeper_name:agent_name ~label ~interval_sec action in
+               ok (task_to_json task))
+           | None, _ -> err "masc_recurring_add requires a string 'label' field"
+           | _, None -> err "masc_recurring_add requires an int 'interval_sec' field"
+           | Some (`String _), Some _ -> err "interval_sec must be an integer"
+           | _ -> err "masc_recurring_add: invalid field types"))
      | _ -> err "masc_recurring_add requires an object argument")
   | "masc_recurring_remove" ->
     (match args with

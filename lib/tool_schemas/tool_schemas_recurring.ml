@@ -12,6 +12,7 @@ Returns task id, label, interval_sec, and enabled status on success. \
 Fails if a task with the same label already exists for this keeper.";
     input_schema = `Assoc [
       ("type", `String "object");
+      ("additionalProperties", `Bool false);
       ("properties", `Assoc [
         ("label", `Assoc [
           ("type", `String "string");
@@ -20,10 +21,6 @@ Fails if a task with the same label already exists for this keeper.";
         ("interval_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Interval in seconds between runs.");
-        ]);
-        ("keeper_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper name (defaults to calling keeper).");
         ]);
       ]);
       ("required", `List [`String "label"; `String "interval_sec"]);
@@ -38,12 +35,8 @@ Returns task id, label, interval_sec, enabled status, last_run_ts, \
 run_count, and failure_count for each task.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc [
-        ("keeper_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Filter by keeper name (defaults to calling keeper).");
-        ]);
-      ]);
+      ("additionalProperties", `Bool false);
+      ("properties", `Assoc []);
     ];
   };
 
@@ -54,6 +47,7 @@ run_count, and failure_count for each task.";
 the calling keeper can be removed. Returns success or not_found error.";
     input_schema = `Assoc [
       ("type", `String "object");
+      ("additionalProperties", `Bool false);
       ("properties", `Assoc [
         ("id", `Assoc [
           ("type", `String "string");

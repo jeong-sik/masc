@@ -95,6 +95,21 @@ let test_tool_dispatch_contract () =
   check_tool_success "list succeeds" list_result;
   let tasks = list_result |> Tool_result.data |> J.member "tasks" |> J.to_list in
   check int "list returns one task" 1 (List.length tasks);
+  let foreign_add =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_add"
+      ~args:
+        (`Assoc
+          [
+            "keeper_name", `String "keeper-b";
+            "label", `String "foreign-write";
+            "interval_sec", `Int 30;
+          ])
+  in
+  check_tool_failure "foreign add override fails" foreign_add;
+  check int "foreign add writes no caller task" 1 (List.length (Rec.list ~keeper_name:"keeper-a"));
+  check int "foreign add writes no target task" 0 (List.length (Rec.list ~keeper_name:"keeper-b"));
   let other_task =
     Rec.add
       ~keeper_name:"keeper-b"
@@ -102,6 +117,13 @@ let test_tool_dispatch_contract () =
       ~interval_sec:60
       (Rec.Broadcast "foreign")
   in
+  let foreign_list =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_list"
+      ~args:(`Assoc [ "keeper_name", `String "keeper-b" ])
+  in
+  check_tool_failure "foreign list override fails" foreign_list;
   let foreign_remove =
     dispatch_tool
       ~agent_name:"keeper-a"

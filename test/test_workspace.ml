@@ -1366,12 +1366,15 @@ let test_submit_and_approve_completes_via_verification () =
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Uses the exported probe identity so this test also pins that the
        constant passes Agent_id validation and is distinct from a plain
-       agent identity, end-to-end through the real FSM. *)
+       agent identity, end-to-end through the real FSM. evidence_refs=[]
+       pins the RFC-0323 Phase A boundary: a task without a strict contract
+       machine-verifies with no evidence (the #23719 gate is strict-scoped). *)
     let result =
       Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
         ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
         ~task_id:"task-001"
-        ~notes:"deterministic evidence satisfied" ~approve_notes:"machine-verified" ()
+        ~notes:"deterministic evidence satisfied" ~approve_notes:"machine-verified"
+        ~evidence_refs:[] ()
     in
     Alcotest.(check bool) "submit+approve ok" true
       (match result with Ok _ -> true | Error _ -> false);
@@ -1403,7 +1406,7 @@ let test_submit_and_approve_rejects_same_identity () =
     let result =
       Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
         ~verifier_name:test_agent_a ~task_id:"task-001"
-        ~notes:"n" ~approve_notes:"a" ()
+        ~notes:"n" ~approve_notes:"a" ~evidence_refs:[] ()
     in
     Alcotest.(check bool) "rejected as not distinct" true
       (match result with
@@ -1423,7 +1426,7 @@ let test_submit_and_approve_rejects_invalid_verifier () =
     let result =
       Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
         ~verifier_name:"probe:bad:double" ~task_id:"task-001"
-        ~notes:"n" ~approve_notes:"a" ()
+        ~notes:"n" ~approve_notes:"a" ~evidence_refs:[] ()
     in
     Alcotest.(check bool) "rejected as invalid verifier" true
       (match result with
@@ -1442,13 +1445,78 @@ let test_submit_and_approve_non_assignee_submit_fails () =
     let result =
       Workspace.submit_and_approve_task_r config ~agent_name:admin_keeper_agent
         ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
-        ~task_id:"task-001" ~notes:"n" ~approve_notes:"a" ()
+        ~task_id:"task-001" ~notes:"n" ~approve_notes:"a" ~evidence_refs:[] ()
     in
     Alcotest.(check bool) "submit failed typed" true
       (match result with
        | Error (Workspace.Machine_verify_submit_failed _) -> true
        | Ok _ | Error _ -> false);
     Alcotest.(check bool) "task still claimed" true
+      (match find_task config "task-001" with
+       | Some { task_status = Masc_domain.Claimed _; _ } -> true
+       | Some _ | None -> false))
+
+(* The #23719 evidence gate, scoped to strict contracts: a strict task
+   machine-verifies when the probe supplies evidence_refs, and fail-closes
+   before any mutation when it does not. *)
+
+let g2_strict_contract : Masc_domain.task_contract =
+  { strict = true
+  ; completion_contract = [ "machine-verifiable deliverable" ]
+  ; required_evidence = []
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  ; evidence_claims = []
+  ; stale_claim_timeout_sec = 0
+  ; links = { operation_id = None; session_id = None }
+  }
+
+let test_submit_and_approve_strict_with_evidence_completes () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task config ~contract:g2_strict_contract
+        ~title:"Strict Probe Task" ~priority:1 ~description:""
+    in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let result =
+      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
+        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
+        ~task_id:"task-001" ~notes:"claims satisfied" ~approve_notes:"machine-verified"
+        ~evidence_refs:[ "file exists: proof.json" ] ()
+    in
+    Alcotest.(check bool) "strict submit+approve ok" true
+      (match result with Ok _ -> true | Error _ -> false);
+    match find_task config "task-001" with
+    | Some { task_status = Masc_domain.Done _; handoff_context; _ } ->
+      (* The approve re-supplies the machine handoff, so the Done record
+         keeps the evidence for audit consumers instead of wiping it. *)
+      Alcotest.(check bool) "Done record carries the machine evidence" true
+        (match handoff_context with
+         | Some ctx -> ctx.evidence_refs = [ "file exists: proof.json" ]
+         | None -> false)
+    | Some _ -> Alcotest.fail "strict task not Done after submit+approve"
+    | None -> Alcotest.fail "task-001 missing")
+
+let test_submit_and_approve_strict_without_evidence_fail_closed () =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task config ~contract:g2_strict_contract
+        ~title:"Strict Probe Task" ~priority:1 ~description:""
+    in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let result =
+      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
+        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
+        ~task_id:"task-001" ~notes:"no evidence" ~approve_notes:"a"
+        ~evidence_refs:[] ()
+    in
+    Alcotest.(check bool) "strict submit without evidence fail-closed" true
+      (match result with
+       | Error (Workspace.Machine_verify_submit_failed _) -> true
+       | Ok _ | Error _ -> false);
+    Alcotest.(check bool) "task unchanged (still claimed)" true
       (match find_task config "task-001" with
        | Some { task_status = Masc_domain.Claimed _; _ } -> true
        | Some _ | None -> false))
@@ -1530,7 +1598,9 @@ let test_strict_task_done_routes_to_submit () =
     in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* Direct done is blocked with the RFC-0308 remediation, even for the owner. *)
+    (* Direct done is blocked and the error names the submit lane — whether
+       the strict evidence gate (no handoff supplied here) or the RFC-0308
+       lifecycle guard fires first, both route to submit_for_verification. *)
     let direct =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Done_action ~notes:"done" ()
@@ -1540,10 +1610,22 @@ let test_strict_task_done_routes_to_submit () =
        Alcotest.(check bool) "error routes to submit_for_verification" true
          (str_contains (Masc_domain.masc_error_to_string e) "submit_for_verification")
      | Ok _ -> Alcotest.fail "strict task completed via direct done");
-    (* The verification lane still completes it. *)
+    (* The verification lane completes it — a strict submit carries evidence
+       (the #23719 gate, strict-scoped). *)
     let submitted =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Submit_for_verification ~notes:"evidence attached" ()
+        ~action:Masc_domain.Submit_for_verification ~notes:"evidence attached"
+        ~handoff_context:
+          { Masc_domain.summary = "evidence attached"
+          ; reason = None
+          ; next_step = None
+          ; failure_mode = None
+          ; reclaim_policy = None
+          ; evidence_refs = [ "tests green: dune runtest" ]
+          ; updated_at = None
+          ; updated_by = None
+          }
+        ()
     in
     Alcotest.(check bool) "submit ok" true
       (match submitted with Ok _ -> true | Error _ -> false);
@@ -2297,6 +2379,10 @@ let () =
         test_submit_and_approve_rejects_invalid_verifier;
       Alcotest.test_case "non-assignee submit fails typed" `Quick
         test_submit_and_approve_non_assignee_submit_fails;
+      Alcotest.test_case "strict + evidence completes, Done keeps evidence" `Quick
+        test_submit_and_approve_strict_with_evidence_completes;
+      Alcotest.test_case "strict without evidence fail-closed pre-mutation" `Quick
+        test_submit_and_approve_strict_without_evidence_fail_closed;
     ];
 
     (* === RFC-0323 G-3: state-keyed completion side effects === *)

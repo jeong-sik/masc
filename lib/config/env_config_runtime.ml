@@ -306,10 +306,10 @@ module Verification = struct
   let timeout_deadline_seconds () =
     get_float ~default:(24.0 *. 60.0 *. 60.0) "MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC"
 
-  (** Interval for verification timeout check fiber (seconds). Default: 60.
-      Issue #7549. *)
-  let timeout_check_interval_seconds =
-    get_float ~default:60.0 "MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC"
+  (* MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC was deleted by RFC-0220 §11
+     PR-3 together with the [verification_timeout] server fork it paced and
+     the [Verification_protocol.check_timeouts] no-op it invoked. The knob
+     row was removed from docs/runtime-tunables.md in the same change. *)
 end
 
 (** {1 Approval Janitor}

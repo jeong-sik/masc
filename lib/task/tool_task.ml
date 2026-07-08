@@ -410,8 +410,8 @@ and handle_transition ~tool_name ~start_time ctx args =
   | None ->
   let evidence_refs =
         match handoff_context with
-        | None -> []
-        | Some h -> h.evidence_refs
+        | Ok h -> h.evidence_refs
+        | Error _ -> []
       in
       let review_gate_rejection =
     if (=) action Masc_domain.Done_action && not force then

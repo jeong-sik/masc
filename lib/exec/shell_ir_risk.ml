@@ -364,15 +364,17 @@ let classify_write_detail (words : string list) : risk_class option =
 
 let repo_hosting_cli_irreversible_ops =
   [
-    (* RFC-0309 W4/G-9 (completing the deferred [pr ready] case): only [merge]
-       is factually irreversible (it writes the base branch history). [ready]
-       toggles a PR between draft and ready-for-review and is reversible via
-       [gh pr ready --undo], so it moves to the reversible table below. Its
-       CI/notification side-effects are an externality (a capability concern,
-       identical to [pr create] which is already Allowed), NOT a reversibility
-       fact — encoding them as R2 here was the same policy-as-risk mistake W4/G-9
-       closed for repo create/fork/discussion. *)
-    ("pr", [ "merge" ]);
+    (* RFC-0309 W4/G-9 + follow-up: [pr] has NO irreversible action. [ready] is
+       reversible ([--undo]); [merge] is reversible too — [git revert] restores
+       the base-branch tree, exactly as a created repo can be deleted. What made
+       [merge] feel R2 ("it writes the base branch / triggers deploys") is a
+       durable-remote externality — a CAPABILITY concern, not a reversibility
+       fact. So [merge] moves to the reversible table and the "keeper may not
+       merge unsupervised" decision lives on the capability axis
+       ([Gh_capability_policy.creates_durable_remote_surface] -> Requires_approval,
+       i.e. non-blocking human approval), mirroring [gh repo create]. Same
+       policy-as-risk correction W4/G-9 applied to repo create/fork/discussion.
+       Operator decision 2026-07-08: gh pr merge -> Ask, not Deny. *)
     (* RFC-0309 W4/G-9: repo create/fork are factually REVERSIBLE (a created or
        forked repo can be deleted), so they move to the reversible table below.
        Only the genuinely irreversible repo ops stay here. This restores the
@@ -398,7 +400,7 @@ let repo_hosting_cli_reversible_mutations =
   [
     ("pr",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock"; "checkout";
-       "unlock"; "ready" ]);
+       "unlock"; "ready"; "merge" ]);
     ("issue",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "lock"; "unlock";
        "develop"; "pin"; "unpin" ]);

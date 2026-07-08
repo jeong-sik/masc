@@ -231,9 +231,38 @@ let test_status_summary_uses_read_only_git_conventions () =
               Alcotest.(check bool)
                 "uses --no-optional-locks" true
                 (contains_substring joined "--no-optional-locks");
-              Alcotest.(check bool)
-                "sets GIT_OPTIONAL_LOCKS env key" true
-                (contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
+	              Alcotest.(check bool)
+	                "sets GIT_OPTIONAL_LOCKS env key" true
+	                (contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
+
+let test_origin_head_branch_preserves_slash_branch () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      (match run_cmd ~cwd:source [ "git"; "branch"; "release/v1" ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git branch release/v1 failed: " ^ e));
+      (match
+         run_cmd
+           ~cwd:source
+           [ "git"; "update-ref"; "refs/remotes/origin/release/v1"; "HEAD" ]
+       with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git update-ref origin/release/v1 failed: " ^ e));
+      (match
+         run_cmd
+           ~cwd:source
+           [ "git"
+           ; "symbolic-ref"
+           ; "refs/remotes/origin/HEAD"
+           ; "refs/remotes/origin/release/v1"
+           ]
+       with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git origin HEAD failed: " ^ e));
+      match Repo_git.origin_head_branch ~local_path:source with
+      | Ok branch -> Alcotest.(check string) "origin HEAD branch" "release/v1" branch
+      | Error e -> Alcotest.fail ("origin_head_branch failed: " ^ e))
 
 let () =
   Alcotest.run "Repo_git"
@@ -248,11 +277,16 @@ let () =
       ( "fetch", [ Alcotest.test_case "returns remotes" `Quick test_fetch ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );
-      ( "status_summary",
-        [
-          Alcotest.test_case "counts porcelain rows" `Quick
-            test_status_summary_counts_porcelain_rows;
-          Alcotest.test_case "uses read-only git conventions" `Quick
-            test_status_summary_uses_read_only_git_conventions;
-        ] );
-    ]
+	      ( "status_summary",
+	        [
+	          Alcotest.test_case "counts porcelain rows" `Quick
+	            test_status_summary_counts_porcelain_rows;
+	          Alcotest.test_case "uses read-only git conventions" `Quick
+	            test_status_summary_uses_read_only_git_conventions;
+	        ] );
+	      ( "origin_head_branch",
+	        [
+	          Alcotest.test_case "preserves slash branch" `Quick
+	            test_origin_head_branch_preserves_slash_branch;
+	        ] );
+	    ]

@@ -179,7 +179,13 @@ let test_registered_repo_outside_advisory_mapping_is_allowed () =
   Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ())
 ;;
 
-let test_unregistered_repository_does_not_request_hitl () =
+let playground_repo_root ~base_path ~keeper_id ~repository_id =
+  Filename.concat
+    base_path
+    (Filename.concat (Playground_paths.repos_path keeper_id) repository_id)
+;;
+
+let test_unregistered_repository_without_clone_does_not_request_hitl () =
   AQ.For_testing.reset_audit_store ();
   Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
   with_temp_base_path @@ fun base_path ->
@@ -202,7 +208,7 @@ let test_unregistered_repository_does_not_request_hitl () =
        (contains_substring detail "not-registered")
    | Claim.Access_allowed -> Alcotest.fail "expected unregistered denial"
    | Claim.Access_denied_hitl_pending _ ->
-     Alcotest.fail "direct repository id request must not create HITL");
+     Alcotest.fail "repository id without clone must not create HITL");
   Alcotest.(check int) "pending count unchanged" pending_before (AQ.pending_count ())
 ;;
 
@@ -228,6 +234,47 @@ let string_field key json =
       "expected string field %s, got %s"
       key
       (Yojson.Safe.to_string other)
+;;
+
+let test_unregistered_repository_id_with_clone_requests_hitl () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "keeper-repo-direct-register" in
+    write_repositories base_path [];
+    let repo_root =
+      playground_repo_root ~base_path ~keeper_id ~repository_id:"not-registered"
+    in
+    init_git_repo repo_root "https://github.com/test/not-registered.git";
+    let pending_before = AQ.pending_count () in
+    let result =
+      Claim.request_repository_access
+        ~keeper_id
+        ~base_path
+        ~repository_id:"not-registered"
+    in
+    (match result with
+     | Claim.Access_denied_hitl_pending { detail; approval_id } ->
+       Alcotest.(check bool)
+         "denial mentions unregistered repository"
+         true
+         (contains_substring detail "not-registered");
+       Alcotest.(check bool) "approval id nonempty" true (String.trim approval_id <> "")
+     | Claim.Access_allowed -> Alcotest.fail "expected unregistered denial"
+     | Claim.Access_denied detail ->
+       Alcotest.fail ("expected HITL pending denial, got: " ^ detail));
+    Alcotest.(check int) "pending count increments" (pending_before + 1) (AQ.pending_count ());
+    let pending = require_one_pending ~keeper_id in
+    Alcotest.(check string)
+      "requested action"
+      "register_repository"
+      (string_field "requested_action" pending.input);
+    Alcotest.(check string)
+      "repo root"
+      (canonical_path repo_root)
+      (string_field "repo_root" pending.input))
 ;;
 
 let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
@@ -360,6 +407,45 @@ let test_unregistered_clone_matching_existing_remote_requests_alias () =
 	        (List.exists (String.equal "masc-mcp") repo.aliases))
 	;;
 
+let test_unregistered_repository_id_clone_matching_existing_remote_requests_alias () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "keeper-repo-direct-alias" in
+    let registered = sample_repo ~base_path "masc" in
+    let registered =
+      { registered with url = "https://github.com/jeong-sik/masc.git"; aliases = [] }
+    in
+    write_repositories base_path [ registered ];
+    let repo_root =
+      playground_repo_root ~base_path ~keeper_id ~repository_id:"masc-mcp"
+    in
+    init_git_repo repo_root registered.url;
+    let result =
+      Claim.request_repository_access
+        ~keeper_id
+        ~base_path
+        ~repository_id:"masc-mcp"
+    in
+    (match result with
+     | Claim.Access_denied_hitl_pending _ -> ()
+     | Claim.Access_allowed -> Alcotest.fail "expected alias HITL denial"
+     | Claim.Access_denied detail ->
+       Alcotest.fail ("expected alias HITL pending denial, got: " ^ detail));
+    let pending = require_one_pending ~keeper_id in
+    Alcotest.(check string)
+      "requested action"
+      "add_repository_alias"
+      (string_field "requested_action" pending.input);
+    Alcotest.(check string)
+      "target repository"
+      "masc"
+      (string_field "target_repository_id" pending.input);
+    Alcotest.(check string) "alias" "masc-mcp" (string_field "alias" pending.input))
+;;
+
 let test_nested_git_root_queues_manual_review_without_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
@@ -459,9 +545,13 @@ let () =
             `Quick
             test_registered_repo_outside_advisory_mapping_is_allowed
         ; Alcotest.test_case
-            "unregistered repository remains fail-closed"
+            "unregistered repository without clone remains fail-closed"
             `Quick
-            test_unregistered_repository_does_not_request_hitl
+            test_unregistered_repository_without_clone_does_not_request_hitl
+        ; Alcotest.test_case
+            "unregistered repository id with clone queues repository HITL"
+            `Quick
+            test_unregistered_repository_id_with_clone_requests_hitl
         ; Alcotest.test_case
             "unregistered sandbox clone queues registration HITL"
             `Quick
@@ -470,17 +560,21 @@ let () =
             "registration approval rechecks clone origin"
             `Quick
             test_registration_approval_rechecks_clone_origin
-	        ; Alcotest.test_case
-	            "clone name mismatch queues alias HITL"
-	            `Quick
-	            test_unregistered_clone_matching_existing_remote_requests_alias
+        ; Alcotest.test_case
+            "clone name mismatch queues alias HITL"
+            `Quick
+            test_unregistered_clone_matching_existing_remote_requests_alias
+        ; Alcotest.test_case
+            "repository id clone name mismatch queues alias HITL"
+            `Quick
+            test_unregistered_repository_id_clone_matching_existing_remote_requests_alias
         ; Alcotest.test_case
             "nested git root queues manual review without alias"
             `Quick
             test_nested_git_root_queues_manual_review_without_alias
-	        ; Alcotest.test_case
-	            "alias approval rechecks clone origin"
-	            `Quick
+        ; Alcotest.test_case
+            "alias approval rechecks clone origin"
+            `Quick
             test_alias_approval_rechecks_clone_origin
         ] )
     ]

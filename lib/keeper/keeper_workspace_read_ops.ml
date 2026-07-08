@@ -69,7 +69,9 @@ let try_handle
       Read_target_policy_response
         (path_error
            ~deterministic_reason:Keeper_tool_deterministic_error.Policy_blocked
-           detail)
+           (* RFC-0330: policy denial detail has no typed rejection — Opaque
+              keeps the string classifier path unchanged. *)
+           (Opaque detail))
     | access_result ->
       Read_target_policy_response
         (Yojson.Safe.to_string

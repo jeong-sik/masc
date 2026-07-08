@@ -344,3 +344,13 @@ module Shell_ir_approval_gate : sig
       operations require explicit approval. Default: [true] (the autonomous
       policy is a strict safety improvement over the no-gate path). *)
 end
+
+(** {1 Shell IR approval policy config (RFC-0254)} *)
+
+module Shell_ir_approval : sig
+  val raw_overlay : unit -> string option
+  (** Single env spec for Shell IR approval trust overlay.
+      See {!Masc_exec.Approval_config.shell_ir_approval_overlay_of_string} for
+      supported values and validation semantics.
+      Returns [None] when unset/blank. *)
+end

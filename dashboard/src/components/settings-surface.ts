@@ -1204,6 +1204,7 @@ export function SettingsSurface() {
   const runtimeRoutingSaving = runtimeRoutingStatus === 'saving'
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
+  const shellIrApproval = runtimeResolution?.shell_ir_approval
   const hasRuntimePathResolution = runtimeResolution !== null
   const hasConfigPathResolution = configResolution !== null
   const hasShellPathResolution = hasRuntimePathResolution || hasConfigPathResolution
@@ -1569,6 +1570,38 @@ export function SettingsSurface() {
                       <${PathTruthRow} label="Workspace path" item=${runtimeResolution?.workspace_path ?? null} />
                       <${PathTruthRow} label="Data root" item=${runtimeResolution?.data_root ?? null} fallback=${concreteConfigValue(dataDirEntry)} />
                       <${PathTruthRow} label="Prompt markdown dir" item=${runtimeResolution?.prompt_markdown_dir ?? null} />
+                      ${shellIrApproval
+                        ? html`
+                          <div class="set-sub-h">Shell IR approval</div>
+                          <${SetRow} label="gate enabled" hint=${shellIrApproval?.env_key ?? 'shell ir approval'}>
+                            <div class="set-truth-value">
+                              <span class="mono">${shellIrApproval.enabled ? 'enabled' : 'disabled'}</span>
+                              <span class="set-truth-source">${shellIrApproval.source ?? 'runtime projection'}</span>
+                            </div>
+                          <//>
+                          <${SetRow} label="override" hint=${shellIrApproval.env_key}>
+                            <div class="set-truth-value">
+                              <span class="mono">${shellIrApproval.raw_overlay ?? 'default (autonomous)'}</span>
+                            </div>
+                          <//>
+                          <${SetRow} label="trust" hint="safe / audited / privileged">
+                            <div class="set-truth-value">
+                              <span class="mono">${shellIrApproval.trust === null
+                                ? 'unknown'
+                                : `${shellIrApproval.trust.safe}/${shellIrApproval.trust.audited}/${shellIrApproval.trust.privileged}`}</span>
+                            </div>
+                          <//>
+                          ${shellIrApproval.reason
+                            ? html`
+                              <${SetRow} label="reason" hint="projection reason">
+                                <div class="set-truth-value">
+                                  <span class="mono">${shellIrApproval.reason}</span>
+                                </div>
+                              <//>
+                            `
+                            : null}
+                        `
+                        : null}
                     `
                     : null}
                   ${hasConfigPathResolution || runtimeConfigPath

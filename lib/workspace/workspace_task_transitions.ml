@@ -93,9 +93,7 @@ let transition_task_outcome_r
           | Masc_domain.Cancel
           | Masc_domain.Release -> Ok ()
           | Masc_domain.Done_action
-          | Masc_domain.Submit_for_verification
-          | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification ->
+          | Masc_domain.Submit_for_verification ->
             (match handoff_context with
              | None ->
                Error
@@ -107,6 +105,20 @@ let transition_task_outcome_r
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                        "Code task submission requires at least one evidence_ref in handoff_context"))
+             | Some _ -> Ok ())
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification ->
+            (match task.handoff_context with
+             | None ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Approve/reject requires task to carry handoff_context with evidence_refs"))
+             | Some ctx when ctx.evidence_refs = [] ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       "Approve/reject requires task to carry at least one evidence_ref"))
              | Some _ -> Ok ())
         in
         let* () =

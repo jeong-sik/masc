@@ -414,20 +414,22 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     expect(chatCss).toContain('@keyframes recwave')
   })
 
-  it('keeps fleet roster pressure and tone indicators backed by live keeper fields', () => {
+  it('keeps the roster card as v2 identity + status + compact time (no per-row context/tool)', () => {
     expect(keeperWorkspaceRosterSource).toContain('data-tone=${tone}')
+    // context_ratio still backs the fleet-summary highContext aggregate, but is
+    // no longer rendered as a per-row bar — the v2 mock keeps the card to
+    // identity + status and shows context in the runtime panel.
     expect(keeperWorkspaceRosterSource).toContain('keeper.context_ratio')
-    expect(keeperWorkspaceRosterSource).toContain('keeper.latest_tool_names')
-    expect(keeperWorkspaceRosterSource).toContain('keeper.recent_tool_names')
-    expect(keeperWorkspaceRosterSource).toContain('keeper.latest_tool_call_count')
-    expect(keeperWorkspaceRosterSource).toContain('class="kw-kp-context"')
-    expect(keeperWorkspaceRosterSource).toContain('class="kw-kp-tool"')
-    expect(keeperWorkspaceRosterSource).toContain('const ROSTER_ROW_ESTIMATED_HEIGHT = 92')
+    expect(keeperWorkspaceRosterSource).not.toContain('class="kw-kp-context"')
+    expect(keeperWorkspaceRosterSource).not.toContain('class="kw-kp-tool"')
+    // Compact top-right time chip ("41분"/"방금"), full label kept in the hover title.
+    expect(keeperWorkspaceRosterSource).toContain('formatCompactAge')
+    expect(keeperWorkspaceRosterSource).toContain('rosterActivityTitle')
+    expect(keeperWorkspaceRosterSource).toContain('const ROSTER_ROW_ESTIMATED_HEIGHT = 69')
     expect(keeperWorkspaceRosterSource).toContain('estimatedItemHeight=${ROSTER_ROW_ESTIMATED_HEIGHT}')
     expect(css).toContain('.kw-kp-row::before')
-    expect(css).toContain('.kw-kp-context-bar')
-    expect(css).toContain('.kw-kp-context-val.hot')
-    expect(css).toContain('.kw-kp-tool-v')
+    expect(css).not.toContain('.kw-kp-context-bar')
+    expect(css).not.toContain('.kw-kp-tool-v')
     expect(mobileRuleDecls('.kw-kp-menu')['max-height']).toBe('min(70dvh, 420px)')
     expect(mobileRuleDecls('.kw-kp-menu')['max-width']).toContain('env(safe-area-inset-right, 0px)')
   })

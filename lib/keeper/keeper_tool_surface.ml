@@ -691,13 +691,29 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
+(** Wrap a persona_crud Yojson result ([ok_assoc]/[error_assoc]) into a
+    [Tool_result.result]. The crud handlers return Yojson for parity with the
+    legacy assoc helpers; the dispatcher wraps it. An [error]/[errors] key
+    marks failure so the caller observes success/failure correctly. *)
+let persona_crud_result ~tool_name (json : Yojson.Safe.t) : Tool_result.result =
+  let is_error =
+    match json with
+    | `Assoc fields ->
+        List.exists (fun (k, _) -> k = "error" || k = "errors") fields
+    | _ -> false
+  in
+  if is_error then
+    Tool_result.make_err ~tool_name ~class_:Workflow_rejection ~start_time:0.0
+      ~data:json ""
+  else Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:json ()
+
 let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
-  | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (Persona_crud.handle_persona_create ctx args))
-  | "masc_persona_update" -> Some (tool_result_with_tool_name ~tool_name:name (Persona_crud.handle_persona_update ctx args))
+  | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (persona_crud_result ~tool_name:name (Persona_crud.handle_persona_create ctx args)))
+  | "masc_persona_update" -> Some (tool_result_with_tool_name ~tool_name:name (persona_crud_result ~tool_name:name (Persona_crud.handle_persona_update ctx args)))
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))

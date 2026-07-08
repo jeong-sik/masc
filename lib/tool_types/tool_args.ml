@@ -52,6 +52,7 @@ let get_int_opt args key = Safe_ops.json_int_opt key args
 let get_float_opt args key = Safe_ops.json_float_opt key args
 let get_bool_opt args key = Safe_ops.json_bool_opt key args
 let get_string_list args key = Safe_ops.json_string_list key args
+let get_string_list_opt args key = Safe_ops.json_string_list_opt key args
 
 (** {1 Standard Error Codes}
 

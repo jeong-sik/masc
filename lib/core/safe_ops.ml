@@ -548,6 +548,12 @@ let json_string_list key json =
       List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l
   | _ -> []
 
+let json_string_list_opt key json =
+  match safe_member key json with
+  | `List l ->
+      Some (List.filter_map (function `String s -> Some s | _ -> None) l)
+  | _ -> None
+
 let json_string_opt key json =
   match safe_member key json with
   | `String s -> Some s

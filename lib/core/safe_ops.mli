@@ -177,6 +177,7 @@ val json_int : ?default:int -> string -> Yojson.Safe.t -> int
 val json_float : ?default:float -> string -> Yojson.Safe.t -> float
 val json_bool : ?default:bool -> string -> Yojson.Safe.t -> bool
 val json_string_list : string -> Yojson.Safe.t -> string list
+val json_string_list_opt : string -> Yojson.Safe.t -> string list option
 val json_string_opt : string -> Yojson.Safe.t -> string option
 val json_int_opt : string -> Yojson.Safe.t -> int option
 val json_float_opt : string -> Yojson.Safe.t -> float option

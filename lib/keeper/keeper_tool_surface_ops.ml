@@ -17,6 +17,7 @@ module Turn = Keeper_turn
 module Status = Keeper_status
 module Persona = Keeper_persona
 module Persona_audit = Keeper_tool_persona_audit
+module Persona_crud = Keeper_tool_persona_crud
 type 'a context = 'a Keeper_types_profile.context = {
   config : Workspace.config;
   agent_name : string;

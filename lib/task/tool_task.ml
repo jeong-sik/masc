@@ -408,7 +408,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time reason
   | None ->
-let evidence_refs =
+  let evidence_refs =
         match handoff_context with
         | Some h -> h.evidence_refs
         | None -> []

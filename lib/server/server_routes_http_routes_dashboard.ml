@@ -1065,6 +1065,73 @@ let add_routes ~sw ~clock router =
          let json = dashboard_governance_tool_events_http_json req in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/governance/approval-mode" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _operator_name _req reqd ->
+           let config = Mcp_server.workspace_config state in
+           let json =
+             Operator_approval.approval_mode_status_json
+               ~base_path:config.base_path
+           in
+           respond_json_value_with_cors request reqd json)
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/governance/approval-mode" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             try
+               let args = Yojson.Safe.from_string body_str in
+               let mode_json =
+                 match args with
+                 | `Assoc fields -> List.assoc_opt "mode" fields
+                 | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null
+                 | `String _ ->
+                   None
+               in
+               match mode_json with
+               | None ->
+                 respond_json_value_with_cors ~status:`Bad_request request reqd
+                   (operator_error_json "mode is required")
+               | Some mode_json ->
+                 (match Operator_approval.parse_approval_mode_json mode_json with
+                  | Error msg ->
+                    respond_json_value_with_cors ~status:`Bad_request request reqd
+                      (operator_error_json msg)
+                  | Ok mode ->
+                    let config = Mcp_server.workspace_config state in
+                    (match
+                       Operator_approval.set_approval_mode
+                         config
+                         ~actor:operator_name
+                         mode
+                     with
+                     | Error msg ->
+                       respond_json_value_with_cors ~status:`Bad_request request reqd
+                         (operator_error_json msg)
+                     | Ok change ->
+                       Dashboard_cache.invalidate_prefix
+                         (Printf.sprintf "governance:%s;" config.base_path);
+                       Sse.broadcast
+                         (`Assoc
+                            [ "type", `String "approval_mode_changed"
+                            ; "mode",
+                              `String (Operator_approval.approval_mode_to_string mode)
+                            ; "previous_mode",
+                              `String
+                                (Operator_approval.approval_mode_to_string
+                                   change.previous)
+                            ; "actor", `String operator_name
+                            ; "changed_at", `String change.changed_at
+                            ]);
+                       respond_json_value_with_cors request reqd
+                         (Operator_approval.approval_mode_change_json change)))
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | Yojson.Json_error msg ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd
+                 (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+         )
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/repository-observation-snapshot" (fun request reqd ->
        Server_dashboard_http.handle_repository_observation_snapshot ~sw ~clock request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->

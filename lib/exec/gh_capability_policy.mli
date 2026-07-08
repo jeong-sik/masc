@@ -79,6 +79,12 @@ val repo_create_contract_rule_of_simple : Shell_ir.simple -> string option
 (** Render a stable [Verdict.Policy_deny] rule for a repo-create command that
     violates {!repo_create_contract_of_simple}. *)
 
+val policy_deny_rule_of_simple : Shell_ir.simple -> string option
+(** Render a stable [Verdict.Policy_deny] rule for gh capability denials that
+    must not enter the approval queue. This includes invalid repo-create
+    contracts and [gh pr merge --admin], which bypasses required merge
+    protections rather than requesting ordinary merge approval. *)
+
 val creates_durable_remote_surface : Gh_verb.t -> bool
 (** G-4 externality axis (risk-independent): [true] when this gh verb creates or
     mutates a durable remote surface whose ownership, lifecycle, and moderation

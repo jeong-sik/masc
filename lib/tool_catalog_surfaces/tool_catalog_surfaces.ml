@@ -75,6 +75,8 @@ let public_mcp_surface_tools =
   ; "masc_keeper_down"
   ; (* Persona authoring is operator-visible. *)
     "masc_persona_list"
+  ; "masc_persona_create"
+  ; "masc_persona_update"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
        operator/client counterpart to existing board comment/vote actions. *)
     "masc_board_post"

@@ -19,6 +19,7 @@ import { ActionButton } from '../common/button'
 import { StatusChip } from '../common/status-chip'
 import { showToast } from '../common/toast'
 import { KeeperLaneInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
+import { KeeperBackgroundPanel } from '../tools/keeper-background-panel'
 import {
   ScheduleAside,
   ScheduledAutomationPanel,
@@ -73,6 +74,7 @@ export function ScheduleSurface() {
   const data = toolsData.value
   const automation = data?.scheduled_automation ?? null
   const waitingInventory = data?.keeper_waiting_inventory ?? null
+  const keeperBackground = data?.keeper_background ?? null
   const loading = toolsLoading.value
   const error = toolsError.value
   const dueEffective = automation?.derived_counts?.due_effective ?? 0
@@ -210,6 +212,11 @@ export function ScheduleSurface() {
         <section class="ov-card mt-4" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
           <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
           <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
+        </section>
+
+        <section class="ov-card mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
+          <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
+          <${KeeperBackgroundPanel} background=${keeperBackground} />
         </section>
 
         ${loading && !automation

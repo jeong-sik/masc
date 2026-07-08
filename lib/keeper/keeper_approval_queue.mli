@@ -47,6 +47,12 @@ type pending_approval =
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; (** Originating chat connector identifier (e.g. "discord",
+       "slack", "dashboard", "test") for the approval request.
+       Threaded into the approval entry so the Hitl_resolved wake
+       can route the resolution back to the original channel.
+       Task-1870 (W2b HITL approval provenance capture). *)
+  ; channel : string option
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry

@@ -401,6 +401,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
       in
+      let channel : string option = None in
       let rule_match =
         if forbidden
         then None
@@ -458,6 +459,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
                ~disposition_reason:"healthy"
                ~rule_match:matched
                ~auto_approved:true
+               ?channel
                ();
              Agent_sdk.Hooks.Approve
            | None ->
@@ -479,6 +481,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
                ~disposition_reason:"waiting_approval"
                ~risk_level
                ?clock
+               ?channel
                ()))
     else Agent_sdk.Hooks.Approve
 ;;

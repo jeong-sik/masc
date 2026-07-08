@@ -172,6 +172,7 @@ let audit_approval_event
       ?rule_match
       ?source_approval_id
       ?auto_approved
+      ?channel
       ?decision
       ()
   =
@@ -455,6 +456,7 @@ let create_entry
       ~audit_base_path
       ~resolver
       ~on_resolution
+      ?channel
       ()
   =
   let action_key = action_key_of_input ~tool_name ~input in
@@ -490,6 +492,7 @@ let create_entry
   ; audit_base_path
   ; resolver
   ; on_resolution
+  ; channel
   }
 ;;
 
@@ -514,6 +517,7 @@ let pending_entry_json_fields
   ; "selected_model", `Null
   ; "disposition", Json_util.string_opt_to_json entry.disposition
   ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason
+  ; "channel", Json_util.string_opt_to_json entry.channel
   ]
   @ (if include_requested_at_iso
      then
@@ -758,6 +762,7 @@ let submit_and_await
       ?disposition_reason
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
+      ?channel
       ()
   : Agent_sdk.Hooks.approval_decision
   =

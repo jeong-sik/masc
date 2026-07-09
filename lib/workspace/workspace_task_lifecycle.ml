@@ -198,11 +198,11 @@ let decide
   | ( Masc_domain.Mark_operator_blocked
     , (Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.Todo
       | Masc_domain.AwaitingVerification _) ) ->
-    ok (Masc_domain.Operator_blocked { blocked_at = now; reason })
+    ok (Masc_domain.Operator_blocked { blocked_at = now; reason; previous_status = task_status })
   | Masc_domain.Mark_operator_blocked, (Masc_domain.Done _ | Masc_domain.Cancelled _) ->
     Error Invalid_transition
   (* ── Unblock ──────────────────────────────────── *)
-  | Masc_domain.Unblock, Masc_domain.Operator_blocked _ -> ok Masc_domain.Todo
+  | Masc_domain.Unblock, Masc_domain.Operator_blocked { previous_status; _ } -> ok previous_status
   | Masc_domain.Unblock, _ -> Error Invalid_transition
   (* ── Release ──────────────────────────────────── *)
   | ( Masc_domain.Release

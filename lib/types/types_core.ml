@@ -320,7 +320,7 @@ type task_status =
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
-  | Operator_blocked of { blocked_at: string; reason: string }
+  | Operator_blocked of { blocked_at: string; reason: string; previous_status: task_status }
 [@@deriving show]
 
 (** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
@@ -431,7 +431,7 @@ let task_status_schema_witnesses : task_status list =
   ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
   ; Cancelled
       { cancelled_by = placeholder; cancelled_at = placeholder; reason = None }
-  ; Operator_blocked { blocked_at = placeholder; reason = placeholder }
+  ; Operator_blocked { blocked_at = placeholder; reason = placeholder; previous_status = Todo }
   ]
 
 let all_task_status_names : string list =
@@ -482,11 +482,12 @@ let task_status_to_yojson = function
         ("cancelled_at", `String cancelled_at);
         ("reason", Json_util.string_opt_to_json reason);
       ]
-  | Operator_blocked { blocked_at; reason } ->
+  | Operator_blocked { blocked_at; reason; previous_status } ->
       `Assoc [
         ("status", `String "operator_blocked");
         ("blocked_at", `String blocked_at);
         ("reason", `String reason);
+        ("previous_status", task_status_to_yojson previous_status);
       ]
 
 let task_status_of_yojson json =
@@ -524,9 +525,15 @@ let task_status_of_yojson json =
               ; reason = opt "reason"
               })
     | "operator_blocked" ->
+        let previous_status =
+          match Json_util.get_string json "previous_status" with
+          | Some s -> task_status_of_yojson (`Assoc [("status", `String s)]) |> Result.value ~default:Todo
+          | None -> Todo
+        in
         Ok (Operator_blocked
               { blocked_at = req "blocked_at"
               ; reason = req "reason"
+              ; previous_status
               })
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)

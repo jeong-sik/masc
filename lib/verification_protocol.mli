@@ -1,15 +1,17 @@
 (** Verification_protocol — task verification FSM transitions
-    (submit -> verdict -> close).
+    (submit -> verdict).
 
-    Three lifecycle phases:
+    Two lifecycle phases:
     + Submit: worker requests verification ({!create_submit_request}
       / {!notify_submit_for_verification} / {!on_submit_for_verification}).
     + Verdict: verifier approves or rejects ({!record_approve_verification}
       / {!notify_approve_verification} for approve;
       {!record_reject_verification} / {!notify_reject_verification} for
       reject).
-    + Close: pending verifications past their TTL transition to
-      reject ({!check_timeouts}).
+
+    There is no timeout close phase: RFC-0220 removed the destructive
+    wall-clock deadline (an AwaitingVerification obligation stays claimable
+    by a verifier; long waits surface from the activity-event stream).
 
     {b record_* vs notify_* split}: \[record_*\] mutates state
     (Verification.ml FSM + journal entries); \[notify_*\] emits SSE
@@ -119,12 +121,3 @@ val notify_reject_verification :
 (** [notify_reject_verification ...] emits the SSE
     [masc/verification/verdict] event with [type=rejected].
     State-free. *)
-
-(** {1 Timeout sweep} *)
-
-val check_timeouts : config:Workspace.config -> unit
-(** [check_timeouts ~config] scans pending verifications and
-    emits operator-visible timeout events for any past their TTL. No-op when
-    [Env_config_runtime.Verification.fsm_enabled ()] is [false]
-    — pinned at the contract seam so disabling the FSM does not
-    silently drop the timeout sweep entirely; it just does nothing. *)

@@ -217,6 +217,55 @@ let test_exec_policy_validate_path_survives_deleted_cwd () =
        Unix.rmdir doomed;
        ignore (Exec_policy.Paths.validate_path "/not-under-tmp-or-workspace"))
 
+(* ── RFC-0324 B-2': playground exec gate = filesystem truth ──────────
+   [keeper_registered_repo_path_allowed] is pinned directly (not through
+   [validate_path]) because CI temp dirs live under [/tmp], where
+   [validate_path]'s /tmp arm would allow everything and mask the repo
+   arm under test. The missing repositories.toml falls back to the
+   single "default" catalog entry, so the "ghost-clone" segment below is
+   deterministically NOT catalog-registered — pre-B-2' the gate rejected
+   it; the filesystem-truth gate admits the existing clone and still
+   rejects a nonexistent one (fail-closed). *)
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path) then begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let playground_repo_path base segments =
+  List.fold_left Filename.concat base ([ ".masc"; "playground" ] @ segments)
+
+let test_b2_playground_clone_allowed_without_catalog_entry () =
+  with_temp_dir "exec-b2-clone-" @@ fun base ->
+  let repo_root = playground_repo_path base [ "kp"; "repos"; "ghost-clone" ] in
+  mkdir_p repo_root;
+  assert (
+    Exec_policy.Paths.keeper_registered_repo_path_allowed ~keeper_id:"kp"
+      ~base_path:base
+      (Filename.concat repo_root "src/main.ml"))
+
+let test_b2_playground_missing_clone_rejected () =
+  with_temp_dir "exec-b2-ghost-" @@ fun base ->
+  mkdir_p (playground_repo_path base [ "kp"; "repos" ]);
+  assert (
+    not
+      (Exec_policy.Paths.keeper_registered_repo_path_allowed ~keeper_id:"kp"
+         ~base_path:base
+         (Filename.concat
+            (playground_repo_path base [ "kp"; "repos"; "nonexistent" ])
+            "x.txt")))
+
+let test_b2_outside_playground_still_rejected () =
+  (* RFC-0324 line 86: the playground/sandbox boundary is the invariant the
+     filesystem flip must not loosen — a path resolving to no repository
+     stays rejected by this arm regardless of what exists on disk. *)
+  with_temp_dir "exec-b2-outside-" @@ fun base ->
+  assert (
+    not
+      (Exec_policy.Paths.keeper_registered_repo_path_allowed ~keeper_id:"kp"
+         ~base_path:base "/definitely/not/a/repo/path"))
+
 (* ── runner ──────────────────────────────────────────────────────── *)
 
 let () =
@@ -241,4 +290,7 @@ let () =
   test_playground_sibling_rejected ();
   test_worktrees_sibling_rejected ();
   test_exec_policy_validate_path_survives_deleted_cwd ();
+  test_b2_playground_clone_allowed_without_catalog_entry ();
+  test_b2_playground_missing_clone_rejected ();
+  test_b2_outside_playground_still_rejected ();
   print_endline "test_keeper_tool_policy_paths: all assertions passed"

@@ -1380,6 +1380,24 @@ let run_keeper_msg_turn_admitted
                     Ids.Turn_ref.to_yojson turn_ref );
                 ]
               in
+              (* W3c: deterministic HITL continuation delivery — fire-and-forget
+                 the response back to the originating channel when a
+                 continuation_channel was captured.  Errors are logged but do
+                 not block or fail the turn. *)
+              (match continuation_channel with
+               | Some channel ->
+                 (try
+                    Keeper_continuation_delivery.deliver_continuation
+                      ~config:ctx.config
+                      ~agent_name:meta.name
+                      ~continuation_channel:channel
+                      ~text:result.response_text
+                      ()
+                  with exn ->
+                    Log.Keeper.warn
+                      "continuation delivery failed after keeper_msg turn: %s"
+                      (Printexc.to_string exn))
+               | None -> ());
               tool_result_ok (Yojson.Safe.to_string reply_json)
 
 ))))))))

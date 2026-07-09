@@ -1593,6 +1593,61 @@ let () = test "handle_transition_verifier_blocks_non_verdict_actions" (fun () ->
   assert_task_todo ctx;
   assert (Planning_eio.get_current_task ctx.config = None))
 
+(* Gate 0: submit_for_verification rejects empty evidence_refs *)
+let () = test "gate0_submit_rejects_empty_evidence_refs" (fun () ->
+  let ctx = make_test_ctx () in
+  let task_id = "task-gate0-" ^ string_of_int (Random.int 100000) in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Gate 0 test task") ])
+  in
+  (* Submit without handoff_context → evidence_refs will be [] *)
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String task_id);
+          ("action", `String "submit_for_verification");
+          ("notes", `String "Gate 0 test — should fail");
+        ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message result) "evidence_refs is required"))
+
+(* Gate 0: submit_for_verification accepts non-empty evidence_refs *)
+let () = test "gate0_submit_accepts_evidence_refs" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Gate 0 test task with evidence") ])
+  in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "submit_for_verification");
+          ("notes", `String "with evidence");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "has evidence");
+                ( "evidence_refs",
+                  `List [ `String "test/fixtures/sample.txt" ] );
+              ] );
+        ])
+  in
+  (* Should NOT be rejected by Gate 0 — it has evidence_refs.
+     May still fail downstream for other reasons. *)
+  let msg = Tool_result.message result in
+  if Tool_result.is_success result
+  then ()
+  else
+    (* If it fails, it should NOT be because of empty evidence_refs *)
+    assert (not (str_contains msg "evidence_refs is required")))
+
 let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
   register_test_keeper ctx ~keeper_name:"verifier" ~agent_name:"verifier"

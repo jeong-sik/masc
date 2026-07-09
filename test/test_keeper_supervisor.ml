@@ -3061,6 +3061,76 @@ let test_sweep_auto_resumes_registered_paused_entry () =
       check bool "auto-resume wakes existing keeper fiber" true
         (Atomic.get entry.Reg.fiber_wakeup))
 
+(* Test: Phase-3 prune of a stale paused meta file also unregisters the
+   registry entry. Without the unregister, the surviving entry is a ghost:
+   still a board-wake candidate (Paused is accepted by
+   [board_signal_entry_is_wakeup_candidate]) with no durable meta behind it,
+   and any later [write_meta] through it resurrects the pruned file at
+   meta_version=1 (RFC-0334 W3 census #23837, freshness caveat 1). Mirrors
+   [keeper_down]'s remove_meta branch, which pairs [Sys.remove] with
+   [unregister]. *)
+let test_prune_stale_paused_meta_unregisters_entry () =
+  ensure_test_runtime ();
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "stale-paused-prune" in
+      write_keeper_toml config_dir ~name;
+      (* Two days ago: past the 24h [paused_cleanup_ttl_sec] default, and
+         [auto_resume_after_sec = None] keeps Phase 3.5 auto-resume out of
+         the picture (operator pauses are never auto-resumed). *)
+      let two_days_ago =
+        let t = Unix.gmtime (Unix.time () -. 172800.0) in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+          t.tm_hour t.tm_min t.tm_sec
+      in
+      let stale_meta =
+        { (make_meta name) with
+          paused = true;
+          auto_resume_after_sec = None;
+          updated_at = two_days_ago;
+        }
+      in
+      (match Keeper_meta_store.write_meta config stale_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let _entry = Reg.register ~base_path:config.base_path name stale_meta in
+      (match Reg.dispatch_event ~base_path:config.base_path name KSM.Operator_pause with
+       | Ok _ -> ()
+       | Error err ->
+           fail
+             ("precondition: Operator_pause failed: "
+              ^ KSM.transition_error_to_string err));
+      let meta_path = Keeper_types_profile.keeper_meta_path config name in
+      check bool "precondition: meta file on disk" true (Sys.file_exists meta_path);
+      check bool "precondition: registered" true
+        (Reg.is_registered ~base_path:config.base_path name);
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      check bool "stale paused meta file pruned" false (Sys.file_exists meta_path);
+      check bool "pruned keeper unregistered (no ghost wake candidate)" false
+        (Reg.is_registered ~base_path:config.base_path name))
+
 (* Test: operator-paused keeper ([auto_resume_after_sec = None]) is NOT
    auto-resumed by the sweep — only the human can clear it. *)
 let test_operator_pause_not_auto_resumed () =
@@ -3806,6 +3876,8 @@ let () =
         test_sweep_auto_resumes_after_backoff;
       test_case "sweep auto-resumes registered paused keeper in registry" `Quick
         test_sweep_auto_resumes_registered_paused_entry;
+      test_case "prune of stale paused meta unregisters the registry entry" `Quick
+        test_prune_stale_paused_meta_unregisters_entry;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
       test_case "turn timeout blocker without resume policy is auto-recoverable"

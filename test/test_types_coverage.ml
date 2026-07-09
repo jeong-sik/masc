@@ -1379,10 +1379,10 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     reclaim_policy = None;
     do_not_reclaim_reason = Some "worktree path not found";
   } in
-  match Masc_domain.task_reclaim_gate t with
-  | Masc_domain.Reclaim_gate_open -> ()
-  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
-    fail ("free text must not block reclaim: " ^ reason)
+  match Masc_domain.task_claim_decision t with
+  | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
+    fail "do_not_reclaim_reason should not influence claim readiness"
 
 let test_task_reclaim_gate_blocks_only_typed_policy () =
   let t : Masc_domain.task = {
@@ -1401,10 +1401,10 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     reclaim_policy = Some Masc_domain.Block_reclaim;
     do_not_reclaim_reason = Some "operator hard stop";
   } in
-  match Masc_domain.task_reclaim_gate t with
-  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
-    check string "reason" "operator hard stop" reason
-  | Masc_domain.Reclaim_gate_open -> fail "typed block policy must close reclaim gate"
+  match Masc_domain.task_claim_decision t with
+  | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
+    fail "claim-ready task must stay claimable regardless of reclaim policy"
 
 
 

@@ -300,6 +300,7 @@ let valid_next_actions
         ~authority
         ~notes:""
         ~reason:""
+        ~system_gate_exempt:false
     with
     | Ok _ -> true
     | Error _ -> false

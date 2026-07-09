@@ -855,7 +855,7 @@ let review
            ; fallback_reason = None
            }
        | None ->
-         if operator_override then begin
+         if operator_override then
            emit
              { verdict = Approve
              ; evaluator_runtime
@@ -863,7 +863,7 @@ let review
              ; gate = Fallback
              ; fallback_reason = Some "operator override: shared-account self-approval deadlock"
              }
-         end else begin
+         else
            (* Gate 3: LLM review via evaluator runtime (structured tool output, ADR D3) *)
          let prompt =
            build_prompt
@@ -1097,5 +1097,5 @@ let review
                   ; generator_runtime
                   ; gate = Fallback
                   ; fallback_reason = Some msg
-                  })))) end
+                  }))))
 ;;

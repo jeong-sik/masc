@@ -168,6 +168,7 @@ let transition_task_outcome_r
               ~action
               ~now
               ~authority
+              ~system_gate_exempt:false
               ~notes
               ~reason
           with

@@ -365,8 +365,12 @@ let check_write ~requires_source_snapshot ~tool_name ~author ~target_post_id ~co
   let has_snapshot_arg = Option.is_some (assoc_opt "source_post_snapshot" args) in
   let snapshot = source_snapshot_arg args in
   let artifact_refs = artifact_refs_arg args in
+  let target_high_risk =
+    Board_claim_evidence.post_has_high_risk_evidence target_post_id
+  in
   let high_risk =
     claims <> [] || unknown_claims <> [] || has_snapshot_arg || artifact_refs <> []
+    || target_high_risk
   in
   if not high_risk
   then Ok ()

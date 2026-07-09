@@ -713,17 +713,15 @@ let review
       ?(completion_contract : string list option)
       ?(required_evidence = [])
       ?(verify_gate_evidence = [])
-      ?(on_verdict : (review_result -> unit) option)
+      ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(few_shot_block = "")
       ?(operator_override : bool = false)
-      ?(sw : Eio.Switch.t option)
+      ?(sw : Eio.Switch.t option = None)
       (req : review_request)
   : review_result
   =
   let emit result =
-    (match on_verdict with
-     | Some f -> f result
-     | None -> ());
+    on_verdict result;
     result
   in
 

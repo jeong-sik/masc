@@ -328,7 +328,7 @@ val set_approval_resolution_wake_hook :
    keeper_name:string ->
    approval_id:string ->
    decision:Keeper_event_queue.hitl_resolution_decision ->
-   ?channel:Keeper_continuation_channel.t ->
+   ?channel:Keeper_continuation_channel.t option ->
    unit) ->
   unit
 

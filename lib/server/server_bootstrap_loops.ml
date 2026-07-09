@@ -517,7 +517,7 @@ let start_keeper_loops
       ~keeper_name
       ~approval_id
       ~decision
-      ?(channel : Keeper_continuation_channel.t option) ->
+      ?channel ->
        let resolution =
          Keeper_event_queue.
            {

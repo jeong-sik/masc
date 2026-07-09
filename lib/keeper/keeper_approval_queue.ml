@@ -846,14 +846,12 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
-     ?channel:Keeper_continuation_channel.t ->
+     ?channel:Keeper_continuation_channel.t option ->
      unit)
     ref =
   ref
     (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_
-      ?(channel : Keeper_continuation_channel.t option) ->
-      ignore (channel : Keeper_continuation_channel.t option))
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ?channel:_ -> ())
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
@@ -927,7 +925,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ~keeper_name:entry.keeper_name
     ~approval_id:entry.id
     ~decision:(hitl_resolution_decision_of_approval_decision decision)
-    ?channel:entry.channel;
+    ~channel:entry.channel;
   try
     Sse.broadcast
       (`Assoc
@@ -1522,7 +1520,7 @@ let expire_stale ~max_wait_s =
          ~keeper_name:entry.keeper_name
          ~approval_id:id
          ~decision:Keeper_event_queue.Hitl_rejected
-         ?channel:entry.channel;
+         ~channel:entry.channel;
        (match entry.resolver with
         | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
         | None -> ());

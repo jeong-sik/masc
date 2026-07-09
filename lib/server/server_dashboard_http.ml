@@ -589,7 +589,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
             match task.task_status with
             | Todo -> todo + 1, claimed, running, done_count, cancelled
             | Claimed _ -> todo, claimed + 1, running, done_count, cancelled
-            | InProgress _ | AwaitingVerification _ ->
+            | InProgress _ | AwaitingVerification _ | Operator_blocked _ ->
               todo, claimed, running + 1, done_count, cancelled
             | Done _ -> todo, claimed, running, done_count + 1, cancelled
             | Cancelled _ -> todo, claimed, running, done_count, cancelled + 1)

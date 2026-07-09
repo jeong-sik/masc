@@ -40,11 +40,12 @@ val adapter_loop :
   channel:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   ?base_url:string ->
+  ?on_send_result:((unit, error) result -> unit) ->
   unit ->
   unit
-(** [adapter_loop ~token ~channel ~events ?base_url ()] blocks on the event
-    stream until [Run_finished] or [Error], then sends the accumulated
-    text (or error message) to the given Slack channel.
+(** [adapter_loop ~token ~channel ~events ?base_url ?on_send_result ()]
+    blocks on the event stream until [Run_finished] or [Error], then sends
+    the accumulated text (or error message) to the given Slack channel.
 
     Rich events ([Link_block], [Image_block], [Audio_block],
     [Tool_context_block]) are rendered as Slack Block Kit sections and
@@ -54,6 +55,11 @@ val adapter_loop :
 
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.
+
+    [on_send_result] is invoked once per outbound attempt with the send
+    outcome, so callers (e.g. the connector gateway) can record delivery
+    observability without this adapter depending on any metric sink. It
+    defaults to a no-op to preserve existing behavior.
 
     The loop exits after one turn. *)
 

@@ -512,16 +512,8 @@ let start_keeper_loops
      Keeper_world_observation -> Keeper_approval_queue dependency cycle. Mirrors
      the Fusion_completed/Bg_completed async-completion wakes. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
-    (fun ~base_path ~keeper_name ~approval_id ~decision ~continuation_channel ->
-       let resolution =
-         Keeper_event_queue.
-           { approval_id
-           ; decision
-           (* RFC-0320 W2b: carry the submission-time continuation channel on
-              the HITL wake. W3 owns delivery/re-engagement. *)
-           ; channel = continuation_channel
-           }
-       in
+    (fun ~base_path ~keeper_name ~approval_id ~decision ?channel ->
+       let resolution = Keeper_event_queue.{ approval_id; decision; channel } in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
        let stimulus : Keeper_event_queue.stimulus =
          { Keeper_event_queue.post_id = Keeper_event_queue.hitl_resolution_post_id resolution
@@ -1107,32 +1099,35 @@ let start_keeper_loops
                              keeper_name (Printexc.to_string exn))
                          (fun () ->
                            Keeper_chat_slack.adapter_loop ~token
-                             ~channel ~events ())
+                             ~channel ~events
+                             ~on_send_result:(fun result ->
+                               Slack_observability.record_reply
+                                 (match result with
+                                  | Ok () -> Slack_observability.Reply_send_ok
+                                  | Error _ ->
+                                      Slack_observability.Reply_send_failed))
+                             ())
                    | None ->
-                       Log.Keeper.warn
+                       Log.Keeper.error
                          "keeper_chat_consumer: \
-                          SLACK_BOT_TOKEN not set, \
-                          skipping Slack delivery for keeper=%s"
+                          SLACK_BOT_TOKEN not set; \
+                          Slack delivery skipped for keeper=%s \
+                          (queued reply will not be delivered)"
                          keeper_name));
              (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
                 line recorded at the gate inbound boundary before the message was
                 enqueued, so the turn records the assistant reply only and does
                 not re-write the user line. Dashboard-source queue messages have
                 no upstream recorder, so the turn records both sides. *)
-	             let connector_user_line_recorded_upstream =
-	               match queued_message.source with
-	               | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
-	               | Keeper_chat_queue.Dashboard -> false
-	             in
-             let continuation_channel =
-               Keeper_chat_queue.continuation_channel_of_message_source
-                 ~dashboard_thread_id:thread_id
-                 queued_message.source
+             let connector_user_line_recorded_upstream =
+               match queued_message.source with
+               | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
+               | Keeper_chat_queue.Dashboard -> false
              in
-	             process_single_turn ~connector_user_line_recorded_upstream
-	               ~state ~clock ~sw ~auth_token:None
-	               ~thread_id ~continuation_channel ~closed ~client_disconnects:None ~payload ~run_id ~message_id
-	               ~agent_name ~events)
+             process_single_turn ~connector_user_line_recorded_upstream
+               ~state ~clock ~sw ~auth_token:None
+               ~thread_id ~closed ~client_disconnects:None ~payload ~run_id ~message_id
+               ~agent_name ~events)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

@@ -249,7 +249,8 @@ let send_message ~token ~channel ~content =
 
 let add_block acc block = block :: acc
 
-let adapter_loop ~token ~channel ~events ?base_url () =
+let adapter_loop ~token ~channel ~events ?base_url
+    ?(on_send_result = fun _ -> ()) () =
   let rec loop ~acc_text ~acc_blocks ~run_id_opt =
     match Keeper_chat_events.subscribe events with
     | Text_delta text ->
@@ -262,14 +263,12 @@ let adapter_loop ~token ~channel ~events ?base_url () =
             ~event_blocks:(List.rev acc_blocks)
         in
         if String.length acc_text > 0 || List.length blocks > 0 then
-          ignore
-            (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks
-              : (unit, error) result);
+          on_send_result
+            (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks);
         ()
     | Event_error { message } ->
-        ignore
-          (send_message ~token ~channel ~content:("Keeper error: " ^ message)
-            : (unit, error) result);
+        on_send_result
+          (send_message ~token ~channel ~content:("Keeper error: " ^ message));
         ()
     | Run_started { run_id; thread_id = _ } ->
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
@@ -290,12 +289,11 @@ let adapter_loop ~token ~channel ~events ?base_url () =
     | Oas_media_delta _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Oas_stream_protocol_error error ->
-        ignore
+        on_send_result
           (send_message ~token ~channel
              ~content:
                ("Keeper stream protocol: "
-                ^ Keeper_chat_events.stream_protocol_error_summary error)
-            : (unit, error) result);
+                ^ Keeper_chat_events.stream_protocol_error_summary error));
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Tool_call_start _ | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt

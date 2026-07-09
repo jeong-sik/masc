@@ -664,15 +664,22 @@ let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
        subcommand past leading value-taking global flags, so [gh --repo O/R pr
        view] is read as [Pr/view] (Allowed) rather than [Gh_verb.Other] (Ask).
        Falls back to the word-list [Gh_verb.classify] only for the [Generic]
-       escape hatch (non-literal argv), preserving prior behavior there. The
-       typed parser preserves the [Api]/[gh api graphql] identity, so the graphql
-       opacity fail-closed below still fires (RFC-0208). *)
+       escape hatch (non-literal argv), preserving prior behavior there.
+
+       The RFC-0208 graphql opacity check also consults the word-list
+       classifier.  That deliberately preserves fail-closed behavior for valid
+       gh api boolean flags that the typed parser does not model (for example
+       [gh api --paginate graphql --input body.json]): such flags must not hide
+       the [graphql] endpoint from the approval gate. *)
+    let words_verb = Gh_verb.classify words in
     let verb =
       match Shell_ir_risk.gh_verb_of_simple simple with
       | Some v -> v
-      | None -> Gh_verb.classify words
+      | None -> words_verb
     in
-    if is_graphql_api verb && graphql_query_body_is_opaque simple.Shell_ir.args
+    if
+      (is_graphql_api verb || is_graphql_api words_verb)
+      && graphql_query_body_is_opaque simple.Shell_ir.args
     then Some Requires_approval
     else Some (disposition_of_words words verb))
   | Some _ | None -> None

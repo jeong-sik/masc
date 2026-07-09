@@ -17,7 +17,8 @@ let can_review_completion ~(task_opt : Masc_domain.task option) ~(agent_name : s
        | Masc_domain.Todo
        | Masc_domain.AwaitingVerification _
        | Masc_domain.Done _
-       | Masc_domain.Cancelled _ -> false)
+       | Masc_domain.Cancelled _
+       | Masc_domain.Operator_blocked _ -> false)
   | None -> false
 
 let persisted_completion_contract ~(task_opt : Masc_domain.task option) =

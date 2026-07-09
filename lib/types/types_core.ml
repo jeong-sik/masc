@@ -682,7 +682,8 @@ let task_claim_decision (task : task) =
      claiming wipes it). *)
   | Claimed _
   | InProgress _
-  | Cancelled _ ->
+  | Cancelled _
+  | Operator_blocked _ ->
     Claim_unavailable (Claim_block_not_todo task.task_status)
 ;;
 

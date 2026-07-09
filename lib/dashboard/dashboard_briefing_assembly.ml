@@ -288,6 +288,9 @@ let task_operation_status (task : Masc_domain.task) =
   (* RFC-0323 G-6: awaiting verification is the normal completion lane,
      not a pause — the operation is still moving (verifier's turn). *)
   | Masc_domain.AwaitingVerification _ -> Some "active"
+  (* Operator_blocked is a suspended state — surface it as "paused" (closest
+     existing dashboard vocabulary) until a dedicated "blocked" class is added. *)
+  | Masc_domain.Operator_blocked _ -> Some "paused"
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
 let task_operation_updated_at (task : Masc_domain.task) =
@@ -297,6 +300,7 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.InProgress { started_at; _ } -> started_at
   | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Operator_blocked { blocked_at; _ } -> blocked_at
   | Masc_domain.Todo -> task.created_at
 
 let task_operation_links (task : Masc_domain.task) =

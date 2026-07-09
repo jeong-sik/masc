@@ -33,7 +33,8 @@ let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.ba
          | InProgress _
          | AwaitingVerification _
          | Done _
-         | Cancelled _ -> None)
+         | Cancelled _
+         | Operator_blocked _ -> None)
   |> List.sort_uniq String.compare
 ;;
 
@@ -117,7 +118,8 @@ let claim_task_r config ~agent_name ~task_id ()
            | InProgress _
            | AwaitingVerification _
            | Done _
-           | Cancelled _ -> Ok ()
+           | Cancelled _
+           | Operator_blocked _ -> Ok ()
          in
          (* fold_left to find+transform in a single pass without mutable refs.
          Uses polymorphic variants for inline state tracking. *)

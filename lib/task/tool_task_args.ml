@@ -93,7 +93,7 @@ let transition_action_requires_summary : Masc_domain.task_action -> bool =
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->
     true
-  | Masc_domain.Claim | Masc_domain.Start ->
+  | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Mark_operator_blocked | Masc_domain.Unblock ->
     false
 
 let parse_handoff_context ~(agent_name : string)

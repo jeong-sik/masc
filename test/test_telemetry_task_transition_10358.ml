@@ -78,7 +78,9 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
         Telemetry_eio.track_task_completed config ~task_id ~duration_ms:0 ~success:false
       | Masc_domain.Release
       | Masc_domain.Submit_for_verification
-      | Masc_domain.Reject_verification -> ());
+      | Masc_domain.Reject_verification
+      | Masc_domain.Mark_operator_blocked
+      | Masc_domain.Unblock -> ());
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_default_runtime;

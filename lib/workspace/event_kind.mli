@@ -27,6 +27,8 @@ module Task : sig
     | Approved
     | Rejected
     | Linked
+    | Operator_blocked
+    | Unblocked
 
   val to_string : t -> string
   (** Canonical dotted-form wire name ([task.claimed] etc.). *)

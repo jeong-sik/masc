@@ -66,6 +66,11 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
            (Printf.sprintf
               "task %s is awaiting verification by %s; approve or reject before marking done"
               task_id assignee)))
+    | Masc_domain.Operator_blocked _ ->
+      Some
+        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
+           (Printf.sprintf
+              "task %s is operator-blocked; unblock before marking done" task_id)))
 
 (* Verification is owned solely by [Task_completion_gate], applied upstream in
    [Tool_task.handle_transition]. This per-action layer formerly ran a second

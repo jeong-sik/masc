@@ -157,6 +157,21 @@ let task_status_info_of_task (task : Masc_domain.task) =
         cancelled_at = None;
         reason = None;
       }
+  | Masc_domain.Operator_blocked { blocked_at; reason } ->
+      (* No dedicated GraphQL field yet; surface the block timestamp via
+         started_at and the operator reason via reason until a blocked_at field
+         is added to task_status_info. *)
+      {
+        status;
+        assignee = None;
+        claimed_at = None;
+        started_at = Some blocked_at;
+        completed_at = None;
+        notes = None;
+        cancelled_by = None;
+        cancelled_at = None;
+        reason = Some reason;
+      }
 
 let page_info_typ =
   Schema.obj "PageInfo"

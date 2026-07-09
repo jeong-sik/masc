@@ -48,7 +48,8 @@ let task_is_unclaimed_todo (task : Masc_domain.task) =
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ ->
+  | Masc_domain.Cancelled _
+  | Masc_domain.Operator_blocked _ ->
     false
 
 type claim_goal_scope = {
@@ -140,10 +141,11 @@ let task_is_blocked (task : Masc_domain.task) =
      to any future status (e.g. a hypothetical [BlockedOnReview]) which
      would be exactly the wrong default for a blocked-task detector.
      RFC-0323 G-6: [AwaitingVerification] is the normal completion lane
-     (submit -> verifier approve), not a blocked state — no current status
-     is blocked; the exhaustive match stays as the decision point for any
-     future genuinely-blocked constructor. *)
+     (submit -> verifier approve), not a blocked state. [Operator_blocked] is
+     the genuinely-blocked constructor introduced in #23866 and is the only
+     status that currently maps to blocked=true. *)
   match task.task_status with
+  | Masc_domain.Operator_blocked _ -> true
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Todo
   | Masc_domain.Claimed _

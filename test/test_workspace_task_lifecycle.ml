@@ -412,7 +412,7 @@ let test_claim_awaiting_by_self_blocked () =
 ;;
 
 (* [resolve_claim] is the single claim decision shared by both writers. Pin the
-   worker, verifier, self-block, held-by-other, and typed reclaim-block outcomes. *)
+   worker, verifier, self-block, held-by-other, and terminal outcomes. *)
 let test_resolve_claim_outcomes () =
   let actor x a = String.equal a x in
   (match L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now (mk_task D.Todo) with
@@ -438,33 +438,27 @@ let test_resolve_claim_outcomes () =
    with
    | L.Held_by_other h when String.equal h other -> ()
    | _ -> fail "Claimed-by-other should resolve to Held_by_other naming the holder");
-  (match
-     L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
-       (mk_task (mk_done other))
-   with
-   | L.Held_by_other h when String.equal h other -> ()
-   | _ -> fail "Done without explicit Allow_reclaim should stay held/terminal");
-  (match
-     L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
-       (mk_task ~reclaim_policy:D.Allow_reclaim (mk_done other))
-   with
-   | L.Worker_claim (D.Claimed { assignee = "w"; _ }) -> ()
-   | _ -> fail "Done with Allow_reclaim should resolve to Worker_claim Claimed");
-  (* Self-livelock guard: the completer must not reclaim its own Done task, even
-     with Allow_reclaim — that busy-loops complete -> reclaim. Only a different
-     actor may reclaim (asserted above). *)
-  (match
-     L.resolve_claim ~same_actor:(actor other) ~agent_name:other ~now
-       (mk_task ~reclaim_policy:D.Allow_reclaim (mk_done other))
-   with
-   | L.Self_owned -> ()
-   | _ -> fail "own Done+Allow_reclaim must resolve to Self_owned (self-livelock guard)");
-  match
-    L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now
-      (mk_task ~reclaim_policy:D.Block_reclaim (mk_done other))
-  with
-  | L.Blocked_by_reclaim_policy _ -> ()
-  | _ -> fail "Done with Block_reclaim should resolve to Blocked_by_reclaim_policy"
+  (* RFC-0323 G-10: Done is terminal for EVERY (policy, actor) combination —
+     the #23632 Done-reclaim mechanism (incl. the interim self-livelock guard)
+     is retired. Re-running the work takes a new predecessor_task_id-linked
+     task. *)
+  List.iter
+    (fun (ctx, reclaim_policy, claimer) ->
+       let task =
+         match reclaim_policy with
+         | Some p -> mk_task ~reclaim_policy:p (mk_done other)
+         | None -> mk_task (mk_done other)
+       in
+       match
+         L.resolve_claim ~same_actor:(actor claimer) ~agent_name:claimer ~now task
+       with
+       | L.Held_terminal (D.Done _) -> ()
+       | _ -> fail (ctx ^ ": Done must resolve to Held_terminal"))
+    [ "done/no-policy/other-actor", None, "w"
+    ; "done/allow-reclaim/other-actor", Some D.Allow_reclaim, "w"
+    ; "done/allow-reclaim/completer", Some D.Allow_reclaim, other
+    ; "done/block-reclaim/other-actor", Some D.Block_reclaim, "w"
+    ]
 ;;
 
 (* [Verifier_assigned] must survive a serialize -> parse round-trip so the

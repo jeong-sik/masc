@@ -644,6 +644,7 @@ let keeper_msg_body
       ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
       ?proc_mgr
       ?net
+      ?continuation_channel
       args : tool_result =
   let keeper_ctx : _ Keeper_types_profile.context =
     { config; agent_name; sw; clock; proc_mgr; net }
@@ -664,7 +665,7 @@ let keeper_msg_body
         ~base_path:config.base_path
         ~keeper_name:name
         ~f:(fun ?event_bus () ->
-          let result = Turn.handle_keeper_msg ?event_bus keeper_ctx resolved_args in
+          let result = Turn.handle_keeper_msg ?event_bus ?continuation_channel keeper_ctx resolved_args in
           if tool_result_success result
           then begin
             append_direct_chat_pair_if_reply

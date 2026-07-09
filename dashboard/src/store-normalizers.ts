@@ -606,6 +606,39 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
   }
 }
 
+function normalizeDashboardShellIrApproval(
+  raw: unknown,
+): DashboardRuntimeResolution['shell_ir_approval'] {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const enabled = asBoolean(raw.enabled)
+  const envKey = asString(raw.env_key)
+  const rawOverlay = asString(raw.raw_overlay)
+  const reason = asString(raw.reason)
+  const source = asString(raw.source)
+  const trust = isRecord(raw.trust)
+    ? {
+      safe: asString(raw.trust.safe),
+      audited: asString(raw.trust.audited),
+      privileged: asString(raw.trust.privileged),
+    }
+    : null
+  const normalizedTrust =
+    trust === null || trust.safe === undefined || trust.audited === undefined || trust.privileged === undefined
+      ? null
+      : { safe: trust.safe, audited: trust.audited, privileged: trust.privileged }
+  if (schema === undefined || enabled === undefined || envKey === undefined) return null
+  return {
+    schema,
+    enabled,
+    env_key: envKey,
+    raw_overlay: rawOverlay ?? null,
+    trust: normalizedTrust,
+    source: source ?? null,
+    reason: reason ?? null,
+  }
+}
+
 export function normalizeDashboardRuntimeResolution(
   raw: unknown,
   generatedAt?: string,
@@ -640,6 +673,7 @@ export function normalizeDashboardRuntimeResolution(
       .map(normalizeDashboardRuntimeDiagnostic)
       .filter((item): item is DashboardRuntimeDiagnostic => item !== null),
     build,
+    shell_ir_approval: normalizeDashboardShellIrApproval(raw.shell_ir_approval),
     keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
     fleet_safety: normalizeDashboardFleetSafetyHealth(raw),
     fd_accountant: normalizeDashboardFdAccountant(raw.fd_accountant),

@@ -381,14 +381,8 @@ let awaiting_verification_deadline
    With the verification sub-state folded into [task_status] (RFC-0220 §3.1),
    the illegal Todo+Pending drift is unrepresentable, an AwaitingVerification
    obligation stays claimable by a verifier, and a keeper never idles on an
-   empty pool — so the per-obligation wall-clock deadline this enforced (the
-   I2-forbidden heuristic) is unnecessary, and its destructive force-cancel
-   discarded work rather than rescheduling the obligation. Long-waiting
-   obligations are surfaced from the activity-event stream, not a poll-timer.
-   Neutered here in PR-1 (forced by dropping [deadline] from the type); the
-   [verification_timeout] fork and these knobs are deleted in a follow-up
-   (RFC-0220 §11 PR-3). *)
-let check_timeouts ~(config : Workspace.config) =
-  let _ = config in
-  ()
-;;
+   empty pool. Long-waiting obligations are surfaced from the activity-event
+   stream, not a poll-timer. PR-1 neutered [check_timeouts] to a no-op;
+   RFC-0220 §11 PR-3 (this change) deleted the no-op, the
+   [verification_timeout] server fork that spun on it, its interval knob,
+   and the caller-less [Workspace.force_cancel_task_r]. *)

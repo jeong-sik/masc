@@ -278,6 +278,12 @@ let test_graphql_opaque_query_simple () =
     ; ( "attached query"
       , [ lit "api"; lit "graphql"; concat [ lit "--raw-field=query="; var "MUTATION" ] ]
       )
+    ; ( "--paginate before graphql with --input file"
+      , [ lit "api"; lit "--paginate"; lit "graphql"; lit "--input"; lit "body.json" ]
+      )
+    ; ( "--paginate before graphql with external query field"
+      , [ lit "api"; lit "--paginate"; lit "graphql"; lit "-F"; lit "query=@mutation.graphql" ]
+      )
     ]
   in
   List.iter

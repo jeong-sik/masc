@@ -233,6 +233,8 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Mark_operator_blocked
+  | Unblock
 [@@deriving show]
 
 (** RFC-0262: who authorizes a transition that would otherwise require the
@@ -269,6 +271,8 @@ let task_action_of_string s =
   | "submit_for_verification" -> Ok Submit_for_verification
   | "approve" -> Ok Approve_verification
   | "reject" -> Ok Reject_verification
+  | "mark_operator_blocked" -> Ok Mark_operator_blocked
+  | "unblock" -> Ok Unblock
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 let task_action_to_string = function
@@ -280,11 +284,14 @@ let task_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve"
   | Reject_verification -> "reject"
+  | Mark_operator_blocked -> "mark_operator_blocked"
+  | Unblock -> "unblock"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =
   [ Claim; Start; Done_action; Cancel; Release;
-    Submit_for_verification; Approve_verification; Reject_verification ]
+    Submit_for_verification; Approve_verification; Reject_verification;
+    Mark_operator_blocked; Unblock ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 (* RFC-0220: the verification sub-state (previously a separate request_status
@@ -313,6 +320,7 @@ type task_status =
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
+  | Operator_blocked of { blocked_at: string; reason: string }
 [@@deriving show]
 
 (** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
@@ -336,6 +344,7 @@ let task_status_to_string = function
   | AwaitingVerification _ -> "awaiting_verification"
   | Done _ -> "done"
   | Cancelled _ -> "cancelled"
+  | Operator_blocked _ -> "operator_blocked"
 
 let string_of_task_status = task_status_to_string
 
@@ -347,6 +356,7 @@ let task_status_icon = function
   | AwaitingVerification _ -> "🔍"
   | Done _ -> "✅"
   | Cancelled _ -> "🚫"
+  | Operator_blocked _ -> "🔒"
 
 (** Display assignee for task status.
     Cancelled surfaces [cancelled_by]; Todo yields "unclaimed".
@@ -355,6 +365,7 @@ let task_display_assignee = function
   | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
   | AwaitingVerification { assignee; _ } -> assignee
   | Cancelled { cancelled_by; _ } -> cancelled_by
+  | Operator_blocked _ -> "operator"
   | Todo -> "unclaimed"
 
 (** Extract assignee as [Some string], or [None] for Todo/Cancelled.
@@ -363,20 +374,20 @@ let task_assignee_of_status = function
   | Claimed { assignee; _ } -> Some assignee
   | InProgress { assignee; _ } -> Some assignee
   | AwaitingVerification { assignee; _ } -> Some assignee
-  | Todo | Done _ | Cancelled _ -> None
+  | Todo | Done _ | Cancelled _ | Operator_blocked _ -> None
 
 (** Terminal states: [Done] or [Cancelled]. No further transitions possible.
     Exhaustive match — adding a constructor forces an update here. *)
 let task_status_is_terminal = function
   | Done _ | Cancelled _ -> true
-  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Operator_blocked _ -> false
 
 (** Completed state: [Done]. Distinct from [task_status_is_terminal] which
     also includes [Cancelled]. Use this when only successful completion
     matters (e.g. convergence ratios, reputation counting). *)
 let task_status_is_done = function
   | Done _ -> true
-  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ | Operator_blocked _ -> false
 
 (** Issue #8354 + 2026-05-27 follow-up: schema enums for [task_status]
     used to be hand-rolled in [tool_shard.ml] and [mcp_server.ml],
@@ -401,7 +412,7 @@ let task_status_is_done = function
       renames cannot desync.
 
     The remaining hand-coded axis is the witness list's length —
-    [test_types.ml] pins it at 6, so adding a constructor without
+    [test_types.ml] pins it at 7, so adding a constructor without
     adding a witness here breaks that test.
 
     Order matches the FSM lifecycle (Todo -> Claimed -> InProgress ->
@@ -420,6 +431,7 @@ let task_status_schema_witnesses : task_status list =
   ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
   ; Cancelled
       { cancelled_by = placeholder; cancelled_at = placeholder; reason = None }
+  ; Operator_blocked { blocked_at = placeholder; reason = placeholder }
   ]
 
 let all_task_status_names : string list =
@@ -470,6 +482,12 @@ let task_status_to_yojson = function
         ("cancelled_at", `String cancelled_at);
         ("reason", Json_util.string_opt_to_json reason);
       ]
+  | Operator_blocked { blocked_at; reason } ->
+      `Assoc [
+        ("status", `String "operator_blocked");
+        ("blocked_at", `String blocked_at);
+        ("reason", `String reason);
+      ]
 
 let task_status_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
@@ -504,6 +522,11 @@ let task_status_of_yojson json =
               { cancelled_by = req "cancelled_by"
               ; cancelled_at = req "cancelled_at"
               ; reason = opt "reason"
+              })
+    | "operator_blocked" ->
+        Ok (Operator_blocked
+              { blocked_at = req "blocked_at"
+              ; reason = req "reason"
               })
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)

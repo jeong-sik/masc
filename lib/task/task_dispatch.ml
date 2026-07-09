@@ -81,7 +81,7 @@ let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
         let dominated = match t.task_status with
           | Done _ -> not include_done
           | Cancelled _ -> not include_cancelled
-          | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+          | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Operator_blocked _ -> false
         in
         not dominated
       ) backlog.tasks in

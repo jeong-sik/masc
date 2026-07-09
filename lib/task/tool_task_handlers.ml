@@ -249,7 +249,7 @@ let review_completion_notes
              ~on_verdict ~few_shot_block ~operator_override ar_req
          | Some sw ->
            Anti_rationalization.review
-             ~sw
+             ~sw:(Some sw)
              ?evaluator_runtime
              ?completion_contract
              ~required_evidence

@@ -23,7 +23,7 @@ type loaded_secret_root =
   ; file_entries : (string * string) list
   }
 
-let base_secret_scope = "base"
+let shared_secret_scope = "_shared"
 
 let trim_env_opt key =
   match Sys.getenv_opt key with
@@ -56,13 +56,13 @@ let secret_root ~base_path ~keeper_name =
 ;;
 
 let base_secret_root_info ~base_path =
-  secret_root_info_of_dir ~base_path ~keeper_dir:base_secret_scope
+  secret_root_info_of_dir ~base_path ~keeper_dir:shared_secret_scope
 ;;
 
 let secret_roots ~base_path ~keeper_name =
   let keeper_dir = keeper_secret_dir keeper_name in
   let keeper_root = secret_root_info_of_dir ~base_path ~keeper_dir in
-  if String.equal keeper_dir base_secret_scope
+  if String.equal keeper_dir shared_secret_scope
   then [ keeper_root ]
   else [ base_secret_root_info ~base_path; keeper_root ]
 ;;
@@ -540,8 +540,8 @@ let validate_env_entry_target path =
 ;;
 
 let reject_base_keeper_scope_mutation ~keeper_name ~scope =
-  if String.equal keeper_name "base" && scope = Keeper_secret
-  then Error "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+  if String.equal (keeper_secret_dir keeper_name) shared_secret_scope && scope = Keeper_secret
+  then Error "keeper-scope secret mutation is not permitted for the reserved '_shared' keeper"
   else Ok ()
 ;;
 

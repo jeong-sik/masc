@@ -18,8 +18,8 @@ val secret_root : base_path:string -> keeper_name:string -> string
 
 val secret_roots : base_path:string -> keeper_name:string -> secret_root_info list
 (** Effective secret roots in projection order. The workspace-level
-    [secrets/base] root is loaded first and [secrets/<keeper>] overlays it.
-    For the literal [base] keeper, the root is returned once. *)
+    [secrets/_shared] root is loaded first and [secrets/<keeper>] overlays it.
+    For the literal [_shared] keeper, the root is returned once. *)
 
 val local_env_for_keeper :
   ?host_env:string array ->
@@ -28,7 +28,7 @@ val local_env_for_keeper :
   unit ->
   (string array option, string) result
 (** Build the child-process environment for local keeper execution from
-    [secrets/base/env] overlaid by [secrets/<keeper>/env]. The host
+    [secrets/_shared/env] overlaid by [secrets/<keeper>/env]. The host
     environment is keeper-scrubbed and git/gh noninteractive defaults are
     injected even when both secret roots are absent; a missing root only means
     there are no env/file overlays from that scope. When present, secret files
@@ -52,7 +52,7 @@ val set_env_entry :
   name:string ->
   value:string ->
   (unit, string) result
-(** Persist one projected env secret under [secrets/base/env] or
+(** Persist one projected env secret under [secrets/_shared/env] or
     [secrets/<keeper>/env]. The value is validated with the same single-line
     rules used by local and docker projection. *)
 
@@ -72,7 +72,7 @@ val set_file_entry :
   container_path:string ->
   value:string ->
   (unit, string) result
-(** Persist one projected file secret under [secrets/base/files] or
+(** Persist one projected file secret under [secrets/_shared/files] or
     [secrets/<keeper>/files]. [container_path] must be an absolute container
     path; traversal components and symlink targets are rejected. *)
 

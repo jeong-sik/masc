@@ -47,7 +47,7 @@ let secret_root_default ~base ~keeper_name =
     (Filename.concat (Filename.concat base Common.masc_dirname) "secrets")
     (Workspace_utils.safe_filename keeper_name)
 
-let base_secret_root_default ~base = secret_root_default ~base ~keeper_name:"base"
+let base_secret_root_default ~base = secret_root_default ~base ~keeper_name:"_shared"
 
 let not_contains label haystack needle =
   Alcotest.(check bool) label false (String_util.contains_substring haystack needle)

@@ -149,6 +149,10 @@ end
 
 module Verification : sig
   val fsm_enabled : unit -> bool
+  (** RFC-0323 G-5 Phase B default-on flip. Default: false. When true, the
+      done guard treats every task as verification-required. Flip only when
+      readiness gate S5 holds (identity>=2 anti-starvation). *)
+  val default_on : unit -> bool
   val timeout_deadline_seconds : unit -> float
 end
 

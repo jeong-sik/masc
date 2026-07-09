@@ -320,6 +320,9 @@ let run_turn
      children, so runtime attempts and tool invocations spawned inside
      the turn body all see [turn_sw] automatically. *)
   Eio.Switch.run @@ fun turn_sw ->
+  Keeper_registry.set_turn_switch ~base_path:config.base_path meta.name (Some turn_sw);
+  Eio.Switch.on_release turn_sw (fun () ->
+    Keeper_registry.clear_turn_switch ~base_path:config.base_path meta.name);
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
   let runtime_id_string = runtime_id in

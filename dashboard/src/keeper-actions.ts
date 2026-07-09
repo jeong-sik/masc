@@ -4,6 +4,7 @@ import {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchQueuedKeeperMessageResult,
+  interruptKeeperTurn as apiInterruptKeeperTurn,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
   queuedKeeperMessageToReply,
@@ -218,6 +219,14 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
     return true
   }
   return locallyAborted
+}
+
+export async function interruptKeeperTurn(keeperName: string): Promise<boolean> {
+  const name = keeperName.trim()
+  if (!name) return false
+  await cancelActiveKeeperThreadMessage(name)
+  const result = await apiInterruptKeeperTurn(name, { signal: keeperThreadCancelSignal() })
+  return result.cancelled
 }
 
 export function selectKeeper(name: string): void {

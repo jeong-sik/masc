@@ -36,13 +36,23 @@ type grounded_verdict = private {
 
 (** {1 Read-Only Detection} *)
 
-(** [should_skip ~action_description] returns [true] when the
+(** Effect classification for tool actions. *)
+type effect_class =
+  | ReadOnly
+  | ReadWrite
+
+(** [classify_effect ~action_description] returns [ReadOnly] when the
     description text contains a word-boundary match for any
     read-only keyword ([read], [glob], [grep], [search], [find],
     [list], [ls], [cat], [head], [tail], [git status], [git log],
     [git diff], [status], [view], [get], [fetch], [query]).
     Case-insensitive, word-boundary aware. *)
-val should_skip : action_description:string -> bool
+val classify_effect : action_description:string -> effect_class
+
+(** [should_skip ~effect_class] returns [true] for [ReadOnly],
+    [false] for [ReadWrite]. Replaces the old string-pattern-based
+    [should_skip ~action_description]. *)
+val should_skip : effect_class:effect_class -> bool
 
 (** {1 Verdict Parsing} *)
 

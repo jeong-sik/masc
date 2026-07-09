@@ -104,7 +104,8 @@ end
     The fallback path is strict JSON and returns Error on failure instead of
     extracting a verdict from prose. *)
 let verify (req : Core.verification_request) : (Core.verdict, string) result =
-  if Core.should_skip ~action_description:req.action_description
+  let effect_class = Core.classify_effect ~action_description:req.action_description in
+  if Core.should_skip ~effect_class
   then Ok Core.Pass
   else (
     let prompt = build_prompt req in
@@ -203,7 +204,8 @@ let handle_pre_tool_use
   : Agent_sdk.Hooks.hook_decision
   =
   let action_description = sprintf "tool:%s" tool_name in
-  if Core.should_skip ~action_description
+  let effect_class = Core.classify_effect ~action_description in
+  if Core.should_skip ~effect_class
   then Agent_sdk.Hooks.Continue
   else (
     match
@@ -290,7 +292,7 @@ let install_hook
 (** Create an OAS Guardrails config that uses read-only detection
     as a Custom tool filter.
 
-    Tools whose names match {!read_only_patterns} (read, grep,
+    Tools whose names match {!classify_effect} (read, grep,
     search, git status, etc.) pass through. Tools that do NOT match are
     also allowed -- the filter itself does not block anything. Its purpose
     is to tag tools for downstream hooks that may skip verification for
@@ -316,7 +318,8 @@ let guardrails_with_read_only_tag ?(max_tool_calls_per_turn : int option) ()
     tool name matches read-only patterns. Can be used in custom
     guardrails pipelines for conditional verification bypass. *)
 let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
-  Core.should_skip ~action_description:schema.name
+  let effect_class = Core.classify_effect ~action_description:schema.name in
+  Core.should_skip ~effect_class
 ;;
 
 (* ================================================================ *)

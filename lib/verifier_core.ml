@@ -40,12 +40,9 @@ type grounded_verdict = {
 (* Read-Only Detection                                              *)
 (* ================================================================ *)
 
-let read_only_patterns = [
-  "read"; "glob"; "grep";
-  "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
-  "git status"; "git log"; "git diff";
-  "status"; "view"; "get"; "fetch"; "query";
-]
+type effect_class =
+  | ReadOnly
+  | ReadWrite
 
 let is_word_char c =
   match c with
@@ -69,11 +66,23 @@ let has_pattern_with_word_boundary ~text ~pat =
     in
     loop 0
 
-let should_skip ~action_description =
+let classify_effect ~action_description : effect_class =
   let text = String.lowercase_ascii action_description in
-  List.exists (fun pat ->
+  let patterns = [
+    "read"; "glob"; "grep";
+    "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
+    "git status"; "git log"; "git diff";
+    "status"; "view"; "get"; "fetch"; "query";
+  ] in
+  let is_read_only = List.exists (fun pat ->
     has_pattern_with_word_boundary ~text ~pat
-  ) read_only_patterns
+  ) patterns in
+  if is_read_only then ReadOnly else ReadWrite
+
+let should_skip ~effect_class =
+  match effect_class with
+  | ReadOnly -> true
+  | ReadWrite -> false
 
 (* ================================================================ *)
 (* Verdict Parsing                                                  *)

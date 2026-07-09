@@ -79,6 +79,7 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
        [predecessor_task_id]. *)
     Held_terminal task.task_status
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+  | Masc_domain.Operator_blocked { reason; _ } -> Held_by_other reason
 ;;
 
 (* RFC-0262: a transition that overrides the assignee guard is permitted when
@@ -191,6 +192,17 @@ let decide
      | Operator | System -> ok (cancelled_status ~agent_name ~now ~reason)
      | Assignee -> Error Invalid_transition)
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
+  (* ── Mark operator blocked ──────────────────── *)
+  | Masc_domain.Mark_operator_blocked, Masc_domain.Operator_blocked _ -> ok task_status
+  | ( Masc_domain.Mark_operator_blocked
+    , (Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.Todo
+      | Masc_domain.AwaitingVerification _) ) ->
+    ok (Masc_domain.Operator_blocked { blocked_at = now; reason })
+  | Masc_domain.Mark_operator_blocked, (Masc_domain.Done _ | Masc_domain.Cancelled _) ->
+    Error Invalid_transition
+  (* ── Unblock ──────────────────────────────────── *)
+  | Masc_domain.Unblock, Masc_domain.Operator_blocked _ -> ok Masc_domain.Todo
+  | Masc_domain.Unblock, _ -> Error Invalid_transition
   (* ── Release ──────────────────────────────────── *)
   | ( Masc_domain.Release
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->

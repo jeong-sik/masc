@@ -144,26 +144,24 @@ let test_visible_mind_read_resolves_to_private_storage () =
   | Error e -> Alcotest.fail ("visible mind path should resolve: " ^ e)
 ;;
 
-let test_direct_private_storage_read_now_allowed () =
+let test_direct_private_storage_read_stays_blocked () =
   setup
   @@ fun ~config ~meta ~playground:_ ->
   let private_raw =
     Masc.Keeper_sandbox.allowed_root_rel_of_meta ~meta ^ "mind/README.md"
   in
-  let private_target = Filename.concat config.Workspace.base_path private_raw in
-  write_file private_target "private readme\n";
   match
     Keeper_tool_shared_runtime.resolve_keeper_read_path
       ~config
       ~meta
       ~raw_path:private_raw
   with
-  | Ok path ->
-    Alcotest.(check string)
-      "direct private storage path should resolve"
-      private_target
-      path
-  | Error e -> Alcotest.fail ("direct private storage path should resolve: " ^ e)
+  | Ok path -> Alcotest.fail ("direct private storage path should be blocked: " ^ path)
+  | Error e ->
+    Alcotest.(check bool)
+      "task state/private path blocked"
+      true
+      (String.starts_with ~prefix:"task_state_file_path_blocked:" e)
 ;;
 
 let test_read_with_visible_repo_cwd_and_relative_file_path () =
@@ -260,9 +258,9 @@ let () =
             `Quick
             test_visible_mind_read_resolves_to_private_storage
         ; Alcotest.test_case
-            "direct private storage read resolves"
+            "direct private storage read stays blocked"
             `Quick
-            test_direct_private_storage_read_now_allowed
+            test_direct_private_storage_read_stays_blocked
         ] )
     ; ( "file_tools"
       , [ Alcotest.test_case

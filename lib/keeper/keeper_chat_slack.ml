@@ -130,6 +130,24 @@ let tool_context_block_json ~name ~args_summary ~result_summary =
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
     ]
 
+let code_block_json ~source ~caption =
+  let language = Option.value caption ~default:"code" in
+  let body =
+    Printf.sprintf "```%s\n%s\n```" (redact language) (redact source)
+    |> truncate_block_text
+  in
+  `Assoc
+    [ ("type", `String "section")
+    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
+    ]
+
+let mermaid_block_json ~source =
+  let body = Printf.sprintf "```mermaid\n%s\n```" (redact source) |> truncate_block_text in
+  `Assoc
+    [ ("type", `String "section")
+    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
+    ]
+
 (* ── Content → Slack blocks ──────────────────────────────────────── *)
 
 let slack_block_of_chat_block = function
@@ -141,13 +159,19 @@ let slack_block_of_chat_block = function
       Option.map
         (fun url -> link_block_json ~url ~title ~description:None)
         (redacted_http_url_opt url)
+  | Keeper_chat_blocks.Code { cap; html; source } ->
+    let source =
+      match source with
+      | Some source -> source
+      | None -> html
+    in
+    if String.trim source = "" then None else Some (code_block_json ~source ~caption:cap)
+  | Keeper_chat_blocks.Mermaid { source; caption = _ } -> Some (mermaid_block_json ~source)
   | Keeper_chat_blocks.Text _
   | Keeper_chat_blocks.Heading _
   | Keeper_chat_blocks.Unordered_list _
   | Keeper_chat_blocks.Callout _
   | Keeper_chat_blocks.Table _
-  | Keeper_chat_blocks.Code _
-  | Keeper_chat_blocks.Mermaid _
   | Keeper_chat_blocks.Svg _
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _

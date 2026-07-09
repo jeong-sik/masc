@@ -32,8 +32,10 @@ val content_blocks_of_text : string -> Yojson.Safe.t list
     - Markdown images [![alt](url)] become image blocks.
     - Standalone image URLs (png/jpg/gif/webp/svg) become image blocks.
     - Other standalone URLs become link blocks with a hostname-derived title.
-    Text and fusion blocks are omitted because text is delivered via the
-    [content] field and fusion cards have no Slack-native projection yet. *)
+    Code and Mermaid fences become section code-block sections.
+    Text and most other block kinds are omitted because primary text is
+    already delivered via the [content] field; fusion cards also have no
+    Slack-native projection yet. *)
 
 val adapter_loop :
   token:string ->

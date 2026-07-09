@@ -127,6 +127,15 @@ val handle_keeper_chat_request_cancel :
     Cancels a live async keeper message request when it is still
     cancellable. *)
 
+val handle_keeper_turn_interrupt :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/turn/interrupt].
+    Reads [{"name": "<keeper>"}], validates the keeper is registered, and
+    asks {!Keeper_registry.interrupt_current_turn} to cancel the in-flight
+    turn's switch. Returns [{cancelled, turn_id}] on success or
+    [{cancelled:false, reason:"no_in_flight_turn"}] when there is nothing
+    to interrupt. *)
+
 (** {1 SSE handler} *)
 
 val handle_keeper_chat_stream :

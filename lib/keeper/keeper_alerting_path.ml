@@ -263,6 +263,13 @@ let is_masc_internal_state_path (raw : string) : bool =
       && (len = 12 || raw.[len - 13] = '/'))
 ;;
 
+let is_masc_internal_state_norm ~(root_norm : string) ~(target_norm : string) : bool =
+  let root_norm = strip_trailing_slashes root_norm in
+  let target_norm = strip_trailing_slashes target_norm in
+  let masc_root = Filename.concat root_norm Common.masc_dirname in
+  target_norm = masc_root || String.starts_with ~prefix:(masc_root ^ "/") target_norm
+;;
+
 let resolve_keeper_target_path
       ~(config : Workspace.config)
       ~(allowed_paths : string list)
@@ -293,6 +300,11 @@ let resolve_keeper_target_path
          input. The "outside_project_root" label is enough for the
          caller to course-correct without enumerating the host. *)
       Error (Outside_project_root { raw })
+    else if is_masc_internal_state_norm ~root_norm ~target_norm
+    then (
+      let rej = Task_state_file_path_blocked { raw } in
+      rejection_to_telemetry rej;
+      Error rej)
     else if allowed_paths = []
     then Ok candidate
     else (
@@ -425,6 +437,11 @@ let resolve_keeper_read_path
          input. The "outside_project_root" label is enough for the
          caller to course-correct without enumerating the host. *)
       Error (Outside_project_root { raw })
+    else if is_masc_internal_state_norm ~root_norm ~target_norm
+    then (
+      let rej = Task_state_file_path_blocked { raw } in
+      rejection_to_telemetry rej;
+      Error rej)
     else (
       let allowed_norms =
         if allowed_paths = []

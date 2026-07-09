@@ -740,10 +740,11 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
-  (* Gate 0: empty evidence_refs — required for all code task submissions.
-     Reject completions that lack code-level evidence (file paths, commit hashes,
-     trace/turn/receipt refs). *)
-  if List.is_empty req.evidence_refs then
+  (* Gate 0: DISABLED (task-1887 hotfix) — re-enable when call site is wired
+     to pass actual evidence_refs from handoff_context via review_request.
+     PR #23666 merged this gate with evidence_refs = [] hardcoded in
+     tool_task_handlers.ml, causing all submissions to be rejected. *)
+  if false && List.is_empty req.evidence_refs then
     emit
       { verdict = Reject "no evidence references supplied"
       ; evaluator_runtime

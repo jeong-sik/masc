@@ -154,6 +154,16 @@ jobs:
             | xargs -0 sha256sum > SHA256SUMS
           (cd ../config && sha256sum tool_policy.toml runtime.toml) >> SHA256SUMS
           (cd .. && sha256sum oas-models.toml) >> SHA256SUMS
+          # Team preset files, keyed by their repo-relative path so
+          # `install.sh --team` can verify each seeded file (presets/<name>/...).
+          (cd .. && for m in presets/*/manifest.txt; do
+             [ -f "$m" ] || continue
+             d="$(dirname "$m")"
+             while IFS= read -r rel; do
+               case "$rel" in ''|'#'*) continue ;; esac
+               sha256sum "$d/$rel"
+             done < "$m"
+           done) >> SHA256SUMS
           cat SHA256SUMS
 
       - name: Create Release

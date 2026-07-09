@@ -48,6 +48,34 @@ let task_has_actionable_verification actionable_request_ids
   | Masc_domain.Cancelled _ -> false
 ;;
 
+(** RFC-0323 G-5 readiness gate 3 audit: AwaitingVerification tasks whose
+    [verification_id] has no actionable verification-store record. Such a task
+    will never wake — the wake join ([actionable_verification_request_ids])
+    requires the record, so an orphan starves silently (no wake signal, no
+    timer backstop per RFC-0220). This is the inverse of
+    [task_has_actionable_verification]: it lists the violations rather than
+    counting healthy ones, so a default-on flip (G-5) can detect store-record
+    loss before it becomes invisible starvation. *)
+let audit_tasks_without_actionable_verification_ids
+    (actionable_request_ids : string list) (tasks : Masc_domain.task list)
+    : (string * string) list =
+  List.filter_map
+    (fun (task : Masc_domain.task) ->
+      match task.task_status with
+      | Masc_domain.AwaitingVerification { verification_id; _ } ->
+        if List.exists (String.equal verification_id) actionable_request_ids
+        then None
+        else Some (task.id, verification_id)
+      | _ -> None)
+    tasks
+;;
+
+let audit_tasks_without_actionable_verification ~config
+    (tasks : Masc_domain.task list) : (string * string) list =
+  audit_tasks_without_actionable_verification_ids
+    (actionable_verification_request_ids ~config) tasks
+;;
+
 (** Read workspace backlog counts. *)
 let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * int * bool

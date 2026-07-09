@@ -84,6 +84,7 @@ type pending_approval =
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
+  ; channel : Keeper_continuation_channel.t option
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry
@@ -203,12 +204,11 @@ val audit_approval_event :
   ?disposition_reason:string ->
   ?rule_match:rule_match ->
   ?source_approval_id:string ->
-  ?auto_approved:bool ->
   ?actor:string ->
   ?approval_mode:string ->
   ?authorizing_band:string ->
+  ?auto_approved:bool ->
   ?decision:approval_audit_decision ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   unit
 
@@ -281,10 +281,10 @@ val submit_and_await :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   ?critical_escalation_after_s:float ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   Agent_sdk.Hooks.approval_decision
 
@@ -316,12 +316,8 @@ val submit_pending :
 
 (** {1 Resolve (operator action)} *)
 
-(** Install the hook that wakes a keeper when a non-blocking pending approval
-    is resolved or expired. Blocking [submit_and_await] entries resolve through
-    their resolver promise and must not also enqueue a [Hitl_resolved] wake. This
-    includes the stale-expiry path: expiry must preserve resolver-first behavior for
-    blocking entries and only wake non-blocking entries.
-    Injected (rather than a direct
+(** Install the hook that wakes a keeper when one of its pending approvals is
+    resolved or expires. Injected (rather than a direct
     [Keeper_keepalive_signal] call) to break a dependency cycle: this module
     sits below [Keeper_keepalive_signal], which depends on
     [Keeper_world_observation], which depends back here for
@@ -332,7 +328,7 @@ val set_approval_resolution_wake_hook :
    keeper_name:string ->
    approval_id:string ->
    decision:Keeper_event_queue.hitl_resolution_decision ->
-   continuation_channel:Keeper_continuation_channel.t ->
+   channel:Keeper_continuation_channel.t option ->
    unit) ->
   unit
 

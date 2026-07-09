@@ -6,7 +6,8 @@ import { ActionButton } from '../common/button'
 import { TextInput } from '../common/input'
 import { shellAuthSummary } from '../../store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
-import { personas, personasLoading, personasError, loadPersonas, spawnKeeperFromPersona, spawning, spawnResult, type PersonaSummary } from './keeper-spawn-state'
+import { personas, personasLoading, personasError, loadPersonas, spawnKeeperFromPersona, spawning, spawnResult, showCreateForm, editingPersona, type PersonaSummary } from './keeper-spawn-state'
+import { PersonaForm } from './persona-form'
 
 const confirmTarget = signal<string | null>(null)
 const searchQuery = signal('')
@@ -87,6 +88,13 @@ export function PersonaBrowser() {
   const visible = filterPersonas(personas.value, searchQuery.value)
   return html`
     <div class="v2-monitoring-surface">
+      <div class="flex items-center justify-between mb-3">
+        <${ActionButton} variant="ghost" size="sm"
+          onClick=${() => { showCreateForm.value = true; editingPersona.value = null }}>
+          + 새 페르소나
+        <//>
+      </div>
+      <${PersonaForm} />
       ${spawnAccess.allowed ? null : html`
         <p class="mb-3 text-2xs text-[var(--color-status-warn)] v2-monitoring-row">
           키퍼 생성 차단: ${spawnAccess.reason ?? 'worker 권한이 필요합니다.'}

@@ -58,19 +58,9 @@ let build_base_system_prompt
          | None -> None)
       meta.active_goal_ids
   in
-  let registered_repositories =
-    (* Enumerate registered repository ids so the system prompt can list the
-       valid [repos/<name>] segments. A failed catalog read is rendered as a
-       fail-closed prompt block instead of silently falling back to guessing. *)
-    match Repo_store.load_all ~base_path:config.base_path with
-    | Ok repos ->
-        Keeper_prompt.Registered_repository_ids
-          (List.map (fun (r : Repo_manager_types.repository) -> r.id) repos)
-    | Error err ->
-        Log.Keeper.warn ~keeper_name:meta.name
-          "registered repository catalog unavailable: %s" err;
-        Keeper_prompt.Registered_repositories_unavailable err
-  in
+  (* RFC-0324 B-1: no catalog-fed repository list is injected into the
+     prompt any more — the filesystem is the repo truth and the prompt's
+     constant <repositories> block instructs self-discovery. *)
   Keeper_prompt.build_keeper_system_prompt
     ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
     ~instructions:
@@ -79,7 +69,6 @@ let build_base_system_prompt
     ~keeper_name:meta.name
     ~active_goals
     ~home_ground:config.base_path
-    ~registered_repositories
     ()
 
 let max_tokens_fallback ~keeper_name profile_defaults () =

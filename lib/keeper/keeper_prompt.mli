@@ -29,10 +29,6 @@ val state_block_output_guard_text : string
     synthesize and persist STATE metadata, so direct/no-state turns should not
     ask the model to emit raw STATE markers in visible text. *)
 
-type registered_repositories =
-  | Registered_repository_ids of string list
-  | Registered_repositories_unavailable of string
-
 val build_keeper_system_prompt :
   goal:string ->
   instructions:string ->
@@ -40,14 +36,13 @@ val build_keeper_system_prompt :
   ?keeper_name:string ->
   ?home_ground:string ->
   ?active_goals:(string * string) list ->
-  ?registered_repositories:registered_repositories ->
   unit ->
   string
-(** [registered_repositories] lists the globally registered repository ids from
-    [repositories.toml], or carries the catalog read error. A non-empty id list
-    renders the valid [repos/<name>] segments; an unavailable catalog renders a
-    fail-closed [<registered_repositories>] block that tells the keeper not to
-    guess org-prefixed / renamed / invented names. *)
+(** RFC-0324 B-1: no repository list is injected. The prompt carries a
+    constant [<repositories>] block instructing filesystem self-discovery —
+    the catalog and a keeper's sandbox checkouts have no invariant linking
+    them, so a catalog-fed list asserted resolvability for repos that were
+    never cloned. *)
 
 val append_direct_reply_mode_prompt :
   base_prompt:string ->

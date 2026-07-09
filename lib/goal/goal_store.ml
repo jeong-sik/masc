@@ -111,82 +111,81 @@ and state_of_yojson = function
 
 and goal_of_yojson = function
   | `Assoc _ as json ->
-      begin
-        match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "title" json with
-        | Some (`String id), Some (`String title) ->
-            let legacy_status =
-              match Json_util.assoc_member_opt "status" json with
-              | None | Some `Null -> Ok Active
-              | Some status_json -> goal_status_of_yojson status_json
-            in
-            let phase =
-              match Json_util.assoc_member_opt "phase" json with
-              | None | Some `Null -> (
-                  match legacy_status with
-                  | Ok status -> Ok (phase_of_goal_status status)
-                  | Error msg -> Error msg)
-              | Some phase_json -> Goal_phase.of_yojson phase_json
-            in
-            let verifier_policy =
-              match Json_util.assoc_member_opt "verifier_policy" json with
-              | None | Some `Null -> Ok None
-              | Some policy_json ->
-                  Result.map
-                    Option.some
-                    (Goal_verification.goal_verifier_policy_of_yojson policy_json)
-            in
-            let created_at =
-              match Json_util.assoc_member_opt "created_at" json with
-              | Some (`String value) -> Ok value
-              | _ -> Error "goal_of_yojson: created_at missing"
-            in
-            let updated_at =
-              match Json_util.assoc_member_opt "updated_at" json with
-              | Some (`String value) -> Ok value
-              | _ -> Error "goal_of_yojson: updated_at missing"
-            in
-            begin
-              match legacy_status, phase, verifier_policy, created_at, updated_at with
-              | Ok _legacy_status, Ok phase, Ok verifier_policy, Ok created_at, Ok updated_at ->
-                  Ok
-                    (normalize_goal
-                       {
-                         id;
-                         title;
-                         metric = Json_util.get_string json "metric" ;
-                         target_value = Json_util.get_string json "target_value" ;
-                         due_date = Json_util.get_string json "due_date" ;
-                         priority =
-                           (match Json_util.assoc_member_opt "priority" json with
-                           | Some (`Int value) -> clamp_priority value
-                           | _ -> 3);
-                         status = goal_status_of_phase phase;
-                         phase;
-                         verifier_policy;
-                         require_completion_approval =
-                           (match Json_util.assoc_member_opt "require_completion_approval" json with
-                           | Some (`Bool value) -> value
-                           | _ -> false);
-                         active_verification_request_id =
-                           Json_util.get_string json "active_verification_request_id" ;
-                         parent_goal_id = Json_util.get_string json "parent_goal_id" ;
-                         last_review_note = Json_util.get_string json "last_review_note" ;
-                         last_review_at = Json_util.get_string json "last_review_at" ;
-                         created_at;
-                         updated_at;
-                       })
-              | Error msg, _, _, _, _
-              | _, Error msg, _, _, _
-              | _, _, Error msg, _, _
-              | _, _, _, Error msg, _
-              | _, _, _, _, Error msg ->
-                  Error msg
-            end
-        | _ ->
-            Error "goal_of_yojson: invalid goal"
-      end
-  | json ->
-      Error ("goal_of_yojson: " ^ Yojson.Safe.to_string json)
+      let id_opt = Json_util.assoc_member_opt "id" json in
+      let title_opt = Json_util.assoc_member_opt "title" json in
+      (match id_opt, title_opt with
+      | Some (`String id), Some (`String title) ->
+          let legacy_status =
+            match Json_util.assoc_member_opt "status" json with
+            | None | Some `Null -> Ok Active
+            | Some status_json -> goal_status_of_yojson status_json
+          in
+          let phase =
+            match Json_util.assoc_member_opt "phase" json with
+            | None | Some `Null -> Ok (phase_of_goal_status Active)
+            | Some phase_json -> Goal_phase.of_yojson phase_json
+          in
+          let verifier_policy =
+            match Json_util.assoc_member_opt "verifier_policy" json with
+            | None | Some `Null -> Ok None
+            | Some policy_json ->
+                Result.map
+                  Option.some
+                  (Goal_verification.goal_verifier_policy_of_yojson policy_json)
+          in
+          let created_at =
+            match Json_util.assoc_member_opt "created_at" json with
+            | Some (`String value) -> Ok value
+            | _ -> Error "goal_of_yojson: created_at missing"
+          in
+          let updated_at =
+            match Json_util.assoc_member_opt "updated_at" json with
+            | Some (`String value) -> Ok value
+            | _ -> Error "goal_of_yojson: updated_at missing"
+          in
+          (match
+             legacy_status, phase, verifier_policy, created_at, updated_at
+           with
+           | ( Ok _legacy_status
+             , Ok phase
+             , Ok verifier_policy
+             , Ok created_at
+             , Ok updated_at ) ->
+             Ok
+               (normalize_goal
+                  {
+                    id;
+                    title;
+                    metric = Json_util.get_string json "metric";
+                    target_value = Json_util.get_string json "target_value";
+                    due_date = Json_util.get_string json "due_date";
+                    priority =
+                      (match Json_util.assoc_member_opt "priority" json with
+                      | Some (`Int value) -> clamp_priority value
+                      | _ -> 3);
+                    status = goal_status_of_phase phase;
+                    phase;
+                    verifier_policy;
+                    require_completion_approval =
+                      (match Json_util.assoc_member_opt "require_completion_approval" json with
+                      | Some (`Bool value) -> value
+                      | _ -> false);
+                    active_verification_request_id =
+                      Json_util.get_string json "active_verification_request_id";
+                    parent_goal_id = Json_util.get_string json "parent_goal_id";
+                    last_review_note = Json_util.get_string json "last_review_note";
+                    last_review_at = Json_util.get_string json "last_review_at";
+                    created_at;
+                    updated_at;
+                  })
+           | Error msg, _, _, _, _ -> Error msg
+           | _, Error msg, _, _, _ -> Error msg
+           | _, _, Error msg, _, _ -> Error msg
+           | _, _, _, Error msg, _ -> Error msg
+           | _, _, _, _, Error msg -> Error msg)
+      | _ -> Error "goal_of_yojson: invalid goal")
+  | other_json ->
+      Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
 
 and normalize_goal (goal : goal) =
   {

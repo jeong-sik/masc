@@ -135,12 +135,22 @@ let rejected_snapshot slot =
 
 let run_if_free ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
-  (* Yield to a parked chat before touching the lock. [waiting > 0] implies
+  (* Yield to deferred work before touching the lock. [waiting > 0] implies
      the slot is held (a waiter only parks because a turn is in flight), so
      [try_lock] would fail here anyway; the explicit check keeps the
-     autonomous lane from competing for a slot a dashboard/connector message
-     is already queued on and documents the intent at the entry point. *)
+     autonomous lane from competing for a slot a parked chat is already
+     queued on. A non-empty [Keeper_chat_queue] means a busy connector
+     (Slack/Discord) or dashboard message is deferred for this keeper but
+     has not parked on the slot; the autonomous lane must yield for it too,
+     otherwise a long or back-to-back autonomous turn starves that queue
+     indefinitely (the busy-ACK loop). Reading the queue length is a
+     lock-only, non-suspending peek and is the SSOT signal that closes the
+     gap: the autonomous lane cooperates on the same backlog the consumer
+     drains, so the consumer's [in_flight = None] window opens
+     deterministically instead of racing the next autonomous cycle. *)
   if waiting_count slot > 0
+  then `Busy (peek_info slot)
+  else if Keeper_chat_queue.length ~keeper_name > 0
   then `Busy (peek_info slot)
   else if Eio.Mutex.try_lock slot.turn_mu
   then run_locked slot ~lane:Autonomous f

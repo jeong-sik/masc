@@ -195,6 +195,7 @@ let owner_transition_action_denylist (ctx : context) =
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_runtime : string option)
+    ~(operator_override : bool)
     ~(ctx : context)
     ~(task_opt : Masc_domain.task option)
     ~(task_id : string)
@@ -244,14 +245,20 @@ let review_completion_notes
          complete without evidence; #23738 made Gate 0 unconditional and, running
          first at this tool boundary, pre-empted the scoped workspace gate. *)
       let requires_evidence = Masc_domain.task_requires_verification task in
-      match (Anti_rationalization.review
-         ?sw:ctx.sw
-         ?evaluator_runtime
-         ?completion_contract
-         ~required_evidence
-         ~verify_gate_evidence
-         ~requires_evidence
-         ~on_verdict ~few_shot_block ar_req).verdict with
+      let ar_result =
+        Anti_rationalization.review
+          ?evaluator_runtime
+          ?completion_contract
+          ~required_evidence
+          ~verify_gate_evidence
+          ~requires_evidence
+          ~on_verdict
+          ~few_shot_block
+          ~operator_override
+          ~sw:ctx.sw
+          ar_req
+      in
+      match ar_result.verdict with
       | Anti_rationalization.Reject reason -> Some reason
       | Anti_rationalization.Approve -> None
 

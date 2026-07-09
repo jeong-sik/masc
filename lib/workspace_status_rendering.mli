@@ -8,11 +8,12 @@
     credential state, suggestions, attention items, players,
     quest board, messages).
 
-    Three additional helpers
-    ({!active_task_assignee}, {!assigned_task_ids},
-    {!deliverable_claims_completion}) are used by [tool_workspace]
-    for assignee-aware filtering and deliverable-completion
-    detection outside the rendering path.
+    Two additional helpers
+    ({!active_task_assignee}, {!assigned_task_ids}) are used by
+    [tool_workspace] for assignee-aware filtering outside the
+    rendering path. Deliverable completion-claim detection now
+    lives in {!Task_completion_claim} (shared with
+    {!Verification_protocol}).
 
     All formatting helpers (icons, badges, take-items,
     bool-flag) stay private — the rendered string is the
@@ -42,28 +43,6 @@ val assigned_task_ids :
 
     Used by [tool_workspace] to compute "the tasks assigned to you"
     for the [masc_status] response. *)
-
-val deliverable_claims_completion :
-  task_id:string -> string -> bool
-(** [deliverable_claims_completion ~task_id deliverable] returns
-    [true] iff [deliverable]'s normalised first line claims
-    completion of [task_id].
-
-    {2 Detection rules (case-insensitive on a trimmed first line)}
-
-    | Pattern | Match |
-    |---|---|
-    | [["<task_id> completed"]] | yes |
-    | [["completed"]] (any task) | yes |
-    | empty | no |
-    | otherwise | no |
-
-    The "completed" prefix-match is intentional — it catches
-    LLM-generated text that uses "completed: ..." or
-    "completed and verified by ..." while not mistaking
-    "completion was attempted" for a real claim.  Pinning at
-    the contract seam so a future "stricter pattern" PR must
-    touch this explicitly. *)
 
 val status_summary_string :
   ctx:Workspace_types.context ->

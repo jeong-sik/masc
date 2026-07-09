@@ -305,7 +305,7 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
   let batch_len = List.length batch in
   if batch_len > 1 then
     Log.Keeper.info
-      "debounce: coalesced %d board signals (keeper=%s)"
+      "turn digest: coalesced %d board signals into one turn (keeper=%s)"
       batch_len
       meta_after_triage.name;
   List.filter_map
@@ -325,9 +325,11 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
 ;;
 
 let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
-  (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
-     per turn. Board signals are coalesced by the default debounce
-     window in {!Keeper_event_queue.drain_board_window} (2 s). *)
+  (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus per
+     turn, where the board unit is the turn digest: every queued board
+     signal is consumed as one batch ({!Keeper_event_queue.drain_board_all},
+     RFC-0334 W2 — arrival-window batching is retired), and the non-board
+     fallback below stays a single stimulus. *)
   let board_batch =
     Keeper_registry_event_queue.drain_board
       ~base_path:ctx.config.base_path

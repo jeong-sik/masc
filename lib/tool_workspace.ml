@@ -222,7 +222,7 @@ let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_do
   | Masc_domain.Todo ->
     (match Planning_eio.load ctx.config ~task_id:task.id with
      | Ok plan_ctx ->
-       Workspace_status_rendering.deliverable_claims_completion
+       Task_completion_claim.deliverable_claims_completion
          ~task_id:task.id
          plan_ctx.deliverable
      | Error _ -> false)
@@ -307,7 +307,7 @@ let planning_context_state
              active_tasks
          with
          | Some { task_status = Masc_domain.Claimed _ | Masc_domain.InProgress _; _ }
-           when Workspace_status_rendering.deliverable_claims_completion
+           when Task_completion_claim.deliverable_claims_completion
                   ~task_id
                   plan_ctx.deliverable -> Some task_id
          | Some _ | None -> None

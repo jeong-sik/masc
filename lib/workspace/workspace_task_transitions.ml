@@ -79,16 +79,12 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
+        (* RFC-0323 G-10: the typed reclaim claim precheck is retired — the
+           FSM decision below owns claimability by status alone. The evidence
+           requirements for submission/approval (#23719) stay. *)
         let* () =
           match action with
-          | Masc_domain.Claim ->
-            (match Masc_domain.task_claim_decision task with
-             | Claim_unavailable (Claim_block_reclaim_policy r) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
-             | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ())
+          | Masc_domain.Claim
           | Masc_domain.Start
           | Masc_domain.Cancel
           | Masc_domain.Release -> Ok ()
@@ -161,7 +157,16 @@ let transition_task_outcome_r
           match
             Workspace_task_lifecycle.decide
               ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
-              ~requires_verification:(Masc_domain.task_requires_verification task)
+              (* RFC-0323 G-5 Phase B: when [Verification.default_on] is set,
+                 treat every task as verification-required so completion
+                 routes through submit→approve. The evidence gate above
+                 reads [task_requires_verification] (= contract.strict)
+                 directly and is intentionally NOT flipped here — keeping
+                 it on Phase-A scope avoids the #23719 G-2 regression
+                 (unannounced Phase B). Default off (readiness gate §5). *)
+              ~requires_verification:
+                (Masc_domain.task_requires_verification task
+                 || Env_config_runtime.Verification.default_on ())
               ~verification_timeout_seconds:
                 (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
@@ -172,6 +177,7 @@ let transition_task_outcome_r
               ~action
               ~now
               ~authority
+              ~system_gate_exempt:false
               ~notes
               ~reason
           with
@@ -195,7 +201,7 @@ let transition_task_outcome_r
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Task is verifier-required (completion_contract or goal verifier_policy set); use submit_for_verification instead of done (RFC-0308)"))
+                    "Task has a strict verification contract (contract.strict=true); use submit_for_verification — a verifier (not the assignee) then approves it to done (RFC-0323 G-1, implements RFC-0308)"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -221,7 +227,9 @@ let transition_task_outcome_r
                  action=claim first, then action=release once you own it."
               | Masc_domain.Todo, (Masc_domain.Done_action | Masc_domain.Cancel) ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim then action=start before trying to finish or cancel it."
+                 action=claim then action=start; complete via \
+                 submit_for_verification → approve (action=done only for \
+                 non-strict tasks)."
               | Masc_domain.Todo, Masc_domain.Start ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim first — start needs ownership."
@@ -247,10 +255,13 @@ let transition_task_outcome_r
                  keeper_task_claim for unclaimed work."
               | Masc_domain.InProgress _, Masc_domain.Start ->
                 " Remediation: task is already in_progress. Valid actions from \
-                 in_progress: done, submit_for_verification, release, cancel."
+                 in_progress: submit_for_verification (→ verifier approve), done \
+                 (non-strict tasks only), release, cancel."
               | Masc_domain.Done _, _ ->
-                " Remediation: task is already in a terminal state (done). Use \
-                 masc_add_task for new work or masc_tasks to find claimable items."
+                " Remediation: task is already in a terminal state (done). To \
+                 re-run this work, create a new task with predecessor_task_id \
+                 via masc_add_task (RFC-0323); use masc_tasks to find claimable \
+                 items."
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."

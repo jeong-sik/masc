@@ -734,6 +734,10 @@ let resolve_projected_allowed_path
   in
   if not within_root
   then user_message_error (Keeper_alerting_path.Outside_project_root { raw = raw_for_error })
+  else if Keeper_alerting_path.is_masc_internal_state_norm ~root_norm ~target_norm
+  then
+    user_message_error
+      (Keeper_alerting_path.Task_state_file_path_blocked { raw = raw_for_error })
   else (
     let allowed_norms =
       if allowed_paths = []

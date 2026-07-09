@@ -225,8 +225,15 @@ export async function interruptKeeperTurn(keeperName: string): Promise<boolean> 
   const name = keeperName.trim()
   if (!name) return false
   await cancelActiveKeeperThreadMessage(name)
-  const result = await apiInterruptKeeperTurn(name, { signal: keeperThreadCancelSignal() })
-  return result.cancelled
+  try {
+    const result = await apiInterruptKeeperTurn(name, { signal: keeperThreadCancelSignal() })
+    return result.cancelled
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn('[keeper] interrupt turn failed', { keeperName: name, message })
+    setRecordValue(keeperActionErrors, name, message)
+    return false
+  }
 }
 
 export function selectKeeper(name: string): void {

@@ -1410,10 +1410,11 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
 
 
 let test_task_claim_next_action_todo_policy_block_still_claims () =
-  (* task-1869 (#23661): reclaim_policy gates Done -> re-claim only. A Todo
-     task carrying Block_reclaim (e.g. an operator hard-stop release) stays
-     claimable; the block re-arms once the task reaches Done. This pin was
-     inverted before #23661 and sat latent-red while main was compile-red. *)
+  (* task-1869 (#23661): a Todo task carrying a reclaim_policy stays
+     claimable. RFC-0323 G-10 (#23731) then retired the typed reclaim claim
+     gate entirely — [Claim_block_reclaim_policy] no longer exists, so the
+     only skip reason left is [Claim_block_not_todo]; this pin survives as
+     the Todo-always-claimable half. *)
   let t : Masc_domain.task = {
     id = "task-009";
     title = "Operator stop";
@@ -1433,8 +1434,6 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
   match Masc_domain.task_claim_next_action t with
   | Masc_domain.Claim_now ->
     check bool "claimable" true (Masc_domain.task_claim_next_action_is_claimable t)
-  | Masc_domain.Skip_claim (Masc_domain.Claim_block_reclaim_policy _) ->
-    fail "todo task must stay claimable regardless of reclaim_policy (task-1869)"
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"
 

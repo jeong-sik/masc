@@ -30,6 +30,7 @@ vi.mock('../keeper-actions', () => ({
   recoverKeeperRuntime: vi.fn(),
   resumePendingKeeperChatRequests: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),
+  interruptKeeperTurn: vi.fn(async () => true),
   isKeeperThreadMessageSendInFlight: vi.fn(() => false),
 }))
 
@@ -107,6 +108,7 @@ import { keeperStatusDetails } from '../keeper-state'
 import {
   cancelActiveKeeperThreadMessage,
   hydrateKeeperStatus,
+  interruptKeeperTurn,
   isKeeperThreadMessageSendInFlight,
   sendKeeperThreadMessage,
 } from '../keeper-actions'
@@ -879,6 +881,33 @@ describe('KeeperConversationPanel', () => {
     )
     await waitFor(() => {
       expect(container.textContent).toContain('busy')
+    })
+  })
+
+  it('calls interruptKeeperTurn when the busy toolbar interrupt button is clicked', async () => {
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [
+          { keeper_name: 'sangsu', state: 'busy', waiting_on: [], waiting_count: 0 },
+        ],
+      },
+    }
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain('busy')
+    })
+
+    const interruptButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === '현재 턴 중단') as HTMLButtonElement | undefined
+    expect(interruptButton).toBeDefined()
+
+    fireEvent.click(interruptButton as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(interruptKeeperTurn).toHaveBeenCalledWith('sangsu')
     })
   })
 })

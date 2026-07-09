@@ -805,6 +805,28 @@ export function KeeperConversationPanel({
     bumpQueue()
   }
 
+  // Busy/interrupt affordance shared by all three composer layouts. Defined
+  // here (not as a module-level helper) so it closes over keeperName/showToast/
+  // interruptKeeperTurn and the workspace/primary/default branches cannot drift
+  // apart again — the default branch previously dropped this entirely.
+  const renderBusyToolbar = () => html`
+    <${BusyToolbar}
+      keeperName=${keeperName}
+      onInterrupt=${() => {
+        void interruptKeeperTurn(keeperName)
+          .then(cancelled => {
+            showToast(
+              cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+              cancelled ? 'success' : 'warning',
+            )
+          })
+          .catch(() => {
+            showToast('현재 턴 중단에 실패했습니다', 'error')
+          })
+      }}
+    />
+  `
+
   if (layout === 'workspace') {
     // 3-pane workspace: identity + lifecycle live in the ChatHeader above
     // this panel, so the workspace layout drops the panel's own header and
@@ -909,23 +931,7 @@ export function KeeperConversationPanel({
                   </div>
                 `
               : null}
-            ${isKeeperBusy
-              ? html`<${BusyToolbar}
-                  keeperName=${keeperName}
-                  onInterrupt=${() => {
-                    void interruptKeeperTurn(keeperName)
-                      .then(cancelled => {
-                        showToast(
-                          cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
-                          cancelled ? 'success' : 'warning',
-                        )
-                      })
-                      .catch(() => {
-                        showToast('현재 턴 중단에 실패했습니다', 'error')
-                      })
-                  }}
-                />`
-              : null}
+            ${isKeeperBusy ? renderBusyToolbar() : null}
             <${ChatComposer}
               key=${keeperName}
               draftPersistKey=${keeperName}
@@ -1041,23 +1047,7 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
-          ${isKeeperBusy
-            ? html`<${BusyToolbar}
-                keeperName=${keeperName}
-                onInterrupt=${() => {
-                  void interruptKeeperTurn(keeperName)
-                    .then(cancelled => {
-                      showToast(
-                        cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
-                        cancelled ? 'success' : 'warning',
-                      )
-                    })
-                    .catch(() => {
-                      showToast('현재 턴 중단에 실패했습니다', 'error')
-                    })
-                }}
-              />`
-            : null}
+          ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}
@@ -1170,6 +1160,7 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
+          ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}

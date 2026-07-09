@@ -37,43 +37,26 @@ type grounded_verdict = {
 }
 
 (* ================================================================ *)
-(* Read-Only Detection                                              *)
+(* Read-Only Detection — RFC-0331 §A4: uses Effect_class.t          *)
 (* ================================================================ *)
 
-let read_only_patterns = [
-  "read"; "glob"; "grep";
-  "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
-  "git status"; "git log"; "git diff";
-  "status"; "view"; "get"; "fetch"; "query";
-]
-
-let is_word_char c =
-  match c with
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
-  | _ -> false
-
-let has_pattern_with_word_boundary ~text ~pat =
-  let tlen = String.length text in
-  let plen = String.length pat in
-  if plen = 0 || tlen < plen then false
-  else
-    let rec loop i =
-      if i > tlen - plen then false
-      else if String.sub text i plen = pat then
-        let before_ok = i = 0 || not (is_word_char text.[i - 1]) in
-        let after_idx = i + plen in
-        let after_ok = after_idx >= tlen || not (is_word_char text.[after_idx]) in
-        if before_ok && after_ok then true else loop (i + 1)
-      else
-        loop (i + 1)
-    in
-    loop 0
+let tool_effect_class ~name =
+  match String.lowercase_ascii name with
+  | "read" | "glob" | "grep" | "search" | "find" | "list"
+  | "ls" | "cat" | "head" | "tail" | "status" | "view"
+  | "get" | "fetch" | "query" -> Types_core.Read
+  | "write" | "edit" | "create" | "delete" | "remove"
+  | "post" | "send" | "broadcast" | "claim" | "release"
+  | "done" | "cancel" -> Types_core.Write
+  | _ -> Types_core.ReadWrite
 
 let should_skip ~action_description =
   let text = String.lowercase_ascii action_description in
-  List.exists (fun pat ->
-    has_pattern_with_word_boundary ~text ~pat
-  ) read_only_patterns
+  let words = String.split_on_char ' ' text in
+  let first_word = List.hd words in
+  match tool_effect_class ~name:first_word with
+  | Types_core.Read -> true
+  | Types_core.Write | Types_core.ReadWrite -> false
 
 (* ================================================================ *)
 (* Verdict Parsing                                                  *)

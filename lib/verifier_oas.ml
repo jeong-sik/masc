@@ -290,7 +290,7 @@ let install_hook
 (** Create an OAS Guardrails config that uses read-only detection
     as a Custom tool filter.
 
-    Tools whose names match {!read_only_patterns} (read, grep,
+    Tools whose names match {!Types_core.effect_class} Read (read, grep,
     search, git status, etc.) pass through. Tools that do NOT match are
     also allowed -- the filter itself does not block anything. Its purpose
     is to tag tools for downstream hooks that may skip verification for

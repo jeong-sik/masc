@@ -967,11 +967,19 @@ let tool_result_to_yojson r =
   | Some d -> `Assoc (base @ [("data", d)])
   | None -> `Assoc base
 
+(** RFC-0331 §A4: Effect class — replaces [read_only_patterns] string classifiers. *)
+type effect_class =
+  | Read
+  | Write
+  | ReadWrite
+[@@deriving show]
+
 (** Tool schema for MCP *)
 type tool_schema = {
   name: string;
   description: string;
   input_schema: Yojson.Safe.t;
+  effect_class: effect_class;
 }
 
 (** Structured result for claim_next scheduling (avoids brittle string parsing).

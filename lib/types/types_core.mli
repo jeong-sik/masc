@@ -320,10 +320,18 @@ type tool_result =
 
 val tool_result_to_yojson : tool_result -> Yojson.Safe.t
 
+(** RFC-0331 §A4: Effect class — replaces [read_only_patterns] string classifiers. *)
+type effect_class =
+  | Read
+  | Write
+  | ReadWrite
+[@@deriving show]
+
 type tool_schema =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; effect_class : effect_class
   }
 
 type claim_next_result =

@@ -34,14 +34,14 @@ type grounded_verdict = private {
   evidence : grounded_ref list;
 }
 
-(** {1 Read-Only Detection} *)
+(** {1 Read-Only Detection — RFC-0331 §A4} *)
 
 (** [should_skip ~action_description] returns [true] when the
-    description text contains a word-boundary match for any
-    read-only keyword ([read], [glob], [grep], [search], [find],
-    [list], [ls], [cat], [head], [tail], [git status], [git log],
-    [git diff], [status], [view], [get], [fetch], [query]).
-    Case-insensitive, word-boundary aware. *)
+    first word of the description matches a known read-only tool
+    name (read, glob, grep, search, find, list, ls, cat, head,
+    tail, status, view, get, fetch, query).
+    Uses {!Types_core.effect_class} instead of the retired
+    [read_only_patterns] string classifier. *)
 val should_skip : action_description:string -> bool
 
 (** {1 Verdict Parsing} *)

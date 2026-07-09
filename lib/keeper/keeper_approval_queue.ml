@@ -173,15 +173,15 @@ let audit_approval_event
       ?(goal_ids = [])
       ?sandbox_target
       ?runtime_contract
-      ?selected_model
-      ?actor
-      ?approval_mode
-      ?authorizing_band
+      ?selected_model:(selected_model : string option)
       ?audit_disposition
       ?disposition
       ?disposition_reason
       ?rule_match
       ?source_approval_id
+      ?actor
+      ?approval_mode
+      ?authorizing_band
       ?auto_approved
       ?decision
       ()

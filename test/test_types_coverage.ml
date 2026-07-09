@@ -1435,7 +1435,6 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
     check bool "claimable" true (Masc_domain.task_claim_next_action_is_claimable t)
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"
-  | _ -> fail "todo task should not be unclaimable"
 
 (* ============================================================
    Test Runners

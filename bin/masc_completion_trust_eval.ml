@@ -368,7 +368,13 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
   ()
 ;;
 
-let run_one (scenario : EH.scenario) ~runtime_id ~base_path ~run_index ~sw ~record_verdicts
+let run_one
+  (scenario : EH.scenario)
+  ~runtime_id
+  ~base_path
+  ~run_index
+  ~(sw : Eio.Switch.t option)
+  ~record_verdicts
     ~(evaluator_runtime : string option) : EH.eval_run =
   let calls = ref [] in
   let dispatch ~name ~args =
@@ -402,7 +408,13 @@ let run_one (scenario : EH.scenario) ~runtime_id ~base_path ~run_index ~sw ~reco
   build_eval_run scenario ~run_index ~res ~calls ~duration_ms
 ;;
 
-let run_scenario (scenario : EH.scenario) ~runtime_id ~base_path ~k ~sw ~record_verdicts
+let run_scenario
+  (scenario : EH.scenario)
+  ~runtime_id
+  ~base_path
+  ~k
+  ~(sw : Eio.Switch.t option)
+  ~record_verdicts
     ~(evaluator_runtime : string option) : EH.eval_result =
   Printf.eprintf "running scenario %s (k=%d)...\n%!" scenario.EH.id k;
   let runs =
@@ -602,7 +614,7 @@ let () =
     let results =
       List.map
         (fun s ->
-          run_scenario s ~runtime_id:cfg.runtime_id ~base_path ~k:cfg.k ~sw
+          run_scenario s ~runtime_id:cfg.runtime_id ~base_path ~k:cfg.k ~sw:(Some sw)
             ~record_verdicts:cfg.record_verdicts
             ~evaluator_runtime)
         scenarios

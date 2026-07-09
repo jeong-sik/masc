@@ -174,14 +174,14 @@ let audit_approval_event
       ?sandbox_target
       ?runtime_contract
       ?selected_model
+      ?actor
+      ?approval_mode
+      ?authorizing_band
       ?audit_disposition
       ?disposition
       ?disposition_reason
       ?rule_match
       ?source_approval_id
-      ?actor
-      ?approval_mode
-      ?authorizing_band
       ?auto_approved
       ?decision
       ()

@@ -734,6 +734,60 @@ let test_pending_phase_conversions () =
 (* RFC-0320 W3c: the delivery gate is fail-closed and dedups with the W3b
    prompt steer. [gate_decision] is pure, so we assert the decision matrix
    without a live connector. *)
+let test_w3c_deliver_continuation_unrouted_returns_skip () =
+  let module D = Masc.Keeper_continuation_delivery in
+  let config = Masc.Workspace_utils.default_config (Filename.get_temp_dir_name ()) in
+  let result =
+    D.deliver_continuation
+      ~config
+      ~agent_name:"test-agent"
+      ~continuation_channel:(Masc.Keeper_continuation_channel.Unrouted { reason = "test" })
+      ~text:"hello from test"
+      ()
+  in
+  Alcotest.(check bool)
+    "deliver_continuation with Unrouted channel returns Skipped_unrouted"
+    true
+    (result = D.Skipped_unrouted)
+;;
+
+let test_w3c_deliver_continuation_empty_text_returns_skip () =
+  let module D = Masc.Keeper_continuation_delivery in
+  let config = Masc.Workspace_utils.default_config (Filename.get_temp_dir_name ()) in
+  let result =
+    D.deliver_continuation
+      ~config
+      ~agent_name:"test-agent"
+      ~continuation_channel:(Masc.Keeper_continuation_channel.Dashboard)
+      ~text:""
+      ()
+  in
+  Alcotest.(check bool)
+    "deliver_continuation with empty text returns Skipped_empty"
+    true
+    (result = D.Skipped_empty)
+;;
+
+let test_w3c_describe_outcome () =
+  let module D = Masc.Keeper_continuation_delivery in
+  Alcotest.(check string)
+    "describe Delivered"
+    "delivered"
+    (D.describe_outcome D.Delivered);
+  Alcotest.(check string)
+    "describe Skipped_unrouted"
+    "skipped: unrouted"
+    (D.describe_outcome D.Skipped_unrouted);
+  Alcotest.(check string)
+    "describe Skipped_empty"
+    "skipped: empty content"
+    (D.describe_outcome D.Skipped_empty);
+  Alcotest.(check string)
+    "describe Skipped_already_replied"
+    "skipped: already replied"
+    (D.describe_outcome D.Skipped_already_replied)
+;;
+
 let test_w3c_continuation_delivery_gate () =
   let module D = Masc.Keeper_continuation_delivery in
   let dashboard =
@@ -800,6 +854,18 @@ let () =
             "W3c continuation delivery gate is fail-closed"
             `Quick
             test_w3c_continuation_delivery_gate
+        ; Alcotest.test_case
+            "W3c deliver_continuation with Unrouted returns skip"
+            `Quick
+            test_w3c_deliver_continuation_unrouted_returns_skip
+        ; Alcotest.test_case
+            "W3c deliver_continuation with empty text returns skip"
+            `Quick
+            test_w3c_deliver_continuation_empty_text_returns_skip
+        ; Alcotest.test_case
+            "W3c describe_outcome covers all variants"
+            `Quick
+            test_w3c_describe_outcome
         ] )
     ; ( "summary"
       , [ Alcotest.test_case

@@ -118,6 +118,18 @@ let try_handle
   in
   let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
+    (* Pre-flight parity with [Keeper_sandbox_read_backend.read_file]: verify
+       the host target exists before spawning a container, so a wrong
+       repos/<segment> guess fails with a precise host-path error instead of
+       burning a docker run that ends in "No such file or directory". *)
+    if not (Sys.file_exists target) then
+      Error
+        (sandbox_read_error ~target
+           (Printf.sprintf
+              "path_not_found: %s (host path does not exist; list repos/ to \
+               see your actual checkouts before searching)"
+              target))
+    else
     let max_eintr_retries = 8 in
     let rec loop attempts_left =
       match
@@ -168,7 +180,11 @@ let try_handle
                (match
                   run_readonly_in_sandbox ~target
                     ~command_argv:(fun cpath ->
-                      base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
+                      (* [-e] marks the pattern as a pattern even when it
+                         starts with a dash — without it a model-authored
+                         leading-dash pattern parses as an rg flag (latent
+                         argv-injection-shaped failure; 24h audit #7). *)
+                      base_argv @ type_argv @ glob_argv @ [ "-e"; pattern; cpath ])
                     ~ok_exit_codes:[ 0; 1 ]
                     ~max_bytes:1_000_000
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
@@ -199,7 +215,8 @@ let try_handle
                  @ (if glob <> "" then
                       [ "--glob"; glob ]
                     else [])
-                 @ [ pattern; target ]
+                 (* [-e]: same leading-dash guard as the sandbox lane. *)
+                 @ [ "-e"; pattern; target ]
                in
                let ir = Keeper_tool_execute_shell_ir.simple Masc_exec.Exec_program.Rg argv in
                run_host_shell_ir

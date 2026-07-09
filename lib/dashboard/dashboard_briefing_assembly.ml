@@ -285,7 +285,9 @@ let build_internal_signals incidents actions =
 let task_operation_status (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
-  | Masc_domain.AwaitingVerification _ -> Some "paused"
+  (* RFC-0323 G-6: awaiting verification is the normal completion lane,
+     not a pause — the operation is still moving (verifier's turn). *)
+  | Masc_domain.AwaitingVerification _ -> Some "active"
   (* Operator_blocked is a suspended state — surface it as "paused" (closest
      existing dashboard vocabulary) until a dedicated "blocked" class is added. *)
   | Masc_domain.Operator_blocked _ -> Some "paused"

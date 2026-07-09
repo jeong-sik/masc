@@ -139,10 +139,14 @@ let task_is_blocked (task : Masc_domain.task) =
   (* Enumerate every [task_status] variant so the compiler flags any new
      constructor here. The old [_ -> false] silently extended "not blocked"
      to any future status (e.g. a hypothetical [BlockedOnReview]) which
-     would be exactly the wrong default for a blocked-task detector. *)
+     would be exactly the wrong default for a blocked-task detector.
+     RFC-0323 G-6: [AwaitingVerification] is the normal completion lane
+     (submit -> verifier approve), not a blocked state. [Operator_blocked] is
+     the genuinely-blocked constructor introduced in #23866 and is the only
+     status that currently maps to blocked=true. *)
   match task.task_status with
-  | Masc_domain.AwaitingVerification _ -> true
   | Masc_domain.Operator_blocked _ -> true
+  | Masc_domain.AwaitingVerification _
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _

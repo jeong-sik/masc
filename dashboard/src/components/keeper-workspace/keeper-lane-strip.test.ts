@@ -96,6 +96,35 @@ describe('KeeperLaneStrip', () => {
     expect(el.querySelector('[data-missing="keeper-lane"]')).toBeNull()
   })
 
+  it('shows the auto-refresh cadence beside the snapshot time when polling', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+        autoRefreshMs=${15_000}
+      />
+    `)
+    const text = el.textContent ?? ''
+    expect(text).toContain('기준')
+    expect(text).toContain('Auto-refresh 15s')
+  })
+
+  it('omits the auto-refresh label when the panel is not polling', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    expect(el.textContent ?? '').not.toContain('Auto-refresh')
+  })
+
   it('renders an explicit gap when the keeper is absent from the inventory', () => {
     const el = mount(html`
       <${KeeperLaneStrip}

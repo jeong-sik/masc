@@ -1,0 +1,99 @@
+# MASC one-touch, self-contained image — builds the OCaml server AND the
+# dashboard SPA from the current source tree, then bakes a coherent config seed
+# and a keeper-team preset. Unlike the release Dockerfile (which COPYs a
+# prebuilt masc-linux-x64), this needs no external artifact: `docker build` on a
+# fresh clone produces a runnable image. First build is slow (OCaml 5.5 + deps).
+#
+# The server binary and the seeded runtime.toml / oas-models.toml come from the
+# same tree, so the model catalog stays coherent with the execution logic by
+# construction. On Apple Silicon this builds a native arm64 image (no emulation).
+
+# ---- Stage 1: OCaml server from source --------------------------------------
+# Mirrors .github/workflows/release.yml: pin external deps, deps-only install,
+# `dune build --release bin/main_eio.exe`. OCaml 5.5.0 per dune-project.
+FROM ocaml/opam:ubuntu-24.04-ocaml-5.5 AS ocaml-builder
+
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+# Install opam depext system packages explicitly (conf-protoc needs
+# libprotobuf-dev, not just protobuf-compiler). Keep the apt lists in place so
+# `opam install` can still sudo-install any depext this list misses.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config m4 git curl ca-certificates g++ \
+    protobuf-compiler libprotobuf-dev libev-dev \
+    libgmp-dev libffi-dev libssl-dev libsqlite3-dev libpq-dev \
+    zlib1g-dev libzstd-dev
+
+USER opam
+WORKDIR /src
+
+# Copy only the pin scripts + opam metadata first so the expensive dependency
+# layer is cached across ordinary source edits. opam-pin-external-deps.sh sources
+# its sibling oas-agent-sdk-pin.sh, so both must be present (matches the CI cache
+# key in .github/actions/setup-ocaml-toolchain, which hashes both scripts).
+COPY --chown=opam:opam scripts/opam-pin-external-deps.sh scripts/oas-agent-sdk-pin.sh scripts/
+COPY --chown=opam:opam dune-project masc.opam ./
+RUN opam update -y \
+    && chmod +x scripts/opam-pin-external-deps.sh \
+    && scripts/opam-pin-external-deps.sh --with-compact-protocol
+RUN ok=0; for attempt in 1 2 3; do \
+      if opam install . --deps-only -y; then ok=1; break; fi; \
+      echo "opam deps-only attempt ${attempt} failed; retrying" >&2; sleep 15; \
+    done; [ "$ok" = 1 ] || { echo "opam deps-only failed after 3 attempts" >&2; exit 1; }
+
+# Now the full source for the actual build.
+COPY --chown=opam:opam . .
+RUN opam exec -- dune build --release bin/main_eio.exe \
+    && cp _build/default/bin/main_eio.exe /tmp/masc \
+    && (strip /tmp/masc || true)
+
+# ---- Stage 2: dashboard SPA -------------------------------------------------
+FROM node:22-slim AS dashboard-builder
+RUN corepack enable && corepack prepare pnpm@10.31.0 --activate
+WORKDIR /build/dashboard
+COPY dashboard/package.json dashboard/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prefer-offline
+COPY dashboard/ ./
+RUN pnpm run build
+
+# ---- Stage 3: runtime -------------------------------------------------------
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl bash \
+    libffi8 libgmp10 libpq5 libsqlite3-0 libssl3t64 libzstd1 tini zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=ocaml-builder /tmp/masc /app/masc
+RUN chmod +x /app/masc
+
+# Immutable seed sources. config-seed carries catalogs + prompts; the repo's own
+# abstract keepers are dropped so the only keepers are the chosen team preset.
+COPY config/ /app/config-seed/
+COPY oas-models.toml /app/config-seed/oas-models.toml
+RUN rm -rf /app/config-seed/keepers
+COPY presets/ /app/presets/
+COPY scripts/seed-team.sh scripts/docker-entrypoint.sh /app/scripts/
+RUN chmod +x /app/scripts/*.sh
+
+COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard
+
+RUN groupadd --system appgroup && useradd --system --gid appgroup appuser \
+    && mkdir -p /app/.masc && chown -R appuser:appgroup /app
+
+ENV PORT=8080
+ENV MASC_BASE_PATH=/app
+# MASC_CONFIG_DIR intentionally unset: config resolves to /app/.masc/config
+# (Local_masc), the writable root the entrypoint seeds on the volume.
+
+VOLUME ["/app/.masc"]
+EXPOSE 8080
+STOPSIGNAL SIGTERM
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=5 \
+  CMD curl -fsS http://localhost:${PORT}/health || exit 1
+
+USER appuser
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/scripts/docker-entrypoint.sh"]

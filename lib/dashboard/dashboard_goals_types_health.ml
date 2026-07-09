@@ -21,7 +21,7 @@ let goal_phase_to_health = function
       None
 
 let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
-    ~pending_approvals ~sandbox_risk ~runtime_risk ~fsm_risk ~stalled
+    ~pending_approvals ~sandbox_risk ~runtime_risk ~verification_pending ~stalled
     ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
     ~activity_observation ~stagnation_status =
   match goal_phase_to_health goal_phase with
@@ -44,8 +44,8 @@ let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
         "Linked keeper is constrained by the current sandbox or scope."
       else if runtime_risk then
         "Latest keeper run fell back within the configured runtime."
-      else if fsm_risk then
-        "Linked task is waiting on FSM verification or remediation."
+      else if verification_pending then
+        "Linked task is awaiting verification (normal completion lane)."
       else if Option.is_some linkage_warning_reason then
         (match linkage_warning_reason with
          | Some "no_linked_tasks" ->
@@ -76,13 +76,13 @@ let tree_health ~goal_phase ~blocked_by_receipt ~child_blocked ~at_risk =
       else if at_risk then "at_risk"
       else "on_track"
 
-let tree_badges ~pending_approvals ~sandbox_risk ~runtime_risk ~fsm_risk ~stalled
+let tree_badges ~pending_approvals ~sandbox_risk ~runtime_risk ~verification_pending ~stalled
     ~activity_unobserved =
   let badges = ref [] in
   if pending_approvals > 0 then badges := "awaiting_approval" :: !badges;
   if sandbox_risk then badges := "sandbox" :: !badges;
   if runtime_risk then badges := "runtime" :: !badges;
-  if fsm_risk then badges := "task_verification_pending" :: !badges;
+  if verification_pending then badges := "task_verification_pending" :: !badges;
   if stalled then badges := "stalled" :: !badges;
   if activity_unobserved then badges := "activity_unobserved" :: !badges;
   List.rev !badges

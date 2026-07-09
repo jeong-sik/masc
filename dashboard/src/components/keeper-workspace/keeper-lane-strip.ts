@@ -23,9 +23,19 @@ import {
   stateTone,
 } from '../tools/keeper-waiting-inventory-panel'
 import { formatDateTimeKo } from '../../lib/format-time'
+import { setupVisibleAutoRefresh, formatAutoRefreshLabel } from '../../lib/auto-refresh'
 import { CountBadge } from '../v2/primitives-v2'
 
 const LANE_ROW_LIMIT = 3
+
+// The strip mirrors a heavy server-side aggregation (per-keeper event-queue,
+// turn-admission, external-attention, HITL, schedule scans). It is refreshed
+// by polling — not server push — while the keeper detail is open, so a busy
+// fleet does not pay that aggregation on every event. 15s is tighter than the
+// 30s shared panel default because this is the live "what is this keeper
+// waiting on right now" surface; setupVisibleAutoRefresh still pauses when the
+// tab is hidden and refreshes immediately on focus/return.
+const LANE_REFRESH_MS = 15_000
 
 function inventoryEntry(
   inventory: DashboardKeeperWaitingInventory | null | undefined,
@@ -72,6 +82,7 @@ export function KeeperLaneStrip({
   ready,
   loading,
   error,
+  autoRefreshMs,
 }: {
   keeper: Keeper
   inventory: DashboardKeeperWaitingInventory | null | undefined
@@ -80,6 +91,9 @@ export function KeeperLaneStrip({
   ready: boolean
   loading: boolean
   error: string | null
+  /** when set, the container polls at this cadence — shown next to the
+   *  snapshot time so the operator knows the panel refreshes on its own. */
+  autoRefreshMs?: number
 }): VNode {
   const entry = inventoryEntry(inventory, keeper)
   const rows = (entry?.waiting_on ?? []).slice(0, LANE_ROW_LIMIT)
@@ -112,8 +126,10 @@ export function KeeperLaneStrip({
                   `
                 : null}
               ${inventory?.generated_at
-                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">기준 ${formatDateTimeKo(inventory.generated_at)}</div>`
-                : null}
+                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">기준 ${formatDateTimeKo(inventory.generated_at)}${autoRefreshMs ? html` · ${formatAutoRefreshLabel(autoRefreshMs)}` : null}</div>`
+                : autoRefreshMs
+                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(autoRefreshMs)}</div>`
+                  : null}
             </div>
           `
         : inventory
@@ -127,11 +143,17 @@ export function KeeperLaneStrip({
   `
 }
 
-/** Container: reads the shared tools resource (loads it once if absent —
- *  the same pattern schedule-surface uses) and renders the strip. */
+/** Container: reads the shared tools resource, loads it once if absent, and
+ *  keeps it live while mounted by polling on a visibility-aware interval
+ *  (paused when the tab is hidden, refreshed immediately on focus/return).
+ *  The shared resource is stale-while-revalidate, so each refetch swaps the
+ *  inventory in place without flashing a loading gap. */
 export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) void loadTools()
+    return setupVisibleAutoRefresh(() => {
+      void loadTools()
+    }, LANE_REFRESH_MS)
   }, [])
   return html`
     <${KeeperLaneStrip}
@@ -140,6 +162,7 @@ export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
       ready=${toolsData.value != null}
       loading=${toolsLoading.value}
       error=${toolsError.value}
+      autoRefreshMs=${LANE_REFRESH_MS}
     />
   `
 }

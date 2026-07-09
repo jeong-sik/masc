@@ -626,7 +626,7 @@ function normalizeDashboardShellIrApproval(
   const normalizedTrust =
     trust === null || trust.safe === undefined || trust.audited === undefined || trust.privileged === undefined
       ? null
-      : trust
+      : { safe: trust.safe, audited: trust.audited, privileged: trust.privileged }
   if (schema === undefined || enabled === undefined || envKey === undefined) return null
   return {
     schema,

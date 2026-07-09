@@ -388,7 +388,7 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('/tmp/masc')
     expect(container.textContent).toContain('server repo head')
     expect(container.textContent).toContain('feedbee')
-    expect(container.textContent).toContain('Shell IR approval')
+    expect(container.textContent).toContain('shell IR approval')
     expect(container.textContent).toContain('disabled')
     expect(container.textContent).toContain('safe/audited/privileged')
     expect(container.textContent).toContain('source mismatch')

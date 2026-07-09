@@ -58,6 +58,7 @@ val decide
   -> authority:Masc_domain.completion_authority
   -> notes:string
   -> reason:string
+  -> system_gate_exempt:bool
   -> (decision, invalid) result
 
 (** Enumerate the [task_action]s that [decide] would accept for the given

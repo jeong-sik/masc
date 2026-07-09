@@ -108,9 +108,8 @@ let decide
       ~authority
       ~notes
       ~reason
-      ?system_gate_exempt
+      ~system_gate_exempt
   =
-  let system_gate_exempt = Option.value system_gate_exempt ~default:false in
   (* RFC-0323 W1 / RFC-0308: a verification-required task cannot reach Done
      through Done_action — submit -> approve is the completion lane. Gated on
      [verification_enabled] so a disabled verification FSM cannot deadlock

@@ -488,7 +488,11 @@ let () =
   assert (String.equal stim.post_id "p1");
   assert (length q = 1);
 
-  (* --- drain_board_window: coalesces board signals within window --- *)
+  (* --- drain_board_all: turn-keyed digest drains every board signal
+     regardless of arrival time (RFC-0334 W2). [old_board] arrived far
+     outside the retired 2 s window — under the old arrival-keyed drain
+     it starved in the queue and cost one extra wake→turn cycle; the
+     turn digest consumes it with the rest. *)
   let now = Unix.gettimeofday () in
   let recent_board_1 =
     { post_id = "rb1"; urgency = Normal; arrived_at = now; payload = board_payload () }
@@ -507,15 +511,20 @@ let () =
   let q_drain = enqueue q_drain old_board in
   let q_drain = enqueue q_drain bootstrap_in_queue in
   let q_drain = enqueue q_drain recent_board_2 in
-  let board_in_window, rest_queue = drain_board_window ~window_sec:5.0 q_drain in
-  assert (List.length board_in_window = 2);
-  (match board_in_window with
-   | first :: _ -> assert (String.equal first.post_id "rb2") (* urgency-sorted: Immediate first *)
-   | [] -> Alcotest.fail "expected at least one board signal in window");
-  assert (length rest_queue = 2);
+  let board_digest, rest_queue = drain_board_all q_drain in
+  assert (List.length board_digest = 3);
+  (match board_digest with
+   | first :: _ ->
+     (* Explicit mentions enqueue as [Immediate], so they lead the digest. *)
+     assert (String.equal first.post_id "rb2")
+   | [] -> Alcotest.fail "expected board signals in digest");
+  assert (
+    List.exists (fun s -> String.equal s.post_id "ob1") board_digest);
+  (* Non-board stimuli are not part of the board digest. *)
+  assert (length rest_queue = 1);
 
-  (* --- drain_board_window: empty queue --- *)
-  let empty_board, empty_rest = drain_board_window empty in
+  (* --- drain_board_all: empty queue --- *)
+  let empty_board, empty_rest = drain_board_all empty in
   assert (List.length empty_board = 0);
   assert (is_empty empty_rest);
 
@@ -917,6 +926,52 @@ let () =
       assert (String.equal replayed.post_id "p1");
       Masc.Keeper_registry_event_queue.ack_consumed ~base_path keeper_name [ replayed ];
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- registry drain_board: turn digest consumes every queued board
+     signal in one call, however spread their arrival times (RFC-0334 W2
+     pin: 5 signals spread over >2 s while the keeper was busy → one
+     drain, mention-urgency first; the non-board stimulus stays queued
+     for the single-dequeue lane). --- *)
+  let base_path = temp_dir "keeper-event-queue-turn-digest" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-turn-digest-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-turn-digest-test" in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      let digest_now = Unix.gettimeofday () in
+      let board_at ~post_id ~urgency arrived_at =
+        { post_id; urgency; arrived_at; payload = board_payload () }
+      in
+      List.iter
+        (Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name)
+        [ board_at ~post_id:"dg1" ~urgency:Normal 0.0
+        ; board_at ~post_id:"dg2" ~urgency:Normal (digest_now -. 600.0)
+        ; board_at ~post_id:"dg3" ~urgency:Immediate (digest_now -. 90.0)
+        ; board_at ~post_id:"dg4" ~urgency:Normal (digest_now -. 3.0)
+        ; board_at ~post_id:"dg5" ~urgency:Normal digest_now
+        ; { post_id = "dg-bootstrap"
+          ; urgency = Normal
+          ; arrived_at = digest_now
+          ; payload = Bootstrap
+          }
+        ];
+      let digest = Masc.Keeper_registry_event_queue.drain_board ~base_path keeper_name in
+      assert (List.length digest = 5);
+      (match digest with
+       | first :: _ -> assert (String.equal first.post_id "dg3")
+       | [] -> Alcotest.fail "turn digest should not be empty");
+      (* Second drain finds no board signals; the bootstrap stimulus is
+         still queued for the non-board single-dequeue lane. *)
+      assert (
+        List.length (Masc.Keeper_registry_event_queue.drain_board ~base_path keeper_name)
+        = 0);
+      (match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+       | Some stim -> assert (String.equal stim.post_id "dg-bootstrap")
+       | None -> Alcotest.fail "bootstrap stimulus should remain after board drain"));
 
   (* --- registry unavailable window: enqueue persists before register --- *)
   let base_path = temp_dir "keeper-event-queue-unregistered" in

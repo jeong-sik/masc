@@ -105,6 +105,7 @@ let decide_claim ~same_agent ~agent_name ~task_id ~task_status =
     ~authority:D.Assignee
     ~notes:""
     ~reason:""
+    ~system_gate_exempt:false
 ;;
 
 (* Cross-check: [valid_next_actions] returns exactly the [task_action]s for
@@ -134,6 +135,7 @@ let assert_consistent_with_decide
         ~authority
         ~notes:""
         ~reason:""
+        ~system_gate_exempt:false
     with
     | Ok _ -> true
     | Error _ -> false
@@ -492,6 +494,7 @@ let decide_done ~requires_verification ~verification_enabled ~task_status ~autho
     ~authority
     ~notes:"done notes"
     ~reason:""
+    ~system_gate_exempt:false
 ;;
 
 let test_verification_required_blocks_done () =

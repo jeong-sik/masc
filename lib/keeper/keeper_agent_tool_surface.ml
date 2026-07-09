@@ -79,8 +79,12 @@ let tools_for_affordance = function
   | Task_audit ->
     [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
-    [ "keeper_tasks_list"; "keeper_tasks_audit";
-      "keeper_task_done"; "masc_transition" ]
+    (* RFC-0323 G-4: a verify turn clears pending_verification via
+       masc_transition action=approve/reject. keeper_task_done is excluded —
+       it hardcodes action="done", which the FSM rejects on
+       awaiting_verification, so granting it here burned verify turns on
+       guaranteed-invalid transitions. *)
+    [ "keeper_tasks_list"; "keeper_tasks_audit"; "masc_transition" ]
 
 (* RFC-keeper-proactive-wake-actionability-invariant: does this affordance grant the keeper a tool that can change
    task/world state (and thus clear the signal that surfaced it)?  Exhaustive
@@ -139,7 +143,10 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        | Task_audit ->
          [ "keeper_tasks_audit" ]
        | Task_verify ->
-         [ "keeper_task_done"; "masc_transition" ]
+         (* RFC-0323 G-4: only masc_transition can approve/reject an
+            awaiting_verification task (keeper_task_done cannot — see
+            tools_for_affordance). *)
+         [ "masc_transition" ]
        )
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 

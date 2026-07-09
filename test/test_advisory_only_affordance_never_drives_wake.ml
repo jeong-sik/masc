@@ -87,6 +87,26 @@ let test_affordance_can_mutate_consistent_with_tools () =
     all_affordances
 ;;
 
+(* RFC-0323 G-4: a verify turn must be able to clear pending_verification.
+   Only masc_transition can act on awaiting_verification (action=approve /
+   reject); keeper_task_done hardcodes action="done", which the FSM rejects
+   there, so its presence on the verify surface burned turns on
+   guaranteed-invalid transitions. *)
+let test_task_verify_surface_can_approve () =
+  let tools = ATS.tools_for_affordance ATS.Task_verify in
+  Alcotest.(check bool)
+    "Task_verify grants masc_transition" true
+    (List.mem "masc_transition" tools);
+  Alcotest.(check bool)
+    "Task_verify does not grant keeper_task_done" false
+    (List.mem "keeper_task_done" tools);
+  let preferred = ATS.preferred_tool_names_for_turn_affordances [ "task_verify" ] in
+  Alcotest.(check (list string))
+    "verify-turn preferred tools are exactly the approve-capable one"
+    [ "masc_transition" ]
+    preferred
+;;
+
 let base_obs : WO.world_observation =
   { pending_mentions = []
   ; pending_board_events = []
@@ -132,6 +152,8 @@ let () =
             test_affordance_can_mutate_taxonomy
         ; test_case "mutate matches tool surface" `Quick
             test_affordance_can_mutate_consistent_with_tools
+        ; test_case "verify surface can approve (RFC-0323 G-4)" `Quick
+            test_task_verify_surface_can_approve
         ] )
     ; ( "wake_predicate"
       , [ test_case "actionable_signal_present excludes failed-only" `Quick

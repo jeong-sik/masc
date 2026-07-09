@@ -281,9 +281,12 @@ let () =
             `Quick
             test_visible_mind_read_resolves_to_private_storage
         ; Alcotest.test_case
-            "direct private storage read stays blocked"
+            "direct private storage read is allowed"
             `Quick
             test_playground_internal_path_now_allowed
+        ; Alcotest.test_case
+            "internal masc state read stays blocked"
+            `Quick
             test_masc_internal_state_read_stays_blocked
         ] )
     ; ( "file_tools"

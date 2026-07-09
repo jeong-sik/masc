@@ -174,14 +174,14 @@ let audit_approval_event
       ?sandbox_target
       ?runtime_contract
       ?selected_model
+      ?actor
+      ?approval_mode
+      ?authorizing_band
       ?audit_disposition
       ?disposition
       ?disposition_reason
       ?rule_match
       ?source_approval_id
-      ?actor
-      ?approval_mode
-      ?authorizing_band
       ?auto_approved
       ?decision
       ()
@@ -849,11 +849,17 @@ let approval_resolution_wake_hook :
      ?channel:Keeper_continuation_channel.t ->
      unit)
     ref =
-  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ?channel:_ -> ())
+  ref
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_
+      ?(channel : Keeper_continuation_channel.t option) ->
+      ignore (channel : Keeper_continuation_channel.t option))
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
-let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision ?channel =
+let wake_keeper_on_approval_resolution
+    ~base_path ~keeper_name ~approval_id ~decision
+    ?(channel : Keeper_continuation_channel.t option) =
   try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision ?channel with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

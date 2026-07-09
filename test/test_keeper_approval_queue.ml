@@ -129,7 +129,7 @@ let test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook () =
       ~keeper_name
       ~approval_id
       ~decision
-      ~channel:_ ->
+      ?channel:_ ->
       woke := Some (keeper_name, approval_id, decision));
   Fun.protect
     ~finally:(fun () ->
@@ -141,7 +141,7 @@ let test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~channel:_ ->
+          ?channel:_ ->
           ());
       cleanup_dir base_path)
     (fun () ->
@@ -187,7 +187,7 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
       ~keeper_name
       ~approval_id
       ~decision
-      ~channel:_ ->
+      ?channel:_ ->
       woke := Some (keeper_name, approval_id, decision));
   Fun.protect
     ~finally:(fun () ->
@@ -197,7 +197,7 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~channel:_ ->
+          ?channel:_ ->
           ());
       cleanup_dir base_path)
     (fun () ->
@@ -241,7 +241,7 @@ let test_resolution_wake_carries_originating_continuation_channel () =
       ~keeper_name:_
       ~approval_id
       ~decision
-      ~channel ->
+      ?channel ->
       captured :=
         Some
           Keeper_event_queue.
@@ -253,7 +253,7 @@ let test_resolution_wake_carries_originating_continuation_channel () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~channel:_ ->
+          ?channel:_ ->
           ())
   in
   let submit_resolve_capture ?continuation_channel ~keeper_name () =
@@ -335,7 +335,7 @@ let test_expire_stale_submit_and_await_does_not_fire_wake_hook () =
   let woke = ref false in
   AQ.set_approval_resolution_wake_hook
     (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ?channel:_ ->
       woke := true);
   Fun.protect
     ~finally:(fun () ->
@@ -345,7 +345,7 @@ let test_expire_stale_submit_and_await_does_not_fire_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~channel:_ ->
+          ?channel:_ ->
           ())
       ; cleanup_dir base_path)
     (fun () ->
@@ -392,7 +392,7 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
       ~keeper_name
       ~approval_id
       ~decision
-      ~channel ->
+      ?channel ->
       woke := Some (keeper_name, approval_id, decision, channel));
   Fun.protect
     ~finally:(fun () ->
@@ -402,7 +402,7 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~channel:_ ->
+          ?channel:_ ->
           ())
       ; cleanup_dir base_path)
     (fun () ->

@@ -9,9 +9,9 @@
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
     before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
-    [keeper_heartbeat_loop.ml] drains the board-signal batch within the
-    debounce window via [Keeper_registry_event_queue.drain_board] (a CAS loop
-    over [drain_board_window]) and falls back to a single non-board
+    [keeper_heartbeat_loop.ml] drains every queued board signal at turn
+    start via [Keeper_registry_event_queue.drain_board] (a CAS loop
+    over [drain_board_all], RFC-0334 W2) and falls back to a single non-board
     [dequeue_event] when that batch is empty — either path pins the
     [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots
     the queue and forces [Emit] when it is non-empty (pinning
@@ -362,12 +362,14 @@ val urgency_of_string : string -> (urgency, string) result
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)
 
-val drain_board_window : ?window_sec:float -> t -> stimulus list * t
-(** [drain_board_window q] separates board-signal stimuli that arrived
-    within [window_sec] seconds (default [2.0]) of now from the rest of
-    the queue.  Board signals are urgency-sorted; non-board stimuli and
-    board signals outside the window remain in the returned queue in
-    their original order. *)
+val drain_board_all : t -> stimulus list * t
+(** [drain_board_all q] separates every board-signal stimulus from the
+    rest of the queue, regardless of arrival time (RFC-0334 W2: the turn
+    is the batching unit, not an arrival window — identity dedup at
+    enqueue already bounds the batch).  Board signals are urgency-sorted
+    (explicit mentions enqueue as [Immediate], so they surface first);
+    non-board stimuli remain in the returned queue in their original
+    order. *)
 
 val stimulus_to_yojson : stimulus -> Yojson.Safe.t
 (** Stable JSON representation used by MASC-owned durable queue snapshots. *)

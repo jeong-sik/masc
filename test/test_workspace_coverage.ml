@@ -1266,6 +1266,56 @@ let test_transition_invalid () =
     | _ -> Alcotest.fail "Expected TaskInvalidState")
 ;;
 
+let test_transition_mark_operator_blocked () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let result =
+      Workspace.transition_task_r
+        config
+        ~agent_name:"claude"
+        ~task_id:"task-001"
+        ~action:Masc_domain.Mark_operator_blocked
+        ()
+    in
+    match result with
+    | Ok msg ->
+      Alcotest.(check bool)
+        "mark_operator_blocked from claimed"
+        true
+        (str_contains msg "operator_blocked")
+    | Error _ -> Alcotest.fail "Expected Ok for Mark_operator_blocked")
+;;
+
+let test_transition_unblock () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ =
+      Workspace.transition_task_r
+        config
+        ~agent_name:"claude"
+        ~task_id:"task-001"
+        ~action:Masc_domain.Mark_operator_blocked
+        ()
+    in
+    let result =
+      Workspace.transition_task_r
+        config
+        ~agent_name:"claude"
+        ~task_id:"task-001"
+        ~action:Masc_domain.Unblock
+        ()
+    in
+    match result with
+    | Ok msg ->
+      Alcotest.(check bool)
+        "unblock from operator_blocked"
+        true
+        (str_contains msg "todo")
+    | Error _ -> Alcotest.fail "Expected Ok for Unblock")
+;;
+
 let test_transition_submit_for_verification_requires_notes () =
   with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
     with_test_env (fun config ->
@@ -2701,6 +2751,11 @@ let () =
             test_transition_release_generated_nickname_alias
         ; Alcotest.test_case "release todo no-op" `Quick test_transition_release_todo_noop
         ; Alcotest.test_case "invalid" `Quick test_transition_invalid
+        ; Alcotest.test_case
+            "mark_operator_blocked from claimed"
+            `Quick
+            test_transition_mark_operator_blocked
+        ; Alcotest.test_case "unblock from operator_blocked" `Quick test_transition_unblock
         ; Alcotest.test_case
             "submit_for_verification requires notes"
             `Quick

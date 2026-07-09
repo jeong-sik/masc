@@ -37,27 +37,12 @@ type grounded_verdict = {
 }
 
 (* ================================================================ *)
-(* Read-Only Detection — RFC-0331 §A4: uses Effect_class.t          *)
-(* ================================================================ *)
-
-let tool_effect_class ~name =
-  match String.lowercase_ascii name with
-  | "read" | "glob" | "grep" | "search" | "find" | "list"
-  | "ls" | "cat" | "head" | "tail" | "status" | "view"
-  | "get" | "fetch" | "query" -> Types_core.Read
-  | "write" | "edit" | "create" | "delete" | "remove"
-  | "post" | "send" | "broadcast" | "claim" | "release"
-  | "done" | "cancel" -> Types_core.Write
-  | _ -> Types_core.ReadWrite
-
-let should_skip ~action_description =
-  let text = String.lowercase_ascii action_description in
-  let words = String.split_on_char ' ' text in
-  let first_word = List.hd words in
-  match tool_effect_class ~name:first_word with
-  | Types_core.Read -> true
-  | Types_core.Write | Types_core.ReadWrite -> false
-
+(* Read-Only Detection — RFC-0331 §A4: retired string classifier.
+   Effect_class.t is now a typed field on tool_schema declared at
+   registration. The old tool_effect_class / should_skip heuristic
+   (first-word substring match against 18 hardcoded patterns) is
+   removed per RFC-0331 decision. Consumers use the tool's declared
+   effect_class field instead.                                    *)
 (* ================================================================ *)
 (* Verdict Parsing                                                  *)
 (* ================================================================ *)

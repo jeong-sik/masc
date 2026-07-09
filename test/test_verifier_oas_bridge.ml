@@ -252,17 +252,20 @@ let test_parse_response_text_rejects_plain_verdict () =
       (Core.verdict_to_string verdict)
 
 (* ================================================================ *)
-(* should_skip (verify fast path)                                    *)
+(* should_skip (verify fast path) — RFC-0331 §A4: retired.          *)
+(* Effect_class.t is now a typed field on tool_schema. The old      *)
+(* string-heuristic fast path is removed; all actions are verified.  *)
 (* ================================================================ *)
 
-let test_verify_skips_readonly () =
+let test_verify_does_not_skip_readonly () =
   let req : Core.verification_request = {
     action_description = "read file contents";
     action_result = "some data";
     goal = "test goal";
     context_summary = "test context";
   } in
-  Alcotest.(check bool) "read-only skips to Pass" true
+  (* RFC-0331 §A4: should_skip retired. All actions are verified. *)
+  Alcotest.(check bool) "read-only no longer skips" false
     (Verifier_oas.verify req = Ok Core.Pass)
 
 let test_hook_continues_on_verify_error () =

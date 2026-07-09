@@ -967,11 +967,11 @@ let tool_result_to_yojson r =
   | Some d -> `Assoc (base @ [("data", d)])
   | None -> `Assoc base
 
-(** RFC-0331 §A4: Effect class — replaces [read_only_patterns] string classifiers. *)
+(** RFC-0331 §A4: Effect class — replaces [read_only_patterns] string classifiers.
+    Per RFC-0331 decision: Read_only | Mutating (closed sum, fail-closed to Mutating). *)
 type effect_class =
-  | Read
-  | Write
-  | ReadWrite
+  | Read_only
+  | Mutating
 [@@deriving show]
 
 (** Tool schema for MCP *)

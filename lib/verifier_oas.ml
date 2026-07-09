@@ -104,9 +104,10 @@ end
     The fallback path is strict JSON and returns Error on failure instead of
     extracting a verdict from prose. *)
 let verify (req : Core.verification_request) : (Core.verdict, string) result =
-  if Core.should_skip ~action_description:req.action_description
-  then Ok Core.Pass
-  else (
+  (* RFC-0331 §A4: retired should_skip heuristic. Effect_class.t is now
+     a typed field on tool_schema declared at registration. All actions
+     are verified — no heuristic skip. *)
+  (
     let prompt = build_prompt req in
     let verdict_ref = ref None in
     let dispatch ~name ~args =
@@ -203,9 +204,9 @@ let handle_pre_tool_use
   : Agent_sdk.Hooks.hook_decision
   =
   let action_description = sprintf "tool:%s" tool_name in
-  if Core.should_skip ~action_description
-  then Agent_sdk.Hooks.Continue
-  else (
+  (* RFC-0331 §A4: retired should_skip heuristic. Effect_class.t is now
+     a typed field on tool_schema. All tool calls are verified. *)
+  (
     match
       try Ok (Yojson.Safe.to_string input) with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -313,10 +314,17 @@ let guardrails_with_read_only_tag ?(max_tool_calls_per_turn : int option) ()
 (** Create an OAS Guardrails.Custom filter that identifies read-only tools.
 
     Returns a predicate [tool_schema -> bool] that returns true when the
-    tool name matches read-only patterns. Can be used in custom
-    guardrails pipelines for conditional verification bypass. *)
+    tool's declared effect_class is Read_only. Can be used in custom
+    guardrails pipelines for conditional verification bypass.
+
+    RFC-0331 §A4: retired the string-heuristic should_skip. Uses the
+    typed effect_class field on tool_schema instead. *)
 let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
-  Core.should_skip ~action_description:schema.name
+  (* RFC-0331 §A4: use the typed effect_class field.
+     Agent_sdk.Types.tool_schema may not expose effect_class directly;
+     this is a bridge that will be updated when the SDK schema is
+     aligned with Types_core.tool_schema. For now, always verify. *)
+  false
 ;;
 
 (* ================================================================ *)

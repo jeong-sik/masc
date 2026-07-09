@@ -320,11 +320,11 @@ type tool_result =
 
 val tool_result_to_yojson : tool_result -> Yojson.Safe.t
 
-(** RFC-0331 §A4: Effect class — replaces [read_only_patterns] string classifiers. *)
+(** RFC-0331 §A4: Effect class — replaces [read_only_patterns] string classifiers.
+    Per RFC-0331 decision: Read_only | Mutating (closed sum, fail-closed to Mutating). *)
 type effect_class =
-  | Read
-  | Write
-  | ReadWrite
+  | Read_only
+  | Mutating
 [@@deriving show]
 
 type tool_schema =

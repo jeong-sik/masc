@@ -108,31 +108,9 @@ let test_grounded_parser_rejects_bad_line () =
 
 (** {1 Read-Only Detection — RFC-0331 §A4} *)
 
-let test_should_skip_skips_read_tools () =
-  Alcotest.(check bool) "read" true
-    (VC.should_skip ~action_description:"read lib/foo.ml");
-  Alcotest.(check bool) "grep" true
-    (VC.should_skip ~action_description:"grep -rn pattern lib/");
-  Alcotest.(check bool) "search" true
-    (VC.should_skip ~action_description:"search pattern lib/");
-  Alcotest.(check bool) "list" true
-    (VC.should_skip ~action_description:"list lib/");
-  Alcotest.(check bool) "status" true
-    (VC.should_skip ~action_description:"status --short")
-
-let test_should_skip_does_not_skip_write_tools () =
-  Alcotest.(check bool) "write" false
-    (VC.should_skip ~action_description:"write lib/foo.ml");
-  Alcotest.(check bool) "edit" false
-    (VC.should_skip ~action_description:"edit lib/foo.ml");
-  Alcotest.(check bool) "delete" false
-    (VC.should_skip ~action_description:"delete lib/foo.ml");
-  Alcotest.(check bool) "create" false
-    (VC.should_skip ~action_description:"create lib/foo.ml")
-
-let test_should_skip_handles_empty_description () =
-  Alcotest.(check bool) "empty" false
-    (VC.should_skip ~action_description:"")
+(* RFC-0331 §A4: should_skip / tool_effect_class retired.
+   Effect_class.t is now a typed field on tool_schema declared at
+   registration. The old string-heuristic tests are removed. *)
 
 let test_grounded_verdict_serializes_evidence () =
   match VC.grounded_of (VC.Fail "bad") [ evidence ~line:9 ~quote:"let bad = true" () ] with

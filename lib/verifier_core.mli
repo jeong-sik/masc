@@ -34,15 +34,12 @@ type grounded_verdict = private {
   evidence : grounded_ref list;
 }
 
-(** {1 Read-Only Detection — RFC-0331 §A4} *)
+(** {1 Read-Only Detection — RFC-0331 §A4}
 
-(** [should_skip ~action_description] returns [true] when the
-    first word of the description matches a known read-only tool
-    name (read, glob, grep, search, find, list, ls, cat, head,
-    tail, status, view, get, fetch, query).
-    Uses {!Types_core.effect_class} instead of the retired
-    [read_only_patterns] string classifier. *)
-val should_skip : action_description:string -> bool
+    Retired: the string-heuristic [should_skip] / [tool_effect_class]
+    functions have been removed. Effect_class.t is now a typed field
+    on tool_schema declared at registration. Consumers use the tool's
+    declared effect_class field instead. *)
 
 (** {1 Verdict Parsing} *)
 

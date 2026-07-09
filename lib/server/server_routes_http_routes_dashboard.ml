@@ -1142,7 +1142,8 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/resolve" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _operator_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in

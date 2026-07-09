@@ -279,11 +279,6 @@ let resolve_keeper_target_path
   let raw = String.trim raw_path in
   if raw = ""
   then Error Path_required
-  else if is_masc_internal_state_path raw
-  then (
-    let rej = Task_state_file_path_blocked { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
   else (
     let root = project_root_of_config config in
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
@@ -300,11 +295,6 @@ let resolve_keeper_target_path
          input. The "outside_project_root" label is enough for the
          caller to course-correct without enumerating the host. *)
       Error (Outside_project_root { raw })
-    else if is_masc_internal_state_norm ~root_norm ~target_norm
-    then (
-      let rej = Task_state_file_path_blocked { raw } in
-      rejection_to_telemetry rej;
-      Error rej)
     else if allowed_paths = []
     then Ok candidate
     else (
@@ -413,14 +403,6 @@ let resolve_keeper_read_path
     let rej = Absolute_path_rejected { raw } in
     rejection_to_telemetry rej;
     Error rej)
-  else if is_masc_internal_state_path raw
-  then (
-    (* Block direct access to .masc/ internal state files.
-       Keepers should use keeper_tasks_list / keeper_context_status
-       instead of probing .masc/backlog.json, .masc/tasks/, etc. *)
-    let rej = Task_state_file_path_blocked { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
   else (
     let root = project_root_of_config config in
     let candidate = Filename.concat root raw in
@@ -437,11 +419,6 @@ let resolve_keeper_read_path
          input. The "outside_project_root" label is enough for the
          caller to course-correct without enumerating the host. *)
       Error (Outside_project_root { raw })
-    else if is_masc_internal_state_norm ~root_norm ~target_norm
-    then (
-      let rej = Task_state_file_path_blocked { raw } in
-      rejection_to_telemetry rej;
-      Error rej)
     else (
       let allowed_norms =
         if allowed_paths = []

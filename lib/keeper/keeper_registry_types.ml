@@ -12,6 +12,8 @@ module StringMap = Set_util.StringMap
    [Keeper_registry_types_failure] (godfile decomp). *)
 include Keeper_registry_types_failure
 
+exception Operator_interrupt
+
 (* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
    [Keeper_registry_types_turn_phase] (500-line decomp). *)
 include Keeper_registry_types_turn_phase

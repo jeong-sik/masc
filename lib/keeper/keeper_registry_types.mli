@@ -113,6 +113,11 @@ type failure_reason =
       (** The current turn was cancelled by an explicit operator request,
           typically from the dashboard "stop current turn" action. *)
 
+exception Operator_interrupt
+(** Raised by [interrupt_current_turn] to cancel the live turn switch.
+    The turn runtime may catch this via [Eio.Cancel.Cancelled] and record
+    [failure_reason.Operator_interrupt] for observability. *)
+
 val ambiguous_partial_commit_kind_to_string :
   ambiguous_partial_commit_kind -> string
 

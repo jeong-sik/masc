@@ -910,6 +910,7 @@ let interrupt_current_turn ~base_path name =
        match Atomic.exchange entry.current_turn_switch None with
        | None -> `No_turn_in_flight
        | Some sw ->
-         Eio.Switch.fail sw (Failure "operator_interrupt");
+         (try Eio.Switch.fail sw Operator_interrupt with
+          | Invalid_argument _ -> ());
          `Cancelled obs.turn_id)
 ;;

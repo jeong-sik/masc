@@ -2213,6 +2213,30 @@ let test_board_dashboard_json_embeds_claim_evidence_projection () =
   Alcotest.(check string) "needs evidence label" "Needs evidence"
     (json_member_string needs_evidence_json "label")
 
+let test_post_has_high_risk_evidence_returns_true_for_high_risk_claim () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = Board_core.create_post ~body:"high risk post"
+    ~author:(make_keeper_eta ())
+    ~claims:["artifact_exists"]
+    ~artifact_refs:["/tmp/test-artifact"]
+    ()
+  in
+  Alcotest.(check bool) "high risk evidence detected" true
+    (Board_claim_evidence.post_has_high_risk_evidence post_id)
+
+let test_post_has_high_risk_evidence_returns_false_for_no_claims () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = Board_core.create_post ~body:"no claims post"
+    ~author:(make_keeper_eta ())
+    ()
+  in
+  Alcotest.(check bool) "no high risk evidence" false
+    (Board_claim_evidence.post_has_high_risk_evidence post_id)
+
 let test_comment_claim_gate_rejects_unknown_claim_kind () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2742,6 +2766,8 @@ let () =
             test_board_dashboard_json_embeds_claim_evidence_projection;
           Alcotest.test_case "claim gate rejects unknown claim kind" `Quick
             test_comment_claim_gate_rejects_unknown_claim_kind;
+            test_post_has_high_risk_evidence_returns_true_for_high_risk_claim;
+            test_post_has_high_risk_evidence_returns_false_for_no_claims;
           Alcotest.test_case "claim gate resolves artifact content digest" `Quick
             test_resolve_file_path_records_content_digest;
           Alcotest.test_case "claim gate rejects digest-unavailable artifact" `Quick

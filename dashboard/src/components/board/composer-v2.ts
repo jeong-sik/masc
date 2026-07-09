@@ -154,10 +154,6 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function formatClock(seconds: number): string {
-  const whole = Math.max(0, Math.round(seconds))
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
-}
 
 export function appendVoiceTranscriptDraft(current: string, transcript: string): string {
   const text = transcript.trim()
@@ -174,16 +170,15 @@ export function serializeComposerBody(input: {
   if (input.attachments.length > 0) {
     throw new Error('Composer attachments require block transport and must not be serialized into text body')
   }
-  const blocks: string[] = []
   if (input.voice) {
-    blocks.push([
-      `Voice memo ${formatClock(input.voice.secs)} (${input.voice.size})`,
-      input.voice.transcript,
-    ].join('\n'))
+    // G02 (multimodal parity) — voice must travel as a block, not be folded into
+    // the text body. Chat and board share the ComposerBlocks transport; the text
+    // path must refuse voice rather than silently serializing its transcript and
+    // dropping the audio metadata. All current callers pass voice: null, so this
+    // removes the dead serialization branch.
+    throw new Error('Composer voice requires block transport and must not be serialized into text body')
   }
-  const text = input.text.trim()
-  if (text) blocks.push(text)
-  return blocks.join('\n\n')
+  return input.text.trim()
 }
 
 interface ComposerV2Props {

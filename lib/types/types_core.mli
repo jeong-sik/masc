@@ -64,6 +64,8 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Mark_operator_blocked
+  | Unblock
 [@@deriving show]
 
 val task_action_of_string : string -> (task_action, string) result
@@ -103,6 +105,7 @@ type task_status =
       }
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
+  | Operator_blocked of { blocked_at : string; reason : string }
 [@@deriving show]
 
 (** RFC-0220 §3.5: [task_status] of an [AwaitingVerification] obligation once

@@ -195,7 +195,7 @@ let owner_transition_action_denylist (ctx : context) =
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_runtime : string option)
-    ?(operator_override : bool = false)
+    ~(operator_override : bool)
     ~(ctx : context)
     ~(task_opt : Masc_domain.task option)
     ~(task_id : string)

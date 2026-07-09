@@ -102,6 +102,7 @@ val review :
   ?verify_gate_evidence:string list ->
   ?on_verdict:(review_result -> unit) ->
   ?few_shot_block:string ->
+  ?operator_override:bool ->
   ?sw:Eio.Switch.t ->
   review_request -> review_result
 

@@ -310,7 +310,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         source: 'workspace_masc_secrets',
         effective_roots: [
           {
-            root: '/mock/workspace/.masc/secrets/base',
+            root: '/mock/workspace/.masc/secrets/_shared',
             source: 'workspace_masc_secrets',
             status: 'ready',
             configured: true,
@@ -343,7 +343,7 @@ describe('parseKeeperCompositeSnapshot', () => {
 
     expect(result.secret_projection?.status).toBe('ready')
     expect(result.secret_projection?.effective_roots.map(root => root.root)).toEqual([
-      '/mock/workspace/.masc/secrets/base',
+      '/mock/workspace/.masc/secrets/_shared',
       '/mock/workspace/.masc/secrets/sangsu',
     ])
     expect(result.secret_projection?.env_names).toEqual(['GH_TOKEN'])

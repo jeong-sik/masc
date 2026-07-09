@@ -131,7 +131,7 @@ let secret_root_default ~base ~keeper_name =
     (Workspace_utils.safe_filename keeper_name)
 ;;
 
-let base_secret_root_default ~base = secret_root_default ~base ~keeper_name:"base"
+let base_secret_root_default ~base = secret_root_default ~base ~keeper_name:"_shared"
 
 let test_missing_secret_dir_is_noop () =
   let base = temp_dir () in
@@ -258,6 +258,35 @@ let test_base_secret_env_and_files_project_to_keeper_docker_args () =
       (contains_substring args (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
     Alcotest.(check bool) "generated gitconfig mounted" true
       (contains_substring args ":/tmp/masc-runtime/.masc/gitconfig:ro");
+    projection.cleanup ()
+;;
+
+let test_legacy_base_keeper_secret_dir_does_not_project_to_other_keepers () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let legacy_base_root = secret_root_default ~base ~keeper_name:"base" in
+  let token_path = Filename.concat (Filename.concat legacy_base_root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat legacy_base_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  write_file token_path "legacy-base-token\n";
+  write_file ssh_path "LEGACY BASE PRIVATE KEY";
+  match
+    Keeper_secret_projection.docker_args_for_keeper
+      ~base_path:base
+      ~keeper_name:"idealist"
+      ~container_name:"container"
+  with
+  | Error err -> Alcotest.fail err
+  | Ok projection ->
+    Alcotest.(check bool) "no env file from legacy base keeper dir" true
+      (Option.is_none (env_file_arg projection.docker_args));
+    let args = String.concat " " projection.docker_args in
+    Alcotest.(check bool) "legacy base ssh file not mounted" false
+      (contains_substring args (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
     projection.cleanup ()
 ;;
 
@@ -894,7 +923,7 @@ let test_base_keeper_scope_mutation_rejected () =
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
-       ~keeper_name:"base"
+       ~keeper_name:"_shared"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~name:"GH_TOKEN"
        ~value:"secret"
@@ -903,13 +932,13 @@ let test_base_keeper_scope_mutation_rejected () =
    | Error msg ->
      Alcotest.(check string)
        "rejection message"
-       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       "keeper-scope secret mutation is not permitted for the reserved '_shared' keeper"
        msg);
 
   (match
      Keeper_secret_projection.delete_env_entry
        ~base_path:base
-       ~keeper_name:"base"
+       ~keeper_name:"_shared"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~name:"GH_TOKEN"
    with
@@ -917,13 +946,13 @@ let test_base_keeper_scope_mutation_rejected () =
    | Error msg ->
      Alcotest.(check string)
        "rejection message"
-       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       "keeper-scope secret mutation is not permitted for the reserved '_shared' keeper"
        msg);
 
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
-       ~keeper_name:"base"
+       ~keeper_name:"_shared"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~container_path:"/home/keeper/.ssh/id_ed25519"
        ~value:"secret"
@@ -932,13 +961,13 @@ let test_base_keeper_scope_mutation_rejected () =
    | Error msg ->
      Alcotest.(check string)
        "rejection message"
-       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       "keeper-scope secret mutation is not permitted for the reserved '_shared' keeper"
        msg);
 
   (match
      Keeper_secret_projection.delete_file_entry
        ~base_path:base
-       ~keeper_name:"base"
+       ~keeper_name:"_shared"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~container_path:"/home/keeper/.ssh/id_ed25519"
    with
@@ -946,13 +975,13 @@ let test_base_keeper_scope_mutation_rejected () =
    | Error msg ->
      Alcotest.(check string)
        "rejection message"
-       "keeper-scope secret mutation is not permitted for the reserved 'base' keeper"
+       "keeper-scope secret mutation is not permitted for the reserved '_shared' keeper"
        msg);
 
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
-       ~keeper_name:"base"
+       ~keeper_name:"_shared"
        ~scope:Keeper_secret_projection.Shared_secret
        ~name:"GH_TOKEN"
        ~value:"secret"
@@ -973,6 +1002,9 @@ let () =
             test_secret_dir_override_uses_keeper_subdir
         ; Alcotest.test_case "base secret projects to keeper docker args" `Quick
             test_base_secret_env_and_files_project_to_keeper_docker_args
+        ; Alcotest.test_case "legacy base keeper dir does not project to other keepers"
+            `Quick
+            test_legacy_base_keeper_secret_dir_does_not_project_to_other_keepers
         ; Alcotest.test_case "keeper secret overrides base secret entries" `Quick
             test_keeper_secret_overrides_base_secret_entries
         ; Alcotest.test_case "local env missing secret dir is scrubbed" `Quick

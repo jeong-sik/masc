@@ -1029,7 +1029,7 @@ describe('RuntimeLensSection', () => {
         source: 'workspace_masc_secrets',
         effective_roots: [
           {
-            root: '/mock/workspace/.masc/secrets/base',
+            root: '/mock/workspace/.masc/secrets/_shared',
             source: 'workspace_masc_secrets',
             status: 'ready',
             configured: true,
@@ -1066,7 +1066,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('shared -> keeper')).toBeInTheDocument()
     expect(screen.getAllByText('shared').length).toBeGreaterThan(0)
     expect(screen.getAllByText('keeper').length).toBeGreaterThan(0)
-    expect(screen.getByText('/mock/workspace/.masc/secrets/base')).toBeInTheDocument()
+    expect(screen.getByText('/mock/workspace/.masc/secrets/_shared')).toBeInTheDocument()
     expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()
@@ -1080,7 +1080,7 @@ describe('RuntimeLensSection', () => {
       source: 'workspace_masc_secrets',
       effective_roots: [
         {
-          root: '/mock/workspace/.masc/secrets/base',
+          root: '/mock/workspace/.masc/secrets/_shared',
           source: 'workspace_masc_secrets',
           status: 'absent',
           configured: false,
@@ -1148,7 +1148,7 @@ describe('RuntimeLensSection', () => {
       source: 'workspace_masc_secrets',
       effective_roots: [
         {
-          root: '/mock/workspace/.masc/secrets/base',
+          root: '/mock/workspace/.masc/secrets/_shared',
           source: 'workspace_masc_secrets',
           status: 'absent',
           configured: false,

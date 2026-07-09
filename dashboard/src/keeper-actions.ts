@@ -227,12 +227,13 @@ export async function interruptKeeperTurn(keeperName: string): Promise<boolean> 
   await cancelActiveKeeperThreadMessage(name)
   try {
     const result = await apiInterruptKeeperTurn(name, { signal: keeperThreadCancelSignal() })
+    setRecordValue(keeperActionErrors, name, null)
     return result.cancelled
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.warn('[keeper] interrupt turn failed', { keeperName: name, message })
     setRecordValue(keeperActionErrors, name, message)
-    return false
+    throw err
   }
 }
 

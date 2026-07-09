@@ -73,8 +73,14 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
-import { loadTools, toolsData } from './tools/tool-state'
+import { loadTools, toolsData, toolsLoading } from './tools/tool-state'
+import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+
+// Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
+// const is module-local there, so we keep the same 15 s cadence here rather
+// than exporting it cross-file for a single consumer.
+const BUSY_REFRESH_MS = 15_000
 
 
 function GhostButton({
@@ -542,11 +548,16 @@ export function KeeperConversationPanel({
   const bumpQueue = () => setQueueVersion(v => v + 1)
   const isDrainingRef = useRef(false)
 
-  // Ensure the shared keeper waiting inventory (the same ~15 s-polled feed the
-  // lane strip consumes) is loaded so we can reflect this keeper's
-  // server-reported busy state in the composer.
+  // Keep the shared keeper waiting inventory live on surfaces that do NOT
+  // render KeeperLaneSection (which is what normally polls it every 15 s).
+  // Mirror the lane strip's visibility-aware auto-refresh: pause while the tab
+  // is hidden, refresh immediately on focus/return, and return the cleanup so
+  // the busy chip / interrupt button cannot freeze on a stale snapshot.
   useEffect(() => {
-    void loadTools()
+    if (!toolsData.value && !toolsLoading.value) void loadTools()
+    return setupVisibleAutoRefresh(() => {
+      void loadTools()
+    }, BUSY_REFRESH_MS)
   }, [])
 
   const inventoryEntry = useMemo(() => {
@@ -902,12 +913,16 @@ export function KeeperConversationPanel({
               ? html`<${BusyToolbar}
                   keeperName=${keeperName}
                   onInterrupt=${() => {
-                    void interruptKeeperTurn(keeperName).then(cancelled => {
-                      showToast(
-                        cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
-                        cancelled ? 'success' : 'warning',
-                      )
-                    })
+                    void interruptKeeperTurn(keeperName)
+                      .then(cancelled => {
+                        showToast(
+                          cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+                          cancelled ? 'success' : 'warning',
+                        )
+                      })
+                      .catch(() => {
+                        showToast('현재 턴 중단에 실패했습니다', 'error')
+                      })
                   }}
                 />`
               : null}
@@ -1030,12 +1045,16 @@ export function KeeperConversationPanel({
             ? html`<${BusyToolbar}
                 keeperName=${keeperName}
                 onInterrupt=${() => {
-                  void interruptKeeperTurn(keeperName).then(cancelled => {
-                    showToast(
-                      cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
-                      cancelled ? 'success' : 'warning',
-                    )
-                  })
+                  void interruptKeeperTurn(keeperName)
+                    .then(cancelled => {
+                      showToast(
+                        cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+                        cancelled ? 'success' : 'warning',
+                      )
+                    })
+                    .catch(() => {
+                      showToast('현재 턴 중단에 실패했습니다', 'error')
+                    })
                 }}
               />`
             : null}

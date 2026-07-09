@@ -1091,6 +1091,11 @@ let run_turn
           ());
        receipt_result)
 with
+| Eio.Cancel.Cancelled Keeper_registry.Operator_interrupt as ce ->
+  turn_cancelled := Some ce;
+  Keeper_registry.set_failure_reason
+    ~base_path:config.base_path meta.name (Some Keeper_registry.Operator_interrupt);
+  raise ce
 | Eio.Cancel.Cancelled _ as ce ->
   turn_cancelled := Some ce;
   raise ce

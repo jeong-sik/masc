@@ -37,6 +37,7 @@
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_verification_audit
   test_keeper_connector_attention_wake
   test_keeper_no_signal_silence
   test_keeper_failed_task_not_proactive_driver
@@ -397,6 +398,7 @@
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_verification_audit
   test_keeper_connector_attention_wake
   test_keeper_no_signal_silence
   test_keeper_failed_task_not_proactive_driver

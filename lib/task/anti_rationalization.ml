@@ -716,7 +716,7 @@ let review
       ?(on_verdict : (review_result -> unit) option)
       ?(few_shot_block = "")
       ?(operator_override : bool = false)
-      ?(sw : Eio.Switch.t option)
+      ?(sw : Eio.Switch.t option = None)
       (req : review_request)
   : review_result
   =

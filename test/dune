@@ -1145,6 +1145,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_goal_metric_unevaluated
+  test_goal_awaiting_read_model
   test_goal_verification
   test_string_util
   test_prompt_asset_sync
@@ -1341,6 +1342,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_goal_metric_unevaluated
+  test_goal_awaiting_read_model
   test_goal_verification
   test_string_util
   test_prompt_asset_sync

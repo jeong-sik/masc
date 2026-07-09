@@ -341,7 +341,10 @@ let rec build_tree context goals goal =
                   | None -> trust_disposition_reason trust)
              | _ -> None)
   in
-  let direct_fsm_risk =
+  (* RFC-0323 G-6: AwaitingVerification is the NORMAL completion lane
+     (submit -> verifier approve), so it is surfaced as a pending badge and
+     never feeds [at_risk] or a blocking source. *)
+  let direct_verification_pending =
     List.exists
       (fun ((task, _) : Masc_domain.task * string) ->
         match task.task_status with
@@ -407,7 +410,7 @@ let rec build_tree context goals goal =
   let direct_badges =
     tree_badges ~pending_approvals:(List.length direct_pending_approvals)
       ~sandbox_risk:direct_sandbox_risk ~runtime_risk:direct_runtime_risk
-      ~fsm_risk:direct_fsm_risk ~stalled
+      ~verification_pending:direct_verification_pending ~stalled
       ~activity_unobserved:(String.equal stagnation_status "unobserved")
   in
   let direct_badges =
@@ -473,7 +476,6 @@ let rec build_tree context goals goal =
     pending_approval_count > 0
     || infra_risk_count > 0
     || Option.is_some direct_runtime_blocking_reason
-    || direct_fsm_risk
     || Option.is_some linkage_warning_reason
     || stalled
     || child_at_risk
@@ -486,7 +488,7 @@ let rec build_tree context goals goal =
     goal_health_reason ~goal_phase:goal.Goal_store.phase ~blocked_by_receipt
       ~child_blocked ~pending_approvals:pending_approval_count
       ~sandbox_risk:direct_sandbox_risk ~runtime_risk:direct_runtime_risk
-      ~fsm_risk:direct_fsm_risk ~stalled
+      ~verification_pending:direct_verification_pending ~stalled
       ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
       ~activity_observation ~stagnation_status
   in
@@ -503,8 +505,6 @@ let rec build_tree context goals goal =
         else if Option.is_some direct_runtime_blocking_reason then
           ( "keeper_runtime",
             Option.value direct_runtime_blocking_reason ~default:status_reason )
-        else if direct_fsm_risk then
-          ("task_fsm", status_reason)
         else if Option.is_some linkage_warning_reason then
           ("goal_linkage", status_reason)
         else if stalled then

@@ -147,7 +147,9 @@ let transition_task_outcome_r
             | Masc_domain.Release
             | Masc_domain.Submit_for_verification
             | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification ), _ -> Ok ())
+            | Masc_domain.Reject_verification
+            | Masc_domain.Mark_operator_blocked
+            | Masc_domain.Unblock ), _ -> Ok ())
           [@warning "-4"]
         in
         let now = now_iso () in

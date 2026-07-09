@@ -426,6 +426,7 @@ and handle_transition ~tool_name ~start_time ctx args =
              | Some persisted -> Some persisted
              | None -> completion_contract)
           ~evaluator_runtime
+          ~operator_override:false
           ~ctx
           ~task_opt
           ~task_id

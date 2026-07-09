@@ -358,7 +358,8 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               err;
             acc)
        | Some Keeper_registry.Turn_overflow_pause
-       | Some Keeper_registry.Turn_livelock_pause ->
+       | Some Keeper_registry.Turn_livelock_pause
+       | Some Keeper_registry.Operator_interrupt ->
          { acc with to_unregister = entry :: acc.to_unregister }
        | Some (Keeper_registry.Turn_consecutive_failures count) ->
          (* #23439: policy returns [Pause_keeper] for a turn-failure streak
@@ -422,6 +423,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
     | Some (Keeper_registry.Completion_contract_violation _)
     | Some Keeper_registry.Turn_overflow_pause
     | Some Keeper_registry.Turn_livelock_pause
+    | Some Keeper_registry.Operator_interrupt
     | Some (Keeper_registry.Ambiguous_partial_commit _)
     | Some (Keeper_registry.Fiber_unresolved _)
     | Some (Keeper_registry.Exception _)
@@ -467,6 +469,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       | Some (Keeper_registry.Completion_contract_violation _)
       | Some Keeper_registry.Turn_overflow_pause
       | Some Keeper_registry.Turn_livelock_pause
+      | Some Keeper_registry.Operator_interrupt
       | Some (Keeper_registry.Ambiguous_partial_commit _)
       | Some (Keeper_registry.Fiber_unresolved _)
       | Some (Keeper_registry.Exception _)

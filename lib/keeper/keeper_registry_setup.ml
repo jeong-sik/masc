@@ -366,6 +366,7 @@ let register_with_state
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
     ; livelock_state = Atomic.make None
+    ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -460,6 +461,7 @@ let register_restarting ~base_path name meta
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
     ; livelock_state = Atomic.make None
+    ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None

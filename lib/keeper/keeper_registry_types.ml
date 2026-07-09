@@ -100,6 +100,7 @@ type registry_entry =
   ; last_failure_reason : failure_reason option
   ; turn_consecutive_failures : int
   ; livelock_state : livelock_attempt_state option Atomic.t
+  ; current_turn_switch : Eio.Switch.t option Atomic.t
   ; board_wakeups : float StringMap.t
   ; board_cursor_ts : float
   ; board_cursor_post_id : string option

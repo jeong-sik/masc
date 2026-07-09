@@ -109,6 +109,9 @@ type failure_reason =
   | Turn_livelock_pause
       (** Keeper paused by turn-livelock guard. Triggers supervisor
           auto-resume sweep (RFC-0152 Phase B). *)
+  | Operator_interrupt
+      (** The current turn was cancelled by an explicit operator request,
+          typically from the dashboard "stop current turn" action. *)
 
 val ambiguous_partial_commit_kind_to_string :
   ambiguous_partial_commit_kind -> string
@@ -449,6 +452,9 @@ type registry_entry = {
   livelock_state : livelock_attempt_state option Atomic.t;
       (** Per-keeper turn-livelock retry history, updated via CAS on this
           per-entry atomic so it is part of the keeper SSOT. *)
+  current_turn_switch : Eio.Switch.t option Atomic.t;
+      (** Live turn-scoped switch exposed for operator interrupt.
+          [Some sw] while a turn is running; [None] otherwise. *)
   board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;

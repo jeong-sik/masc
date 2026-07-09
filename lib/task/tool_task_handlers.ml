@@ -240,19 +240,19 @@ let review_completion_notes
       let few_shot_block = (Atomic.get get_few_shot_block_fn) () in
       let ar_result =
         (match ctx.sw with
-         | None ->
-           Anti_rationalization.review
-             ?evaluator_runtime
-             ?completion_contract
-             ~required_evidence
-             ~verify_gate_evidence
-             ~on_verdict ~few_shot_block ~operator_override ar_req
-         | Some sw ->
-           Anti_rationalization.review
-             ~sw
-             ?evaluator_runtime
-             ?completion_contract
-             ~required_evidence
+	         | None ->
+	           Anti_rationalization.review
+	             ?evaluator_runtime
+	             ?completion_contract
+	             ~required_evidence
+	             ~verify_gate_evidence
+	             ~on_verdict ~few_shot_block ~operator_override ar_req
+	         | Some sw ->
+	           Anti_rationalization.review
+	             ~sw:(Some sw)
+	             ?evaluator_runtime
+	             ?completion_contract
+	             ~required_evidence
              ~verify_gate_evidence
              ~on_verdict ~few_shot_block ~operator_override ar_req)
       in

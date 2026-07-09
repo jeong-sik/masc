@@ -512,12 +512,7 @@ let start_keeper_loops
      Keeper_world_observation -> Keeper_approval_queue dependency cycle. Mirrors
      the Fusion_completed/Bg_completed async-completion wakes. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
-    (fun
-      ~base_path
-      ~keeper_name
-      ~approval_id
-      ~decision
-      ?channel ->
+    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
        let resolution =
          Keeper_event_queue.
            {
@@ -1141,15 +1136,20 @@ let start_keeper_loops
                | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
                | Keeper_chat_queue.Dashboard -> false
              in
-               process_single_turn ~connector_user_line_recorded_upstream
-                 ~state ~clock ~sw ~auth_token:None
-                 ~thread_id
-                 ~continuation_channel:
-                   (Keeper_chat_queue.continuation_channel_of_message_source
-                      ~dashboard_thread_id:thread_id
-                      queued_message.source)
-                 ~closed ~client_disconnects:None ~payload ~run_id ~message_id
-                 ~agent_name ~events)
+             (* Derive the typed reply-continuation channel from the queued
+                message source so [process_single_turn] can route the
+                assistant reply to the originating connector (Discord/Slack)
+                or dashboard thread. [dashboard_thread_id] is the same
+                [thread_id] the turn itself uses. *)
+             let continuation_channel =
+               Keeper_chat_queue.continuation_channel_of_message_source
+                 ~dashboard_thread_id:thread_id
+                 queued_message.source
+             in
+             process_single_turn ~connector_user_line_recorded_upstream
+               ~state ~clock ~sw ~auth_token:None
+               ~thread_id ~continuation_channel ~closed ~client_disconnects:None
+               ~payload ~run_id ~message_id ~agent_name ~events)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

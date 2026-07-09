@@ -159,7 +159,7 @@ let test_content_blocks_detects_code () =
   let blocks = S.content_blocks_of_text "```ocaml\nlet x = 1 + 2\n```" in
   check int "one code block" 1 (List.length blocks);
   let s = json_string (List.hd blocks) in
-  check bool "code block text" true (contains s "```ocaml");
+  check bool "code block text" true (contains s "```ocaml")
 
 let test_content_blocks_detects_mermaid () =
   let blocks = S.content_blocks_of_text "```mermaid\nflowchart TD\nA-->B\n```" in

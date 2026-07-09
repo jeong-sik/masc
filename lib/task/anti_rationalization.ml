@@ -895,16 +895,54 @@ let review
                    let parse_err = verdict_parse_error_to_string parse_error in
                    (match parse_error with
                     | Empty_review_output ->
-                      task_warn
-                        "[anti-rationalization] evaluator returned empty text \
-                         (rejecting)"
+                      (* Topology deadlock fix: empty-text is LESS severe than
+                         LLM-unavailable (Error branch below), yet previously
+                         got a harder Reject verdict.  Apply the same fail-open
+                         liveness policy as the Error/zero-providers branch:
+                         approve by liveness when no excuse advisory is active,
+                         reject only when there is an active safety-net pattern.
+                         See #10474. *)
+                      (match excuse_advisory with
+                       | Some (pattern, reason) ->
+                         task_warn
+                           "[anti-rationalization] evaluator returned empty text \
+                            AND gate-2 advisory pattern=%s active: rejecting \
+                            (safety net) rather than laundering through liveness.  \
+                            OPERATOR ACTION REQUIRED: fix the evaluator runtime."
+                           pattern;
+                         ( Reject
+                             (sprintf
+                                "anti-rationalization evaluator returned \
+                                 empty text AND avoidance pattern \"%s\" \
+                                 detected (%s); rejecting as fail-closed \
+                                 safety net. Revise notes or wait for \
+                                evaluator runtime repair."
+                                pattern reason)
+                         , Fallback
+                         , Some
+                             (sprintf
+                                "evaluator returned empty text with \
+                                 active gate-2 advisory pattern=%s"
+                                pattern) )
+                       | None ->
+                         task_warn
+                           "[anti-rationalization] evaluator returned empty text \
+                            — approving by liveness (no excuse advisory).  \
+                            OPERATOR ACTION REQUIRED: fix the evaluator runtime \
+                            (provider capabilities, MCP policy, or tool \
+                            requirements).  See #10474.";
+                         ( Approve
+                         , Fallback
+                         , Some
+                             "anti-rationalization evaluator returned \
+                              empty text; approving by liveness (#10474)" ))
                     | Unrecognized_review_format _ ->
                       task_warn
                         "[anti-rationalization] verdict parse failed: %s (rejecting)"
-                        parse_err);
-                   ( Reject (sprintf "review format unrecognized: %s" parse_err)
-                   , Format_reject
-                   , Some parse_err ))
+                        parse_err;
+                      ( Reject (sprintf "review format unrecognized: %s" parse_err)
+                      , Format_reject
+                      , Some parse_err ))
             in
             (match v with
              | Reject reason ->

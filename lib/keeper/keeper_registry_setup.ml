@@ -889,3 +889,27 @@ let mark_turn_runtime_done ~base_path name =
     ~event_kind:"runtime_done"
     (Packed Turn_finalizing)
 ;;
+
+let set_turn_switch ~base_path name sw_opt =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | Some entry -> Atomic.set entry.current_turn_switch sw_opt
+  | None -> ()
+;;
+
+let clear_turn_switch ~base_path name =
+  set_turn_switch ~base_path name None
+;;
+
+let interrupt_current_turn ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> `No_turn_in_flight
+  | Some entry ->
+    (match entry.current_turn_observation with
+     | None -> `No_turn_in_flight
+     | Some obs ->
+       match Atomic.exchange entry.current_turn_switch None with
+       | None -> `No_turn_in_flight
+       | Some sw ->
+         Eio.Switch.fail sw (Failure "operator_interrupt");
+         `Cancelled obs.turn_id)
+;;

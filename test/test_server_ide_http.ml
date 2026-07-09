@@ -752,12 +752,17 @@ let seed_lane_turn_event ~base_path ~keeper_id ~turn_id ~timestamp_ms =
 
 let test_events_keeper_lane_returns_only_lane_events () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
     seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
       ~timestamp_ms:1700000000000L;
     seed_lane_turn_event ~base_path ~keeper_id:"bob" ~turn_id:"turn-bob-1"
       ~timestamp_ms:1700000001000L;
     let request =
-      http_request ~meth:`GET ~path:"/api/v1/ide/events?keeper_lane=alice" ()
+      http_request
+        ~meth:`GET
+        ~path:"/api/v1/ide/events?keeper_lane=alice"
+        ~token:(Some token)
+        ()
     in
     let response = dispatch router request in
     check_status "GET keeper-lane events succeeds" 200 response;
@@ -800,8 +805,30 @@ let test_events_keeper_lane_rejects_mismatched_keeper_filter () =
       (error_code_of_response response))
 ;;
 
+let test_events_keeper_lane_rejects_other_keeper_token () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "bob" in
+    seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
+      ~timestamp_ms:1700000000000L;
+    let request =
+      http_request
+        ~meth:`GET
+        ~path:"/api/v1/ide/events?keeper_lane=alice"
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "other keeper token returns 403" 403 response;
+    check
+      string
+      "keeper lane forbidden code"
+      "keeper_lane_forbidden"
+      (error_code_of_response response))
+;;
+
 let test_cursors_keeper_lane_filters_to_lane_keeper () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
     (let seed keeper_id line =
        match
          Ide_bridge.ingest_cursor_event
@@ -819,7 +846,11 @@ let test_cursors_keeper_lane_filters_to_lane_keeper () =
      seed "alice" 1;
      seed "bob" 2);
     let request =
-      http_request ~meth:`GET ~path:"/api/v1/ide/cursors?keeper_lane=alice" ()
+      http_request
+        ~meth:`GET
+        ~path:"/api/v1/ide/cursors?keeper_lane=alice"
+        ~token:(Some token)
+        ()
     in
     let response = dispatch router request in
     check_status "GET keeper-lane cursors succeeds" 200 response;
@@ -934,6 +965,8 @@ let () =
             test_events_keeper_lane_conflicts_with_repo_scope
         ; test_case "keeper_lane rejects mismatched keeper filter" `Quick
             test_events_keeper_lane_rejects_mismatched_keeper_filter
+        ; test_case "keeper_lane rejects other keeper token" `Quick
+            test_events_keeper_lane_rejects_other_keeper_token
         ; test_case "GET cursors keeper_lane filters to lane keeper" `Quick
             test_cursors_keeper_lane_filters_to_lane_keeper
         ; test_case "POST cursor rejects keeper_lane scope" `Quick

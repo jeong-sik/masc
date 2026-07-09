@@ -163,6 +163,29 @@ let keeper_filter_for_scope ~scope ~requested_keeper_id =
   | Scope_canonical_url _ | Scope_repo_id _ -> Ok requested_keeper_id
 ;;
 
+let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
+  match scope with
+  | Scope_canonical_url _ | Scope_repo_id _ -> continue ()
+  | Scope_keeper_lane { keeper_id = lane } ->
+    let base_path = base_path_of_state state in
+    (match
+       authorize_token_bound_permission_request
+         ~base_path
+         ~permission:Masc_domain.CanReadState
+         request
+     with
+     | Error err -> respond_auth_error request reqd err
+     | Ok agent_name when String.equal agent_name lane -> continue ()
+     | Ok _ ->
+       respond_ide_error
+         ~status:`Forbidden
+         ~request
+         (ide_error
+            "keeper_lane_forbidden"
+            "keeper_lane reads require a bearer token for the requested keeper")
+         reqd)
+;;
+
 type annotation_scope_error =
   | File_path_repo_id_mismatch
   | File_path_canonical_url_mismatch
@@ -588,6 +611,7 @@ let add_routes router =
            (match keeper_filter_for_scope ~scope ~requested_keeper_id:keeper_id with
             | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
             | Ok keeper_id ->
+              with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
               let partition = partition_of_ide_scope scope in
               let filter =
                 { Ide_annotation_types.file_path; keeper_id; goal_id; task_id }
@@ -606,7 +630,7 @@ let add_routes router =
                 ~compress:true
                 ~request
                 (json_ok json)
-                reqd))
+                reqd)))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
@@ -844,6 +868,7 @@ let add_routes router =
          match resolve_ide_scope_for_query ~state ~uri with
          | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
          | Ok scope ->
+           with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
            let partition = partition_of_ide_scope scope in
            let regions =
              Ide_region_tracker.read_regions
@@ -870,6 +895,7 @@ let add_routes router =
              ~request
              (json_ok json)
              reqd)
+      )
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
@@ -904,6 +930,7 @@ let add_routes router =
                   | Error err ->
                     respond_ide_error ~status:`Bad_request ~request err reqd
                   | Ok keeper_id ->
+                    with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
                     let partition = partition_of_ide_scope scope in
                     let events =
                       Ide_bridge.list_events
@@ -933,7 +960,7 @@ let add_routes router =
                       ~compress:true
                       ~request
                       (json_ok result)
-                      reqd))))
+                      reqd)))))
       request
       reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
@@ -971,6 +998,7 @@ let add_routes router =
                with
                | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
                | Ok keeper_id ->
+                 with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
                  let partition = partition_of_ide_scope scope in
                  let snapshot =
                    build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset
@@ -979,7 +1007,7 @@ let add_routes router =
                    ~compress:true
                    ~request
                    (json_ok snapshot)
-                   reqd)))
+                   reqd))))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
@@ -1152,6 +1180,7 @@ let add_routes router =
                | Error err ->
                  respond_ide_error ~status:`Bad_request ~request err inner_reqd
                | Ok keeper_id ->
+              with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
               let partition = partition_of_ide_scope scope in
               let origin = get_origin request in
               let headers =
@@ -1197,7 +1226,7 @@ let add_routes router =
                        "IDE cursor SSE loop exited: %s"
                        (Printexc.to_string exn);
                      Httpun.Body.Writer.close writer)
-               | _ -> Httpun.Body.Writer.close writer))))
+               | _ -> Httpun.Body.Writer.close writer)))))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/memory" (fun request reqd ->
@@ -1228,6 +1257,7 @@ let add_routes router =
                | Error err ->
                  respond_ide_error ~status:`Bad_request ~request err inner_reqd
                | Ok keeper_id ->
+              with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
               let partition = partition_of_ide_scope scope in
               let filter : Ide_annotation_types.annotation_filter =
                 { file_path = None; keeper_id; goal_id = None; task_id = None }
@@ -1270,7 +1300,7 @@ let add_routes router =
               in
               let body = Yojson.Safe.to_string result in
               let response = Httpun.Response.create ~headers `OK in
-              Httpun.Reqd.respond_with_string inner_reqd response body)))
+              Httpun.Reqd.respond_with_string inner_reqd response body))))
       request
       reqd)
 ;;

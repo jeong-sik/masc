@@ -55,8 +55,9 @@ type claim_resolution =
   | Held_by_other of string
       (** Held by another actor, or unreclaimable terminal [Cancelled]; the
           string names the current holder for the caller's error message. *)
-  | Blocked_by_reclaim_policy of string
-      (** Typed reclaim policy closed the claim gate. *)
+  | Held_terminal of Masc_domain.task_status
+      (** Terminal [Done] — completed work is never re-claimed (RFC-0323);
+          re-running it takes a NEW task linked via [predecessor_task_id]. *)
 
 let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
   match task.task_status with
@@ -71,25 +72,12 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
            ~verifier:agent_name ~assignee ~submitted_at ~verification_id)
   | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
     if same_actor assignee then Self_owned else Held_by_other assignee
-  | Masc_domain.Done { assignee; _ } ->
-    (match Masc_domain.task_claim_decision task with
-     | Masc_domain.Claim_available Masc_domain.Claim_ready ->
-       (* WORKAROUND: interim self-livelock guard. A completed [Allow_reclaim]
-          task is reclaimable by a DIFFERENT actor (coordination hand-off), but
-          the completer re-claiming its own [Done] task busy-loops
-          (complete -> reclaim -> complete). Every other owned state already
-          returns [Self_owned] for [same_actor]; the [Done] arm is the only one
-          missing that invariant, so restore it here. Root fix: model recurring
-          coordination work as RFC-0314 recurrence (a new task instance per
-          interval) instead of reclaiming a terminal task in place, removing the
-          reclaim-on-[Done] path entirely. removal target: RFC-0323 merge. *)
-       if same_actor assignee
-       then Self_owned
-       else Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
-     | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_reclaim_policy reason) ->
-       Blocked_by_reclaim_policy reason
-     | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
-       Held_by_other assignee)
+  | Masc_domain.Done _ ->
+    (* RFC-0323: a completed task is terminal for every actor — the #23632
+       Done-reclaim mechanism (and its interim same-actor guard) retires
+       here. Re-running completed work creates a NEW task linked via
+       [predecessor_task_id]. *)
+    Held_terminal task.task_status
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
 ;;
 
@@ -120,6 +108,7 @@ let decide
       ~authority
       ~notes
       ~reason
+      ~system_gate_exempt
   =
   (* RFC-0323 W1 / RFC-0308: a verification-required task cannot reach Done
      through Done_action — submit -> approve is the completion lane. Gated on
@@ -239,7 +228,7 @@ let decide
   (* ── Approve verification ─────────────────────── *)
   | ( Masc_domain.Approve_verification
     , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->
-    if same_agent assignee
+    if same_agent assignee && not system_gate_exempt
     then Error Self_approval
     else if verification_enabled
     then
@@ -265,7 +254,7 @@ let decide
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
   (* ── Reject verification ──────────────────────── *)
   | Masc_domain.Reject_verification, Masc_domain.AwaitingVerification { assignee; _ } ->
-    if same_agent assignee
+    if same_agent assignee && not system_gate_exempt
     then Error Self_rejection
     else if verification_enabled
     then ok (Masc_domain.InProgress { assignee; started_at = now })
@@ -311,6 +300,7 @@ let valid_next_actions
         ~authority
         ~notes:""
         ~reason:""
+        ~system_gate_exempt:false
     with
     | Ok _ -> true
     | Error _ -> false

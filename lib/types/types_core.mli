@@ -207,23 +207,14 @@ val task_requires_verification : task -> bool
     trigger (creation auto-fills an advisory contract for every task);
     [strict] is the explicit persisted opt-in. *)
 
-type task_reclaim_gate =
-  | Reclaim_gate_open
-  | Reclaim_gate_blocked_by_policy of string
-
-val task_reclaim_gate : task -> task_reclaim_gate
-(** Deterministic reclaim gate derived only from typed [reclaim_policy].
-    Free-text [do_not_reclaim_reason] can explain a typed block, but cannot
-    close the gate by itself. *)
-
-val task_reclaim_gate_block_reason : task -> string option
-
 type task_claim_readiness =
   | Claim_ready
 
+(** RFC-0323 G-10: the typed reclaim claim gate is retired (#23661 removed
+    the Todo producer, G-10 the Done producer) — only the status blocks a
+    claim now. [reclaim_policy] survives as release/cancel data plumbing. *)
 type task_claim_block =
   | Claim_block_not_todo of task_status
-  | Claim_block_reclaim_policy of string
 
 type task_claim_decision =
   | Claim_available of task_claim_readiness

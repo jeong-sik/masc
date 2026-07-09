@@ -19,6 +19,7 @@ import type { Task } from '../../types'
 import {
   expandedTasks,
   toggleTaskExpand,
+  effectiveTaskPriority,
   priorityLabel,
   sortByPriority,
   sortByTimeDesc,
@@ -161,7 +162,7 @@ function taskLink(task: Task): { href: string; label: string } {
 }
 
 function KanbanCard({ task }: { task: Task }) {
-  const p = task.priority ?? 4
+  const p = effectiveTaskPriority(task)
   const isExpanded = expandedTasks.value.has(task.id)
   const hasDescription = Boolean(task.description)
   const isDeleting = deletingTaskId.value === task.id

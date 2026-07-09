@@ -108,11 +108,16 @@ export {
   fetchDashboardMemory,
 } from './dashboard-execution'
 
-export type { DashboardScheduleDecision, DashboardScheduleResolveResponse } from './dashboard-governance'
+export type {
+  DashboardScheduleDecision,
+  DashboardScheduleResolveResponse,
+  SetApprovalModeResponse,
+} from './dashboard-governance'
 export {
   fetchDashboardGovernance,
   resolveGovernanceApproval,
   deleteGovernanceApprovalRule,
+  setApprovalMode,
   resolveScheduleApproval,
   pruneSchedules,
   fetchGovernanceCaseStatus,

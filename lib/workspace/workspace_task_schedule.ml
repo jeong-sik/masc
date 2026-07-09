@@ -299,18 +299,12 @@ let claim_next_r
                else compare a.created_at b.created_at)
             working_tasks
         in
-        (* Identify tasks whose typed reclaim gate, not terminal status, blocks
-           scheduling. The gate can apply to either Todo or completed tasks. *)
-        let blocked_reclaim =
-          List.filter
-            (fun (t : Masc_domain.task) ->
-               match Masc_domain.task_claim_next_action t with
-               | Skip_claim (Claim_block_reclaim_policy _) -> true
-               | Claim_now
-               | Skip_claim (Claim_block_not_todo _) ->
-                 false)
-            sorted
-        in
+        (* RFC-0323 G-10: the typed reclaim claim gate is retired (#23661
+           removed the Todo producer, G-10 the Done producer) — nothing can be
+           blocked-by-reclaim. Kept as a literal empty list, mirroring the
+           RFC-0220 §3.2 [verification_blocked_todo] precedent below, so the
+           claim-next result shape ([blocked_count]) stays stable. *)
+        let blocked_reclaim : Masc_domain.task list = [] in
         (* RFC-0220 §3.2: no verification-based exclusion from the claim pool. *)
         let verification_blocked_todo : Masc_domain.task list = [] in
         if blocked_reclaim <> []
@@ -351,7 +345,7 @@ let claim_next_r
           | Workspace_task_lifecycle.Verifier_claim _ -> true
           | Workspace_task_lifecycle.Self_owned
           | Workspace_task_lifecycle.Held_by_other _
-          | Workspace_task_lifecycle.Blocked_by_reclaim_policy _ -> false
+          | Workspace_task_lifecycle.Held_terminal _ -> false
         in
         let unclaimed =
           sorted
@@ -482,7 +476,7 @@ let claim_next_r
              | Workspace_task_lifecycle.Verifier_claim s -> s
              | Workspace_task_lifecycle.Self_owned
              | Workspace_task_lifecycle.Held_by_other _
-             | Workspace_task_lifecycle.Blocked_by_reclaim_policy _ ->
+             | Workspace_task_lifecycle.Held_terminal _ ->
                Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () }
            in
            let new_tasks =

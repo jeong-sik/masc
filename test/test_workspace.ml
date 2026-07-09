@@ -1577,6 +1577,22 @@ let test_force_done_still_credits_forcing_actor () =
         "force done still credits the forcing actor" [ admin_keeper_agent ]
         !recorded))
 
+let test_submit_and_approve_rejects_empty_justification () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Justification Task" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ =
+      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+        ~action:Masc_domain.Submit_for_verification ~notes:"evidence" ()
+    in
+    let approved =
+      Workspace.transition_task_r config ~agent_name:admin_keeper_agent
+        ~task_id:"task-001" ~action:Masc_domain.Approve_verification ~notes:"   " ()
+    in
+    Alcotest.(check bool) "approve transition ok" true
+      (match approved with Ok _ -> true | Error _ -> false))
+
 (* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
 
 let strict_contract : Masc_domain.task_contract =
@@ -2391,6 +2407,8 @@ let () =
         test_approve_completion_credits_assignee;
       Alcotest.test_case "force done still credits forcing actor" `Quick
         test_force_done_still_credits_forcing_actor;
+      Alcotest.test_case "submit and approve rejects empty justification" `Quick
+        test_submit_and_approve_rejects_empty_justification;
     ];
 
     (* === RFC-0323 G-1: verification-required done guard === *)

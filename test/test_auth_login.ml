@@ -66,6 +66,27 @@ let test_login_with_expiry_uses_caller_env_var () =
        | Error err ->
            failf "minted token did not verify: %s"
              (Masc_domain.masc_error_to_string err));
+      (match
+         Auth.check_permission base_path ~agent_name:"test-agent"
+           ~token:(Some report.bearer_token)
+           ~permission:Masc_domain.CanInit
+       with
+       | Ok () -> fail "worker login token must not have admin permission"
+       | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+       | Error err ->
+           failf "expected forbidden for worker admin action: %s"
+             (Masc_domain.masc_error_to_string err));
+      (match
+         Auth.resolve_role base_path ~agent_name:"test-agent"
+           ~token:(Some report.bearer_token)
+       with
+       | Ok Masc_domain.Worker -> ()
+       | Ok role ->
+           failf "expected worker effective role, got %s"
+             (Masc_domain.agent_role_to_string role)
+       | Error err ->
+           failf "expected worker effective role: %s"
+             (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
       check bool "shell exports caller-named env var" true
         (contains_substring ~needle:"export MASC_TOKEN="

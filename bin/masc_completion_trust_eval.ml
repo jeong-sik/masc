@@ -337,6 +337,16 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
     |> Option.value ~default:""
   in
   let notes = str_field "notes" in
+  let evidence_refs =
+    Yojson.Safe.Util.(
+      match args |> member "handoff_context" |> member "evidence_refs" with
+      | `List lst -> Some lst
+      | _ -> None
+    )
+    |> Option.value ~default:[]
+    |> List.filter_map (fun j ->
+        try Some (Yojson.Safe.Util.to_string j) with _ -> None)
+  in
   let task_id = match str_field "task_id" with "" -> scenario.EH.id | s -> s in
   let req : AR.review_request =
     {
@@ -345,7 +355,7 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
       completion_notes = notes;
       agent_name = eval_agent_name;
       task_id;
-      evidence_refs = [];
+      evidence_refs = evidence_refs;
     }
   in
   let on_verdict (result : AR.review_result) =

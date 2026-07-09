@@ -245,7 +245,11 @@ let test_resolution_wake_carries_originating_continuation_channel () =
       captured :=
         Some
           Keeper_event_queue.
-            { approval_id; decision; channel });
+            { approval_id;
+              decision;
+              channel =
+                Option.value channel
+                  ~default:(Keeper_continuation_channel.unrouted "test: no channel") });
   let reset_hook () =
     AQ.set_approval_resolution_wake_hook
         (fun
@@ -441,7 +445,9 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
             true
             (Keeper_continuation_channel.same_route
                continuation_channel
-               wake_channel)
+               (Option.value wake_channel
+                  ~default:
+                    (Keeper_continuation_channel.unrouted "test: no wake channel")))
         | None -> Alcotest.fail "submit_pending stale expiry must fire wake hook")
        )
 ;;

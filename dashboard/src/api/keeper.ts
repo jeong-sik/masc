@@ -230,6 +230,38 @@ function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessag
   }
 }
 
+export interface KeeperTurnInterruptResult {
+  cancelled: boolean
+  turn_id?: number
+  reason?: string
+}
+
+export async function interruptKeeperTurn(
+  keeperName: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<KeeperTurnInterruptResult> {
+  const path = '/api/v1/keepers/turn/interrupt'
+  const resp = await fetchWithTimeout(
+    path,
+    {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: keeperName.trim() }),
+      signal: opts.signal,
+    },
+    DEFAULT_POST_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('POST', path, resp)
+  }
+  const data = (await resp.json()) as Record<string, unknown>
+  return {
+    cancelled: data.cancelled === true,
+    turn_id: typeof data.turn_id === 'number' ? data.turn_id : undefined,
+    reason: asString(data.reason),
+  }
+}
+
 export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
   return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
 }

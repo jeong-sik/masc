@@ -114,6 +114,42 @@ let test_slack_binding_store_error_is_typed () =
     | Ok _ -> fail "expected invalid Slack binding store to return Error"
     | Error err -> check bool "reports read error" true (String.length err > 0))
 
+
+let test_slack_default_paths_resolve_under_base_path () =
+  with_temp_dir (fun base_dir ->
+    with_temp_dir (fun cwd_dir ->
+      with_env "MASC_BASE_PATH" (Some base_dir) (fun () ->
+        with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+          with_envs
+            [
+              "SLACK_STATUS_PATH"; "MASC_SLACK_STATUS_PATH"; "SLACK_BINDING_STORE_PATH"
+            ; "MASC_SLACK_BINDING_STORE_PATH"; "SLACK_BINDING_AUDIT_PATH"
+            ; "MASC_SLACK_BINDING_AUDIT_PATH"
+            ]
+            None
+            (fun () ->
+              let original_cwd = Sys.getcwd () in
+              Fun.protect
+                ~finally:(fun () -> Sys.chdir original_cwd)
+                (fun () ->
+                  Sys.chdir cwd_dir;
+                  match
+                    Channel_gate_slack_state.bind ~channel_id:"C123"
+                      ~keeper_name:"luna" ~actor_name:"dashboard"
+                  with
+                  | Error err -> fail err
+                  | Ok json ->
+                    let expected_binding_path =
+                      Filename.concat base_dir ".gate/runtime/slack/bindings.json"
+                    in
+                    check string "binding store path under base" expected_binding_path
+                      (json |> U.member "binding_store_path" |> U.to_string);
+                    check bool "binding written under base" true
+                      (Sys.file_exists expected_binding_path);
+                    check bool "binding not written under cwd" false
+                      (Sys.file_exists
+                         (Filename.concat cwd_dir ".gate/runtime/slack/bindings.json"))))))))
+
 let test_telegram_connector_json_reads_runtime_status () =
   with_temp_dir @@ fun dir ->
   with_sidecar_paths "telegram" dir (fun () ->
@@ -166,6 +202,8 @@ let () =
             test_slack_bind_persists_binding_and_audit;
           test_case "slack binding read errors are typed" `Quick
             test_slack_binding_store_error_is_typed;
+          test_case "slack default paths resolve under base path" `Quick
+            test_slack_default_paths_resolve_under_base_path;
           test_case "telegram connector json reads runtime status" `Quick
             test_telegram_connector_json_reads_runtime_status;
         ] );

@@ -26,10 +26,15 @@ let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
 
 (* Slack has no Discord-style guilds; the bot token authorizes per-workspace.
    Path resolvers read an env override, else fall back to the default. *)
+let resolve_path raw_path =
+  if Filename.is_relative raw_path then
+    Filename.concat (Env_config_core.base_path ()) raw_path
+  else raw_path
+
 let slack_path ~env_var ~default () =
   match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
-  | Some path -> path
-  | None -> default
+  | Some path -> resolve_path path
+  | None -> resolve_path default
 
 let status_path () =
   slack_path ~env_var:"MASC_SLACK_STATUS_PATH" ~default:default_status_path ()

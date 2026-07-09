@@ -13,8 +13,10 @@ import { TextInput } from '../common/input'
 import { TimeAgo } from '../common/time-ago'
 import { findKeeper } from '../../lib/keeper-utils'
 import { selectedTask } from './task-detail-selection'
+import { tasks } from '../../store'
 import {
   closeTaskDetail,
+  openTaskDetail,
   taskEvents,
   taskEventsLoading,
   taskEventsError,
@@ -300,6 +302,36 @@ function GateSection({
   `
 }
 
+// RFC-0323 G-9: linked re-run lineage. A task created as a re-run carries
+// the write-once predecessor_task_id (G-8); surface it as a link so the
+// operator can walk back to the original. Clicking opens the predecessor's
+// detail when it is in the loaded task list; otherwise the id renders as
+// plain text (the store may window out old terminal tasks).
+function PredecessorSection({ task }: { task: Task }) {
+  const predecessorId = task.predecessor_task_id
+  if (!predecessorId) return null
+  const predecessor = tasks.value.find(t => t.id === predecessorId) ?? null
+  return html`
+    <div>
+      <${SectionTitle}>이전 실행 (재실행 계보)</${SectionTitle}>
+      <div class="${CARD_BOX} flex items-center gap-2 text-sm">
+        <span class="text-2xs uppercase tracking-3 text-text-muted">predecessor</span>
+        ${predecessor ? html`
+          <button
+            type="button"
+            class="font-mono text-accent-fg underline-offset-2 hover:underline"
+            onClick=${() => openTaskDetail(predecessor)}
+          >${predecessorId}</button>
+          <span class="truncate text-text-dim">${predecessor.title}</span>
+        ` : html`
+          <span class="font-mono text-text-body">${predecessorId}</span>
+          <span class="text-2xs text-text-dim">(현재 목록에 없음)</span>
+        `}
+      </div>
+    </div>
+  `
+}
+
 function ContractSection({ task }: { task: Task }) {
   const contract = task.contract
   const gate = task.gate
@@ -543,6 +575,7 @@ export function TaskDetailOverlay() {
           ` : null}
 
           <${TaskLineageSection} task=${task} />
+          <${PredecessorSection} task=${task} />
           <${ContractSection} task=${task} />
           <${VerdictLineageSection} />
           <${ExecutionLinksSection} task=${task} />

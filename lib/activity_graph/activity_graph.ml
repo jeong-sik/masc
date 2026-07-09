@@ -698,8 +698,9 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
              (* RFC-0323 G-3: on approve-produced completion the event actor
                 is the VERIFIER, but the span was opened by the ASSIGNEE, who
                 rides the payload (emitted since G-3). Close the assignee's
-                span; fall back to the actor for pre-G-3 events — mirrors the
-                works_on-edge routing in [Activity_graph_reducer]. *)
+                span and attribute it to them; fall back to the actor for
+                pre-G-3 events — mirrors the works_on-edge routing in
+                [Activity_graph_reducer]. *)
              let closing_aid =
                match e.kind with
                | "task.approved" ->
@@ -713,7 +714,7 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
               | Some (start_ms, sk, label) when String.equal sk ek ->
                   Hashtbl.remove open_spans key;
                   closed_spans := {
-                    agent = aid;
+                    agent = closing_aid;
                     start_ms;
                     end_ms = e.ts_ms;
                     span_kind = sk;

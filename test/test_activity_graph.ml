@@ -624,7 +624,11 @@ let test_task_approved_completes_graph_and_span () =
       with
       | Some s ->
           check string "task span completed" "completed"
-            (s |> member "status" |> to_string)
+            (s |> member "status" |> to_string);
+          (* the span belongs to the assignee (worker-a) who did the work,
+             not the verifier (verifier-b) whose task.approved closed it *)
+          check string "task span attributed to assignee" "worker-a"
+            (s |> member "agent" |> to_string)
       | None -> Alcotest.fail "task span missing")
 
 let test_parse_since_ms_supports_minutes () =

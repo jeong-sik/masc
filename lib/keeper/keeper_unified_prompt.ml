@@ -443,12 +443,44 @@ let observation_data_envelope_header =
 let observation_data_envelope_footer = "\n--- end observational-data ---\n"
 ;;
 
+let replace_substring ~needle ~replacement s =
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then s
+  else (
+    let s_len = String.length s in
+    let buf = Buffer.create s_len in
+    let rec loop i =
+      if i >= s_len
+      then ()
+      else if i + needle_len <= s_len && String.sub s i needle_len = needle
+      then (
+        Buffer.add_string buf replacement;
+        loop (i + needle_len))
+      else (
+        Buffer.add_char buf s.[i];
+        loop (i + 1))
+    in
+    loop 0;
+    Buffer.contents buf)
+;;
+
+let sanitize_observation_line s =
+  s
+  |> replace_substring ~needle:"\r" ~replacement:"\\r"
+  |> replace_substring ~needle:"\n" ~replacement:"\\n"
+  |> replace_substring
+       ~needle:"--- end observational-data ---"
+       ~replacement:"--- end observational-data (escaped) ---"
+;;
+
 (* RFC-0248 PR-2: the SOLE renderer for observation lines. Applying the envelope
    is structurally mandatory — there is no function that turns an
    [Observation_line] into a bare string, so fleet narrative cannot reach the
-   instruction stream. Returns [None] when there are no observations so the
-   caller adds nothing. Output is byte-identical to the PR-1 render-time
-   partition that wrapped the quarantined list. *)
+   instruction stream. Observation content is normalized before joining so
+   verifier/automation-controlled text cannot inject delimiter lines or extra
+   prompt sections by embedding newlines or the footer marker. Returns [None]
+   when there are no observations so the caller adds nothing. *)
 let render_observation_lines (lines : board_line list) : string option =
   match
     lines |> List.filter_map (function Observation_line s -> Some s | Trusted_line _ -> None)
@@ -456,7 +488,8 @@ let render_observation_lines (lines : board_line list) : string option =
   | [] -> None
   | obs ->
     Some
-      (observation_data_envelope_header ^ String.concat "\n" obs
+      (observation_data_envelope_header
+       ^ String.concat "\n" (List.map sanitize_observation_line obs)
        ^ observation_data_envelope_footer)
 ;;
 

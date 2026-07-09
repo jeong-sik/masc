@@ -413,7 +413,24 @@ let evidence_refs =
         | Some h -> h.evidence_refs
         | None -> []
       in
-      let review_gate_rejection =
+      (* Gate 0: evidence_refs required for all code task submissions.
+         Reject completions that lack code-level evidence (file paths,
+         commit hashes, trace/turn/receipt refs). *)
+      let gate0_rejection =
+        if evidence_refs = [] then
+          Some
+            "evidence_refs is required. Include at least one locally \
+             validated base-path artifact, local git commit, or \
+             .masc trace/turn/receipt reference."
+        else
+          None
+      in
+      (match gate0_rejection with
+       | Some reason ->
+         Tool_result.error
+           ~failure_class:(Some Tool_result.Workflow_rejection)
+           ~tool_name ~start_time reason
+       | None -> let review_gate_rejection =
     if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then
         None

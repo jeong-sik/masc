@@ -846,19 +846,15 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
-     ?channel:Keeper_continuation_channel.t option ->
+     channel:Keeper_continuation_channel.t option ->
      unit)
     ref =
-  ref
-    (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ?channel:_ -> ())
+  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ -> ())
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
-let wake_keeper_on_approval_resolution
-    ~base_path ~keeper_name ~approval_id ~decision
-    ?(channel : Keeper_continuation_channel.t option) =
-  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision ?channel with
+let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision ~channel =
+  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision ~channel with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn

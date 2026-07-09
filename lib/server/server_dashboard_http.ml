@@ -568,6 +568,8 @@ let dashboard_verification_resolve_http_json
      | Masc_domain.Cancel
      | Masc_domain.Release
      | Masc_domain.Submit_for_verification
+     | Masc_domain.Mark_operator_blocked
+     | Masc_domain.Unblock
      -> ());
     Ok
       (`Assoc

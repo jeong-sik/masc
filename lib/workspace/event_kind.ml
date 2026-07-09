@@ -10,6 +10,8 @@ module Task = struct
     | Approved
     | Rejected
     | Linked
+    | Operator_blocked
+    | Unblocked
 
   let to_string = function
     | Created -> "task.created"
@@ -22,6 +24,8 @@ module Task = struct
     | Approved -> "task.approved"
     | Rejected -> "task.rejected"
     | Linked -> "task.linked"
+    | Operator_blocked -> "task.operator_blocked"
+    | Unblocked -> "task.unblocked"
 
   let of_string = function
     | "task.created" -> Some Created
@@ -34,11 +38,14 @@ module Task = struct
     | "task.approved" -> Some Approved
     | "task.rejected" -> Some Rejected
     | "task.linked" -> Some Linked
+    | "task.operator_blocked" -> Some Operator_blocked
+    | "task.unblocked" -> Some Unblocked
     | _ -> None
 
   let all =
     [ Created; Claimed; Started; Released; Done; Cancelled;
-      Submit_for_verification; Approved; Rejected; Linked ]
+      Submit_for_verification; Approved; Rejected; Linked;
+      Operator_blocked; Unblocked ]
 end
 
 module Message = struct

@@ -203,6 +203,8 @@ let non_empty_opt = function
 let task_status_snapshot_fields (status : Masc_domain.task_status) =
   match status with
   | Masc_domain.Todo -> None, None, None, None, None
+  (* Operator_blocked has no assignee; route like Todo (no actor / phase / verifier). *)
+  | Masc_domain.Operator_blocked _ -> None, None, None, None, None
   | Masc_domain.Claimed { assignee; _ }
   | Masc_domain.InProgress { assignee; _ } ->
     Some assignee, None, None, None, None

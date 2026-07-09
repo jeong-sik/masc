@@ -59,6 +59,8 @@ let action_to_string = function
   | D.Submit_for_verification -> "submit_for_verification"
   | D.Approve_verification -> "approve"
   | D.Reject_verification -> "reject"
+  | D.Mark_operator_blocked -> "mark_operator_blocked"
+  | D.Unblock -> "unblock"
 ;;
 
 let sort_actions xs =

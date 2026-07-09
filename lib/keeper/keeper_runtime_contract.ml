@@ -48,7 +48,8 @@ let task_is_unclaimed_todo (task : Masc_domain.task) =
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ ->
+  | Masc_domain.Cancelled _
+  | Masc_domain.Operator_blocked _ ->
     false
 
 type claim_goal_scope = {
@@ -141,6 +142,7 @@ let task_is_blocked (task : Masc_domain.task) =
      would be exactly the wrong default for a blocked-task detector. *)
   match task.task_status with
   | Masc_domain.AwaitingVerification _ -> true
+  | Masc_domain.Operator_blocked _ -> true
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _

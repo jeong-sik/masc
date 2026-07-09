@@ -262,7 +262,9 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Cancel
       | Masc_domain.Submit_for_verification
       | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ), _ -> None
+      | Masc_domain.Reject_verification
+      | Masc_domain.Mark_operator_blocked
+      | Masc_domain.Unblock ), _ -> None
   in
   match release_owner_mismatch_rejection with
   | Some result -> result
@@ -465,7 +467,9 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Cancel
       | Masc_domain.Release
       | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ->
+      | Masc_domain.Reject_verification
+      | Masc_domain.Mark_operator_blocked
+      | Masc_domain.Unblock ->
         false
     in
     if not needs_gate then Workspace_hooks.Pass
@@ -544,7 +548,9 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Cancel
     | Masc_domain.Release
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Reject_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock ->
       None
   in
   (* RFC-0221 §3.1: compensation for [Submit_for_verification]. If the status
@@ -575,7 +581,9 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Cancel
     | Masc_domain.Release
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Reject_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock ->
       None
   in
   let prepare_verification_verdict =
@@ -604,7 +612,9 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Done_action
     | Masc_domain.Cancel
     | Masc_domain.Release
-    | Masc_domain.Submit_for_verification ->
+    | Masc_domain.Submit_for_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock ->
       None
   in
   let verifier_approve_gate_rejection =
@@ -687,7 +697,7 @@ and handle_transition ~tool_name ~start_time ctx args =
                 (Atomic.get Workspace_hooks.verification_notify_submit_fn)
                   ctx.config ~task ~assignee ~verification_id ~evidence_refs
               | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-              | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
+              | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.Operator_blocked _ -> ())
            | None -> ())
         | Masc_domain.Approve_verification ->
           (* Previously this arm used [Option.value ~default:""
@@ -718,7 +728,8 @@ and handle_transition ~tool_name ~start_time ctx args =
              (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
                ~task_id ~verifier:ctx.agent_name ~verification_id
                ~decision:(`Reject reason))
-        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
+        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release
+        | Masc_domain.Mark_operator_blocked | Masc_domain.Unblock -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
@@ -758,7 +769,8 @@ and handle_transition ~tool_name ~start_time ctx args =
           ~reason:(Some "task_cancelled");
         ()
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
+            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release
+            | Masc_domain.Mark_operator_blocked | Masc_domain.Unblock)
    | Error _, _ -> ());
   result_to_response ~tool_name ~start_time result
 

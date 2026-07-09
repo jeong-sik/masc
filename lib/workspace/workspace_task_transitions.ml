@@ -87,7 +87,9 @@ let transition_task_outcome_r
           | Masc_domain.Claim
           | Masc_domain.Start
           | Masc_domain.Cancel
-          | Masc_domain.Release -> Ok ()
+          | Masc_domain.Release
+          | Masc_domain.Mark_operator_blocked
+          | Masc_domain.Unblock -> Ok ()
           | Masc_domain.Done_action
           | Masc_domain.Submit_for_verification ->
             (* #23719 evidence gate, scoped to the RFC-0323 Phase A predicate
@@ -285,7 +287,9 @@ let transition_task_outcome_r
           | Masc_domain.Release
           | Masc_domain.Submit_for_verification
           | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification -> Ok ()
+          | Masc_domain.Reject_verification
+          | Masc_domain.Mark_operator_blocked
+          | Masc_domain.Unblock -> Ok ()
         in
         (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
@@ -335,7 +339,9 @@ let transition_task_outcome_r
               | Masc_domain.Cancel
               | Masc_domain.Release
               | Masc_domain.Approve_verification
-              | Masc_domain.Reject_verification )
+              | Masc_domain.Reject_verification
+              | Masc_domain.Mark_operator_blocked
+              | Masc_domain.Unblock )
             , _
             , _
             , Some _ ) -> Ok ()
@@ -346,7 +352,9 @@ let transition_task_outcome_r
               | Masc_domain.Release
               | Masc_domain.Approve_verification
               | Masc_domain.Reject_verification
-              | Masc_domain.Submit_for_verification )
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Mark_operator_blocked
+              | Masc_domain.Unblock )
             , _
             , _
             , None ) -> Ok ()) [@warning "-4"]
@@ -384,7 +392,8 @@ let transition_task_outcome_r
          | Masc_domain.Claimed _
          | Masc_domain.InProgress _
          | Masc_domain.AwaitingVerification _
-         | Masc_domain.Cancelled _ -> ());
+         | Masc_domain.Cancelled _
+         | Masc_domain.Operator_blocked _ -> ());
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
 (* Idempotent: already in backlog, nothing to release. *)
@@ -395,12 +404,15 @@ let transition_task_outcome_r
         | Masc_domain.Cancel, _
         | Masc_domain.Submit_for_verification, _
         | Masc_domain.Approve_verification, _
-         | Masc_domain.Reject_verification, _
-         | Masc_domain.Release, Masc_domain.Claimed _
-         | Masc_domain.Release, Masc_domain.InProgress _
-         | Masc_domain.Release, Masc_domain.AwaitingVerification _
-         | Masc_domain.Release, Masc_domain.Done _
-         | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
+        | Masc_domain.Reject_verification, _
+        | Masc_domain.Mark_operator_blocked, _
+        | Masc_domain.Unblock, _
+        | Masc_domain.Release, Masc_domain.Claimed _
+        | Masc_domain.Release, Masc_domain.InProgress _
+        | Masc_domain.Release, Masc_domain.AwaitingVerification _
+        | Masc_domain.Release, Masc_domain.Done _
+        | Masc_domain.Release, Masc_domain.Cancelled _
+        | Masc_domain.Release, Masc_domain.Operator_blocked _ -> ());
 (* #10719: surface tasks that have crossed oscillation thresholds so dashboards/triage can pick them up before they reach 20+ cycles with zero progress. *)
         (match action with
          | Masc_domain.Release ->
@@ -433,7 +445,9 @@ let transition_task_outcome_r
          | Masc_domain.Cancel
          | Masc_domain.Submit_for_verification
          | Masc_domain.Approve_verification
-         | Masc_domain.Reject_verification -> ());
+         | Masc_domain.Reject_verification
+         | Masc_domain.Mark_operator_blocked
+         | Masc_domain.Unblock -> ());
         if new_status = task.task_status && set_current = None
         then
 (* Idempotent no-op: status unchanged, skip write/events. Match None explicitly so set_current=Some is never silently dropped. *)
@@ -479,14 +493,17 @@ let transition_task_outcome_r
                     | Masc_domain.Claimed _
                     | Masc_domain.InProgress _
                     | Masc_domain.Done _
-                    | Masc_domain.Cancelled _ -> ())
+                    | Masc_domain.Cancelled _
+                    | Masc_domain.Operator_blocked _ -> ())
                  | Masc_domain.Claim
                  | Masc_domain.Start
                  | Masc_domain.Done_action
                  | Masc_domain.Cancel
                  | Masc_domain.Release
                  | Masc_domain.Approve_verification
-                 | Masc_domain.Reject_verification -> ()));
+                 | Masc_domain.Reject_verification
+                 | Masc_domain.Mark_operator_blocked
+                 | Masc_domain.Unblock -> ()));
              raise exn);
           (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
              commit so agents that cache the task don't emit stale broadcasts
@@ -529,7 +546,8 @@ let transition_task_outcome_r
                  | Masc_domain.Claimed _
                  | Masc_domain.InProgress _
                  | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ())
+                 | Masc_domain.Cancelled _
+                 | Masc_domain.Operator_blocked _ -> ())
               | Masc_domain.Reject_verification ->
                 (match task.task_status with
                  | Masc_domain.AwaitingVerification { verification_id; _ } ->
@@ -551,13 +569,16 @@ let transition_task_outcome_r
                  | Masc_domain.Claimed _
                  | Masc_domain.InProgress _
                  | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ())
+                 | Masc_domain.Cancelled _
+                 | Masc_domain.Operator_blocked _ -> ())
               | Masc_domain.Claim
               | Masc_domain.Start
               | Masc_domain.Done_action
               | Masc_domain.Cancel
               | Masc_domain.Release
-              | Masc_domain.Submit_for_verification -> ()));
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Mark_operator_blocked
+              | Masc_domain.Unblock -> ()));
           update_local_agent_state config ~agent_name (fun agent ->
             match set_current with
             | Some _ -> { agent with status = Busy; current_task = Some task_id }
@@ -652,7 +673,8 @@ let transition_task_outcome_r
                | Masc_domain.Claimed _
                | Masc_domain.InProgress _
                | Masc_domain.AwaitingVerification _
-               | Masc_domain.Cancelled _ -> `Assoc [ "task_id", `String task_id ]
+               | Masc_domain.Cancelled _
+               | Masc_domain.Operator_blocked _ -> `Assoc [ "task_id", `String task_id ]
              in
              emit_task_activity
                config
@@ -666,6 +688,24 @@ let transition_task_outcome_r
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
+               ~payload:(`Assoc [ "task_id", `String task_id ])
+           | Masc_domain.Mark_operator_blocked ->
+             emit_task_activity
+               config
+               ~agent_name
+               ~task_id
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Operator_blocked)
+               ~payload:
+                 (`Assoc
+                     [ "task_id", `String task_id
+                     ; ("reason", if reason = "" then `Null else `String reason)
+                     ])
+           | Masc_domain.Unblock ->
+             emit_task_activity
+               config
+               ~agent_name
+               ~task_id
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Unblocked)
                ~payload:(`Assoc [ "task_id", `String task_id ]));
           (* RFC-0323 G-3: completion side effects key off the RESULT (Done),
              not the action — otherwise Approve_verification completions
@@ -692,7 +732,9 @@ let transition_task_outcome_r
               | Masc_domain.Release
               | Masc_domain.Submit_for_verification
               | Masc_domain.Approve_verification
-              | Masc_domain.Reject_verification -> None)
+              | Masc_domain.Reject_verification
+              | Masc_domain.Mark_operator_blocked
+              | Masc_domain.Unblock -> None)
           in
           observe_task_transition
             config
@@ -724,7 +766,8 @@ let transition_task_outcome_r
            | Masc_domain.Claimed _
            | Masc_domain.InProgress _
            | Masc_domain.AwaitingVerification _
-           | Masc_domain.Cancelled _ -> ());
+           | Masc_domain.Cancelled _
+           | Masc_domain.Operator_blocked _ -> ());
           (match action with
            | Masc_domain.Cancel ->
              Workspace_task_cleanup.run_cancel_hooks config ~agent_name
@@ -734,7 +777,9 @@ let transition_task_outcome_r
            | Masc_domain.Start
            | Masc_domain.Submit_for_verification
            | Masc_domain.Approve_verification
-           | Masc_domain.Reject_verification -> ());
+           | Masc_domain.Reject_verification
+           | Masc_domain.Mark_operator_blocked
+           | Masc_domain.Unblock -> ());
           Ok
             { message =
                 Printf.sprintf

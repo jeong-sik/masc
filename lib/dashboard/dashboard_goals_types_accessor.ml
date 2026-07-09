@@ -79,6 +79,7 @@ let task_status_label (task : Masc_domain.task) : string =
   | Masc_domain.AwaitingVerification _ -> "awaiting_verification"
   | Masc_domain.Done _ -> "completed"
   | Masc_domain.Cancelled _ -> "cancelled"
+  | Masc_domain.Operator_blocked _ -> "operator_blocked"
 
 let task_is_terminal (task : Masc_domain.task) : bool =
   Masc_domain.task_status_is_terminal task.task_status
@@ -93,6 +94,7 @@ let task_updated_at (task : Masc_domain.task) : string =
   | Masc_domain.InProgress { started_at; _ } -> started_at
   | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Operator_blocked { blocked_at; _ } -> blocked_at
   | Masc_domain.Todo -> task.created_at
 
 let dedupe_sort values =

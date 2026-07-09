@@ -230,7 +230,8 @@ let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_do
   | Masc_domain.InProgress _
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> false
+  | Masc_domain.Cancelled _
+  | Masc_domain.Operator_blocked _ -> false
 ;;
 
 let todo_completed_deliverable_conflicts (ctx : context) tasks =
@@ -427,7 +428,11 @@ let status_summary_string (ctx : context) =
            , done_cnt
            , cancelled_cnt )
          | Masc_domain.Cancelled _ ->
-           active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt + 1)
+           active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt + 1
+         (* Operator_blocked is suspended, not active work; it is not counted in
+            any bucket (no dedicated blocked bucket yet). *)
+         | Masc_domain.Operator_blocked _ ->
+           active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
       ([], 0, 0, 0, 0, 0)
       backlog.tasks
   in

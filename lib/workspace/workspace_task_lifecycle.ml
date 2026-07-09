@@ -277,6 +277,10 @@ let decide
       | Masc_domain.Done _
       | Masc_domain.Cancelled _ ) ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
+  (* Operator_blocked is a terminal-like suspension: only Mark_operator_blocked
+     (idempotent) and Unblock (to Todo) are valid. All other actions are
+     invalid until the operator removes the block. *)
+  | _, Masc_domain.Operator_blocked _ -> Error Invalid_transition
 ;;
 
 (* Enumerate the actions that [decide] would accept for the given status under

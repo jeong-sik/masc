@@ -45,7 +45,8 @@ let task_has_actionable_verification actionable_request_ids
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> false
+  | Masc_domain.Cancelled _
+  | Masc_domain.Operator_blocked _ -> false
 ;;
 
 (** Read workspace backlog counts. *)

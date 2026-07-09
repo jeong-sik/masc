@@ -402,7 +402,9 @@ let record_task_transition
         ~max_age_sec:task_commitment_expiry_sec
     | Masc_domain.Submit_for_verification
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification -> ())
+    | Masc_domain.Reject_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock -> ())
 ;;
 
 let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =

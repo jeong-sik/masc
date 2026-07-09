@@ -286,6 +286,9 @@ let task_operation_status (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
   | Masc_domain.AwaitingVerification _ -> Some "paused"
+  (* Operator_blocked is a suspended state — surface it as "paused" (closest
+     existing dashboard vocabulary) until a dedicated "blocked" class is added. *)
+  | Masc_domain.Operator_blocked _ -> Some "paused"
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
 let task_operation_updated_at (task : Masc_domain.task) =
@@ -295,6 +298,7 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.InProgress { started_at; _ } -> started_at
   | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Operator_blocked { blocked_at; _ } -> blocked_at
   | Masc_domain.Todo -> task.created_at
 
 let task_operation_links (task : Masc_domain.task) =

@@ -620,7 +620,10 @@ let test_global_pending_confirm_is_actionable_row () =
       (json_string_member "wake_producer" row);
     check string "next action" "operator_confirm_action"
       (json_string_member "next_action" row);
-    check string "token" "confirm-goal-1" U.(detail |> member "token" |> to_string);
+    check (option string) "token redacted" None
+      U.(detail |> member "token" |> to_string_option);
+    check (option string) "actor redacted" None
+      U.(detail |> member "actor" |> to_string_option);
     check string "trace_id" "trace-goal-1" U.(detail |> member "trace_id" |> to_string);
     check string "target_type" "goal" U.(detail |> member "target_type" |> to_string);
     check string "target_id" "goal-123" U.(detail |> member "target_id" |> to_string);

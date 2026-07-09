@@ -430,9 +430,7 @@ let pending_confirm_row ?keeper_name
   ; next_action = "operator_confirm_action"
   ; detail =
       `Assoc
-        [ "token", `String entry.token
-        ; "trace_id", `String entry.trace_id
-        ; "actor", `String entry.actor
+        [ "trace_id", `String entry.trace_id
         ; "target_type", `String entry.target_type
         ; "target_id", Json_util.string_opt_to_json entry.target_id
         ; "delegated_tool", `String entry.delegated_tool

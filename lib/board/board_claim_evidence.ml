@@ -235,6 +235,48 @@ let load_records path =
       [])
 ;;
 
+(* --- Phase 1: target-post high-risk detection --- *)
+
+(** High-risk claim kinds that require evidence backing. *)
+let high_risk_claim_strings =
+  [ "artifact_exists"; "artifact_missing"; "artifact_created"
+  ; "artifact_endorsed"; "verification_endorsement"
+  ; "task_completion"; "pr_state"; "retraction_ack"
+  ]
+;;
+
+(** [post_has_high_risk_evidence post_id] scans the sidecar ledger for
+    any record targeting [post_id] that carries typed claims beyond
+    [opinion_or_routing].  Used by the board claim gate (Phase 1) to
+    force source_post_snapshot requirements on replies to high-risk
+    posts even when the replying keeper omits explicit claim args. *)
+let post_has_high_risk_evidence post_id =
+  let records = load_records (sidecar_path ()) in
+  List.exists
+    (fun json ->
+      let matches_target =
+        match string_opt "target_post_id" json with
+        | Some pid -> String.equal pid post_id
+        | None -> false
+      in
+      if not matches_target
+      then false
+      else
+        let claims =
+          match assoc_opt "claims" json with
+          | Some (`List items) ->
+            List.filter_map
+              (function `String s -> Some s | _ -> None)
+              items
+          | _ -> []
+        in
+        (* Any claim beyond opinion_or_routing makes the post high-risk *)
+        List.exists
+          (fun c -> not (String.equal c "opinion_or_routing"))
+          claims)
+    records
+;;
+
 let projection_lookup () =
   let table = Hashtbl.create 16 in
   let path = sidecar_path () in

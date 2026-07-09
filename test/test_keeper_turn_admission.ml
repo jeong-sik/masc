@@ -393,6 +393,44 @@ let test_idle_loop_yields_to_parked_chat () =
   check "parked chat admitted after the autonomous turn yielded" !chat_ran
 ;;
 
+let test_autonomous_yields_to_queued_connector_message () =
+  reset ();
+  Keeper_chat_queue.clear ~keeper_name;
+  Printf.printf
+    "Test 10: autonomous lane yields while a connector/dashboard message is queued\n%!";
+  (* Sanity: an empty queue lets the autonomous lane run. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> 7) with
+   | `Ran 7 -> check "run_if_free admits when the chat queue is empty" true
+   | `Ran _ | `Busy _ -> check "run_if_free admits when the chat queue is empty" false);
+  (* A busy connector (Slack/Discord) message is deferred on the chat queue
+     without parking on the admission slot, so [chat_waiting] stays false. The
+     autonomous lane must still yield, or a long/back-to-back autonomous turn
+     busy-ACKs the connector forever (the starvation this pins). *)
+  Keeper_chat_queue.enqueue ~keeper_name
+    { Keeper_chat_queue.content = "deferred slack mention"
+    ; user_blocks = []
+    ; attachments = []
+    ; timestamp = 1.0
+    ; source = Keeper_chat_queue.Slack { channel = "C-test"; user_id = "U-test" }
+    };
+  check "queue depth is 1 after enqueue" (Keeper_chat_queue.length ~keeper_name = 1);
+  check
+    "a queued connector message is not a parked chat"
+    (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy _ ->
+     check "run_if_free yields (Busy) while a connector message is queued" true
+   | `Ran () ->
+     check "run_if_free must not admit while a connector message is queued" false);
+  (* Draining the queue (what the consumer does in the yielded window) lets the
+     autonomous lane run again. *)
+  ignore (Keeper_chat_queue.dequeue_batch ~keeper_name);
+  check "queue empty after drain" (Keeper_chat_queue.length ~keeper_name = 0);
+  match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ok") with
+  | `Ran "ok" -> check "run_if_free admits again once the queue is drained" true
+  | `Ran _ | `Busy _ -> check "run_if_free admits again once the queue is drained" false
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_free_slot_admits ();
@@ -405,6 +443,7 @@ let () =
   test_cancelled_waiter_leaves_queue ();
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
+  test_autonomous_yields_to_queued_connector_message ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

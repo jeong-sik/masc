@@ -347,16 +347,35 @@ let ask_of policy ~caps ~bin : Verdict.t =
    floored or Ask-graded; [Allowed] verbs fall through to the overlay), so this
    layer only ADDS an approval requirement, never removes one. Non-gh commands
    are unaffected. *)
-let gh_verb_of_simple (simple : Shell_ir.simple) : Gh_verb.t option =
-  match Exec_program.known simple.Shell_ir.bin with
+let gh_verb_of_program bin args : Gh_verb.t option =
+  match Exec_program.known bin with
   | Some Exec_program.Gh ->
     let words =
-      Exec_program.to_string simple.Shell_ir.bin
-      :: List.map repo_hosting_arg_word simple.Shell_ir.args
+      Exec_program.to_string bin
+      :: List.map repo_hosting_arg_word args
     in
     Some (Gh_verb.classify words)
   | Some _ | None -> None
 [@@warning "-4"]
+
+let cap_requires_gh_approval cap =
+  let requires_approval v =
+    Gh_capability_policy.disposition_of v
+    = Gh_capability_policy.Requires_approval
+  in
+  let rec scan = function
+    | Capability.Exec_program (bin, args) ->
+      (match gh_verb_of_program bin args with
+       | Some v -> requires_approval v
+       | None -> false)
+    | Capability.Pipeline_fold caps -> List.exists scan caps
+    | Capability.Read_path _ | Capability.Write_path _ | Capability.Git _
+    | Capability.Env_set _ ->
+      false
+  in
+  scan cap
+
+let caps_require_gh_approval caps = List.exists cap_requires_gh_approval caps
 
 let trust_dispatch ~trust_level ~caps ~policy ~bin ~simple : Verdict.t =
   match trust_level with
@@ -377,15 +396,11 @@ let decide (policy : t)
   | Some reason ->
     (* Trust-independent: denied regardless of [overlay] (RFC-0254 §5.3). *)
     Verdict.Deny { caps; reason }
-  | None when
-      (match gh_verb_of_simple simple with
-       | Some v ->
-         Gh_capability_policy.disposition_of v
-         = Gh_capability_policy.Requires_approval
-       | None -> false) ->
+  | None when caps_require_gh_approval caps ->
     (* RFC-0309 W3: a gh verb the capability axis marks [Requires_approval] is
-       escalated to [Ask] regardless of overlay. Additive only — reached solely
-       for gh, and only to REQUIRE approval the risk grading would not. *)
+       escalated to [Ask] regardless of overlay. Scan the full capability tree
+       rather than only the representative command so non-final pipeline stages
+       cannot bypass this additive approval requirement. *)
     ask_of policy ~caps ~bin:simple.bin
   | None ->
     (* Non-catastrophic: graded by the per-actor trust overlay.  Under the

@@ -489,6 +489,24 @@ let test_gh_durable_remote_asks_under_autonomous () =
     ; "gh frobnicate (unknown -> Requires_approval)", [ "frobnicate"; "now" ]
     ]
 
+let test_gh_durable_remote_pipeline_stage_asks_under_autonomous () =
+  let gh =
+    simple (bin_ok "gh") ~args:[ lit "repo"; lit "edit"; lit "--description"; lit "d" ]
+  in
+  let cat = simple (bin_ok "cat") in
+  let caps =
+    Capability_check.of_ir
+      (Shell_ir.Pipeline [ Shell_ir.Simple gh; Shell_ir.Simple cat ])
+  in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous
+      ~caps ~simple:cat
+  with
+  | Verdict.Ask _ -> ()
+  | _ ->
+    Alcotest.fail
+      "durable-remote gh op in a non-final pipeline stage must Ask under autonomous"
+
 (* #23362 keeps discussion mutations and repo create/fork at R2, so the
    capability disposition is [Denied] and they take the floor Deny path, NOT
    the W3 Ask path. Pinned here so W4/G-9 (R2 -> R1) produces a visible delta:
@@ -652,6 +670,7 @@ let () =
   test_gh_leading_dynamic_flag_destructive_floored_under_autonomous ();
   test_gh_leading_flag_read_not_floored_under_autonomous ();
   test_gh_durable_remote_asks_under_autonomous ();
+  test_gh_durable_remote_pipeline_stage_asks_under_autonomous ();
   test_gh_r2_durable_remote_denies_pending_w4 ();
   test_gh_reads_and_local_still_allowed_under_autonomous ();
   test_non_gh_unaffected_by_capability_layer ();

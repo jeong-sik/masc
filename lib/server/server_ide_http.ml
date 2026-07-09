@@ -466,7 +466,11 @@ let build_cursor_snapshot state uri ~partition ~limit ~offset =
 let add_routes router =
   Ide_bridge.install_agent_observation_sinks ();
   router
-  |> Http.Router.get "/api/v1/ide/observations/snapshot" observation_snapshot_handler
+  |> Http.Router.get "/api/v1/ide/observations/snapshot" (fun request reqd ->
+    with_public_read
+      (fun _state req reqd -> observation_snapshot_handler req reqd)
+      request
+      reqd)
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->

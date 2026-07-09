@@ -104,7 +104,7 @@ end
     The fallback path is strict JSON and returns Error on failure instead of
     extracting a verdict from prose. *)
 let verify (req : Core.verification_request) : (Core.verdict, string) result =
-  if Core.should_skip ~action_description:req.action_description
+  if Core.should_skip ~tool_name:req.action_description ()
   then Ok Core.Pass
   else (
     let prompt = build_prompt req in
@@ -203,7 +203,7 @@ let handle_pre_tool_use
   : Agent_sdk.Hooks.hook_decision
   =
   let action_description = sprintf "tool:%s" tool_name in
-  if Core.should_skip ~action_description
+  if Core.should_skip ~tool_name ()
   then Agent_sdk.Hooks.Continue
   else (
     match
@@ -316,7 +316,7 @@ let guardrails_with_read_only_tag ?(max_tool_calls_per_turn : int option) ()
     tool name matches read-only patterns. Can be used in custom
     guardrails pipelines for conditional verification bypass. *)
 let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
-  Core.should_skip ~action_description:schema.name
+  Core.should_skip ~tool_name:schema.name ()
 ;;
 
 (* ================================================================ *)

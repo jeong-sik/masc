@@ -37,43 +37,77 @@ type grounded_verdict = {
 }
 
 (* ================================================================ *)
-(* Read-Only Detection                                              *)
+(* Effect Class (RFC-0327 §A4)                                      *)
 (* ================================================================ *)
 
-let read_only_patterns = [
-  "read"; "glob"; "grep";
-  "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
-  "git status"; "git log"; "git diff";
-  "status"; "view"; "get"; "fetch"; "query";
-]
+(** Tool effect classification — replaces the old [read_only_patterns]
+    string-list classifier with a typed variant.  Each tool is classified
+    by its primary side-effect level so the verifier can decide whether
+    to skip or flag the action without brittle string matching. *)
+type effect_class =
+  | Read      (** Observation-only tools: read, grep, search, git log … *)
+  | Write     (** Mutating tools: edit, write, create, delete … *)
+  | Execute   (** Command execution: shell, git push, gh … *)
+  | Admin     (** Privileged operations: task claim, transition … *)
 
-let is_word_char c =
-  match c with
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
-  | _ -> false
+let effect_class_to_string = function
+  | Read -> "read"
+  | Write -> "write"
+  | Execute -> "execute"
+  | Admin -> "admin"
 
-let has_pattern_with_word_boundary ~text ~pat =
-  let tlen = String.length text in
-  let plen = String.length pat in
-  if plen = 0 || tlen < plen then false
-  else
-    let rec loop i =
-      if i > tlen - plen then false
-      else if String.sub text i plen = pat then
-        let before_ok = i = 0 || not (is_word_char text.[i - 1]) in
-        let after_idx = i + plen in
-        let after_ok = after_idx >= tlen || not (is_word_char text.[after_idx]) in
-        if before_ok && after_ok then true else loop (i + 1)
-      else
-        loop (i + 1)
-    in
-    loop 0
+(** Classify a tool by its name.  Unknown tools default to [Write]
+    (conservative: flag rather than silently skip). *)
+let classify_tool_effect ~tool_name =
+  let name = String.lowercase_ascii (String.trim tool_name) in
+  match name with
+  (* Read-only observation tools *)
+  | "read" | "grep" | "search" | "search_files"
+  | "find" | "list" | "ls" | "cat" | "head" | "tail"
+  | "glob" | "rg"
+    -> Read
+  (* Git read-only commands *)
+  | "git status" | "git log" | "git diff" | "git show"
+  | "git branch" | "git rev-parse"
+    -> Read
+  (* Dashboard / surface read-only *)
+  | "status" | "view" | "get" | "fetch" | "query"
+    -> Read
+  (* Write / mutation tools *)
+  | "edit" | "write" | "create" | "delete" | "patch"
+    -> Write
+  (* Execution tools *)
+  | "execute" | "shell" | "run"
+    -> Execute
+  (* Git write commands *)
+  | "git add" | "git commit" | "git push" | "git pull"
+  | "git merge" | "git rebase" | "git checkout" | "git switch"
+    -> Execute
+  (* GitHub CLI mutations *)
+  | "gh pr create" | "gh pr merge" | "gh issue create"
+    -> Execute
+  (* Admin / privileged *)
+  | "keeper_task_claim" | "keeper_task_done" | "masc_transition"
+  | "keeper_task_create" | "keeper_task_release"
+    -> Admin
+  (* Board mutations *)
+  | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
+    -> Admin
+  (* Default: conservative — treat unknown as Write *)
+  | _ -> Write
 
-let should_skip ~action_description =
-  let text = String.lowercase_ascii action_description in
-  List.exists (fun pat ->
-    has_pattern_with_word_boundary ~text ~pat
-  ) read_only_patterns
+(** [should_skip ~tool_name] returns [true] when the tool is read-only
+    and the verifier should skip anti-rationalization review.
+    Accepts [~tool_name] for the new typed path, or [~action_description]
+    for backward compatibility with callers that pass free-form text. *)
+let should_skip ?(tool_name="") ?(action_description="") () =
+  let name =
+    if tool_name <> "" then tool_name
+    else action_description
+  in
+  classify_tool_effect ~tool_name:name = Read
+
+
 
 (* ================================================================ *)
 (* Verdict Parsing                                                  *)

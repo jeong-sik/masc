@@ -288,7 +288,7 @@ let send_text_bigstring session payload =
       if is_session_closed session then false
       else begin
         try
-          Ws_wsd.send_text_bigstring session.wsd payload;
+          Ws_wsd.send_text session.wsd (Bigstringaf.to_string payload);
           Transport_metrics.inc_ws_bytes_sent ~bytes:len;
           Transport_metrics.observe_ws_message_bytes_sent len;
           true

@@ -254,6 +254,7 @@ type t =
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
+  | ContinuationDeliveryOutcome
 
 val to_string : t -> string
 

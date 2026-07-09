@@ -441,6 +441,10 @@ let finalize
        Keeper_continuation_delivery.maybe_deliver ~config
          ~keeper_name:meta.name ~channel ~already_replied ~content
      in
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string ContinuationDeliveryOutcome)
+       ~labels:["outcome", Keeper_continuation_delivery.describe_outcome outcome]
+       ();
      Log.Keeper.info ~keeper_name:meta.name
        "RFC-0320 W3c continuation delivery: %s"
        (Keeper_continuation_delivery.describe_outcome outcome)

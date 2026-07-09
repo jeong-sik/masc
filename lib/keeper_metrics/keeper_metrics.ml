@@ -264,6 +264,10 @@ type t =
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
+  | ContinuationDeliveryOutcome
+      (* counter: RFC-0320 W3c continuation delivery outcome; label=outcome_tag
+         (Delivered/Skipped_unrouted/Skipped_already_replied/Skipped_empty/Failed).
+         G5 observability — a dropped/unrouted continuation must never be silent. *)
 
 (** String conversion
 
@@ -553,6 +557,7 @@ let to_string = function
     "masc_keeper_wire_capture_response_suppressed_total"
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
+  | ContinuationDeliveryOutcome -> "masc_keeper_continuation_delivery_outcome_total"
 ;;
 
 (* Every constructor of [t], in declaration order.  Consumed by
@@ -622,7 +627,7 @@ let all : t list =
   KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;
   RawTraceSinkDegraded; WireCaptureResponseSuppressed; WireCaptureWriteFailures;
-  WireCaptureRecordSkipped
+  WireCaptureRecordSkipped; ContinuationDeliveryOutcome
   ]
 ;;
 

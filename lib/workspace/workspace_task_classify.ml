@@ -55,7 +55,8 @@ let classify_completion_path
   | Masc_domain.Approve_verification -> "via_verification"
   | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action
   | Masc_domain.Cancel | Masc_domain.Release
-  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification ->
+  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification
+  | Masc_domain.Mark_operator_blocked | Masc_domain.Unblock ->
     if force then "forced_done"
     else (match drift with
           | Some Workspace_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
@@ -85,7 +86,7 @@ let working_agents config =
       (fun (t : task) ->
          match t.task_status with
          | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
-         | Todo | Done _ | Cancelled _ | AwaitingVerification _ -> None)
+         | Todo | Done _ | Cancelled _ | AwaitingVerification _ | Operator_blocked _ -> None)
       backlog.tasks
     |> List.sort_uniq String.compare
 ;;
@@ -370,6 +371,8 @@ let valid_next_actions_for_status
   | Masc_domain.AwaitingVerification _ ->
     [ Masc_domain.Approve_verification; Masc_domain.Reject_verification ]
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
+  | Masc_domain.Operator_blocked _ ->
+    [ Masc_domain.Mark_operator_blocked; Masc_domain.Unblock ]
 ;;
 
 let next_actions_hint status =
@@ -391,7 +394,8 @@ let task_started_at_unix status =
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> default_time
+  | Masc_domain.Cancelled _
+  | Masc_domain.Operator_blocked _ -> default_time
 ;;
 
 let task_transition_details

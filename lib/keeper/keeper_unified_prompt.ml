@@ -79,6 +79,8 @@ let format_current_task (task : Masc_domain.task) : string =
     | Masc_domain.Todo -> "todo"
     | Masc_domain.Done _ -> "done"
     | Masc_domain.Cancelled _ -> "cancelled"
+    | Masc_domain.Operator_blocked { reason; _ } ->
+        if reason = "" then "operator-blocked" else Printf.sprintf "operator-blocked (%s)" reason
   in
   let buf = Buffer.create 256 in
   Buffer.add_string buf "### Current Task (held by you)\n";

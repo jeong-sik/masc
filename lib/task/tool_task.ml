@@ -262,7 +262,9 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Cancel
       | Masc_domain.Submit_for_verification
       | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ), _ -> None
+      | Masc_domain.Reject_verification
+      | Masc_domain.Mark_operator_blocked
+      | Masc_domain.Unblock ), _ -> None
   in
   match release_owner_mismatch_rejection with
   | Some result -> result
@@ -408,7 +410,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time reason
   | None ->
-let evidence_refs =
+  let evidence_refs =
         match handoff_context with
         | Some h -> h.evidence_refs
         | None -> []
@@ -424,7 +426,6 @@ let evidence_refs =
              | Some persisted -> Some persisted
              | None -> completion_contract)
           ~evaluator_runtime
-          ~operator_override:force
           ~ctx
           ~task_opt
           ~task_id
@@ -466,7 +467,9 @@ let evidence_refs =
       | Masc_domain.Cancel
       | Masc_domain.Release
       | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ->
+      | Masc_domain.Reject_verification
+      | Masc_domain.Mark_operator_blocked
+      | Masc_domain.Unblock ->
         false
     in
     if not needs_gate then Workspace_hooks.Pass
@@ -545,7 +548,9 @@ let evidence_refs =
     | Masc_domain.Cancel
     | Masc_domain.Release
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Reject_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock ->
       None
   in
   (* RFC-0221 §3.1: compensation for [Submit_for_verification]. If the status
@@ -576,7 +581,9 @@ let evidence_refs =
     | Masc_domain.Cancel
     | Masc_domain.Release
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Reject_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock ->
       None
   in
   let prepare_verification_verdict =
@@ -605,7 +612,9 @@ let evidence_refs =
     | Masc_domain.Done_action
     | Masc_domain.Cancel
     | Masc_domain.Release
-    | Masc_domain.Submit_for_verification ->
+    | Masc_domain.Submit_for_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock ->
       None
   in
   let verifier_approve_gate_rejection =
@@ -688,23 +697,26 @@ let evidence_refs =
                 (Atomic.get Workspace_hooks.verification_notify_submit_fn)
                   ctx.config ~task ~assignee ~verification_id ~evidence_refs
               | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-              | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
+              | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.Operator_blocked _ -> ())
            | None -> ())
         | Masc_domain.Approve_verification ->
+          (* Previously this arm used [Option.value ~default:""
+             verification_id_before], which silently turned a missing
+             verification_id into the empty string and let
+             [notify_approve_verification] proceed against an invalid
+             id.  An Approve_verification action without a preceding
+             AwaitingVerification record is a logical invariant
+             violation — log it so dashboards surface the drift
+             instead of acting on empty strings. *)
           (match verification_id_before with
            | None ->
              task_log_warn ~task_id
                "approve_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
-             if String.equal (String.trim notes) "" then
-               task_log_warn ~task_id
-                 "approve_verification for task %s rejected: empty justification (rubber-stamp guard)"
-                 task_id
-             else
-               (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-                 ~task_id ~verifier:ctx.agent_name ~verification_id
-                 ~decision:(`Approve notes))
+             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
+               ~task_id ~verifier:ctx.agent_name ~verification_id
+               ~decision:(`Approve notes))
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
           (match verification_id_before with
@@ -713,15 +725,11 @@ let evidence_refs =
                "reject_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
-             if String.equal (String.trim reason) "" then
-               task_log_warn ~task_id
-                 "reject_verification for task %s rejected: empty justification (unsubstantiated guard)"
-                 task_id
-             else
-               (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-                 ~task_id ~verifier:ctx.agent_name ~verification_id
-                 ~decision:(`Reject reason))
-        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
+             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
+               ~task_id ~verifier:ctx.agent_name ~verification_id
+               ~decision:(`Reject reason))
+        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release
+        | Masc_domain.Mark_operator_blocked | Masc_domain.Unblock -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
@@ -761,7 +769,8 @@ let evidence_refs =
           ~reason:(Some "task_cancelled");
         ()
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
+            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release
+            | Masc_domain.Mark_operator_blocked | Masc_domain.Unblock)
    | Error _, _ -> ());
   result_to_response ~tool_name ~start_time result
 

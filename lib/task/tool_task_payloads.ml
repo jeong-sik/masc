@@ -45,7 +45,9 @@ let is_verdict_transition_action = function
   | Masc_domain.Done_action
   | Masc_domain.Cancel
   | Masc_domain.Release
-  | Masc_domain.Submit_for_verification ->
+  | Masc_domain.Submit_for_verification
+  | Masc_domain.Mark_operator_blocked
+  | Masc_domain.Unblock ->
     false
 
 let transition_action_policy_rejection ~agent_name ~action ~allowed_actions =

@@ -48,7 +48,7 @@ let task_assignee (task : Masc_domain.task) =
   | Claimed { assignee; _ } | InProgress { assignee; _ }
   | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
       Some assignee
-  | Todo | Cancelled _ -> None
+  | Todo | Cancelled _ | Operator_blocked _ -> None
 
 let last_message_map messages =
   let table = Hashtbl.create 32 in
@@ -377,16 +377,18 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
 let task_operation_status (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
-  (* RFC-0323 G-6: awaiting verification is the normal completion lane,
-     not a pause — the operation is still moving (verifier's turn). *)
-  | Masc_domain.AwaitingVerification _ -> Some "active"
+  | Masc_domain.AwaitingVerification _ -> Some "paused"
+  (* Operator_blocked is a suspended state — surface it as "paused" (closest
+     existing dashboard vocabulary) until a dedicated "blocked" class is added. *)
+  | Masc_domain.Operator_blocked _ -> Some "paused"
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
 let task_operation_severity (task : Masc_domain.task) =
   match task.task_status with
-  (* RFC-0323 G-6: verification pending is not a warning tone. *)
-  | Masc_domain.AwaitingVerification _ -> Tone_ok
+  | Masc_domain.AwaitingVerification _ -> Tone_warn
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Tone_ok
+  (* Operator_blocked is not yet in-progress work; route to neutral tone. *)
+  | Masc_domain.Operator_blocked _ -> Tone_ok
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Tone_ok
 
 let task_operation_updated_at (task : Masc_domain.task) =
@@ -396,6 +398,7 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.InProgress { started_at; _ } -> started_at
   | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Operator_blocked { blocked_at; _ } -> blocked_at
   | Masc_domain.Todo -> task.created_at
 
 let task_operation_links (task : Masc_domain.task) =

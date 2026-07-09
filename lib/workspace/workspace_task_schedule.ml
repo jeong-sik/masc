@@ -22,6 +22,7 @@ let task_status_label (status : Masc_domain.task_status) : string =
   | AwaitingVerification _ -> "awaiting_verification"
   | Done _ -> "done"
   | Cancelled _ -> "cancelled"
+  | Operator_blocked _ -> "operator_blocked"
 ;;
 
 let task_is_claim_pool_candidate (task : Masc_domain.task) =
@@ -60,7 +61,7 @@ let active_task_assignees_by_task_id backlog =
        match task.task_status with
        | Claimed { assignee; _ } | InProgress { assignee; _ } ->
          Hashtbl.replace table task.id assignee
-       | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ())
+       | Todo | AwaitingVerification _ | Done _ | Cancelled _ | Operator_blocked _ -> ())
     backlog.tasks;
   table
 ;;
@@ -624,7 +625,8 @@ let release_stale_claims config ~ttl_seconds =
       | Masc_domain.Todo
       | Masc_domain.AwaitingVerification _
       | Masc_domain.Done _
-      | Masc_domain.Cancelled _ -> None
+      | Masc_domain.Cancelled _
+      | Masc_domain.Operator_blocked _ -> None
     in
     let older_than_ttl task =
       match status_timestamp task.task_status with

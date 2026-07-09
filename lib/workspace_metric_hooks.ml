@@ -34,7 +34,9 @@ let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = fu
   | Masc_domain.Release -> Audit_log.ReleaseTask
   | ( Masc_domain.Submit_for_verification
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ) as action ->
+    | Masc_domain.Reject_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock ) as action ->
     Audit_log.Custom ("task_" ^ Masc_domain.task_action_to_string action)
 ;;
 
@@ -136,7 +138,9 @@ let observe_task_transition_event
     | Masc_domain.Release
     | Masc_domain.Submit_for_verification
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification -> Log.Info
+    | Masc_domain.Reject_verification
+    | Masc_domain.Mark_operator_blocked
+    | Masc_domain.Unblock -> Log.Info
   in
   let message = Printf.sprintf "task %s %s by %s" task_id transition_s agent_name in
   Log.Task.emit level ~details message;
@@ -163,7 +167,9 @@ let observe_task_transition_event
          Otel_metric_store.record_task_failed ()
        | Masc_domain.Release
        | Masc_domain.Submit_for_verification
-       | Masc_domain.Reject_verification -> ())
+       | Masc_domain.Reject_verification
+       | Masc_domain.Mark_operator_blocked
+       | Masc_domain.Unblock -> ())
    with
    | Stdlib.Effect.Unhandled _ as exn ->
      warn_telemetry_drop ~event:(Task_transition transition) exn);

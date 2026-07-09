@@ -225,7 +225,7 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
       | Masc_domain.AwaitingVerification { assignee; _ } ->
           if is_active_agent assignee then None
           else Some (task, assignee)
-      | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
+      | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.Operator_blocked _ -> None
     ) backlog.tasks
 
 (* RFC-0294 PR-4: the single typed source of truth for "is this status
@@ -243,7 +243,7 @@ let orphan_status_class_of_status : Masc_domain.task_status -> string option = f
   | Masc_domain.Claimed _ -> Some "claimed"
   | Masc_domain.InProgress _ -> Some "in_progress"
   | Masc_domain.AwaitingVerification _ -> Some "awaiting_verification"
-  | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
+  | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.Operator_blocked _ -> None
 
 (* The fixed class set the gauge reports (0 when a class is empty, so a cleared
    class resets rather than going stale). Exactly the Some-range of
@@ -429,7 +429,7 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
           let is_cancelled = match status with
             | Masc_domain.Cancelled _ -> true
             | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-            | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ -> false
+            | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Operator_blocked _ -> false
           in
           (include_done || not is_done) &&
           (include_cancelled || not is_cancelled)

@@ -23,7 +23,7 @@ let dashboard_task_assignee (task : Masc_domain.task) =
   | InProgress { assignee; _ }
   | AwaitingVerification { assignee; _ }
   | Done { assignee; _ } -> Some assignee
-  | Todo | Cancelled _ -> None
+  | Todo | Cancelled _ | Operator_blocked _ -> None
 ;;
 
 let dashboard_task_json config (task : Masc_domain.task) =

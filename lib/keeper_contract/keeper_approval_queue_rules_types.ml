@@ -65,7 +65,7 @@ type pending_approval =
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
-  ; channel : string option
+  ; channel : Keeper_continuation_channel.t option
   }
 
 type decision = Agent_sdk.Hooks.approval_decision

@@ -513,7 +513,19 @@ let start_keeper_loops
      the Fusion_completed/Bg_completed async-completion wakes. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
     (fun ~base_path ~keeper_name ~approval_id ~decision ?channel ->
-       let resolution = Keeper_event_queue.{ approval_id; decision; channel } in
+       let resolution =
+         Keeper_event_queue.
+           {
+             approval_id;
+             decision;
+             channel =
+               Option.value
+                 channel
+                 ~default:
+                   (Keeper_continuation_channel.unrouted
+                      "legacy: no approval continuation channel");
+           }
+       in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
        let stimulus : Keeper_event_queue.stimulus =
          { Keeper_event_queue.post_id = Keeper_event_queue.hitl_resolution_post_id resolution

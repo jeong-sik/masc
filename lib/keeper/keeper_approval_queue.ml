@@ -489,6 +489,8 @@ let create_entry
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?(continuation_channel =
+         Keeper_continuation_channel.unrouted "legacy: continuation channel not provided")
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -525,12 +527,13 @@ let create_entry
   ; disposition
   ; disposition_reason
   ; phase = Awaiting_operator
+  ; continuation_channel
   ; audit_base_path
   ; resolver
   ; on_resolution
   ; context_summary = None
   ; summary_status = Summary_not_requested
-  ; channel = None
+  ; channel = Some continuation_channel
   }
 ;;
 
@@ -843,7 +846,7 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
-     ?channel:string option ->
+     ?channel:Keeper_continuation_channel.t ->
      unit)
     ref =
   ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ?channel:_ -> ())
@@ -1036,6 +1039,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
       ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
@@ -1062,6 +1066,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
       ~on_resolution:None
@@ -1192,6 +1197,7 @@ let submit_pending
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ~on_resolution
       ()
   : string
@@ -1234,13 +1240,14 @@ let submit_pending
           ?sandbox_profile
           ?backend
           ?runtime_contract
-          ?selected_model
-          ?disposition
-          ?disposition_reason
-          ~audit_base_path:base_path
-          ~resolver:None
-          ~on_resolution:(Some on_resolution)
-          ()
+      ?selected_model
+      ?disposition
+      ?disposition_reason
+      ?continuation_channel
+      ~audit_base_path:base_path
+      ~resolver:None
+      ~on_resolution:(Some on_resolution)
+      ()
       in
       let updated = SMap.add id entry map in
       if Atomic.compare_and_set pending map updated

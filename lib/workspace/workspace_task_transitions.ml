@@ -157,7 +157,16 @@ let transition_task_outcome_r
           match
             Workspace_task_lifecycle.decide
               ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
-              ~requires_verification:(Masc_domain.task_requires_verification task)
+              (* RFC-0323 G-5 Phase B: when [Verification.default_on] is set,
+                 treat every task as verification-required so completion
+                 routes through submit→approve. The evidence gate above
+                 reads [task_requires_verification] (= contract.strict)
+                 directly and is intentionally NOT flipped here — keeping
+                 it on Phase-A scope avoids the #23719 G-2 regression
+                 (unannounced Phase B). Default off (readiness gate §5). *)
+              ~requires_verification:
+                (Masc_domain.task_requires_verification task
+                 || Env_config_runtime.Verification.default_on ())
               ~verification_timeout_seconds:
                 (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)

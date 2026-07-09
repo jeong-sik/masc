@@ -1310,9 +1310,9 @@ let test_transition_unblock () =
     match result with
     | Ok msg ->
       Alcotest.(check bool)
-        "unblock from operator_blocked"
+        "unblock from operator_blocked restores claimed (previous_status)"
         true
-        (str_contains msg "todo")
+        (str_contains msg "claimed")
     | Error _ -> Alcotest.fail "Expected Ok for Unblock")
 ;;
 

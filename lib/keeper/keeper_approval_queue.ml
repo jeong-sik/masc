@@ -174,7 +174,6 @@ let audit_approval_event
       ?sandbox_target
       ?runtime_contract
       ?selected_model:(selected_model : string option)
-      ?audit_disposition
       ?disposition
       ?disposition_reason
       ?rule_match
@@ -182,6 +181,7 @@ let audit_approval_event
       ?actor
       ?approval_mode
       ?authorizing_band
+      ?audit_disposition
       ?auto_approved
       ?decision
       ()

@@ -1208,6 +1208,25 @@ let test_release_checksums_include_model_catalog_seed () =
     "(cd .. && sha256sum oas-models.toml) >> SHA256SUMS"
 ;;
 
+let test_team_flag_and_seed_exist () =
+  let script = install_script () in
+  assert_contains "team flag" script "--team)";
+  assert_contains "team seed function" script "seed_team()";
+  assert_contains "team manifest fetch" script "presets/$preset/manifest.txt";
+  assert_contains
+    "team files verified against release checksums"
+    script
+    "verify_checksum \"$tmp\" \"presets/$preset/$rel\""
+;;
+
+let test_release_checksums_include_team_presets () =
+  let workflow = release_workflow () in
+  assert_contains
+    "release checksum walks every team preset manifest"
+    workflow
+    "for m in presets/*/manifest.txt"
+;;
+
 let () =
   run
     "install_script"
@@ -1308,6 +1327,16 @@ let () =
             "runtime default update preserves comments and leaves no temp/bak files"
             `Quick
             test_runtime_default_update_preserves_comments_and_leaves_no_temp
+        ] )
+    ; ( "team"
+      , [ test_case
+            "team flag and seed function exist"
+            `Quick
+            test_team_flag_and_seed_exist
+        ; test_case
+            "release checksums include team presets"
+            `Quick
+            test_release_checksums_include_team_presets
         ] )
     ]
 ;;

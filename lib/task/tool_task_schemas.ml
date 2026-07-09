@@ -30,8 +30,8 @@ let handoff_example_evidence_ref =
 let handoff_context_description =
   Printf.sprintf
     "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
-     actions (done / submit_for_verification / release / cancel). On \
-     action='done' or 'submit_for_verification', include 'evidence_refs' with \
+     actions (submit_for_verification / done / release / cancel). On \
+     action='submit_for_verification' or 'done', include 'evidence_refs' with \
      at least one locally validated reference: an existing base-path artifact \
      file/file:// URI, a commit hash present in the local git repo, or a %s \
      trace/turn/receipt ref that resolves on disk. Completion notes, URLs, PR \
@@ -46,7 +46,9 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
-Normal completion flow is todo → claimed → done/cancelled; explicit submit_for_verification routes through awaiting_verification. \
+The completion path is todo → claimed/in_progress → submit_for_verification → awaiting_verification → approve (verifier ≠ assignee) → done. \
+Tasks with contract.strict=true reject direct action='done'; non-strict tasks may still complete directly. \
+To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
 Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})"
@@ -223,14 +225,17 @@ Tip: Look for status='todo' tasks to claim.";
   {
     name = "masc_transition";
     description = Printf.sprintf
-      "Move a task through its lifecycle: claim, start, done, cancel, release, \
-submit_for_verification, approve, or reject. \
+      "Move a task through its lifecycle: claim, start, submit_for_verification, \
+approve, reject, done, cancel, or release. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
 %s \
-After %s or %s; pair with masc_deliver before action='done'. \
-Use submit_for_verification only for explicit review of a claimed/in_progress task you own; approve/reject for verifier actions. \
-Tasks created through %s complete via action='done' after LLM completion review; \
-they do not route normal completion through the verifier agent."
+After %s or %s; pair with masc_deliver before completing. \
+Completion path: the assignee calls submit_for_verification, then a verifier \
+(any agent other than the assignee) calls approve — awaiting_verification → done \
+(reject returns it to in_progress). \
+Tasks created through %s with contract.strict=true are rejected on direct \
+action='done'; non-strict tasks may complete via action='done' after LLM \
+completion review."
       (Tool_contract_guidance.task_lifecycle_rule ())
       masc_add_task_name
       "keeper_task_claim"
@@ -248,7 +253,7 @@ they do not route normal completion through the verifier agent."
         ]);
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject");
+          ("description", `String "Transition action: claim | start | submit_for_verification | approve | reject | done | cancel | release");
         ]);
         ("expected_version", `Assoc [
           ("type", `String "integer");
@@ -256,7 +261,7 @@ they do not route normal completion through the verifier agent."
         ]);
         ("notes", `Assoc [
           ("type", `String "string");
-          ("description", `String "Completion notes (used with action='done')");
+          ("description", `String "Completion notes (used with action='done'; on action='approve' appended to the approval note)");
         ]);
         ("completion_contract", `Assoc [
           ("type", `String "array");

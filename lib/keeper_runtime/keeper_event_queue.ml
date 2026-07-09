@@ -391,12 +391,10 @@ let is_board_signal = function
   | Goal_stagnation _ ->
     false
 
-let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
-  let now = Unix.gettimeofday () in
-  let is_board_in_window s =
-    is_board_signal s.payload && Float.abs (now -. s.arrived_at) <= window_sec
+let drain_board_all (queue : t) : stimulus list * t =
+  let board, rest =
+    List.partition (fun s -> is_board_signal s.payload) (to_list queue)
   in
-  let board, rest = List.partition is_board_in_window (to_list queue) in
   (to_list (sort_by_urgency (of_list board)), of_list rest)
 
 let summary (queue : t) : string =

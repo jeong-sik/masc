@@ -103,7 +103,7 @@ val review :
   ?on_verdict:(review_result -> unit) ->
   ?few_shot_block:string ->
   ?operator_override:bool ->
-  ?sw:Eio.Switch.t ->
+  ?sw:Eio.Switch.t option ->
   review_request -> review_result
 
 (** Check completion notes against a contract. Returns unmet items.

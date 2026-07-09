@@ -78,12 +78,13 @@ type pending_approval =
   ; disposition : string option
   ; disposition_reason : string option
   ; phase : pending_phase
+  ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
-  ; channel : string option
+  ; channel : Keeper_continuation_channel.t option
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry
@@ -198,9 +199,9 @@ val audit_approval_event :
   ?sandbox_target:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
-  ?actor:string option ->
-  ?approval_mode:string option ->
-  ?authorizing_band:string option ->
+  ?actor:string ->
+  ?approval_mode:string ->
+  ?authorizing_band:string ->
   ?audit_disposition:approval_audit_disposition ->
   ?disposition:string ->
   ?disposition_reason:string ->
@@ -280,6 +281,7 @@ val submit_and_await :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   ?critical_escalation_after_s:float ->
@@ -307,6 +309,7 @@ val submit_pending :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   on_resolution:(Agent_sdk.Hooks.approval_decision -> unit) ->
   unit ->
   string
@@ -325,7 +328,7 @@ val set_approval_resolution_wake_hook :
    keeper_name:string ->
    approval_id:string ->
    decision:Keeper_event_queue.hitl_resolution_decision ->
-   ?channel:string option ->
+   ?channel:Keeper_continuation_channel.t ->
    unit) ->
   unit
 

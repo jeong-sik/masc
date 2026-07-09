@@ -238,13 +238,25 @@ let review_completion_notes
               (Stdlib.Printexc.to_string exn))
       in
       let few_shot_block = (Atomic.get get_few_shot_block_fn) () in
-      match (Anti_rationalization.review
-         ?sw:ctx.sw
-         ?evaluator_runtime
-         ?completion_contract
-         ~required_evidence
-         ~verify_gate_evidence
-         ~on_verdict ~few_shot_block ~operator_override ar_req).verdict with
+      let ar_result =
+        (match ctx.sw with
+         | None ->
+           Anti_rationalization.review
+             ?evaluator_runtime
+             ?completion_contract
+             ~required_evidence
+             ~verify_gate_evidence
+             ~on_verdict ~few_shot_block ~operator_override ar_req
+         | Some sw ->
+           Anti_rationalization.review
+             ~sw
+             ?evaluator_runtime
+             ?completion_contract
+             ~required_evidence
+             ~verify_gate_evidence
+             ~on_verdict ~few_shot_block ~operator_override ar_req)
+      in
+      match ar_result.verdict with
       | Anti_rationalization.Reject reason -> Some reason
       | Anti_rationalization.Approve -> None
 

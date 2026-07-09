@@ -414,15 +414,30 @@ let take = List.take
 
 (* RFC-0020: select which keepers wake for a board signal from typed
    [Board_wake.wake_reason] candidates. Explicit mentions short-circuit and
-   wake unconditionally; thread-reply/reaction followups compete for [total_limit] slots
-   in candidate order. [None] reasons are dropped (the structural reactive
-   pipeline found no deterministic address for that keeper). Semantic
-   relatedness is intentionally not a wake reason here: it must enter through an
-   LLM/Judge attention boundary, not goal-keyword matching in the board publish
-   hook. *)
+   wake unconditionally; thread-reply/reaction followups compete for
+   [total_limit] immediate-wake slots in candidate order. [None] reasons are
+   dropped (the structural reactive pipeline found no deterministic address
+   for that keeper). Semantic relatedness is intentionally not a wake reason
+   here: it must enter through an LLM/Judge attention boundary, not
+   goal-keyword matching in the board publish hook.
+
+   RFC-0334 W1: the cap bounds WAKES, not delivery. Addressed candidates
+   beyond the wake budget — cap overflow, or followups shadowed by an
+   explicit-mention short-circuit — return as [deferred]: the caller appends
+   the stimulus to their mailboxes and they observe it on their next turn.
+   Only [None]-reason candidates receive nothing. *)
 let select_board_wakeup_candidates
     ?(total_limit = board_reactive_wakeup_max)
     candidates =
+  let followups =
+    candidates
+    |> List.filter_map (fun (item, reason) ->
+      match reason with
+      | Some
+          (( Board_wake.Thread_reply_after_self_comment
+           | Board_wake.Reaction_after_self_activity ) as r) -> Some (item, r)
+      | Some Board_wake.Explicit_mention | None -> None)
+  in
   let explicit =
     candidates
     |> List.filter_map (fun (item, reason) ->
@@ -434,17 +449,11 @@ let select_board_wakeup_candidates
       | None -> None)
   in
   match explicit with
-  | _ :: _ -> explicit, 0
+  | _ :: _ -> explicit, followups
   | [] ->
-    let non_explicit =
-      List.filter_map
-        (fun (item, reason) ->
-          match reason with None -> None | Some r -> Some (item, r))
-        candidates
-    in
-    let selected = take total_limit non_explicit in
-    let dropped = List.length non_explicit - List.length selected in
-    selected, dropped
+    let selected = take total_limit followups in
+    let deferred = List.drop total_limit followups in
+    selected, deferred
 ;;
 
 (* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
@@ -685,25 +694,42 @@ let wakeup_relevant_keeper_for_board_signal
           signal.post_id
           err)
   in
-  let selected, dropped = select_board_wakeup_candidates candidates in
+  let selected, deferred = select_board_wakeup_candidates candidates in
   let yield_meter = Eio_guard.create_yield_meter ~interval:1 () in
   selected
   |> List.iter (fun (meta, reason) ->
          wake_meta meta reason;
          Eio_guard.yield_step yield_meter);
-  if dropped > 0 then begin
-    (* Counter tracks wakeups dropped by the cap, not capped events; under
-       high fanout [dropped] can be >1 per signal, so add the actual amount
-       (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
+  (* RFC-0334 W1: the wake budget defers, it does not drop. Every addressed
+     candidate beyond the budget still receives the stimulus in its mailbox
+     ([Keeper_registry_event_queue.enqueue]: identity-dedup + durable
+     persist, no wakeup-flag flip) and observes it on its next turn —
+     whatever triggers that turn. The wake debounce
+     ([board_reactive_wakeup_allowed]) guards wakes, not delivery; queue
+     identity dedup already collapses repeats on this path. *)
+  deferred
+  |> List.iter (fun (meta, reason) ->
+         let stimulus = board_signal_stimulus ~reason signal in
+         Keeper_registry_event_queue.enqueue
+           ~base_path:config.base_path
+           meta.name
+           stimulus;
+         Eio_guard.yield_step yield_meter);
+  let deferred_count = List.length deferred in
+  if deferred_count > 0 then begin
+    (* Counter semantics per RFC-0334 W1: wakes deferred to the mailbox by
+       the wake budget — no longer a loss count. Under high fanout it can
+       be >1 per signal, so add the actual amount (not a fixed 1) to keep
+       the compact dashboard accurate. *)
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
       ~labels:[("kind", signal_kind_label)]
-      ~delta:(float_of_int dropped)
+      ~delta:(float_of_int deferred_count)
       ();
     Log.Keeper.info
-      "board signal wakeup capped by configured fanout: dropped=%d post=%s \
-       total_limit=%d"
-      dropped
+      "board signal wake budget reached: deferred=%d to mailboxes post=%s \
+       total_limit=%d (delivered, not dropped — RFC-0334 W1)"
+      deferred_count
       signal.post_id
       board_reactive_wakeup_max
   end

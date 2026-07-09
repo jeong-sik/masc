@@ -89,12 +89,7 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Keeper_internal_error.Max_turns_exceeded
      | Keeper_internal_error.Other_detail _ ->
        rotate Runtime_exhausted)
-  | Keeper_internal_error.Accept_rejected _ ->
-    (match Keeper_internal_error.accept_no_progress_retry_kind internal with
-     | Some `Empty_no_progress -> rotate No_progress_empty
-     | Some `Read_only_no_progress -> rotate No_progress_read_only
-     | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
-     | None -> judge ~err Contract_violation)
+  | Keeper_internal_error.Accept_rejected _ -> judge ~err Contract_violation
   | Keeper_internal_error.Max_tokens_ceiling_violation _ -> judge ~err Contract_violation
   | Keeper_internal_error.Internal_contract_rejected _ -> judge ~err Contract_violation
   | Keeper_internal_error.Ambiguous_post_commit _ -> judge ~err Mutating_ambiguity

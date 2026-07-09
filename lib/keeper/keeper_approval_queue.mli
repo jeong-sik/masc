@@ -199,6 +199,7 @@ val audit_approval_event :
   ?sandbox_target:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
+  ?audit_disposition:approval_audit_disposition ->
   ?disposition:string ->
   ?disposition_reason:string ->
   ?rule_match:rule_match ->
@@ -206,7 +207,6 @@ val audit_approval_event :
   ?actor:string ->
   ?approval_mode:string ->
   ?authorizing_band:string ->
-  ?audit_disposition:approval_audit_disposition ->
   ?auto_approved:bool ->
   ?decision:approval_audit_decision ->
   unit ->

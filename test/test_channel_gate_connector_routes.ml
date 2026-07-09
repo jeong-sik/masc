@@ -148,7 +148,7 @@ let test_slack_default_paths_resolve_under_base_path () =
                       (Sys.file_exists expected_binding_path);
                     check bool "binding not written under cwd" false
                       (Sys.file_exists
-                         (Filename.concat cwd_dir ".gate/runtime/slack/bindings.json")))))))
+                         (Filename.concat cwd_dir ".gate/runtime/slack/bindings.json"))))))))
 
 let test_telegram_connector_json_reads_runtime_status () =
   with_temp_dir @@ fun dir ->

@@ -2,13 +2,23 @@ name: Fundamental Check
 
 # Regression guards derived from the 2026-05-05 reality check
 # (docs/audit/2026-05-05-fundamental-roadmap-reality-check.md) on
-# fundamental_roadmap.md. Each job protects ground that PR #12986,
+# fundamental_roadmap.md. Each lint protects ground that PR #12986,
 # #12990, and the 10-week re-scoped plan
 # (~/me/planning/claude-plans/joyful-tumbling-dragon.md) already
 # cleared, so the codebase does not silently regress.
 #
 # Dashboard `tsc --noEmit` typecheck is intentionally NOT duplicated
 # here — ci.yml's `dashboard` job already runs it (see ci.yml:834).
+#
+# 2026-07-10 consolidation: these lints used to be ~30 separate jobs.
+# Each was seconds of work behind ~1 minute of checkout/apt setup, and
+# together they held ~30 runner slots per PR event — the main cause of
+# the day's queue starvation (PRs sat `queued` for 25+ minutes). They
+# now run as TWO jobs (blocking + advisory) through
+# scripts/ci/run-lint-suite.sh, which runs every lint to completion and
+# fails with the full failure list, preserving the old "see all
+# failures at once" property of parallel jobs. The lint scripts
+# themselves are unchanged.
 
 on:
   pull_request:
@@ -30,356 +40,42 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  no-roadmap-stale-hardcoding:
-    name: Hardcoded model prefix
+  lint-suite:
+    name: Lint Suite
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/no-roadmap-stale-hardcoding.sh
-
-  no-raw-font-size-px:
-    name: Raw font-size px (--fs-* token exists)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-raw-font-size-px.sh
-
-  no-ocaml-comment-terminator-trap:
-    name: OCaml comment `*)` terminator trap
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-ocaml-comment-terminator-trap.sh
-
-  timeout-env-ceiling:
-    name: Timeout env knob ceiling ratchet (RFC-0138)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/timeout-env-ceiling.sh
-
-  dashboard-env-knob-count:
-    name: Dashboard env knob count (advisory)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint-timeout-env-count.sh --strict
-
-  no-actionable-signal-bool-context:
-    name: No actionable signal bool context
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-actionable-signal-bool-context.sh
-
-  no-provider-name-hardcoding:
-    name: Provider name hardcoding ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-provider-name-hardcoding.sh --fail
-
-  no-keeper-behavior-hardcoding:
-    name: Keeper behavior hardcoding ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-keeper-behavior-hardcoding.sh
-
-  no-eval-tool-selector-runtime-import:
-    name: Eval tool selector runtime boundary
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-eval-tool-selector-runtime-import.sh
-
-  no-legacy-tool-surface-name:
-    name: Legacy tool surface name ratchet (RFC-0064)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-legacy-tool-surface-name.sh --fail
-
-  no-retired-tool-husks:
-    name: Retired tool husk ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-retired-tool-husks.sh --fail
-
-  no-synthetic-tool-call-residue:
-    name: Synthetic tool-call residue ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-synthetic-tool-call-residue.sh --fail
-
-  no-tool-substrate-adapter-surface:
-    name: Tool substrate adapter surface ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail
-
-  tool-keeper-boundary:
-    name: Tool -> Keeper dependency-direction ratchet (RFC-0194 §3)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/tool-keeper-boundary-ratchet.sh --fail
-
-  masc-domain-boundary:
-    name: MASC domain ownership ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/masc-domain-boundary-ratchet.sh --fail
-
-  no-tool-result-error-printexc:
-    name: RFC-0148 backsliding guard (no Tool_result.error + Printexc.to_string)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-tool-result-error-printexc.sh
-
-  no-runtime-literal-outside-boundary-redaction:
-    name: Boundary redaction SSOT enforcement (RFC-0132 PR-3)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/no-runtime-literal-outside-boundary-redaction.sh --fail
-
-  no-fabricated-telemetry:
-    name: Math.random in components
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/no-fabricated-telemetry.sh
-
-  no-oas-prefix-in-lib:
-    name: No oas_* prefix in masc lib/ (RFC-0047)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/no-oas-prefix-in-lib.sh
-
-  no-inline-ok-envelope:
-    name: No inline ok-envelope literals (T27/T28/T29)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/no-inline-ok-envelope.sh
-
-  no-inline-error-envelope:
-    name: No inline error-envelope literals (T30)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/no-inline-error-envelope.sh
-
-  no-inline-json-kind-name:
-    name: No inline json_kind_name (use Json_util.kind_name)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/no-inline-json-kind-name.sh
-
-  no-yojson-3-dead-arms:
-    name: No yojson 3.0 dead arms (`Tuple/`Variant in Yojson.Safe.t)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/no-yojson-3-dead-arms.sh
-
-  ignore-without-comment-new:
-    name: ignore() justification (new sites)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v7
         with:
+          # Full history: the PR-only diff guards (env-knob, Fun.protect,
+          # ignore-justification, stale-base revert RFC-0235) need the
+          # merge-base and intervening main commits reachable.
           fetch-depth: 0
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: |
-          bash scripts/ci/check-ignore-without-comment-diff.sh \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head HEAD
-
-  magic-number-advisory:
-    name: Magic number repetition (advisory)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint-magic-number.sh
-
-  yaml-syntax:
-    name: Workflow YAML syntax
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
-      - name: Install PyYAML
-        run: python -m pip install --upgrade pip pyyaml
-      - name: Run lint
-        run: bash scripts/lint/yaml-syntax.sh
-
-  board-slo-extractor-fixture:
-    name: Board SLO extractor fixture
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install jq
-        run: sudo apt-get install -y -qq jq
-      - name: Run fixture test
-        run: bash scripts/test-board-slo-extractor.sh
-
-  env-knob-classification:
-    name: Env knob classification
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Run guard
+      - name: Install lint dependencies
         run: |
-          python3 scripts/ci/check-env-knob-classification.py \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head HEAD
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y -qq ripgrep jq
+          python -m pip install --quiet --upgrade pip pyyaml
+      - name: Run blocking lints (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          bash scripts/ci/run-lint-suite.sh blocking-pr \
+            "${{ github.event.pull_request.base.sha }}"
+      - name: Run blocking lints (push)
+        if: github.event_name != 'pull_request'
+        run: bash scripts/ci/run-lint-suite.sh blocking
 
-  exhaustive-guard-advisory:
-    # RFC-0071 Phase 1 advisory: surfaces new fragile-match sites in PR
-    # checks but never blocks merge. Phase 5 (RFC-0071 §4) flips this
-    # to required-and-blocking once codemod (WS-3) closes the bulk of
-    # the inventory and the allowlist is narrowed to (a)-class sites.
-    name: Fragile-match (advisory)
+  lint-advisory:
+    name: Lint Suite (advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - name: Run lint
-        run: bash scripts/lint/exhaustive-guard.sh
-
-  fun-protect-finalizer:
-    name: Fun.protect finalizer guard
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Run guard
-        run: |
-          python3 scripts/ci/check-fun-protect-finally-guard.py \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head HEAD
-
-  spawn-bounded:
-    name: Spawn-bounded ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint-spawn-bounded.sh
-
-  audit-path-ssot:
-    name: audit-path-ssot
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install ripgrep
+      - name: Install lint dependencies
         run: |
           bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y -qq ripgrep
-      - name: Run path SSOT audit
-        run: bash scripts/audit-path-ssot.sh
-
-  stale-base-revert:
-    # RFC-0235. Blocks a PR that would silently revert recently-merged
-    # work because it was computed against a stale base (the 2026-06-12
-    # #20869 incident: a stale branch dropped #20853's telemetry block,
-    # 19/19 lines, with no conflict). Only meaningful on pull_request;
-    # a push to main has no base to compare against.
-    name: Stale-base revert guard (RFC-0235)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # Full history so the merge-base and the intervening main
-          # commits are reachable; a shallow clone would make the guard
-          # unable to compute the merge-base and fail loud.
-          fetch-depth: 0
-      - name: Self-test the guard
-        run: python3 scripts/ci/test_check_stale_base_revert.py
-      - name: Run guard
-        env:
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        run: |
-          python3 scripts/ci/check-stale-base-revert.py \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head HEAD
+      - name: Run advisory lints
+        run: bash scripts/ci/run-lint-suite.sh advisory

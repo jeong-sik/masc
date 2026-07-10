@@ -86,9 +86,9 @@ val playground_root_of_allowed : string list -> string option
 
 val raw_looks_like_playground_subdir : string -> bool
 
-(** Detect paths that reference .masc/ internal state files
-    (backlog.json, tasks/, etc). These should be accessed via
-    keeper_tasks_list / keeper_context_status, not direct file access. *)
+(** Detect relative paths rooted at the workspace [.masc/] internal-state
+    directory.  The keeper playground is exempt.  Ordinary repository files
+    named [backlog.json] are not internal state. *)
 val is_masc_internal_state_path : string -> bool
 
 (** Detect normalized targets that resolve under the workspace-level

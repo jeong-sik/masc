@@ -1,85 +1,36 @@
-// Preact wrapper that mounts the Solid `KpiStrip` subtree as an island.
+// KpiStrip renderer — a data-driven Preact strip of KpiCell tiles.
 //
-// Usage from a Preact caller (data-driven, no children):
+// Previously this mounted a Solid subtree as an island for fine-grained KPI
+// reactivity. As of #66 the dashboard is unified on Preact: the Solid island
+// and its mirror components (kpi-strip.solid, kpi-cell.solid, bar.solid, and
+// createKpiStripIsland) were removed along with the solid-js toolchain. This
+// now renders the Preact KpiStrip / KpiCell directly — the same output the
+// island's test-environment fallback already used, so the five call sites
+// (governance, harness-health, feature-health, surface-readiness, connector-
+// status) need no change.
 //
-//   <${KpiStripIsland}
-//     ariaLabel="기능 상태 요약"
-//     variant="standard"
-//     cells=${[
-//       { variant: 'stacked', label: '총 기능', value: total },
-//       { variant: 'stacked', label: '정상', value: ok, kind: 'ok' },
-//       ...
-//     ]}
-//   />
-//
-// Lifecycle:
-//   - mount: useEffect creates a Solid signal seeded with the props,
-//     hands the JSX closure to `solid-js/web` render, stores the setter.
-//   - re-render: the second useEffect (no deps) fires every Preact
-//     render and pushes the latest props through `setState`. Solid
-//     diffs the signal value and re-renders only what actually changed.
-//   - unmount: dispose the Solid root + null the setter.
+// Trade-off recorded at removal: Solid diffed only the cells whose props
+// changed; Preact re-renders the whole strip on each parent render. A KPI
+// strip is a handful of cells, so the full re-render cost is negligible, and
+// dropping the second framework removes the dual-transform build complexity.
 
-import { useEffect, useRef } from 'preact/hooks'
-import { render as solidRender } from 'solid-js/web'
-import type { Setter } from 'solid-js'
 import type { VNode } from 'preact'
-import { html } from 'htm/preact'
-import {
-  createKpiStripIsland,
-  type KpiStripIslandData,
-} from './kpi-strip-island-solid.solid'
 import { KpiStrip } from './kpi-strip'
 import { KpiCell } from './kpi-cell'
+import type { KpiCellProps, KpiStripVariant } from './kpi-shared'
 
-export type { KpiStripIslandData } from './kpi-strip-island-solid.solid'
-
-interface GlobalWithProcess {
-  process?: { env?: Record<string, string | undefined> }
+export interface KpiStripIslandData {
+  ariaLabel: string
+  variant?: KpiStripVariant
+  cols?: number
+  cells: ReadonlyArray<KpiCellProps>
 }
 
-const isVitest =
-  typeof (globalThis as GlobalWithProcess).process !== 'undefined' &&
-  (globalThis as GlobalWithProcess).process?.env?.VITEST === 'true'
-
 export function KpiStripIsland(props: KpiStripIslandData): VNode {
-  // In test environments (happy-dom/jsdom) Solid JSX isn't transformed by
-  // vite-plugin-solid because that plugin has global side-effects that break
-  // Preact hook tests. Fall back to the native Preact implementation so
-  // assertions on KPI content still pass. The browser path stays on the Solid
-  // island for fine-grained reactivity.
-  if (isVitest) {
-    // htm spread (`...${cell}`) silently stringifies objects in some
-    // environments; call the components directly to bypass JSX transform.
-    return KpiStrip({
-      ariaLabel: props.ariaLabel,
-      variant: props.variant,
-      cols: props.cols,
-      children: props.cells.map(cell => KpiCell(cell)),
-    })
-  }
-
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const setStateRef = useRef<Setter<KpiStripIslandData> | null>(null)
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return undefined
-    const island = createKpiStripIsland(props)
-    setStateRef.current = island.setState
-    const dispose = solidRender(island.jsx, el)
-    return () => {
-      dispose()
-      setStateRef.current = null
-    }
-    // Mount-once intentional: Solid owns its own reactivity after the
-    // initial mount. Prop sync runs in the second useEffect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    setStateRef.current?.(props)
+  return KpiStrip({
+    ariaLabel: props.ariaLabel,
+    variant: props.variant,
+    cols: props.cols,
+    children: props.cells.map(cell => KpiCell(cell)),
   })
-
-  return html`<div ref=${containerRef} />`
 }

@@ -22,10 +22,17 @@ let pp_error fmt = function
   | Slack_api { error } -> Format.fprintf fmt "slack api: %s" error
   | Other msg -> Format.fprintf fmt "other: %s" msg
 
-(* Slack's per-message text limit is 40000 chars; we don't split here (caller
-   responsibility, matching Discord_rest_client's stance on overflow) but
-   expose it for callers that do. *)
-let message_text_limit = 40_000
+(* Slack's native [markdown_text] field accepts at most 12,000 characters.
+   We don't split here (caller responsibility, matching
+   Discord_rest_client's stance on overflow) but expose the documented wire
+   limit for callers that do. *)
+let message_text_limit = 12_000
+
+(* Slack's agent guidance says streaming messages updated through
+   [chat.update] must be edited no more than once every three seconds. Keep
+   this wire constraint beside the endpoint contract rather than duplicating
+   it in the gateway. *)
+let streaming_update_min_interval_sec = 3.0
 
 (* Default outbound-request timeout. [Masc_http_client.post_sync] applies a
    deadline only when a clock {b and} [timeout_sec > 0.0] are both supplied, so
@@ -50,7 +57,14 @@ let field_opt name = function
 let build_post_message_request ~token ~channel_id ~text ?thread_ts () =
   let url = "https://slack.com/api/chat.postMessage" in
   let headers = ("Content-Type", "application/json") :: auth_headers ~token in
-  let fields = [ ("channel", `String channel_id); ("text", `String text) ] in
+  (* Slack owns Markdown parsing at this protocol boundary. Using its native
+     [markdown_text] field preserves the authored document without a local,
+     incomplete Markdown-to-mrkdwn heuristic. Slack rejects combining this
+     field with [text] or [blocks], so this builder emits exactly one content
+     representation. *)
+  let fields =
+    [ ("channel", `String channel_id); ("markdown_text", `String text) ]
+  in
   let fields =
     match thread_ts with
     | None -> fields
@@ -99,7 +113,10 @@ let build_update_request ~token ~channel_id ~ts ~text () =
   let body =
     Yojson.Safe.to_string
       (`Assoc
-         [ ("channel", `String channel_id); ("ts", `String ts); ("text", `String text) ])
+         [ ("channel", `String channel_id)
+         ; ("ts", `String ts)
+         ; ("markdown_text", `String text)
+         ])
   in
   (url, headers, body)
 

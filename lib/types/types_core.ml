@@ -526,9 +526,9 @@ let task_status_of_yojson json =
               })
     | "operator_blocked" ->
         let previous_status =
-          match Json_util.get_string json "previous_status" with
-          | Some s -> task_status_of_yojson (`Assoc [("status", `String s)]) |> Result.value ~default:Todo
-          | None -> Todo
+          match Yojson.Safe.Util.member "previous_status" json with
+          | `Null -> Todo
+          | nested -> task_status_of_yojson nested |> Result.value ~default:Todo
         in
         Ok (Operator_blocked
               { blocked_at = req "blocked_at"

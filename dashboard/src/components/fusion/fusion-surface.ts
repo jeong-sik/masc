@@ -386,13 +386,14 @@ function timeValue(iso: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+// No sort here: ordering is owned exclusively by buildMergedRuns (creation/
+// start axis). A second, different sort key at this layer is exactly the
+// mixed-axis bug this file just removed.
 function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
-  return posts
-    .flatMap(post => {
-      const run = fusionRunFromPost(post)
-      return run ? [run] : []
-    })
-    .sort((a, b) => timeValue(b.updatedAt) - timeValue(a.updatedAt))
+  return posts.flatMap(post => {
+    const run = fusionRunFromPost(post)
+    return run ? [run] : []
+  })
 }
 
 // Registry status ('completed') aligned to the board run status enum ('complete')
@@ -415,11 +416,13 @@ const FUSION_LIST_PAGE_SIZE = 30
 
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Running rows pin
-// to the top (the live work), then recency on a SINGLE time axis: creation/start
-// time (board createdAt ISO, registry startedAt unix seconds — both normalized
-// to ms). Sorting board rows by updatedAt while registry rows sorted by
-// startedAt let an old run leapfrog newer ones whenever its board post was
-// touched, which read as a jumbled list (38-bug campaign #34).
+// to the top (the live work), then recency on a SINGLE stable axis per row kind:
+// board post creation (createdAt ISO — the post lands when the deliberation
+// completes) and registry start (startedAt unix seconds), both normalized to ms.
+// The two kinds approximate different moments of a run's life, but each is
+// immutable, which is the property that matters: sorting board rows by
+// updatedAt let an old run leapfrog newer ones whenever its post was touched,
+// which read as a jumbled list (38-bug campaign #34).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
@@ -908,6 +911,9 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
   `
 }
 
+// Row timestamp renders createdAt to match the list's sort axis: showing
+// updatedAt made an edited old post wear a fresher timestamp than the rows
+// above it, reproducing the jumbled impression the sort fix removed.
 function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
   const dec = decisionSpecFor(run.judge.decision)
   return html`
@@ -920,7 +926,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       <span class="fus-row-h">
         <${FusionStatusGlyph} status=${run.status} />
         <span class="fus-run-id mono">${run.runId}</span>
-        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.updatedAt} /></span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.createdAt} /></span>
       </span>
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
       <span class="fus-row-f">
@@ -1409,7 +1415,12 @@ export function FusionSurface() {
                         type="button"
                         class=${`fus-link inline fus-list-more ${ringFocusClasses()}`}
                         data-testid="fusion-list-more"
-                        onClick=${() => setVisibleCount(count => count + FUSION_LIST_PAGE_SIZE)}
+                        onClick=${() =>
+                          // Grow from what is actually rendered, not the
+                          // latch: after a deep link auto-extends the list
+                          // (effectiveCount >> visibleCount), growing the
+                          // latch alone would make the first clicks no-ops.
+                          setVisibleCount(effectiveCount + FUSION_LIST_PAGE_SIZE)}
                       >더 보기 (${hiddenCount}개 남음)</button>`
                     : null}
                 </div>

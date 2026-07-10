@@ -1110,6 +1110,40 @@ describe('FusionSurface', () => {
     })
     expect(container.querySelector('[data-testid="fusion-list-more"]')).toBeNull()
   })
+
+  it('더 보기 grows from the auto-extended deep-link count, not the latch (#34 P2)', async () => {
+    // 70 runs; deep-link selects sorted index 65 (i=4 in creation order), so
+    // the list auto-extends to 66 rows while the page latch stays at 30.
+    // Growing the latch alone (30 -> 60 < 66) made the first clicks no-ops;
+    // one click must now reveal the remaining rows.
+    const posts = []
+    for (let i = 0; i < 70; i += 1) {
+      const hour = String(1 + Math.floor(i / 60)).padStart(2, '0')
+      const minute = String(i % 60).padStart(2, '0')
+      posts.push(
+        minimalFusionPost(
+          `fus-${String(i).padStart(3, '0')}`,
+          `2026-06-19T${hour}:${minute}:00Z`,
+          `2026-06-19T${hour}:${minute}:30Z`,
+        ),
+      )
+    }
+    fusionBoardPosts.value = posts
+    route.value = { tab: 'fusion', params: { run_id: 'fus-004' }, postId: null }
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelectorAll('.fus-run-row').length).toBe(66)
+    const more = container.querySelector<HTMLButtonElement>('[data-testid="fusion-list-more"]')
+    expect(more?.textContent).toContain('4개 남음')
+
+    more?.click()
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.fus-run-row').length).toBe(70)
+    })
+    expect(container.querySelector('[data-testid="fusion-list-more"]')).toBeNull()
+  })
 })
 
 describe('FusionJudgesStrip', () => {

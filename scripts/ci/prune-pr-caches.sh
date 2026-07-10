@@ -31,8 +31,11 @@ list_caches() {
   local page=1
   while :; do
     local rows
-    rows="$(gh api "repos/${GH_REPO}/actions/caches?per_page=100&page=${page}" \
-      -q '.actions_caches[] | "\(.id)\t\(.ref)\t\(.size_in_bytes)"')"
+    if ! rows="$(gh api "repos/${GH_REPO}/actions/caches?per_page=100&page=${page}" \
+      -q '.actions_caches[] | "\(.id)\t\(.ref)\t\(.size_in_bytes)"')"; then
+      echo "failed to list Actions caches at page ${page}" >&2
+      return 1
+    fi
     [ -z "${rows}" ] && break
     printf '%s\n' "${rows}"
     page=$((page + 1))
@@ -48,12 +51,26 @@ pr_number_of_ref() {
   printf '%s' "$1" | sed -n 's|^refs/pull/\([0-9][0-9]*\)/merge$|\1|p'
 }
 
-pr_is_open() {
-  [ "$(gh api "repos/${GH_REPO}/pulls/$1" -q '.state')" = "open" ]
+pr_state() {
+  local state
+  if ! state="$(gh api "repos/${GH_REPO}/pulls/$1" -q '.state')"; then
+    echo "failed to read pull request $1 state" >&2
+    return 1
+  fi
+  case "${state}" in
+    open|closed) printf '%s\n' "${state}" ;;
+    *)
+      echo "unexpected pull request $1 state: ${state}" >&2
+      return 1
+      ;;
+  esac
 }
 
 freed=0
 deleted=0
+if ! cache_rows="$(list_caches)"; then
+  exit 1
+fi
 
 if [ -n "${CLOSED_PR}" ]; then
   target_ref="refs/pull/${CLOSED_PR}/merge"
@@ -63,7 +80,7 @@ if [ -n "${CLOSED_PR}" ]; then
     delete_cache "${id}"
     freed=$((freed + size))
     deleted=$((deleted + 1))
-  done < <(list_caches)
+  done <<< "${cache_rows}"
 else
   echo "sweeping caches whose pull request is no longer open"
   # Memoise PR state so a PR with several caches costs one API call.
@@ -76,7 +93,10 @@ else
     case " ${closed_prs} " in
       *" ${pr} "*) ;;
       *)
-        if pr_is_open "${pr}"; then
+        if ! state="$(pr_state "${pr}")"; then
+          exit 1
+        fi
+        if [ "${state}" = "open" ]; then
           open_prs="${open_prs} ${pr}"
           continue
         fi
@@ -86,7 +106,7 @@ else
     delete_cache "${id}"
     freed=$((freed + size))
     deleted=$((deleted + 1))
-  done < <(list_caches)
+  done <<< "${cache_rows}"
 fi
 
 echo "deleted ${deleted} cache entries, reclaimed $((freed / 1048576)) MiB"

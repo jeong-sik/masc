@@ -26,10 +26,15 @@ let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
 
 (* Slack has no Discord-style guilds; the bot token authorizes per-workspace.
    Path resolvers read an env override, else fall back to the default. *)
+let resolve_path raw_path =
+  if Filename.is_relative raw_path then
+    Filename.concat (Env_config_core.base_path ()) raw_path
+  else raw_path
+
 let slack_path ~env_var ~default () =
   match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
-  | Some path -> path
-  | None -> default
+  | Some path -> resolve_path path
+  | None -> resolve_path default
 
 let status_path () =
   slack_path ~env_var:"MASC_SLACK_STATUS_PATH" ~default:default_status_path ()
@@ -75,14 +80,12 @@ let connector_state_label ~available ~connected ~stale =
   else "disconnected"
 
 (* Outbound REST uses the bot token (xoxb-...). The app token (xapp-...) is read
-   only by {!Slack_socket_client} for apps.connections.open. *)
-let bot_token_opt () =
-  Env_config_core.raw_value_opt "MASC_SLACK_BOT_TOKEN"
-  |> Env_config_core.trim_opt
-
-let app_token_opt () =
-  Env_config_core.raw_value_opt "MASC_SLACK_APP_TOKEN"
-  |> Env_config_core.trim_opt
+   only by {!Slack_socket_client} for apps.connections.open. Both resolve
+   through the config boundary ({!Env_config_slack}) so the token env names
+   ([SLACK_BOT_TOKEN] / [SLACK_APP_TOKEN]) are defined in exactly one place and
+   cannot drift between this state module and the gateway. *)
+let bot_token_opt = Env_config_slack.bot_token_opt
+let app_token_opt = Env_config_slack.app_token_opt
 
 let gateway_state_label = function
   | Slack_gateway_state.Disconnected -> "disconnected"
@@ -125,7 +128,7 @@ let status_json ?(audit_limit = 10) () =
   let error =
     match gateway_state with
     | Disconnected ->
-      if app_present then "" else "MASC_SLACK_APP_TOKEN is unset or empty"
+      if app_present then "" else "SLACK_APP_TOKEN is unset or empty"
     | Failed msg -> msg
     | Awaiting_hello | Connected | Reconnect_pending _ -> ""
   in
@@ -338,28 +341,29 @@ type send_error =
 
 let pp_send_error fmt = function
   | Missing_token ->
-    Format.fprintf fmt "MASC_SLACK_BOT_TOKEN is unset or empty"
+    Format.fprintf fmt "SLACK_BOT_TOKEN is unset or empty"
   | Rest_error e ->
     Format.fprintf fmt "slack rest error: %a" Slack_rest_client.pp_error e
 
-let send_message ~channel_id ~content ?reply_to_message_id () =
+let send_message ?clock ?timeout_sec ~channel_id ~content ?reply_to_message_id ()
+    =
   match bot_token_opt () with
   | None -> Error Missing_token
   | Some token ->
     (match
-       Slack_rest_client.send_message ~token ~channel_id ~text:content
-         ?thread_ts:reply_to_message_id ()
+       Slack_rest_client.send_message ?clock ?timeout_sec ~token ~channel_id
+         ~text:content ?thread_ts:reply_to_message_id ()
      with
      | Ok ts -> Ok ts
      | Error e -> Error (Rest_error e))
 
-let edit_message ~channel_id ~message_id ~content () =
+let edit_message ?clock ?timeout_sec ~channel_id ~message_id ~content () =
   match bot_token_opt () with
   | None -> Error Missing_token
   | Some token ->
     (match
-       Slack_rest_client.edit_message ~token ~channel_id ~ts:message_id
-         ~text:content ()
+       Slack_rest_client.edit_message ?clock ?timeout_sec ~token ~channel_id
+         ~ts:message_id ~text:content ()
      with
      | Ok () -> Ok ()
      | Error e -> Error (Rest_error e))

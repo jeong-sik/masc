@@ -1379,10 +1379,10 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     reclaim_policy = None;
     do_not_reclaim_reason = Some "worktree path not found";
   } in
-  match Masc_domain.task_reclaim_gate t with
-  | Masc_domain.Reclaim_gate_open -> ()
-  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
-    fail ("free text must not block reclaim: " ^ reason)
+  match Masc_domain.task_claim_decision t with
+  | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
+    fail "do_not_reclaim_reason should not influence claim readiness"
 
 let test_task_reclaim_gate_blocks_only_typed_policy () =
   let t : Masc_domain.task = {
@@ -1401,15 +1401,20 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     reclaim_policy = Some Masc_domain.Block_reclaim;
     do_not_reclaim_reason = Some "operator hard stop";
   } in
-  match Masc_domain.task_reclaim_gate t with
-  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
-    check string "reason" "operator hard stop" reason
-  | Masc_domain.Reclaim_gate_open -> fail "typed block policy must close reclaim gate"
+  match Masc_domain.task_claim_decision t with
+  | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
+    fail "claim-ready task must stay claimable regardless of reclaim policy"
 
 
 
 
-let test_task_claim_next_action_policy_block_is_skip () =
+let test_task_claim_next_action_todo_policy_block_still_claims () =
+  (* task-1869 (#23661): a Todo task carrying a reclaim_policy stays
+     claimable. RFC-0323 G-10 (#23731) then retired the typed reclaim claim
+     gate entirely — [Claim_block_reclaim_policy] no longer exists, so the
+     only skip reason left is [Claim_block_not_todo]; this pin survives as
+     the Todo-always-claimable half. *)
   let t : Masc_domain.task = {
     id = "task-009";
     title = "Operator stop";
@@ -1427,11 +1432,8 @@ let test_task_claim_next_action_policy_block_is_skip () =
     do_not_reclaim_reason = Some "operator hard stop";
   } in
   match Masc_domain.task_claim_next_action t with
-  | Masc_domain.Skip_claim (Masc_domain.Claim_block_reclaim_policy reason) ->
-    check string "reason" "operator hard stop" reason;
-    check bool "claimable" false (Masc_domain.task_claim_next_action_is_claimable t)
   | Masc_domain.Claim_now ->
-    fail "typed policy block must skip claim"
+    check bool "claimable" true (Masc_domain.task_claim_next_action_is_claimable t)
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"
 
@@ -1687,7 +1689,7 @@ let () =
       test_case "to_yojson" `Quick test_task_to_yojson;
       test_case "of_yojson ok" `Quick test_task_of_yojson_ok;
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
-      test_case "claim next action policy block is skip" `Quick
-        test_task_claim_next_action_policy_block_is_skip;
+      test_case "claim next action: todo stays claimable under policy block" `Quick
+        test_task_claim_next_action_todo_policy_block_still_claims;
     ];
   ]

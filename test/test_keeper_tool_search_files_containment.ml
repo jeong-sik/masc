@@ -115,10 +115,18 @@ let assert_unregistered_policy_denial_response ~raw =
     "policy response denies access"
     (Some false)
     (Json.member "ok" json |> Json.to_bool_option);
-  Alcotest.(check (option string))
+  (* #23638 appends an environment-dependent diagnostic suffix when a
+     playground clone candidate exists but fails verification ("; playground
+     clone candidate could not be verified: <tmp path>: ..."). The invariant
+     this pin protects is that the ORIGINAL denial survives as the visible
+     error — assert the prefix, not equality. *)
+  Alcotest.(check bool)
     "visible error keeps original denial"
-    (Some unregistered_masc_mcp_policy_error)
-    (Json.member "error" json |> Json.to_string_option);
+    true
+    (match Json.member "error" json |> Json.to_string_option with
+     | Some err ->
+       String.starts_with ~prefix:unregistered_masc_mcp_policy_error err
+     | None -> false);
   Alcotest.(check (option string))
     "no HITL policy error"
     None

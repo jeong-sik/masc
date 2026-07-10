@@ -35,6 +35,9 @@ let dashboard_task_json config (task : Masc_domain.task) =
     ; "priority", `Int task.priority
     ; "assignee", Json_util.string_opt_to_json (dashboard_task_assignee task)
     ; "created_at", `String task.created_at
+    (* RFC-0323 G-9: surface the linked re-run lineage (G-8 write-once
+       field) so the task detail can link back to the predecessor. *)
+    ; "predecessor_task_id", Json_util.string_opt_to_json task.predecessor_task_id
     ]
   in
   let projection_fields =

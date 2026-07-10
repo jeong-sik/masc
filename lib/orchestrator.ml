@@ -88,11 +88,15 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 
 4. **Work on the task**: Execute the task description
 
-5. **Mark done**: Call `mcp__masc__masc_transition` with:
+5. **Complete the task**: Call `mcp__masc__masc_transition` with:
    - agent_name: "orchestrator"
    - task_id: "task-XXX"
-   - action: "done"
+   - action: "submit_for_verification"
    - notes: completion summary
+
+   A verifier (a different agent) then approves it to done. Strict-contract
+   tasks reject direct completion; only non-strict tasks may skip verification
+   with action: "done".
 
 6. **Broadcast progress**: Call `mcp__masc__masc_broadcast` to notify others
 

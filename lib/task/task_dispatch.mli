@@ -90,36 +90,11 @@ val list_tasks :
     Active states ([Todo] / [Claimed] / [InProgress] /
     [AwaitingVerification]) always pass through. *)
 
-val validate_transition :
-  current:Masc_domain.task_status ->
-  next:Masc_domain.task_status ->
-  task_id:string ->
-  (unit, Masc_error.t) result
-(** [validate_transition ~current ~next ~task_id] enforces the
-    terminal-state rule: neither [Done _] nor [Cancelled _] may
-    transition to either terminal state.  The error message
-    embeds [task_id] + the rendered current/next status so
-    operator logs surface the full context.  Pure — no side
-    effects, suitable for use in client-side preflight checks. *)
-
-val update_status :
-  Workspace.config ->
-  task_id:string ->
-  status:Masc_domain.task_status ->
-  (unit, Masc_error.t) result
-(** [update_status config ~task_id ~status] takes the Workspace [.backlog]
-    file lock, reads the backlog,
-    runs {!validate_transition}, and on success rewrites the task
-    list with the new status, bumping [version] and refreshing
-    [last_updated] (ISO 8601 of the current monotonic time).
-    If [status] is terminal, the commit also clears any agent
-    [current_task] cache still pointing to [task_id] so the backlog
-    write and cache invalidation happen atomically in the same
-    transaction.
-    Errors:
-    - [TaskNotFound task_id] when the task is absent.
-    - [TaskInvalidState <message>] from {!validate_transition}.
-    - [System IoError <message>] when the backlog cannot be read. *)
+(* [validate_transition] / [update_status] were retired by RFC-0323 G-7:
+   a direct status writer with its own 2-state terminal check bypassed the
+   workspace FSM ([Workspace.transition_task_r]) — including the RFC-0308
+   done guard and the #23719 evidence gate — and had zero production
+   callers. Status changes go through the FSM; there is no side door. *)
 
 val delete_task :
   Workspace.config ->

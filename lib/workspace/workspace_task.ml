@@ -237,22 +237,10 @@ let submit_and_approve_task_r
                 (Machine_verify_approve_failed_stranded { approve_error; reject_error }))))
 ;;
 
-(** Force-cancel a task regardless of assignee. System privilege.
-    Used by [Verification_protocol.check_timeouts] to expire
-    [AwaitingVerification] tasks whose verifier deadline has passed,
-    so the FSM does not stall and re-emit Timeout posts forever. *)
-let force_cancel_task_r config ~agent_name ~task_id ~reason ()
-  : string Masc_domain.masc_result
-  =
-  transition_task_r
-    config
-    ~agent_name
-    ~task_id
-    ~action:Masc_domain.Cancel
-    ~reason
-    ~authority:Masc_domain.System
-    ()
-;;
+(* force_cancel_task_r was deleted by RFC-0220 §11 PR-3: its only advertised
+   consumer was the retired [Verification_protocol.check_timeouts] deadline
+   sweep, and a caller-less System-privilege cancel invites misuse. System
+   cancels go through [transition_task_r ~authority:System] explicitly. *)
 
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)

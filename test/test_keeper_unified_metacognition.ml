@@ -339,11 +339,40 @@ let test_recent_tool_streak_count_ignores_stale_entries () =
     (HK.recent_tool_streak_count ~within_sec:60.0 ~tool_name:"masc_status" entries)
 ;;
 
+let test_on_idle_final_warning_guides_text_reply_when_waiting () =
+  (* At the final-warning threshold (skip_at - 1) a keeper polling a status it
+     cannot self-advance (e.g. a pending approval) should be steered to reply
+     with text and end the turn, not to try another tool. *)
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:4
+      ~consecutive_idle_turns:3
+      ~allowed_tools:[ "masc_schedule_get"; "keeper_broadcast" ]
+      ~tool_names:[ "masc_schedule_get" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check bool "final warning announces turn end" true
+      (contains_substring msg "the next idle ends the turn");
+    check bool "final warning steers to a text status reply when waiting" true
+      (contains_substring msg "reply with a short text status")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
 let () =
   run
     "keeper unified metacognition"
     [ ( "metacognition"
       , [ test_case "on_idle nudge at first idle" `Quick test_on_idle_nudge_at_first_idle
+        ; test_case
+            "on_idle final warning guides text reply when waiting"
+            `Quick
+            test_on_idle_final_warning_guides_text_reply_when_waiting
         ; test_case
             "on_idle board_get nudge names post_id discovery"
             `Quick

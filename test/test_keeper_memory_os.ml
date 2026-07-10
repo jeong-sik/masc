@@ -3815,6 +3815,38 @@ let test_consolidator_stale_peer_does_not_satisfy_min_keepers () =
     (List.length shared)
 ;;
 
+(* A fact with no valid_until but an old last_verified_at is stale and must be
+   excluded from the representative and observed_by set. *)
+let test_consolidator_filters_stale_without_valid_until () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "no-valid-until-stale" in
+  let stale =
+    { (mk_shared_fixture ~now ~category:"lesson" "stale no valid_until") with
+      Types.first_seen = 1.0
+    ; Types.last_verified_at = Some (now -. (Policy.max_consensus_staleness +. 1.0))
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh no valid_until") with
+      Types.first_seen = now -. 1.0
+    ; Types.last_verified_at = Some (now -. 1.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one ~now [ "stale", [ stale ]; "fresh", [ fresh ] ]
+  in
+  Alcotest.(check string)
+    "representative excludes stale contributor without valid_until"
+    "fresh no valid_until"
+    promoted.Types.claim;
+  Alcotest.(check (list string))
+    "observed_by excludes stale contributor without valid_until"
+    [ "fresh" ]
+    promoted.Types.observed_by
+;;
+
 (* A claim held by a single keeper is never shared (below min_keepers). *)
 let test_consolidator_solo_not_promoted () =
   let now = 1_000_000.0 in
@@ -6102,6 +6134,10 @@ let () =
             "stale peer does not satisfy min_keepers"
             `Quick
             test_consolidator_stale_peer_does_not_satisfy_min_keepers
+        ; Alcotest.test_case
+            "stale fact without valid_until is filtered"
+            `Quick
+            test_consolidator_filters_stale_without_valid_until
         ; Alcotest.test_case
             "solo claim not promoted"
             `Quick

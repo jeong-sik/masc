@@ -37,6 +37,7 @@
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_verification_audit
   test_keeper_connector_attention_wake
   test_keeper_no_signal_silence
   test_keeper_failed_task_not_proactive_driver
@@ -316,6 +317,7 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_task_completion_gate
+  test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
   test_tool_bridge_externalize
@@ -396,6 +398,7 @@
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_verification_audit
   test_keeper_connector_attention_wake
   test_keeper_no_signal_silence
   test_keeper_failed_task_not_proactive_driver
@@ -678,6 +681,7 @@
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_task_completion_gate
+  test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   ; test_risk_digest removed (team session cleanup)
   test_tool_blob_store
@@ -1145,6 +1149,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_goal_metric_unevaluated
+  test_goal_awaiting_read_model
   test_goal_verification
   test_string_util
   test_prompt_asset_sync
@@ -1341,6 +1346,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_goal_metric_unevaluated
+  test_goal_awaiting_read_model
   test_goal_verification
   test_string_util
   test_prompt_asset_sync
@@ -1926,6 +1932,8 @@
 
 (include stanzas/test_env_config_nonneg.inc)
 
+(include stanzas/test_env_config_code_exempt_keepers.inc)
+
 (include stanzas/test_env_config_sandbox.inc)
 
 (include stanzas/test_env_config_sidecar_timeouts.inc)
@@ -2229,6 +2237,8 @@
 (include stanzas/test_server_state_product.inc)
 
 (include stanzas/test_server_discord_trigger_policy.inc)
+
+(include stanzas/test_server_slack_trigger_policy.inc)
 
 (include stanzas/test_shell_parse_site_ratchet.inc)
 

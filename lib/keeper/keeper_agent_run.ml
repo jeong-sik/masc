@@ -45,7 +45,17 @@ let normalize_response_text_for_finalization
       ~tool_names
       ()
   =
-  match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
+  (* Surface the model's reasoning when the turn produced no final answer text,
+     so an empty-answer turn shows why (e.g. a keeper waiting on approval)
+     instead of a bare tool list. *)
+  let reasoning =
+    run_result.response.Agent_sdk.Types.content
+    |> List.filter_map (function
+         | Agent_sdk.Types.Thinking { content; _ } -> Some content
+         | _ -> None)
+    |> String.concat "\n"
+  in
+  match Keeper_tool_response.normalize_response_text ~text ~tool_names ~reasoning () with
   | Ok response_text -> Ok response_text
   | Error _ ->
     (* Finalization intentionally exposes the higher-level accept-rejected

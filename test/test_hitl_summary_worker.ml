@@ -90,6 +90,7 @@ let dummy_pending_approval
   ; on_resolution = None
   ; context_summary = None
   ; summary_status = Q.Summary_not_requested
+  ; channel = None
   }
 ;;
 
@@ -420,6 +421,62 @@ let test_summary_of_response_plain_json_text_parses_prose_wrapped () =
   | Error e -> failf "expected plain-path parse to succeed, got %s" e
 ;;
 
+let test_summary_of_response_native_recovers_prose_wrapped_json () =
+  (* Native path over the OpenAI-compatible /v1 transport: a native-schema runtime
+     may return the JSON as visible (fenced) prose instead of an enforced structured
+     payload. [summary_of_response ~mode:Native_structured] must recover via the
+     plain-text extractor rather than degrading to the deterministic fallback. Only
+     genuinely empty/non-JSON output should fail. *)
+  let text =
+    "Here is the structured judgment:\n```json\n"
+    ^ Yojson.Safe.to_string valid_summary_json
+    ^ "\n```\nDone."
+  in
+  let response : Agent_sdk.Types.api_response =
+    { id = "run-native-recover"
+    ; model = "test-model"
+    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; content = [ Agent_sdk.Types.Text text ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  match
+    H.For_testing.summary_of_response
+      ~generated_at:1234567890.0
+      ~mode:H.For_testing.Native_structured
+      response
+  with
+  | Ok summary ->
+    check string "context_summary parsed" "A tool request is pending." summary.context_summary;
+    check int "suggested_options length" 1 (List.length summary.suggested_options)
+  | Error e -> failf "expected native-path recovery to succeed, got %s" e
+;;
+
+let test_summary_of_response_native_empty_text_still_fails () =
+  (* The recovery must not paper over a genuinely empty answer (the reasoning-model
+     thinking-budget exhaustion case): with no JSON anywhere, both the structured
+     extractor and the plain-text fallback fail, and the worker degrades to the
+     deterministic fallback rather than fabricating a summary. *)
+  let response : Agent_sdk.Types.api_response =
+    { id = "run-native-empty"
+    ; model = "test-model"
+    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; content = [ Agent_sdk.Types.Text "" ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  match
+    H.For_testing.summary_of_response
+      ~generated_at:1234567890.0
+      ~mode:H.For_testing.Native_structured
+      response
+  with
+  | Ok _ -> fail "expected empty native response to fail, not fabricate a summary"
+  | Error reason -> check bool "error reason non-empty" true (String.length reason > 0)
+;;
+
 let test_plain_mode_error_outcomes_record_degradation () =
   let provider_error = Agent_sdk.Error.Internal "synthetic provider failure" in
   let timeout_error =
@@ -510,6 +567,10 @@ let () =
             test_extract_json_object_variants
         ; test_case "summary_of_response plain path parses prose-wrapped JSON" `Quick
             test_summary_of_response_plain_json_text_parses_prose_wrapped
+        ; test_case "summary_of_response native path recovers prose-wrapped JSON" `Quick
+            test_summary_of_response_native_recovers_prose_wrapped_json
+        ; test_case "summary_of_response native path still fails on empty text" `Quick
+            test_summary_of_response_native_empty_text_still_fails
         ; test_case "plain-mode errors keep degradation observable" `Quick
             test_plain_mode_error_outcomes_record_degradation
         ; test_case "fallback summary is redacted and uncertain" `Quick

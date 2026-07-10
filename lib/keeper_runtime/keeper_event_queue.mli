@@ -9,9 +9,9 @@
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
     before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
-    [keeper_heartbeat_loop.ml] drains the board-signal batch within the
-    debounce window via [Keeper_registry_event_queue.drain_board] (a CAS loop
-    over [drain_board_window]) and falls back to a single non-board
+    [keeper_heartbeat_loop.ml] drains every queued board signal at turn
+    start via [Keeper_registry_event_queue.drain_board] (a CAS loop
+    over [drain_board_all], RFC-0334 W2) and falls back to a single non-board
     [dequeue_event] when that batch is empty — either path pins the
     [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots
     the queue and forces [Emit] when it is non-empty (pinning
@@ -93,28 +93,12 @@ type stimulus_payload =
           after the goal phase returns to [executing], instead of waiting for
           unrelated board/task activity. *)
   | Failure_judgment of failure_judgment
-      (** RFC-0313 W2: a turn failure routed
-          [Keeper_runtime_failure_route.Escalate_judgment] — a deterministic failure
-          class where mechanical retry/rotation cannot change the outcome.
-          Surfaces on the keeper's next turn as prompt input for an
-          LLM-boundary verdict. Follows the [Fusion_completed]/
-          [Goal_verification_failed] precedent: no dedicated turn_reason, so
-          scheduling cooldowns are unchanged; the stable per-(runtime, class)
-          post_id lets queue identity dedup collapse repeats. *)
+      (** RFC-0313 deterministic failure class was rejected/blocked and should
+          produce an LLM-boundary verdict prompt on the keeper lane. *)
   | Goal_assigned of goal_assignment
-      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
-          (keeper_up tool args or TOML reconcile). Wakes the keeper once at
-          the assignment edge so the new standing objective arrives as
-          actionable turn input. Follows the [Goal_verification_failed]
-          precedent: no dedicated turn_reason; the injected pending
-          observation drives the turn. *)
+      (** A goal was newly added to this keeper's [active_goal_ids]. *)
   | Goal_stagnation of goal_stagnation
-      (** RFC-0310 §3.3: a live goal has been untouched past the stagnation
-          threshold. Wakes the responsible keeper once per stale episode
-          (episode key = goal_id + [gs_stale_since]) so it can resume the
-          goal or hand off a progress note. An edge, not a blind clock:
-          advancing the goal bumps [updated_at] and opens a fresh episode;
-          an unadvanced goal never re-wakes within one episode. *)
+      (** A live goal has been stale longer than the configured threshold. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -163,9 +147,6 @@ and hitl_resolution = {
   approval_id : string;
   decision : hitl_resolution_decision;
   channel : Keeper_continuation_channel.t;
-      (** RFC-0320: the connector this resolution should continue the
-          conversation on. [Unrouted] when no originating connector was
-          captured at approval-submission time. *)
 }
 (** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
     pending-approval queue entry; [decision] is the resolved label
@@ -176,8 +157,6 @@ and hitl_resolution = {
 and connector_attention = {
   event_id : string;
   channel : Keeper_continuation_channel.t;
-      (** RFC-0320: the connector that raised this attention, so a woken keeper
-          replies into the same channel. [Unrouted] when unknown. *)
 }
 (** RFC-connector-ambient-attention-wake payload for [Connector_attention]:
     [event_id] is the pointer into [Keeper_external_attention] for the ambient
@@ -215,30 +194,21 @@ and failure_judgment = {
   fj_judgment : Keeper_runtime_failure_route.judgment_class;
   fj_detail : string;
 }
-(** Payload for [Failure_judgment]. [fj_detail] is a display-only failure
-    summary bounded by [Keeper_internal_error.cap_blocker_detail] at the
-    producer; it is never matched. *)
+(** Payload for [Failure_judgment]. *)
 
 and goal_assignment = {
   ga_goal_id : string;
   ga_goal_title : string;
   ga_assigned_by : string;
 }
-(** RFC-0315 P3 W0 payload for [Goal_assigned]. [ga_goal_title] and
-    [ga_assigned_by] are display-only (title resolved from Goal_store at
-    enqueue time; actor is the tool caller name or ["toml_reconcile"]) and
-    are stripped from queue identity so repeat assignments of the same goal
-    dedup regardless of actor. *)
+(** Payload for [Goal_assigned]. *)
 
 and goal_stagnation = {
   gs_goal_id : string;
   gs_stale_since : string;
   gs_goal_title : string;
 }
-(** RFC-0310 §3.3 payload for [Goal_stagnation]. [gs_stale_since] is the
-    goal's [updated_at] at detection — the episode key kept in queue identity
-    so advancing the goal opens a fresh episode. [gs_goal_title] is
-    display-only and stripped from queue identity. *)
+(** Payload for [Goal_stagnation]. *)
 
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
@@ -261,21 +231,10 @@ val goal_verification_failure_post_id : goal_verification_failure -> post_id
 (** Dedup/correlation id for [Goal_verification_failed]. *)
 
 val failure_judgment_post_id : failure_judgment -> post_id
-(** Dedup/correlation id for [Failure_judgment]:
-    ["failure-judgment:<runtime_id>:<class label>"]. Stable per
-    (runtime, class) so repeats of the same deterministic failure collapse
-    under queue identity dedup instead of accumulating a backlog. *)
-
-val goal_stagnation_post_id : goal_stagnation -> post_id
-(** Dedup/correlation id for [Goal_stagnation]:
-    ["goal-stagnation:<goal_id>:<stale_since>"]. Stable per stale episode so
-    repeated scans collapse under queue identity dedup and a re-stale goal
-    (new [gs_stale_since]) opens a new episode. *)
 
 val goal_assignment_post_id : goal_assignment -> post_id
-(** Dedup/correlation id for [Goal_assigned]: ["goal-assigned:<goal_id>"].
-    Stable per goal so re-assignment before the first wake is consumed
-    collapses under queue identity dedup. *)
+
+val goal_stagnation_post_id : goal_stagnation -> post_id
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)
@@ -304,11 +263,8 @@ val enqueue : t -> stimulus -> t
 
 val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
-    intentionally ignores [arrived_at] — and display-only payload fields
-    ([failure_judgment.fj_detail], whose provider text carries volatile
-    fragments) — so restart/bootstrap re-enqueues and repeats of the same
-    deterministic failure do not create an unbounded backlog of otherwise
-    identical stimuli. *)
+    intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
+    not create an unbounded backlog of otherwise identical stimuli. *)
 
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)
@@ -362,12 +318,14 @@ val urgency_of_string : string -> (urgency, string) result
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)
 
-val drain_board_window : ?window_sec:float -> t -> stimulus list * t
-(** [drain_board_window q] separates board-signal stimuli that arrived
-    within [window_sec] seconds (default [2.0]) of now from the rest of
-    the queue.  Board signals are urgency-sorted; non-board stimuli and
-    board signals outside the window remain in the returned queue in
-    their original order. *)
+val drain_board_all : t -> stimulus list * t
+(** [drain_board_all q] separates every board-signal stimulus from the
+    rest of the queue, regardless of arrival time (RFC-0334 W2: the turn
+    is the batching unit, not an arrival window — identity dedup at
+    enqueue already bounds the batch).  Board signals are urgency-sorted
+    (explicit mentions enqueue as [Immediate], so they surface first);
+    non-board stimuli remain in the returned queue in their original
+    order. *)
 
 val stimulus_to_yojson : stimulus -> Yojson.Safe.t
 (** Stable JSON representation used by MASC-owned durable queue snapshots. *)

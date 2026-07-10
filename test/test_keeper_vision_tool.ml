@@ -1132,13 +1132,13 @@ let () =
   test_unknown_magic_bytes_are_policy_rejection ();
   test_oversize_image_is_runtime_failure_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
-  test_provider_for_vision_uses_runtime_temperature ();
   test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
   (* These tests drive the synthetic ollama vision runtimes past the
      schema-capability gate to the provider sub-call, so they need an installed
-     model catalog that advertises supports_structured_output (see
+  model catalog that advertises supports_structured_output (see
      [with_vision_model_catalog]). *)
   with_vision_model_catalog (fun () ->
+    test_provider_for_vision_uses_runtime_temperature ();
     test_invalid_structured_vision_response_is_runtime_failure ();
     test_run_vision_invalid_structured_response_is_typed ();
     test_retryable_provider_error_tries_next_runtime ();

@@ -80,6 +80,35 @@ let test_whitespace_only_verdict_also_empty () =
   | Ok _ ->
       Alcotest.fail "parse_verdict of whitespace should return Error"
 
+(* Test #10474 safety-net branch: notes contain an excuse pattern AND
+   evaluator returns empty text → reject (not approve).  This covers the
+   [excuse_advisory = Some _] branch in the Empty_review_output handler. *)
+let test_empty_review_rejects_with_excuse_advisory () =
+  let req : AR.review_request =
+    { (make_request ()) with
+      completion_notes =
+        "Done. This is a pre-existing issue that was already there."
+    }
+  in
+  with_reviewer
+    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+      Ok (None, ""))
+    (fun () ->
+      let result =
+        AR.review ~evaluator_runtime:"test-empty-evaluator" req
+      in
+      Alcotest.(check string)
+        "gate" "evaluator_empty" (AR.gate_to_string result.AR.gate);
+      match result.AR.verdict with
+      | AR.Approve ->
+        Alcotest.fail
+          "expected reject with excuse advisory safety net, got approve"
+      | AR.Reject reason ->
+        Alcotest.(check bool)
+          "mentions safety net"
+          true
+          (contains_substring (String.lowercase_ascii reason) "safety net"))
+
 let test_review_approves_empty_by_liveness () =
   with_reviewer
     (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
@@ -171,6 +200,10 @@ let () =
         ] );
       ( "review policy",
         [
+          Alcotest.test_case
+            "empty output with excuse advisory rejects (safety net)"
+            `Quick
+            test_empty_review_rejects_with_excuse_advisory;
           Alcotest.test_case
             "empty evaluator output approves by liveness"
             `Quick

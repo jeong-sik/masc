@@ -398,7 +398,8 @@ let transition_task_outcome_r
          | Masc_domain.Claimed _
          | Masc_domain.InProgress _
          | Masc_domain.AwaitingVerification _
-         | Masc_domain.Cancelled _ -> ()));
+         | Masc_domain.Cancelled _
+         | Masc_domain.OperatorBlocked _ -> ()));
          | Masc_domain.OperatorBlocked _ -> ());
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
@@ -415,7 +416,8 @@ let transition_task_outcome_r
          | Masc_domain.Release, Masc_domain.InProgress _
          | Masc_domain.Release, Masc_domain.AwaitingVerification _
          | Masc_domain.Release, Masc_domain.Done _
-         | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
+         | Masc_domain.Release, Masc_domain.Cancelled _
+         | Masc_domain.Release, Masc_domain.OperatorBlocked _ -> ());
 (* #10719: surface tasks that have crossed oscillation thresholds so dashboards/triage can pick them up before they reach 20+ cycles with zero progress. *)
         (match action with
          | Masc_domain.Release ->
@@ -494,7 +496,8 @@ let transition_task_outcome_r
                     | Masc_domain.Claimed _
                     | Masc_domain.InProgress _
                     | Masc_domain.Done _
-                    | Masc_domain.Cancelled _ -> ()));
+                    | Masc_domain.Cancelled _
+         | Masc_domain.OperatorBlocked _ -> ()));
          | Masc_domain.OperatorBlocked _ -> ())
                  | Masc_domain.Claim
                  | Masc_domain.Start
@@ -545,7 +548,8 @@ let transition_task_outcome_r
                  | Masc_domain.Claimed _
                  | Masc_domain.InProgress _
                  | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ()));
+                 | Masc_domain.Cancelled _
+         | Masc_domain.OperatorBlocked _ -> ()));
          | Masc_domain.OperatorBlocked _ -> ())
               | Masc_domain.Reject_verification ->
                 (match task.task_status with
@@ -568,7 +572,8 @@ let transition_task_outcome_r
                  | Masc_domain.Claimed _
                  | Masc_domain.InProgress _
                  | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ()));
+                 | Masc_domain.Cancelled _
+         | Masc_domain.OperatorBlocked _ -> ()));
          | Masc_domain.OperatorBlocked _ -> ())
               | Masc_domain.Claim
               | Masc_domain.Start
@@ -742,7 +747,8 @@ let transition_task_outcome_r
            | Masc_domain.Claimed _
            | Masc_domain.InProgress _
            | Masc_domain.AwaitingVerification _
-           | Masc_domain.Cancelled _ -> ()));
+           | Masc_domain.Cancelled _
+         | Masc_domain.OperatorBlocked _ -> ()));
          | Masc_domain.OperatorBlocked _ -> ());
           (match action with
            | Masc_domain.Cancel ->

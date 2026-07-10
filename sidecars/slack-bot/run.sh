@@ -32,18 +32,29 @@ LOG_DIR="$BASE_PATH/.masc/logs"
 LOG_FILE="$LOG_DIR/slack-sidecar-$(date +%Y%m%d).log"
 STATUS_FILE="$BASE_PATH/.gate/runtime/slack/status.json"
 
+ensure_venv() {
+  # Bootstrap a local .venv from requirements.txt on first run so the bot (and
+  # the backend schema fetch) work on a host with only python3 + pip (no uv).
+  if [[ ! -x .venv/bin/python ]]; then
+    python3 -m venv .venv
+    .venv/bin/pip install -q -r requirements.txt
+  fi
+}
+
 cmd="${1:-start}"
 case "$cmd" in
   start)
     cd "$(script_dir)"
-    if [[ ! -f .env ]]; then
-      echo "ERROR: .env missing. Copy .env.example and fill SLACK_BOT_TOKEN + SLACK_APP_TOKEN." >&2
+    CONFIG_TOML="$BASE_PATH/.gate/runtime/slack/config.toml"
+    if [[ ! -f .env && ! -f "$CONFIG_TOML" ]]; then
+      echo "ERROR: Slack config missing. Save tokens in the dashboard, or copy .env.example and fill SLACK_BOT_TOKEN + SLACK_APP_TOKEN." >&2
       exit 1
     fi
+    ensure_venv
     mkdir -p "$LOG_DIR"
     printf 'Starting Slack sidecar\n  MASC_BASE_PATH=%s\n  log file:      %s\n' \
       "$BASE_PATH" "$LOG_FILE" >&2
-    python -m src 2>&1 | tee -a "$LOG_FILE"
+    .venv/bin/python -m src 2>&1 | tee -a "$LOG_FILE"
     ;;
   tail)
     if [[ ! -f "$LOG_FILE" ]]; then
@@ -68,7 +79,8 @@ case "$cmd" in
   doctor)
     cd "$(script_dir)"
     shift || true
-    python -m src doctor "$@"
+    ensure_venv
+    .venv/bin/python -m src doctor "$@"
     ;;
   stop)
     # Match by absolute script_dir path so we never hit another sidecar.

@@ -25,7 +25,16 @@ let python_argv_for sidecar_dir =
   let venv_python = Filename.concat sidecar_dir ".venv/bin/python" in
   if Sys.file_exists venv_python
   then [ venv_python; "-m"; "src.schema_dump" ]
-  else [ "uv"; "run"; "--directory"; sidecar_dir; "python"; "-m"; "src.schema_dump" ]
+  else if Sys.file_exists (Filename.concat sidecar_dir "pyproject.toml")
+  then [ "uv"; "run"; "--directory"; sidecar_dir; "python"; "-m"; "src.schema_dump" ]
+  else
+    (* Pip-style sidecar (requirements.txt, no pyproject.toml): the [uv run]
+       fallback cannot work without a project file, and the backend host may
+       not have [uv] at all. Bootstrap a local .venv from requirements.txt on
+       first schema fetch, then use the venv python. Runs with cwd = sidecar_dir
+       (see fetch_schema), so the relative requirements.txt resolves correctly. *)
+    [ "sh"; "-c";
+      "{ test -x .venv/bin/python || { python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt; }; } && .venv/bin/python -m src.schema_dump" ]
 ;;
 
 let fetch_schema ?base_path id =

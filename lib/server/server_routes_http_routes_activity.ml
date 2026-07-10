@@ -794,6 +794,7 @@ let add_routes ~sw ~clock router =
          in
          let target_id =
            Server_utils.query_param request "target_id"
+           (* DET-OK: absent filter is the explicit unfiltered activity view. *)
            |> Option.value ~default:""
          in
          let user_id = Server_utils.query_param request "user_id" in
@@ -829,14 +830,17 @@ let add_routes ~sw ~clock router =
              | args ->
                let target_type_raw =
                  Safe_ops.json_string_opt "target_type" args
+                 (* DET-OK: absent input is intentionally passed to the typed target parser for rejection. *)
                  |> Option.value ~default:""
                in
                let target_id =
                  Safe_ops.json_string_opt "target_id" args
+                 (* DET-OK: malformed or absent optional input is rejected by the typed target parser. *)
                  |> Option.value ~default:""
                in
                let emoji =
                  Safe_ops.json_string_opt "emoji" args
+                 (* DET-OK: malformed or absent optional input is rejected by the typed reaction parser. *)
                  |> Option.value ~default:""
                in
                let user_id = board_actor_author_for_write actor in

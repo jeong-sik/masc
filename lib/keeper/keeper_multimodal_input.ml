@@ -337,7 +337,7 @@ let normalize_media_payload ~kind ~attachment_id ~declared_media_type data =
     in
     Ok (media_type, data)
 
-let media_block_to_oas ~attachments kind make_block media =
+let resolve_media_payload ~attachments kind media =
   match find_attachment ~attachments media.attachment_id with
   | None ->
       Error
@@ -347,9 +347,89 @@ let media_block_to_oas ~attachments kind make_block media =
   | Some att ->
       let declared = declared_media_type media att in
       Result.map
-        (fun (media_type, data) -> make_block ~media_type ~data ())
+        (fun (media_type, data) -> att, media_type, data)
         (normalize_media_payload ~kind ~attachment_id:media.attachment_id
            ~declared_media_type:declared att.data)
+
+let media_block_to_oas ~attachments kind make_block media =
+  Result.map
+    (fun (_att, media_type, data) -> make_block ~media_type ~data ())
+    (resolve_media_payload ~attachments kind media)
+
+type document_projection =
+  | Project_as_text
+  | Preserve_document
+
+(* Catalog the text-like document kinds accepted by the dashboard composer.
+   This is the one untyped MIME boundary; control flow consumes the typed
+   [document_projection] below instead of branching on MIME strings. *)
+let text_document_media_types =
+  Set_util.StringSet.of_list
+    [ "text/plain"
+    ; "text/markdown"
+    ; "text/html"
+    ; "application/json"
+    ; "text/csv"
+    ]
+
+let document_projection_of_media_type media_type =
+  if Set_util.StringSet.mem media_type text_document_media_types
+  then Project_as_text
+  else Preserve_document
+
+let text_block_of_document
+    ~(att : Keeper_chat_store.attachment)
+    ~attachment_id
+    ~media_type
+    data =
+  match Base64.decode data with
+  | Error (`Msg msg) ->
+      Error
+        (Printf.sprintf
+           "invalid base64 payload for textual document user block %S: %s"
+           attachment_id
+           msg)
+  | Ok text ->
+      let sanitized = Safe_ops.sanitize_text_utf8 text in
+      if not (String.equal text sanitized) then
+        Error
+          (Printf.sprintf
+             "textual document user block %S is not valid UTF-8 text or contains unsupported control characters"
+             attachment_id)
+      else
+        let name =
+          match String.trim att.name with
+          | "" -> attachment_id
+          | name -> name
+        in
+        let metadata =
+          Yojson.Safe.to_string
+            (`Assoc
+              [ "kind", `String "user_attachment"
+              ; "name", `String name
+              ; "media_type", `String media_type
+              ])
+        in
+        Ok
+          (Agent_sdk.Types.Text
+             (Printf.sprintf
+                "User-provided attachment metadata: %s\n\n%s"
+                metadata
+                text))
+
+let document_block_to_oas ~attachments media =
+  match resolve_media_payload ~attachments "document" media with
+  | Error _ as error -> error
+  | Ok (att, media_type, data) ->
+      (match document_projection_of_media_type media_type with
+       | Project_as_text ->
+           text_block_of_document
+             ~att
+             ~attachment_id:media.attachment_id
+             ~media_type
+             data
+       | Preserve_document ->
+           Ok (Agent_sdk.Types.document_block ~media_type ~data ()))
 
 let to_oas_blocks ~attachments blocks =
   let rec loop acc = function
@@ -370,12 +450,7 @@ let to_oas_blocks ~attachments blocks =
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
     | User_document media :: rest -> (
-        match
-          media_block_to_oas ~attachments "document"
-            (fun ~media_type ~data () ->
-               Agent_sdk.Types.document_block ~media_type ~data ())
-            media
-        with
+        match document_block_to_oas ~attachments media with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
     | User_audio media :: rest -> (

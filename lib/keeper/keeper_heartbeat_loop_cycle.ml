@@ -52,6 +52,7 @@ let run_keeper_cycle_admitted
       ~obs
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
+      ~(wake : Keeper_registry.wake_reason)
       ()
   =
   match
@@ -61,6 +62,7 @@ let run_keeper_cycle_admitted
         ~meta:meta_after_triage
         ~observation:obs
         ~generation:meta_after_triage.runtime.generation
+        ~wake
         ~channel:turn_decision.channel
         ?hitl_resolution
         (* RFC-0315: pass the whole decision, not just its channel — the
@@ -141,6 +143,7 @@ let run_keeper_cycle
       ~obs
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
+      ~(wake : Keeper_registry.wake_reason)
       ()
   =
   match
@@ -154,6 +157,7 @@ let run_keeper_cycle
          ~obs
          ~turn_decision
          ~shared_context
+         ~wake
          ?event_bus
          ?hitl_resolution)
   with

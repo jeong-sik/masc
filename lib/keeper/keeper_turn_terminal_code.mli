@@ -56,6 +56,10 @@ type t =
   | Turn_livelock_pause
   (** [Keeper_registry.Turn_livelock_pause]: turn livelock guard
           blocked dispatch; keeper auto-paused. *)
+  | Operator_interrupt
+  (** [Keeper_registry.Operator_interrupt]: the current turn was cancelled
+          by an explicit operator request, typically from the dashboard
+          "stop current turn" action. *)
   | Exception_unhandled of string
   (** [Keeper_registry.Exception]: payload is the exception
           message. *)

@@ -799,6 +799,11 @@ let record_summary_failure ~id ~reason ~retryable =
   | None -> ()
 ;;
 
+type summary_provider =
+  { runtime_id : string
+  ; provider_config : Llm_provider.Provider_config.t
+  }
+
 let provider_config_for_summary ~keeper_name =
   (* The HITL evaluator is a dedicated judge (mirroring the memory-os librarian's
      dedicated runtime), not the requesting keeper's own model. Route to the
@@ -807,8 +812,10 @@ let provider_config_for_summary ~keeper_name =
      default, so an operator-selected HITL lane wins and unset deployments keep
      the judge routing. Fall back to the keeper's own runtime only when the
      resolved lane id has no runtime entry. *)
-  let resolve id =
-    Option.map (fun rt -> rt.Runtime.provider_config) (Runtime.get_runtime_by_id id)
+  let resolve runtime_id =
+    Option.map
+      (fun rt -> { runtime_id; provider_config = rt.Runtime.provider_config })
+      (Runtime.get_runtime_by_id runtime_id)
   in
   let keeper_runtime_id () =
     match Runtime.runtime_id_for_keeper keeper_name with
@@ -850,8 +857,9 @@ let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
     match provider_config_for_summary ~keeper_name:entry.keeper_name with
     | None ->
       on_failure ~reason:"HITL summary: no runtime provider config available" ~retryable:false
-    | Some config ->
-      Hitl_summary_worker.spawn ~sw ~entry ~provider_config:config ~on_summary ~on_failure ()
+    | Some selected ->
+      Hitl_summary_worker.spawn ~sw ~runtime_id:selected.runtime_id ~entry
+        ~provider_config:selected.provider_config ~on_summary ~on_failure ()
 ;;
 
 let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =

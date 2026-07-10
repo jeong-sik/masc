@@ -64,6 +64,20 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+type turn_intake_admission =
+  | Intake_admitted
+  | Intake_pressure_blocked of Keeper_pressure_admission.block
+  | Intake_blocking_approval_pending
+
+let classify_turn_intake_admission ~pressure ~blocking_approval_pending =
+  match pressure with
+  | Keeper_pressure_admission.Blocked block -> Intake_pressure_blocked block
+  | Keeper_pressure_admission.Admitted ->
+    if blocking_approval_pending
+    then Intake_blocking_approval_pending
+    else Intake_admitted
+;;
+
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
 let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
@@ -484,9 +498,9 @@ let run_keepalive_unified_turn
         then meta_after_triage
         else if should_run_turn
         then (
-          (* fd/disk pressure is pre-checked by the caller's turn-admission gate
-             (Keeper_pressure_admission_observer.decide_observed in run_heartbeat_loop)
-             BEFORE stimulus intake, so this branch is reached only when a turn is
+          (* fd/disk pressure and typed Blocking HITL ownership are pre-checked
+             by [classify_turn_intake_admission] in [run_heartbeat_loop] BEFORE
+             stimulus intake, so this branch is reached only when a turn is
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
              consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
@@ -543,9 +557,11 @@ let run_keepalive_unified_turn
           meta_after_cycle)
         else meta_after_triage
       in
-      (* Event intake dequeues before the admission/pressure gates above.
-         Only ack after [run_keeper_cycle] actually returns; otherwise put the
-         lease back so a non-exception skip does not drop the stimulus. *)
+      (* The caller has already admitted intake before this dequeue. Downstream
+         scheduling can still decide not to run (for example provider cooldown
+         or keeper health), so acknowledge only after [run_keeper_cycle]
+         actually returns; otherwise put the lease back rather than dropping
+         the stimulus. *)
       if !consumed_stimuli <> []
       then
         if !consumed_stimuli_turn_completed
@@ -998,12 +1014,11 @@ let run_heartbeat_loop
           proactive_warmup_sec <= 0
           || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
         in
-        (* Turn-admission precondition (fd/disk pressure) is evaluated ONCE here,
-           BEFORE board collection and stimulus intake. A pressure-blocked keeper
-           therefore neither advances the board cursor (collect_keepalive_board_events
-           acks board posts with no requeue) nor dequeues+requeues its event-queue
-           stimulus every cycle — eliminating the consume/requeue churn and its log
-           noise at the source instead of skipping after the work is already done.
+        (* Turn-intake preconditions (fd/disk pressure and a typed Blocking HITL
+           lane) are evaluated ONCE here, BEFORE board collection and durable
+           stimulus intake. A blocked keeper therefore neither advances the
+           board cursor nor leases and requeues the same event every heartbeat.
+           Nonblocking approvals never enter this gate.
            The fleet observer logs one WARN per pressure episode (was four per-turn
            DEBUG gates inside run_keepalive_unified_turn, now removed). last_turn_ts
            is refreshed on the blocked path so the RFC-0250 stale-turn watchdog
@@ -1015,14 +1030,19 @@ let run_heartbeat_loop
             ~active_keepers:(Keeper_registry.count_running ())
             ()
         in
-        let admitted_turn =
-          match turn_admission with
-          | Keeper_pressure_admission.Admitted -> true
-          | Keeper_pressure_admission.Blocked _ -> false
-        in
         let approval_pending =
           Keeper_approval_queue.has_blocking_pending_for_keeper
             ~keeper_name:meta_current.name
+        in
+        let intake_admission =
+          classify_turn_intake_admission
+            ~pressure:turn_admission
+            ~blocking_approval_pending:approval_pending
+        in
+        let admitted_turn =
+          match intake_admission with
+          | Intake_admitted -> true
+          | Intake_pressure_blocked _ | Intake_blocking_approval_pending -> false
         in
         let keeper_health_blocker =
           if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"
@@ -1034,13 +1054,24 @@ let run_heartbeat_loop
             ~runtime_id
         in
         let provider_cooldown_pending = Option.is_some provider_cooldown_remaining_sec in
-        (match turn_admission with
-         | Keeper_pressure_admission.Admitted -> ()
-         | Keeper_pressure_admission.Blocked block ->
+        (match intake_admission with
+         | Intake_admitted -> ()
+         | Intake_pressure_blocked block ->
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
              meta_current.name
              ~reasons:[ Keeper_pressure_admission.skip_reason block ];
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name
+         | Intake_blocking_approval_pending ->
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:
+               [ Keeper_world_observation.skip_reason_to_string
+                   Keeper_world_observation.Approval_pending
+               ];
            Keeper_registry.touch_last_turn_ts
              ~base_path:ctx.config.base_path
              meta_current.name);

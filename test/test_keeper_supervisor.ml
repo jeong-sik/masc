@@ -20,6 +20,12 @@ module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 
+let () =
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()))
+
 let supervisor_agent_name = Sup.supervisor_agent_name
 
 let temp_dir () =

@@ -22,6 +22,28 @@ let enqueue_if_missing queue stimulus =
   if queue_contains queue stimulus then queue else Keeper_event_queue.enqueue queue stimulus
 ;;
 
+let rec stimulus_with_post_id queue post_id =
+  match Keeper_event_queue.dequeue queue with
+  | None -> None
+  | Some (stimulus, rest) ->
+    if String.equal stimulus.post_id post_id
+    then Some stimulus
+    else stimulus_with_post_id rest post_id
+;;
+
+let enqueue_external_decision queue stimulus =
+  match stimulus_with_post_id queue stimulus.Keeper_event_queue.post_id with
+  | None -> Ok (Keeper_event_queue.enqueue queue stimulus)
+  | Some committed
+    when Keeper_event_queue.stimulus_identity_equal committed stimulus ->
+    Ok queue
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "conflicting durable stimulus already exists for post_id=%s"
+         stimulus.post_id)
+;;
+
 let requeue_missing_front queue stimuli =
   let missing =
     List.filter (fun stimulus -> not (queue_contains queue stimulus)) stimuli
@@ -34,6 +56,19 @@ let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name 
     ~base_path
     ~keeper_name:name
     (fun () -> Atomic.get entry.event_queue)
+;;
+
+let enqueue_live_if_missing (entry : Keeper_registry.registry_entry) stimulus =
+  let rec loop () =
+    let cur = Atomic.get entry.event_queue in
+    let next = enqueue_if_missing cur stimulus in
+    if next = cur
+    then ()
+    else if Atomic.compare_and_set entry.event_queue cur next
+    then ()
+    else loop ()
+  in
+  loop ()
 ;;
 
 let enqueue ~base_path name stimulus =
@@ -71,6 +106,23 @@ let enqueue ~base_path name stimulus =
       else loop ()
     in
     loop ()
+;;
+
+let enqueue_durable_result ~base_path name stimulus =
+  (* Commit the identity-deduplicated durable row before exposing a successful
+     delivery result. This path is intentionally separate from [enqueue]: most
+     stimuli already have an upstream replay source, while HITL resolution is
+     the sole carrier of an operator decision and must fail closed. *)
+  let after_commit =
+    match Keeper_registry.get ~base_path name with
+    | None -> fun () -> ()
+    | Some entry -> fun () -> enqueue_live_if_missing entry stimulus
+  in
+  Keeper_event_queue_persistence.update_checked_result
+    ~base_path
+    ~keeper_name:name
+    ~after_commit
+    (fun queue -> enqueue_external_decision queue stimulus)
 ;;
 
 let requeue_front ~base_path name stimuli =
@@ -153,7 +205,7 @@ let snapshot ~base_path name =
   | Some entry -> Atomic.get entry.event_queue
 ;;
 
-let dequeue ~base_path name =
+let dequeue_when ~base_path name ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> None
   | Some entry ->
@@ -161,6 +213,7 @@ let dequeue ~base_path name =
       let cur = Atomic.get entry.event_queue in
       match Keeper_event_queue.dequeue cur with
       | None -> None
+      | Some (stim, _) when not (ready stim) -> None
       | Some (stim, rest) ->
         Keeper_event_queue_persistence.record_inflight
           ~base_path
@@ -174,6 +227,8 @@ let dequeue ~base_path name =
     in
     loop ()
 ;;
+
+let dequeue ~base_path name = dequeue_when ~base_path name ~ready:(fun _ -> true)
 
 let drain_board ~base_path name =
   match Keeper_registry.get ~base_path name with

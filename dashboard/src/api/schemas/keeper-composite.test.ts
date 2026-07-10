@@ -179,6 +179,46 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.live_turn!.active_tool_count).toBeUndefined()
   })
 
+  it('parses run_state for an in-turn keeper (#16, 38-bug campaign PR-5)', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      run_state: {
+        kind: 'in_turn',
+        wake_kind: 'woken',
+        stimulus_kinds: ['board_signal'],
+        started_at: 1713398400,
+        active_tool_count: 2,
+      },
+    })
+    expect(result.run_state?.kind).toBe('in_turn')
+    expect(result.run_state?.wake_kind).toBe('woken')
+    expect(result.run_state?.stimulus_kinds).toEqual(['board_signal'])
+  })
+
+  it('parses run_state for a waiting keeper', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      run_state: { kind: 'waiting', queue_depth: 2, skip_reasons: ['cooldown_pending'] },
+    })
+    expect(result.run_state?.kind).toBe('waiting')
+    expect(result.run_state?.queue_depth).toBe(2)
+    expect(result.run_state?.skip_reasons).toEqual(['cooldown_pending'])
+  })
+
+  it('parses run_state for a suspended keeper', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      run_state: { kind: 'suspended', phase: 'paused' },
+    })
+    expect(result.run_state?.kind).toBe('suspended')
+    expect(result.run_state?.phase).toBe('paused')
+  })
+
+  it('leaves run_state undefined for a pinned backend that predates it', () => {
+    const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
+    expect(result.run_state).toBeUndefined()
+  })
+
   it('parses the last_skip verdict (A-PR-2 G5)', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,

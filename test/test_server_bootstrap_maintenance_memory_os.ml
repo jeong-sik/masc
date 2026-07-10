@@ -19,6 +19,7 @@ let message_text (m : Atypes.message) =
   |> String.concat "\n"
 
 let now = 1_000_000.0
+let unconfigured_runtime_id = "test.unconfigured"
 
 let fact claim =
   { Types.claim
@@ -104,6 +105,7 @@ let test_accumulate_consolidate_recall () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ();
@@ -149,6 +151,7 @@ let test_skips_when_too_few () =
             ~complete:(fake_complete "{\"groups\":[],\"drop_indices\":[]}")
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ();
@@ -190,6 +193,7 @@ let test_parallel_timeout_per_keeper () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ();

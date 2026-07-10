@@ -49,6 +49,16 @@ export async function deleteTask(taskId: string): Promise<boolean> {
   return resp.ok
 }
 
+// Route an operator claim through the shared FSM transition tool so it is
+// persisted server-side (todo -> claimed, assignee = the dashboard actor).
+// Before this, the Work board's claim button only mutated local React state,
+// so a claim vanished on refresh. masc_transition emits a task_resource
+// notification, so the dashboard's task signal refreshes over SSE with the
+// real assignee — the caller does not need a manual refetch.
+export async function claimTask(taskId: string): Promise<void> {
+  await callMcpTool('masc_transition', { task_id: taskId, action: 'claim' })
+}
+
 export interface PurgeAgentResponse {
   ok: boolean
   target_kind: 'agent' | 'keeper' | string

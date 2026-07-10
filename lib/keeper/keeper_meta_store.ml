@@ -295,49 +295,11 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   read_candidate requested_name
 ;;
 
-let is_missing_progress_file_error exn =
-  match exn with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> true
-  | _ ->
-    let message = Printexc.to_string exn in
-    String_util.contains_substring message "ENOENT"
-    || String_util.contains_substring message "No such file"
-;;
-
-let refresh_progress_updated_line config name =
-  let progress_path = Keeper_types_support.keeper_progress_path config name in
-  if Fs_compat.file_exists progress_path then try
-    let content = Fs_compat.load_file progress_path in
-    let now_str = Masc_domain.now_iso () in
-    let updated =
-      String.split_on_char '\n' content
-      |> List.map (fun line ->
-        if String.starts_with ~prefix:"Updated:" (String.trim line)
-        then "Updated: " ^ now_str
-        else line)
-      |> String.concat "\n"
-    in
-    Fs_compat.save_file progress_path updated
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn when is_missing_progress_file_error exn -> ()
-  | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ProgressUpdatedLineFailures)
-      ~labels:[("keeper", name)]
-      ();
-    Log.Keeper.warn ~keeper_name:name
-      "progress Updated line refresh failed for %s: %s"
-      progress_path
-      (Printexc.to_string exn)
-;;
-
 let persist_meta config path persisted =
   let json = meta_to_json persisted in
   match Keeper_fs.save_json_atomic path json with
   | Ok () ->
     Atomic.get runtime_meta_write_sync_hook_atomic config persisted;
-    refresh_progress_updated_line config persisted.name;
     Ok ()
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
 ;;
@@ -375,6 +337,75 @@ let is_version_conflict_error msg =
     true
   with
   | Not_found -> false
+;;
+
+(* ── Boot-time canonicalization ─────────────────────────── *)
+
+(* Keys deliberately deleted from persisted keeper meta. Dropping is
+   destructive, so membership is EXPLICIT — a key is listed only after
+   BOTH codec sides stopped knowing it. Deriving this set instead
+   (canonical/config complement) was refuted twice: [compaction_mode]
+   (keeper_meta_json_parse.ml, fail-closed persisted override) and
+   [keeper_name] (keeper_identity.ml, wins over [name]) are
+   parser-consumed yet in neither derived list, and a derived drop
+   would silently destroy them. Forgetting to extend THIS list is
+   fail-safe: the file merely keeps triggering the unknown-keys
+   warning until the key is added here. *)
+let retired_keeper_meta_key_names =
+  [ (* #23929 continuity purge left these behind in .masc/keepers/ *)
+    "last_continuity_update_ts"
+  ; "continuity_summary"
+  ]
+;;
+
+let retired_keeper_meta_keys json =
+  match json with
+  | `Assoc fields ->
+    fields
+    |> List.filter_map (fun (key, _) ->
+      if List.mem key retired_keeper_meta_key_names then Some key else None)
+    |> dedupe_keep_order
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
+;;
+
+let migrate_retired_keeper_meta_keys config =
+  persisted_keeper_names config
+  |> List.iter (fun name ->
+    let path = keeper_meta_path config name in
+    match Safe_ops.read_json_file_safe path with
+    | Error msg ->
+      Log.Keeper.warn "retired keeper meta key migration: unreadable %s: %s" path msg
+    | Ok json ->
+      (match retired_keeper_meta_keys json with
+       | [] -> ()
+       | retired ->
+         (match meta_of_json json with
+          | Error msg ->
+            (* A file the strict parser rejects is preserved untouched for
+               operator repair; editing it could destroy whatever evidence
+               explains the rejection. *)
+            Log.Keeper.warn
+              "retired keeper meta key migration: parse failed for %s, leaving file untouched: %s"
+              path
+              msg
+          | Ok _ ->
+            (* Drop only the retired keys from the raw JSON instead of
+               re-serializing the parsed record: every other field —
+               including parser-consumed TOML-owned values the serializer
+               never emits — keeps its exact on-disk value, and
+               [meta_version] is not bumped. *)
+            let cleaned = drop_assoc_keys retired json in
+            (match Keeper_fs.save_json_atomic path cleaned with
+             | Ok () ->
+               Log.Keeper.info
+                 "migrated keeper meta %s: dropped retired keys: %s"
+                 path
+                 (String.concat ", " retired)
+             | Error msg ->
+               Log.Keeper.warn
+                 "retired keeper meta key migration: rewrite failed for %s (file unchanged, unknown-key warning persists): %s"
+                 path
+                 msg))))
 ;;
 
 (* #9769 root fix: CAS retry with explicit field ownership. The

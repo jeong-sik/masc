@@ -60,6 +60,10 @@ jobs:
           python -m pip install --quiet --upgrade pip pyyaml
       - name: Run blocking lints (PR)
         if: github.event_name == 'pull_request'
+        env:
+          # Typed acknowledgement consumed by check-stale-base-revert.py.
+          # Preserve the former dedicated job's intentional-revert contract.
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           bash scripts/ci/run-lint-suite.sh blocking-pr \
             "${{ github.event.pull_request.base.sha }}"

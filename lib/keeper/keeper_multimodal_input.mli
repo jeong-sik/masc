@@ -47,4 +47,9 @@ val to_oas_blocks :
 (** Convert semantic MASC input blocks to OAS provider input blocks.  Media
     blocks resolve their payload through [attachments] by [attachment_id].
     Data URLs are normalized to raw base64 payloads before crossing into OAS,
-    and declared MIME types must match any MIME embedded in a data URL. *)
+    and declared MIME types must match any MIME embedded in a data URL.
+
+    Dashboard-supported text documents are base64-decoded and validated as
+    UTF-8 at this MASC boundary, then projected as OAS [Text] blocks so provider
+    fallbacks do not need provider-specific file-input support. Binary and
+    provider-native documents remain OAS [Document] blocks. *)

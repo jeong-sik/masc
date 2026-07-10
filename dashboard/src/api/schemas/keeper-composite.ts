@@ -244,6 +244,23 @@ const FsmGuardViolationBucketSchema = object({
   count: number(),
 })
 
+// Total run-state classification (#16, 38-bug campaign PR-5). `kind` stays
+// an open string for the same reason as the other FSM fields above: a new
+// backend `run_state` variant must render opaquely, not vanish behind a
+// stale enum. Per-kind fields (`wake_kind`, `queue_depth`, `phase`, ...)
+// are `optional` — only the fields relevant to `kind` are populated on the
+// wire (see `keeper_composite_observer.ml` `run_state_to_json`).
+const KeeperRunStateSchema = object({
+  kind: string(),
+  wake_kind: optional(string()),
+  stimulus_kinds: optional(array(string())),
+  started_at: optional(number()),
+  active_tool_count: optional(number()),
+  queue_depth: optional(number()),
+  skip_reasons: optional(array(string())),
+  phase: optional(string()),
+})
+
 export const KeeperCompositeSnapshotSchema = object({
   // Explicit registry identity from new backends. Optional so pinned older
   // backends keep rendering; UI falls back to canonical correlation_id parsing.
@@ -279,6 +296,10 @@ export const KeeperCompositeSnapshotSchema = object({
   phase_diagnosis: optional(KeeperPhaseDiagnosisSchema),
   is_live: boolean(),
   live_turn: optional(nullable(KeeperLiveTurnSchema)),
+  // #16 (38-bug campaign PR-5). `optional` for rollout tolerance: a pinned
+  // backend that predates this field omits it and the dashboard must keep
+  // rendering rather than raising CompositeSchemaDriftError.
+  run_state: optional(nullable(KeeperRunStateSchema)),
   last_outcome: nullable(KeeperLastOutcomeSchema),
   // A-PR-2 additive observability fields. All `optional` for rollout
   // tolerance: a pinned backend that predates PR A-PR-2 omits them and the
@@ -304,6 +325,7 @@ export type KeeperPhaseDiagnosis = InferOutput<typeof KeeperPhaseDiagnosisSchema
 export type KeeperPhaseDiagnosisRow = InferOutput<typeof KeeperPhaseDiagnosisRowSchema>
 export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
 export type KeeperLiveTurn = InferOutput<typeof KeeperLiveTurnSchema>
+export type KeeperRunState = InferOutput<typeof KeeperRunStateSchema>
 export type KeeperLastSkip = InferOutput<typeof KeeperLastSkipSchema>
 export type KeeperLivelock = InferOutput<typeof KeeperLivelockSchema>
 export type KeeperBoardCursor = InferOutput<typeof KeeperBoardCursorSchema>

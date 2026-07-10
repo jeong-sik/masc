@@ -8,6 +8,7 @@
 
 module AQ = Masc.Keeper_approval_queue
 module Chat_queue = Masc.Keeper_chat_queue
+module Summary_worker = Masc.Hitl_summary_worker
 
 let install_noop_resolution_delivery_hook () =
   AQ.set_approval_resolution_wake_hook
@@ -77,21 +78,22 @@ let summary_routing_runtime_toml ~with_hitl_summary =
      [models.judge.capabilities]\n\
      supports-structured-output = true\n\
      \n\
-     [models.summary]\n\
-     api-name = \"summary\"\n\
+     [models.kimi_like]\n\
+     api-name = \"kimi-like-summary\"\n\
      max-context = 1024\n\
+     temperature = 1.0\n\
      \n\
      [local.chat]\n\
      \n\
      [local.judge]\n\
      \n\
-     [local.summary]\n\
+     [local.kimi_like]\n\
      \n\
      [runtime]\n\
      default = \"local.chat\"\n\
      structured_judge = \"local.judge\"\n"
   in
-  if with_hitl_summary then base ^ "hitl_summary = \"local.summary\"\n" else base
+  if with_hitl_summary then base ^ "hitl_summary = \"local.kimi_like\"\n" else base
 ;;
 
 (* Proves the HITL summary worker consumes the [runtime].hitl_summary lane
@@ -103,22 +105,43 @@ let test_provider_config_for_summary_routes_hitl_summary_lane () =
     with_temp_runtime_toml text (fun path ->
       match Runtime.save_config_text ~runtime_config_path:path text with
       | Error msg -> Alcotest.failf "runtime config should load: %s" msg
-      | Ok () -> AQ.provider_config_for_summary ~keeper_name:"no-such-keeper")
+      | Ok () ->
+        (match AQ.provider_config_for_summary ~keeper_name:"no-such-keeper" with
+         | None -> None
+         | Some selected ->
+           let worker_cfg, _mode =
+             Summary_worker.For_testing.provider_config_for_summary
+               ~runtime_id:selected.runtime_id
+               selected.provider_config
+           in
+           Some (selected, worker_cfg)))
   in
   (match load_and_resolve ~with_hitl_summary:true with
    | None -> Alcotest.fail "expected a provider config for the hitl_summary lane"
-   | Some cfg ->
+   | Some (selected, worker_cfg) ->
+     Alcotest.(check string)
+       "hitl_summary runtime id is preserved"
+       "local.kimi_like"
+       selected.runtime_id;
      Alcotest.(check string)
        "hitl_summary lane model is used"
-       "summary"
-       cfg.Llm_provider.Provider_config.model_id);
+       "kimi-like-summary"
+       selected.provider_config.Llm_provider.Provider_config.model_id;
+     Alcotest.(check (option (float 0.0001)))
+       "HITL worker preserves runtime.toml temperature"
+       (Some 1.0)
+       worker_cfg.temperature);
   match load_and_resolve ~with_hitl_summary:false with
   | None -> Alcotest.fail "expected structured_judge fallback config"
-  | Some cfg ->
+  | Some (selected, _worker_cfg) ->
+    Alcotest.(check string)
+      "structured_judge fallback runtime id is preserved"
+      "local.judge"
+      selected.runtime_id;
     Alcotest.(check string)
       "structured_judge fallback model is used"
       "judge"
-      cfg.Llm_provider.Provider_config.model_id
+      selected.provider_config.Llm_provider.Provider_config.model_id
 ;;
 
 let pending_id_for_keeper ~keeper_name =
@@ -1095,7 +1118,7 @@ let () =
         ] )
     ; ( "summary"
       , [ Alcotest.test_case
-            "provider_config_for_summary routes the hitl_summary lane"
+            "provider_config_for_summary preserves HITL runtime identity and temperature"
             `Quick
             test_provider_config_for_summary_routes_hitl_summary_lane
         ; Alcotest.test_case

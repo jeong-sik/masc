@@ -412,7 +412,8 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
            | Keeper_registry.Completion_contract_violation _
            | Keeper_registry.Ambiguous_partial_commit _
            | Keeper_registry.Fiber_unresolved _
-           | Keeper_registry.Exception _ )
+           | Keeper_registry.Exception _
+           | Keeper_registry.Operator_interrupt )
        | None ->
          queue_standard_restart acc)
     | Some
@@ -442,6 +443,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
     | Some (Keeper_registry.Completion_contract_violation _)
     | Some Keeper_registry.Turn_overflow_pause
     | Some Keeper_registry.Turn_livelock_pause
+    | Some Keeper_registry.Operator_interrupt
     | Some (Keeper_registry.Ambiguous_partial_commit _)
     | Some (Keeper_registry.Fiber_unresolved _)
     | Some (Keeper_registry.Exception _)
@@ -487,6 +489,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       | Some (Keeper_registry.Completion_contract_violation _)
       | Some Keeper_registry.Turn_overflow_pause
       | Some Keeper_registry.Turn_livelock_pause
+      | Some Keeper_registry.Operator_interrupt
       | Some (Keeper_registry.Ambiguous_partial_commit _)
       | Some (Keeper_registry.Fiber_unresolved _)
       | Some (Keeper_registry.Exception _)

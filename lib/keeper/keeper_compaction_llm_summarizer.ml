@@ -42,15 +42,20 @@ let is_direct_completion_provider (provider_cfg : Llm_provider.Provider_config.t
   match provider_cfg.kind with
   | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope -> true
 
-let provider_for_plan (provider_cfg : Llm_provider.Provider_config.t) =
+let provider_for_plan ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
     | Some n when n > 0 -> Some (min n summary_max_tokens)
     | _ -> Some summary_max_tokens
   in
+  let temperature =
+    Runtime_inference.resolve_temperature
+      ~runtime_id
+      ~fallback:(fun () -> Runtime_provider_defaults.deterministic_temperature)
+  in
   { provider_cfg with
     max_tokens
-  ; temperature = Some 0.0
+  ; temperature = Some temperature
   ; tool_choice = None
   ; disable_parallel_tool_use = true
   }
@@ -246,7 +251,7 @@ let run_plan
     ~(messages : Agent_sdk.Types.message list)
     () : compaction_plan option =
   let message_count = List.length messages in
-  let provider_cfg = provider_for_plan provider_cfg in
+  let provider_cfg = provider_for_plan ~runtime_id provider_cfg in
   let request = messages_for_plan ~messages in
   match
     with_timeout ?clock ~timeout_sec (fun () ->
@@ -322,3 +327,7 @@ let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) (
       "compaction LLM summarizer skipped: Eio context unavailable runtime=%s"
       runtime_id;
     None
+
+module For_testing = struct
+  let provider_for_plan = provider_for_plan
+end

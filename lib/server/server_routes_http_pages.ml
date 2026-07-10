@@ -371,6 +371,57 @@ let bonsai_ctx_pct (meta : Keeper_meta_contract.keeper_meta) =
       min 100 (max 0 pct)
   | _ -> 0
 
+(* #16 (38-bug campaign PR-5): project the composite observer's typed
+   [run_state] onto the Bonsai wire record. [Masc_dashboard_api_types]
+   cannot depend on [Keeper_composite_observer] (see that library's
+   README), so the conversion lives here where both are in scope. *)
+let bonsai_run_state_of_entry (entry : Keeper_registry.registry_entry)
+    : Masc_dashboard_api_types.Keepers.keeper_run_state =
+  let module K = Masc_dashboard_api_types.Keepers in
+  let empty : K.keeper_run_state =
+    { kind = K.Waiting
+    ; wake_kind = None
+    ; stimulus_kinds = []
+    ; started_at = None
+    ; active_tool_count = None
+    ; queue_depth = None
+    ; skip_reasons = []
+    ; phase = None
+    }
+  in
+  let last_skip =
+    match entry.Keeper_registry.last_skip_observation with
+    | Some (ts, reasons) ->
+      Some Keeper_composite_observer.{ ls_ts = ts; ls_reasons = reasons }
+    | None -> None
+  in
+  match Keeper_composite_observer.run_state_of_entry entry ~last_skip with
+  | Keeper_composite_observer.In_turn { rs_wake; rs_started_at; rs_active_tool_count } ->
+    let wake_kind, stimulus_kinds =
+      Keeper_composite_observer.wake_reason_kind_and_stimuli rs_wake
+    in
+    { empty with
+      kind = K.In_turn
+    ; wake_kind = Some wake_kind
+    ; stimulus_kinds
+    ; started_at = Some rs_started_at
+    ; active_tool_count = Some rs_active_tool_count
+    }
+  | Keeper_composite_observer.Waiting { rs_queue_depth; rs_last_skip } ->
+    { empty with
+      kind = K.Waiting
+    ; queue_depth = Some rs_queue_depth
+    ; skip_reasons =
+        (match rs_last_skip with
+         | Some ls -> ls.Keeper_composite_observer.ls_reasons
+         | None -> [])
+    }
+  | Keeper_composite_observer.Suspended phase ->
+    { empty with
+      kind = K.Suspended
+    ; phase = Some (Keeper_state_machine.phase_to_string phase)
+    }
+
 let latest_tool_name (entry : Keeper_registry.registry_entry) =
   let latest =
     Keeper_registry.StringMap.fold
@@ -409,6 +460,7 @@ let keepers_summary_from_registry ~base_path
           ; last_tool = latest_tool_name entry
           ; lane_frames = []
           ; ctx_history = []
+          ; run_state = bonsai_run_state_of_entry entry
           })
       entries
   in

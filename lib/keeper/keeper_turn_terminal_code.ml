@@ -20,6 +20,7 @@ type t =
   | Fiber_unresolved
   | Turn_overflow_pause
   | Turn_livelock_pause
+  | Operator_interrupt
   | Exception_unhandled of string
   | Sdk_error of string
 
@@ -43,6 +44,7 @@ let to_wire = function
   | Fiber_unresolved -> "fiber_unresolved"
   | Turn_overflow_pause -> "turn_overflow_pause"
   | Turn_livelock_pause -> "turn_livelock_pause"
+  | Operator_interrupt -> "operator_interrupt"
   | Exception_unhandled _ -> "exception"
   | Sdk_error wire -> wire
 ;;
@@ -66,6 +68,7 @@ let of_wire = function
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "turn_overflow_pause" -> Some Turn_overflow_pause
   | "turn_livelock_pause" -> Some Turn_livelock_pause
+  | "operator_interrupt" -> Some Operator_interrupt
   | "exception" -> Some (Exception_unhandled "")
   | _other ->
     (* Could be a [Provider_runtime_error] / [Tool_required_unsatisfied]
@@ -100,6 +103,7 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Fiber_unresolved _ -> Fiber_unresolved
   | Keeper_registry.Turn_overflow_pause -> Turn_overflow_pause
   | Keeper_registry.Turn_livelock_pause -> Turn_livelock_pause
+  | Keeper_registry.Operator_interrupt -> Operator_interrupt
   | Keeper_registry.Exception msg -> Exception_unhandled msg
 ;;
 

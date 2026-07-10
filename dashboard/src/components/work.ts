@@ -21,6 +21,9 @@ import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
 import { GoalCreateForm } from './goals/goal-create-form'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
+import { claimTask as claimTaskAction } from '../api/actions'
+import { showToast } from './common/toast'
+import { errorToString } from '../lib/format-string'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
@@ -652,7 +655,7 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
                 class="wk-task-claim"
                 data-testid="job-claim"
                 onClick=${(e: Event) => { e.stopPropagation(); onClaim(task.id) }}
-                title="keeper_task_claim — 미배정 task claim"
+                title="미배정 task를 claim (masc_transition, 나에게 배정)"
               >
                 ＋ claim
               </button>
@@ -1380,13 +1383,27 @@ function WorkSurfaceV2() {
     })
   }, [displayGoals, allTasks])
 
-  const claimTask = (taskId: string) => {
+  const claimTask = useCallback((taskId: string) => {
+    // Optimistically flag the task as claimed so the row updates instantly,
+    // then persist through masc_transition. On failure, roll the flag back so
+    // the board does not lie about an unpersisted claim (the pre-existing bug:
+    // the claim only lived in local state and vanished on refresh). On success
+    // the server emits a task_resource notification and the tasks signal
+    // refreshes over SSE with the real assignee, superseding this flag.
     setClaimed(prev => {
       const next = new Set(prev)
       next.add(taskId)
       return next
     })
-  }
+    void claimTaskAction(taskId).catch((err: unknown) => {
+      setClaimed(prev => {
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
+      })
+      showToast(`claim 실패: ${errorToString(err)}`, 'error')
+    })
+  }, [])
 
   const claimedTasks = useMemo(() => {
     if (claimed.size === 0) return allTasks

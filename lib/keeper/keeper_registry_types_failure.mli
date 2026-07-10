@@ -43,6 +43,7 @@ type failure_reason =
   | Exception of string
   | Turn_overflow_pause
   | Turn_livelock_pause
+  | Operator_interrupt
 val ambiguous_partial_commit_kind_to_string :
   Keeper_registry_types_kill_class.ambiguous_partial_commit_kind ->
   string

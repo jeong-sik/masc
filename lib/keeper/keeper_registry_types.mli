@@ -109,6 +109,14 @@ type failure_reason =
   | Turn_livelock_pause
       (** Keeper paused by turn-livelock guard. Triggers supervisor
           auto-resume sweep (RFC-0152 Phase B). *)
+  | Operator_interrupt
+      (** The current turn was cancelled by an explicit operator request,
+          typically from the dashboard "stop current turn" action. *)
+
+exception Operator_interrupt
+(** Raised by [interrupt_current_turn] to cancel the live turn switch.
+    The turn runtime may catch this via [Eio.Cancel.Cancelled] and record
+    [failure_reason.Operator_interrupt] for observability. *)
 
 val ambiguous_partial_commit_kind_to_string :
   ambiguous_partial_commit_kind -> string
@@ -408,6 +416,20 @@ type livelock_attempt_state = {
   first_started_at : float;
 }
 
+(** #16 (38-bug campaign PR-5): what caused a turn to run — an explicit
+    reactive stimulus batch or the proactive cadence tick (no stimulus).
+    Closed sum over {!Keeper_event_queue.stimulus_payload} so a new wake
+    source cannot silently collapse into a generic "running" label on the
+    operator dashboard. *)
+type wake_reason =
+  | Proactive_tick
+  | Woken of Keeper_event_queue.stimulus_payload list
+
+val wake_reason_label : wake_reason -> string
+(** Stable low-cardinality label: ["proactive_tick"] or ["woken"]. Use
+    {!Keeper_event_queue.payload_kind_label} on the carried stimuli (for
+    [Woken]) to surface the finer-grained wake cause. *)
+
 type turn_measurement = {
   tm_captured_at : float;
   tm_context_actions : Keeper_state_machine.context_actions;
@@ -449,6 +471,9 @@ type registry_entry = {
   livelock_state : livelock_attempt_state option Atomic.t;
       (** Per-keeper turn-livelock retry history, updated via CAS on this
           per-entry atomic so it is part of the keeper SSOT. *)
+  current_turn_switch : Eio.Switch.t option Atomic.t;
+      (** Live turn-scoped switch exposed for operator interrupt.
+          [Some sw] while a turn is running; [None] otherwise. *)
   board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;
@@ -533,6 +558,9 @@ and turn_observation = {
           The composite observer's [event_priority_monotone] invariant
           requires this to stay <= 1. *)
   selected_model : string option;
+  wake : wake_reason;
+      (** What triggered this turn (#16, 38-bug campaign PR-5). Installed
+          once by [mark_turn_started] and frozen for the turn's lifetime. *)
 }
 
 and completed_turn_observation = {
@@ -541,6 +569,10 @@ and completed_turn_observation = {
   ct_ended_at : float;
   ct_decision_stage : packed_decision_stage;
   ct_selected_model : string option;
+  ct_wake : wake_reason;
+      (** Frozen copy of [turn_observation.wake] (#16, 38-bug campaign
+          PR-5), so the "what just finished" surface can show why the
+          last turn ran, not only the live one. *)
 }
 
 type done_resolve_result =

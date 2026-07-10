@@ -849,7 +849,10 @@ let degrade_loaded_for_missing_catalog
       , degradation )
 ;;
 
-let materialize_config ~(config_path : string) (cfg : config)
+let materialize_config
+    ?(validate_max_context = true)
+    ~(config_path : string)
+    (cfg : config)
   : ( t list
       * t
       * (string * string) list
@@ -907,7 +910,11 @@ let materialize_config ~(config_path : string) (cfg : config)
     validate_media_failover ~config_path ~dropped_bindings runtimes
       cfg.media_failover
   in
-  let* () = validate_runtime_max_context ~config_path runtimes in
+  let* () =
+    if validate_max_context
+    then validate_runtime_max_context ~config_path runtimes
+    else Ok ()
+  in
   let* lanes =
     lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
@@ -927,7 +934,7 @@ let materialize_config ~(config_path : string) (cfg : config)
     , lanes )
 ;;
 
-let load_list ~(config_path : string)
+let load_list_internal ~(config_path : string) ~validate_max_context
   : ( t list
        * t
        * (string * string) list
@@ -948,7 +955,12 @@ let load_list ~(config_path : string)
         config_path
         (List.length errs))
   in
-  materialize_config ~config_path cfg
+  materialize_config ~validate_max_context ~config_path cfg
+;;
+
+let load_list ~config_path =
+  load_list_internal ~config_path ~validate_max_context:true
+;;
 
 (* ---- Lazy default runtime singleton ---- *)
 
@@ -1039,19 +1051,25 @@ let init_default_strict ~config_path =
   |> Result.map_error strict_init_error_to_string
 
 let init_default_degraded_report ~config_path =
-  match load_list ~config_path with
+  match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
   | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
-       set_loaded ~config_path loaded;
-       Ok Initialized
+       (match validate_runtime_max_context ~config_path runtimes with
+        | Error msg -> Error (Runtime_config_error msg)
+        | Ok () ->
+          set_loaded ~config_path loaded;
+          Ok Initialized)
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
-        | Ok (degraded_loaded, degradation) ->
-          set_loaded ~startup_degradation:degradation ~config_path degraded_loaded;
-          Ok (Initialized_degraded degradation)))
+        | Ok (((active_runtimes, _, _, _, _, _, _, _, _) as degraded_loaded), degradation) ->
+          (match validate_runtime_max_context ~config_path active_runtimes with
+           | Error msg -> Error (Runtime_config_error msg)
+           | Ok () ->
+             set_loaded ~startup_degradation:degradation ~config_path degraded_loaded;
+             Ok (Initialized_degraded degradation))))
 
 let runtime_state () = Atomic.get loaded_state_ref
 

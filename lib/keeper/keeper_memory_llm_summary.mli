@@ -15,7 +15,11 @@ val is_direct_completion_provider :
   Llm_provider.Provider_config.t -> bool
 
 val provider_for_summary :
-  Llm_provider.Provider_config.t -> Llm_provider.Provider_config.t
+  runtime_id:string ->
+  Llm_provider.Provider_config.t ->
+  Llm_provider.Provider_config.t
+(** Tune the summary request while preserving a temperature declared by the
+    selected runtime model; otherwise use the deterministic subsystem fallback. *)
 
 val summary_schema_supported : Llm_provider.Provider_config.t -> bool
 
@@ -44,7 +48,7 @@ module For_testing : sig
     ?complete:complete_fn ->
     ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
     ?timeout_sec:float ->
-    ?runtime_id:string ->
+    runtime_id:string ->
     sw:Eio.Switch.t ->
     net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
     provider_cfg:Llm_provider.Provider_config.t ->

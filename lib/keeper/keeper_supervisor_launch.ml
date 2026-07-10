@@ -198,6 +198,7 @@ let launch_supervised_fiber_body
                   | Some (Keeper_registry.Ambiguous_partial_commit _)
                   | Some (Keeper_registry.Fiber_unresolved _)
                   | Some (Keeper_registry.Exception _)
+                  | Some Keeper_registry.Operator_interrupt
                   | None -> false)
                | None -> false
              in

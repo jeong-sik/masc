@@ -701,7 +701,7 @@ let evidence_refs =
                 (Atomic.get Workspace_hooks.verification_notify_submit_fn)
                   ctx.config ~task ~assignee ~verification_id ~evidence_refs
               | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-              | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
+              | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.OperatorBlocked _ -> ())
            | None -> ())
         | Masc_domain.Approve_verification ->
           (match verification_id_before with

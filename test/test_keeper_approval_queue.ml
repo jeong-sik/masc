@@ -87,7 +87,7 @@ let test_provider_config_for_summary_routes_hitl_summary_lane () =
   let load_and_resolve ~with_hitl_summary =
     let text = summary_routing_runtime_toml ~with_hitl_summary in
     with_temp_runtime_toml text (fun path ->
-      match Masc.Runtime.save_config_text ~runtime_config_path:path text with
+      match Runtime.save_config_text ~runtime_config_path:path text with
       | Error msg -> Alcotest.failf "runtime config should load: %s" msg
       | Ok () -> AQ.provider_config_for_summary ~keeper_name:"no-such-keeper")
   in

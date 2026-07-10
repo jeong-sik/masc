@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Removed
+- Purged the retired model-authored `[STATE]`/NEXT Constraints transport plus the BDI/self-model/meta-cognition and heuristic-scoring stack from Keeper runtime, prompts/personas, sidecars, dashboard/viewer, tests, and design assets; typed domain APIs and lifecycle `context_actions` remain authoritative (#23929).
+
 ## [0.20.1] - 2026-07-10
 
 ### Changed
@@ -871,7 +874,7 @@
 - Adaptive Pheromone Evaporation with Max-Min Conductivity Bounds.
 - 3-Layer Context Auto-Compaction (Working, Episodic, Semantic).
 - TLA+ Runtime Invariant verification (`ZombiePhaseInvariant`).
-- 4-Tier Operator Nudge System (`HINT` -> `SUGGEST` -> `APPROVE/REJECT` -> `REDIRECT`) and dashboard lifecycle inspector.
+- 4-Tier Operator Nudge System (`HINT` -> `SUGGEST` -> `APPROVE/REJECT` -> `REDIRECT`) and BDI Inspector in Dashboard.
 
 ### Fixed
 - SafeAuto source path recovery to prevent backtrace loss in Effect Handler.
@@ -1213,7 +1216,7 @@ The headline thread for this release is the autonomous **Cycle 24-44 spec ↔ co
 - `#11617` `keeper_memory_policy.ml`, `#11622` `keeper_memory_bank.ml` — KeeperMemoryLifecycle 2/2.
 - `#11618` `keeper_execution_receipt.ml` — multi-spec anchor first (ReceiptOutcomeSet + OperatorPauseBroadcast).
 - `#11625` `keeper_stale_watchdog.ml` — OperatorPauseBroadcast 2/2 with module-relocation drift correction.
-- `#11626` retired personality-state FSM anchor with issue #8949 topology drift record.
+- `#11626` `keeper_social_model_magentic_ledger_fsm.ml` — SocialModelMagenticLedger anchor with issue #8949 topology drift record.
 - `#11634` `keeper_guards.ml` — KeeperTurnCycle anchor (single-action `GateRejected` ownership).
 
 ### Changed (spec citation refresh — autonomous Cycle 40-43)
@@ -2525,7 +2528,7 @@ No code changes. Bump captures the documentation/hygiene cycle as a tagged relea
 - **`keeper_summarizer.ml` simplified** — deletes the local
   `default_extractive_summary` re-implementation and delegates to
   `Agent_sdk.Budget_strategy.default_summarizer` directly. This was
-  the follow-up promised in PR #7668 (Gen4 compaction-layer structured-state
+  the follow-up promised in PR #7668 (Gen4 compaction-layer [STATE]
   scrub). Net diff: −36 lines; behavior unchanged (4 existing tests
   in `test_keeper_summarizer.ml` still pass).
 - `scripts/oas-agent-sdk-pin.sh` BASE/SHA/MIN → `v0.153.0` /
@@ -2546,18 +2549,18 @@ No code changes. Bump captures the documentation/hygiene cycle as a tagged relea
   - Also picks up OAS PR #962 (Anthropic `cache_extended_ttl`), included
     transitively via the 0.151.0 release.
   - No runtime behavior change in masc itself: this is a pin-only
-  bump. Registering a structured-state-aware summarizer is the follow-up step
+    bump. Registering a `[STATE]`-aware summarizer is the follow-up step
     and ships separately.
 
 ## [0.9.6] - 2026-04-16
 
 ### Fixed
 - **Keeper continuity resonance loop** (PR #7612, #7615, #7618) — closes the
-  save/read asymmetry that caused keepers to echo their own prior structured
+  save/read asymmetry that caused keepers to echo their own prior `[STATE]`
   narrative every turn.
   - `keeper_world_observation.ml:read_continuity_summary` now prefers the
     structured snapshot stored in `Checkpoint.working_context` over
-    re-parsing model-authored state blocks from message bodies (PR #7612). Completes
+    re-parsing `[STATE]` blocks from message bodies (PR #7612). Completes
     the RFC-MASC-001 Phase 1 read side; the save side already wrote
     structured JSON when enabled.
   - `scripts/retro-clean-keeper-continuity.sh` one-shot: dry-run default,
@@ -2569,8 +2572,8 @@ No code changes. Bump captures the documentation/hygiene cycle as a tagged relea
   completes RFC-MASC-001 Phase 1 rollout. The structured
   `Checkpoint.working_context` save path is now active by default;
   combined with PR #7612 every keeper turn writes a typed snapshot and
-  reads it back on the next turn instead of re-parsing model-authored state text.
-  Accepted opt-out values: `false`, `0`, `no`. Legacy text-state
+  reads it back on the next turn instead of re-parsing `[STATE]` text.
+  Accepted opt-out values: `false`, `0`, `no`. Legacy text `[STATE]`
   fallback is preserved for checkpoints without `working_context`.
 
 ## [0.9.5] - 2026-04-16
